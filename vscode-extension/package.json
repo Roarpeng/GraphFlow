@@ -1,0 +1,39 @@
+{
+  "name": "graphflow-vscode",
+  "displayName": "GraphFlow",
+  "description": "GraphFlow orchestration panel and command runner",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.99.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:graphflow.runTask",
+    "onCommand:graphflow.showRuns"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "graphflow.runTask",
+        "title": "GraphFlow: Run Task"
+      },
+      {
+        "command": "graphflow.showRuns",
+        "title": "GraphFlow: Show Runs"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p ./tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.99.0",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "graphflow": "file:.."
+  }
+}

@@ -7,4 +7,17 @@ export interface GraphFlowConfig {
   budgetPolicy: {
     runTokenCap: number;
   };
+  graphPolicy: {
+    enableAutoBuild: boolean;
+    transport: "memory" | "mcp-http";
+    mcpEndpoint?: string;
+    mcpApiKey?: string;
+    maxContextTokens: number;
+  };
+  learningPolicy: {
+    enableFlywheel: boolean;
+    trainingCadence: "nightly" | "weekly";
+    canaryRatio: number;
+    exportPath: string;
+  };
 }

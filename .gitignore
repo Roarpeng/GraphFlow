@@ -7,3 +7,4 @@ coverage/
 tests/**/*.d.ts
 tests/**/*.d.ts.map
 tests/**/*.js.map
+tmp/
