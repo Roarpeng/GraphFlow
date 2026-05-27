@@ -1,0 +1,37 @@
+{
+  "name": "graphflow",
+  "version": "1.0.0",
+  "description": "**A Context-Aware Multi-Agent Orchestration Engine**",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.json",
+    "test:watch": "vitest",
+    "start": "tsx src/surfaces/cli/index.ts",
+    "lint": "eslint ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Roarpeng/GraphFlow.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Roarpeng/GraphFlow/issues"
+  },
+  "homepage": "https://github.com/Roarpeng/GraphFlow#readme",
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@typescript-eslint/eslint-plugin": "^8.60.0",
+    "@typescript-eslint/parser": "^8.60.0",
+    "eslint": "^10.4.0",
+    "prettier": "^3.8.3",
+    "tsx": "^4.22.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
+}
