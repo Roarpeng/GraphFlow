@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { runSimpleTask } from "../../core/state-machine";
+import { orchestrate } from "../../core/orchestrator";
 
 async function main(): Promise<void> {
   const [, , command, ...args] = process.argv;
@@ -18,7 +18,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const result = await runSimpleTask({ task });
+  const result = await orchestrate({ task });
   console.log(`status=${result.status}; attempts=${result.attempts}; feedback=${result.feedback}`);
 }
 

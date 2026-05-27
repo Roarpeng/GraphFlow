@@ -18,3 +18,35 @@ export interface TaskRunResult {
   attempts: number;
   feedback: string;
 }
+
+export interface TaskNode {
+  id: string;
+  description: string;
+  dependencies: string[];
+  status: TaskStatus;
+  contextQuery: string;
+  retryCount: number;
+}
+
+export interface OrchestrationInput {
+  task: string;
+  maxRetries?: number;
+}
+
+export interface GraphNode {
+  id: string;
+  type: "File" | "Symbol" | "Module" | "TaskRun" | "Decision";
+  content: string;
+}
+
+export interface GraphEdge {
+  from: string;
+  to: string;
+  relation:
+    | "defines"
+    | "references"
+    | "imports"
+    | "depends_on"
+    | "changes"
+    | "validates";
+}
