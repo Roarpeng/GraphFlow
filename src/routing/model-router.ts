@@ -40,7 +40,8 @@ export function resolveModelForRole(role: AgentRole): ModelSelection {
 
 export function resolveModelWithFallback(
   role: AgentRole,
-  providerHealth: ProviderHealthMap
+  providerHealth: ProviderHealthMap,
+  fallbackChain?: ProviderName[]
 ): ModelSelection {
   const base = resolveModelForRole(role);
 
@@ -48,8 +49,8 @@ export function resolveModelWithFallback(
     return base;
   }
 
-  const fallbackChain: ProviderName[] = ["anthropic", "bailian", "doubao"];
-  const available = fallbackChain.find((provider) => providerHealth[provider]);
+  const chain = fallbackChain ?? ["anthropic", "bailian", "doubao"];
+  const available = chain.find((provider) => provider !== base.provider && providerHealth[provider]);
 
   if (!available) {
     return {

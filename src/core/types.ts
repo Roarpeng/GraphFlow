@@ -11,12 +11,30 @@ export type AgentRole = "planner" | "worker" | "validator";
 export interface ValidationResult {
   passed: boolean;
   feedback: string;
+  matchedCriteria: string[];
+  missingCriteria: string[];
+  riskTags: string[];
+}
+
+export interface RouteDecision {
+  role: AgentRole;
+  provider: string;
+  model: string;
+  tier: "smart" | "economy";
+  fallbackApplied: boolean;
 }
 
 export interface TaskRunResult {
   status: TaskStatus;
   attempts: number;
   feedback: string;
+  routeDecisions?: RouteDecision[];
+  executionRounds?: string[][];
+  validationSummary?: {
+    matched: number;
+    missing: number;
+    riskTags: string[];
+  };
 }
 
 export interface TaskNode {
@@ -35,7 +53,7 @@ export interface OrchestrationInput {
 
 export interface GraphNode {
   id: string;
-  type: "File" | "Symbol" | "Module" | "TaskRun" | "Decision";
+  type: "File" | "Symbol" | "Module" | "TaskRun" | "Decision" | "Skill";
   content: string;
 }
 
@@ -48,5 +66,9 @@ export interface GraphEdge {
     | "imports"
     | "depends_on"
     | "changes"
-    | "validates";
+    | "validates"
+    | "co_occurs"
+    | "prerequisite"
+    | "improves"
+    | "conflicts_with";
 }

@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import type { GraphEdge } from "../core/types";
 import type { GraphNode } from "../core/types";
 import type { GraphClient } from "./client-factory";
 
@@ -22,6 +23,7 @@ export async function indexWorkspaceFiles(
 
   const files = walkFiles(rootDir, includeExtensions);
   const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
 
   for (const file of files) {
     const stat = statSync(file);
@@ -31,19 +33,39 @@ export async function indexWorkspaceFiles(
 
     const relPath = normalizePath(relative(rootDir, file));
     const content = readFileSync(file, "utf8");
-    nodes.push({ id: `file:${relPath}`, type: "File", content: relPath });
+    const fileNodeId = `file:${relPath}`;
+    nodes.push({ id: fileNodeId, type: "File", content: relPath });
+
+    const moduleNodeId = `module:${moduleKey(relPath)}`;
+    nodes.push({ id: moduleNodeId, type: "Module", content: moduleKey(relPath) });
+    edges.push({ from: fileNodeId, to: moduleNodeId, relation: "depends_on" });
 
     const symbolLines = extractSymbolLines(content);
     for (const symbol of symbolLines) {
+      const symbolNodeId = `symbol:${relPath}:${hashText(symbol)}`;
       nodes.push({
-        id: `symbol:${relPath}:${hashText(symbol)}`,
+        id: symbolNodeId,
         type: "Symbol",
         content: `${relPath}::${symbol}`,
       });
+      edges.push({ from: fileNodeId, to: symbolNodeId, relation: "defines" });
+    }
+
+    const importTargets = extractImportTargets(content);
+    for (const target of importTargets) {
+      const targetModule = normalizeImportTarget(target);
+      if (!targetModule) {
+        continue;
+      }
+
+      const importNodeId = `module:${targetModule}`;
+      nodes.push({ id: importNodeId, type: "Module", content: targetModule });
+      edges.push({ from: moduleNodeId, to: importNodeId, relation: "imports" });
     }
   }
 
   await client.upsertNodes(nodes);
+  await client.upsertEdges(dedupEdges(edges));
 
   return {
     indexedFiles: nodes.filter((node) => node.type === "File").length,
@@ -80,6 +102,43 @@ function extractSymbolLines(content: string): string[] {
     .map((line) => line.trim())
     .filter((line) => line.startsWith("export ") || line.startsWith("function "))
     .slice(0, 80);
+}
+
+function extractImportTargets(content: string): string[] {
+  const matches = content.matchAll(/(?:import\s+[^"']+from\s+|require\()\s*["']([^"']+)["']/g);
+  const targets: string[] = [];
+  for (const match of matches) {
+    const target = match[1]?.trim();
+    if (target) {
+      targets.push(target);
+    }
+  }
+  return targets.slice(0, 120);
+}
+
+function normalizeImportTarget(target: string): string | undefined {
+  const cleaned = target.replace(/\\/g, "/").replace(/\.(ts|tsx|js|jsx)$/i, "");
+  if (!cleaned) {
+    return undefined;
+  }
+  return cleaned;
+}
+
+function moduleKey(relPath: string): string {
+  return relPath.replace(/\.(ts|tsx|js|jsx|md|json)$/i, "");
+}
+
+function dedupEdges(edges: GraphEdge[]): GraphEdge[] {
+  const seen = new Set<string>();
+  const result: GraphEdge[] = [];
+  for (const edge of edges) {
+    const key = `${edge.from}|${edge.relation}|${edge.to}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(edge);
+    }
+  }
+  return result;
 }
 
 function hashText(text: string): string {

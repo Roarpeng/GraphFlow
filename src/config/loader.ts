@@ -24,6 +24,10 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     throw new Error("Invalid config: graphPolicy.mcpEndpoint is required for mcp-http.");
   }
 
+  if (input.graphPolicy.transport === "file" && !input.graphPolicy.graphStorePath) {
+    throw new Error("Invalid config: graphPolicy.graphStorePath is required for file transport.");
+  }
+
   if (input.graphPolicy.layerQuota) {
     const { l1, l2, l3 } = input.graphPolicy.layerQuota;
     if (l1 < 0 || l2 < 0 || l3 < 0) {
@@ -42,6 +46,14 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     throw new Error("Invalid config: learningPolicy is required.");
   }
 
+  if (input.routingPolicy?.providerPriority) {
+    const allowed = new Set(["openai", "anthropic", "bailian", "doubao"]);
+    const invalid = input.routingPolicy.providerPriority.some((provider) => !allowed.has(provider));
+    if (invalid) {
+      throw new Error("Invalid config: routingPolicy.providerPriority contains unknown provider.");
+    }
+  }
+
   if (input.learningPolicy.canaryRatio < 0 || input.learningPolicy.canaryRatio > 100) {
     throw new Error("Invalid config: learningPolicy.canaryRatio must be 0-100.");
   }
@@ -52,7 +64,9 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       ...input.graphPolicy,
       enableNearLosslessMode: input.graphPolicy.enableNearLosslessMode ?? false,
       autoIndexOnPreview: input.graphPolicy.autoIndexOnPreview ?? true,
+      autoIndexOnRun: input.graphPolicy.autoIndexOnRun ?? true,
       workspaceRoot: input.graphPolicy.workspaceRoot ?? process.cwd(),
+      graphStorePath: input.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.json",
       includeExtensions: input.graphPolicy.includeExtensions ?? [
         ".ts",
         ".tsx",
@@ -67,6 +81,22 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       ...input.learningPolicy,
       trainingCadence: input.learningPolicy.trainingCadence ?? "nightly",
       canaryRatio: input.learningPolicy.canaryRatio ?? 10,
+      eventsPath: input.learningPolicy.eventsPath ?? "tmp/learning-events.jsonl",
+      summaryPath: input.learningPolicy.summaryPath ?? "tmp/learning-summary.json",
+    },
+    routingPolicy: {
+      enableDynamicRouting: input.routingPolicy?.enableDynamicRouting ?? true,
+      requireApiKeyForHealthy: input.routingPolicy?.requireApiKeyForHealthy ?? false,
+      providerPriority: input.routingPolicy?.providerPriority ?? [
+        "openai",
+        "anthropic",
+        "bailian",
+        "doubao",
+      ],
+    },
+    skillPolicy: {
+      enableSkillFlywheel: input.skillPolicy?.enableSkillFlywheel ?? true,
+      maxSkillHints: input.skillPolicy?.maxSkillHints ?? 3,
     },
   };
 }

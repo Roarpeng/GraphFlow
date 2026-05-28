@@ -13,8 +13,10 @@ describe("M2/M3 baseline behavior", () => {
 
   it("creates dependent plan nodes for multi-part task", () => {
     const plan = planTasks("update readme and add tests");
-    expect(plan.length).toBe(2);
-    expect(plan[1]?.dependencies).toEqual(["task-1"]);
+    expect(plan.length).toBe(3);
+    expect(plan[0]?.dependencies).toEqual([]);
+    expect(plan[1]?.dependencies).toEqual([]);
+    expect(plan[2]?.dependencies).toEqual(["task-1", "task-2"]);
   });
 
   it("executes dag with dependency order", async () => {
@@ -45,6 +47,7 @@ describe("M2/M3 baseline behavior", () => {
 
     expect(result.failed).toHaveLength(0);
     expect(events).toEqual(["task-1", "task-2"]);
+    expect(result.rounds).toEqual([["task-1"], ["task-2"]]);
   });
 
   it("builds graph index and slices context by token budget", async () => {

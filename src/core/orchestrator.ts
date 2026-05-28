@@ -5,10 +5,18 @@ import {
   type LayeredContextPackage,
 } from "../graph/context-slicer";
 import { syncGraphAfterRun } from "../hooks/post-run-sync";
+import { applySkillLearning, suggestSkillHints } from "../learning/skill-flywheel";
+import {
+  resolveModelForRole,
+  resolveModelWithFallback,
+  type ProviderName,
+  type ProviderHealthMap,
+} from "../routing/model-router";
+import { executeRolePrompt } from "../routing/provider-executor";
 import { executeDag } from "./dag-engine";
 import { runSimpleTask } from "./state-machine";
 import { triageTask } from "./triage";
-import type { OrchestrationInput, TaskRunResult } from "./types";
+import type { OrchestrationInput, RouteDecision, TaskRunResult } from "./types";
 
 export interface OrchestrateOptions {
   graphClient?: GraphClient;
@@ -18,6 +26,10 @@ export interface OrchestrateOptions {
   maxContextTokens?: number;
   layerQuota?: { l1: number; l2: number; l3: number };
   onContextPackage?: (pkg: LayeredContextPackage) => void;
+  providerHealth?: ProviderHealthMap;
+  providerFallbackChain?: ProviderName[];
+  enableSkillFlywheel?: boolean;
+  skillHintsLimit?: number;
 }
 
 export async function orchestrate(
@@ -27,17 +39,34 @@ export async function orchestrate(
   const mode = triageTask(input.task);
   const retryOptions = input.maxRetries !== undefined ? { maxRetries: input.maxRetries } : {};
   const contextPackage = await maybeBuildNearLosslessContext(input, options);
+  const routeDecisions = buildRouteDecisions(options?.providerHealth, options?.providerFallbackChain);
+  const skillHints = await maybeBuildSkillHints(input.task, options);
 
   if (mode === "simple") {
-    const run = await runSimpleTask({ task: input.task, ...retryOptions });
+    const run = await runSimpleTask({
+      task: input.task,
+      ...retryOptions,
+      workerSelection: decisionToSelection(routeDecisions.worker),
+      validatorSelection: decisionToSelection(routeDecisions.validator),
+    });
     const finalRun = appendContextFeedback(run, contextPackage);
-    await maybeSyncGraph(input.task, finalRun, options);
-    return finalRun;
+    const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
+    await maybeSyncGraph(input.task, withRoute, options);
+    await maybeSyncSkillGraph(input.task, withRoute, options);
+    return withRoute;
   }
 
-  const plan = planTasks(input.task);
+  const plannerSelection = decisionToSelection(routeDecisions.planner);
+  const plannerDraft = await executeRolePrompt("planner", `plan task: ${input.task}`, plannerSelection);
+  const plan = planTasks(input.task, skillHints);
+
   const result = await executeDag(plan, async (node) => {
-    const run = await runSimpleTask({ task: node.description, ...retryOptions });
+    const run = await runSimpleTask({
+      task: node.description,
+      ...retryOptions,
+      workerSelection: decisionToSelection(routeDecisions.worker),
+      validatorSelection: decisionToSelection(routeDecisions.validator),
+    });
     return run.status === "COMPLETED";
   });
 
@@ -45,21 +74,27 @@ export async function orchestrate(
     const run: TaskRunResult = {
       status: "HUMAN_REVIEW_REQUIRED",
       attempts: plan.length,
-      feedback: `Failed tasks: ${result.failed.join(", ")}`,
+      feedback: `Failed tasks: ${result.failed.join(", ")}; plannerDraft=${shorten(plannerDraft)}`,
+      executionRounds: result.rounds,
     };
     const finalRun = appendContextFeedback(run, contextPackage);
-    await maybeSyncGraph(input.task, finalRun, options);
-    return finalRun;
+    const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
+    await maybeSyncGraph(input.task, withRoute, options);
+    await maybeSyncSkillGraph(input.task, withRoute, options);
+    return withRoute;
   }
 
   const run: TaskRunResult = {
     status: "COMPLETED",
     attempts: plan.length,
-    feedback: `Completed tasks: ${result.completed.join(", ")}`,
+    feedback: `Completed tasks: ${result.completed.join(", ")}; plannerDraft=${shorten(plannerDraft)}`,
+    executionRounds: result.rounds,
   };
   const finalRun = appendContextFeedback(run, contextPackage);
-  await maybeSyncGraph(input.task, finalRun, options);
-  return finalRun;
+  const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
+  await maybeSyncGraph(input.task, withRoute, options);
+  await maybeSyncSkillGraph(input.task, withRoute, options);
+  return withRoute;
 }
 
 async function maybeBuildNearLosslessContext(
@@ -96,6 +131,89 @@ function appendContextFeedback(
   };
 }
 
+function appendRouteFeedback(
+  run: TaskRunResult,
+  routeDecisions: { planner: RouteDecision; worker: RouteDecision; validator: RouteDecision },
+  skillHints: string[]
+): TaskRunResult {
+  return {
+    ...run,
+    routeDecisions: [routeDecisions.planner, routeDecisions.worker, routeDecisions.validator],
+    feedback:
+      `${run.feedback}; routes(planner=${routeDecisions.planner.provider}/${routeDecisions.planner.model}` +
+      `,worker=${routeDecisions.worker.provider}/${routeDecisions.worker.model}` +
+      `,validator=${routeDecisions.validator.provider}/${routeDecisions.validator.model})` +
+      `${skillHints.length > 0 ? `; skills(hints=${skillHints.join("|")})` : ""}`,
+  };
+}
+
+function buildRouteDecisions(
+  providerHealth?: ProviderHealthMap,
+  providerFallbackChain?: ProviderName[]
+): {
+  planner: RouteDecision;
+  worker: RouteDecision;
+  validator: RouteDecision;
+} {
+  return {
+    planner: selectionToDecision(
+      "planner",
+      providerHealth
+        ? resolveModelWithFallback("planner", providerHealth, providerFallbackChain)
+        : resolveModelForRole("planner")
+    ),
+    worker: selectionToDecision(
+      "worker",
+      providerHealth
+        ? resolveModelWithFallback("worker", providerHealth, providerFallbackChain)
+        : resolveModelForRole("worker")
+    ),
+    validator: selectionToDecision(
+      "validator",
+      providerHealth
+        ? resolveModelWithFallback("validator", providerHealth, providerFallbackChain)
+        : resolveModelForRole("validator")
+    ),
+  };
+}
+
+function selectionToDecision(role: "planner" | "worker" | "validator", selection: {
+  provider: string;
+  model: string;
+  tier: "smart" | "economy";
+  fallbackApplied: boolean;
+}): RouteDecision {
+  return {
+    role,
+    provider: selection.provider,
+    model: selection.model,
+    tier: selection.tier,
+    fallbackApplied: selection.fallbackApplied,
+  };
+}
+
+function decisionToSelection(decision: RouteDecision): {
+  provider: "openai" | "anthropic" | "bailian" | "doubao";
+  model: string;
+  tier: "smart" | "economy";
+  fallbackApplied: boolean;
+} {
+  return {
+    provider: decision.provider as "openai" | "anthropic" | "bailian" | "doubao",
+    model: decision.model,
+    tier: decision.tier,
+    fallbackApplied: decision.fallbackApplied,
+  };
+}
+
+function shorten(text: string): string {
+  if (text.length <= 60) {
+    return text;
+  }
+
+  return `${text.slice(0, 57)}...`;
+}
+
 async function maybeSyncGraph(
   task: string,
   run: TaskRunResult,
@@ -115,4 +233,24 @@ async function maybeSyncGraph(
       summary: `Task completed: ${task}`,
     },
   ]);
+}
+
+async function maybeBuildSkillHints(task: string, options?: OrchestrateOptions): Promise<string[]> {
+  if (!options?.enableSkillFlywheel || !options.graphClient) {
+    return [];
+  }
+
+  return suggestSkillHints(options.graphClient, task, options.skillHintsLimit ?? 3);
+}
+
+async function maybeSyncSkillGraph(
+  task: string,
+  run: TaskRunResult,
+  options?: OrchestrateOptions
+): Promise<void> {
+  if (!options?.enableSkillFlywheel || !options.graphClient) {
+    return;
+  }
+
+  await applySkillLearning(options.graphClient, task, run);
 }

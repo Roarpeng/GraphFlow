@@ -1,6 +1,6 @@
 {
   "name": "graphflow",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "**A Context-Aware Multi-Agent Orchestration Engine**",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,7 +12,10 @@
     "build": "tsc -p tsconfig.json",
     "test:watch": "vitest",
     "start": "tsx src/surfaces/cli/index.ts",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "build:extension": "npm --prefix vscode-extension run build",
+    "package:extension": "npm --prefix vscode-extension run package",
+    "ci": "npm run lint && npm run build && npm test && npm run build:extension"
   },
   "repository": {
     "type": "git",

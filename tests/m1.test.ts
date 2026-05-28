@@ -17,13 +17,18 @@ describe("M1 bootstrap behavior", () => {
   it("validator fails empty output", () => {
     const result = validateTaskResult("update readme", "");
     expect(result.passed).toBe(false);
+    expect(result.missingCriteria.length).toBeGreaterThan(0);
   });
 
   it("simple pipeline finishes completed when worker returns output", async () => {
-    const input: RunInput = { task: "update readme", workerOutput: "applied diff" };
+    const input: RunInput = {
+      task: "update readme",
+      workerOutput: "updated readme with new architecture section",
+    };
     const run = await runSimpleTask(input);
     expect(run.status).toBe("COMPLETED");
     expect(run.attempts).toBe(1);
+    expect(run.validationSummary?.missing).toBe(0);
   });
 
   it("simple pipeline enters human review after retry limit", async () => {

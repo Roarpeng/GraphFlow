@@ -49,6 +49,17 @@ describe("M9 orchestrator near-lossless integration", () => {
 
     expect(run.status).toBe("COMPLETED");
     expect(run.feedback).toContain("context(summary=");
+    expect(run.routeDecisions?.length).toBe(3);
     expect(capturedAnchors).toBeGreaterThan(0);
+  });
+
+  it("records parallel execution rounds for complex tasks", async () => {
+    const run = await orchestrate({
+      task: "update readme and add tests and refactor architecture module",
+    });
+
+    expect(run.status).toBe("COMPLETED");
+    expect(run.executionRounds?.length).toBeGreaterThan(1);
+    expect(run.executionRounds?.[0]?.length).toBeGreaterThan(1);
   });
 });

@@ -25,9 +25,11 @@
     "enableAutoBuild": true,
     "enableNearLosslessMode": true,
     "autoIndexOnPreview": true,
+    "autoIndexOnRun": true,
     "workspaceRoot": ".",
     "includeExtensions": [".ts", ".tsx", ".js", ".jsx", ".md", ".json"],
-    "transport": "memory",
+    "transport": "file",
+    "graphStorePath": "tmp/graphflow-graph.json",
     "maxContextTokens": 1200,
     "layerQuota": { "l1": 6, "l2": 4, "l3": 3 }
   },
@@ -35,6 +37,17 @@
     "enableFlywheel": true,
     "trainingCadence": "nightly",
     "canaryRatio": 10,
-    "exportPath": "tmp/learning-dataset.jsonl"
+    "exportPath": "tmp/learning-dataset.jsonl",
+    "eventsPath": "tmp/learning-events.jsonl",
+    "summaryPath": "tmp/learning-summary.json"
+  },
+  "routingPolicy": {
+    "enableDynamicRouting": true,
+    "requireApiKeyForHealthy": false,
+    "providerPriority": ["openai", "anthropic", "bailian", "doubao"]
+  },
+  "skillPolicy": {
+    "enableSkillFlywheel": true,
+    "maxSkillHints": 3
   }
 }

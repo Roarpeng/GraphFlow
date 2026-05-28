@@ -4,25 +4,29 @@ A Context-Aware Multi-Agent Orchestration Engine.
 
 GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，当前版本聚焦于工程可用性：任务分流、DAG 执行、结果校验、图谱索引、近无损上下文压缩、CLI 与 VS Code 扩展联动。
 
-## 当前进度（v0.1.0）
+## 当前进度（v0.3.0）
 
 已完成并可用：
 
 1. 简单/复杂任务自动分流（triage）。
-2. 复杂任务编排链路：Planner -> DAG -> Worker -> Validator。
-3. 任务级校验与重试机制。
+2. 复杂任务编排链路：Planner & Brainstorm -> DAG -> Worker -> Validator。
+3. 任务级需求对账校验与重试机制。
 4. 模型分层路由与 fallback。
-5. 图谱增量同步与工作区索引。
+5. 图谱增量同步与工作区索引（支持 file 持久化）。
 6. 近无损上下文机制：summary + anchors + layer quota + refill。
-7. CLI 命令：`run`、`context preview`、`graph index`。
-8. VS Code 扩展已可调用工作区 CLI。
-9. 学习飞轮基础能力（样本导出 + canary gate）。
+7. CLI 命令：`run`、`plan`、`route diagnose`、`learn nightly`、`context preview`、`graph index`、`graph inspect`、`skill insights`。
+8. VS Code 扩展已完成从工作区 CLI 调用过渡到内置 runtime 打包。
+9. VS Code 扩展内置 GraphFlow runtime，安装后可在任意工作区直接使用。
+10. 支持在 Agent 对话框通过 `@graphflow` 执行 `/run`、`/plan`、`/history`、`/diagnose`、`/learn`、`/graph`、`/skills`。
+11. VS Code 扩展内置图谱快照与技能洞察面板，支持搜索、类型过滤、节点聚焦、技能排序与结果筛选。
+12. 学习飞轮增强能力：技能抽取、技能连接（co-occurs）、技能提示注入、nightly 学习闭环。
 
 发布信息：
 
-1. GitHub Release: `v0.1.0`
-2. VSIX 产物：`artifacts/graphflow-vscode-0.1.0.vsix`
-3. 发布说明：`docs/releases/v0.1.0.md`
+1. GitHub Release: `v0.3.0`
+2. VSIX 产物：`artifacts/graphflow-vscode-0.3.0.vsix`
+3. 发布说明：`docs/releases/v0.3.0.md`
+4. 正式测试报告：`docs/testing/2026-05-28-formal-usage-test-report.md`
 
 ## 环境要求
 
@@ -45,7 +49,13 @@ npm test
 
 1. `lint` 无错误
 2. `build` 成功
-3. `vitest` 全量通过（当前应为 25 tests passed）
+3. `vitest` 全量通过（当前应为 40 tests passed）
+
+可选一键 CI 本地校验：
+
+```bash
+npm run ci
+```
 
 ## 本地功能验证（CLI）
 
@@ -81,6 +91,66 @@ npm run start -- run "update readme and add tests"
 
 说明：该命令会根据任务复杂度自动走 simple 或 complex 工作流。
 
+### 4) 规划与头脑风暴
+
+```bash
+npm run start -- plan "update readme and add tests and refactor architecture module"
+```
+
+预期输出示例：
+
+```text
+mode=complex; ideas=...; plan=task-1... | task-2... | task-3...
+```
+
+### 5) 动态路由诊断
+
+```bash
+npm run start -- route diagnose
+```
+
+预期输出示例：
+
+```text
+dynamicRouting=on; health=openai:true,...; planner=openai/...; worker=openai/...
+```
+
+### 6) 学习夜跑
+
+```bash
+npm run start -- learn nightly
+```
+
+预期输出示例：
+
+```text
+events=12; passRate=0.833; avgTokens=118.0; canary=allow; dataset=tmp/learning-dataset.jsonl
+```
+
+### 7) 图谱快照洞察
+
+```bash
+npm run start -- graph inspect
+```
+
+预期输出示例：
+
+```text
+nodes=120; edges=184; types=File:20,Symbol:54,...; relations=defines:44,imports:20,...
+```
+
+### 8) 技能洞察
+
+```bash
+npm run start -- skill insights
+```
+
+预期输出示例：
+
+```text
+source=graph-store; transport=file; count=8; top=add tests:4/6,refactor planner:3/4
+```
+
 ## 配置文件
 
 默认使用根目录 `graphflow.config.json`。
@@ -102,16 +172,35 @@ cp graphflow.config.example.json graphflow.config.json
 关键配置：
 
 1. `graphPolicy.transport`
-- `memory`：本地内存图谱（默认，适合本地调试）
+- `file`：本地持久化图谱（默认，适合正式使用测试）
+- `memory`：本地内存图谱（适合轻量调试）
 - `mcp-http`：连接 Graphify MCP HTTP 服务
+2. `graphPolicy.graphStorePath`
+- `file` transport 的图谱存储路径
 2. `graphPolicy.enableNearLosslessMode`
 - 开启后启用近无损上下文打包
 3. `graphPolicy.autoIndexOnPreview`
 - `context preview` 前自动索引工作区
-4. `graphPolicy.layerQuota`
+4. `graphPolicy.autoIndexOnRun`
+- `run` 前自动索引工作区
+5. `graphPolicy.layerQuota`
 - 控制 L1/L2/L3 锚点配额
-5. `learningPolicy.exportPath`
+6. `learningPolicy.exportPath`
 - 学习样本导出路径
+7. `learningPolicy.eventsPath`
+- 运行反馈事件日志路径（用于 nightly 学习）
+8. `learningPolicy.summaryPath`
+- 学习汇总指标路径
+9. `routingPolicy.enableDynamicRouting`
+- 启用按 provider 健康状态的自动路由
+10. `routingPolicy.requireApiKeyForHealthy`
+- 若开启，缺少 apiKey 的 provider 会被标记为不健康并触发 fallback
+11. `routingPolicy.providerPriority`
+- 设置 fallback 优先级，例如 `["anthropic", "openai", "bailian", "doubao"]`
+12. `skillPolicy.enableSkillFlywheel`
+- 开启技能飞轮（技能抽取、技能连接、技能提示复用）
+13. `skillPolicy.maxSkillHints`
+- 每次规划注入的技能提示上限
 
 ## 本地测试验收清单
 
@@ -121,19 +210,46 @@ cp graphflow.config.example.json graphflow.config.json
 2. `graph index` 返回 `indexedFiles > 0`
 3. `context preview` 返回 `summary > 0` 且 `anchors > 0`
 4. `run "..."` 能返回正常执行输出
+5. `plan "..."` 返回 `mode=...; ideas=...; plan=...`
+
+## 正式使用测试
+
+正式使用测试脚本（含通过标准）见：
+
+1. `docs/testing/2026-05-28-formal-usage-test-plan.md`
+2. `docs/testing/2026-05-28-formal-usage-test-report.md`
 
 ## VS Code 扩展本地试用
 
 ### 方式 A：安装已打包 VSIX
 
 ```bash
-code --install-extension artifacts/graphflow-vscode-0.1.0.vsix
+code --install-extension artifacts/graphflow-vscode-0.3.0.vsix
 ```
 
 安装后可在命令面板执行：
 
 1. `GraphFlow: Run Task`
 2. `GraphFlow: Show Runs`
+3. `GraphFlow: Plan & Brainstorm`
+4. `GraphFlow: Graph Snapshot`
+5. `GraphFlow: Skill Insights`
+
+并可在 Agent 对话框通过 `@graphflow` 使用：
+
+1. `/run <task>`
+2. `/plan <task>`
+3. `/history`
+4. `/diagnose`
+5. `/learn`
+6. `/graph`
+7. `/skills`
+
+分发给同事：
+
+1. 直接发送 `artifacts/graphflow-vscode-0.3.0.vsix`
+2. 同事执行 `code --install-extension artifacts/graphflow-vscode-0.3.0.vsix`
+3. 不需要克隆 GraphFlow 仓库即可使用插件核心能力
 
 ### 方式 B：开发模式运行扩展
 
@@ -177,5 +293,5 @@ GraphFlow/
 ## 版本与变更
 
 1. 变更日志：`CHANGELOG.md`
-2. 发布文档：`docs/releases/v0.1.0.md`
+2. 发布文档：`docs/releases/v0.3.0.md`
 3. License：`LICENSE`

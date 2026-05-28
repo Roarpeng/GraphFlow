@@ -1,6 +1,7 @@
 import type { GraphFlowConfig } from "../config/schema";
 import type { GraphEdge, GraphNode } from "../core/types";
 import { GraphifyClient } from "./graphify-client";
+import { GraphifyFileClient } from "./graphify-file-client";
 import { GraphifyMcpClient } from "./graphify-mcp-client";
 
 export interface GraphClient {
@@ -28,6 +29,10 @@ class InMemoryGraphClientAdapter implements GraphClient {
 export function createGraphClient(config: GraphFlowConfig): GraphClient {
   if (config.graphPolicy.transport === "mcp-http") {
     return new GraphifyMcpClient(config.graphPolicy.mcpEndpoint!, config.graphPolicy.mcpApiKey);
+  }
+
+  if (config.graphPolicy.transport === "file") {
+    return new GraphifyFileClient(config.graphPolicy.graphStorePath!);
   }
 
   return new InMemoryGraphClientAdapter(new GraphifyClient());

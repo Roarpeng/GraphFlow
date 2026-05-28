@@ -3,7 +3,7 @@
   "publisher": "roarpeng",
   "displayName": "GraphFlow",
   "description": "GraphFlow orchestration panel and command runner",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"
@@ -16,7 +16,11 @@
   ],
   "activationEvents": [
     "onCommand:graphflow.runTask",
-    "onCommand:graphflow.showRuns"
+    "onCommand:graphflow.showRuns",
+    "onCommand:graphflow.planTask",
+    "onCommand:graphflow.showGraph",
+    "onCommand:graphflow.showSkills",
+    "onChatParticipant:roarpeng.graphflow-vscode.graphflowAgent"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -28,19 +32,68 @@
       {
         "command": "graphflow.showRuns",
         "title": "GraphFlow: Show Runs"
+      },
+      {
+        "command": "graphflow.planTask",
+        "title": "GraphFlow: Plan & Brainstorm"
+      },
+      {
+        "command": "graphflow.showGraph",
+        "title": "GraphFlow: Graph Snapshot"
+      },
+      {
+        "command": "graphflow.showSkills",
+        "title": "GraphFlow: Skill Insights"
+      }
+    ],
+    "chatParticipants": [
+      {
+        "id": "roarpeng.graphflow-vscode.graphflowAgent",
+        "name": "graphflow",
+        "fullName": "GraphFlow Agent",
+        "description": "Run GraphFlow tasks and planning in chat",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "run",
+            "description": "Run a task via GraphFlow orchestration"
+          },
+          {
+            "name": "plan",
+            "description": "Generate plan and brainstorming ideas"
+          },
+          {
+            "name": "history",
+            "description": "Show recent GraphFlow run history"
+          },
+          {
+            "name": "diagnose",
+            "description": "Show routing diagnostics and provider health"
+          },
+          {
+            "name": "learn",
+            "description": "Run nightly learning cycle and show summary"
+          },
+          {
+            "name": "graph",
+            "description": "Show graph snapshot summary"
+          },
+          {
+            "name": "skills",
+            "description": "Show current top skill insights"
+          }
+        ]
       }
     ]
   },
   "scripts": {
-    "build": "tsc -p ./tsconfig.json",
-    "package": "npm run build && npx @vscode/vsce package --no-dependencies --out ../artifacts/graphflow-vscode-0.1.0.vsix"
+    "sync-runtime": "npm --prefix .. run build && node ./scripts/sync-runtime.mjs",
+    "build": "npm run sync-runtime && tsc -p ./tsconfig.json",
+    "package": "npm run build && npx @vscode/vsce package --no-dependencies --out ../artifacts/graphflow-vscode-0.3.0.vsix"
   },
   "devDependencies": {
     "@types/vscode": "^1.99.0",
     "@vscode/vsce": "^3.6.0",
     "typescript": "^6.0.3"
-  },
-  "dependencies": {
-    "graphflow": "file:.."
   }
 }

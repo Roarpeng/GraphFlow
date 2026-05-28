@@ -11,11 +11,13 @@ export interface GraphFlowConfig {
     enableAutoBuild: boolean;
     enableNearLosslessMode?: boolean;
     autoIndexOnPreview?: boolean;
+    autoIndexOnRun?: boolean;
     workspaceRoot?: string;
     includeExtensions?: string[];
-    transport: "memory" | "mcp-http";
+    transport: "memory" | "mcp-http" | "file";
     mcpEndpoint?: string;
     mcpApiKey?: string;
+    graphStorePath?: string;
     maxContextTokens: number;
     layerQuota?: {
       l1: number;
@@ -28,5 +30,16 @@ export interface GraphFlowConfig {
     trainingCadence: "nightly" | "weekly";
     canaryRatio: number;
     exportPath: string;
+    eventsPath?: string;
+    summaryPath?: string;
+  };
+  routingPolicy?: {
+    enableDynamicRouting?: boolean;
+    requireApiKeyForHealthy?: boolean;
+    providerPriority?: Array<"openai" | "anthropic" | "bailian" | "doubao">;
+  };
+  skillPolicy?: {
+    enableSkillFlywheel?: boolean;
+    maxSkillHints?: number;
   };
 }

@@ -1,11 +1,14 @@
 import { runWorker } from "../agents/worker";
 import { validateTaskResult } from "../agents/validator";
+import type { ModelSelection } from "../routing/model-router";
 import type { TaskRunResult, TaskStatus } from "./types";
 
 export interface RunInput {
   task: string;
   workerOutput?: string;
   maxRetries?: number;
+  workerSelection?: ModelSelection;
+  validatorSelection?: ModelSelection;
 }
 
 export async function runSimpleTask(input: RunInput): Promise<TaskRunResult> {
@@ -20,8 +23,10 @@ export async function runSimpleTask(input: RunInput): Promise<TaskRunResult> {
 
     const output =
       input.workerOutput !== undefined
-        ? runWorker({ task: input.task, outputHint: input.workerOutput })
-        : runWorker({ task: input.task });
+        ? await runWorker({ task: input.task, outputHint: input.workerOutput })
+        : input.workerSelection
+          ? await runWorker({ task: input.task, selection: input.workerSelection })
+          : await runWorker({ task: input.task });
 
     status = "VALIDATING";
     const validation = validateTaskResult(input.task, output);
@@ -29,7 +34,16 @@ export async function runSimpleTask(input: RunInput): Promise<TaskRunResult> {
 
     if (validation.passed) {
       status = "COMPLETED";
-      return { status, attempts, feedback };
+      return {
+        status,
+        attempts,
+        feedback,
+        validationSummary: {
+          matched: validation.matchedCriteria.length,
+          missing: validation.missingCriteria.length,
+          riskTags: validation.riskTags,
+        },
+      };
     }
   }
 
@@ -38,5 +52,10 @@ export async function runSimpleTask(input: RunInput): Promise<TaskRunResult> {
     status,
     attempts,
     feedback: feedback || "Retry limit reached.",
+    validationSummary: {
+      matched: 0,
+      missing: 1,
+      riskTags: ["retry_limit"],
+    },
   };
 }

@@ -1,13 +1,22 @@
 #!/usr/bin/env node
 
-import { indexGraph, previewContext, runTask } from "./runtime";
+import {
+  diagnoseRouting,
+  getSkillInsights,
+  indexGraph,
+  inspectGraph,
+  planAndBrainstorm,
+  previewContext,
+  runLearningNightly,
+  runTask,
+} from "./runtime";
 
 async function main(): Promise<void> {
   const [, , command, ...args] = process.argv;
 
   if (!command) {
     console.log(
-      "Usage: graphflow run \"<task>\" | graphflow context preview \"<query>\" | graphflow graph index [path]"
+      "Usage: graphflow run \"<task>\" | graphflow plan \"<task>\" | graphflow route diagnose | graphflow learn nightly | graphflow context preview \"<query>\" | graphflow graph index [path] | graphflow graph inspect | graphflow skill insights"
     );
     process.exitCode = 1;
     return;
@@ -22,6 +31,19 @@ async function main(): Promise<void> {
     }
 
     const output = await runTask(task);
+    console.log(output);
+    return;
+  }
+
+  if (command === "plan") {
+    const task = args.join(" ").trim();
+    if (!task) {
+      console.log("Task is required.");
+      process.exitCode = 1;
+      return;
+    }
+
+    const output = planAndBrainstorm(task);
     console.log(output);
     return;
   }
@@ -56,8 +78,48 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "graph" && args[0] === "inspect") {
+    const result = inspectGraph();
+    console.log(
+      [
+        `nodes=${result.nodeCount}`,
+        `edges=${result.edgeCount}`,
+        `types=${Object.entries(result.nodeTypeCount)
+          .map(([type, count]) => `${type}:${count}`)
+          .join(",")}`,
+        `relations=${result.topRelations.map((item) => `${item.relation}:${item.count}`).join(",")}`,
+      ].join("; ")
+    );
+    return;
+  }
+
+  if (command === "skill" && args[0] === "insights") {
+    const result = getSkillInsights();
+    console.log(
+      [
+        `source=${result.source}`,
+        `transport=${result.transport}`,
+        `count=${result.skills.length}`,
+        `top=${result.skills
+          .map((skill) => `${skill.name}:${skill.score}/${skill.uses}`)
+          .join(",")}`,
+      ].join("; ")
+    );
+    return;
+  }
+
+  if (command === "route" && args[0] === "diagnose") {
+    console.log(diagnoseRouting());
+    return;
+  }
+
+  if (command === "learn" && args[0] === "nightly") {
+    console.log(runLearningNightly());
+    return;
+  }
+
   console.log(
-    "Usage: graphflow run \"<task>\" | graphflow context preview \"<query>\" | graphflow graph index [path]"
+    "Usage: graphflow run \"<task>\" | graphflow plan \"<task>\" | graphflow route diagnose | graphflow learn nightly | graphflow context preview \"<query>\" | graphflow graph index [path] | graphflow graph inspect | graphflow skill insights"
   );
   process.exitCode = 1;
 }
