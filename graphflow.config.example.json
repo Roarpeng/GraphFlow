@@ -1,0 +1,40 @@
+{
+  "providers": {
+    "openai": {
+      "apiKey": "${OPENAI_API_KEY}",
+      "baseUrl": "https://api.openai.com/v1"
+    },
+    "anthropic": {
+      "apiKey": "${ANTHROPIC_API_KEY}"
+    },
+    "bailian": {
+      "apiKey": "${BAILIAN_API_KEY}"
+    },
+    "doubao": {
+      "apiKey": "${DOUBAO_API_KEY}"
+    }
+  },
+  "tiers": {
+    "smart": { "provider": "openai", "model": "gpt-5.3-codex" },
+    "economy": { "provider": "openai", "model": "gpt-4.1-mini" }
+  },
+  "budgetPolicy": {
+    "runTokenCap": 4000
+  },
+  "graphPolicy": {
+    "enableAutoBuild": true,
+    "enableNearLosslessMode": true,
+    "autoIndexOnPreview": true,
+    "workspaceRoot": ".",
+    "includeExtensions": [".ts", ".tsx", ".js", ".jsx", ".md", ".json"],
+    "transport": "memory",
+    "maxContextTokens": 1200,
+    "layerQuota": { "l1": 6, "l2": 4, "l3": 3 }
+  },
+  "learningPolicy": {
+    "enableFlywheel": true,
+    "trainingCadence": "nightly",
+    "canaryRatio": 10,
+    "exportPath": "tmp/learning-dataset.jsonl"
+  }
+}

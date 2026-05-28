@@ -31,6 +31,13 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     }
   }
 
+  if (input.graphPolicy.includeExtensions) {
+    const invalid = input.graphPolicy.includeExtensions.some((ext) => !ext.startsWith("."));
+    if (invalid) {
+      throw new Error("Invalid config: graphPolicy.includeExtensions must start with '.'.");
+    }
+  }
+
   if (!input.learningPolicy) {
     throw new Error("Invalid config: learningPolicy is required.");
   }
@@ -44,6 +51,16 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     graphPolicy: {
       ...input.graphPolicy,
       enableNearLosslessMode: input.graphPolicy.enableNearLosslessMode ?? false,
+      autoIndexOnPreview: input.graphPolicy.autoIndexOnPreview ?? true,
+      workspaceRoot: input.graphPolicy.workspaceRoot ?? process.cwd(),
+      includeExtensions: input.graphPolicy.includeExtensions ?? [
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".md",
+        ".json",
+      ],
       layerQuota: input.graphPolicy.layerQuota ?? { l1: 6, l2: 4, l3: 3 },
     },
     learningPolicy: {

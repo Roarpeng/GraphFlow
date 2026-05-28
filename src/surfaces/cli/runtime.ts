@@ -3,6 +3,7 @@ import { loadConfig, validateConfig } from "../../config/loader";
 import type { GraphFlowConfig } from "../../config/schema";
 import { orchestrate } from "../../core/orchestrator";
 import { createGraphClient } from "../../graph/client-factory";
+import { indexWorkspaceFiles } from "../../graph/file-indexer";
 import {
   buildLayeredContextPackage,
   createContextRefillManager,
@@ -19,6 +20,9 @@ export function getDefaultConfig(): GraphFlowConfig {
     graphPolicy: {
       enableAutoBuild: true,
       enableNearLosslessMode: true,
+      autoIndexOnPreview: true,
+      workspaceRoot: process.cwd(),
+      includeExtensions: [".ts", ".tsx", ".js", ".jsx", ".md", ".json"],
       transport: "memory",
       maxContextTokens: 400,
       layerQuota: { l1: 6, l2: 4, l3: 3 },
@@ -56,6 +60,16 @@ export interface ContextPreviewResult {
 export async function previewContext(query: string, configPath?: string): Promise<ContextPreviewResult> {
   const config = resolveConfig(configPath);
   const graphClient = createGraphClient(config);
+
+  if (config.graphPolicy.autoIndexOnPreview) {
+    const indexOptions = config.graphPolicy.includeExtensions
+      ? { includeExtensions: config.graphPolicy.includeExtensions }
+      : undefined;
+    await indexWorkspaceFiles(graphClient, config.graphPolicy.workspaceRoot ?? process.cwd(), {
+      ...indexOptions,
+    });
+  }
+
   const packageOptions = config.graphPolicy.layerQuota
     ? { layerQuota: config.graphPolicy.layerQuota }
     : undefined;
@@ -87,6 +101,25 @@ export async function previewContext(query: string, configPath?: string): Promis
     },
     refillPreview,
   };
+}
+
+export interface GraphIndexResult {
+  indexedFiles: number;
+  indexedSymbols: number;
+}
+
+export async function indexGraph(rootDir?: string, configPath?: string): Promise<GraphIndexResult> {
+  const config = resolveConfig(configPath);
+  const graphClient = createGraphClient(config);
+  const targetDir = rootDir || config.graphPolicy.workspaceRoot || process.cwd();
+
+  const indexOptions = config.graphPolicy.includeExtensions
+    ? { includeExtensions: config.graphPolicy.includeExtensions }
+    : undefined;
+
+  return indexWorkspaceFiles(graphClient, targetDir, {
+    ...indexOptions,
+  });
 }
 
 export async function runTask(task: string, configPath?: string): Promise<string> {

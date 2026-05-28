@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 
-import { previewContext, runTask } from "./runtime";
+import { indexGraph, previewContext, runTask } from "./runtime";
 
 async function main(): Promise<void> {
   const [, , command, ...args] = process.argv;
 
   if (!command) {
-    console.log("Usage: graphflow run \"<task>\" | graphflow context preview \"<query>\"");
+    console.log(
+      "Usage: graphflow run \"<task>\" | graphflow context preview \"<query>\" | graphflow graph index [path]"
+    );
     process.exitCode = 1;
     return;
   }
@@ -47,7 +49,16 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log("Usage: graphflow run \"<task>\" | graphflow context preview \"<query>\"");
+  if (command === "graph" && args[0] === "index") {
+    const pathArg = args[1]?.trim();
+    const result = await indexGraph(pathArg || undefined);
+    console.log(`indexedFiles=${result.indexedFiles}; indexedSymbols=${result.indexedSymbols}`);
+    return;
+  }
+
+  console.log(
+    "Usage: graphflow run \"<task>\" | graphflow context preview \"<query>\" | graphflow graph index [path]"
+  );
   process.exitCode = 1;
 }
 

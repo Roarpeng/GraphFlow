@@ -4,6 +4,105 @@
 
 GraphFlow 是一个基于 TypeScript 原生构建的轻量级、自适应多智能体编排引擎。它通过整合**多模态全局图谱上下文**（如 Graphify）与**高级提示词管理/工作流状态机**（如 Superpowers），为现代 AI 辅助开发（如 Claude Code, Cursor, Hermes）提供强大的并发执行、动态拆解与闭环校验能力。
 
+## 当前实现状态（v0.1 Full Feature）
+
+已实现并可直接运行：
+
+1. 混合路由：simple/complex 自动分流。
+2. 复杂任务编排：Planner -> DAG -> Worker -> Validator。
+3. 每任务校验与重试上限控制。
+4. 模型分层路由与供应商 fallback（OpenAI/Anthropic/百炼/豆包）。
+5. 图谱增量同步（run 完成后自动索引）。
+6. Graphify MCP HTTP 客户端与 memory 模式切换。
+7. 近无损上下文压缩：
+- 双通道上下文包（summary + anchor）
+- L1/L2/L3 配额
+- 动态回补（refill）去重
+8. CLI 全命令：`run`、`context preview`、`graph index`。
+9. VS Code 扩展骨架已接核心 runtime。
+10. 学习飞轮数据导出与 canary 门禁基础能力。
+
+---
+
+## 快速开始
+
+```bash
+npm install
+npm run build
+npm test
+```
+
+可选：复制配置模板。
+
+```bash
+copy graphflow.config.example.json graphflow.config.json
+```
+
+---
+
+## CLI 使用
+
+1. 执行任务：
+
+```bash
+npm run start -- run "update readme and add tests"
+```
+
+2. 查看上下文压缩预览：
+
+```bash
+npm run start -- context preview "orchestrate"
+```
+
+输出示例：
+
+```text
+summary=12; anchors=9; tokens=118; truncated=false; L1=6; L2=2; L3=1
+```
+
+3. 索引工作区到图谱：
+
+```bash
+npm run start -- graph index .
+```
+
+---
+
+## 配置说明
+
+配置文件：`graphflow.config.json`，可参考：`graphflow.config.example.json`。
+
+关键字段：
+
+1. `graphPolicy.transport`:
+- `memory`：本地内存图谱（默认开发调试）
+- `mcp-http`：Graphify MCP HTTP
+2. `graphPolicy.enableNearLosslessMode`：是否启用近无损上下文包。
+3. `graphPolicy.layerQuota`：L1/L2/L3 信息配额。
+4. `graphPolicy.autoIndexOnPreview`：context preview 前是否自动索引工作区。
+5. `learningPolicy.exportPath`：学习飞轮样本导出路径。
+
+---
+
+## 近无损上下文机制
+
+GraphFlow 的 token 压缩不是简单截断，而是结构化压缩：
+
+1. Summary Channel：在预算内提供高密度摘要文本。
+2. Anchor Channel：保留可追溯锚点（ID + 类型 + 层级）。
+3. Layer Quota：限制 L1/L2/L3 比例，避免信息偏食。
+4. Refill：需要更多证据时按 hint 增量回补，且去重。
+
+---
+
+## 验证命令
+
+```bash
+npm run lint
+npm run build
+npm test
+```
+
 ---
 
 ## 💡 核心设计理念

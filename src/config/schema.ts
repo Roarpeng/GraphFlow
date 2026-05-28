@@ -10,6 +10,9 @@ export interface GraphFlowConfig {
   graphPolicy: {
     enableAutoBuild: boolean;
     enableNearLosslessMode?: boolean;
+    autoIndexOnPreview?: boolean;
+    workspaceRoot?: string;
+    includeExtensions?: string[];
     transport: "memory" | "mcp-http";
     mcpEndpoint?: string;
     mcpApiKey?: string;
