@@ -9,10 +9,16 @@ export interface GraphFlowConfig {
   };
   graphPolicy: {
     enableAutoBuild: boolean;
+    enableNearLosslessMode?: boolean;
     transport: "memory" | "mcp-http";
     mcpEndpoint?: string;
     mcpApiKey?: string;
     maxContextTokens: number;
+    layerQuota?: {
+      l1: number;
+      l2: number;
+      l3: number;
+    };
   };
   learningPolicy: {
     enableFlywheel: boolean;

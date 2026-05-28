@@ -24,6 +24,13 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     throw new Error("Invalid config: graphPolicy.mcpEndpoint is required for mcp-http.");
   }
 
+  if (input.graphPolicy.layerQuota) {
+    const { l1, l2, l3 } = input.graphPolicy.layerQuota;
+    if (l1 < 0 || l2 < 0 || l3 < 0) {
+      throw new Error("Invalid config: graphPolicy.layerQuota values must be >= 0.");
+    }
+  }
+
   if (!input.learningPolicy) {
     throw new Error("Invalid config: learningPolicy is required.");
   }
@@ -34,6 +41,11 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
 
   return {
     ...input,
+    graphPolicy: {
+      ...input.graphPolicy,
+      enableNearLosslessMode: input.graphPolicy.enableNearLosslessMode ?? false,
+      layerQuota: input.graphPolicy.layerQuota ?? { l1: 6, l2: 4, l3: 3 },
+    },
     learningPolicy: {
       ...input.learningPolicy,
       trainingCadence: input.learningPolicy.trainingCadence ?? "nightly",
