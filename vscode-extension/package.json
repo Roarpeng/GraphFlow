@@ -1,8 +1,13 @@
 {
   "name": "graphflow-vscode",
+  "publisher": "roarpeng",
   "displayName": "GraphFlow",
   "description": "GraphFlow orchestration panel and command runner",
   "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Roarpeng/GraphFlow.git"
+  },
   "engines": {
     "vscode": "^1.99.0"
   },
@@ -27,10 +32,12 @@
     ]
   },
   "scripts": {
-    "build": "tsc -p ./tsconfig.json"
+    "build": "tsc -p ./tsconfig.json",
+    "package": "npm run build && npx @vscode/vsce package --no-dependencies --out ../artifacts/graphflow-vscode-0.1.0.vsix"
   },
   "devDependencies": {
     "@types/vscode": "^1.99.0",
+    "@vscode/vsce": "^3.6.0",
     "typescript": "^6.0.3"
   },
   "dependencies": {
