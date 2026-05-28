@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { createVsCodeRuntime } from "graphflow";
 
 interface RunRecord {
   task: string;
@@ -9,6 +10,7 @@ interface RunRecord {
 }
 
 const runs: RunRecord[] = [];
+const runtime = createVsCodeRuntime();
 
 export function activate(context: vscode.ExtensionContext): void {
   const runTask = vscode.commands.registerCommand("graphflow.runTask", async () => {
@@ -22,12 +24,13 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
+    const runtimeRecord = await runtime.runTask(task);
     const record: RunRecord = {
-      task,
-      status: "COMPLETED",
-      attempts: 1,
-      feedback: "Stub runtime: integrate GraphFlow core next.",
-      timestamp: Date.now(),
+      task: runtimeRecord.task,
+      status: runtimeRecord.status,
+      attempts: runtimeRecord.attempts,
+      feedback: runtimeRecord.feedback,
+      timestamp: runtimeRecord.timestamp,
     };
 
     runs.push(record);

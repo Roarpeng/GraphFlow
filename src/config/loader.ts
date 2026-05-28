@@ -28,6 +28,10 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     throw new Error("Invalid config: learningPolicy is required.");
   }
 
+  if (input.learningPolicy.canaryRatio < 0 || input.learningPolicy.canaryRatio > 100) {
+    throw new Error("Invalid config: learningPolicy.canaryRatio must be 0-100.");
+  }
+
   return {
     ...input,
     learningPolicy: {

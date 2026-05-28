@@ -1,10 +1,10 @@
-import type { GraphifyClient } from "../graph/graphify-client";
+import type { GraphClient } from "../graph/client-factory";
 import { indexChanges, type ChangeRecord } from "../graph/graph-indexer";
 
-export function syncGraphAfterRun(client: GraphifyClient, changes: ChangeRecord[]): void {
+export async function syncGraphAfterRun(client: GraphClient, changes: ChangeRecord[]): Promise<void> {
   if (changes.length === 0) {
     return;
   }
 
-  indexChanges(client, changes);
+  await indexChanges(client, changes);
 }

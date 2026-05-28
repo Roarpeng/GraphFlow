@@ -1,12 +1,12 @@
 import type { GraphEdge, GraphNode } from "../core/types";
-import type { GraphifyClient } from "./graphify-client";
+import type { GraphClient } from "./client-factory";
 
 export interface ChangeRecord {
   filePath: string;
   summary: string;
 }
 
-export function indexChanges(client: GraphifyClient, changes: ChangeRecord[]): void {
+export async function indexChanges(client: GraphClient, changes: ChangeRecord[]): Promise<void> {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
 
@@ -19,6 +19,6 @@ export function indexChanges(client: GraphifyClient, changes: ChangeRecord[]): v
     edges.push({ from: decisionNodeId, to: fileNodeId, relation: "changes" });
   }
 
-  client.upsertNodes(nodes);
-  client.upsertEdges(edges);
+  await client.upsertNodes(nodes);
+  await client.upsertEdges(edges);
 }

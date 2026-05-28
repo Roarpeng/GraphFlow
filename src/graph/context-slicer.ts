@@ -1,17 +1,17 @@
 import type { GraphNode } from "../core/types";
-import type { GraphifyClient } from "./graphify-client";
+import type { GraphClient } from "./client-factory";
 
 export interface ContextSlice {
   items: string[];
   tokenEstimate: number;
 }
 
-export function buildContextSlice(
-  client: GraphifyClient,
+export async function buildContextSlice(
+  client: GraphClient,
   query: string,
   maxTokens: number
-): ContextSlice {
-  const hits = client.queryByKeyword(query);
+): Promise<ContextSlice> {
+  const hits = await client.queryByKeyword(query);
   const items: string[] = [];
   let tokens = 0;
 

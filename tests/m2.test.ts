@@ -47,10 +47,10 @@ describe("M2/M3 baseline behavior", () => {
     expect(events).toEqual(["task-1", "task-2"]);
   });
 
-  it("builds graph index and slices context by token budget", () => {
+  it("builds graph index and slices context by token budget", async () => {
     const client = new GraphifyClient();
-    indexChanges(client, [{ filePath: "README.md", summary: "updated overview" }]);
-    const slice = buildContextSlice(client, "README", 20);
+    await indexChanges(client, [{ filePath: "README.md", summary: "updated overview" }]);
+    const slice = await buildContextSlice(client, "README", 20);
     expect(slice.items.length).toBeGreaterThan(0);
     expect(slice.tokenEstimate).toBeLessThanOrEqual(20);
   });

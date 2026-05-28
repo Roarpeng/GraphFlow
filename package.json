@@ -2,7 +2,8 @@
   "name": "graphflow",
   "version": "1.0.0",
   "description": "**A Context-Aware Multi-Agent Orchestration Engine**",
-  "main": "index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "directories": {
     "doc": "docs"
   },

@@ -4,17 +4,17 @@ export class GraphifyClient {
   private readonly nodes = new Map<string, GraphNode>();
   private readonly edges: GraphEdge[] = [];
 
-  upsertNodes(nodes: GraphNode[]): void {
+  async upsertNodes(nodes: GraphNode[]): Promise<void> {
     for (const node of nodes) {
       this.nodes.set(node.id, node);
     }
   }
 
-  upsertEdges(edges: GraphEdge[]): void {
+  async upsertEdges(edges: GraphEdge[]): Promise<void> {
     this.edges.push(...edges);
   }
 
-  queryByKeyword(query: string): GraphNode[] {
+  async queryByKeyword(query: string): Promise<GraphNode[]> {
     const normalized = query.toLowerCase();
     return Array.from(this.nodes.values()).filter((node) =>
       node.content.toLowerCase().includes(normalized)
