@@ -3,6 +3,7 @@
   "publisher": "roarpeng",
   "displayName": "GraphFlow",
   "description": "GraphFlow orchestration panel and command runner",
+  "icon": "media/graphflow.png",
   "version": "0.3.0",
   "repository": {
     "type": "git",
@@ -87,6 +88,7 @@
     ]
   },
   "scripts": {
+    "icon:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/generate-icon.ps1",
     "sync-runtime": "npm --prefix .. run build && node ./scripts/sync-runtime.mjs",
     "build": "npm run sync-runtime && tsc -p ./tsconfig.json",
     "package": "npm run build && npx @vscode/vsce package --no-dependencies --out ../artifacts/graphflow-vscode-0.3.0.vsix"

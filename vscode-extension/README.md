@@ -116,6 +116,21 @@ npm run package
 
 `../artifacts/graphflow-vscode-0.3.0.vsix`
 
+## 扩展图标
+
+当前扩展图标路径：
+
+1. `media/graphflow.png`（Marketplace / 扩展清单使用）
+2. `media/graphflow.ico`（Windows 兼容资产）
+
+如需重新生成图标，可在本目录执行：
+
+```bash
+npm run icon:generate
+```
+
+该命令会执行：`scripts/generate-icon.ps1`，并覆盖 `media/graphflow.png` 与 `media/graphflow.ico`。
+
 ## 验收标准
 
 满足以下条件即可判定扩展本地可用：
