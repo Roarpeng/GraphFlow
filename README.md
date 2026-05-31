@@ -4,22 +4,23 @@ A Context-Aware Multi-Agent Orchestration Engine.
 
 GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，当前版本聚焦于工程可用性：任务分流、DAG 执行、结果校验、图谱索引、近无损上下文压缩、CLI 与 VS Code 扩展联动。
 
-## 当前进度（v0.3.0）
+## 当前进度（v0.3.0 + main）
 
 已完成并可用：
 
 1. 简单/复杂任务自动分流（triage）。
-2. 复杂任务编排链路：Planner & Brainstorm -> DAG -> Worker -> Validator。
-3. 任务级需求对账校验与重试机制。
-4. 模型分层路由与 fallback。
-5. 图谱增量同步与工作区索引（支持 file 持久化）。
-6. 近无损上下文机制：summary + anchors + layer quota + refill。
-7. CLI 命令：`run`、`plan`、`route diagnose`、`learn nightly`、`context preview`、`graph index`、`graph inspect`、`skill insights`。
-8. VS Code 扩展已完成从工作区 CLI 调用过渡到内置 runtime 打包。
-9. VS Code 扩展内置 GraphFlow runtime，安装后可在任意工作区直接使用。
-10. 支持在 Agent 对话框通过 `@graphflow` 执行 `/run`、`/plan`、`/history`、`/diagnose`、`/learn`、`/graph`、`/skills`。
-11. VS Code 扩展内置图谱快照与技能洞察面板，支持搜索、类型过滤、节点聚焦、技能排序与结果筛选。
-12. 学习飞轮增强能力：技能抽取、技能连接（co-occurs）、技能提示注入、nightly 学习闭环。
+2. 复杂任务编排链路：Brainstorm -> Planner -> DAG -> Worker -> Validator，并支持 LLM 驱动变体（`enableLlmAgents`）。
+3. 任务级需求对账校验、重试机制，以及失败后 mid-DAG 漂移重规划（`enableDriftReplan`）。
+4. 模型分层路由与 provider fallback（OpenAI / Anthropic / 百炼 / 豆包）。
+5. 工作区 AST 索引：基于 TypeScript Compiler API 提取 function/class/interface/type/enum/variable/method 节点 + 跨文件 `references` 边。
+6. 知识图谱真正注入 prompt：summary + skill hints 作为结构化上下文块送入 planner / brainstormer / worker / validator（`enableGraphContextInPrompt`）。
+7. 节点压缩：Symbol content 改为签名行（约 1.76× 字节缩减），元数据迁到 `metadata` 字段。
+8. 真 tokenizer（gpt-tokenizer / o200k_base）替代 `length/4` 估算，token 预算更准确。
+9. 检索升级：倒排索引 keyword 查询、邻接表、`getNodesByIds`、`getNeighbors`、`expandSubgraph` k-hop BFS 沿 `references/imports/depends_on/prerequisite` 扩展上下文。
+10. 学习飞轮 + 技能融合：技能抽取、score/uses、co_occurs 边，以及当 A+B 共现 ≥2 次且成功 ≥2 次时合成复合技能 C 并写 `prerequisite` 边；`suggestSkillHints` 优先返回融合技能。
+11. CLI 命令：`run`、`plan`、`route diagnose`、`learn nightly`、`context preview`、`graph index`、`graph inspect`、`skill insights`，全部支持 `--json`。
+12. MCP stdio server（`graphflow-mcp` bin）暴露 7 个工具，可被 Cursor / Claude Code / Claude Desktop / Codex / Aider 等直接调用。
+13. VS Code 扩展内置 runtime + `@graphflow` chat（`/run`、`/plan`、`/history`、`/diagnose`、`/learn`、`/graph`、`/skills`）+ 图谱快照与技能洞察面板。
 
 发布信息：
 
@@ -49,7 +50,7 @@ npm test
 
 1. `lint` 无错误
 2. `build` 成功
-3. `vitest` 全量通过（当前应为 40 tests passed）
+3. `vitest` 全量通过（当前应为 71 tests / 21 files passed）
 
 可选一键 CI 本地校验：
 
