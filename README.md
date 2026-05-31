@@ -21,6 +21,10 @@ GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，当�
 11. CLI 命令：`run`、`plan`、`route diagnose`、`learn nightly`、`context preview`、`graph index`、`graph inspect`、`skill insights`，全部支持 `--json`。
 12. MCP stdio server（`graphflow-mcp` bin）暴露 7 个工具，可被 Cursor / Claude Code / Claude Desktop / Codex / Aider 等直接调用。
 13. VS Code 扩展内置 runtime + `@graphflow` chat（`/run`、`/plan`、`/history`、`/diagnose`、`/learn`、`/graph`、`/skills`）+ 图谱快照与技能洞察面板。
+14. SQLite/FTS5 图谱后端：`transport: "sqlite"`、WAL+FTS5 全文索引、边表 PK+三索引、邻居查询 O(度)。
+15. 向量召回 + RRF 双路融合：`enableVectorRecall` + `embeddingProvider`；hash embedding 默认供应商零依赖，可丝滑切换到 OpenAI text-embedding-3-small。
+16. Episodic Memory + Reflection：Episode 节点记录每次 task 轨迹，复现相似 task 时注入历史决策；nightly reflector 集类成功 episode 合成 Lesson 节点。
+17. 跨语言 AST 索引：TypeScript / JavaScript / Python / Rust / Go / C / C++；统一输出 Symbol / Module / imports / defines / references 边，后续图谱 / prompt 注入 / episode 检索透明复用。
 
 发布信息：
 
@@ -50,7 +54,7 @@ npm test
 
 1. `lint` 无错误
 2. `build` 成功
-3. `vitest` 全量通过（当前应为 71 tests / 21 files passed）
+3. `vitest` 全量通过（当前应为 95 tests / 25 files passed）
 
 可选一键 CI 本地校验：
 

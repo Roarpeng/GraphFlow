@@ -1,9 +1,11 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { GraphFlowConfig } from "../config/schema";
+import type { GraphClient } from "../graph/client-factory";
 import { evaluateCanary } from "./canary-gate";
 import { computeLearningMetrics, exportLearningDataset, type LearningMetrics } from "./exporter";
 import type { FeedbackEvent } from "./feedback-collector";
+import { reflectOnEpisodes } from "./reflector";
 import { buildRankingSamples } from "./sample-builder";
 
 export interface NightlyLearningSummary {
@@ -13,6 +15,7 @@ export interface NightlyLearningSummary {
   canaryAllowed: boolean;
   canaryReason: string;
   exportedPath: string;
+  lessonsSynthesized?: number;
 }
 
 export function appendFeedbackEvent(path: string, event: FeedbackEvent): void {
@@ -20,7 +23,15 @@ export function appendFeedbackEvent(path: string, event: FeedbackEvent): void {
   appendFileSync(path, `${JSON.stringify(event)}\n`, "utf8");
 }
 
-export function runNightlyLearning(config: GraphFlowConfig): NightlyLearningSummary {
+export function runNightlyLearning(config: GraphFlowConfig): NightlyLearningSummary;
+export function runNightlyLearning(
+  config: GraphFlowConfig,
+  graphClient: GraphClient
+): Promise<NightlyLearningSummary>;
+export function runNightlyLearning(
+  config: GraphFlowConfig,
+  graphClient?: GraphClient
+): NightlyLearningSummary | Promise<NightlyLearningSummary> {
   const eventsPath = config.learningPolicy.eventsPath ?? "tmp/learning-events.jsonl";
   const events = readFeedbackEvents(eventsPath);
   const metrics = computeLearningMetrics(events);
@@ -33,7 +44,7 @@ export function runNightlyLearning(config: GraphFlowConfig): NightlyLearningSumm
   const samples = buildRankingSamples(events);
   exportLearningDataset(config.learningPolicy.exportPath, samples, metrics);
 
-  const summary: NightlyLearningSummary = {
+  const baseSummary: NightlyLearningSummary = {
     totalEvents: metrics.totalEvents,
     passRate: metrics.passRate,
     averageTokenCost: metrics.averageTokenCost,
@@ -44,9 +55,21 @@ export function runNightlyLearning(config: GraphFlowConfig): NightlyLearningSumm
 
   const summaryPath = config.learningPolicy.summaryPath ?? "tmp/learning-summary.json";
   mkdirSync(dirname(summaryPath), { recursive: true });
-  writeFileSync(summaryPath, JSON.stringify(summary, null, 2), "utf8");
 
-  return summary;
+  if (!graphClient) {
+    writeFileSync(summaryPath, JSON.stringify(baseSummary, null, 2), "utf8");
+    return baseSummary;
+  }
+
+  return (async () => {
+    const lessons = await reflectOnEpisodes(graphClient);
+    const summary: NightlyLearningSummary = {
+      ...baseSummary,
+      lessonsSynthesized: lessons.length,
+    };
+    writeFileSync(summaryPath, JSON.stringify(summary, null, 2), "utf8");
+    return summary;
+  })();
 }
 
 function readFeedbackEvents(path: string): FeedbackEvent[] {

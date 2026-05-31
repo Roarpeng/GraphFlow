@@ -46,6 +46,11 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     throw new Error("Invalid config: graphPolicy.graphStorePath is required for file transport.");
   }
 
+  const allowedTransports = new Set(["memory", "mcp-http", "file", "sqlite"]);
+  if (!allowedTransports.has(input.graphPolicy.transport)) {
+    throw new Error(`Invalid config: graphPolicy.transport must be one of memory|mcp-http|file|sqlite.`);
+  }
+
   if (input.graphPolicy.layerQuota) {
     const { l1, l2, l3 } = input.graphPolicy.layerQuota;
     if (l1 < 0 || l2 < 0 || l3 < 0) {
@@ -84,7 +89,11 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       autoIndexOnPreview: input.graphPolicy.autoIndexOnPreview ?? true,
       autoIndexOnRun: input.graphPolicy.autoIndexOnRun ?? true,
       workspaceRoot: input.graphPolicy.workspaceRoot ?? process.cwd(),
-      graphStorePath: input.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.json",
+      graphStorePath:
+        input.graphPolicy.graphStorePath ??
+        (input.graphPolicy.transport === "sqlite"
+          ? "tmp/graphflow-graph.sqlite"
+          : "tmp/graphflow-graph.json"),
       includeExtensions: input.graphPolicy.includeExtensions ?? [
         ".ts",
         ".tsx",

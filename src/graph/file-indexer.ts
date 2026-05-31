@@ -1,18 +1,24 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import * as ts from "typescript";
 import type { GraphEdge, GraphNode } from "../core/types";
 import type { GraphClient } from "./client-factory";
+import {
+  ALL_LANGUAGE_EXTENSIONS,
+  getIndexerForFile,
+  type DeclaredSymbol as ExtractedSymbol,
+} from "./language-indexers/index";
 
 export interface FileIndexerOptions {
   includeExtensions?: string[];
   maxFileSizeBytes?: number;
 }
 
-const DEFAULT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".md", ".json"];
+const BASE_EXTENSIONS = [".md", ".json"];
+const DEFAULT_EXTENSIONS = Array.from(
+  new Set([...ALL_LANGUAGE_EXTENSIONS, ...BASE_EXTENSIONS])
+);
 const DEFAULT_MAX_FILE_SIZE = 200_000;
 const IGNORED_DIRS = new Set([".git", "node_modules", "dist", "coverage", "tmp"]);
-const TS_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx"]);
 
 const REFERENCE_SKIPLIST = new Set([
   "if", "for", "let", "const", "var", "this", "new", "return", "true", "false",
@@ -23,13 +29,17 @@ const REFERENCE_SKIPLIST = new Set([
   "void", "yield", "number", "string", "boolean", "object", "any", "unknown",
   "never", "Array", "Promise", "Map", "Set", "Date", "Error", "JSON", "Math",
   "Object", "String", "Number", "Boolean", "Symbol", "Function", "RegExp",
+  "def", "fn", "pub", "struct", "trait", "impl", "use", "mod", "func",
+  "package", "include", "namespace", "typedef", "define", "static", "inline",
+  "extern", "virtual", "nil", "None", "True", "False", "int", "char", "long",
+  "short", "float", "double", "bool", "auto", "sizeof", "self", "cls",
+  "and", "or", "not", "is", "lambda", "global", "nonlocal", "pass", "raise",
+  "with", "yield", "make", "len", "cap", "append", "range", "chan", "select",
+  "defer", "goto", "fallthrough", "size_t", "uint", "int8", "int16", "int32",
+  "int64", "uint8", "uint16", "uint32", "uint64", "byte", "rune", "string",
 ]);
 
-interface DeclaredSymbol {
-  name: string;
-  kind: string;
-  exported: boolean;
-  line: number;
+interface IndexedSymbol extends ExtractedSymbol {
   nodeId: string;
 }
 
@@ -37,10 +47,9 @@ interface ParsedFile {
   relPath: string;
   fileNodeId: string;
   moduleNodeId: string;
-  declared: DeclaredSymbol[];
-  imports: string[];
-  identifiers: Array<{ name: string }>;
-  isCodeFile: boolean;
+  declared: IndexedSymbol[];
+  content: string;
+  scannable: boolean;
 }
 
 export async function indexWorkspaceFiles(
@@ -66,25 +75,19 @@ export async function indexWorkspaceFiles(
     const content = readFileSync(file, "utf8");
     const fileNodeId = `file:${relPath}`;
     const moduleNodeId = `module:${moduleKey(relPath)}`;
-    const ext = extOf(relPath);
-    const isCodeFile = TS_EXTENSIONS.has(ext);
-    const language = ext.replace(/^\./, "") || "text";
+    const indexer = getIndexerForFile(relPath);
+    const language = indexer?.language ?? (extOf(relPath).replace(/^\./, "") || "text");
 
-    let declared: DeclaredSymbol[] = [];
+    let declared: IndexedSymbol[] = [];
     let imports: string[] = [];
-    let identifiers: Array<{ name: string }> = [];
 
-    if (isCodeFile) {
-      try {
-        const extracted = extractFromAst(relPath, content);
-        declared = extracted.declared;
-        imports = extracted.imports;
-        identifiers = extracted.identifiers;
-      } catch {
-        declared = fallbackDeclared(relPath, content);
-        imports = fallbackImports(content);
-        identifiers = [];
-      }
+    if (indexer) {
+      const extracted = indexer.extract(relPath, content);
+      declared = extracted.symbols.map((sym) => ({
+        ...sym,
+        nodeId: `symbol:${relPath}:${hashText(sym.name)}`,
+      }));
+      imports = extracted.imports.map((imp) => imp.module);
     }
 
     const exportNames = declared
@@ -137,10 +140,17 @@ export async function indexWorkspaceFiles(
       edges.push({ from: moduleNodeId, to: importNodeId, relation: "imports" });
     }
 
-    parsed.push({ relPath, fileNodeId, moduleNodeId, declared, imports, identifiers, isCodeFile });
+    parsed.push({
+      relPath,
+      fileNodeId,
+      moduleNodeId,
+      declared,
+      content,
+      scannable: Boolean(indexer),
+    });
   }
 
-  const symbolIndex = new Map<string, DeclaredSymbol[]>();
+  const symbolIndex = new Map<string, IndexedSymbol[]>();
   for (const file of parsed) {
     for (const symbol of file.declared) {
       const list = symbolIndex.get(symbol.name) ?? [];
@@ -149,15 +159,20 @@ export async function indexWorkspaceFiles(
     }
   }
 
+  const identifierRe = /\b\w{3,}\b/g;
   let referenceCount = 0;
   for (const file of parsed) {
-    if (!file.isCodeFile) {
+    if (!file.scannable) {
       continue;
     }
     const ownNames = new Set(file.declared.map((s) => s.name));
     const seenThisFile = new Set<string>();
-    for (const ident of file.identifiers) {
-      const name = ident.name;
+    const matches = file.content.match(identifierRe);
+    if (!matches) continue;
+    const seenIdent = new Set<string>();
+    for (const name of matches) {
+      if (seenIdent.has(name)) continue;
+      seenIdent.add(name);
       if (name.length < 3 || REFERENCE_SKIPLIST.has(name)) {
         continue;
       }
@@ -190,149 +205,6 @@ export async function indexWorkspaceFiles(
   };
 }
 
-function extractFromAst(
-  relPath: string,
-  content: string
-): { declared: DeclaredSymbol[]; imports: string[]; identifiers: Array<{ name: string }> } {
-  const ext = extOf(relPath);
-  const scriptKind =
-    ext === ".tsx" ? ts.ScriptKind.TSX :
-    ext === ".jsx" ? ts.ScriptKind.JSX :
-    ext === ".js" ? ts.ScriptKind.JS :
-    ts.ScriptKind.TS;
-
-  const sourceFile = ts.createSourceFile(
-    relPath,
-    content,
-    ts.ScriptTarget.Latest,
-    true,
-    scriptKind
-  );
-
-  const declared: DeclaredSymbol[] = [];
-  const imports: string[] = [];
-  const identifiers: Array<{ name: string }> = [];
-  const declNamePositions = new Set<number>();
-
-  const addDecl = (
-    nameNode: ts.Node | undefined,
-    kind: string,
-    exported: boolean
-  ): void => {
-    if (!nameNode || !ts.isIdentifier(nameNode)) {
-      return;
-    }
-    const name = nameNode.text;
-    if (!name) {
-      return;
-    }
-    const start = nameNode.getStart(sourceFile);
-    const { line } = sourceFile.getLineAndCharacterOfPosition(start);
-    declared.push({
-      name,
-      kind,
-      exported,
-      line: line + 1,
-      nodeId: `symbol:${relPath}:${hashText(name)}`,
-    });
-    declNamePositions.add(start);
-  };
-
-  const hasExport = (node: ts.Node): boolean => {
-    const flags = ts.getCombinedModifierFlags(node as ts.Declaration);
-    return (flags & ts.ModifierFlags.Export) !== 0;
-  };
-
-  for (const stmt of sourceFile.statements) {
-    if (ts.isFunctionDeclaration(stmt)) {
-      addDecl(stmt.name, "function", hasExport(stmt));
-    } else if (ts.isClassDeclaration(stmt)) {
-      addDecl(stmt.name, "class", hasExport(stmt));
-      for (const member of stmt.members) {
-        if (ts.isMethodDeclaration(member) && member.name && ts.isIdentifier(member.name)) {
-          addDecl(member.name, "method", false);
-        }
-      }
-    } else if (ts.isInterfaceDeclaration(stmt)) {
-      addDecl(stmt.name, "interface", hasExport(stmt));
-    } else if (ts.isTypeAliasDeclaration(stmt)) {
-      addDecl(stmt.name, "type", hasExport(stmt));
-    } else if (ts.isEnumDeclaration(stmt)) {
-      addDecl(stmt.name, "enum", hasExport(stmt));
-    } else if (ts.isVariableStatement(stmt)) {
-      const exported = hasExport(stmt);
-      for (const decl of stmt.declarationList.declarations) {
-        if (ts.isIdentifier(decl.name)) {
-          addDecl(decl.name, "variable", exported);
-        }
-      }
-    } else if (ts.isImportDeclaration(stmt)) {
-      const spec = stmt.moduleSpecifier;
-      if (ts.isStringLiteral(spec)) {
-        imports.push(spec.text);
-      }
-    } else if (ts.isExportDeclaration(stmt)) {
-      const spec = stmt.moduleSpecifier;
-      if (spec && ts.isStringLiteral(spec)) {
-        imports.push(spec.text);
-      }
-    }
-  }
-
-  const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node)) {
-      const callee = node.expression;
-      if (ts.isIdentifier(callee) && callee.text === "require" && node.arguments.length > 0) {
-        const arg = node.arguments[0];
-        if (arg && ts.isStringLiteral(arg)) {
-          imports.push(arg.text);
-        }
-      }
-    }
-    if (ts.isIdentifier(node) && !declNamePositions.has(node.getStart(sourceFile))) {
-      const text = node.text;
-      if (text) {
-        identifiers.push({ name: text });
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  ts.forEachChild(sourceFile, visit);
-
-  return { declared, imports, identifiers };
-}
-
-function fallbackDeclared(relPath: string, content: string): DeclaredSymbol[] {
-  const lines = content.split(/\r?\n/);
-  const out: DeclaredSymbol[] = [];
-  for (let i = 0; i < lines.length && out.length < 80; i += 1) {
-    const trimmed = lines[i]?.trim() ?? "";
-    if (trimmed.startsWith("export ") || trimmed.startsWith("function ")) {
-      const summary = trimmed.slice(0, 200);
-      out.push({
-        name: summary,
-        kind: "raw",
-        exported: trimmed.startsWith("export "),
-        line: i + 1,
-        nodeId: `symbol:${relPath}:${hashText(summary)}`,
-      });
-    }
-  }
-  return out;
-}
-
-function fallbackImports(content: string): string[] {
-  const matches = content.matchAll(/(?:import\s+[^"']+from\s+|require\()\s*["']([^"']+)["']/g);
-  const targets: string[] = [];
-  for (const match of matches) {
-    const target = match[1]?.trim();
-    if (target) {
-      targets.push(target);
-    }
-  }
-  return targets.slice(0, 120);
-}
-
 function walkFiles(rootDir: string, includeExtensions: string[]): string[] {
   const entries = readdirSync(rootDir, { withFileTypes: true });
   const files: string[] = [];
@@ -360,7 +232,9 @@ function walkFiles(rootDir: string, includeExtensions: string[]): string[] {
 }
 
 function normalizeImportTarget(target: string): string | undefined {
-  const cleaned = target.replace(/\\/g, "/").replace(/\.(ts|tsx|js|jsx)$/i, "");
+  const cleaned = target
+    .replace(/\\/g, "/")
+    .replace(/\.(ts|tsx|js|jsx|py|rs|go|hpp|hxx|cpp|cxx|cc|h|c)$/i, "");
   if (!cleaned) {
     return undefined;
   }
@@ -368,7 +242,7 @@ function normalizeImportTarget(target: string): string | undefined {
 }
 
 function moduleKey(relPath: string): string {
-  return relPath.replace(/\.(ts|tsx|js|jsx|md|json)$/i, "");
+  return relPath.replace(/\.(ts|tsx|js|jsx|md|json|py|rs|go|hpp|hxx|cpp|cxx|cc|h|c)$/i, "");
 }
 
 function dedupEdges(edges: GraphEdge[]): GraphEdge[] {
@@ -403,3 +277,4 @@ function extOf(relPath: string): string {
   }
   return relPath.slice(idx).toLowerCase();
 }
+

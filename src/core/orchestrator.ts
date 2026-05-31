@@ -6,6 +6,12 @@ import {
   type LayeredContextPackage,
 } from "../graph/context-slicer";
 import { syncGraphAfterRun } from "../hooks/post-run-sync";
+import {
+  findSimilarEpisodes,
+  recordEpisode,
+  summarizeEpisodeForPrompt,
+  type EpisodeRecord,
+} from "../learning/episodic-memory";
 import { applySkillLearning, suggestSkillHints } from "../learning/skill-flywheel";
 import {
   resolveModelForRole,
@@ -17,7 +23,7 @@ import { executeRolePrompt, type PromptContext } from "../routing/provider-execu
 import { executeDag } from "./dag-engine";
 import { runSimpleTask } from "./state-machine";
 import { triageTask } from "./triage";
-import type { OrchestrationInput, RouteDecision, TaskRunResult, TaskNode } from "./types";
+import type { OrchestrationInput, RouteDecision, TaskRunResult, TaskNode, TaskStatus } from "./types";
 
 export interface OrchestrateOptions {
   graphClient?: GraphClient;
@@ -35,6 +41,7 @@ export interface OrchestrateOptions {
   enableDriftReplan?: boolean;
   maxReplanRounds?: number;
   enableGraphContextInPrompt?: boolean;
+  enableEpisodicMemory?: boolean;
 }
 
 export async function orchestrate(
@@ -46,8 +53,11 @@ export async function orchestrate(
   const contextPackage = await maybeBuildNearLosslessContext(input, options);
   const routeDecisions = buildRouteDecisions(options?.providerHealth, options?.providerFallbackChain);
   const skillHints = await maybeBuildSkillHints(input.task, options);
-  const promptContext = buildPromptContext(contextPackage, skillHints, options);
+  const similarEpisodes = await maybeFindSimilarEpisodes(input.task, options);
+  const episodeSummaries = similarEpisodes.map((ep) => summarizeEpisodeForPrompt(ep));
+  const promptContext = buildPromptContext(contextPackage, skillHints, episodeSummaries, options);
   const promptContextLines = promptContext?.summaryChannel?.length ?? 0;
+  let currentPlan: TaskNode[] = [];
 
   if (mode === "simple") {
     const run = await runSimpleTask({
@@ -61,7 +71,7 @@ export async function orchestrate(
     const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
     await maybeSyncGraph(input.task, withRoute, options);
     await maybeSyncSkillGraph(input.task, withRoute, options);
-    return withRoute;
+    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options);
   }
 
   const plannerSelection = decisionToSelection(routeDecisions.planner);
@@ -85,6 +95,7 @@ export async function orchestrate(
   } else {
     plan = planTasks(input.task, skillHints);
   }
+  currentPlan = plan;
 
   const runner = async (node: TaskNode): Promise<boolean> => {
     const run = await runSimpleTask({
@@ -129,6 +140,7 @@ export async function orchestrate(
 
     replanRounds += 1;
     plan = newPlan;
+    currentPlan = plan;
     result = await executeDag(plan, runner);
   }
 
@@ -145,7 +157,7 @@ export async function orchestrate(
     const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
     await maybeSyncGraph(input.task, withRoute, options);
     await maybeSyncSkillGraph(input.task, withRoute, options);
-    return withRoute;
+    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options);
   }
 
   const run: TaskRunResult = {
@@ -160,7 +172,7 @@ export async function orchestrate(
   const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
   await maybeSyncGraph(input.task, withRoute, options);
   await maybeSyncSkillGraph(input.task, withRoute, options);
-  return withRoute;
+  return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options);
 }
 
 function projectPlan(plan: TaskNode[]): string {
@@ -219,19 +231,25 @@ function appendContextFeedback(
 function buildPromptContext(
   contextPackage: LayeredContextPackage | undefined,
   skillHints: string[],
+  episodeSummaries: string[],
   options?: OrchestrateOptions
 ): PromptContext | undefined {
-  if (!options?.enableGraphContextInPrompt || !contextPackage) {
+  const includeGraph = options?.enableGraphContextInPrompt === true && contextPackage !== undefined;
+  const includeEpisodes = options?.enableEpisodicMemory === true && episodeSummaries.length > 0;
+  if (!includeGraph && !includeEpisodes) {
     return undefined;
   }
   const ctx: PromptContext = {};
-  if (contextPackage.summaryChannel.length > 0) {
+  if (includeGraph && contextPackage && contextPackage.summaryChannel.length > 0) {
     ctx.summaryChannel = contextPackage.summaryChannel;
   }
-  if (skillHints.length > 0) {
+  if (includeGraph && skillHints.length > 0) {
     ctx.skillHints = skillHints;
   }
-  if (!ctx.summaryChannel && !ctx.skillHints) {
+  if (includeEpisodes) {
+    ctx.extraInstructions = [...episodeSummaries];
+  }
+  if (!ctx.summaryChannel && !ctx.skillHints && !ctx.extraInstructions) {
     return undefined;
   }
   return ctx;
@@ -359,4 +377,68 @@ async function maybeSyncSkillGraph(
   }
 
   await applySkillLearning(options.graphClient, task, run);
+}
+
+async function maybeFindSimilarEpisodes(
+  task: string,
+  options?: OrchestrateOptions
+): Promise<EpisodeRecord[]> {
+  if (!options?.enableEpisodicMemory || !options.graphClient) {
+    return [];
+  }
+  return findSimilarEpisodes(options.graphClient, task, 3);
+}
+
+function statusToOutcome(status: TaskStatus): "pass" | "fail" | "human_review" {
+  if (status === "COMPLETED") return "pass";
+  if (status === "HUMAN_REVIEW_REQUIRED") return "human_review";
+  return "fail";
+}
+
+async function finalizeEpisode(
+  task: string,
+  plan: TaskNode[],
+  run: TaskRunResult,
+  similar: EpisodeRecord[],
+  skillHints: string[],
+  options?: OrchestrateOptions
+): Promise<TaskRunResult> {
+  if (!options?.enableEpisodicMemory || !options.graphClient) {
+    return run;
+  }
+
+  const decisions: string[] = [];
+  for (const rd of run.routeDecisions ?? []) {
+    decisions.push(`route ${rd.role}: ${rd.provider}/${rd.model}`);
+  }
+  for (const hint of skillHints.slice(0, 3)) {
+    decisions.push(`skill: ${hint}`);
+  }
+  const dedupedDecisions = Array.from(new Set(decisions)).slice(0, 6);
+
+  const planProjection = plan.map((node) => ({ id: node.id, description: node.description }));
+  const recordInput: Parameters<typeof recordEpisode>[1] = {
+    task,
+    plan: planProjection,
+    outcome: statusToOutcome(run.status),
+    keyDecisions: dedupedDecisions,
+    lessons: [],
+    attempts: run.attempts,
+    ...(run.executionRounds ? { executionRounds: run.executionRounds } : {}),
+    ...(run.feedback !== undefined ? { runFeedback: run.feedback } : {}),
+  };
+
+  const episode = await recordEpisode(options.graphClient, recordInput);
+
+  const similarSummaries = similar.map((ep) => ({
+    id: ep.id,
+    task: ep.task,
+    score: ep.outcome === "pass" ? 1 : ep.outcome === "fail" ? -1 : 0,
+  }));
+
+  return {
+    ...run,
+    episodeId: episode.id,
+    similarEpisodes: similarSummaries,
+  };
 }

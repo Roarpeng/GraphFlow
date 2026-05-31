@@ -38,6 +38,8 @@ export interface TaskRunResult {
   replanRounds?: number;
   brainstormIdeas?: string[];
   promptContextLines?: number;
+  episodeId?: string;
+  similarEpisodes?: Array<{ id: string; task: string; score: number }>;
 }
 
 export interface TaskNode {

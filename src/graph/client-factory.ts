@@ -3,6 +3,7 @@ import type { GraphEdge, GraphNode } from "../core/types";
 import { GraphifyClient } from "./graphify-client";
 import { GraphifyFileClient } from "./graphify-file-client";
 import { GraphifyMcpClient } from "./graphify-mcp-client";
+import { GraphifySqliteClient } from "./sqlite-client";
 
 export interface GraphClient {
   upsertNodes(nodes: GraphNode[]): Promise<void>;
@@ -51,6 +52,10 @@ export function createGraphClient(config: GraphFlowConfig): GraphClient {
 
   if (config.graphPolicy.transport === "file") {
     return new GraphifyFileClient(config.graphPolicy.graphStorePath!);
+  }
+
+  if (config.graphPolicy.transport === "sqlite") {
+    return new GraphifySqliteClient(config.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.sqlite");
   }
 
   return new InMemoryGraphClientAdapter(new GraphifyClient());

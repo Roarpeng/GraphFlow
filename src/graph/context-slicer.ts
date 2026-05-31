@@ -1,4 +1,10 @@
 import type { GraphEdge, GraphNode } from "../core/types";
+import {
+  cosineSimilarity,
+  extractEmbedding,
+  reciprocalRankFusion,
+  type EmbeddingProvider,
+} from "../learning/embeddings";
 import type { GraphClient } from "./client-factory";
 
 let encoderFn: ((text: string) => number[]) | null = null;
@@ -58,6 +64,10 @@ export interface LayeredPackageOptions {
     l3: number;
   };
   enableEdgeExpansion?: boolean;
+  enableVectorRecall?: boolean;
+  embeddingProvider?: EmbeddingProvider;
+  vectorTopK?: number;
+  vectorMinSimilarity?: number;
 }
 
 export interface SubgraphExpansionOptions {
@@ -113,13 +123,45 @@ export async function buildContextSlice(
   return { items: pkg.summaryChannel, tokenEstimate: pkg.tokenEstimate };
 }
 
+export function vectorRecall(
+  nodes: GraphNode[],
+  queryEmbedding: number[],
+  topK: number,
+  minSimilarity: number
+): GraphNode[] {
+  if (!queryEmbedding || queryEmbedding.length === 0) return [];
+  const scored: { node: GraphNode; sim: number }[] = [];
+  for (const node of nodes) {
+    const emb = extractEmbedding(node);
+    if (!emb) continue;
+    const sim = cosineSimilarity(queryEmbedding, emb);
+    if (sim >= minSimilarity) scored.push({ node, sim });
+  }
+  scored.sort((a, b) => b.sim - a.sim);
+  return scored.slice(0, topK).map((s) => s.node);
+}
+
 export async function buildLayeredContextPackage(
   client: GraphClient,
   query: string,
   maxTokens: number,
   options?: LayeredPackageOptions
 ): Promise<LayeredContextPackage> {
-  const hits = await client.queryByKeyword(query);
+  const keywordHits = await client.queryByKeyword(query);
+  let hits: GraphNode[] = keywordHits;
+
+  if (options?.enableVectorRecall === true && options.embeddingProvider) {
+    try {
+      const queryEmbedding = await options.embeddingProvider.embed(query);
+      const topK = options.vectorTopK ?? 8;
+      const minSim = options.vectorMinSimilarity ?? 0.05;
+      const vectorHits = vectorRecall(keywordHits, queryEmbedding, topK, minSim);
+      hits = reciprocalRankFusion([keywordHits, vectorHits]);
+    } catch {
+      hits = keywordHits;
+    }
+  }
+
   const summaryChannel: string[] = [];
   const anchorChannel: ContextAnchorItem[] = [];
   let tokens = 0;
