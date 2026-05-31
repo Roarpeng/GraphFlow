@@ -1,5 +1,35 @@
-import type { GraphNode } from "../core/types";
+import type { GraphEdge, GraphNode } from "../core/types";
 import type { GraphClient } from "./client-factory";
+
+let encoderFn: ((text: string) => number[]) | null = null;
+let encoderLoaded = false;
+
+function getEncoder(): ((text: string) => number[]) | null {
+  if (encoderLoaded) return encoderFn;
+  encoderLoaded = true;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require("gpt-tokenizer/encoding/o200k_base") as { encode: (t: string) => number[] };
+    if (typeof mod.encode === "function") {
+      encoderFn = mod.encode.bind(mod);
+      return encoderFn;
+    }
+  } catch {
+    // fall through
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require("gpt-tokenizer") as { encode: (t: string) => number[] };
+    if (typeof mod.encode === "function") {
+      encoderFn = mod.encode.bind(mod);
+      return encoderFn;
+    }
+  } catch {
+    // fall through
+  }
+  encoderFn = null;
+  return null;
+}
 
 export interface ContextSlice {
   items: string[];
@@ -27,6 +57,51 @@ export interface LayeredPackageOptions {
     l2: number;
     l3: number;
   };
+  enableEdgeExpansion?: boolean;
+}
+
+export interface SubgraphExpansionOptions {
+  hops?: number;
+  maxNodes?: number;
+  relations?: GraphEdge["relation"][];
+}
+
+const DEFAULT_EXPANSION_RELATIONS: GraphEdge["relation"][] = [
+  "references",
+  "imports",
+  "depends_on",
+  "prerequisite",
+];
+
+export async function expandSubgraph(
+  client: GraphClient,
+  seedIds: string[],
+  options?: SubgraphExpansionOptions
+): Promise<GraphNode[]> {
+  if (typeof client.getNeighbors !== "function") return [];
+  const hops = options?.hops ?? 1;
+  const maxNodes = options?.maxNodes ?? 20;
+  const relations = options?.relations ?? DEFAULT_EXPANSION_RELATIONS;
+
+  const excluded = new Set(seedIds);
+  const collected = new Map<string, GraphNode>();
+  let frontier = [...seedIds];
+
+  for (let depth = 0; depth < hops; depth += 1) {
+    if (frontier.length === 0) break;
+    const neighbors = await client.getNeighbors(frontier, relations, "both");
+    const nextFrontier: string[] = [];
+    for (const { node } of neighbors) {
+      if (excluded.has(node.id) || collected.has(node.id)) continue;
+      collected.set(node.id, node);
+      nextFrontier.push(node.id);
+      if (collected.size >= maxNodes) break;
+    }
+    if (collected.size >= maxNodes) break;
+    frontier = nextFrontier;
+  }
+
+  return Array.from(collected.values());
 }
 
 export async function buildContextSlice(
@@ -56,6 +131,7 @@ export async function buildLayeredContextPackage(
     l3: options?.layerQuota?.l3 ?? Number.POSITIVE_INFINITY,
   };
   const used = { l1: 0, l2: 0, l3: 0 };
+  const added = new Set<string>();
 
   for (const hit of hits) {
     const layer = classifyLayer(hit);
@@ -72,8 +148,35 @@ export async function buildLayeredContextPackage(
 
     summaryChannel.push(summary);
     anchorChannel.push({ id: hit.id, type: hit.type, layer });
+    added.add(hit.id);
     tokens += estimate;
     markLayerUsed(layer, used);
+  }
+
+  const enableExpansion = options?.enableEdgeExpansion !== false;
+  if (enableExpansion && !truncated && typeof client.getNeighbors === "function") {
+    const seedIds = anchorChannel.slice(0, 5).map((a) => a.id);
+    if (seedIds.length > 0) {
+      const expanded = await expandSubgraph(client, seedIds, { hops: 1 });
+      for (const node of expanded) {
+        if (added.has(node.id)) continue;
+        const layer = classifyLayer(node);
+        if (!canUseLayer(layer, quota, used)) continue;
+
+        const summary = `${node.type}: ${node.content}`;
+        const estimate = estimateTokens(summary);
+        if (tokens + estimate > maxTokens) {
+          truncated = true;
+          break;
+        }
+
+        summaryChannel.push(summary);
+        anchorChannel.push({ id: node.id, type: node.type, layer });
+        added.add(node.id);
+        tokens += estimate;
+        markLayerUsed(layer, used);
+      }
+    }
   }
 
   return { summaryChannel, anchorChannel, tokenEstimate: tokens, truncated };
@@ -129,6 +232,15 @@ export function createContextRefillManager(
 }
 
 function estimateTokens(text: string): number {
+  const enc = getEncoder();
+  if (enc) {
+    try {
+      const n = enc(text).length;
+      return Math.max(1, n);
+    } catch {
+      // fall back below
+    }
+  }
   return Math.max(1, Math.ceil(text.length / 4));
 }
 

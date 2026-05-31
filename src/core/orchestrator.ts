@@ -13,7 +13,7 @@ import {
   type ProviderName,
   type ProviderHealthMap,
 } from "../routing/model-router";
-import { executeRolePrompt } from "../routing/provider-executor";
+import { executeRolePrompt, type PromptContext } from "../routing/provider-executor";
 import { executeDag } from "./dag-engine";
 import { runSimpleTask } from "./state-machine";
 import { triageTask } from "./triage";
@@ -34,6 +34,7 @@ export interface OrchestrateOptions {
   enableLlmAgents?: boolean;
   enableDriftReplan?: boolean;
   maxReplanRounds?: number;
+  enableGraphContextInPrompt?: boolean;
 }
 
 export async function orchestrate(
@@ -45,6 +46,8 @@ export async function orchestrate(
   const contextPackage = await maybeBuildNearLosslessContext(input, options);
   const routeDecisions = buildRouteDecisions(options?.providerHealth, options?.providerFallbackChain);
   const skillHints = await maybeBuildSkillHints(input.task, options);
+  const promptContext = buildPromptContext(contextPackage, skillHints, options);
+  const promptContextLines = promptContext?.summaryChannel?.length ?? 0;
 
   if (mode === "simple") {
     const run = await runSimpleTask({
@@ -52,8 +55,9 @@ export async function orchestrate(
       ...retryOptions,
       workerSelection: decisionToSelection(routeDecisions.worker),
       validatorSelection: decisionToSelection(routeDecisions.validator),
+      ...(promptContext ? { workerContext: promptContext, validatorContext: promptContext } : {}),
     });
-    const finalRun = appendContextFeedback(run, contextPackage);
+    const finalRun = appendContextFeedback(run, contextPackage, promptContextLines, options);
     const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
     await maybeSyncGraph(input.task, withRoute, options);
     await maybeSyncSkillGraph(input.task, withRoute, options);
@@ -61,16 +65,22 @@ export async function orchestrate(
   }
 
   const plannerSelection = decisionToSelection(routeDecisions.planner);
-  const plannerDraft = await executeRolePrompt("planner", `plan task: ${input.task}`, plannerSelection);
+  const plannerDraft = await executeRolePrompt(
+    "planner",
+    `plan task: ${input.task}`,
+    plannerSelection,
+    promptContext
+  );
 
   let brainstormIdeas: string[] | undefined;
   let plan: TaskNode[];
   if (options?.enableLlmAgents) {
-    brainstormIdeas = await brainstormTaskLlm(input.task, plannerSelection);
+    brainstormIdeas = await brainstormTaskLlm(input.task, plannerSelection, promptContext);
     plan = await planTasksLlm(input.task, {
       selection: plannerSelection,
       skillHints,
       brainstormIdeas,
+      ...(promptContext ? { context: promptContext } : {}),
     });
   } else {
     plan = planTasks(input.task, skillHints);
@@ -82,6 +92,7 @@ export async function orchestrate(
       ...retryOptions,
       workerSelection: decisionToSelection(routeDecisions.worker),
       validatorSelection: decisionToSelection(routeDecisions.validator),
+      ...(promptContext ? { workerContext: promptContext, validatorContext: promptContext } : {}),
     });
     return run.status === "COMPLETED";
   };
@@ -109,6 +120,7 @@ export async function orchestrate(
       previousPlan: plan,
       failureFeedback,
       ...(brainstormIdeas ? { brainstormIdeas } : {}),
+      ...(promptContext ? { context: promptContext } : {}),
     });
 
     if (projectPlan(newPlan) === projectPlan(plan)) {
@@ -129,7 +141,7 @@ export async function orchestrate(
       replanRounds,
       ...(brainstormIdeas ? { brainstormIdeas } : {}),
     };
-    const finalRun = appendContextFeedback(run, contextPackage);
+    const finalRun = appendContextFeedback(run, contextPackage, promptContextLines, options);
     const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
     await maybeSyncGraph(input.task, withRoute, options);
     await maybeSyncSkillGraph(input.task, withRoute, options);
@@ -144,7 +156,7 @@ export async function orchestrate(
     replanRounds,
     ...(brainstormIdeas ? { brainstormIdeas } : {}),
   };
-  const finalRun = appendContextFeedback(run, contextPackage);
+  const finalRun = appendContextFeedback(run, contextPackage, promptContextLines, options);
   const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
   await maybeSyncGraph(input.task, withRoute, options);
   await maybeSyncSkillGraph(input.task, withRoute, options);
@@ -181,18 +193,48 @@ async function maybeBuildNearLosslessContext(
 
 function appendContextFeedback(
   run: TaskRunResult,
-  contextPackage?: LayeredContextPackage
+  contextPackage?: LayeredContextPackage,
+  promptContextLines = 0,
+  options?: OrchestrateOptions
 ): TaskRunResult {
-  if (!contextPackage) {
-    return run;
+  let next = run;
+  if (contextPackage) {
+    next = {
+      ...next,
+      feedback:
+        `${next.feedback}; context(summary=${contextPackage.summaryChannel.length}, ` +
+        `anchors=${contextPackage.anchorChannel.length}, tokens=${contextPackage.tokenEstimate})`,
+    };
   }
+  if (options?.enableGraphContextInPrompt) {
+    next = {
+      ...next,
+      feedback: `${next.feedback}; promptCtx(lines=${promptContextLines})`,
+      promptContextLines,
+    };
+  }
+  return next;
+}
 
-  return {
-    ...run,
-    feedback:
-      `${run.feedback}; context(summary=${contextPackage.summaryChannel.length}, ` +
-      `anchors=${contextPackage.anchorChannel.length}, tokens=${contextPackage.tokenEstimate})`,
-  };
+function buildPromptContext(
+  contextPackage: LayeredContextPackage | undefined,
+  skillHints: string[],
+  options?: OrchestrateOptions
+): PromptContext | undefined {
+  if (!options?.enableGraphContextInPrompt || !contextPackage) {
+    return undefined;
+  }
+  const ctx: PromptContext = {};
+  if (contextPackage.summaryChannel.length > 0) {
+    ctx.summaryChannel = contextPackage.summaryChannel;
+  }
+  if (skillHints.length > 0) {
+    ctx.skillHints = skillHints;
+  }
+  if (!ctx.summaryChannel && !ctx.skillHints) {
+    return undefined;
+  }
+  return ctx;
 }
 
 function appendRouteFeedback(

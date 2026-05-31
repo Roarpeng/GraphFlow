@@ -1,5 +1,5 @@
 import type { ModelSelection } from "../routing/model-router";
-import { executeRolePrompt } from "../routing/provider-executor";
+import { executeRolePrompt, type PromptContext } from "../routing/provider-executor";
 
 export function brainstormTask(task: string): string[] {
   const normalized = task.trim();
@@ -24,7 +24,11 @@ export function brainstormTask(task: string): string[] {
 
 const MAX_BRAINSTORM_IDEAS = 6;
 
-export async function brainstormTaskLlm(task: string, selection: ModelSelection): Promise<string[]> {
+export async function brainstormTaskLlm(
+  task: string,
+  selection: ModelSelection,
+  context?: PromptContext
+): Promise<string[]> {
   const normalized = task.trim();
   if (!normalized) {
     return brainstormTask(task);
@@ -39,7 +43,7 @@ export async function brainstormTaskLlm(task: string, selection: ModelSelection)
 
   let raw = "";
   try {
-    raw = await executeRolePrompt("planner", prompt, selection);
+    raw = await executeRolePrompt("planner", prompt, selection, context);
   } catch {
     return brainstormTask(task);
   }

@@ -66,12 +66,9 @@ export async function indexWorkspaceFiles(
     const content = readFileSync(file, "utf8");
     const fileNodeId = `file:${relPath}`;
     const moduleNodeId = `module:${moduleKey(relPath)}`;
-    nodes.push({ id: fileNodeId, type: "File", content: relPath });
-    nodes.push({ id: moduleNodeId, type: "Module", content: moduleKey(relPath) });
-    edges.push({ from: fileNodeId, to: moduleNodeId, relation: "depends_on" });
-
     const ext = extOf(relPath);
     const isCodeFile = TS_EXTENSIONS.has(ext);
+    const language = ext.replace(/^\./, "") || "text";
 
     let declared: DeclaredSymbol[] = [];
     let imports: string[] = [];
@@ -90,16 +87,42 @@ export async function indexWorkspaceFiles(
       }
     }
 
+    const exportNames = declared
+      .filter((s) => s.exported && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(s.name))
+      .map((s) => s.name);
+    const uniqueExports = Array.from(new Set(exportNames));
+    const exportsSuffix = uniqueExports.length > 0
+      ? ` # exports: ${uniqueExports.slice(0, 8).join(", ")}`
+      : "";
+
+    nodes.push({
+      id: fileNodeId,
+      type: "File",
+      content: `${relPath}${exportsSuffix}`,
+      metadata: {
+        path: relPath,
+        language,
+        exports: uniqueExports,
+        symbolCount: declared.length,
+        sizeBytes: stat.size,
+      },
+    });
+    nodes.push({ id: moduleNodeId, type: "Module", content: moduleKey(relPath) });
+    edges.push({ from: fileNodeId, to: moduleNodeId, relation: "depends_on" });
+
     for (const symbol of declared) {
+      const sig = `${symbol.kind} ${symbol.name}${symbol.exported ? " (exported)" : ""} @${relPath}:${symbol.line}`;
       nodes.push({
         id: symbol.nodeId,
         type: "Symbol",
-        content: `${relPath}::${symbol.name} ${JSON.stringify({
+        content: sig,
+        metadata: {
           name: symbol.name,
           kind: symbol.kind,
           exported: symbol.exported,
           line: symbol.line,
-        })}`,
+          file: relPath,
+        },
       });
       edges.push({ from: fileNodeId, to: symbol.nodeId, relation: "defines" });
     }

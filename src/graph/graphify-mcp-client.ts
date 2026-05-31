@@ -28,6 +28,30 @@ export class GraphifyMcpClient {
     return response.nodes ?? [];
   }
 
+  async getNodesByIds(ids: string[]): Promise<GraphNode[]> {
+    try {
+      const response = await this.call<McpQueryResponse>("graph.get_nodes", { ids });
+      return response.nodes ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  async getNeighbors(
+    nodeIds: string[],
+    relations?: GraphEdge["relation"][],
+    direction: "out" | "in" | "both" = "both"
+  ): Promise<{ node: GraphNode; via: GraphEdge["relation"] }[]> {
+    try {
+      const response = await this.call<{
+        neighbors?: { node: GraphNode; via: GraphEdge["relation"] }[];
+      }>("graph.get_neighbors", { nodeIds, relations, direction });
+      return response.neighbors ?? [];
+    } catch {
+      return [];
+    }
+  }
+
   private async call<T = unknown>(method: string, params: object): Promise<T> {
     const response = await fetch(this.endpoint, {
       method: "POST",

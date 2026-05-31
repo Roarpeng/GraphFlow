@@ -1,6 +1,6 @@
 import type { ValidationResult } from "../core/types";
 import type { ModelSelection } from "../routing/model-router";
-import { executeRolePrompt } from "../routing/provider-executor";
+import { executeRolePrompt, type PromptContext } from "../routing/provider-executor";
 
 export function validateTaskResult(task: string, workerOutput: string): ValidationResult {
   if (!task.trim()) {
@@ -78,7 +78,8 @@ function matchesCriterion(criterion: string, output: string): boolean {
 export async function validateTaskResultLlm(
   task: string,
   workerOutput: string,
-  selection: ModelSelection
+  selection: ModelSelection,
+  context?: PromptContext
 ): Promise<ValidationResult> {
   if (!task.trim() || !workerOutput.trim()) {
     return validateTaskResult(task, workerOutput);
@@ -96,7 +97,7 @@ export async function validateTaskResultLlm(
 
   let raw = "";
   try {
-    raw = await executeRolePrompt("validator", prompt, selection);
+    raw = await executeRolePrompt("validator", prompt, selection, context);
   } catch {
     return validateTaskResult(task, workerOutput);
   }

@@ -55,7 +55,8 @@ describe("M18 AST-based indexer", () => {
       expect(names.some((c) => c.includes("AlphaIface"))).toBe(true);
       expect(names.some((c) => c.includes("AlphaType"))).toBe(true);
       expect(names.some((c) => c.includes("alphaConst"))).toBe(true);
-      expect(names.some((c) => c.includes('"exported":true'))).toBe(true);
+      expect(names.some((c) => c.includes("(exported)"))).toBe(true);
+      expect(names.every((c) => !c.includes("{"))).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -122,7 +123,10 @@ describe("M18 AST-based indexer", () => {
 
       expect(result.indexedFiles).toBe(2);
       const fileNodes = inner.snapshot().nodes.filter((n) => n.type === "File");
-      expect(fileNodes.map((f) => f.content).sort()).toEqual(["src/broken.ts", "src/good.ts"]);
+      const paths = fileNodes
+        .map((f) => (f.metadata?.path as string | undefined) ?? f.content.split(" # ")[0])
+        .sort();
+      expect(paths).toEqual(["src/broken.ts", "src/good.ts"]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

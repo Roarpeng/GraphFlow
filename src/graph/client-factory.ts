@@ -8,6 +8,12 @@ export interface GraphClient {
   upsertNodes(nodes: GraphNode[]): Promise<void>;
   upsertEdges(edges: GraphEdge[]): Promise<void>;
   queryByKeyword(query: string): Promise<GraphNode[]>;
+  getNodesByIds?(ids: string[]): Promise<GraphNode[]>;
+  getNeighbors?(
+    nodeIds: string[],
+    relations?: GraphEdge["relation"][],
+    direction?: "out" | "in" | "both"
+  ): Promise<{ node: GraphNode; via: GraphEdge["relation"] }[]>;
 }
 
 class InMemoryGraphClientAdapter implements GraphClient {
@@ -23,6 +29,18 @@ class InMemoryGraphClientAdapter implements GraphClient {
 
   async queryByKeyword(query: string): Promise<GraphNode[]> {
     return this.client.queryByKeyword(query);
+  }
+
+  async getNodesByIds(ids: string[]): Promise<GraphNode[]> {
+    return this.client.getNodesByIds(ids);
+  }
+
+  async getNeighbors(
+    nodeIds: string[],
+    relations?: GraphEdge["relation"][],
+    direction?: "out" | "in" | "both"
+  ): Promise<{ node: GraphNode; via: GraphEdge["relation"] }[]> {
+    return this.client.getNeighbors(nodeIds, relations, direction);
   }
 }
 

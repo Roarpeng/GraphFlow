@@ -37,6 +37,7 @@ export interface TaskRunResult {
   };
   replanRounds?: number;
   brainstormIdeas?: string[];
+  promptContextLines?: number;
 }
 
 export interface TaskNode {
@@ -57,6 +58,7 @@ export interface GraphNode {
   id: string;
   type: "File" | "Symbol" | "Module" | "TaskRun" | "Decision" | "Skill";
   content: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface GraphEdge {

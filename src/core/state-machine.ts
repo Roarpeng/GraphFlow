@@ -1,6 +1,7 @@
 import { runWorker } from "../agents/worker";
 import { validateTaskResult } from "../agents/validator";
 import type { ModelSelection } from "../routing/model-router";
+import type { PromptContext } from "../routing/provider-executor";
 import type { TaskRunResult, TaskStatus } from "./types";
 
 export interface RunInput {
@@ -9,6 +10,8 @@ export interface RunInput {
   maxRetries?: number;
   workerSelection?: ModelSelection;
   validatorSelection?: ModelSelection;
+  workerContext?: PromptContext;
+  validatorContext?: PromptContext;
 }
 
 export async function runSimpleTask(input: RunInput): Promise<TaskRunResult> {
@@ -25,7 +28,11 @@ export async function runSimpleTask(input: RunInput): Promise<TaskRunResult> {
       input.workerOutput !== undefined
         ? await runWorker({ task: input.task, outputHint: input.workerOutput })
         : input.workerSelection
-          ? await runWorker({ task: input.task, selection: input.workerSelection })
+          ? await runWorker({
+              task: input.task,
+              selection: input.workerSelection,
+              ...(input.workerContext ? { context: input.workerContext } : {}),
+            })
           : await runWorker({ task: input.task });
 
     status = "VALIDATING";

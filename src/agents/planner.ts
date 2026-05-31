@@ -1,6 +1,6 @@
 import type { TaskNode } from "../core/types";
 import type { ModelSelection } from "../routing/model-router";
-import { executeRolePrompt } from "../routing/provider-executor";
+import { executeRolePrompt, type PromptContext } from "../routing/provider-executor";
 
 function toNode(id: string, description: string, dependencies: string[]): TaskNode {
   return {
@@ -49,6 +49,7 @@ export interface PlanTasksLlmOptions {
   brainstormIdeas?: string[];
   previousPlan?: TaskNode[];
   failureFeedback?: string;
+  context?: PromptContext;
 }
 
 const MAX_PLAN_NODES = 8;
@@ -57,7 +58,7 @@ export async function planTasksLlm(task: string, options: PlanTasksLlmOptions): 
   const prompt = buildPlannerPrompt(task, options);
   let raw = "";
   try {
-    raw = await executeRolePrompt("planner", prompt, options.selection);
+    raw = await executeRolePrompt("planner", prompt, options.selection, options.context);
   } catch {
     return planTasks(task, options.skillHints);
   }
