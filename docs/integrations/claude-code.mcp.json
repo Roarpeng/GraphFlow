@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "graphflow": {
+      "command": "npx",
+      "args": ["-y", "graphflow-mcp"]
+    }
+  }
+}

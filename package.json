@@ -4,6 +4,10 @@
   "description": "**A Context-Aware Multi-Agent Orchestration Engine**",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "graphflow": "dist/surfaces/cli/index.js",
+    "graphflow-mcp": "dist/surfaces/mcp/server.js"
+  },
   "directories": {
     "doc": "docs"
   },
@@ -12,6 +16,7 @@
     "build": "tsc -p tsconfig.json",
     "test:watch": "vitest",
     "start": "tsx src/surfaces/cli/index.ts",
+    "start:mcp": "tsx src/surfaces/mcp/server.ts",
     "lint": "eslint .",
     "build:extension": "npm --prefix vscode-extension run build",
     "package:extension": "npm --prefix vscode-extension run package",
@@ -21,9 +26,16 @@
     "type": "git",
     "url": "git+https://github.com/Roarpeng/GraphFlow.git"
   },
-  "keywords": [],
+  "keywords": [
+    "multi-agent",
+    "orchestration",
+    "mcp",
+    "context-engine",
+    "cursor",
+    "claude-code"
+  ],
   "author": "",
-  "license": "ISC",
+  "license": "Apache-2.0",
   "bugs": {
     "url": "https://github.com/Roarpeng/GraphFlow/issues"
   },

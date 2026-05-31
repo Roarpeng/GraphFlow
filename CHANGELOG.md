@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- StdIO MCP server entrypoint (`graphflow-mcp`) for Cursor, Claude Code, and other MCP-capable agents.
+- JSON CLI mode for all primary commands via `--json`.
+- Agent guidance files: `AGENTS.md`, `CLAUDE.md`, and `.cursor/rules/graphflow.mdc`.
+- Integration config samples under `docs/integrations/`.
+- CLI help/version entrypoints (`--help`, `--version`).
+
+### Changed
+
+- Root package metadata now matches Apache-2.0 and publishes `graphflow` / `graphflow-mcp` binaries.
+- Default router and example config models now use `gpt-4.1` and `gpt-4.1-mini`.
+- Config loader now resolves `${ENV_VAR}` placeholders from the process environment.
+- Failed `runTask` executions now append negative feedback events for the learning flywheel.
+- File indexer skips symbolic links while crawling a workspace.
+
+### Verified
+
+- `npm run ci`
+- CLI/agent regression tests including MCP and config env expansion
+
 ## [0.3.0] - 2026-05-28
 
 GraphFlow 在 `0.3.0` 完成了从“可跑的多智能体原型”到“可安装、可观测、可分发产品版”的收敛：

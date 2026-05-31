@@ -3,8 +3,26 @@ import type { GraphFlowConfig } from "./schema";
 
 export function loadConfig(path = "graphflow.config.json"): GraphFlowConfig {
   const raw = readFileSync(path, "utf8");
-  const parsed = JSON.parse(raw) as GraphFlowConfig;
+  const parsed = resolveEnvTemplates(JSON.parse(raw)) as GraphFlowConfig;
   return validateConfig(parsed);
+}
+
+function resolveEnvTemplates(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.replace(/\$\{([A-Z0-9_]+)\}/gi, (_match, name: string) => process.env[name] ?? "");
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => resolveEnvTemplates(item));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [key, resolveEnvTemplates(nested)])
+    );
+  }
+
+  return value;
 }
 
 export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {

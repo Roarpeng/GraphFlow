@@ -2,37 +2,35 @@
 
 import {
   diagnoseRouting,
+  diagnoseRoutingResult,
   getSkillInsights,
   indexGraph,
   inspectGraph,
   planAndBrainstorm,
+  planAndBrainstormResult,
   previewContext,
   runLearningNightly,
+  runLearningNightlyResult,
   runTask,
+  runTaskResult,
 } from "./runtime";
+import { buildCliUsage, formatCliResult, getCliVersion, parseCliOptions, type CliCommandResult } from "./output";
 
-async function main(): Promise<void> {
-  const [, , command, ...args] = process.argv;
-
-  if (!command) {
-    console.log(
-      "Usage: graphflow run \"<task>\" | graphflow plan \"<task>\" | graphflow route diagnose | graphflow learn nightly | graphflow context preview \"<query>\" | graphflow graph index [path] | graphflow graph inspect | graphflow skill insights"
-    );
-    process.exitCode = 1;
-    return;
-  }
-
+async function executeCommand(command: string, args: string[], configPath?: string): Promise<CliCommandResult | undefined> {
   if (command === "run") {
     const task = args.join(" ").trim();
     if (!task) {
       console.log("Task is required.");
       process.exitCode = 1;
-      return;
+      return undefined;
     }
 
-    const output = await runTask(task);
-    console.log(output);
-    return;
+    const data = await runTaskResult(task, configPath);
+    return {
+      command,
+      data,
+      legacyText: await runTask(task, configPath),
+    };
   }
 
   if (command === "plan") {
@@ -40,12 +38,15 @@ async function main(): Promise<void> {
     if (!task) {
       console.log("Task is required.");
       process.exitCode = 1;
-      return;
+      return undefined;
     }
 
-    const output = planAndBrainstorm(task);
-    console.log(output);
-    return;
+    const data = planAndBrainstormResult(task);
+    return {
+      command,
+      data,
+      legacyText: planAndBrainstorm(task),
+    };
   }
 
   if (command === "context" && args[0] === "preview") {
@@ -53,75 +54,114 @@ async function main(): Promise<void> {
     if (!query) {
       console.log("Context query is required.");
       process.exitCode = 1;
-      return;
+      return undefined;
     }
 
-    const preview = await previewContext(query);
-    console.log(
-      [
-        `summary=${preview.summaryCount}`,
-        `anchors=${preview.anchorCount}`,
-        `tokens=${preview.tokenEstimate}`,
-        `truncated=${preview.truncated}`,
-        `L1=${preview.anchorsByLayer.l1}`,
-        `L2=${preview.anchorsByLayer.l2}`,
-        `L3=${preview.anchorsByLayer.l3}`,
-      ].join("; ")
-    );
-    return;
+    const data = await previewContext(query, configPath);
+    return {
+      command: "context-preview",
+      data,
+      legacyText: [
+        `summary=${data.summaryCount}`,
+        `anchors=${data.anchorCount}`,
+        `tokens=${data.tokenEstimate}`,
+        `truncated=${data.truncated}`,
+        `L1=${data.anchorsByLayer.l1}`,
+        `L2=${data.anchorsByLayer.l2}`,
+        `L3=${data.anchorsByLayer.l3}`,
+      ].join("; "),
+    };
   }
 
   if (command === "graph" && args[0] === "index") {
     const pathArg = args[1]?.trim();
-    const result = await indexGraph(pathArg || undefined);
-    console.log(`indexedFiles=${result.indexedFiles}; indexedSymbols=${result.indexedSymbols}`);
-    return;
+    const data = await indexGraph(pathArg || undefined, configPath);
+    return {
+      command: "graph-index",
+      data,
+      legacyText: `indexedFiles=${data.indexedFiles}; indexedSymbols=${data.indexedSymbols}`,
+    };
   }
 
   if (command === "graph" && args[0] === "inspect") {
-    const result = inspectGraph();
-    console.log(
-      [
-        `nodes=${result.nodeCount}`,
-        `edges=${result.edgeCount}`,
-        `types=${Object.entries(result.nodeTypeCount)
+    const data = inspectGraph(configPath);
+    return {
+      command: "graph-inspect",
+      data,
+      legacyText: [
+        `nodes=${data.nodeCount}`,
+        `edges=${data.edgeCount}`,
+        `types=${Object.entries(data.nodeTypeCount)
           .map(([type, count]) => `${type}:${count}`)
           .join(",")}`,
-        `relations=${result.topRelations.map((item) => `${item.relation}:${item.count}`).join(",")}`,
-      ].join("; ")
-    );
-    return;
+        `relations=${data.topRelations.map((item) => `${item.relation}:${item.count}`).join(",")}`,
+      ].join("; "),
+    };
   }
 
   if (command === "skill" && args[0] === "insights") {
-    const result = getSkillInsights();
-    console.log(
-      [
-        `source=${result.source}`,
-        `transport=${result.transport}`,
-        `count=${result.skills.length}`,
-        `top=${result.skills
-          .map((skill) => `${skill.name}:${skill.score}/${skill.uses}`)
-          .join(",")}`,
-      ].join("; ")
-    );
-    return;
+    const data = getSkillInsights(configPath);
+    return {
+      command: "skill-insights",
+      data,
+      legacyText: [
+        `source=${data.source}`,
+        `transport=${data.transport}`,
+        `count=${data.skills.length}`,
+        `top=${data.skills.map((skill) => `${skill.name}:${skill.score}/${skill.uses}`).join(",")}`,
+      ].join("; "),
+    };
   }
 
   if (command === "route" && args[0] === "diagnose") {
-    console.log(diagnoseRouting());
-    return;
+    const data = diagnoseRoutingResult(configPath);
+    return {
+      command: "route-diagnose",
+      data,
+      legacyText: diagnoseRouting(configPath),
+    };
   }
 
   if (command === "learn" && args[0] === "nightly") {
-    console.log(runLearningNightly());
+    const data = runLearningNightlyResult(configPath);
+    return {
+      command: "learn-nightly",
+      data,
+      legacyText: runLearningNightly(configPath),
+    };
+  }
+
+  console.log(buildCliUsage());
+  process.exitCode = 1;
+  return undefined;
+}
+
+async function main(): Promise<void> {
+  const options = parseCliOptions(process.argv.slice(2));
+  const command = options.command;
+
+  if (!command) {
+    console.log(buildCliUsage());
+    process.exitCode = 1;
     return;
   }
 
-  console.log(
-    "Usage: graphflow run \"<task>\" | graphflow plan \"<task>\" | graphflow route diagnose | graphflow learn nightly | graphflow context preview \"<query>\" | graphflow graph index [path] | graphflow graph inspect | graphflow skill insights"
-  );
-  process.exitCode = 1;
+  if (command === "help" || command === "--help" || command === "-h") {
+    console.log(buildCliUsage());
+    return;
+  }
+
+  if (command === "version" || command === "--version" || command === "-v") {
+    console.log(getCliVersion());
+    return;
+  }
+
+  const result = await executeCommand(command, options.args, options.configPath);
+  if (!result) {
+    return;
+  }
+
+  console.log(formatCliResult(result, options.json));
 }
 
 main().catch((error) => {

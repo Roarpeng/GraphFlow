@@ -15,7 +15,7 @@
     }
   },
   "tiers": {
-    "smart": { "provider": "openai", "model": "gpt-5.3-codex" },
+    "smart": { "provider": "openai", "model": "gpt-4.1" },
     "economy": { "provider": "openai", "model": "gpt-4.1-mini" }
   },
   "budgetPolicy": {

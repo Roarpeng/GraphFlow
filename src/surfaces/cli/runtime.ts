@@ -15,12 +15,13 @@ import {
 import { appendFeedbackEvent, runNightlyLearning } from "../../learning/nightly-trainer";
 import { resolveModelForRole, resolveModelWithFallback } from "../../routing/model-router";
 import { buildFallbackChain, buildProviderHealthMap } from "../../routing/provider-health";
+import type { TaskStatus } from "../../core/types";
 
 export function getDefaultConfig(): GraphFlowConfig {
   return validateConfig({
     providers: {},
     tiers: {
-      smart: { provider: "openai", model: "gpt-5.3-codex" },
+      smart: { provider: "openai", model: "gpt-4.1" },
       economy: { provider: "openai", model: "gpt-4.1-mini" },
     },
     budgetPolicy: { runTokenCap: 2000 },
@@ -155,6 +156,42 @@ export interface SkillInsightsResult {
   skills: SkillInsightItem[];
 }
 
+export interface RunTaskSummary {
+  status: TaskStatus;
+  attempts: number;
+  feedback: string;
+}
+
+export interface RoutingDiagnosisResult {
+  dynamicRouting: boolean;
+  health: Record<"openai" | "anthropic" | "bailian" | "doubao", boolean>;
+  priority: string[];
+  planner: {
+    provider: string;
+    model: string;
+    fallbackApplied: boolean;
+  };
+  worker: {
+    provider: string;
+    model: string;
+    fallbackApplied: boolean;
+  };
+  validator: {
+    provider: string;
+    model: string;
+    fallbackApplied: boolean;
+  };
+}
+
+export interface LearningNightlyResult {
+  events: number;
+  passRate: number;
+  avgTokens: number;
+  canary: "allow" | "block";
+  reason: string;
+  dataset: string;
+}
+
 export async function indexGraph(rootDir?: string, configPath?: string): Promise<GraphIndexResult> {
   const config = resolveConfig(configPath);
   const graphClient = createGraphClient(config);
@@ -261,55 +298,76 @@ export function getSkillInsights(configPath?: string, limit = 12): SkillInsights
   };
 }
 
-export async function runTask(task: string, configPath?: string): Promise<string> {
+export async function runTaskResult(task: string, configPath?: string): Promise<RunTaskSummary> {
   const config = resolveConfig(configPath);
-  const graphClient = createGraphClient(config);
-  if (config.graphPolicy.autoIndexOnRun) {
-    const indexOptions = config.graphPolicy.includeExtensions
-      ? { includeExtensions: config.graphPolicy.includeExtensions }
-      : undefined;
-    await indexWorkspaceFiles(graphClient, config.graphPolicy.workspaceRoot ?? process.cwd(), {
-      ...indexOptions,
+  const eventsPath = config.learningPolicy.eventsPath ?? "tmp/learning-events.jsonl";
+
+  try {
+    const graphClient = createGraphClient(config);
+    if (config.graphPolicy.autoIndexOnRun) {
+      const indexOptions = config.graphPolicy.includeExtensions
+        ? { includeExtensions: config.graphPolicy.includeExtensions }
+        : undefined;
+      await indexWorkspaceFiles(graphClient, config.graphPolicy.workspaceRoot ?? process.cwd(), {
+        ...indexOptions,
+      });
+    }
+
+    const orchestrateOptions: OrchestrateOptions = {
+      graphClient,
+      enableAutoGraphSync: config.graphPolicy.enableAutoBuild,
+      maxContextTokens: config.graphPolicy.maxContextTokens,
+      ...(config.skillPolicy?.enableSkillFlywheel
+        ? {
+            enableSkillFlywheel: true,
+            ...(config.skillPolicy.maxSkillHints !== undefined
+              ? { skillHintsLimit: config.skillPolicy.maxSkillHints }
+              : {}),
+          }
+        : { enableSkillFlywheel: false }),
+      ...(config.routingPolicy?.enableDynamicRouting
+        ? {
+            providerHealth: buildProviderHealthMap(config),
+            providerFallbackChain: buildFallbackChain(config),
+          }
+        : {}),
+      ...(config.graphPolicy.enableNearLosslessMode !== undefined
+        ? { enableNearLosslessMode: config.graphPolicy.enableNearLosslessMode }
+        : {}),
+      ...(config.graphPolicy.layerQuota ? { layerQuota: config.graphPolicy.layerQuota } : {}),
+    };
+
+    const result = await orchestrate({ task }, orchestrateOptions);
+
+    appendFeedbackEvent(eventsPath, {
+      query: task,
+      passed: result.status === "COMPLETED",
+      tokenCost: extractTokenCost(result.feedback),
+      retries: Math.max(0, result.attempts - 1),
     });
+
+    return {
+      status: result.status,
+      attempts: result.attempts,
+      feedback: result.feedback,
+    };
+  } catch (error) {
+    appendFeedbackEvent(eventsPath, {
+      query: task,
+      passed: false,
+      tokenCost: 0,
+      retries: 0,
+    });
+    throw error;
   }
+}
 
-  const orchestrateOptions: OrchestrateOptions = {
-    graphClient,
-    enableAutoGraphSync: config.graphPolicy.enableAutoBuild,
-    maxContextTokens: config.graphPolicy.maxContextTokens,
-    ...(config.skillPolicy?.enableSkillFlywheel
-      ? {
-          enableSkillFlywheel: true,
-          ...(config.skillPolicy.maxSkillHints !== undefined
-            ? { skillHintsLimit: config.skillPolicy.maxSkillHints }
-            : {}),
-        }
-      : { enableSkillFlywheel: false }),
-    ...(config.routingPolicy?.enableDynamicRouting
-      ? {
-          providerHealth: buildProviderHealthMap(config),
-          providerFallbackChain: buildFallbackChain(config),
-        }
-      : {}),
-    ...(config.graphPolicy.enableNearLosslessMode !== undefined
-      ? { enableNearLosslessMode: config.graphPolicy.enableNearLosslessMode }
-      : {}),
-    ...(config.graphPolicy.layerQuota ? { layerQuota: config.graphPolicy.layerQuota } : {}),
-  };
-
-  const result = await orchestrate({ task }, orchestrateOptions);
-
-  appendFeedbackEvent(config.learningPolicy.eventsPath ?? "tmp/learning-events.jsonl", {
-    query: task,
-    passed: result.status === "COMPLETED",
-    tokenCost: extractTokenCost(result.feedback),
-    retries: Math.max(0, result.attempts - 1),
-  });
-
+export async function runTask(task: string, configPath?: string): Promise<string> {
+  const result = await runTaskResult(task, configPath);
   return `status=${result.status}; attempts=${result.attempts}; feedback=${result.feedback}`;
 }
 
-export function diagnoseRouting(configPath?: string): string {
+export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResult {
   const config = resolveConfig(configPath);
   const health = buildProviderHealthMap(config);
   const chain = buildFallbackChain(config);
@@ -326,26 +384,63 @@ export function diagnoseRouting(configPath?: string): string {
   const worker = resolve("worker");
   const validator = resolve("validator");
 
+  return {
+    dynamicRouting: config.routingPolicy?.enableDynamicRouting ?? false,
+    health,
+    priority: chain,
+    planner: {
+      provider: planner.provider,
+      model: planner.model,
+      fallbackApplied: planner.fallbackApplied,
+    },
+    worker: {
+      provider: worker.provider,
+      model: worker.model,
+      fallbackApplied: worker.fallbackApplied,
+    },
+    validator: {
+      provider: validator.provider,
+      model: validator.model,
+      fallbackApplied: validator.fallbackApplied,
+    },
+  };
+}
+
+export function diagnoseRouting(configPath?: string): string {
+  const result = diagnoseRoutingResult(configPath);
   return [
-    `dynamicRouting=${config.routingPolicy?.enableDynamicRouting ? "on" : "off"}`,
-    `health=openai:${health.openai},anthropic:${health.anthropic},bailian:${health.bailian},doubao:${health.doubao}`,
-    `priority=${chain.join(",")}`,
-    `planner=${planner.provider}/${planner.model}${planner.fallbackApplied ? ":fallback" : ""}`,
-    `worker=${worker.provider}/${worker.model}${worker.fallbackApplied ? ":fallback" : ""}`,
-    `validator=${validator.provider}/${validator.model}${validator.fallbackApplied ? ":fallback" : ""}`,
+    `dynamicRouting=${result.dynamicRouting ? "on" : "off"}`,
+    `health=openai:${result.health.openai},anthropic:${result.health.anthropic},bailian:${result.health.bailian},doubao:${result.health.doubao}`,
+    `priority=${result.priority.join(",")}`,
+    `planner=${result.planner.provider}/${result.planner.model}${result.planner.fallbackApplied ? ":fallback" : ""}`,
+    `worker=${result.worker.provider}/${result.worker.model}${result.worker.fallbackApplied ? ":fallback" : ""}`,
+    `validator=${result.validator.provider}/${result.validator.model}${result.validator.fallbackApplied ? ":fallback" : ""}`,
   ].join("; ");
 }
 
-export function runLearningNightly(configPath?: string): string {
+export function runLearningNightlyResult(configPath?: string): LearningNightlyResult {
   const config = resolveConfig(configPath);
   const summary = runNightlyLearning(config);
+
+  return {
+    events: summary.totalEvents,
+    passRate: summary.passRate,
+    avgTokens: summary.averageTokenCost,
+    canary: summary.canaryAllowed ? "allow" : "block",
+    reason: summary.canaryReason,
+    dataset: summary.exportedPath,
+  };
+}
+
+export function runLearningNightly(configPath?: string): string {
+  const result = runLearningNightlyResult(configPath);
   return [
-    `events=${summary.totalEvents}`,
-    `passRate=${summary.passRate.toFixed(3)}`,
-    `avgTokens=${summary.averageTokenCost.toFixed(1)}`,
-    `canary=${summary.canaryAllowed ? "allow" : "block"}`,
-    `reason=${summary.canaryReason}`,
-    `dataset=${summary.exportedPath}`,
+    `events=${result.events}`,
+    `passRate=${result.passRate.toFixed(3)}`,
+    `avgTokens=${result.avgTokens.toFixed(1)}`,
+    `canary=${result.canary}`,
+    `reason=${result.reason}`,
+    `dataset=${result.dataset}`,
   ].join("; ");
 }
 
@@ -355,7 +450,7 @@ export interface PlanPreviewResult {
   nodes: Array<{ id: string; description: string; dependencies: string[] }>;
 }
 
-export function planAndBrainstorm(task: string): string {
+export function planAndBrainstormResult(task: string): PlanPreviewResult {
   const mode = triageTask(task);
   const ideas = brainstormTask(task);
   const nodes = planTasks(task).map((node) => ({
@@ -364,10 +459,19 @@ export function planAndBrainstorm(task: string): string {
     dependencies: node.dependencies,
   }));
 
+  return {
+    mode,
+    ideas,
+    nodes,
+  };
+}
+
+export function planAndBrainstorm(task: string): string {
+  const result = planAndBrainstormResult(task);
   return [
-    `mode=${mode}`,
-    `ideas=${ideas.join(" | ")}`,
-    `plan=${nodes
+    `mode=${result.mode}`,
+    `ideas=${result.ideas.join(" | ")}`,
+    `plan=${result.nodes
       .map((node) => `${node.id}[${node.dependencies.join(",") || "-"}]:${node.description}`)
       .join(" | ")}`,
   ].join("; ");

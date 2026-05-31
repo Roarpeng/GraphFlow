@@ -79,6 +79,10 @@ function walkFiles(rootDir: string, includeExtensions: string[]): string[] {
 
   for (const entry of entries) {
     const full = join(rootDir, entry.name);
+    if (entry.isSymbolicLink()) {
+      continue;
+    }
+
     if (entry.isDirectory()) {
       if (IGNORED_DIRS.has(entry.name)) {
         continue;

@@ -18,21 +18,30 @@ const roleTierMap: Record<AgentRole, ModelTier> = {
   worker: "economy",
 };
 
+const DEFAULT_MODELS: Record<ProviderName, Record<ModelTier, string>> = {
+  openai: {
+    smart: "gpt-4.1",
+    economy: "gpt-4.1-mini",
+  },
+  anthropic: {
+    smart: "claude-3-5-sonnet-latest",
+    economy: "claude-3-5-haiku-latest",
+  },
+  bailian: {
+    smart: "qwen-max",
+    economy: "qwen-plus",
+  },
+  doubao: {
+    smart: "doubao-pro-32k",
+    economy: "doubao-lite-32k",
+  },
+};
+
 export function resolveModelForRole(role: AgentRole): ModelSelection {
   const tier = roleTierMap[role];
-
-  if (tier === "smart") {
-    return {
-      provider: "openai",
-      model: "gpt-5.3-codex",
-      tier,
-      fallbackApplied: false,
-    };
-  }
-
   return {
     provider: "openai",
-    model: "gpt-4.1-mini",
+    model: DEFAULT_MODELS.openai[tier],
     tier,
     fallbackApplied: false,
   };
@@ -59,10 +68,9 @@ export function resolveModelWithFallback(
     };
   }
 
-  const fallbackModel = base.tier === "smart" ? "claude-sonnet" : "claude-haiku";
   return {
     provider: available,
-    model: fallbackModel,
+    model: DEFAULT_MODELS[available][base.tier],
     tier: base.tier,
     fallbackApplied: true,
   };

@@ -57,6 +57,41 @@ npm test
 npm run ci
 ```
 
+## Agent 工具接入
+
+GraphFlow 已支持两种对外接入方式：
+
+1. CLI 机器输出：所有核心命令支持 `--json`
+2. MCP stdio server：可被 Cursor、Claude Code 等支持 MCP 的 agent 直接调用
+
+本仓库内直接启动 MCP server：
+
+```bash
+npm run start:mcp
+```
+
+CLI 结构化输出示例：
+
+```bash
+npm run start -- plan "refactor planner and add tests" --json
+```
+
+CLI 标准帮助与版本：
+
+```bash
+npm run start -- --help
+npm run start -- --version
+```
+
+外部 agent 约定文件：
+
+1. `AGENTS.md`
+2. `CLAUDE.md`
+3. `.cursor/rules/graphflow.mdc`
+4. `docs/integrations/cursor.mcp.json`
+5. `docs/integrations/claude-code.mcp.json`
+6. `docs/integrations/claude-desktop-config.json`
+
 ## 本地功能验证（CLI）
 
 ### 1) 图谱索引
@@ -273,6 +308,7 @@ npm run build
 
 3. API Key 未配置导致模型调用失败
 - 在 `graphflow.config.json` 中配置对应 provider 的 `apiKey`
+- `graphflow.config.json` 与示例模板支持 `${ENV_VAR}` 环境变量占位写法
 
 ## 项目结构（简版）
 

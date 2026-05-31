@@ -1,0 +1,25 @@
+---
+description: Use GraphFlow for repo planning, context compression, and orchestration.
+globs:
+  - "**/*"
+alwaysApply: false
+---
+
+When a task is multi-step, uncertain, or needs graph-aware context, call GraphFlow first.
+
+Preferred order:
+
+1. `graphflow_plan` for decomposing work.
+2. `graphflow_preview_context` for targeted code context.
+3. `graphflow_run` only when GraphFlow should execute the orchestration loop itself.
+4. `graphflow_diagnose` if provider routing seems unhealthy.
+
+If MCP is unavailable, use the CLI fallback and always request JSON output:
+
+```bash
+graphflow plan "<task>" --json
+graphflow context preview "<query>" --json
+graphflow route diagnose --json
+```
+
+Treat GraphFlow outputs as structured machine-readable data, not prose.
