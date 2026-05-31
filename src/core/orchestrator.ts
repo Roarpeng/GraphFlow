@@ -1,4 +1,5 @@
-import { planTasks } from "../agents/planner";
+import { planTasks, planTasksLlm } from "../agents/planner";
+import { brainstormTaskLlm } from "../agents/brainstormer";
 import type { GraphClient } from "../graph/client-factory";
 import {
   buildLayeredContextPackage,
@@ -16,7 +17,7 @@ import { executeRolePrompt } from "../routing/provider-executor";
 import { executeDag } from "./dag-engine";
 import { runSimpleTask } from "./state-machine";
 import { triageTask } from "./triage";
-import type { OrchestrationInput, RouteDecision, TaskRunResult } from "./types";
+import type { OrchestrationInput, RouteDecision, TaskRunResult, TaskNode } from "./types";
 
 export interface OrchestrateOptions {
   graphClient?: GraphClient;
@@ -30,6 +31,9 @@ export interface OrchestrateOptions {
   providerFallbackChain?: ProviderName[];
   enableSkillFlywheel?: boolean;
   skillHintsLimit?: number;
+  enableLlmAgents?: boolean;
+  enableDriftReplan?: boolean;
+  maxReplanRounds?: number;
 }
 
 export async function orchestrate(
@@ -58,9 +62,21 @@ export async function orchestrate(
 
   const plannerSelection = decisionToSelection(routeDecisions.planner);
   const plannerDraft = await executeRolePrompt("planner", `plan task: ${input.task}`, plannerSelection);
-  const plan = planTasks(input.task, skillHints);
 
-  const result = await executeDag(plan, async (node) => {
+  let brainstormIdeas: string[] | undefined;
+  let plan: TaskNode[];
+  if (options?.enableLlmAgents) {
+    brainstormIdeas = await brainstormTaskLlm(input.task, plannerSelection);
+    plan = await planTasksLlm(input.task, {
+      selection: plannerSelection,
+      skillHints,
+      brainstormIdeas,
+    });
+  } else {
+    plan = planTasks(input.task, skillHints);
+  }
+
+  const runner = async (node: TaskNode): Promise<boolean> => {
     const run = await runSimpleTask({
       task: node.description,
       ...retryOptions,
@@ -68,7 +84,41 @@ export async function orchestrate(
       validatorSelection: decisionToSelection(routeDecisions.validator),
     });
     return run.status === "COMPLETED";
-  });
+  };
+
+  let result = await executeDag(plan, runner);
+  let replanRounds = 0;
+  const maxReplanRounds = options?.maxReplanRounds ?? 1;
+  const canReplan = options?.enableDriftReplan === true && options.enableLlmAgents === true;
+
+  while (
+    canReplan &&
+    result.failed.length > 0 &&
+    replanRounds < maxReplanRounds
+  ) {
+    const failureFeedback = result.failed
+      .map((id) => {
+        const failedNode = plan.find((node) => node.id === id);
+        return `${id}: ${failedNode?.description ?? ""}`;
+      })
+      .join("; ");
+
+    const newPlan = await planTasksLlm(input.task, {
+      selection: plannerSelection,
+      skillHints,
+      previousPlan: plan,
+      failureFeedback,
+      ...(brainstormIdeas ? { brainstormIdeas } : {}),
+    });
+
+    if (projectPlan(newPlan) === projectPlan(plan)) {
+      break;
+    }
+
+    replanRounds += 1;
+    plan = newPlan;
+    result = await executeDag(plan, runner);
+  }
 
   if (result.failed.length > 0) {
     const run: TaskRunResult = {
@@ -76,6 +126,8 @@ export async function orchestrate(
       attempts: plan.length,
       feedback: `Failed tasks: ${result.failed.join(", ")}; plannerDraft=${shorten(plannerDraft)}`,
       executionRounds: result.rounds,
+      replanRounds,
+      ...(brainstormIdeas ? { brainstormIdeas } : {}),
     };
     const finalRun = appendContextFeedback(run, contextPackage);
     const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
@@ -89,12 +141,24 @@ export async function orchestrate(
     attempts: plan.length,
     feedback: `Completed tasks: ${result.completed.join(", ")}; plannerDraft=${shorten(plannerDraft)}`,
     executionRounds: result.rounds,
+    replanRounds,
+    ...(brainstormIdeas ? { brainstormIdeas } : {}),
   };
   const finalRun = appendContextFeedback(run, contextPackage);
   const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
   await maybeSyncGraph(input.task, withRoute, options);
   await maybeSyncSkillGraph(input.task, withRoute, options);
   return withRoute;
+}
+
+function projectPlan(plan: TaskNode[]): string {
+  return JSON.stringify(
+    plan.map((node) => ({
+      id: node.id,
+      description: node.description,
+      dependencies: node.dependencies,
+    }))
+  );
 }
 
 async function maybeBuildNearLosslessContext(

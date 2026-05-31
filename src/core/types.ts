@@ -35,6 +35,8 @@ export interface TaskRunResult {
     missing: number;
     riskTags: string[];
   };
+  replanRounds?: number;
+  brainstormIdeas?: string[];
 }
 
 export interface TaskNode {
