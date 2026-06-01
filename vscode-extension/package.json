@@ -4,7 +4,7 @@
   "displayName": "GraphFlow",
   "description": "GraphFlow orchestration panel and command runner",
   "icon": "media/graphflow.png",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"
@@ -91,7 +91,7 @@
     "icon:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/generate-icon.ps1",
     "sync-runtime": "npm --prefix .. run build && node ./scripts/sync-runtime.mjs",
     "build": "npm run sync-runtime && tsc -p ./tsconfig.json",
-    "package": "npm run build && npx @vscode/vsce package --no-dependencies --out ../artifacts/graphflow-vscode-0.4.0.vsix"
+    "package": "npm run build && npx @vscode/vsce package --no-dependencies --out ../artifacts/graphflow-vscode-0.4.1.vsix"
   },
   "devDependencies": {
     "@types/vscode": "^1.99.0",
