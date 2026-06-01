@@ -1,7 +1,7 @@
 import type { AgentRole } from "../core/types";
 
 export type ModelTier = "smart" | "economy";
-export type ProviderName = "openai" | "anthropic" | "bailian" | "doubao";
+export type ProviderName = "openai" | "anthropic" | "bailian" | "doubao" | "openbmb";
 
 export type ProviderHealthMap = Record<ProviderName, boolean>;
 
@@ -35,6 +35,10 @@ const DEFAULT_MODELS: Record<ProviderName, Record<ModelTier, string>> = {
     smart: "doubao-pro-32k",
     economy: "doubao-lite-32k",
   },
+  openbmb: {
+    smart: "minicpm-1b",
+    economy: "minicpm-1b",
+  },
 };
 
 export function resolveModelForRole(role: AgentRole): ModelSelection {
@@ -58,7 +62,7 @@ export function resolveModelWithFallback(
     return base;
   }
 
-  const chain = fallbackChain ?? ["anthropic", "bailian", "doubao"];
+  const chain = fallbackChain ?? ["anthropic", "bailian", "doubao", "openbmb"];
   const available = chain.find((provider) => provider !== base.provider && providerHealth[provider]);
 
   if (!available) {

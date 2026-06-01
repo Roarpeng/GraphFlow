@@ -127,6 +127,19 @@ export class GraphifySqliteClient implements GraphClient {
     tx(edges);
   }
 
+  readSnapshot(): { nodes: GraphNode[]; edges: GraphEdge[] } {
+    const nodeRows = this.db
+      .prepare(`SELECT id, type, content, metadata FROM nodes`)
+      .all() as NodeRow[];
+    const edgeRows = this.db
+      .prepare(`SELECT from_id AS "from", to_id AS "to", relation FROM edges`)
+      .all() as Array<{ from: string; to: string; relation: GraphEdge["relation"] }>;
+    return {
+      nodes: nodeRows.map(rowToNode),
+      edges: edgeRows.map((row) => ({ from: row.from, to: row.to, relation: row.relation })),
+    };
+  }
+
   async queryByKeyword(query: string): Promise<GraphNode[]> {
     const tokens = query
       .toLowerCase()

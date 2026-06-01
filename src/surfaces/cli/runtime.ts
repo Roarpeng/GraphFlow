@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { brainstormTask } from "../../agents/brainstormer";
 import { planTasks } from "../../agents/planner";
 import { loadConfig, validateConfig } from "../../config/loader";
@@ -6,7 +7,8 @@ import { triageTask } from "../../core/triage";
 import type { GraphEdge, GraphNode } from "../../core/types";
 import type { GraphFlowConfig } from "../../config/schema";
 import { orchestrate, type OrchestrateOptions } from "../../core/orchestrator";
-import { createGraphClient } from "../../graph/client-factory";
+import { createGraphClient, type GraphClient } from "../../graph/client-factory";
+import { GraphifySqliteClient } from "../../graph/sqlite-client";
 import { indexWorkspaceFiles } from "../../graph/file-indexer";
 import {
   buildLayeredContextPackage,
@@ -48,7 +50,7 @@ export function getDefaultConfig(): GraphFlowConfig {
     routingPolicy: {
       enableDynamicRouting: true,
       requireApiKeyForHealthy: false,
-      providerPriority: ["openai", "anthropic", "bailian", "doubao"],
+      providerPriority: ["openai", "anthropic", "bailian", "doubao", "openbmb"],
     },
     skillPolicy: {
       enableSkillFlywheel: true,
@@ -66,6 +68,7 @@ export function resolveConfig(path = "graphflow.config.json"): GraphFlowConfig {
 }
 
 export interface ContextPreviewResult {
+  query: string;
   summaryCount: number;
   anchorCount: number;
   tokenEstimate: number;
@@ -76,6 +79,103 @@ export interface ContextPreviewResult {
     l3: number;
   };
   refillPreview: string[];
+  summary: string[];
+  anchors: Array<{ id: string; type: GraphNode["type"]; layer: "L1" | "L2" | "L3" }>;
+  tokenBudget: {
+    maxContextTokens: number;
+    estimatedRawTokens: number;
+    compressedTokens: number;
+    estimatedSavingsPercent: number;
+    budgetUsedPercent: number;
+  };
+}
+
+export interface GraphFlowSettings {
+  configPath: string;
+  provider: string;
+  smartModel: string;
+  economyModel: string;
+  apiKeyEnvVar?: string;
+  baseUrl?: string;
+  maxContextTokens: number;
+  layerQuota: { l1: number; l2: number; l3: number };
+  enableNearLosslessMode: boolean;
+  autoIndexOnPreview: boolean;
+  autoIndexOnRun: boolean;
+  transport: GraphFlowConfig["graphPolicy"]["transport"];
+  graphStorePath: string;
+}
+
+export type GraphFlowSettingsInput = Omit<GraphFlowSettings, "configPath">;
+
+export function getGraphFlowSettings(configPath = "graphflow.config.json"): GraphFlowSettings {
+  const config = resolveConfig(configPath);
+  const provider = config.tiers.smart.provider;
+  const rawConfig = readRawConfig(configPath);
+  const providerConfig = config.providers[provider] ?? {};
+  const rawProviderConfig = rawConfig?.providers?.[provider] ?? {};
+  const apiKeyEnvVar = parseEnvPlaceholder(rawProviderConfig.apiKey ?? providerConfig.apiKey);
+
+  return {
+    configPath,
+    provider,
+    smartModel: config.tiers.smart.model,
+    economyModel: config.tiers.economy.model,
+    ...(apiKeyEnvVar ? { apiKeyEnvVar } : {}),
+    ...(rawProviderConfig.baseUrl || providerConfig.baseUrl
+      ? { baseUrl: rawProviderConfig.baseUrl ?? providerConfig.baseUrl }
+      : {}),
+    maxContextTokens: config.graphPolicy.maxContextTokens,
+    layerQuota: config.graphPolicy.layerQuota ?? { l1: 6, l2: 4, l3: 3 },
+    enableNearLosslessMode: config.graphPolicy.enableNearLosslessMode ?? false,
+    autoIndexOnPreview: config.graphPolicy.autoIndexOnPreview ?? true,
+    autoIndexOnRun: config.graphPolicy.autoIndexOnRun ?? true,
+    transport: config.graphPolicy.transport,
+    graphStorePath: config.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.json",
+  };
+}
+
+export function saveGraphFlowSettings(
+  settings: GraphFlowSettingsInput,
+  configPath = "graphflow.config.json"
+): GraphFlowSettings {
+  const current = resolveConfig(configPath);
+  const providerConfig = {
+    ...(settings.apiKeyEnvVar ? { apiKey: `\${${settings.apiKeyEnvVar}}` } : {}),
+    ...(settings.baseUrl ? { baseUrl: settings.baseUrl } : {}),
+  };
+  const updated = validateConfig({
+    ...current,
+    providers: {
+      ...current.providers,
+      [settings.provider]: providerConfig,
+    },
+    tiers: {
+      smart: { provider: settings.provider, model: settings.smartModel },
+      economy: { provider: settings.provider, model: settings.economyModel },
+    },
+    graphPolicy: {
+      ...current.graphPolicy,
+      enableNearLosslessMode: settings.enableNearLosslessMode,
+      autoIndexOnPreview: settings.autoIndexOnPreview,
+      autoIndexOnRun: settings.autoIndexOnRun,
+      transport: settings.transport,
+      graphStorePath: settings.graphStorePath,
+      maxContextTokens: Math.max(1, Math.floor(settings.maxContextTokens)),
+      layerQuota: {
+        l1: Math.max(0, Math.floor(settings.layerQuota.l1)),
+        l2: Math.max(0, Math.floor(settings.layerQuota.l2)),
+        l3: Math.max(0, Math.floor(settings.layerQuota.l3)),
+      },
+    },
+  });
+
+  const dir = dirname(configPath);
+  if (dir && dir !== ".") {
+    mkdirSync(dir, { recursive: true });
+  }
+  writeFileSync(configPath, `${JSON.stringify(updated, null, 2)}\n`, "utf8");
+  return getGraphFlowSettings(configPath);
 }
 
 export async function previewContext(query: string, configPath?: string): Promise<ContextPreviewResult> {
@@ -109,8 +209,14 @@ export async function previewContext(query: string, configPath?: string): Promis
   );
   await refill.initialPackage(query);
   const refillPreview = await refill.refill([query]);
+  const rawTokenEstimate = estimateRawContextTokens(
+    await resolveGraphStoreAfterIndex(config, graphClient),
+    query,
+    pkg.tokenEstimate
+  );
 
   return {
+    query,
     summaryCount: pkg.summaryChannel.length,
     anchorCount: pkg.anchorChannel.length,
     tokenEstimate: pkg.tokenEstimate,
@@ -121,6 +227,15 @@ export async function previewContext(query: string, configPath?: string): Promis
       l3: pkg.anchorChannel.filter((item) => item.layer === "L3").length,
     },
     refillPreview,
+    summary: pkg.summaryChannel,
+    anchors: pkg.anchorChannel,
+    tokenBudget: {
+      maxContextTokens: config.graphPolicy.maxContextTokens,
+      estimatedRawTokens: rawTokenEstimate,
+      compressedTokens: pkg.tokenEstimate,
+      estimatedSavingsPercent: calculateSavingsPercent(rawTokenEstimate, pkg.tokenEstimate),
+      budgetUsedPercent: calculateBudgetUsedPercent(pkg.tokenEstimate, config.graphPolicy.maxContextTokens),
+    },
   };
 }
 
@@ -164,7 +279,7 @@ export interface RunTaskSummary {
 
 export interface RoutingDiagnosisResult {
   dynamicRouting: boolean;
-  health: Record<"openai" | "anthropic" | "bailian" | "doubao", boolean>;
+  health: Record<"openai" | "anthropic" | "bailian" | "doubao" | "openbmb", boolean>;
   priority: string[];
   planner: {
     provider: string;
@@ -206,10 +321,10 @@ export async function indexGraph(rootDir?: string, configPath?: string): Promise
   });
 }
 
-export function inspectGraph(
+export async function inspectGraph(
   configPath?: string,
   options?: { nodeLimit?: number; edgeLimit?: number }
-): GraphSnapshotResult {
+): Promise<GraphSnapshotResult> {
   const config = resolveConfig(configPath);
   const nodeLimit = Math.max(1, options?.nodeLimit ?? 24);
   const edgeLimit = Math.max(1, options?.edgeLimit ?? 36);
@@ -222,8 +337,7 @@ export function inspectGraph(
     Skill: 0,
   };
 
-  const store = loadFileGraphStore(config);
-  if (!store) {
+  if (config.graphPolicy.transport === "mcp-http") {
     return {
       transport: config.graphPolicy.transport,
       ...(config.graphPolicy.graphStorePath ? { storePath: config.graphPolicy.graphStorePath } : {}),
@@ -234,6 +348,18 @@ export function inspectGraph(
       sampleNodes: [],
       sampleEdges: [],
     };
+  }
+
+  let store = loadGraphStore(config);
+  if (store.nodes.length === 0) {
+    const graphClient = createGraphClient(config);
+    const indexOptions = config.graphPolicy.includeExtensions
+      ? { includeExtensions: config.graphPolicy.includeExtensions }
+      : undefined;
+    await indexWorkspaceFiles(graphClient, config.graphPolicy.workspaceRoot ?? process.cwd(), {
+      ...indexOptions,
+    });
+    store = await resolveGraphStoreAfterIndex(config, graphClient);
   }
 
   const relationCounts = new Map<GraphEdge["relation"], number>();
@@ -269,18 +395,29 @@ export function inspectGraph(
   };
 }
 
-export function getSkillInsights(configPath?: string, limit = 12): SkillInsightsResult {
+export async function getSkillInsights(configPath?: string, limit = 12): Promise<SkillInsightsResult> {
   const config = resolveConfig(configPath);
   const boundedLimit = Math.max(1, limit);
-  const store = loadFileGraphStore(config);
 
-  if (!store) {
+  if (config.graphPolicy.transport === "mcp-http") {
     return {
       source: "unavailable",
       transport: config.graphPolicy.transport,
       ...(config.graphPolicy.graphStorePath ? { storePath: config.graphPolicy.graphStorePath } : {}),
       skills: [],
     };
+  }
+
+  let store = loadGraphStore(config);
+  if (store.nodes.length === 0) {
+    const graphClient = createGraphClient(config);
+    const indexOptions = config.graphPolicy.includeExtensions
+      ? { includeExtensions: config.graphPolicy.includeExtensions }
+      : undefined;
+    await indexWorkspaceFiles(graphClient, config.graphPolicy.workspaceRoot ?? process.cwd(), {
+      ...indexOptions,
+    });
+    store = await resolveGraphStoreAfterIndex(config, graphClient);
   }
 
   const skills = store.nodes
@@ -317,6 +454,7 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       graphClient,
       enableAutoGraphSync: config.graphPolicy.enableAutoBuild,
       maxContextTokens: config.graphPolicy.maxContextTokens,
+      enableLlmTriage: config.tiers.smart.provider === "openbmb" || config.tiers.economy.provider === "openbmb",
       ...(config.skillPolicy?.enableSkillFlywheel
         ? {
             enableSkillFlywheel: true,
@@ -410,7 +548,7 @@ export function diagnoseRouting(configPath?: string): string {
   const result = diagnoseRoutingResult(configPath);
   return [
     `dynamicRouting=${result.dynamicRouting ? "on" : "off"}`,
-    `health=openai:${result.health.openai},anthropic:${result.health.anthropic},bailian:${result.health.bailian},doubao:${result.health.doubao}`,
+    `health=openai:${result.health.openai},anthropic:${result.health.anthropic},bailian:${result.health.bailian},doubao:${result.health.doubao},openbmb:${result.health.openbmb}`,
     `priority=${result.priority.join(",")}`,
     `planner=${result.planner.provider}/${result.planner.model}${result.planner.fallbackApplied ? ":fallback" : ""}`,
     `worker=${result.worker.provider}/${result.worker.model}${result.worker.fallbackApplied ? ":fallback" : ""}`,
@@ -486,17 +624,43 @@ function extractTokenCost(feedback: string): number {
   return Math.max(1, Math.ceil(feedback.length / 4));
 }
 
-function loadFileGraphStore(config: GraphFlowConfig):
-  | {
-      nodes: GraphNode[];
-      edges: GraphEdge[];
-    }
-  | undefined {
-  if (config.graphPolicy.transport !== "file") {
-    return undefined;
+function loadGraphStore(config: GraphFlowConfig): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const transport = config.graphPolicy.transport;
+
+  if (transport === "memory") {
+    return { nodes: [], edges: [] };
   }
 
-  const storePath = config.graphPolicy.graphStorePath;
+  if (transport === "sqlite") {
+    const dbPath = config.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.sqlite";
+    try {
+      const client = new GraphifySqliteClient(dbPath);
+      const snapshot = client.readSnapshot();
+      client.close();
+      return snapshot;
+    } catch {
+      const fallbackPath =
+        config.graphPolicy.graphStorePath?.replace(/\.sqlite$/i, ".json") ?? "tmp/graphflow-graph.json";
+      return readFileGraphStore(fallbackPath);
+    }
+  }
+
+  const storePath = config.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.json";
+  return readFileGraphStore(storePath);
+}
+
+async function resolveGraphStoreAfterIndex(
+  config: GraphFlowConfig,
+  graphClient: GraphClient
+): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
+  if (config.graphPolicy.transport === "memory" && graphClient.readSnapshot) {
+    return graphClient.readSnapshot();
+  }
+
+  return loadGraphStore(config);
+}
+
+function readFileGraphStore(storePath: string): { nodes: GraphNode[]; edges: GraphEdge[] } {
   if (!storePath || !existsSync(storePath)) {
     return { nodes: [], edges: [] };
   }
@@ -515,6 +679,69 @@ function loadFileGraphStore(config: GraphFlowConfig):
   } catch {
     return { nodes: [], edges: [] };
   }
+}
+
+function parseEnvPlaceholder(value?: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const match = value.match(/^\$\{([A-Z0-9_]+)\}$/i);
+  return match?.[1];
+}
+
+function readRawConfig(configPath: string): Partial<GraphFlowConfig> | undefined {
+  if (!existsSync(configPath)) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(readFileSync(configPath, "utf8")) as Partial<GraphFlowConfig>;
+  } catch {
+    return undefined;
+  }
+}
+
+function estimateRawContextTokens(
+  store: { nodes: GraphNode[]; edges: GraphEdge[] },
+  query: string,
+  compressedTokens: number
+): number {
+  const matching = store.nodes.filter((node) => {
+    const haystack = `${node.id} ${node.type} ${node.content}`.toLowerCase();
+    const terms = query
+      .toLowerCase()
+      .split(/[^a-z0-9_]+/g)
+      .filter((item) => item.length >= 2);
+    return terms.length === 0 || terms.some((term) => haystack.includes(term));
+  });
+  const nodes = matching.length > 0 ? matching : store.nodes;
+  const rawTokens = nodes.reduce(
+    (sum, node) => sum + estimateTokenCount(`${node.id}\n${node.type}\n${node.content}`),
+    0
+  );
+
+  return Math.max(compressedTokens, rawTokens, estimateTokenCount(query));
+}
+
+function calculateSavingsPercent(rawTokens: number, compressedTokens: number): number {
+  if (rawTokens <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(((rawTokens - compressedTokens) / rawTokens) * 100)));
+}
+
+function calculateBudgetUsedPercent(compressedTokens: number, maxContextTokens: number): number {
+  if (maxContextTokens <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.round((compressedTokens / maxContextTokens) * 100));
+}
+
+function estimateTokenCount(text: string): number {
+  return Math.max(1, Math.ceil(text.replace(/\s+/g, " ").trim().length / 4));
 }
 
 function compactPreview(content: string, maxLength: number): string {

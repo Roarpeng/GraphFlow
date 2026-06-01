@@ -1,0 +1,374 @@
+{
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\eslint.config.js": {
+    "mtime": 1780310519.1077735,
+    "hash": "558f2c9601c2227b032e778d3bb8cacb"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\index.ts": {
+    "mtime": 1780314790.3149714,
+    "hash": "d5b2f6a92d40b1e636244c8fb95cb16c"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\agents\\brainstormer.ts": {
+    "mtime": 1780310519.1137753,
+    "hash": "93d8d76361f83224437d589524c30c72"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\agents\\planner.ts": {
+    "mtime": 1780310519.1147754,
+    "hash": "02936a330ffcd5a3339f615cd2ca6b09"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\agents\\validator.ts": {
+    "mtime": 1780310519.1157758,
+    "hash": "8083cac17893e0dbe62b9d48cd4f87aa"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\agents\\worker.ts": {
+    "mtime": 1780310519.1157758,
+    "hash": "55ce76d1d5454b10f52d23061a0d5c22"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\config\\loader.ts": {
+    "mtime": 1780310519.1167762,
+    "hash": "d761839feb84afd3a7753c77f4a739be"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\config\\schema.ts": {
+    "mtime": 1780310519.1177754,
+    "hash": "8e7aaff7836911f77c41adccf3f2eb6f"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\core\\dag-engine.ts": {
+    "mtime": 1780310519.1192868,
+    "hash": "b022687046faa9ff2acd449acae4b5ef"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\core\\orchestrator.ts": {
+    "mtime": 1780310519.1208227,
+    "hash": "d7a1483071baae8803b11c447edc4b40"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\core\\state-machine.ts": {
+    "mtime": 1780310519.1218326,
+    "hash": "2d65f39b9e48dc0db120e19456dc4b4b"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\core\\triage.ts": {
+    "mtime": 1780310519.1228335,
+    "hash": "a730bb3303b7bdbbfd61c792dc4987e1"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\core\\types.ts": {
+    "mtime": 1780310519.1238348,
+    "hash": "5fc93cfd1157e407e73b49f417fd0742"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\graph\\client-factory.ts": {
+    "mtime": 1780311318.822716,
+    "hash": "8b2c38ae110856f12fc151019be8d0ad"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\graph\\context-slicer.ts": {
+    "mtime": 1780310519.1248333,
+    "hash": "0bc556bc9c344a448a1adc86a021a0c9"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\graph\\file-indexer.ts": {
+    "mtime": 1780310519.126271,
+    "hash": "f0a817639b0f3e6f37f30df273820e0d"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\graph\\graph-indexer.ts": {
+    "mtime": 1780310519.1288323,
+    "hash": "3b666b8ab2bf103cdb2459f93b64bbd6"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\graph\\graphify-client.ts": {
+    "mtime": 1780311312.1409528,
+    "hash": "1a776d17d88792a04cef658a5d035a68"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\graph\\graphify-file-client.ts": {
+    "mtime": 1780311313.1440623,
+    "hash": "bc611b410425bd48a8c01079ae368818"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\graph\\graphify-mcp-client.ts": {
+    "mtime": 1780310519.130833,
+    "hash": "8a3960bda75b531b3df77c011b4a21b9"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\graph\\sqlite-client.ts": {
+    "mtime": 1780311314.7585773,
+    "hash": "4c4933e90f0faa754b2d509b07fa03ab"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\graph\\language-indexers\\c-cpp.ts": {
+    "mtime": 1780310519.1328335,
+    "hash": "2c5015b9e29e6fa10729433577ac7057"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\graph\\language-indexers\\go.ts": {
+    "mtime": 1780310519.1328335,
+    "hash": "b7b784262843aa3acb14f4f35005ccb5"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\graph\\language-indexers\\index.ts": {
+    "mtime": 1780310519.1338308,
+    "hash": "2b03ab0a25469bf2b281569391a5a612"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\graph\\language-indexers\\python.ts": {
+    "mtime": 1780310519.1348305,
+    "hash": "267830d7170bf4a5627b4fc96eb82982"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\graph\\language-indexers\\rust.ts": {
+    "mtime": 1780310519.1348305,
+    "hash": "ffc5a5a5d3addd46624ef5de514b0b65"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\graph\\language-indexers\\typescript.ts": {
+    "mtime": 1780310519.1363375,
+    "hash": "f9589aaf0b28a307415c978a7183768e"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\hooks\\post-run-sync.ts": {
+    "mtime": 1780310519.1374125,
+    "hash": "fa4f9d61a5cf7f6eb26738d5d735f4f0"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\learning\\canary-gate.ts": {
+    "mtime": 1780310519.140362,
+    "hash": "57b6e2a10329241909114b7c253038a4"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\learning\\embeddings.ts": {
+    "mtime": 1780310519.1413634,
+    "hash": "6cc83dd85c52b848a980dffc02769be6"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\learning\\episodic-memory.ts": {
+    "mtime": 1780310519.1413634,
+    "hash": "b5b098826c293754ff11534339eb104b"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\learning\\exporter.ts": {
+    "mtime": 1780310519.1423643,
+    "hash": "bea4cd28b86eae8d7828f8836c6a9e1f"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\learning\\feedback-collector.ts": {
+    "mtime": 1780310519.1433625,
+    "hash": "91580c22aeb41ec6eee9ce8973b417c9"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\learning\\nightly-trainer.ts": {
+    "mtime": 1780310519.1443715,
+    "hash": "470073949155c71145ed992732ca368d"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\learning\\reflector.ts": {
+    "mtime": 1780310519.1443715,
+    "hash": "4a0cc8347f013c96d013b273bb7dff70"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\learning\\sample-builder.ts": {
+    "mtime": 1780310519.145362,
+    "hash": "3267e25556f459e3d3785fad7a09b8aa"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\learning\\skill-flywheel.ts": {
+    "mtime": 1780310519.1463614,
+    "hash": "88f61028ea8b99d33ed8faaeb496af7b"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\routing\\model-router.ts": {
+    "mtime": 1780310519.1473844,
+    "hash": "b9c2ee5460d33b22c31e1dfe0bef9c00"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\routing\\provider-executor.ts": {
+    "mtime": 1780310519.1518793,
+    "hash": "9155a731a4ad6684276658bbca74cb66"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\routing\\provider-health.ts": {
+    "mtime": 1780310519.1528807,
+    "hash": "c6ac9973b1b05a2f7b0568f8671cd11b"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\routing\\provider-adapters\\anthropic.ts": {
+    "mtime": 1780310519.1488707,
+    "hash": "17cca71bff3ee944b39ca575a6ad0280"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\routing\\provider-adapters\\bailian.ts": {
+    "mtime": 1780310519.149881,
+    "hash": "51a49995fb4c0ed9907636a117497456"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\routing\\provider-adapters\\doubao.ts": {
+    "mtime": 1780310519.15088,
+    "hash": "1eec0a9d368837efe68571ab951aa930"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\routing\\provider-adapters\\openai.ts": {
+    "mtime": 1780310519.1518793,
+    "hash": "a7710b634b6e3a69d40cb8097756a884"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\surfaces\\cli\\index.ts": {
+    "mtime": 1780311353.8341787,
+    "hash": "e4e4ab8e13612b14bd5524c49ec1f1fb"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\surfaces\\cli\\output.ts": {
+    "mtime": 1780310519.1548886,
+    "hash": "f4dcda9818a9866c6560d590223975b2"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\surfaces\\cli\\runtime.ts": {
+    "mtime": 1780314717.815139,
+    "hash": "305dd3f07b0099ccfce50aa7c0633c37"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\surfaces\\mcp\\server.ts": {
+    "mtime": 1780311355.656425,
+    "hash": "dd1f622e4feac108f10d07446a906ed0"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\src\\surfaces\\vscode\\extension.ts": {
+    "mtime": 1780310519.1588902,
+    "hash": "0ddde1eb7cae84b9b7b9a58b1beeeece"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m1.test.ts": {
+    "mtime": 1780310519.1608887,
+    "hash": "14751561cf910256f03b3329ccea06ea"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m10-cli-runtime.test.ts": {
+    "mtime": 1780314593.7403083,
+    "hash": "ad64039ed4db59810c856a528c27d608"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m11-file-indexer.test.ts": {
+    "mtime": 1780310519.1628876,
+    "hash": "0b7a01cda6ad7668d0b8d282caa194bf"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m12-dynamic-routing.test.ts": {
+    "mtime": 1780310519.1628876,
+    "hash": "b5c6829d7b18c80c995fc3482e590dc7"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m13-v02-product-completeness.test.ts": {
+    "mtime": 1780310519.1638873,
+    "hash": "bd1069354083b479eac8b5fb83603707"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m14-skill-flywheel.test.ts": {
+    "mtime": 1780310519.1648867,
+    "hash": "e1c3b9a46ea10379365686f6ddf80505"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m15-vscode-panel-observability.test.ts": {
+    "mtime": 1780314605.3730698,
+    "hash": "466694d893931f64159c749341b69354"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m16-agent-integrations.test.ts": {
+    "mtime": 1780310519.166886,
+    "hash": "37dc622cc238a4d50ef66bcc2985b766"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m17-release-readiness.test.ts": {
+    "mtime": 1780310519.1678865,
+    "hash": "fb8333f9f06cb9ab81086a6b19e69318"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m18-ast-indexer.test.ts": {
+    "mtime": 1780310519.1678865,
+    "hash": "e403d55050890bd0f5980d7e63d5d860"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m19-llm-agents-and-drift.test.ts": {
+    "mtime": 1780310519.1693926,
+    "hash": "c927822188053380b62de8f2870bf47e"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m2.test.ts": {
+    "mtime": 1780310519.1704009,
+    "hash": "b9466ae89ec0a1b6601553dd454997d0"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m20-skill-fusion.test.ts": {
+    "mtime": 1780310519.1714,
+    "hash": "872a2c04618d2023052599353f7db6cb"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m21-prompt-context-injection.test.ts": {
+    "mtime": 1780310519.172401,
+    "hash": "13a19130ae3dfb82ad6f43d76d74086f"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m22-node-compression.test.ts": {
+    "mtime": 1780310519.1734002,
+    "hash": "84c16465877e2ad9277c4b97e6036d94"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m23-graph-retrieval.test.ts": {
+    "mtime": 1780310519.173908,
+    "hash": "d83c997ea4b841293ee22e26eb49d10e"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m24-sqlite-backend.test.ts": {
+    "mtime": 1780310519.1749158,
+    "hash": "e72b0de6a4d3c562408d8c8f759a882c"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m25-vector-recall.test.ts": {
+    "mtime": 1780310519.1759171,
+    "hash": "40dbd67ef9e6b6c5512d81ae27667995"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m26-episodic-memory.test.ts": {
+    "mtime": 1780310519.1769178,
+    "hash": "c26d504dca54078803a23a0babd7fd72"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m27-multilang-indexer.test.ts": {
+    "mtime": 1780310519.1779163,
+    "hash": "c196d4956ec5729eb302644ef52db882"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m4m5.test.ts": {
+    "mtime": 1780310519.1799157,
+    "hash": "f1af1192880b82bb519c8951cccab730"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m6.test.ts": {
+    "mtime": 1780310519.1809168,
+    "hash": "13f77200cbee6c8a15b5bab90ed40684"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m7-e2e.test.ts": {
+    "mtime": 1780310519.1819165,
+    "hash": "32bad51f7bd1a6fecc1453fd77b6fbbe"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\tests\\m9-orchestrator-near-lossless.test.ts": {
+    "mtime": 1780310519.1829164,
+    "hash": "65b2609f951b7a1ed6564baff1019f49"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\vscode-extension\\media\\context-preview.js": {
+    "mtime": 1780314776.2134497,
+    "hash": "7f989e6348a373a866e26766997a48a0"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\vscode-extension\\media\\graph-snapshot.js": {
+    "mtime": 1780313613.8005753,
+    "hash": "c990aa97bcefc03bcc1df6bd02be1806"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\vscode-extension\\media\\settings.js": {
+    "mtime": 1780314784.8663213,
+    "hash": "a34841effcfd26696f60e3810f0259c8"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\vscode-extension\\media\\skill-insights.js": {
+    "mtime": 1780313622.5358822,
+    "hash": "e22d37daf5b79c31d0fb60a9b000e111"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\vscode-extension\\scripts\\generate-icon.ps1": {
+    "mtime": 1780310519.1934288,
+    "hash": "a12b3a05354fc8e0171ed5b9ac6bee92"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\vscode-extension\\scripts\\sync-runtime.mjs": {
+    "mtime": 1780310519.194429,
+    "hash": "f9a8903c5c998c3ea2968264bd11ae40"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\vscode-extension\\src\\extension.ts": {
+    "mtime": 1780314768.4895906,
+    "hash": "d4c3ca8f76a3499c838499846bfceacd"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\vscode-extension\\src\\panels.ts": {
+    "mtime": 1780314700.2571106,
+    "hash": "642105250b6e8b7a9ffceb7c1c2a17a2"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\AGENTS.md": {
+    "mtime": 1780310519.0937662,
+    "hash": "c493e702763e2fb12be16d477a493ca5"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\CHANGELOG.md": {
+    "mtime": 1780310519.0937662,
+    "hash": "2cf312f60e7019bb4490299721684c6c"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\CLAUDE.md": {
+    "mtime": 1780310519.0947666,
+    "hash": "6a875c0097a37e9b7a3a10cf13b86c50"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\README.md": {
+    "mtime": 1780310519.0967667,
+    "hash": "bf5aa33f24dd6c896105f83e6c40e49d"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\docs\\releases\\v0.1.0.md": {
+    "mtime": 1780310519.101766,
+    "hash": "214f255f9dda742fcd86815213067a49"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\docs\\releases\\v0.3.0.md": {
+    "mtime": 1780310519.1027663,
+    "hash": "75e8c396af001da122479fd64103417b"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\docs\\superpowers\\plans\\2026-05-27-graphflow-v01-implementation-plan.md": {
+    "mtime": 1780310519.1037667,
+    "hash": "cc501836d1369b23d90ea0be755cbf6c"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\docs\\superpowers\\specs\\2026-05-27-graphflow-dual-surface-design.md": {
+    "mtime": 1780310519.1057742,
+    "hash": "addd854e959916c611b95c691eb0481f"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\docs\\testing\\2026-05-28-formal-usage-test-plan.md": {
+    "mtime": 1780310519.1067731,
+    "hash": "3451ae714ceff79545c40b6d59d44ae8"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\docs\\testing\\2026-05-28-formal-usage-test-report.md": {
+    "mtime": 1780310519.1067731,
+    "hash": "b2eb66ac6144c13baa384fa6efee3384"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\vscode-extension\\README.md": {
+    "mtime": 1780310519.1864288,
+    "hash": "83cec02852a1035dc45f086681d5a335"
+  },
+  "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow\\vscode-extension\\media\\graphflow.png": {
+    "mtime": 1780310519.189429,
+    "hash": "78b5293190ce02ebd273689f574780b1"
+  }
+}

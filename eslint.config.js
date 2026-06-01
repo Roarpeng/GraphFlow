@@ -3,8 +3,17 @@ const tsParser = require("@typescript-eslint/parser");
 
 module.exports = [
   {
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      "vscode-extension/vendor/**",
+      "vscode-extension/dist/**",
+      "vscode-extension/node_modules/**",
+      "tmp/**",
+    ],
+  },
+  {
     files: ["**/*.ts"],
-    ignores: ["dist/**", "node_modules/**"],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
@@ -16,7 +25,7 @@ module.exports = [
       "@typescript-eslint": tseslint,
     },
     rules: {
-      "@typescript-eslint/consistent-type-imports": "error",
+      "@typescript-eslint/consistent-type-imports": ["error", { "disallowTypeAnnotations": false }],
       "@typescript-eslint/no-unused-vars": [
         "error",
         { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }

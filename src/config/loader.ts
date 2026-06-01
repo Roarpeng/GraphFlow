@@ -70,7 +70,7 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
   }
 
   if (input.routingPolicy?.providerPriority) {
-    const allowed = new Set(["openai", "anthropic", "bailian", "doubao"]);
+    const allowed = new Set(["openai", "anthropic", "bailian", "doubao", "openbmb"]);
     const invalid = input.routingPolicy.providerPriority.some((provider) => !allowed.has(provider));
     if (invalid) {
       throw new Error("Invalid config: routingPolicy.providerPriority contains unknown provider.");
@@ -119,6 +119,7 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
         "anthropic",
         "bailian",
         "doubao",
+        "openbmb",
       ],
     },
     skillPolicy: {

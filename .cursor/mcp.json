@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "graphflow": {
+      "command": "npm",
+      "args": ["run", "start:mcp"],
+      "cwd": "c:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow"
+    }
+  }
+}

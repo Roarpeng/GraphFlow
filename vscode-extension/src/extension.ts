@@ -2,9 +2,13 @@ import * as vscode from "vscode";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import {
+  buildContextPreviewHtml,
   buildGraphSnapshotHtml,
+  buildSettingsHtml,
   buildSkillInsightsHtml,
+  type ContextPreviewResult,
   type GraphSnapshotResult,
+  type GraphFlowSettings,
   type SkillInsightsResult,
 } from "./panels";
 
@@ -23,10 +27,13 @@ let runtimePromise: Promise<GraphFlowRuntime> | undefined;
 interface GraphFlowRuntime {
   runTask(task: string): Promise<string>;
   planAndBrainstorm(task: string): string;
+  previewContext(query: string): Promise<ContextPreviewResult>;
   diagnoseRouting(): string;
   runLearningNightly(): string;
-  inspectGraph(nodeLimit?: number, edgeLimit?: number): GraphSnapshotResult;
-  getSkillInsights(limit?: number): SkillInsightsResult;
+  inspectGraph(nodeLimit?: number, edgeLimit?: number): Promise<GraphSnapshotResult>;
+  getSkillInsights(limit?: number): Promise<SkillInsightsResult>;
+  getGraphFlowSettings(): GraphFlowSettings;
+  saveGraphFlowSettings(settings: Omit<GraphFlowSettings, "configPath">): GraphFlowSettings;
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -47,6 +54,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
+    const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(task));
     const output = await runGraphFlow(workspaceRoot, (runtime) => runtime.runTask(task));
     const parsed = parseCliResult(output);
 
@@ -66,7 +74,9 @@ export function activate(context: vscode.ExtensionContext): void {
     };
 
     runs.push(record);
-    vscode.window.showInformationMessage(`GraphFlow finished: ${record.status}`);
+    vscode.window.showInformationMessage(
+      `GraphFlow finished: ${record.status}; saved≈${preview.tokenBudget.estimatedSavingsPercent}% tokens`
+    );
   });
 
   const showRuns = vscode.commands.registerCommand("graphflow.showRuns", async () => {
@@ -102,12 +112,45 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
-    const output = await runGraphFlow(workspaceRoot, (runtime) =>
-      Promise.resolve(runtime.planAndBrainstorm(task))
-    );
+    const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(task));
+    const output = await runGraphFlow(workspaceRoot, (runtime) => Promise.resolve(runtime.planAndBrainstorm(task)));
     await vscode.window.showQuickPick(output.split("; "), {
-      title: "GraphFlow Plan & Brainstorm",
+      title: `GraphFlow Plan & Brainstorm (saved≈${preview.tokenBudget.estimatedSavingsPercent}% tokens)`,
     });
+  });
+
+  const previewContextCommand = vscode.commands.registerCommand("graphflow.previewContext", async () => {
+    const query = await vscode.window.showInputBox({
+      title: "GraphFlow Context Preview",
+      prompt: "Enter query or task description",
+      placeHolder: "refactor planner and reduce token usage",
+    });
+
+    if (!query) {
+      return;
+    }
+
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+      vscode.window.showErrorMessage("No workspace folder found.");
+      return;
+    }
+
+    const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(query));
+    showContextPreviewPanel(context, preview);
+  });
+
+  const showSettings = vscode.commands.registerCommand("graphflow.showSettings", async () => {
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+      vscode.window.showErrorMessage("No workspace folder found.");
+      return;
+    }
+
+    const settings = await runGraphFlow(workspaceRoot, (runtime) =>
+      Promise.resolve(runtime.getGraphFlowSettings())
+    );
+    showSettingsPanel(context, settings, workspaceRoot);
   });
 
   const showGraph = vscode.commands.registerCommand("graphflow.showGraph", async () => {
@@ -117,10 +160,8 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
-    const snapshot = await runGraphFlow(workspaceRoot, (runtime) =>
-      Promise.resolve(runtime.inspectGraph(48, 96))
-    );
-    showGraphSnapshotPanel(snapshot);
+    const snapshot = await runGraphFlow(workspaceRoot, (runtime) => runtime.inspectGraph(48, 96));
+    showGraphSnapshotPanel(context, snapshot);
   });
 
   const showSkills = vscode.commands.registerCommand("graphflow.showSkills", async () => {
@@ -130,10 +171,8 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
-    const insights = await runGraphFlow(workspaceRoot, (runtime) =>
-      Promise.resolve(runtime.getSkillInsights(24))
-    );
-    showSkillInsightsPanel(insights);
+    const insights = await runGraphFlow(workspaceRoot, (runtime) => runtime.getSkillInsights(24));
+    showSkillInsightsPanel(context, insights);
   });
 
   const participant = vscode.chat.createChatParticipant(
@@ -167,6 +206,14 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
+      if (command === "settings") {
+        const settings = await runGraphFlow(workspaceRoot, (runtime) =>
+          Promise.resolve(runtime.getGraphFlowSettings())
+        );
+        stream.markdown(formatSettingsMarkdown(settings));
+        return;
+      }
+
       if (command === "diagnose") {
         const output = await runGraphFlow(workspaceRoot, (runtime) =>
           Promise.resolve(runtime.diagnoseRouting())
@@ -184,17 +231,24 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       if (command === "graph") {
-        const snapshot = await runGraphFlow(workspaceRoot, (runtime) =>
-          Promise.resolve(runtime.inspectGraph(24, 36))
-        );
+        const snapshot = await runGraphFlow(workspaceRoot, (runtime) => runtime.inspectGraph(24, 36));
         stream.markdown(formatGraphSnapshotMarkdown(snapshot));
         return;
       }
 
+      if (command === "context") {
+        if (!payload) {
+          stream.markdown("Please provide a context query. Example: `/context refactor planner`");
+          return;
+        }
+
+        const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(payload));
+        stream.markdown(formatContextPreviewMarkdown(preview));
+        return;
+      }
+
       if (command === "skills") {
-        const insights = await runGraphFlow(workspaceRoot, (runtime) =>
-          Promise.resolve(runtime.getSkillInsights(12))
-        );
+        const insights = await runGraphFlow(workspaceRoot, (runtime) => runtime.getSkillInsights(12));
         stream.markdown(formatSkillInsightsMarkdown(insights));
         return;
       }
@@ -205,14 +259,16 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       if (command === "plan") {
+        const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(payload));
         const output = await runGraphFlow(
           workspaceRoot,
           (runtime) => Promise.resolve(runtime.planAndBrainstorm(payload))
         );
-        stream.markdown(`Plan result:\n\n${formatAsBullet(output)}`);
+        stream.markdown(`Token budget:\n${formatContextBudgetBullets(preview)}\n\nPlan result:\n\n${formatAsBullet(output)}`);
         return;
       }
 
+      const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(payload));
       const runOutput = await runGraphFlow(workspaceRoot, (runtime) => runtime.runTask(payload));
       const parsed = parseCliResult(runOutput);
       runs.push({
@@ -223,12 +279,21 @@ export function activate(context: vscode.ExtensionContext): void {
         timestamp: Date.now(),
       });
       stream.markdown(
-        `Run result:\n- status: ${parsed.status}\n- attempts: ${parsed.attempts}\n- feedback: ${parsed.feedback}`
+        `Token budget:\n${formatContextBudgetBullets(preview)}\n\nRun result:\n- status: ${parsed.status}\n- attempts: ${parsed.attempts}\n- feedback: ${parsed.feedback}`
       );
     }
   );
 
-  context.subscriptions.push(runTask, showRuns, planTask, showGraph, showSkills, participant);
+  context.subscriptions.push(
+    runTask,
+    showRuns,
+    planTask,
+    previewContextCommand,
+    showSettings,
+    showGraph,
+    showSkills,
+    participant
+  );
 }
 
 export function deactivate(): void {
@@ -272,10 +337,13 @@ async function loadRuntime(): Promise<GraphFlowRuntime> {
       if (
         !module.runTask ||
         !module.planAndBrainstorm ||
+        !module.previewContext ||
         !module.diagnoseRouting ||
         !module.runLearningNightly ||
         !module.inspectGraph ||
-        !module.getSkillInsights
+        !module.getSkillInsights ||
+        !module.getGraphFlowSettings ||
+        !module.saveGraphFlowSettings
       ) {
         throw new Error("Bundled GraphFlow runtime is missing required exports.");
       }
@@ -283,10 +351,13 @@ async function loadRuntime(): Promise<GraphFlowRuntime> {
       return {
         runTask: module.runTask,
         planAndBrainstorm: module.planAndBrainstorm,
+        previewContext: module.previewContext,
         diagnoseRouting: module.diagnoseRouting,
         runLearningNightly: module.runLearningNightly,
         inspectGraph: module.inspectGraph,
         getSkillInsights: module.getSkillInsights,
+        getGraphFlowSettings: module.getGraphFlowSettings,
+        saveGraphFlowSettings: module.saveGraphFlowSettings,
       };
     })();
   }
@@ -306,13 +377,21 @@ async function withWorkspaceCwd<T>(workspaceRoot: string, action: () => Promise<
 
 function detectInlineCommand(
   prompt: string
-): "run" | "plan" | "history" | "diagnose" | "learn" | "graph" | "skills" {
+): "run" | "plan" | "history" | "context" | "settings" | "diagnose" | "learn" | "graph" | "skills" {
   if (prompt.startsWith("/plan")) {
     return "plan";
   }
 
   if (prompt.startsWith("/history")) {
     return "history";
+  }
+
+  if (prompt.startsWith("/context")) {
+    return "context";
+  }
+
+  if (prompt.startsWith("/settings")) {
+    return "settings";
   }
 
   if (prompt.startsWith("/diagnose")) {
@@ -335,7 +414,7 @@ function detectInlineCommand(
 }
 
 function stripInlineCommand(prompt: string): string {
-  return prompt.replace(/^\/(run|plan|history|diagnose|learn|graph|skills)\s*/i, "").trim();
+  return prompt.replace(/^\/(run|plan|history|context|settings|diagnose|learn|graph|skills)\s*/i, "").trim();
 }
 
 function formatAsBullet(output: string): string {
@@ -391,24 +470,176 @@ function formatSkillInsightsMarkdown(insights: SkillInsightsResult): string {
   ].join("\n");
 }
 
-function showGraphSnapshotPanel(snapshot: GraphSnapshotResult): void {
+function formatContextBudgetBullets(preview: ContextPreviewResult): string {
+  return [
+    `- raw≈${preview.tokenBudget.estimatedRawTokens}`,
+    `- compressed=${preview.tokenBudget.compressedTokens}/${preview.tokenBudget.maxContextTokens}`,
+    `- saved≈${preview.tokenBudget.estimatedSavingsPercent}%`,
+    `- anchors=${preview.anchorCount} (L1=${preview.anchorsByLayer.l1}, L2=${preview.anchorsByLayer.l2}, L3=${preview.anchorsByLayer.l3})`,
+  ].join("\n");
+}
+
+function formatContextPreviewMarkdown(preview: ContextPreviewResult): string {
+  const summary = preview.summary.slice(0, 8).map((item) => `- ${item}`);
+  return [
+    "Context preview:",
+    formatContextBudgetBullets(preview),
+    "Summary:",
+    ...(summary.length > 0 ? summary : ["- empty"]),
+  ].join("\n");
+}
+
+function formatSettingsMarkdown(settings: GraphFlowSettings): string {
+  return [
+    "GraphFlow settings:",
+    `- config: ${settings.configPath}`,
+    `- provider: ${settings.provider}`,
+    `- smart: ${settings.smartModel}`,
+    `- economy: ${settings.economyModel}`,
+    `- apiKeyEnvVar: ${settings.apiKeyEnvVar ?? "n/a"}`,
+    `- maxContextTokens: ${settings.maxContextTokens}`,
+    `- layerQuota: L1=${settings.layerQuota.l1}, L2=${settings.layerQuota.l2}, L3=${settings.layerQuota.l3}`,
+    `- nearLossless: ${settings.enableNearLosslessMode}`,
+  ].join("\n");
+}
+
+function showContextPreviewPanel(context: vscode.ExtensionContext, preview: ContextPreviewResult): void {
+  const panel = vscode.window.createWebviewPanel(
+    "graphflow.contextPreview",
+    "GraphFlow Context Preview",
+    vscode.ViewColumn.Active,
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [context.extensionUri],
+    }
+  );
+
+  const scriptUri = panel.webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, "media", "context-preview.js")
+  );
+  panel.webview.html = buildContextPreviewHtml(preview, scriptUri.toString());
+  context.subscriptions.push(panel);
+}
+
+function showSettingsPanel(
+  context: vscode.ExtensionContext,
+  settings: GraphFlowSettings,
+  workspaceRoot: string
+): void {
+  const panel = vscode.window.createWebviewPanel(
+    "graphflow.settings",
+    "GraphFlow Settings",
+    vscode.ViewColumn.Active,
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [context.extensionUri],
+    }
+  );
+
+  const scriptUri = panel.webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, "media", "settings.js")
+  );
+  panel.webview.html = buildSettingsHtml(settings, scriptUri.toString());
+  panel.webview.onDidReceiveMessage(async (message) => {
+    if (message?.type !== "saveSettings") {
+      return;
+    }
+
+    try {
+      const saved = await runGraphFlow(workspaceRoot, (runtime) =>
+        Promise.resolve(runtime.saveGraphFlowSettings(message.payload as Omit<GraphFlowSettings, "configPath">))
+      );
+      panel.webview.postMessage({ type: "settingsSaved", payload: saved });
+      vscode.window.showInformationMessage("GraphFlow settings saved.");
+    } catch (err) {
+      const text = err instanceof Error ? err.message : String(err);
+      panel.webview.postMessage({ type: "settingsError", payload: text });
+      vscode.window.showErrorMessage(`Failed to save GraphFlow settings: ${text}`);
+    }
+  });
+  context.subscriptions.push(panel);
+}
+
+function showGraphSnapshotPanel(context: vscode.ExtensionContext, snapshot: GraphSnapshotResult): void {
   const panel = vscode.window.createWebviewPanel(
     "graphflow.graphSnapshot",
     "GraphFlow Graph Snapshot",
     vscode.ViewColumn.Active,
-    { enableScripts: true }
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [context.extensionUri],
+    }
   );
 
-  panel.webview.html = buildGraphSnapshotHtml(snapshot);
+  const scriptUri = panel.webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, "media", "graph-snapshot.js")
+  );
+  panel.webview.html = buildGraphSnapshotHtml(snapshot, scriptUri.toString());
+  wireGraphSnapshotPanel(panel, snapshot);
+  context.subscriptions.push(panel);
 }
 
-function showSkillInsightsPanel(insights: SkillInsightsResult): void {
+function showSkillInsightsPanel(context: vscode.ExtensionContext, insights: SkillInsightsResult): void {
   const panel = vscode.window.createWebviewPanel(
     "graphflow.skillInsights",
     "GraphFlow Skill Insights",
     vscode.ViewColumn.Active,
-    { enableScripts: true }
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [context.extensionUri],
+    }
   );
 
-  panel.webview.html = buildSkillInsightsHtml(insights);
+  const scriptUri = panel.webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, "media", "skill-insights.js")
+  );
+  panel.webview.html = buildSkillInsightsHtml(insights, scriptUri.toString());
+  wireSkillInsightsPanel(panel, insights);
+  context.subscriptions.push(panel);
+}
+
+function wireGraphSnapshotPanel(
+  panel: vscode.WebviewPanel,
+  snapshot: GraphSnapshotResult
+): void {
+  const payload = {
+    nodes: snapshot.sampleNodes,
+    edges: snapshot.sampleEdges,
+  };
+
+  const postSnapshot = (): void => {
+    void panel.webview.postMessage({ type: "snapshot", payload });
+  };
+
+  panel.webview.onDidReceiveMessage((message) => {
+    if (message?.type === "ready") {
+      postSnapshot();
+    }
+  });
+
+  postSnapshot();
+}
+
+function wireSkillInsightsPanel(
+  panel: vscode.WebviewPanel,
+  insights: SkillInsightsResult
+): void {
+  const postSkills = (): void => {
+    void panel.webview.postMessage({
+      type: "skills",
+      payload: { skills: insights.skills },
+    });
+  };
+
+  panel.webview.onDidReceiveMessage((message) => {
+    if (message?.type === "ready") {
+      postSkills();
+    }
+  });
+
+  postSkills();
 }

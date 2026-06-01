@@ -5,10 +5,16 @@ import { GraphifyFileClient } from "./graphify-file-client";
 import { GraphifyMcpClient } from "./graphify-mcp-client";
 import { GraphifySqliteClient } from "./sqlite-client";
 
+export interface GraphStoreSnapshot {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
 export interface GraphClient {
   upsertNodes(nodes: GraphNode[]): Promise<void>;
   upsertEdges(edges: GraphEdge[]): Promise<void>;
   queryByKeyword(query: string): Promise<GraphNode[]>;
+  readSnapshot?(): GraphStoreSnapshot;
   getNodesByIds?(ids: string[]): Promise<GraphNode[]>;
   getNeighbors?(
     nodeIds: string[],
@@ -42,6 +48,10 @@ class InMemoryGraphClientAdapter implements GraphClient {
     direction?: "out" | "in" | "both"
   ): Promise<{ node: GraphNode; via: GraphEdge["relation"] }[]> {
     return this.client.getNeighbors(nodeIds, relations, direction);
+  }
+
+  readSnapshot(): GraphStoreSnapshot {
+    return this.client.readSnapshot();
   }
 }
 

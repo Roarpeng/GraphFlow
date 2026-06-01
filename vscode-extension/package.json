@@ -19,6 +19,8 @@
     "onCommand:graphflow.runTask",
     "onCommand:graphflow.showRuns",
     "onCommand:graphflow.planTask",
+    "onCommand:graphflow.previewContext",
+    "onCommand:graphflow.showSettings",
     "onCommand:graphflow.showGraph",
     "onCommand:graphflow.showSkills",
     "onChatParticipant:roarpeng.graphflow-vscode.graphflowAgent"
@@ -37,6 +39,14 @@
       {
         "command": "graphflow.planTask",
         "title": "GraphFlow: Plan & Brainstorm"
+      },
+      {
+        "command": "graphflow.previewContext",
+        "title": "GraphFlow: Context Preview"
+      },
+      {
+        "command": "graphflow.showSettings",
+        "title": "GraphFlow: Settings"
       },
       {
         "command": "graphflow.showGraph",
@@ -68,6 +78,14 @@
             "description": "Show recent GraphFlow run history"
           },
           {
+            "name": "context",
+            "description": "Preview compressed context and token budget"
+          },
+          {
+            "name": "settings",
+            "description": "Show GraphFlow model and token settings"
+          },
+          {
             "name": "diagnose",
             "description": "Show routing diagnostics and provider health"
           },
@@ -91,7 +109,7 @@
     "icon:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/generate-icon.ps1",
     "sync-runtime": "npm --prefix .. run build && node ./scripts/sync-runtime.mjs",
     "build": "npm run sync-runtime && tsc -p ./tsconfig.json",
-    "package": "npm run build && npx @vscode/vsce package --no-dependencies --out ../artifacts/graphflow-vscode-0.4.2.vsix"
+    "package": "npm run build && node -e \"require('node:fs').mkdirSync('../artifacts',{recursive:true})\" && npx @vscode/vsce package --no-dependencies --out ../artifacts/graphflow-vscode-0.4.2.vsix"
   },
   "devDependencies": {
     "@types/vscode": "^1.99.0",

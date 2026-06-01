@@ -177,10 +177,12 @@ export async function executeToolCall(
         await indexGraph(readOptionalString(args.rootDir), readOptionalString(args.configPath))
       );
     case "graphflow_inspect_graph":
-      return textResponse(inspectGraph(readOptionalString(args.configPath), buildInspectOptions(args)));
+      return textResponse(
+        await inspectGraph(readOptionalString(args.configPath), buildInspectOptions(args))
+      );
     case "graphflow_skill_insights":
       return textResponse(
-        getSkillInsights(readOptionalString(args.configPath), readOptionalNumber(args.limit))
+        await getSkillInsights(readOptionalString(args.configPath), readOptionalNumber(args.limit))
       );
     case "graphflow_diagnose":
       return textResponse(diagnoseRoutingResult(readOptionalString(args.configPath)));

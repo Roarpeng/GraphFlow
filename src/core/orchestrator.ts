@@ -22,7 +22,7 @@ import {
 import { executeRolePrompt, type PromptContext } from "../routing/provider-executor";
 import { executeDag } from "./dag-engine";
 import { runSimpleTask } from "./state-machine";
-import { triageTask } from "./triage";
+import { triageTask, triageTaskLlm } from "./triage";
 import type { OrchestrationInput, RouteDecision, TaskRunResult, TaskNode, TaskStatus } from "./types";
 
 export interface OrchestrateOptions {
@@ -42,13 +42,13 @@ export interface OrchestrateOptions {
   maxReplanRounds?: number;
   enableGraphContextInPrompt?: boolean;
   enableEpisodicMemory?: boolean;
+  enableLlmTriage?: boolean;
 }
 
 export async function orchestrate(
   input: OrchestrationInput,
   options?: OrchestrateOptions
 ): Promise<TaskRunResult> {
-  const mode = triageTask(input.task);
   const retryOptions = input.maxRetries !== undefined ? { maxRetries: input.maxRetries } : {};
   const contextPackage = await maybeBuildNearLosslessContext(input, options);
   const routeDecisions = buildRouteDecisions(options?.providerHealth, options?.providerFallbackChain);
@@ -57,6 +57,11 @@ export async function orchestrate(
   const episodeSummaries = similarEpisodes.map((ep) => summarizeEpisodeForPrompt(ep));
   const promptContext = buildPromptContext(contextPackage, skillHints, episodeSummaries, options);
   const promptContextLines = promptContext?.summaryChannel?.length ?? 0;
+
+  let mode = triageTask(input.task);
+  if (options?.enableLlmTriage) {
+    mode = await triageTaskLlm(input.task, routeDecisions.planner, promptContext);
+  }
   let currentPlan: TaskNode[] = [];
 
   if (mode === "simple") {

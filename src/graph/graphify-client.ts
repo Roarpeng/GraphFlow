@@ -71,6 +71,13 @@ export class GraphifyClient {
     return out;
   }
 
+  readSnapshot(): { nodes: GraphNode[]; edges: GraphEdge[] } {
+    return {
+      nodes: Array.from(this.nodes.values()),
+      edges: [...this.edges],
+    };
+  }
+
   async getNeighbors(
     nodeIds: string[],
     relations?: GraphEdge["relation"][],

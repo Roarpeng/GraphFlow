@@ -1,25 +1,51 @@
 ---
-description: Use GraphFlow for repo planning, context compression, and orchestration.
+description: Use GraphFlow first for token-efficient repo context, planning, and orchestration.
 globs:
   - "**/*"
-alwaysApply: false
+alwaysApply: true
 ---
 
-When a task is multi-step, uncertain, or needs graph-aware context, call GraphFlow first.
+# GraphFlow Token-First Rule
 
-Preferred order:
+GraphFlow is the local Graphify-inspired context layer for this repository. Its purpose is to save context by turning the project into a queryable graph, returning compressed summaries and anchors before an agent reads full files.
 
-1. `graphflow_plan` for decomposing work.
-2. `graphflow_preview_context` for targeted code context.
-3. `graphflow_run` only when GraphFlow should execute the orchestration loop itself.
-4. `graphflow_diagnose` if provider routing seems unhealthy.
+Before broad code exploration, implementation, debugging, review, planning, or architecture questions:
+
+1. Call `graphflow_preview_context` with the user's task/query.
+2. Use the returned `summary`, `anchors`, `refillPreview`, and `tokenBudget` as the first context source.
+3. Read full files only when:
+   - GraphFlow anchors point to that file/symbol,
+   - the compressed context is insufficient,
+   - or exact edits require the file body.
+4. For multi-step or ambiguous work, call `graphflow_plan` before implementation.
+5. For graph freshness after project changes, call `graphflow_index`.
+6. Report token budget when available:
+   - estimated raw tokens,
+   - compressed tokens,
+   - estimated savings percent,
+   - max context token budget.
+
+Do not scan the whole repository, recursively inspect many files, or read large files before trying GraphFlow context.
+
+Preferred MCP order:
+
+1. `graphflow_preview_context` for compressed task context and token savings.
+2. `graphflow_plan` for decomposing multi-step work.
+3. `graphflow_inspect_graph` when graph state or coverage matters.
+4. `graphflow_skill_insights` when prior learning/skills may guide work.
+5. `graphflow_run` only when GraphFlow should execute its orchestration loop.
+6. `graphflow_diagnose` if provider routing or model configuration seems unhealthy.
 
 If MCP is unavailable, use the CLI fallback and always request JSON output:
 
 ```bash
-graphflow plan "<task>" --json
-graphflow context preview "<query>" --json
-graphflow route diagnose --json
+graphflow --json context preview "<query>"
+graphflow --json plan "<task>"
+graphflow --json graph inspect
+graphflow --json skill insights
+graphflow --json route diagnose
 ```
 
 Treat GraphFlow outputs as structured machine-readable data, not prose.
+
+When the user asks about saving token usage, optimizing context, repo understanding, or learning from Graphify, prioritize GraphFlow context compression over ordinary file search.

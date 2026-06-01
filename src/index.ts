@@ -4,6 +4,8 @@ export {
   runTask,
   runTaskResult,
   previewContext,
+  getGraphFlowSettings,
+  saveGraphFlowSettings,
   indexGraph,
   inspectGraph,
   getSkillInsights,

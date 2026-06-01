@@ -36,7 +36,7 @@ export interface GraphFlowConfig {
   routingPolicy?: {
     enableDynamicRouting?: boolean;
     requireApiKeyForHealthy?: boolean;
-    providerPriority?: Array<"openai" | "anthropic" | "bailian" | "doubao">;
+    providerPriority?: Array<"openai" | "anthropic" | "bailian" | "doubao" | "openbmb">;
   };
   skillPolicy?: {
     enableSkillFlywheel?: boolean;

@@ -84,7 +84,7 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   }
 
   if (command === "graph" && args[0] === "inspect") {
-    const data = inspectGraph(configPath);
+    const data = await inspectGraph(configPath);
     return {
       command: "graph-inspect",
       data,
@@ -100,7 +100,7 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   }
 
   if (command === "skill" && args[0] === "insights") {
-    const data = getSkillInsights(configPath);
+    const data = await getSkillInsights(configPath);
     return {
       command: "skill-insights",
       data,

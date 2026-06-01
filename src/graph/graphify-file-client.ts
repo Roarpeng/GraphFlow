@@ -40,6 +40,10 @@ export class GraphifyFileClient {
     this.writeStore(store);
   }
 
+  readSnapshot(): GraphStore {
+    return this.readStore();
+  }
+
   async queryByKeyword(query: string): Promise<GraphNode[]> {
     const store = this.readStore();
     const tokens = tokenizeForIndex(query);

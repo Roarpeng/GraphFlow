@@ -4,6 +4,7 @@ import { anthropicGenerateText } from "./provider-adapters/anthropic";
 import { bailianGenerateText } from "./provider-adapters/bailian";
 import { doubaoGenerateText } from "./provider-adapters/doubao";
 import { openaiGenerateText } from "./provider-adapters/openai";
+import { openbmbGenerateText } from "./provider-adapters/openbmb";
 
 export interface PromptContext {
   summaryChannel?: string[];
@@ -84,6 +85,10 @@ export async function executeRolePrompt(
 
   if (selection.provider === "doubao") {
     return doubaoGenerateText(request);
+  }
+
+  if (selection.provider === "openbmb") {
+    return openbmbGenerateText(request);
   }
 
   return openaiGenerateText(request);

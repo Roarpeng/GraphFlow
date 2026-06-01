@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  getGraphFlowSettings,
   getSkillInsights,
   indexGraph,
   inspectGraph,
   planAndBrainstorm,
   previewContext,
   runTask,
+  saveGraphFlowSettings,
 } from "../src/surfaces/cli/runtime";
 
 describe("M10 CLI runtime", () => {
@@ -24,6 +26,59 @@ describe("M10 CLI runtime", () => {
     expect(preview.anchorCount).toBeGreaterThanOrEqual(0);
     expect(preview.tokenEstimate).toBeGreaterThanOrEqual(0);
     expect(preview.anchorsByLayer.l1).toBeGreaterThanOrEqual(0);
+    expect(preview.tokenBudget.compressedTokens).toBe(preview.tokenEstimate);
+    expect(preview.tokenBudget.maxContextTokens).toBeGreaterThan(0);
+    expect(preview.tokenBudget.estimatedRawTokens).toBeGreaterThanOrEqual(preview.tokenEstimate);
+    expect(preview.tokenBudget.estimatedSavingsPercent).toBeGreaterThanOrEqual(0);
+    expect(preview.summary).toEqual(expect.any(Array));
+    expect(preview.anchors).toEqual(expect.any(Array));
+  });
+
+  it("saves graphflow settings for model routing and token budget", () => {
+    const root = mkdtempSync(join(tmpdir(), "graphflow-settings-"));
+    const configPath = join(root, "graphflow.config.json");
+
+    try {
+      const settings = saveGraphFlowSettings(
+        {
+          provider: "anthropic",
+          smartModel: "claude-4.6-sonnet-medium-thinking",
+          economyModel: "claude-3-5-haiku-latest",
+          apiKeyEnvVar: "ANTHROPIC_API_KEY",
+          baseUrl: "https://example.invalid",
+          maxContextTokens: 900,
+          layerQuota: { l1: 5, l2: 3, l3: 1 },
+          enableNearLosslessMode: true,
+          autoIndexOnPreview: true,
+          autoIndexOnRun: true,
+          transport: "file",
+          graphStorePath: "tmp/custom-graph.json",
+        },
+        configPath
+      );
+
+      expect(settings.configPath).toBe(configPath);
+      expect(settings.provider).toBe("anthropic");
+      expect(settings.smartModel).toBe("claude-4.6-sonnet-medium-thinking");
+      expect(settings.economyModel).toBe("claude-3-5-haiku-latest");
+      expect(settings.maxContextTokens).toBe(900);
+      expect(settings.layerQuota).toEqual({ l1: 5, l2: 3, l3: 1 });
+
+      const persisted = JSON.parse(readFileSync(configPath, "utf8"));
+      expect(persisted.providers.anthropic.apiKey).toBe("${ANTHROPIC_API_KEY}");
+      expect(persisted.providers.anthropic.baseUrl).toBe("https://example.invalid");
+      expect(persisted.tiers.smart).toEqual({
+        provider: "anthropic",
+        model: "claude-4.6-sonnet-medium-thinking",
+      });
+      expect(persisted.graphPolicy.maxContextTokens).toBe(900);
+
+      const loaded = getGraphFlowSettings(configPath);
+      expect(loaded.provider).toBe("anthropic");
+      expect(loaded.apiKeyEnvVar).toBe("ANTHROPIC_API_KEY");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("indexes graph from a workspace path", async () => {
@@ -143,13 +198,65 @@ describe("M10 CLI runtime", () => {
       );
 
       await runTask("update readme", configPath);
-      const snapshot = inspectGraph(configPath, { nodeLimit: 8, edgeLimit: 8 });
+      const snapshot = await inspectGraph(configPath, { nodeLimit: 8, edgeLimit: 8 });
 
       expect(snapshot.transport).toBe("file");
       expect(snapshot.nodeCount).toBeGreaterThan(0);
       expect(snapshot.edgeCount).toBeGreaterThan(0);
       expect(snapshot.sampleNodes.length).toBeGreaterThan(0);
       expect(snapshot.topRelations.length).toBeGreaterThan(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("auto-indexes workspace when graph snapshot store is empty", async () => {
+    const root = mkdtempSync(join(tmpdir(), "graphflow-snapshot-autoidx-"));
+    const configPath = join(root, "graphflow.config.json");
+    const storePath = join(root, "graph-store.json");
+
+    try {
+      mkdirSync(join(root, "src"), { recursive: true });
+      writeFileSync(join(root, "src", "demo.ts"), "export const demo = 42;", "utf8");
+      writeFileSync(
+        configPath,
+        JSON.stringify(
+          {
+            providers: {},
+            tiers: {
+              smart: { provider: "openai", model: "gpt-5.3-codex" },
+              economy: { provider: "openai", model: "gpt-4.1-mini" },
+            },
+            budgetPolicy: { runTokenCap: 2000 },
+            graphPolicy: {
+              enableAutoBuild: true,
+              enableNearLosslessMode: true,
+              autoIndexOnPreview: false,
+              autoIndexOnRun: false,
+              workspaceRoot: root,
+              includeExtensions: [".ts"],
+              transport: "file",
+              graphStorePath: storePath,
+              maxContextTokens: 200,
+            },
+            learningPolicy: {
+              enableFlywheel: true,
+              trainingCadence: "nightly",
+              canaryRatio: 10,
+              exportPath: join(root, "learning.jsonl"),
+            },
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      const snapshot = await inspectGraph(configPath, { nodeLimit: 8, edgeLimit: 8 });
+
+      expect(snapshot.nodeCount).toBeGreaterThan(0);
+      expect(snapshot.sampleNodes.length).toBeGreaterThan(0);
+      expect(existsSync(storePath)).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -202,7 +309,7 @@ describe("M10 CLI runtime", () => {
       );
 
       await runTask("refactor planner and add tests", configPath);
-      const insights = getSkillInsights(configPath, 10);
+      const insights = await getSkillInsights(configPath, 10);
 
       expect(insights.source).toBe("graph-store");
       expect(insights.transport).toBe("file");
