@@ -8,6 +8,7 @@ import type { GraphEdge, GraphNode } from "../../core/types";
 import type { GraphFlowConfig } from "../../config/schema";
 import { orchestrate, type OrchestrateOptions } from "../../core/orchestrator";
 import { createGraphClient, type GraphClient } from "../../graph/client-factory";
+import { enrichGraphSemanticsSilent } from "../../graph/semantic-enricher";
 import { GraphifySqliteClient } from "../../graph/sqlite-client";
 import { indexWorkspaceFiles } from "../../graph/file-indexer";
 import {
@@ -320,6 +321,16 @@ export async function indexGraph(rootDir?: string, configPath?: string): Promise
     ...indexOptions,
   });
 }
+
+export async function enrichSemanticsSilent(
+  configPath?: string,
+  options?: { batchSize?: number; sleepMs?: number }
+): Promise<{ enrichedCount: number }> {
+  const config = resolveConfig(configPath);
+  const graphClient = createGraphClient(config);
+  return enrichGraphSemanticsSilent(graphClient, options);
+}
+
 
 export async function inspectGraph(
   configPath?: string,
