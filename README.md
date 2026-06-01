@@ -4,7 +4,7 @@ A Context-Aware Multi-Agent Orchestration Engine.
 
 GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，当前版本聚焦于工程可用性：任务分流、DAG 执行、结果校验、图谱索引、近无损上下文压缩、CLI 与 VS Code 扩展联动。
 
-## 当前进度（v0.3.0 + main）
+## 当前进度（v0.4.0）
 
 已完成并可用：
 
@@ -28,10 +28,9 @@ GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，当�
 
 发布信息：
 
-1. GitHub Release: `v0.3.0`
-2. VSIX 产物：`artifacts/graphflow-vscode-0.3.0.vsix`
-3. 发布说明：`docs/releases/v0.3.0.md`
-4. 正式测试报告：`docs/testing/2026-05-28-formal-usage-test-report.md`
+1. GitHub Release: `v0.4.0`
+2. 发布说明：`CHANGELOG.md` 与 `docs/releases/`
+3. 正式测试报告：`docs/testing/2026-05-28-formal-usage-test-report.md`
 
 ## 环境要求
 
@@ -191,6 +190,103 @@ npm run start -- skill insights
 source=graph-store; transport=file; count=8; top=add tests:4/6,refactor planner:3/4
 ```
 
+## v0.4 新能力使用指南
+
+### 1) 切换到 SQLite/FTS5 图谱后端
+
+将 `graphflow.config.json` 的 `graphPolicy` 改为：
+
+```json
+{
+  "graphPolicy": {
+    "enableAutoBuild": true,
+    "transport": "sqlite",
+    "graphStorePath": "tmp/graphflow-graph.sqlite",
+    "maxContextTokens": 1200
+  }
+}
+```
+
+特点：
+
+1. WAL 模式 + FTS5 全文索引，关键词查询 O(log n)
+2. 边表三索引（from / to / relation），`getNeighbors` O(度)
+3. 与 `file` / `memory` transport 接口完全一致，零业务代码改动
+
+### 2) 启用向量召回 + RRF 双路融合
+
+代码侧（`buildLayeredContextPackage` 调用方）打开：
+
+```ts
+import { createHashEmbeddingProvider } from "graphflow/dist/learning/embeddings";
+
+const pkg = await buildLayeredContextPackage(client, query, {
+  enableVectorRecall: true,
+  embeddingProvider: createHashEmbeddingProvider(),
+  vectorTopK: 8,
+  vectorMinSimilarity: 0.2,
+});
+```
+
+切换到 OpenAI 真向量：
+
+```ts
+import { createOpenAiEmbeddingProvider } from "graphflow/dist/learning/embeddings";
+
+const provider = createOpenAiEmbeddingProvider({
+  apiKey: process.env.OPENAI_API_KEY!,
+  model: "text-embedding-3-small",
+});
+```
+
+关键词命中 + 向量相似度通过 RRF（k=60）融合排序，对自然语言任务描述召回更稳。
+
+### 3) Episodic Memory + Reflection
+
+在 `orchestrate(...)` 选项里打开：
+
+```ts
+const run = await orchestrate(
+  { task: "refactor planner module and add tests" },
+  {
+    graphClient,
+    enableEpisodicMemory: true,
+    enableGraphContextInPrompt: true,
+  }
+);
+
+console.log(run.episodeId);       // "episode:xxx"
+console.log(run.similarEpisodes); // 历史相似 task 的 keyDecisions
+```
+
+行为：
+
+1. 每次 task 结束写入一个 `Episode` 节点（含 plan / outcome / keyDecisions / attempts）
+2. 复现相似 task 时，Top-K 历史决策自动注入 PromptContext.extraInstructions
+3. `learn nightly` 调用 reflector：将多次成功 episode 聚类合成 `Lesson` 节点 + `improves` 边，可被技能提示复用
+
+### 4) 跨语言 AST 索引
+
+无需额外配置。`graph index` 会自动识别并解析：
+
+```bash
+npm run start -- graph index .
+```
+
+支持的语言/扩展：
+
+| 语言 | 扩展 | 解析方式 |
+| --- | --- | --- |
+| TypeScript / JavaScript | `.ts .tsx .js .jsx` | TS Compiler API |
+| Python | `.py` | 语言专用 indexer |
+| Rust | `.rs` | 语言专用 indexer |
+| Go | `.go` | 语言专用 indexer |
+| C / C++ | `.c .h .cc .cpp .cxx .hpp .hxx` | 语言专用 indexer |
+
+统一输出 `Symbol` / `Module` 节点 + `defines` / `imports` / `references` 边，下游图谱检索、prompt 注入、episode 召回完全透明复用。
+
+如需限制扫描语言，调整 `graphPolicy.includeExtensions` 即可。
+
 ## 配置文件
 
 默认使用根目录 `graphflow.config.json`。
@@ -212,11 +308,12 @@ cp graphflow.config.example.json graphflow.config.json
 关键配置：
 
 1. `graphPolicy.transport`
-- `file`：本地持久化图谱（默认，适合正式使用测试）
+- `file`：本地持久化图谱（JSON，默认，适合正式使用测试）
 - `memory`：本地内存图谱（适合轻量调试）
+- `sqlite`：SQLite + FTS5 后端（v0.4 新增，适合大型工作区与跨会话持久化）
 - `mcp-http`：连接 Graphify MCP HTTP 服务
 2. `graphPolicy.graphStorePath`
-- `file` transport 的图谱存储路径
+- `file` transport 的 JSON 路径，或 `sqlite` transport 的 `.sqlite` 路径
 2. `graphPolicy.enableNearLosslessMode`
 - 开启后启用近无损上下文打包
 3. `graphPolicy.autoIndexOnPreview`
