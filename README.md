@@ -4,32 +4,56 @@ A Context-Aware Multi-Agent Orchestration Engine.
 
 GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，当前版本聚焦于工程可用性：任务分流、DAG 执行、结果校验、图谱索引、近无损上下文压缩、CLI 与 VS Code 扩展联动。
 
-## 当前进度（v0.4.0）
+## 当前进度（v0.4.2）
 
-已完成并可用：
+GraphFlow 已演进为面向多 agent 协作的工程级编排 + 上下文引擎，覆盖 **任务编排 / 路由 / 图谱 / 检索 / 学习 / Agent 接入** 全链路。
 
+### 一句话总结
+
+> 从 task 描述出发，自动规划 → 路由模型 → 编织带图谱与历史经验的 prompt → 执行/校验/重试/反思，并把成功经验沉淀回知识图谱以指导下次。
+
+### 全部已交付能力
+
+**编排核心**
 1. 简单/复杂任务自动分流（triage）。
-2. 复杂任务编排链路：Brainstorm -> Planner -> DAG -> Worker -> Validator，并支持 LLM 驱动变体（`enableLlmAgents`）。
-3. 任务级需求对账校验、重试机制，以及失败后 mid-DAG 漂移重规划（`enableDriftReplan`）。
-4. 模型分层路由与 provider fallback（OpenAI / Anthropic / 百炼 / 豆包）。
-5. 工作区 AST 索引：基于 TypeScript Compiler API 提取 function/class/interface/type/enum/variable/method 节点 + 跨文件 `references` 边。
-6. 知识图谱真正注入 prompt：summary + skill hints 作为结构化上下文块送入 planner / brainstormer / worker / validator（`enableGraphContextInPrompt`）。
-7. 节点压缩：Symbol content 改为签名行（约 1.76× 字节缩减），元数据迁到 `metadata` 字段。
-8. 真 tokenizer（gpt-tokenizer / o200k_base）替代 `length/4` 估算，token 预算更准确。
-9. 检索升级：倒排索引 keyword 查询、邻接表、`getNodesByIds`、`getNeighbors`、`expandSubgraph` k-hop BFS 沿 `references/imports/depends_on/prerequisite` 扩展上下文。
-10. 学习飞轮 + 技能融合：技能抽取、score/uses、co_occurs 边，以及当 A+B 共现 ≥2 次且成功 ≥2 次时合成复合技能 C 并写 `prerequisite` 边；`suggestSkillHints` 优先返回融合技能。
-11. CLI 命令：`run`、`plan`、`route diagnose`、`learn nightly`、`context preview`、`graph index`、`graph inspect`、`skill insights`，全部支持 `--json`。
-12. MCP stdio server（`graphflow-mcp` bin）暴露 7 个工具，可被 Cursor / Claude Code / Claude Desktop / Codex / Aider 等直接调用。
-13. VS Code 扩展内置 runtime + `@graphflow` chat（`/run`、`/plan`、`/history`、`/diagnose`、`/learn`、`/graph`、`/skills`）+ 图谱快照与技能洞察面板。
-14. SQLite/FTS5 图谱后端：`transport: "sqlite"`、WAL+FTS5 全文索引、边表 PK+三索引、邻居查询 O(度)。
-15. 向量召回 + RRF 双路融合：`enableVectorRecall` + `embeddingProvider`；hash embedding 默认供应商零依赖，可丝滑切换到 OpenAI text-embedding-3-small。
-16. Episodic Memory + Reflection：Episode 节点记录每次 task 轨迹，复现相似 task 时注入历史决策；nightly reflector 集类成功 episode 合成 Lesson 节点。
-17. 跨语言 AST 索引：TypeScript / JavaScript / Python / Rust / Go / C / C++；统一输出 Symbol / Module / imports / defines / references 边，后续图谱 / prompt 注入 / episode 检索透明复用。
+2. Brainstorm → Planner → DAG → Worker → Validator 完整链路，支持 LLM 驱动变体（`enableLlmAgents`）。
+3. 任务级需求对账校验、重试、失败后 mid-DAG 漂移重规划（`enableDriftReplan` + `maxReplanRounds`）。
+4. 模型分层路由 + provider fallback（OpenAI / Anthropic / 百炼 / 豆包），支持按 health 动态切换。
+
+**知识图谱**
+5. 跨语言 AST 索引：TypeScript / JavaScript（TS Compiler API）+ Python / Rust / Go / C / C++（语言专用 indexer），统一输出 Symbol / Module / `defines` / `imports` / `references`。
+6. 节点压缩：Symbol content 改为签名行（约 1.76× 字节缩减），元数据迁到 `metadata`。
+7. 真 tokenizer（gpt-tokenizer / o200k_base）替代 `length/4` 估算。
+
+**多后端存储**
+8. `transport` 四选一：`memory` / `file` (JSON) / `sqlite` (WAL+FTS5) / `mcp-http`。
+9. SQLite 后端：FTS5 全文索引、边表 PK+三索引、`getNeighbors` O(度)、原生包失败时自动降级到 file。
+
+**检索 + 上下文注入**
+10. 倒排索引 keyword 查询、邻接表、`getNodesByIds`、`getNeighbors`、`expandSubgraph` k-hop BFS（沿 `references/imports/depends_on/prerequisite`）。
+11. 向量召回 + RRF 双路融合：`enableVectorRecall` + `embeddingProvider`，hash embedding 零依赖默认，可切换 OpenAI text-embedding-3-small。
+12. 知识图谱真正注入 prompt：`enableGraphContextInPrompt` 把 summary + skill hints 送入 planner / brainstormer / worker / validator。
+
+**学习飞轮**
+13. 技能抽取、score/uses、`co_occurs` 边；A+B 共现 ≥2 且成功 ≥2 时合成复合技能 C 并写 `prerequisite` 边；`suggestSkillHints` 优先返回融合技能。
+14. Episodic Memory：每次 task 写 `Episode` 节点；相似 task 复现时把历史 keyDecisions 注入 PromptContext。
+15. Nightly Reflection：聚类成功 episode 合成 `Lesson` 节点 + `improves` 边，被技能提示复用。
+
+**接入面**
+16. CLI 命令（全部支持 `--json`）：`run`、`plan`、`route diagnose`、`learn nightly`、`context preview`、`graph index`、`graph inspect`、`skill insights`。
+17. MCP stdio server（`graphflow-mcp` bin）暴露 7 个工具，可被 Cursor / Claude Code / Claude Desktop / Codex / Aider 直接调用。
+18. VS Code 扩展（v0.4.2 VSIX）：内置 runtime 自带 `typescript` + `gpt-tokenizer`；命令面板 5 个、`@graphflow` chat 7 个子命令（`/run` `/plan` `/history` `/diagnose` `/learn` `/graph` `/skills`）+ Graph Snapshot / Skill Insights 面板。
+
+### 工程质量
+
+- 测试：`25 文件 / 95 用例` 全绿（覆盖编排 / 路由 / 图谱 / 检索 / 向量 / Episode / 多语言 / CLI / MCP / VS Code panel）。
+- 类型：TypeScript 6 strict + exactOptionalPropertyTypes + NodeNext。
+- License：Apache-2.0。
 
 发布信息：
 
-1. GitHub Release: `v0.4.0`
-2. 发布说明：`CHANGELOG.md` 与 `docs/releases/`
+1. 最新版本：`v0.4.2`（root + vscode-extension）
+2. 变更日志：`CHANGELOG.md`
 3. 正式测试报告：`docs/testing/2026-05-28-formal-usage-test-report.md`
 
 ## 环境要求
