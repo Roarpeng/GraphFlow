@@ -1,5 +1,6 @@
 src/**
 node_modules/**
 !dist/**
+!vendor/**
 tsconfig.json
 package-lock.json

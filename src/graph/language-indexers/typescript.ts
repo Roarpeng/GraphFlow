@@ -1,5 +1,20 @@
-import * as ts from "typescript";
+import { createRequire } from "node:module";
+import type * as TsNs from "typescript";
 import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index";
+
+const requireFn = createRequire(__filename);
+
+let tsModule: typeof TsNs | null | undefined;
+
+function loadTs(): typeof TsNs | null {
+  if (tsModule !== undefined) return tsModule;
+  try {
+    tsModule = requireFn("typescript") as typeof TsNs;
+  } catch {
+    tsModule = null;
+  }
+  return tsModule;
+}
 
 const EXTS = [".ts", ".tsx", ".js", ".jsx"];
 
@@ -8,7 +23,7 @@ function extOf(relPath: string): string {
   return idx < 0 ? "" : relPath.slice(idx).toLowerCase();
 }
 
-function extractFromAst(relPath: string, content: string): ExtractionResult {
+function extractFromAst(relPath: string, content: string, ts: typeof TsNs): ExtractionResult {
   const ext = extOf(relPath);
   const scriptKind =
     ext === ".tsx" ? ts.ScriptKind.TSX :
@@ -20,7 +35,7 @@ function extractFromAst(relPath: string, content: string): ExtractionResult {
   const symbols: DeclaredSymbol[] = [];
   const imports: ImportTarget[] = [];
 
-  const addDecl = (nameNode: ts.Node | undefined, kind: string, exported: boolean): void => {
+  const addDecl = (nameNode: TsNs.Node | undefined, kind: string, exported: boolean): void => {
     if (!nameNode || !ts.isIdentifier(nameNode)) return;
     const name = nameNode.text;
     if (!name) return;
@@ -29,8 +44,8 @@ function extractFromAst(relPath: string, content: string): ExtractionResult {
     symbols.push({ name, kind, exported, line: line + 1, file: relPath });
   };
 
-  const hasExport = (node: ts.Node): boolean => {
-    const flags = ts.getCombinedModifierFlags(node as ts.Declaration);
+  const hasExport = (node: TsNs.Node): boolean => {
+    const flags = ts.getCombinedModifierFlags(node as TsNs.Declaration);
     return (flags & ts.ModifierFlags.Export) !== 0;
   };
 
@@ -66,7 +81,7 @@ function extractFromAst(relPath: string, content: string): ExtractionResult {
     }
   }
 
-  const visit = (node: ts.Node): void => {
+  const visit = (node: TsNs.Node): void => {
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
       if (ts.isIdentifier(callee) && callee.text === "require" && node.arguments.length > 0) {
@@ -111,8 +126,10 @@ export const typescriptIndexer: LanguageIndexer = {
   language: "typescript",
   extensions: EXTS,
   extract(filePath: string, content: string): ExtractionResult {
+    const ts = loadTs();
+    if (!ts) return fallbackExtract(filePath, content);
     try {
-      return extractFromAst(filePath, content);
+      return extractFromAst(filePath, content, ts);
     } catch {
       return fallbackExtract(filePath, content);
     }
