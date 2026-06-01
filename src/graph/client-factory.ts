@@ -55,7 +55,21 @@ export function createGraphClient(config: GraphFlowConfig): GraphClient {
   }
 
   if (config.graphPolicy.transport === "sqlite") {
-    return new GraphifySqliteClient(config.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.sqlite");
+    try {
+      return new GraphifySqliteClient(
+        config.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.sqlite"
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const fallbackPath =
+        config.graphPolicy.graphStorePath?.replace(/\.sqlite$/, ".json") ??
+        "tmp/graphflow-graph.json";
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[graphflow] sqlite transport unavailable, falling back to file://${fallbackPath}. Reason: ${msg}`
+      );
+      return new GraphifyFileClient(fallbackPath);
+    }
   }
 
   return new InMemoryGraphClientAdapter(new GraphifyClient());

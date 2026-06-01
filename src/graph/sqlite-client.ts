@@ -1,8 +1,23 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import Database from "better-sqlite3";
+import { createRequire } from "node:module";
 import type { GraphEdge, GraphNode } from "../core/types";
 import type { GraphClient } from "./client-factory";
+
+const requireFn = createRequire(__filename);
+
+function loadBetterSqlite3(): typeof import("better-sqlite3") {
+  try {
+    return requireFn("better-sqlite3") as typeof import("better-sqlite3");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `[graphflow] sqlite transport requires the optional 'better-sqlite3' package. ` +
+        `Install it (npm i better-sqlite3) or switch graphPolicy.transport to 'file' / 'memory'. ` +
+        `Underlying error: ${msg}`
+    );
+  }
+}
 
 type NodeRow = {
   id: string;
@@ -70,13 +85,14 @@ function escapeFtsToken(token: string): string {
 }
 
 export class GraphifySqliteClient implements GraphClient {
-  private readonly db: Database.Database;
+  private readonly db: import("better-sqlite3").Database;
 
   constructor(dbPath: string) {
     const dir = dirname(dbPath);
     if (dir && dir !== "." && dir !== "") {
       mkdirSync(dir, { recursive: true });
     }
+    const Database = loadBetterSqlite3();
     this.db = new Database(dbPath);
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("synchronous = NORMAL");
