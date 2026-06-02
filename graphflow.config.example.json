@@ -12,6 +12,16 @@
     },
     "doubao": {
       "apiKey": "${DOUBAO_API_KEY}"
+    },
+    "openbmb": {
+      "mode": "embedded",
+      "engine": "command",
+      "commandPath": "${GRAPHFLOW_MINICPM_COMMAND}",
+      "modelPath": "${GRAPHFLOW_MINICPM_MODEL_PATH}",
+      "baseUrl": "http://localhost:11434",
+      "timeoutMs": 5000,
+      "maxTokens": 256,
+      "temperature": 0.1
     }
   },
   "tiers": {
@@ -31,7 +41,16 @@
     "transport": "file",
     "graphStorePath": "tmp/graphflow-graph.json",
     "maxContextTokens": 1200,
-    "layerQuota": { "l1": 6, "l2": 4, "l3": 3 }
+    "layerQuota": { "l1": 6, "l2": 4, "l3": 3 },
+    "semanticEnrichment": {
+      "enabled": true,
+      "mode": "post-index",
+      "model": "minicpm-1b",
+      "batchSize": 5,
+      "sleepMs": 1000,
+      "timeoutMs": 5000,
+      "autoRunOnIndex": true
+    }
   },
   "learningPolicy": {
     "enableFlywheel": true,
@@ -39,12 +58,19 @@
     "canaryRatio": 10,
     "exportPath": "tmp/learning-dataset.jsonl",
     "eventsPath": "tmp/learning-events.jsonl",
-    "summaryPath": "tmp/learning-summary.json"
+    "summaryPath": "tmp/learning-summary.json",
+    "skillEvolution": {
+      "enabled": true,
+      "model": "minicpm-1b",
+      "minCoOccur": 2,
+      "minSuccess": 2,
+      "enableTripleFusion": true
+    }
   },
   "routingPolicy": {
     "enableDynamicRouting": true,
     "requireApiKeyForHealthy": false,
-    "providerPriority": ["openai", "anthropic", "bailian", "doubao"]
+    "providerPriority": ["openai", "anthropic", "bailian", "doubao", "openbmb"]
   },
   "skillPolicy": {
     "enableSkillFlywheel": true,

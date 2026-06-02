@@ -16,6 +16,8 @@ const roleTierMap: Record<AgentRole, ModelTier> = {
   planner: "smart",
   validator: "smart",
   worker: "economy",
+  enricher: "economy",
+  evolver: "economy",
 };
 
 const DEFAULT_MODELS: Record<ProviderName, Record<ModelTier, string>> = {
@@ -43,6 +45,15 @@ const DEFAULT_MODELS: Record<ProviderName, Record<ModelTier, string>> = {
 
 export function resolveModelForRole(role: AgentRole): ModelSelection {
   const tier = roleTierMap[role];
+  if (role === "enricher" || role === "evolver") {
+    return {
+      provider: "openbmb",
+      model: DEFAULT_MODELS.openbmb[tier],
+      tier,
+      fallbackApplied: false,
+    };
+  }
+
   return {
     provider: "openai",
     model: DEFAULT_MODELS.openai[tier],

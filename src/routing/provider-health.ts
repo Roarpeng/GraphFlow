@@ -1,7 +1,7 @@
 import type { GraphFlowConfig } from "../config/schema";
 import type { ProviderHealthMap, ProviderName } from "./model-router";
 
-const ALL_PROVIDERS: ProviderName[] = ["openai", "anthropic", "bailian", "doubao"];
+const ALL_PROVIDERS: ProviderName[] = ["openai", "anthropic", "bailian", "doubao", "openbmb"];
 
 export function buildProviderHealthMap(config: GraphFlowConfig): ProviderHealthMap {
   const requireApiKey = config.routingPolicy?.requireApiKeyForHealthy ?? false;
@@ -14,6 +14,15 @@ export function buildProviderHealthMap(config: GraphFlowConfig): ProviderHealthM
     }
 
     if (!requireApiKey) {
+      if (provider === "openbmb") {
+        const mode = details.mode ?? "embedded";
+        if (mode === "embedded") {
+          return [provider, true] as const;
+        }
+        if (mode === "ollama" || mode === "openai-compat") {
+          return [provider, Boolean(details.baseUrl)] as const;
+        }
+      }
       return [provider, true] as const;
     }
 

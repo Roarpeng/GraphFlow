@@ -1,5 +1,19 @@
+export type OpenBmbMode = "embedded" | "ollama" | "openai-compat";
+
+export interface ProviderConfig {
+  apiKey?: string;
+  baseUrl?: string;
+  mode?: OpenBmbMode;
+  engine?: "command" | "node-llama-cpp";
+  modelPath?: string;
+  commandPath?: string;
+  timeoutMs?: number;
+  maxTokens?: number;
+  temperature?: number;
+}
+
 export interface GraphFlowConfig {
-  providers: Record<string, { apiKey?: string; baseUrl?: string }>;
+  providers: Record<string, ProviderConfig>;
   tiers: {
     smart: { provider: string; model: string };
     economy: { provider: string; model: string };
@@ -24,6 +38,15 @@ export interface GraphFlowConfig {
       l2: number;
       l3: number;
     };
+    semanticEnrichment?: {
+      enabled?: boolean;
+      mode?: "streaming" | "post-index" | "off";
+      model?: string;
+      batchSize?: number;
+      sleepMs?: number;
+      timeoutMs?: number;
+      autoRunOnIndex?: boolean;
+    };
   };
   learningPolicy: {
     enableFlywheel: boolean;
@@ -32,6 +55,13 @@ export interface GraphFlowConfig {
     exportPath: string;
     eventsPath?: string;
     summaryPath?: string;
+    skillEvolution?: {
+      enabled?: boolean;
+      model?: string;
+      minCoOccur?: number;
+      minSuccess?: number;
+      enableTripleFusion?: boolean;
+    };
   };
   routingPolicy?: {
     enableDynamicRouting?: boolean;

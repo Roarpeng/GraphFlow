@@ -55,6 +55,7 @@
     "gpt-tokenizer": "^3.4.0"
   },
   "optionalDependencies": {
-    "better-sqlite3": "^12.10.0"
+    "better-sqlite3": "^12.10.0",
+    "node-llama-cpp": "^3.15.6"
   }
 }

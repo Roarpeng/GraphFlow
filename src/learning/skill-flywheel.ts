@@ -38,8 +38,8 @@ export interface CompositeSkillState {
 type EdgeRelation = GraphEdge["relation"];
 type SkillEdge = { from: string; to: string; relation: EdgeRelation };
 
-const COMPOSITE_MIN_COOCCUR = 2;
-const COMPOSITE_MIN_SUCCESS = 2;
+const DEFAULT_COMPOSITE_MIN_COOCCUR = 2;
+const DEFAULT_COMPOSITE_MIN_SUCCESS = 2;
 
 export function extractSkillAtoms(task: string): string[] {
   const phrases = task
@@ -133,6 +133,17 @@ export async function applySkillLearning(
           edges.push({ from: skillNodeId(n1!), to: evolutionNode.id, relation: "prerequisite" });
           edges.push({ from: skillNodeId(n2!), to: evolutionNode.id, relation: "prerequisite" });
         }
+      }
+    }
+  }
+
+  if (passed) {
+    const tripleAtomNames = getTripleAtomNames(skills);
+    const tripleNode = tripleAtomNames ? buildTripleFusionNode(tripleAtomNames, now) : undefined;
+    if (tripleNode && tripleAtomNames) {
+      nodes.push(tripleNode);
+      for (const atom of tripleAtomNames) {
+        edges.push({ from: skillNodeId(atom), to: tripleNode.id, relation: "prerequisite" });
       }
     }
   }
@@ -290,9 +301,11 @@ export async function loadCompositeSkill(
 }
 
 function compositeGateMet(composite: CompositeSkillState): boolean {
+  const minCoOccur = Number(process.env.GRAPHFLOW_SKILL_EVOLVE_MIN_COOCCUR ?? DEFAULT_COMPOSITE_MIN_COOCCUR);
+  const minSuccess = Number(process.env.GRAPHFLOW_SKILL_EVOLVE_MIN_SUCCESS ?? DEFAULT_COMPOSITE_MIN_SUCCESS);
   return (
-    composite.coOccurCount >= COMPOSITE_MIN_COOCCUR &&
-    composite.successCount >= COMPOSITE_MIN_SUCCESS &&
+    composite.coOccurCount >= (Number.isFinite(minCoOccur) ? minCoOccur : DEFAULT_COMPOSITE_MIN_COOCCUR) &&
+    composite.successCount >= (Number.isFinite(minSuccess) ? minSuccess : DEFAULT_COMPOSITE_MIN_SUCCESS) &&
     composite.successCount > composite.failureCount
   );
 }
@@ -457,7 +470,7 @@ export async function evolveCompositeSkillLlm(
   n2: string,
   previousComposite: any
 ): Promise<GraphNode | null> {
-  const openbmbModel = "minicpm-1b";
+  const openbmbModel = process.env.GRAPHFLOW_SKILL_EVOLVE_MODEL ?? "minicpm-1b";
 
   const prompt = [
     `你是一个卓越的代码认知科学家，正模拟人类大脑的技能成长。`,
@@ -478,7 +491,7 @@ export async function evolveCompositeSkillLlm(
       fallbackApplied: false
     };
 
-    const rawJson = await executeRolePrompt("worker", prompt, selection);
+    const rawJson = await executeRolePrompt("evolver", prompt, selection);
     const cleaned = cleanJsonString(rawJson, n1, n2);
     const parsed = JSON.parse(cleaned);
 
@@ -508,6 +521,42 @@ export async function evolveCompositeSkillLlm(
     // 异常安全降级，若推理失败，退回传统规则拼接
     return null;
   }
+}
+
+function getTripleAtomNames(skills: string[]): [string, string, string] | undefined {
+  if (skills.length < 3) {
+    return undefined;
+  }
+  const atoms = dedup(skills).sort();
+  if (atoms.length < 3) {
+    return undefined;
+  }
+  return [atoms[0]!, atoms[1]!, atoms[2]!];
+}
+
+function buildTripleFusionNode(names: [string, string, string], now: number): GraphNode | undefined {
+  if (process.env.GRAPHFLOW_SKILL_TRIPLE_FUSION === "0") {
+    return undefined;
+  }
+  const [a, b, c] = names;
+  const text = `${a}+${b}+${c}`;
+  const id = `skill:triple:${sanitizeAtom(a)}__${sanitizeAtom(b)}__${sanitizeAtom(c)}`;
+  const content = {
+    kind: "triple-composite",
+    id,
+    name: text,
+    parents: [skillNodeId(a), skillNodeId(b), skillNodeId(c)],
+    score: 1,
+    uses: 1,
+    updatedAt: now,
+    methodology: `融合 ${a}、${b}、${c} 的三元高阶技能`,
+  };
+
+  return {
+    id,
+    type: "Skill",
+    content: JSON.stringify(content),
+  };
 }
 
 function cleanJsonString(raw: string, n1: string, n2: string): string {

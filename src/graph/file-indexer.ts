@@ -114,17 +114,26 @@ export async function indexWorkspaceFiles(
     edges.push({ from: fileNodeId, to: moduleNodeId, relation: "depends_on" });
 
     for (const symbol of declared) {
-      const sig = `${symbol.kind} ${symbol.name}${symbol.exported ? " (exported)" : ""} @${relPath}:${symbol.line}`;
+      const compactSig = `${symbol.kind} ${symbol.name}${symbol.exported ? " (exported)" : ""} @${relPath}:${symbol.line}`;
+      const signature = symbol.signature ?? compactSig;
+      const signatureHash = hashText(`${signature}\n${symbol.jsdoc ?? ""}\n${symbol.returnType ?? ""}`);
       nodes.push({
         id: symbol.nodeId,
         type: "Symbol",
-        content: sig,
+        content: compactSig,
         metadata: {
           name: symbol.name,
           kind: symbol.kind,
           exported: symbol.exported,
           line: symbol.line,
           file: relPath,
+          signature,
+          signatureHash,
+          ...(symbol.jsdoc ? { jsdoc: symbol.jsdoc } : {}),
+          ...(symbol.visibility ? { visibility: symbol.visibility } : {}),
+          ...(symbol.paramsCount !== undefined ? { paramsCount: symbol.paramsCount } : {}),
+          ...(symbol.returnType ? { returnType: symbol.returnType } : {}),
+          ...(symbol.complexity !== undefined ? { complexity: symbol.complexity } : {}),
         },
       });
       edges.push({ from: fileNodeId, to: symbol.nodeId, relation: "defines" });

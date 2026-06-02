@@ -6,6 +6,7 @@ export interface EnricherOptions {
   batchSize?: number;
   sleepMs?: number;
   openbmbModel?: string;
+  timeoutMs?: number;
 }
 
 /**
@@ -20,8 +21,9 @@ export async function enrichGraphSemanticsSilent(
   }
 
   const batchSize = options?.batchSize ?? 5;
-  const sleepMs = options?.sleepMs ?? 1000;
+  const sleepMs = options?.sleepMs ?? 0;
   const openbmbModel = options?.openbmbModel ?? "minicpm-1b";
+  const timeoutMs = options?.timeoutMs;
 
   // 1. 读取当前图谱快照
   const snapshot = await client.readSnapshot();
@@ -50,7 +52,7 @@ export async function enrichGraphSemanticsSilent(
       "你是一个卓越的代码语义分析器。",
       "请用一句话极其精炼地总结以下代码片段或函数签名的核心功能，限 20 字以内（使用中文）。",
       "绝不要输出任何解释、标点或引言，直接给出核心功能总结。",
-      `代码签名: ${codeSignature}`,
+      `代码签名: ${safeQuote(codeSignature)}`,
       `所在文件: ${fileSource}`,
       "功能总结:"
     ].join("\n");
@@ -64,7 +66,24 @@ export async function enrichGraphSemanticsSilent(
         fallbackApplied: false
       };
 
-      const rawSummary = await executeRolePrompt("worker", prompt, selection);
+      const previousTimeout = process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS;
+      if (timeoutMs !== undefined) {
+        process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS = String(timeoutMs);
+      }
+
+      let rawSummary = "";
+      try {
+        rawSummary = await executeRolePrompt("enricher", prompt, selection);
+      } finally {
+        if (timeoutMs !== undefined) {
+          if (previousTimeout === undefined) {
+            delete process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS;
+          } else {
+            process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS = previousTimeout;
+          }
+        }
+      }
+
       const summary = rawSummary.trim().replace(/^功能总结[:：]?\s*/, "");
 
       // 5. 写入 metadata 存储
@@ -93,4 +112,8 @@ export async function enrichGraphSemanticsSilent(
   }
 
   return { enrichedCount: updatedNodes.length };
+}
+
+function safeQuote(value: string): string {
+  return "```\n" + value.replace(/```/g, "''").slice(0, 800) + "\n```";
 }

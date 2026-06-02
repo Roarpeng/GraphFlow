@@ -6,7 +6,7 @@ export type TaskStatus =
   | "FAILED"
   | "HUMAN_REVIEW_REQUIRED";
 
-export type AgentRole = "planner" | "worker" | "validator";
+export type AgentRole = "planner" | "worker" | "validator" | "enricher" | "evolver";
 
 export interface ValidationResult {
   passed: boolean;

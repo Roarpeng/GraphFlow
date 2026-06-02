@@ -81,6 +81,33 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     throw new Error("Invalid config: learningPolicy.canaryRatio must be 0-100.");
   }
 
+  const openbmb = input.providers?.openbmb;
+  if (openbmb?.mode) {
+    const allowedModes = new Set(["embedded", "ollama", "openai-compat"]);
+    if (!allowedModes.has(openbmb.mode)) {
+      throw new Error("Invalid config: providers.openbmb.mode must be embedded|ollama|openai-compat.");
+    }
+  }
+
+  if (openbmb?.engine) {
+    const allowedEngines = new Set(["command", "node-llama-cpp"]);
+    if (!allowedEngines.has(openbmb.engine)) {
+      throw new Error("Invalid config: providers.openbmb.engine must be command|node-llama-cpp.");
+    }
+  }
+
+  if (openbmb?.mode === "ollama" || openbmb?.mode === "openai-compat") {
+    if (!openbmb.baseUrl) {
+      throw new Error("Invalid config: providers.openbmb.baseUrl is required for ollama/openai-compat mode.");
+    }
+  }
+
+  if ((openbmb?.mode ?? "embedded") === "embedded") {
+    if (!openbmb?.commandPath && !process.env.GRAPHFLOW_MINICPM_COMMAND) {
+      // Embedded mode can still run in fallback compatibility mode; keep validation soft.
+    }
+  }
+
   return {
     ...input,
     graphPolicy: {
@@ -103,6 +130,15 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
         ".json",
       ],
       layerQuota: input.graphPolicy.layerQuota ?? { l1: 6, l2: 4, l3: 3 },
+      semanticEnrichment: {
+        enabled: input.graphPolicy.semanticEnrichment?.enabled ?? true,
+        mode: input.graphPolicy.semanticEnrichment?.mode ?? "post-index",
+        model: input.graphPolicy.semanticEnrichment?.model ?? "minicpm-1b",
+        batchSize: input.graphPolicy.semanticEnrichment?.batchSize ?? 5,
+        sleepMs: input.graphPolicy.semanticEnrichment?.sleepMs ?? 0,
+        timeoutMs: input.graphPolicy.semanticEnrichment?.timeoutMs ?? 5000,
+        autoRunOnIndex: input.graphPolicy.semanticEnrichment?.autoRunOnIndex ?? true,
+      },
     },
     learningPolicy: {
       ...input.learningPolicy,
@@ -110,6 +146,13 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       canaryRatio: input.learningPolicy.canaryRatio ?? 10,
       eventsPath: input.learningPolicy.eventsPath ?? "tmp/learning-events.jsonl",
       summaryPath: input.learningPolicy.summaryPath ?? "tmp/learning-summary.json",
+      skillEvolution: {
+        enabled: input.learningPolicy.skillEvolution?.enabled ?? true,
+        model: input.learningPolicy.skillEvolution?.model ?? "minicpm-1b",
+        minCoOccur: input.learningPolicy.skillEvolution?.minCoOccur ?? 2,
+        minSuccess: input.learningPolicy.skillEvolution?.minSuccess ?? 2,
+        enableTripleFusion: input.learningPolicy.skillEvolution?.enableTripleFusion ?? true,
+      },
     },
     routingPolicy: {
       enableDynamicRouting: input.routingPolicy?.enableDynamicRouting ?? true,

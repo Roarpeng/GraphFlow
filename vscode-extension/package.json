@@ -23,6 +23,7 @@
     "onCommand:graphflow.showSettings",
     "onCommand:graphflow.showGraph",
     "onCommand:graphflow.showSkills",
+    "onCommand:graphflow.enrichGraph",
     "onChatParticipant:roarpeng.graphflow-vscode.graphflowAgent"
   ],
   "main": "./dist/extension.js",
@@ -55,6 +56,10 @@
       {
         "command": "graphflow.showSkills",
         "title": "GraphFlow: Skill Insights"
+      },
+      {
+        "command": "graphflow.enrichGraph",
+        "title": "GraphFlow: Enrich Graph Semantics"
       }
     ],
     "chatParticipants": [
@@ -100,6 +105,10 @@
           {
             "name": "skills",
             "description": "Show current top skill insights"
+          },
+          {
+            "name": "enrich",
+            "description": "Enrich pending Symbol nodes with semantic summaries"
           }
         ]
       }

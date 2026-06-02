@@ -28,6 +28,7 @@ interface GraphFlowRuntime {
   runTask(task: string): Promise<string>;
   planAndBrainstorm(task: string): string;
   previewContext(query: string): Promise<ContextPreviewResult>;
+  enrichSemanticsSilent(configPath?: string, options?: { batchSize?: number; sleepMs?: number; timeoutMs?: number }): Promise<{ enrichedCount: number }>;
   diagnoseRouting(): string;
   runLearningNightly(): string;
   inspectGraph(nodeLimit?: number, edgeLimit?: number): Promise<GraphSnapshotResult>;
@@ -175,6 +176,17 @@ export function activate(context: vscode.ExtensionContext): void {
     showSkillInsightsPanel(context, insights);
   });
 
+  const enrichGraph = vscode.commands.registerCommand("graphflow.enrichGraph", async () => {
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+      vscode.window.showErrorMessage("No workspace folder found.");
+      return;
+    }
+
+    const result = await runGraphFlow(workspaceRoot, (runtime) => runtime.enrichSemanticsSilent());
+    vscode.window.showInformationMessage(`GraphFlow enriched ${result.enrichedCount} symbol nodes.`);
+  });
+
   const participant = vscode.chat.createChatParticipant(
     CHAT_PARTICIPANT_ID,
     async (request, _context, stream) => {
@@ -253,6 +265,12 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
+      if (command === "enrich") {
+        const result = await runGraphFlow(workspaceRoot, (runtime) => runtime.enrichSemanticsSilent());
+        stream.markdown(`Graph enrichment result:\n- enrichedCount: ${result.enrichedCount}`);
+        return;
+      }
+
       if (!payload) {
         stream.markdown("Please provide a task description. Example: `/run update readme and add tests`");
         return;
@@ -292,6 +310,7 @@ export function activate(context: vscode.ExtensionContext): void {
     showSettings,
     showGraph,
     showSkills,
+    enrichGraph,
     participant
   );
 }
@@ -338,6 +357,7 @@ async function loadRuntime(): Promise<GraphFlowRuntime> {
         !module.runTask ||
         !module.planAndBrainstorm ||
         !module.previewContext ||
+        !module.enrichSemanticsSilent ||
         !module.diagnoseRouting ||
         !module.runLearningNightly ||
         !module.inspectGraph ||
@@ -352,6 +372,7 @@ async function loadRuntime(): Promise<GraphFlowRuntime> {
         runTask: module.runTask,
         planAndBrainstorm: module.planAndBrainstorm,
         previewContext: module.previewContext,
+        enrichSemanticsSilent: module.enrichSemanticsSilent,
         diagnoseRouting: module.diagnoseRouting,
         runLearningNightly: module.runLearningNightly,
         inspectGraph: module.inspectGraph,
@@ -377,7 +398,7 @@ async function withWorkspaceCwd<T>(workspaceRoot: string, action: () => Promise<
 
 function detectInlineCommand(
   prompt: string
-): "run" | "plan" | "history" | "context" | "settings" | "diagnose" | "learn" | "graph" | "skills" {
+): "run" | "plan" | "history" | "context" | "settings" | "diagnose" | "learn" | "graph" | "skills" | "enrich" {
   if (prompt.startsWith("/plan")) {
     return "plan";
   }
@@ -410,11 +431,15 @@ function detectInlineCommand(
     return "skills";
   }
 
+  if (prompt.startsWith("/enrich")) {
+    return "enrich";
+  }
+
   return "run";
 }
 
 function stripInlineCommand(prompt: string): string {
-  return prompt.replace(/^\/(run|plan|history|context|settings|diagnose|learn|graph|skills)\s*/i, "").trim();
+  return prompt.replace(/^\/(run|plan|history|context|settings|diagnose|learn|graph|skills|enrich)\s*/i, "").trim();
 }
 
 function formatAsBullet(output: string): string {

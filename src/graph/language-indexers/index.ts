@@ -10,6 +10,12 @@ export interface DeclaredSymbol {
   exported: boolean;
   line: number;
   file: string;
+  signature?: string;
+  jsdoc?: string;
+  visibility?: "public" | "protected" | "private";
+  paramsCount?: number;
+  returnType?: string;
+  complexity?: number;
 }
 
 export interface ImportTarget {

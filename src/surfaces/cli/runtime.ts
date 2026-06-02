@@ -1,5 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
+import { createReadStream } from "node:fs";
 import { brainstormTask } from "../../agents/brainstormer";
 import { planTasks } from "../../agents/planner";
 import { loadConfig, validateConfig } from "../../config/loader";
@@ -19,6 +22,7 @@ import { appendFeedbackEvent, runNightlyLearning } from "../../learning/nightly-
 import { resolveModelForRole, resolveModelWithFallback } from "../../routing/model-router";
 import { buildFallbackChain, buildProviderHealthMap } from "../../routing/provider-health";
 import type { TaskStatus } from "../../core/types";
+import type { EnricherOptions } from "../../graph/semantic-enricher";
 
 export function getDefaultConfig(): GraphFlowConfig {
   return validateConfig({
@@ -39,6 +43,15 @@ export function getDefaultConfig(): GraphFlowConfig {
       graphStorePath: "tmp/graphflow-graph.json",
       maxContextTokens: 400,
       layerQuota: { l1: 6, l2: 4, l3: 3 },
+      semanticEnrichment: {
+        enabled: true,
+        mode: "post-index",
+        model: "minicpm-1b",
+        batchSize: 5,
+        sleepMs: 0,
+        timeoutMs: 5000,
+        autoRunOnIndex: true,
+      },
     },
     learningPolicy: {
       enableFlywheel: true,
@@ -47,6 +60,13 @@ export function getDefaultConfig(): GraphFlowConfig {
       exportPath: "tmp/learning-dataset.jsonl",
       eventsPath: "tmp/learning-events.jsonl",
       summaryPath: "tmp/learning-summary.json",
+      skillEvolution: {
+        enabled: true,
+        model: "minicpm-1b",
+        minCoOccur: 2,
+        minSuccess: 2,
+        enableTripleFusion: true,
+      },
     },
     routingPolicy: {
       enableDynamicRouting: true,
@@ -66,6 +86,67 @@ export function resolveConfig(path = "graphflow.config.json"): GraphFlowConfig {
   }
 
   return getDefaultConfig();
+}
+
+function applyOpenBmbRuntimeEnv(config: GraphFlowConfig): void {
+  const genericProviders = ["openai", "anthropic", "bailian", "doubao"] as const;
+  for (const name of genericProviders) {
+    const cfg = config.providers[name];
+    if (!cfg) {
+      continue;
+    }
+    const envPrefix = name.toUpperCase();
+    if (cfg.apiKey) {
+      process.env[`${envPrefix}_API_KEY`] = cfg.apiKey;
+    }
+    if (cfg.baseUrl) {
+      process.env[`${envPrefix}_BASE_URL`] = cfg.baseUrl;
+    }
+  }
+
+  const openbmb = config.providers.openbmb;
+  if (!openbmb) {
+    return;
+  }
+  if (openbmb.mode) {
+    process.env.GRAPHFLOW_OPENBMB_MODE = openbmb.mode;
+  }
+  if (openbmb.baseUrl) {
+    process.env.GRAPHFLOW_OPENBMB_BASE_URL = openbmb.baseUrl;
+  }
+  if (openbmb.apiKey) {
+    process.env.GRAPHFLOW_OPENBMB_API_KEY = openbmb.apiKey;
+  }
+  if (openbmb.modelPath) {
+    process.env.GRAPHFLOW_OPENBMB_MODEL_PATH = openbmb.modelPath;
+  }
+  if (openbmb.commandPath) {
+    process.env.GRAPHFLOW_MINICPM_COMMAND = openbmb.commandPath;
+  }
+  if (openbmb.engine) {
+    process.env.GRAPHFLOW_MINICPM_ENGINE = openbmb.engine;
+  }
+  if (openbmb.timeoutMs !== undefined) {
+    process.env.GRAPHFLOW_OPENBMB_TIMEOUT_MS = String(openbmb.timeoutMs);
+  }
+  if (openbmb.maxTokens !== undefined) {
+    process.env.GRAPHFLOW_OPENBMB_MAX_TOKENS = String(openbmb.maxTokens);
+  }
+  if (openbmb.temperature !== undefined) {
+    process.env.GRAPHFLOW_OPENBMB_TEMPERATURE = String(openbmb.temperature);
+  }
+
+  const evolution = config.learningPolicy.skillEvolution;
+  if (evolution?.model) {
+    process.env.GRAPHFLOW_SKILL_EVOLVE_MODEL = evolution.model;
+  }
+  if (evolution?.minCoOccur !== undefined) {
+    process.env.GRAPHFLOW_SKILL_EVOLVE_MIN_COOCCUR = String(evolution.minCoOccur);
+  }
+  if (evolution?.minSuccess !== undefined) {
+    process.env.GRAPHFLOW_SKILL_EVOLVE_MIN_SUCCESS = String(evolution.minSuccess);
+  }
+  process.env.GRAPHFLOW_SKILL_TRIPLE_FUSION = evolution?.enableTripleFusion === false ? "0" : "1";
 }
 
 export interface ContextPreviewResult {
@@ -181,6 +262,7 @@ export function saveGraphFlowSettings(
 
 export async function previewContext(query: string, configPath?: string): Promise<ContextPreviewResult> {
   const config = resolveConfig(configPath);
+  applyOpenBmbRuntimeEnv(config);
   const graphClient = createGraphClient(config);
 
   if (config.graphPolicy.autoIndexOnPreview) {
@@ -308,8 +390,17 @@ export interface LearningNightlyResult {
   dataset: string;
 }
 
+export interface ModelDownloadResult {
+  model: string;
+  targetPath: string;
+  bytes: number;
+  skipped: boolean;
+  verified: boolean;
+}
+
 export async function indexGraph(rootDir?: string, configPath?: string): Promise<GraphIndexResult> {
   const config = resolveConfig(configPath);
+  applyOpenBmbRuntimeEnv(config);
   const graphClient = createGraphClient(config);
   const targetDir = rootDir || config.graphPolicy.workspaceRoot || process.cwd();
 
@@ -317,18 +408,109 @@ export async function indexGraph(rootDir?: string, configPath?: string): Promise
     ? { includeExtensions: config.graphPolicy.includeExtensions }
     : undefined;
 
-  return indexWorkspaceFiles(graphClient, targetDir, {
+  const indexed = await indexWorkspaceFiles(graphClient, targetDir, {
     ...indexOptions,
   });
+
+  const enrichPolicy = config.graphPolicy.semanticEnrichment;
+  if (enrichPolicy?.enabled && enrichPolicy.autoRunOnIndex && enrichPolicy.mode !== "off") {
+    await enrichGraphSemanticsSilent(graphClient, {
+      ...(enrichPolicy.batchSize !== undefined ? { batchSize: enrichPolicy.batchSize } : {}),
+      ...(enrichPolicy.sleepMs !== undefined ? { sleepMs: enrichPolicy.sleepMs } : {}),
+      ...(enrichPolicy.model ? { openbmbModel: enrichPolicy.model } : {}),
+      ...(enrichPolicy.timeoutMs !== undefined ? { timeoutMs: enrichPolicy.timeoutMs } : {}),
+    });
+  }
+
+  return indexed;
 }
 
 export async function enrichSemanticsSilent(
   configPath?: string,
-  options?: { batchSize?: number; sleepMs?: number }
+  options?: { batchSize?: number; sleepMs?: number; timeoutMs?: number }
 ): Promise<{ enrichedCount: number }> {
   const config = resolveConfig(configPath);
+  applyOpenBmbRuntimeEnv(config);
   const graphClient = createGraphClient(config);
-  return enrichGraphSemanticsSilent(graphClient, options);
+  const enrichPolicy = config.graphPolicy.semanticEnrichment;
+  const enricherOptions: EnricherOptions = {};
+  const batchSize = options?.batchSize ?? enrichPolicy?.batchSize;
+  if (batchSize !== undefined) {
+    enricherOptions.batchSize = batchSize;
+  }
+  const sleepMs = options?.sleepMs ?? enrichPolicy?.sleepMs;
+  if (sleepMs !== undefined) {
+    enricherOptions.sleepMs = sleepMs;
+  }
+  const timeoutMs = options?.timeoutMs ?? enrichPolicy?.timeoutMs;
+  if (timeoutMs !== undefined) {
+    enricherOptions.timeoutMs = timeoutMs;
+  }
+  if (enrichPolicy?.model) {
+    enricherOptions.openbmbModel = enrichPolicy.model;
+  }
+
+  return enrichGraphSemanticsSilent(graphClient, enricherOptions);
+}
+
+export async function downloadOpenBmbModel(
+  configPath?: string,
+  options?: { model?: string; url?: string; sha256?: string; targetPath?: string; force?: boolean }
+): Promise<ModelDownloadResult> {
+  const config = resolveConfig(configPath);
+  applyOpenBmbRuntimeEnv(config);
+
+  const model = options?.model ?? "minicpm-1b";
+  const defaultUrl = process.env.GRAPHFLOW_MINICPM_MODEL_URL;
+  const url = options?.url ?? defaultUrl;
+
+  const configuredPath = options?.targetPath ?? config.providers.openbmb?.modelPath;
+  const fallbackPath = join(tmpdir(), "graphflow-models", `${model}.gguf`);
+  const targetPath = configuredPath ?? fallbackPath;
+  const force = options?.force ?? false;
+  const expectedSha = options?.sha256 ?? process.env.GRAPHFLOW_MINICPM_MODEL_SHA256;
+
+  if (existsSync(targetPath) && !force) {
+    const bytes = getFileSize(targetPath);
+    const verified = expectedSha ? (await sha256File(targetPath)) === expectedSha.toLowerCase() : true;
+    return {
+      model,
+      targetPath,
+      bytes,
+      skipped: true,
+      verified,
+    };
+  }
+
+  if (!url) {
+    throw new Error("Model download URL is required. Set GRAPHFLOW_MINICPM_MODEL_URL or pass --url.");
+  }
+
+  mkdirSync(dirname(targetPath), { recursive: true });
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Model download failed: ${response.status} ${response.statusText}`);
+  }
+
+  const bytes = Buffer.from(await response.arrayBuffer());
+  writeFileSync(targetPath, bytes);
+
+  if (expectedSha) {
+    const actual = await sha256File(targetPath);
+    if (actual !== expectedSha.toLowerCase()) {
+      throw new Error(`Model sha256 mismatch. expected=${expectedSha.toLowerCase()} actual=${actual}`);
+    }
+  }
+
+  const finalBytes = getFileSize(targetPath);
+  return {
+    model,
+    targetPath,
+    bytes: finalBytes,
+    skipped: false,
+    verified: Boolean(expectedSha),
+  };
 }
 
 
@@ -448,6 +630,7 @@ export async function getSkillInsights(configPath?: string, limit = 12): Promise
 
 export async function runTaskResult(task: string, configPath?: string): Promise<RunTaskSummary> {
   const config = resolveConfig(configPath);
+  applyOpenBmbRuntimeEnv(config);
   const eventsPath = config.learningPolicy.eventsPath ?? "tmp/learning-events.jsonl";
 
   try {
@@ -699,6 +882,23 @@ function parseEnvPlaceholder(value?: string): string | undefined {
 
   const match = value.match(/^\$\{([A-Z0-9_]+)\}$/i);
   return match?.[1];
+}
+
+function getFileSize(path: string): number {
+  try {
+    return readFileSync(path).byteLength;
+  } catch {
+    return 0;
+  }
+}
+
+async function sha256File(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  const stream = createReadStream(path);
+  for await (const chunk of stream) {
+    hash.update(chunk);
+  }
+  return hash.digest("hex");
 }
 
 function readRawConfig(configPath: string): Partial<GraphFlowConfig> | undefined {

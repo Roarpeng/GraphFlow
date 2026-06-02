@@ -78,3 +78,423 @@ Test Files  28 passed (28)
 6.  **ESLint 全局忽略与类型规则放宽**：[eslint.config.js](file:///c:/Users/roarp/Desktop/TMP/Code/AICode/GraphFlow/eslint.config.js)
 7.  **交付总结规格书**：[Spec.md](file:///c:/Users/roarp/Desktop/TMP/Code/AICode/GraphFlow/Spec.md) (本文件)
 8.  **VS Code 插件成品一键打包**：`artifacts/graphflow-vscode-0.4.2.vsix`
+
+---
+
+## 4. v0.5 演进规格：嵌入式 MiniCPM-1B + 图谱建立 + 技能融合（2026-06-02 增补）
+
+> 本章节是对 v0.4.3 现状的深度审视与下一阶段（v0.5）的实施规格。核心目标：**让 MiniCPM-1B 真正在本地、零 API 跑起来**，并把它作为 GraphFlow 的"内置认知小脑"驱动 (1) 图谱建立 和 (2) 技能学习融合。
+
+### 4.1 现状精确诊断（事实，非推测）
+
+| 模块 | 文件 | 真实状态 |
+|---|---|---|
+| openbmb 适配器 | `src/routing/provider-adapters/openbmb.ts` | **占位 stub**，返回 `\`[openbmb:${model}] ${prompt}\`` 字符串，没有任何真实推理 |
+| 语义增强器 | `src/graph/semantic-enricher.ts` | 逻辑完整，但**只能 CLI 手动触发**，索引/run 完不会自动跑 |
+| 技能融合 LLM | `src/learning/skill-flywheel.ts` `evolveCompositeSkillLlm` | 已接入但**模型名硬编码** `"minicpm-1b"`，且走 worker role |
+| LLM Triage | `src/core/triage.ts` `triageTaskLlm` | 已有但默认关闭；遇到 mock 标志或同时出现 simple/complex 即退回启发式 |
+| 配置 schema | `src/config/schema.ts` | **缺少** `semanticEnrichmentPolicy`、`skillEvolutionPolicy`、openbmb 的 `baseUrl/mode/modelPath` |
+| AST indexer | `src/graph/language-indexers/*.ts` | TypeScript 真 AST，其它 5 种语言纯 regex；**都不取 JSDoc/docstring/参数/复杂度** |
+
+→ 一句话：**Prompt 写完了、调用骨架接好了，但 MiniCPM 从未真正在本地跑过一次推理**。
+
+### 4.2 嵌入式 MiniCPM-1B 集成方案（核心决策）
+
+#### 4.2.1 技术选型
+
+采用 **`node-llama-cpp`** + **MiniCPM-1B-sft GGUF (Q4_K_M)** 量化版本：
+
+- **依赖**：`node-llama-cpp ^3.x`（基于 llama.cpp，提供 Win/macOS/Linux × x64/ARM 的 prebuilt 二进制，无需用户装编译器）。
+- **模型文件**：`MiniCPM-1B-sft-bf16.Q4_K_M.gguf`（约 700MB，4-bit 量化，CPU 推理 30–80 tok/s）。
+- **存放策略**：**不打进 npm/VSIX**（VSIX 已 22MB，再塞 700MB 不现实）。首次调用时从 HuggingFace mirror 下载至 `~/.graphflow/models/minicpm-1b.Q4_K_M.gguf`，带 sha256 校验与断点续传。
+- **加载策略**：进程内单例 `LlamaModel`，懒加载；首次推理冷启动 1.5–3s（mmap），之后常驻；闲置 10min 自动 `dispose()` 释放显存/内存。
+
+#### 4.2.2 三模式并存的 openbmb provider
+
+将 `openbmb.ts` 改造为支持三种 `mode`，用户配置驱动：
+
+```jsonc
+{
+  "providers": {
+    "openbmb": {
+      "mode": "embedded",                // "embedded" | "ollama" | "openai-compat"
+      "modelPath": "~/.graphflow/models/minicpm-1b.Q4_K_M.gguf",  // embedded 模式
+      "baseUrl": "http://localhost:11434",                          // ollama / openai-compat
+      "apiKey": "${OPENBMB_API_KEY}",                               // 仅 cloud 兼容时
+      "maxTokens": 256,
+      "temperature": 0.1,
+      "timeoutMs": 5000
+    }
+  }
+}
+```
+
+- **embedded（默认推荐）**：node-llama-cpp 直接推理，零网络、零依赖外部服务。
+- **ollama**：POST `${baseUrl}/api/generate`，模型名走 `model` 字段。
+- **openai-compat**：POST `${baseUrl}/v1/chat/completions`，兼容 vLLM/LM Studio/OneAPI。
+
+#### 4.2.3 取舍与风险
+
+| 维度 | 取舍 |
+|---|---|
+| 体积 | 模型不入包（700MB），首次下载，可用本地路径覆盖 |
+| 跨平台 | node-llama-cpp 有官方 prebuilt，但 VS Code 扩展宿主对 N-API 原生模块需 abi 匹配 → 通过 `optionalDependencies` + 失败降级到 ollama 模式 |
+| 启动 | 冷启动 1.5–3s（mmap），主进程不能阻塞 → 必须 worker_threads 隔离 |
+| 显存 | Q4_K_M 1B 占 ~900MB RAM；用户机器小内存时回落到 ollama 模式 |
+| 许可 | MiniCPM 商用 license 友好，但需在 README 标注模型来源与协议 |
+
+### 4.3 Goal 1 — MiniCPM 驱动图谱建立 实施规格
+
+#### 4.3.1 先把"纯 AST"做满（前置工作，不依赖 LLM）
+
+当前 TypeScript indexer 只取 `name/kind/exported/line`，本来用 AST 就能拿到但**没拿**的：
+
+| 字段 | 实现方式 | 工作量 |
+|---|---|---|
+| `jsdoc` | `ts.getJSDocCommentsAndTags` | 1h |
+| `signature` | `node.getText()` 截首行 | 30min |
+| `params` / `returnType` | TypeChecker `getSignatureFromDeclaration` | 1h |
+| `cyclomaticComplexity` | 遍历 if/else/while/case/&&/\|\| 计数 | 2h |
+| `visibility` | `node.modifiers` 标志位 | 30min |
+| `callEdges` (A→B) | 遍历 `CallExpression` + symbol 解析 | 4h |
+| `imports` | 已有 | 0 |
+
+Python/Rust/Go/C/C++ 的 regex indexer 同步补 docstring/签名/可见性。
+
+#### 4.3.2 MiniCPM 增强：从"事后批处理"改为"管道环节"
+
+`semantic-enricher.ts` 现为 batch-after-the-fact。改为两套触发并存：
+
+- **流式增强（默认）**：在 `file-indexer.ts` 的循环里，每索引完一个文件就把它的 Symbol 节点送入 `p-limit(8)` 并发队列调 MiniCPM，结果合并到 `metadata` 后**与 AST 信息一次性写入图谱**。
+- **后台批量补齐**：保留 `enrichGraphSemanticsSilent` 作为老仓库/升级补丁，扫描 `!metadata.summary` 的节点补打标签。
+
+#### 4.3.3 升级后的结构化 Prompt（一次拿 4 个字段）
+
+```
+你是代码语义分析器。基于以下 AST 信息，严格输出 JSON（无解释、无 markdown）：
+{"summary":"<≤25字>","role":"util|service|adapter|model|controller|test|config","complexity":"low|medium|high","domain":"<3-8字>"}
+
+文件: src/graph/sqlite-client.ts
+符号: class GraphifySqliteClient implements GraphClient
+JSDoc: SQLite + FTS5 graph backend with WAL mode
+参数: dbPath: string
+方法数: 7   出度: 0   入度: 12
+```
+
+解析失败 → 退化到纯 summary prompt → 再失败 → 跳过并 warn（不再 silent catch）。
+
+#### 4.3.4 增量缓存（性能关键）
+
+`metadata.signatureHash = sha1(signature + jsdoc + paramTypes)`。二次索引时若 hash 未变 → **复用旧 summary/role/complexity，不调 MiniCPM**。大仓库二次索引预计 ≥95% 命中。
+
+#### 4.3.5 新配置面
+
+```ts
+graphPolicy: {
+  semanticEnrichment: {
+    enabled: boolean;                          // 默认 true
+    mode: "streaming" | "post-index" | "off";  // 默认 streaming
+    model: string;                              // 默认 "minicpm-1b"
+    concurrency: number;                        // 默认 8
+    timeoutMs: number;                          // 默认 5000
+    fallbackToSummaryOnly: boolean;             // 结构化失败时退化
+  }
+}
+```
+
+#### 4.3.6 暴露面
+
+- CLI：`graphflow graph enrich [--force] [--concurrency N]`
+- MCP：`graphflow_enrich_graph` tool
+- VS Code：`Graph: Enrich Semantics` 命令 + status bar 进度
+
+### 4.4 Goal 2 — MiniCPM 辅助技能学习融合 实施规格
+
+#### 4.4.1 引入"专用 role"：enricher / evolver
+
+`model-router.ts` 当前只有 `planner/worker/validator`。新增：
+
+```ts
+type AgentRole = "planner" | "worker" | "validator" | "enricher" | "evolver";
+
+defaultRoutes: {
+  enricher: { provider: "openbmb", model: "minicpm-1b" },
+  evolver:  { provider: "openbmb", model: "minicpm-1b" }
+}
+```
+
+→ 这样"内部认知"和"对外 worker"完全解耦：用户配 GPT-4 当 worker，enrichment/evolution 仍走本地 MiniCPM，**零额外 token 成本**。
+
+#### 4.4.2 n-way 技能融合 + 渐进演化
+
+- **三阶融合**：若 composite C + atom D 共现 ≥3 且都 success → 合成 D_meta 节点，建 `prerequisite: C→D_meta, D→D_meta`。
+- **演化更新**：同一 (A,B) 对的 `coOccurCount` 跨过台阶（5/10/20）时**重跑** evolveCompositeSkillLlm，旧版本进 `metadata.previousVersions`，prompt 看到旧定义后微调。技能从"一次定型"变"持续成长"。
+
+#### 4.4.3 技能退化与退休
+
+- `score < -3 && uses > 5` → 标记 `deprecated`，`suggestSkillHints` 跳过。
+- nightly reflector 把连续 deprecated ≥3 轮的 composite 节点真正删除。
+
+#### 4.4.4 Episode → 技能反哺
+
+`reflectOnEpisodes` 当前合 Lesson 但不和 Skill 关联。改为用 MiniCPM 读 5–10 个同簇成功 episode 的 `keyDecisions`，输出：
+
+```json
+{"skillsUsed": ["..."], "antiPatterns": ["..."], "methodology": "..."}
+```
+
+`skillsUsed` 节点 +score，`antiPatterns` 写 `conflicts_with` 边，`methodology` 沉淀到 Lesson 节点 `metadata.methodology`。
+
+#### 4.4.5 新配置面
+
+```ts
+learningPolicy: {
+  enableLlmEvolution: boolean;                 // 默认 true
+  evolutionTrigger: { coOccur: number; success: number };  // 默认 {2, 2}
+  evolutionTiers: number[];                    // 重演阈值，默认 [5, 10, 20]
+  deprecateThreshold: { score: number; uses: number };     // 默认 {-3, 5}
+}
+```
+
+### 4.5 跨切面优化（两个 Goal 共同受益）
+
+#### 4.5.1 ProviderError + 熔断 + 重试
+
+`provider-executor.ts` 统一：
+
+```ts
+class ProviderError extends Error { provider; model; retryable; status? }
+// 重试：指数退避 3 次，仅对 5xx / timeout
+// 熔断：60s 窗口内同 provider 连续 ≥5 次失败 → markUnhealthy 60s
+```
+
+嵌入式 MiniCPM 进程崩溃 / OOM 是高频事故，必须有保护。
+
+#### 4.5.2 可观测面
+
+每次 MiniCPM 调用产 event：
+
+```json
+{"ts":...,"role":"enricher","model":"minicpm-1b","mode":"embedded","latencyMs":124,"promptTokens":180,"outputTokens":42,"ok":true}
+```
+
+追加到 `tmp/learning-events.jsonl`。`learn nightly` CLI 汇总输出 MiniCPM 成功率 / 平均延迟 / fallback 率。
+
+#### 4.5.3 Prompt 沙箱（防注入）
+
+`node.content` 原样拼 prompt → 恶意注释可改输出。统一：
+
+```ts
+function safeQuote(s: string): string {
+  return "```\n" + s.replace(/```/g, "''").slice(0, 800) + "\n```";
+}
+```
+
+### 4.6 落地优先级与工作量估算
+
+| Step | 内容 | 解锁 | 工作量 |
+|---|---|---|---|
+| **1** | `ProviderError` + 重试 + 熔断 | 真实 LLM 接入前提 | 0.5d |
+| **2** | `openbmb.ts` 三模式（embedded/ollama/openai-compat），node-llama-cpp 接入 | **MiniCPM 真跑起来** | 1.5d |
+| **3** | 模型懒下载 + sha256 校验 + worker_thread 隔离 | 嵌入式可用 | 1d |
+| **4** | AST 信息补齐（JSDoc/签名/复杂度/可见性） | grounding 提升 | 1d |
+| **5** | 配置 schema 扩展 + signatureHash 增量缓存 | 性能+可控 | 0.5d |
+| **6** | 流式增强管道 + 结构化 JSON prompt（Goal 1 主体） | **Goal 1 完成** | 1d |
+| **7** | enricher/evolver 独立 role + n-way 融合 + 演化更新 | Goal 2 核心 | 1d |
+| **8** | 技能退化/退休 + episode→skill 反哺（Goal 2 主体） | **Goal 2 完成** | 1d |
+| **9** | 可观测面 + prompt 沙箱 + CLI/MCP/VSCode 暴露 + VSIX 重打 | 生产可用 | 1d |
+
+**合计约 8.5 天**。第 1–3 步（3 天）完成后即可端到端验证嵌入式 MiniCPM 真实可用。
+
+### 4.7 关键判断（决策依据）
+
+1. **嵌入式可行但模型不能进包**：node-llama-cpp 的 prebuilt 二进制已经解决了"用户要装 cmake"的痛点，模型用首跑懒下载到用户家目录是业界标准做法（Ollama/LM Studio 同样如此）。
+2. **AST 潜力先榨干，再让 LLM 补 20%**：1B 模型只有在"AST 元信息打底"时才能稳定结构化输出。先把 JSDoc/签名/复杂度/调用边拿满，MiniCPM 只做语义判断（summary/role/domain）。
+3. **enricher/evolver 必须独立 role**：否则 GPT-4 当 worker 的用户会被 enrichment 烧 token，违背"内置小脑"的设计初衷。
+4. **嵌入式作为默认 + ollama 作为兜底**：N-API 模块在 VS Code 扩展宿主有 abi 不匹配风险 → 失败时自动降级到 ollama，仍然零 API。
+
+### 4.8 风险登记
+
+| 风险 | 概率 | 影响 | 缓解 |
+|---|---|---|---|
+| node-llama-cpp 在 VS Code 扩展宿主 abi 不匹配 | 中 | 嵌入式不可用 | 自动降级 ollama；providerError 上报 |
+| 用户网络无法下载 700MB 模型 | 中 | 首次使用失败 | 配置 `modelPath` 可指向本地任意 GGUF；提供国内镜像 |
+| Q4_K_M 量化精度损失导致 JSON 输出不稳 | 中 | 结构化解析失败率高 | 双层降级（结构化→纯 summary→skip） |
+| 模型常驻 ~900MB 内存影响 VS Code | 低 | 内存压力 | worker_threads 隔离 + 闲置 10min auto-dispose |
+| 跨语言 indexer regex 误判 | 中 | 节点 metadata 不准 | 优先补 Python（pyright AST 可用），其它语言保留 regex+人工校对样本 |
+
+
+---
+
+## 5. v0.5 演进规格：200 t/s 推理目标与推理工具链调研（2026-06-02 增补）
+
+> 用户提问：MiniCPM-1B 嵌入式推理能否做到 200 t/s。结论：**可以，但有硬件与工具链约束**。本章给出全工具调研、可达性矩阵、优化路径。
+
+### 5.1 200 t/s 可达性结论
+
+| 场景 | 可达 200 t/s | 说明 |
+|---|---|---|
+| 纯 CPU 单流（i7 / M2 Pro） | ❌ | 1B INT4 算术下限 80–120 t/s |
+| CPU + 投机解码（speculative） | ⚠️ 接近 | 100–180 t/s，仍未稳过 200 |
+| 集成显卡 / Apple Metal | ✅ | M2 Pro Metal 200–350 t/s |
+| 消费级 N 卡 GPU（RTX 3060+） | ✅ | 250–600 t/s |
+| 旗舰 N 卡（RTX 4090） | ✅✅ | 600–900 t/s（单流） |
+| Python 服务端（vLLM/TRT-LLM） | ✅✅ batch | 单流 200–600，batch 2000+；但违背"嵌入式无 API" |
+
+→ **GraphFlow 嵌入式场景里，200 t/s 只能在有 GPU 加速时稳定达成**；纯 CPU 用户用投机解码做到 100–150 t/s 是现实目标。
+
+### 5.2 推理工具全景调研（1B 级模型，decode-only）
+
+| 工具 | 语言/接口 | 量化 | 后端 | 单流 t/s（参考） | Node 嵌入 | 跨平台 prebuilt | 推荐度 |
+|---|---|---|---|---|---|---|---|
+| **node-llama-cpp** | Node N-API | GGUF Q2–Q8 | CPU / CUDA / Metal / Vulkan / ROCm | CPU 40–120, GPU 200–900 | ✅ 原生 | ✅ | ★★★★★ |
+| **llama.cpp (server)** | C++ HTTP | GGUF | 同上 | 同上 | HTTP | ✅ | ★★★★ |
+| **Ollama** | HTTP | GGUF | llama.cpp 封装 | 同 llama.cpp | HTTP | ✅ | ★★★★ |
+| **LM Studio** | HTTP (openai-compat) | GGUF | llama.cpp | 同上 | HTTP | ✅ | ★★★ |
+| **vLLM** | Python HTTP | AWQ/GPTQ/FP16 | CUDA + PagedAttention | 单 200–350, batch 2000+ | HTTP | ❌（仅 Linux+N 卡） | ★★★★（服务端） |
+| **TensorRT-LLM** | C++/Python | INT4 AWQ | CUDA | 400–600 | ❌ | ❌（仅 N 卡） | ★★★★（极致延迟） |
+| **ExLlamaV2** | Python | EXL2 | CUDA | 280–450 | ❌ | ❌ | ★★★ |
+| **MLC-LLM** | TVM 编译 | q4f16 | Metal/CUDA/Vulkan/WebGPU | 200–400 | ⚠️ WebLLM | ⚠️ 需编译 | ★★★ |
+| **mistral.rs** | Rust | Q4_K_M | CPU/GPU | 接近 llama.cpp | ❌ | ⚠️ | ★★ |
+| **CTranslate2** | C++/Python | INT8 | CPU/CUDA | 60–100 | 需 binding | ✅ | ★★ |
+| **onnxruntime-node** | Node | ONNX INT4 | CPU/DML/CUDA | 20–60 | ✅ | ✅ | ★★ |
+| **transformers.js** | WASM/WebGPU | q4 | 浏览器 | 30–80 | ⚠️ 浏览器 | ✅ | ★★ |
+| **llamafile** | 单文件可执行 | GGUF | llama.cpp | 同 llama.cpp | 子进程 | ✅ | ★★ |
+| **GPT4All** | Node SDK | GGUF | llama.cpp 衍生 | 接近 llama.cpp | ✅ | ✅ | ★★★ |
+
+**关键发现**：
+
+1. **llama.cpp 生态是事实标准**：`node-llama-cpp` / Ollama / LM Studio / llamafile / GPT4All 全部基于它。**选 llama.cpp 等于选了一票多用**。
+2. **想破 200 t/s 必须 GPU 加速**：纯 CPU 1B INT4 的物理上限就在 ~120 t/s（受内存带宽限制：1B Q4 ≈ 0.7GB，DDR5 双通道 ~80GB/s → 理论上限 ~100 t/s）。
+3. **vLLM/TRT-LLM 在嵌入式场景被排除**：它们设计为服务端，要 Python + 长驻 GPU，违背 GraphFlow "VS Code 扩展宿主内零外部进程"的目标。
+4. **MLC-LLM 是 GPU 跨平台备选**：能跑 Vulkan/WebGPU/Metal/CUDA，但需 TVM 编译，工程复杂度比 node-llama-cpp 高一档。
+
+### 5.3 GraphFlow 推理引擎决策
+
+```
+默认引擎: node-llama-cpp
+  └─ 自动探测后端优先级:
+     1. Apple Metal (macOS)
+     2. CUDA (NVIDIA Win/Linux)
+     3. Vulkan (AMD / Intel Arc / 其它)
+     4. ROCm (AMD Linux)
+     5. CPU + AVX2/AVX512
+  └─ CPU 模式自动启用投机解码 (draft model: MiniCPM-Draft 0.3B Q4_0)
+
+降级路径:
+  embedded 失败 → ollama (用户已装) → openai-compat → 报错
+```
+
+### 5.4 200 t/s 优化清单（按收益排序）
+
+| # | 优化项 | 预期增益 | 实现位置 |
+|---|---|---|---|
+| 1 | **启用 GPU 后端**（Metal/CUDA/Vulkan） | 2–5× | node-llama-cpp `gpuLayers: -1` |
+| 2 | **投机解码**（draft model） | 1.5–2× | llama.cpp `--draft` |
+| 3 | **KV cache 持久化**（同 session 复用） | 大量重复 prompt 减 50% prefill | `LlamaContext` 单例 |
+| 4 | **prompt 模板缓存** | 系统 prompt 跳过 prefill | llama.cpp `--cache-reuse` |
+| 5 | **Q4_K_S → Q4_0** 量化降级（CPU） | 10–20% | 模型文件选择 |
+| 6 | **batch 多请求**（enrichment 场景天然 batch） | 5–10× 聚合 | 自实现 batch 队列 |
+| 7 | **限制 max_tokens** | 摘要 ≤32 token，避免无脑生成 | request 参数 |
+| 8 | **降低 context_size**（n_ctx 2048→512） | prefill 加速 + 内存减半 | `LlamaContext` config |
+| 9 | **flash-attention 启用** | GPU 20–30% | llama.cpp build flag |
+| 10 | **mmap 模型 + mlock** | 冷启动减半 | llama.cpp 默认开 |
+
+### 5.5 性能基准计划（v0.5 验收）
+
+新增 `tests/perf/m31-inference-bench.test.ts`（手动触发，非 CI），测三种硬件 profile：
+
+```ts
+profiles: [
+  { name: "cpu-laptop",  target: ">= 60 t/s",  hardware: "i7-12700H Q4_K_M" },
+  { name: "apple-m2",    target: ">= 200 t/s", hardware: "M2 Pro Metal Q4_K_M" },
+  { name: "rtx-3060",    target: ">= 250 t/s", hardware: "RTX 3060 CUDA Q4_K_M" }
+]
+
+测试输入: 30 个真实 enrichment prompt
+测试输出: 平均 latency / p95 / t/s / total tokens
+```
+
+### 5.6 当前工作进度（截至 2026-06-02）
+
+已完成：
+- ✅ `openbmb.ts` 已升级为三模式运行框架：`embedded` / `ollama` / `openai-compat`（失败可降级到兼容 mock 输出）
+- ✅ `openai/anthropic/bailian/doubao` 适配器已升级为真实 API 调用路径（支持 `*_API_KEY` + `*_BASE_URL`，并保留 strict/fallback 开关）
+- ✅ `provider-executor.ts` 已加入 `ProviderError`、统一超时封装（`GRAPHFLOW_PROVIDER_TIMEOUT_MS`）
+- ✅ `provider-executor.ts` 已加入基础重试与熔断（`GRAPHFLOW_PROVIDER_MAX_RETRIES` / `GRAPHFLOW_PROVIDER_CIRCUIT_FAILURES` / `GRAPHFLOW_PROVIDER_CIRCUIT_OPEN_MS`）
+- ✅ 新增专用角色：`enricher` / `evolver`，并在 `model-router` 默认绑定 openbmb + `minicpm-1b`
+- ✅ `provider-health.ts` 已纳入 openbmb 健康检查与模式感知（embedded/ollama/openai-compat）
+- ✅ 配置 schema/loader 已扩展：
+  - `providers.openbmb.mode/modelPath/timeoutMs/maxTokens/temperature`
+  - `graphPolicy.semanticEnrichment.*`
+  - `learningPolicy.skillEvolution.*`
+- ✅ `runtime.ts` 已把 openbmb / 技能演化配置注入运行时环境变量，并支持索引后自动语义增强
+- ✅ CLI 已新增命令：`graphflow graph enrich`
+- ✅ `file-indexer.ts` + `typescript.ts` 已补齐 AST 元信息（`signature/jsdoc/visibility/paramsCount/returnType/complexity/signatureHash`）
+- ✅ 技能融合已升级：
+  - 去除演化模型硬编码（改为可配置）
+  - 演化调用改用 `evolver` 角色
+  - 新增三元融合节点（triple-composite）与 prerequisite 边
+- ✅ prompt 注入防护已加入语义增强链路（代码签名安全包裹）
+- ✅ 配置样例已同步到 `graphflow.config.example.json`
+- ✅ openbmb embedded 本地命令已配置化：`providers.openbmb.commandPath` → `GRAPHFLOW_MINICPM_COMMAND`
+- ✅ openbmb embedded 已支持可选进程内引擎：`providers.openbmb.engine = node-llama-cpp`（默认仍为 command 模式）
+- ✅ MCP 已新增工具：`graphflow_enrich_graph`（支持 `batchSize/sleepMs/timeoutMs`）
+- ✅ CLI/MCP 已新增模型下载能力：
+  - CLI: `graphflow model download [name]`
+  - MCP: `graphflow_model_download`
+  - 支持 `url/sha256/targetPath/force` 参数
+- ✅ VS Code 扩展已新增命令：`GraphFlow: Enrich Graph Semantics`，并支持聊天命令 `/enrich`
+- ✅ 验证结果：TypeScript 编译通过，Vitest **111/111 全部通过**
+- ✅ 扩展验证：`npm --prefix vscode-extension run build` 通过
+
+未完成（仍需外部依赖或下一迭代）：
+- ⏳ `node-llama-cpp` 生产化稳定：GPU/Metal/CUDA 参数自动探测 + 上下文复用与内存回收
+- ⏳ 模型下载生产化：断点续传 + 下载进度 + 校验失败自动回滚
+- ⏳ `worker_threads` 隔离嵌入式推理（当前由 provider 超时兜底）
+- ⏳ VS Code 扩展可观测增强：enrich 进度条与失败明细面板
+- ⏳ 推理性能基准 `m31-inference-bench` 与 200 t/s 硬件分层验收
+- ⏳ provider 生产强化：统一配额/速率限制策略 + provider 级 telemetry
+
+### 5.9 当前项目收尾计划（执行版）
+
+| 阶段 | 目标 | 输出 | 状态 |
+|---|---|---|---|
+| Stage A | 多 provider 与 openbmb 主链路可用 | 5 provider 适配器 + 路由超时/重试/熔断 | ✅ 完成 |
+| Stage B | 图谱语义增强全通路 | CLI/MCP/VSCode enrich 命令 + 自动触发 | ✅ 完成 |
+| Stage C | 嵌入式模型执行与分发能力 | command 模式 + `node-llama-cpp` 可选 + model download | ✅ 完成（基础版） |
+| Stage D | 生产化与性能验收 | worker 隔离、下载断点续传、m31 基准、telemetry | ⏳ 进行中 |
+
+短期里程碑（建议 1-2 周）：
+1. 完成 `worker_threads` 隔离并压测 10k 次 provider 调用稳定性。
+2. 落地 m31 推理基准，分 CPU/Metal/CUDA 三档给出官方性能曲线。
+3. 增加 provider telemetry（成功率/超时率/回退率）并接入 nightly summary。
+
+### 5.7 项目级优化建议（与 MiniCPM 解耦的横向改进）
+
+| # | 类别 | 建议 | 优先级 |
+|---|---|---|---|
+| 1 | 安全 | 5 个 provider 适配器全部接真实 API（openai/anthropic/bailian/doubao/openbmb） | P0 |
+| 2 | 可靠性 | `provider-executor` 加 timeout + retry + circuit breaker | P0 |
+| 3 | 可靠性 | API key 启动校验 + 401 提示 | P0 |
+| 4 | 可观测 | 统一事件总线（替代散落的 console.log） | P1 |
+| 5 | 数据 | SQLite schema 加 `PRAGMA user_version`，支持迁移 | P1 |
+| 6 | 索引 | 增量索引（mtime/hash 比对） | P1 |
+| 7 | 召回 | 向量召回从 hash embedding 升级到真实 embedding（bge-small/m3e-small） | P1 |
+| 8 | 测试 | 新增 m31-perf / m32-error-paths / m33-config-migration | P2 |
+| 9 | 文档 | docs/architecture.md 把 6 层架构画图 | P2 |
+| 10 | DX | VS Code 插件加 "Open Graph Report" 直跳 graph.html | P2 |
+| 11 | 性能 | context-slicer 大仓库 lazy load（当前一次性 load 全图） | P2 |
+| 12 | 性能 | learning-events.jsonl 滚动归档（超 10MB 切片） | P3 |
+| 13 | 国际化 | MiniCPM prompt 英文 fallback（用户图谱含非中文场景） | P3 |
+| 14 | 安全 | Prompt 注入防护（safeQuote + 长度截断） | P1 |
+| 15 | 跨语言 indexer | Python 用 tree-sitter 替换 regex | P2 |
+
+### 5.8 关键判断（决策依据）
+
+1. **200 t/s 不是普适承诺**，而是"GPU 模式承诺、CPU 模式尽力"。文档需明确分级。
+2. **node-llama-cpp 是技术债最小的选择**：跨平台 prebuilt、N-API、GPU 自动探测、社区活跃。备选 Ollama 仅作为降级。
+3. **不要追求 vLLM/TRT-LLM 那种极致 throughput**：嵌入式场景的瓶颈在"用户机器是否有 GPU"，不在"框架是否够快"。
+4. **优先级排序**：先把 MiniCPM 真跑起来（任何速度），再做投机解码 / GPU 调优。性能优化属于第二阶段。
+
+

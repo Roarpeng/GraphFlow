@@ -5,6 +5,8 @@ import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import {
   diagnoseRoutingResult,
+  downloadOpenBmbModel,
+  enrichSemanticsSilent,
   getSkillInsights,
   indexGraph,
   inspectGraph,
@@ -117,6 +119,36 @@ export function getToolDefinitions(): ToolDefinition[] {
       },
     },
     {
+      name: "graphflow_enrich_graph",
+      description: "Run semantic enrichment for pending Symbol nodes using MiniCPM/OpenBMB provider.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+          batchSize: { type: "number", description: "Optional enrichment batch size." },
+          sleepMs: { type: "number", description: "Optional delay between node enrichments." },
+          timeoutMs: { type: "number", description: "Optional provider timeout per enrichment call." },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "graphflow_model_download",
+      description: "Download MiniCPM/OpenBMB model file to local path with optional checksum verification.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+          model: { type: "string", description: "Model name, default minicpm-1b." },
+          url: { type: "string", description: "Optional model URL override." },
+          sha256: { type: "string", description: "Optional expected sha256 checksum." },
+          targetPath: { type: "string", description: "Optional target file path." },
+          force: { type: "boolean", description: "Force re-download even if file exists." },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
       name: "graphflow_inspect_graph",
       description: "Inspect current graph snapshot statistics and sample nodes/edges.",
       inputSchema: {
@@ -176,6 +208,59 @@ export async function executeToolCall(
       return textResponse(
         await indexGraph(readOptionalString(args.rootDir), readOptionalString(args.configPath))
       );
+    case "graphflow_enrich_graph":
+      {
+        const enrichOptions: { batchSize?: number; sleepMs?: number; timeoutMs?: number } = {};
+        const batchSize = readOptionalNumber(args.batchSize);
+        if (batchSize !== undefined) {
+          enrichOptions.batchSize = batchSize;
+        }
+        const sleepMs = readOptionalNumber(args.sleepMs);
+        if (sleepMs !== undefined) {
+          enrichOptions.sleepMs = sleepMs;
+        }
+        const timeoutMs = readOptionalNumber(args.timeoutMs);
+        if (timeoutMs !== undefined) {
+          enrichOptions.timeoutMs = timeoutMs;
+        }
+
+      return textResponse(
+        await enrichSemanticsSilent(readOptionalString(args.configPath), enrichOptions)
+      );
+      }
+    case "graphflow_model_download":
+      {
+        const downloadOptions: {
+          model?: string;
+          url?: string;
+          sha256?: string;
+          targetPath?: string;
+          force?: boolean;
+        } = {};
+        const model = readOptionalString(args.model);
+        if (model) {
+          downloadOptions.model = model;
+        }
+        const url = readOptionalString(args.url);
+        if (url) {
+          downloadOptions.url = url;
+        }
+        const sha256 = readOptionalString(args.sha256);
+        if (sha256) {
+          downloadOptions.sha256 = sha256;
+        }
+        const targetPath = readOptionalString(args.targetPath);
+        if (targetPath) {
+          downloadOptions.targetPath = targetPath;
+        }
+        if (typeof args.force === "boolean") {
+          downloadOptions.force = args.force;
+        }
+
+      return textResponse(
+        await downloadOpenBmbModel(readOptionalString(args.configPath), downloadOptions)
+      );
+      }
     case "graphflow_inspect_graph":
       return textResponse(
         await inspectGraph(readOptionalString(args.configPath), buildInspectOptions(args))

@@ -6,6 +6,35 @@ import { doubaoGenerateText } from "./provider-adapters/doubao";
 import { openaiGenerateText } from "./provider-adapters/openai";
 import { openbmbGenerateText } from "./provider-adapters/openbmb";
 
+export class ProviderError extends Error {
+  provider: ModelSelection["provider"];
+  model: string;
+  retryable: boolean;
+
+  constructor(params: {
+    provider: ModelSelection["provider"];
+    model: string;
+    message: string;
+    retryable: boolean;
+  }) {
+    super(params.message);
+    this.name = "ProviderError";
+    this.provider = params.provider;
+    this.model = params.model;
+    this.retryable = params.retryable;
+  }
+}
+
+interface CircuitState {
+  failures: number;
+  openedUntil?: number;
+}
+
+const circuitByProvider = new Map<string, CircuitState>();
+const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
+const DEFAULT_CIRCUIT_OPEN_MS = 60_000;
+
 export interface PromptContext {
   summaryChannel?: string[];
   skillHints?: string[];
@@ -63,6 +92,80 @@ export function formatPromptWithContext(
   return lines.join("\n");
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  if (timeoutMs <= 0) {
+    return promise;
+  }
+
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+function getCircuitState(key: string): CircuitState {
+  const found = circuitByProvider.get(key);
+  if (found) {
+    return found;
+  }
+  const created: CircuitState = { failures: 0 };
+  circuitByProvider.set(key, created);
+  return created;
+}
+
+function getRetryBudget(): number {
+  const envRaw = Number(process.env.GRAPHFLOW_PROVIDER_MAX_RETRIES ?? DEFAULT_MAX_RETRIES);
+  if (!Number.isFinite(envRaw)) {
+    return DEFAULT_MAX_RETRIES;
+  }
+  return Math.max(0, Math.floor(envRaw));
+}
+
+function getCircuitThreshold(): number {
+  const envRaw = Number(process.env.GRAPHFLOW_PROVIDER_CIRCUIT_FAILURES ?? DEFAULT_CIRCUIT_FAILURE_THRESHOLD);
+  if (!Number.isFinite(envRaw)) {
+    return DEFAULT_CIRCUIT_FAILURE_THRESHOLD;
+  }
+  return Math.max(1, Math.floor(envRaw));
+}
+
+function getCircuitOpenMs(): number {
+  const envRaw = Number(process.env.GRAPHFLOW_PROVIDER_CIRCUIT_OPEN_MS ?? DEFAULT_CIRCUIT_OPEN_MS);
+  if (!Number.isFinite(envRaw)) {
+    return DEFAULT_CIRCUIT_OPEN_MS;
+  }
+  return Math.max(1000, Math.floor(envRaw));
+}
+
+function shouldUseCircuit(state: CircuitState): boolean {
+  if (!state.openedUntil) {
+    return false;
+  }
+  if (Date.now() >= state.openedUntil) {
+    delete state.openedUntil;
+    state.failures = 0;
+    return false;
+  }
+  return true;
+}
+
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function executeRolePrompt(
   role: AgentRole,
   prompt: string,
@@ -75,21 +178,79 @@ export async function executeRolePrompt(
     model: selection.model,
   };
 
-  if (selection.provider === "anthropic") {
-    return anthropicGenerateText(request);
+  const timeoutMsRaw = Number(process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS ?? 15000);
+  const timeoutMs = Number.isFinite(timeoutMsRaw) ? Math.max(1000, Math.floor(timeoutMsRaw)) : 15000;
+  const circuitKey = `${selection.provider}:${selection.model}`;
+  const circuitState = getCircuitState(circuitKey);
+  if (shouldUseCircuit(circuitState)) {
+    throw new ProviderError({
+      provider: selection.provider,
+      model: selection.model,
+      message: `${selection.provider}/${selection.model} circuit is open`,
+      retryable: true,
+    });
   }
 
-  if (selection.provider === "bailian") {
-    return bailianGenerateText(request);
+  const execute = async (): Promise<string> => {
+    if (selection.provider === "anthropic") {
+      return anthropicGenerateText(request);
+    }
+
+    if (selection.provider === "bailian") {
+      return bailianGenerateText(request);
+    }
+
+    if (selection.provider === "doubao") {
+      return doubaoGenerateText(request);
+    }
+
+    if (selection.provider === "openbmb") {
+      return openbmbGenerateText(request);
+    }
+
+    return openaiGenerateText(request);
+  };
+
+  const retryBudget = getRetryBudget();
+  const circuitThreshold = getCircuitThreshold();
+  const circuitOpenMs = getCircuitOpenMs();
+
+  let attempt = 0;
+  while (attempt <= retryBudget) {
+    try {
+      const value = await withTimeout(execute(), timeoutMs, `${selection.provider}/${selection.model}`);
+      circuitState.failures = 0;
+      delete circuitState.openedUntil;
+      return value;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const retryable = !/invalid|unauthorized|forbidden|404|not found/i.test(message);
+      const wrapped = new ProviderError({
+        provider: selection.provider,
+        model: selection.model,
+        message,
+        retryable,
+      });
+
+      circuitState.failures += 1;
+      if (circuitState.failures >= circuitThreshold) {
+        circuitState.openedUntil = Date.now() + circuitOpenMs;
+      }
+
+      if (!retryable || attempt >= retryBudget) {
+        throw wrapped;
+      }
+
+      attempt += 1;
+      const backoffMs = Math.min(1500, 100 * 2 ** attempt);
+      await sleep(backoffMs);
+    }
   }
 
-  if (selection.provider === "doubao") {
-    return doubaoGenerateText(request);
-  }
-
-  if (selection.provider === "openbmb") {
-    return openbmbGenerateText(request);
-  }
-
-  return openaiGenerateText(request);
+  throw new ProviderError({
+    provider: selection.provider,
+    model: selection.model,
+    message: `${selection.provider}/${selection.model} exhausted retries`,
+    retryable: true,
+  });
 }

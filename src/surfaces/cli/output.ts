@@ -23,6 +23,8 @@ export function buildCliUsage(): string {
     '  context preview "<query>" [--json] [--config <path>]',
     "  graph index [path] [--json] [--config <path>]",
     "  graph inspect [--json] [--config <path>]",
+    "  graph enrich [--json] [--config <path>]",
+    "  model download [name] [--json] [--config <path>]",
     "  skill insights [--json] [--config <path>]",
     "  route diagnose [--json] [--config <path>]",
     "  learn nightly [--json] [--config <path>]",

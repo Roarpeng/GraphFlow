@@ -3,6 +3,8 @@
 import {
   diagnoseRouting,
   diagnoseRoutingResult,
+  downloadOpenBmbModel,
+  enrichSemanticsSilent,
   getSkillInsights,
   indexGraph,
   inspectGraph,
@@ -99,6 +101,15 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
+  if (command === "graph" && args[0] === "enrich") {
+    const data = await enrichSemanticsSilent(configPath);
+    return {
+      command: "graph-enrich",
+      data,
+      legacyText: `enrichedCount=${data.enrichedCount}`,
+    };
+  }
+
   if (command === "skill" && args[0] === "insights") {
     const data = await getSkillInsights(configPath);
     return {
@@ -128,6 +139,16 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       command: "learn-nightly",
       data,
       legacyText: runLearningNightly(configPath),
+    };
+  }
+
+  if (command === "model" && args[0] === "download") {
+    const model = args[1]?.trim() || "minicpm-1b";
+    const data = await downloadOpenBmbModel(configPath, { model });
+    return {
+      command: "model-download",
+      data,
+      legacyText: `model=${data.model}; target=${data.targetPath}; bytes=${data.bytes}; skipped=${data.skipped}; verified=${data.verified}`,
     };
   }
 

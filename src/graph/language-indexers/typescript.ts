@@ -35,13 +35,70 @@ function extractFromAst(relPath: string, content: string, ts: typeof TsNs): Extr
   const symbols: DeclaredSymbol[] = [];
   const imports: ImportTarget[] = [];
 
-  const addDecl = (nameNode: TsNs.Node | undefined, kind: string, exported: boolean): void => {
+  const estimateComplexity = (text: string): number => {
+    const hits = text.match(/\b(if|else if|for|while|case|catch|\&\&|\|\|)\b/g);
+    return 1 + (hits?.length ?? 0);
+  };
+
+  const getVisibility = (node: TsNs.Node): "public" | "protected" | "private" => {
+    const flags = ts.getCombinedModifierFlags(node as TsNs.Declaration);
+    if ((flags & ts.ModifierFlags.Private) !== 0) return "private";
+    if ((flags & ts.ModifierFlags.Protected) !== 0) return "protected";
+    return "public";
+  };
+
+  const summarizeJsDoc = (node: TsNs.Node): string | undefined => {
+    const jsdocs = (node as unknown as { jsDoc?: Array<{ comment?: string | TsNs.NodeArray<TsNs.JSDocComment> }> }).jsDoc;
+    if (!jsdocs || jsdocs.length === 0) {
+      return undefined;
+    }
+    const text = jsdocs
+      .map((item: { comment?: string | TsNs.NodeArray<TsNs.JSDocComment> }) => {
+        if (typeof item.comment === "string") {
+          return item.comment;
+        }
+        return "";
+      })
+      .join(" ")
+      .trim();
+    return text || undefined;
+  };
+
+  const declarationType = (node: TsNs.SignatureDeclarationBase): { paramsCount: number; returnType?: string } => {
+    const paramsCount = node.parameters.length;
+    let returnType: string | undefined;
+    if (node.type) {
+      returnType = node.type.getText(sourceFile).slice(0, 80);
+    }
+    return { paramsCount, ...(returnType ? { returnType } : {}) };
+  };
+
+  const addDecl = (
+    nameNode: TsNs.Node | undefined,
+    kind: string,
+    exported: boolean,
+    sourceNode: TsNs.Node,
+    extras?: Partial<DeclaredSymbol>
+  ): void => {
     if (!nameNode || !ts.isIdentifier(nameNode)) return;
     const name = nameNode.text;
     if (!name) return;
     const start = nameNode.getStart(sourceFile);
     const { line } = sourceFile.getLineAndCharacterOfPosition(start);
-    symbols.push({ name, kind, exported, line: line + 1, file: relPath });
+    const signature = sourceNode.getText(sourceFile).split(/\r?\n/)[0]?.slice(0, 240) ?? `${kind} ${name}`;
+    const jsdoc = summarizeJsDoc(sourceNode);
+    symbols.push({
+      name,
+      kind,
+      exported,
+      line: line + 1,
+      file: relPath,
+      signature,
+      ...(jsdoc ? { jsdoc } : {}),
+      visibility: getVisibility(sourceNode),
+      complexity: estimateComplexity(sourceNode.getText(sourceFile)),
+      ...extras,
+    });
   };
 
   const hasExport = (node: TsNs.Node): boolean => {
@@ -51,25 +108,25 @@ function extractFromAst(relPath: string, content: string, ts: typeof TsNs): Extr
 
   for (const stmt of sourceFile.statements) {
     if (ts.isFunctionDeclaration(stmt)) {
-      addDecl(stmt.name, "function", hasExport(stmt));
+      addDecl(stmt.name, "function", hasExport(stmt), stmt, declarationType(stmt));
     } else if (ts.isClassDeclaration(stmt)) {
-      addDecl(stmt.name, "class", hasExport(stmt));
+      addDecl(stmt.name, "class", hasExport(stmt), stmt);
       for (const member of stmt.members) {
         if (ts.isMethodDeclaration(member) && member.name && ts.isIdentifier(member.name)) {
-          addDecl(member.name, "method", false);
+          addDecl(member.name, "method", false, member, declarationType(member));
         }
       }
     } else if (ts.isInterfaceDeclaration(stmt)) {
-      addDecl(stmt.name, "interface", hasExport(stmt));
+      addDecl(stmt.name, "interface", hasExport(stmt), stmt);
     } else if (ts.isTypeAliasDeclaration(stmt)) {
-      addDecl(stmt.name, "type", hasExport(stmt));
+      addDecl(stmt.name, "type", hasExport(stmt), stmt);
     } else if (ts.isEnumDeclaration(stmt)) {
-      addDecl(stmt.name, "enum", hasExport(stmt));
+      addDecl(stmt.name, "enum", hasExport(stmt), stmt);
     } else if (ts.isVariableStatement(stmt)) {
       const exported = hasExport(stmt);
       for (const decl of stmt.declarationList.declarations) {
         if (ts.isIdentifier(decl.name)) {
-          addDecl(decl.name, "variable", exported);
+          addDecl(decl.name, "variable", exported, decl);
         }
       }
     } else if (ts.isImportDeclaration(stmt)) {
