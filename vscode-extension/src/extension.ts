@@ -35,6 +35,24 @@ interface GraphFlowRuntime {
   getSkillInsights(limit?: number): Promise<SkillInsightsResult>;
   getGraphFlowSettings(): GraphFlowSettings;
   saveGraphFlowSettings(settings: Omit<GraphFlowSettings, "configPath">): GraphFlowSettings;
+  downloadOpenBmbModel(
+    configPath?: string,
+    options?: {
+      model?: string;
+      url?: string;
+      sha256?: string;
+      targetPath?: string;
+      force?: boolean;
+      onProgress?: (progress: {
+        model: string;
+        targetPath: string;
+        downloadedBytes: number;
+        totalBytes?: number;
+        percent?: number;
+        stage: "starting" | "downloading" | "verifying" | "completed" | "skipped";
+      }) => void;
+    }
+  ): Promise<{ model: string; targetPath: string; bytes: number; skipped: boolean; verified: boolean; resumed?: boolean }>;
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -187,6 +205,55 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.showInformationMessage(`GraphFlow enriched ${result.enrichedCount} symbol nodes.`);
   });
 
+  const downloadModel = vscode.commands.registerCommand("graphflow.downloadModel", async () => {
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+      vscode.window.showErrorMessage("No workspace folder found.");
+      return;
+    }
+
+    const model = (await vscode.window.showInputBox({
+      title: "GraphFlow Download Model",
+      prompt: "Enter model name",
+      value: "minicpm-1b",
+      placeHolder: "minicpm-1b",
+    }))?.trim();
+
+    if (!model) {
+      return;
+    }
+
+    const result = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `GraphFlow downloading ${model}`,
+        cancellable: false,
+      },
+      async (progress) => {
+        let lastPercent = 0;
+        return runGraphFlow(workspaceRoot, (runtime) =>
+          runtime.downloadOpenBmbModel(undefined, {
+            model,
+            onProgress: (update) => {
+              const nextPercent = update.percent ?? lastPercent;
+              const increment = Math.max(0, Math.min(100, nextPercent - lastPercent));
+              lastPercent = nextPercent;
+              const total = update.totalBytes !== undefined ? formatBytes(update.totalBytes) : "unknown";
+              progress.report({
+                increment,
+                message: `${update.stage} ${formatBytes(update.downloadedBytes)}/${total}`,
+              });
+            },
+          })
+        );
+      }
+    );
+
+    vscode.window.showInformationMessage(
+      `GraphFlow model ready: ${result.model} -> ${result.targetPath}`
+    );
+  });
+
   const participant = vscode.chat.createChatParticipant(
     CHAT_PARTICIPANT_ID,
     async (request, _context, stream) => {
@@ -311,6 +378,7 @@ export function activate(context: vscode.ExtensionContext): void {
     showGraph,
     showSkills,
     enrichGraph,
+    downloadModel,
     participant
   );
 }
@@ -363,7 +431,8 @@ async function loadRuntime(): Promise<GraphFlowRuntime> {
         !module.inspectGraph ||
         !module.getSkillInsights ||
         !module.getGraphFlowSettings ||
-        !module.saveGraphFlowSettings
+        !module.saveGraphFlowSettings ||
+        !module.downloadOpenBmbModel
       ) {
         throw new Error("Bundled GraphFlow runtime is missing required exports.");
       }
@@ -379,6 +448,7 @@ async function loadRuntime(): Promise<GraphFlowRuntime> {
         getSkillInsights: module.getSkillInsights,
         getGraphFlowSettings: module.getGraphFlowSettings,
         saveGraphFlowSettings: module.saveGraphFlowSettings,
+        downloadOpenBmbModel: module.downloadOpenBmbModel,
       };
     })();
   }
@@ -440,6 +510,17 @@ function detectInlineCommand(
 
 function stripInlineCommand(prompt: string): string {
   return prompt.replace(/^\/(run|plan|history|context|settings|diagnose|learn|graph|skills|enrich)\s*/i, "").trim();
+}
+
+function formatBytes(value: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
 function formatAsBullet(output: string): string {

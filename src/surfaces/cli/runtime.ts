@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -398,6 +398,16 @@ export interface ModelDownloadResult {
   resumed?: boolean;
 }
 
+export interface ModelDownloadProgress {
+  model: string;
+  targetPath: string;
+  downloadedBytes: number;
+  totalBytes?: number;
+  resumed: boolean;
+  percent?: number;
+  stage: "starting" | "downloading" | "verifying" | "completed" | "skipped";
+}
+
 export async function indexGraph(rootDir?: string, configPath?: string): Promise<GraphIndexResult> {
   const config = resolveConfig(configPath);
   applyOpenBmbRuntimeEnv(config);
@@ -455,7 +465,14 @@ export async function enrichSemanticsSilent(
 
 export async function downloadOpenBmbModel(
   configPath?: string,
-  options?: { model?: string; url?: string; sha256?: string; targetPath?: string; force?: boolean }
+  options?: {
+    model?: string;
+    url?: string;
+    sha256?: string;
+    targetPath?: string;
+    force?: boolean;
+    onProgress?: (progress: ModelDownloadProgress) => void;
+  }
 ): Promise<ModelDownloadResult> {
   const config = resolveConfig(configPath);
   applyOpenBmbRuntimeEnv(config);
@@ -474,6 +491,15 @@ export async function downloadOpenBmbModel(
   if (existsSync(targetPath) && !force) {
     const bytes = getFileSize(targetPath);
     const verified = expectedSha ? (await sha256File(targetPath)) === expectedSha.toLowerCase() : true;
+    options?.onProgress?.({
+      model,
+      targetPath,
+      downloadedBytes: bytes,
+      totalBytes: bytes,
+      resumed: false,
+      percent: 100,
+      stage: "skipped",
+    });
     return {
       model,
       targetPath,
@@ -503,6 +529,14 @@ export async function downloadOpenBmbModel(
     partialSize = 0;
   }
 
+  options?.onProgress?.({
+    model,
+    targetPath,
+    downloadedBytes: partialSize,
+    resumed: partialSize > 0,
+    stage: "starting",
+  });
+
   const fetchInit: RequestInit = {};
   if (partialSize > 0) {
     fetchInit.headers = { range: `bytes=${partialSize}-` };
@@ -518,34 +552,85 @@ export async function downloadOpenBmbModel(
     partialSize = 0;
   }
 
+  const contentLength = Number(response.headers.get("content-length") ?? "0");
+  const totalBytes = Number.isFinite(contentLength) && contentLength > 0
+    ? partialSize + contentLength
+    : undefined;
+
   const stream = response.body;
   if (!stream) {
     throw new Error("Model download failed: empty response body");
   }
 
   const reader = stream.getReader();
-  const chunks: Buffer[] = [];
+  const resumed = partialSize > 0 && acceptsRange;
+  const writer = createWriteStream(partialPath, { flags: resumed ? "a" : "w" });
+  let downloadedBytes = partialSize;
+  let lastReportedBytes = -1;
+
+  const emitProgress = (stage: ModelDownloadProgress["stage"]) => {
+    if (downloadedBytes === lastReportedBytes && stage === "downloading") {
+      return;
+    }
+    lastReportedBytes = downloadedBytes;
+    const percent = totalBytes && totalBytes > 0
+      ? Math.min(100, Number(((downloadedBytes / totalBytes) * 100).toFixed(1)))
+      : undefined;
+    options?.onProgress?.({
+      model,
+      targetPath,
+      downloadedBytes,
+      ...(totalBytes ? { totalBytes } : {}),
+      resumed,
+      ...(percent !== undefined ? { percent } : {}),
+      stage,
+    });
+  };
+
+  emitProgress("downloading");
   while (true) {
     const { done, value } = await reader.read();
     if (done) {
       break;
     }
     if (value) {
-      chunks.push(Buffer.from(value));
+      const chunk = Buffer.from(value);
+      await new Promise<void>((resolve, reject) => {
+        writer.write(chunk, (error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+      downloadedBytes += chunk.length;
+      emitProgress("downloading");
     }
   }
 
-  const downloadedBuffer = Buffer.concat(chunks);
-  if (partialSize > 0 && acceptsRange) {
-    const previous = readFileSync(partialPath);
-    writeFileSync(partialPath, Buffer.concat([previous, downloadedBuffer]));
-  } else {
-    writeFileSync(partialPath, downloadedBuffer);
-  }
+  await new Promise<void>((resolve, reject) => {
+    writer.end((error?: Error | null) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
 
   renameSync(partialPath, targetPath);
 
   if (expectedSha) {
+    options?.onProgress?.({
+      model,
+      targetPath,
+      downloadedBytes,
+      ...(totalBytes ? { totalBytes } : {}),
+      resumed,
+      percent: 100,
+      stage: "verifying",
+    });
     const actual = await sha256File(targetPath);
     if (actual !== expectedSha.toLowerCase()) {
       rmSync(targetPath, { force: true });
@@ -554,13 +639,22 @@ export async function downloadOpenBmbModel(
   }
 
   const finalBytes = getFileSize(targetPath);
+  options?.onProgress?.({
+    model,
+    targetPath,
+    downloadedBytes: finalBytes,
+    totalBytes: finalBytes,
+    resumed,
+    percent: 100,
+    stage: "completed",
+  });
   return {
     model,
     targetPath,
     bytes: finalBytes,
     skipped: false,
     verified: Boolean(expectedSha),
-    ...(partialSize > 0 && acceptsRange ? { resumed: true } : {}),
+    ...(resumed ? { resumed: true } : {}),
   };
 }
 

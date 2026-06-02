@@ -9,6 +9,7 @@ import {
   enrichSemanticsSilent,
   getSkillInsights,
   indexGraph,
+  type ModelDownloadProgress,
   inspectGraph,
   planAndBrainstormResult,
   previewContext,
@@ -53,6 +54,16 @@ interface JsonRpcResponse {
     code: number;
     message: string;
   };
+}
+
+interface JsonRpcNotification {
+  jsonrpc: "2.0";
+  method: string;
+  params?: Record<string, unknown>;
+}
+
+interface ExecutionHooks {
+  onModelDownloadProgress?: (progress: ModelDownloadProgress) => void;
 }
 
 interface McpServer {
@@ -189,7 +200,8 @@ export function getToolDefinitions(): ToolDefinition[] {
 
 export async function executeToolCall(
   call: ToolCall,
-  _server: McpServer = createMcpServer()
+  _server: McpServer = createMcpServer(),
+  hooks?: ExecutionHooks
 ): Promise<ToolCallResponse> {
   const args = call.arguments ?? {};
 
@@ -258,7 +270,10 @@ export async function executeToolCall(
         }
 
       return textResponse(
-        await downloadOpenBmbModel(readOptionalString(args.configPath), downloadOptions)
+        await downloadOpenBmbModel(readOptionalString(args.configPath), {
+          ...downloadOptions,
+          ...(hooks?.onModelDownloadProgress ? { onProgress: hooks.onModelDownloadProgress } : {}),
+        })
       );
       }
     case "graphflow_inspect_graph":
@@ -276,7 +291,9 @@ export async function executeToolCall(
   }
 }
 
-export function createMcpServer(): McpServer {
+export function createMcpServer(
+  emitNotification?: (notification: JsonRpcNotification) => void
+): McpServer {
   const tools = getToolDefinitions();
 
   return {
@@ -320,10 +337,27 @@ export function createMcpServer(): McpServer {
       if (request.method === "tools/call") {
         try {
           const params = request.params ?? {};
+          const progressToken = readProgressToken(params);
           const result = await executeToolCall({
             name: readRequiredString(params.name, "name"),
             arguments: isRecord(params.arguments) ? params.arguments : {},
-          });
+          }, undefined, progressToken && emitNotification
+            ? {
+                onModelDownloadProgress: (progress) => {
+                  emitNotification({
+                    jsonrpc: "2.0",
+                    method: "notifications/progress",
+                    params: {
+                      progressToken,
+                      progress: progress.percent ?? 0,
+                      total: 100,
+                      message: `${progress.stage} ${progress.model} ${formatProgressMessage(progress)}`,
+                      data: progress,
+                    },
+                  });
+                },
+              }
+            : undefined);
           return {
             jsonrpc: "2.0",
             id: request.id ?? null,
@@ -354,7 +388,7 @@ export function createMcpServer(): McpServer {
 }
 
 export function startStdioServer(
-  server: McpServer = createMcpServer(),
+  server: McpServer = createMcpServer((notification) => writeMessage(process.stdout, notification)),
   input: Readable = process.stdin,
   output: Writable = process.stdout
 ): void {
@@ -388,7 +422,7 @@ export function startStdioServer(
   });
 }
 
-function writeMessage(output: Writable, response: JsonRpcResponse): void {
+function writeMessage(output: Writable, response: JsonRpcResponse | JsonRpcNotification): void {
   const payload = JSON.stringify(response);
   output.write(`Content-Length: ${Buffer.byteLength(payload, "utf8")}\r\n\r\n${payload}`);
 }
@@ -449,6 +483,37 @@ function buildInspectOptions(args: Record<string, unknown>): { nodeLimit?: numbe
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readProgressToken(params: Record<string, unknown>): string | number | undefined {
+  const direct = params.progressToken;
+  if (typeof direct === "string" || typeof direct === "number") {
+    return direct;
+  }
+  const meta = params._meta;
+  if (!isRecord(meta)) {
+    return undefined;
+  }
+  const token = meta.progressToken;
+  return typeof token === "string" || typeof token === "number" ? token : undefined;
+}
+
+function formatProgressMessage(progress: ModelDownloadProgress): string {
+  const current = formatBytes(progress.downloadedBytes);
+  const total = progress.totalBytes !== undefined ? formatBytes(progress.totalBytes) : "unknown";
+  const percent = progress.percent !== undefined ? `${progress.percent.toFixed(1)}%` : "...";
+  return `${percent} ${current}/${total}`;
+}
+
+function formatBytes(value: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
 function resolvePackageVersion(): string {

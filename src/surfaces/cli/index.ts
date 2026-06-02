@@ -144,7 +144,19 @@ async function executeCommand(command: string, args: string[], configPath?: stri
 
   if (command === "model" && args[0] === "download") {
     const model = args[1]?.trim() || "minicpm-1b";
-    const data = await downloadOpenBmbModel(configPath, { model });
+    let lastLine = "";
+    const data = await downloadOpenBmbModel(configPath, {
+      model,
+      onProgress: (progress) => {
+        const total = progress.totalBytes ? formatBytes(progress.totalBytes) : "unknown";
+        const percent = progress.percent !== undefined ? `${progress.percent.toFixed(1)}%` : "...";
+        const line = `${progress.stage} ${percent} ${formatBytes(progress.downloadedBytes)}/${total}`;
+        if (line !== lastLine) {
+          lastLine = line;
+          console.error(`[graphflow:model-download] ${line}`);
+        }
+      },
+    });
     return {
       command: "model-download",
       data,
@@ -155,6 +167,20 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   console.log(buildCliUsage());
   process.exitCode = 1;
   return undefined;
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value < 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
 async function main(): Promise<void> {

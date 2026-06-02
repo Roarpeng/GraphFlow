@@ -31,6 +31,180 @@ interface ResolvedOpenBmbOptions {
   temperature: number;
 }
 
+interface WorkerTaskPayload {
+  id: number;
+  engine: string;
+  command?: string;
+  prompt: string;
+  model: string;
+  modelPath?: string;
+  maxTokens: number;
+  temperature: number;
+  timeoutMs: number;
+}
+
+interface WorkerTaskState {
+  resolve: (value: string) => void;
+  reject: (reason?: unknown) => void;
+  timer: NodeJS.Timeout;
+}
+
+class EmbeddedWorkerPool {
+  private worker: Worker | undefined;
+  private nextId = 1;
+  private pending = new Map<number, WorkerTaskState>();
+
+  async run(payload: Omit<WorkerTaskPayload, "id">): Promise<string> {
+    this.ensureWorker();
+    const id = this.nextId++;
+    return new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        this.restartWorker(new Error(`openbmb embedded worker timed out after ${payload.timeoutMs}ms`), id);
+        reject(new Error(`openbmb embedded worker timed out after ${payload.timeoutMs}ms`));
+      }, payload.timeoutMs + 500);
+
+      this.pending.set(id, { resolve, reject, timer });
+      this.worker!.postMessage({ id, ...payload });
+    });
+  }
+
+  private ensureWorker(): void {
+    if (this.worker) {
+      return;
+    }
+
+    const workerSource = `
+      const { parentPort } = require("node:worker_threads");
+      const { execFile } = require("node:child_process");
+      const { promisify } = require("node:util");
+      const execFileAsync = promisify(execFile);
+      let llama = null;
+      let loadedModel = null;
+      let loadedContext = null;
+      let loadedSequence = null;
+      let loadedModelPath = null;
+
+      async function runCommand(task) {
+        if (!task.command) {
+          throw new Error("openbmb embedded mode requires GRAPHFLOW_MINICPM_COMMAND");
+        }
+        const args = [
+          "-m",
+          task.modelPath || task.model,
+          "-p",
+          task.prompt,
+          "-n",
+          String(task.maxTokens),
+          "--temp",
+          String(task.temperature),
+          "--no-display-prompt",
+        ];
+        const result = await execFileAsync(task.command, args, {
+          timeout: task.timeoutMs,
+          windowsHide: true,
+          maxBuffer: 1024 * 1024,
+        });
+        const output = (result.stdout || "").trim();
+        if (!output) {
+          throw new Error("openbmb embedded mode returned empty output");
+        }
+        return output;
+      }
+
+      async function ensureNodeLlama(task) {
+        if (!task.modelPath) {
+          throw new Error("openbmb embedded node-llama-cpp mode requires modelPath");
+        }
+        if (loadedSequence && loadedModelPath === task.modelPath) {
+          return loadedSequence;
+        }
+        const moduleRef = await import("node-llama-cpp");
+        const createLlama = moduleRef.getLlama || moduleRef.createLlama;
+        if (typeof createLlama !== "function") {
+          throw new Error("node-llama-cpp API not available");
+        }
+        llama = llama || await createLlama();
+        loadedModel = await llama.loadModel({ modelPath: task.modelPath });
+        loadedContext = await loadedModel.createContext({ contextSize: 2048 });
+        loadedSequence = loadedContext.getSequence();
+        loadedModelPath = task.modelPath;
+        return loadedSequence;
+      }
+
+      async function runNodeLlama(task) {
+        const sequence = await ensureNodeLlama(task);
+        const completion = await sequence.prompt(task.prompt, {
+          temperature: task.temperature,
+          maxTokens: task.maxTokens,
+          stopOnAbortSignal: AbortSignal.timeout(task.timeoutMs),
+        });
+        const text = typeof completion === "string" ? completion.trim() : String(completion || "").trim();
+        if (!text) {
+          throw new Error("node-llama-cpp produced empty output");
+        }
+        return text;
+      }
+
+      parentPort.on("message", async (task) => {
+        try {
+          const text = task.engine === "node-llama-cpp" ? await runNodeLlama(task) : await runCommand(task);
+          parentPort.postMessage({ id: task.id, ok: true, text });
+        } catch (error) {
+          parentPort.postMessage({ id: task.id, ok: false, error: error instanceof Error ? error.message : String(error) });
+        }
+      });
+    `;
+
+    this.worker = new Worker(workerSource, { eval: true });
+    this.worker.on("message", (msg: { id?: number; ok?: boolean; text?: string; error?: string }) => {
+      const id = msg.id;
+      if (id === undefined) {
+        return;
+      }
+      const pending = this.pending.get(id);
+      if (!pending) {
+        return;
+      }
+      clearTimeout(pending.timer);
+      this.pending.delete(id);
+      if (msg.ok && msg.text) {
+        pending.resolve(msg.text);
+        return;
+      }
+      pending.reject(new Error(msg.error ?? "openbmb embedded worker failed"));
+    });
+    this.worker.on("error", (error) => {
+      this.restartWorker(error instanceof Error ? error : new Error(String(error)));
+    });
+    this.worker.on("exit", (code) => {
+      if (code !== 0) {
+        this.restartWorker(new Error(`openbmb embedded worker exited with code ${code}`));
+      } else {
+        this.worker = undefined;
+      }
+    });
+  }
+
+  private restartWorker(reason: Error, skipId?: number): void {
+    const current = this.worker;
+    this.worker = undefined;
+    if (current) {
+      void current.terminate();
+    }
+    for (const [id, pending] of this.pending.entries()) {
+      if (id === skipId) {
+        continue;
+      }
+      clearTimeout(pending.timer);
+      pending.reject(reason);
+      this.pending.delete(id);
+    }
+  }
+}
+
+const embeddedWorkerPool = new EmbeddedWorkerPool();
+
 function resolveOptions(input?: OpenBmbRuntimeOptions): ResolvedOpenBmbOptions {
   const mode = input?.mode ?? (process.env.GRAPHFLOW_OPENBMB_MODE as OpenBmbMode | undefined) ?? "embedded";
   const baseUrl = input?.baseUrl ?? process.env.GRAPHFLOW_OPENBMB_BASE_URL ?? "http://localhost:11434";
@@ -164,113 +338,22 @@ async function runEmbeddedInWorker(
   const engine = process.env.GRAPHFLOW_MINICPM_ENGINE ?? "command";
   const command = process.env.GRAPHFLOW_MINICPM_COMMAND;
 
-  const workerSource = `
-    const { parentPort, workerData } = require("node:worker_threads");
-    const { execFile } = require("node:child_process");
-    const { promisify } = require("node:util");
-    const execFileAsync = promisify(execFile);
+  const payload: Omit<WorkerTaskPayload, "id"> = {
+    engine,
+    prompt: request.prompt,
+    model: request.model,
+    maxTokens: options.maxTokens,
+    temperature: options.temperature,
+    timeoutMs: options.timeoutMs,
+  };
+  if (command) {
+    payload.command = command;
+  }
+  if (options.modelPath) {
+    payload.modelPath = options.modelPath;
+  }
 
-    async function runCommand() {
-      if (!workerData.command) {
-        throw new Error("openbmb embedded mode requires GRAPHFLOW_MINICPM_COMMAND");
-      }
-      const args = [
-        "-m",
-        workerData.modelPath || workerData.model,
-        "-p",
-        workerData.prompt,
-        "-n",
-        String(workerData.maxTokens),
-        "--temp",
-        String(workerData.temperature),
-        "--no-display-prompt",
-      ];
-      const result = await execFileAsync(workerData.command, args, {
-        timeout: workerData.timeoutMs,
-        windowsHide: true,
-        maxBuffer: 1024 * 1024,
-      });
-      const output = (result.stdout || "").trim();
-      if (!output) {
-        throw new Error("openbmb embedded mode returned empty output");
-      }
-      return output;
-    }
-
-    async function runNodeLlama() {
-      if (!workerData.modelPath) {
-        throw new Error("openbmb embedded node-llama-cpp mode requires modelPath");
-      }
-      const moduleRef = await import("node-llama-cpp");
-      const createLlama = moduleRef.getLlama || moduleRef.createLlama;
-      if (typeof createLlama !== "function") {
-        throw new Error("node-llama-cpp API not available");
-      }
-      const llama = await createLlama();
-      const model = await llama.loadModel({ modelPath: workerData.modelPath });
-      const context = await model.createContext({ contextSize: 2048 });
-      const sequence = context.getSequence();
-      const completion = await sequence.prompt(workerData.prompt, {
-        temperature: workerData.temperature,
-        maxTokens: workerData.maxTokens,
-        stopOnAbortSignal: AbortSignal.timeout(workerData.timeoutMs),
-      });
-      const text = typeof completion === "string" ? completion.trim() : String(completion || "").trim();
-      if (!text) {
-        throw new Error("node-llama-cpp produced empty output");
-      }
-      return text;
-    }
-
-    (async () => {
-      try {
-        const text = workerData.engine === "node-llama-cpp" ? await runNodeLlama() : await runCommand();
-        parentPort.postMessage({ ok: true, text });
-      } catch (error) {
-        parentPort.postMessage({ ok: false, error: error instanceof Error ? error.message : String(error) });
-      }
-    })();
-  `;
-
-  return new Promise<string>((resolve, reject) => {
-    const worker = new Worker(workerSource, {
-      eval: true,
-      workerData: {
-        engine,
-        command,
-        prompt: request.prompt,
-        model: request.model,
-        modelPath: options.modelPath,
-        maxTokens: options.maxTokens,
-        temperature: options.temperature,
-        timeoutMs: options.timeoutMs,
-      },
-    });
-
-    const timer = setTimeout(() => {
-      void worker.terminate();
-      reject(new Error(`openbmb embedded worker timed out after ${options.timeoutMs}ms`));
-    }, options.timeoutMs + 500);
-
-    worker.once("message", (msg: { ok?: boolean; text?: string; error?: string }) => {
-      clearTimeout(timer);
-      if (msg.ok && msg.text) {
-        resolve(msg.text);
-        return;
-      }
-      reject(new Error(msg.error ?? "openbmb embedded worker failed"));
-    });
-    worker.once("error", (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    worker.once("exit", (code) => {
-      if (code !== 0) {
-        clearTimeout(timer);
-        reject(new Error(`openbmb embedded worker exited with code ${code}`));
-      }
-    });
-  });
+  return embeddedWorkerPool.run(payload);
 }
 
 async function runEmbeddedNodeLlamaCpp(

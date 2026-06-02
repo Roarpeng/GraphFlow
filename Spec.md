@@ -444,19 +444,22 @@ profiles: [
   - CLI: `graphflow model download [name]`
   - MCP: `graphflow_model_download`
   - 支持 `url/sha256/targetPath/force` 参数
-- ✅ 模型下载已支持基础断点续传与完整性校验回滚（`.part` 续传、sha256 不匹配自动删除）
-- ✅ openbmb embedded 默认启用 worker 线程隔离（`GRAPHFLOW_OPENBMB_USE_WORKER` 可关闭）
-- ✅ 新增 m31 推理基准测试骨架：`tests/m31-inference-bench.test.ts`（默认跳过，`GRAPHFLOW_RUN_PERF=1` 启用）
-- ✅ VS Code 扩展已新增命令：`GraphFlow: Enrich Graph Semantics`，并支持聊天命令 `/enrich`
-- ✅ 验证结果：TypeScript 编译通过，Vitest **111 通过 / 1 跳过（m31 手动性能测试）**
+- ✅ 模型下载已支持生产化流式断点续传与完整性校验回滚（`.part` 续传、sha256 不匹配自动删除、边下载边写盘）
+- ✅ 模型下载实时进度已贯通三端：
+  - CLI：stderr 实时输出 `starting/downloading/verifying/completed`
+  - MCP：`graphflow_model_download` 支持 `notifications/progress`
+  - VS Code：新增 `GraphFlow: Download MiniCPM Model` 命令并使用原生 progress notification
+- ✅ openbmb embedded 已从“一次请求一个 worker”升级为长生命周期可复用 worker 池；`node-llama-cpp` 模式在 worker 内复用已加载模型上下文
+- ✅ 新增 m31 标准化性能报告：`tests/m31-inference-bench.test.ts` 运行后会产出 `tmp/m31-inference-bench.json` 与 `tmp/m31-inference-bench.md`
+- ✅ VS Code 扩展已新增命令：`GraphFlow: Enrich Graph Semantics`、`GraphFlow: Download MiniCPM Model`，并支持聊天命令 `/enrich`
+- ✅ 验证结果：TypeScript 编译通过，Vitest **111 通过 / 1 跳过（m31 手动性能测试）**；手动执行 `GRAPHFLOW_RUN_PERF=1` 后 m31 基准通过并成功生成标准化报告
 - ✅ 扩展验证：`npm --prefix vscode-extension run build` 通过
 
 未完成（仍需外部依赖或下一迭代）：
 - ⏳ `node-llama-cpp` 生产化稳定：GPU/Metal/CUDA 参数自动探测 + 上下文复用与内存回收
-- ⏳ 模型下载生产化增强：实时进度回传（CLI/MCP/VSCode）+ 并发下载保护
-- ⏳ worker 隔离进一步增强：长生命周期 worker 池 + 任务队列 + 优雅退出
+- ⏳ 模型下载并发保护与下载锁（避免多端重复拉取同一模型）
 - ⏳ VS Code 扩展可观测增强：enrich 进度条与失败明细面板
-- ⏳ 推理性能基准 `m31-inference-bench` 与 200 t/s 硬件分层验收
+- ⏳ 推理性能基准 `m31-inference-bench` 的真实 GPU/Metal/CUDA 官方曲线沉淀
 - ⏳ provider 生产强化：统一配额/速率限制策略 + provider 级 telemetry
 
 ### 5.9 当前项目收尾计划（执行版）
@@ -465,12 +468,12 @@ profiles: [
 |---|---|---|---|
 | Stage A | 多 provider 与 openbmb 主链路可用 | 5 provider 适配器 + 路由超时/重试/熔断 | ✅ 完成 |
 | Stage B | 图谱语义增强全通路 | CLI/MCP/VSCode enrich 命令 + 自动触发 | ✅ 完成 |
-| Stage C | 嵌入式模型执行与分发能力 | command 模式 + `node-llama-cpp` 可选 + model download | ✅ 完成（基础版） |
-| Stage D | 生产化与性能验收 | worker 隔离、下载断点续传、m31 基准、telemetry | ⏳ 进行中 |
+| Stage C | 嵌入式模型执行与分发能力 | command 模式 + `node-llama-cpp` 可选 + model download | ✅ 完成 |
+| Stage D | 生产化与性能验收 | worker 池、下载进度、m31 标准报告、telemetry | ✅ 阶段完成 |
 
 短期里程碑（建议 1-2 周）：
-1. 完成 `worker_threads` 隔离并压测 10k 次 provider 调用稳定性。
-2. 落地 m31 推理基准，分 CPU/Metal/CUDA 三档给出官方性能曲线。
+1. 增加模型下载锁与多进程互斥，避免并发重复下载。
+2. 沉淀真实 GPU/Metal/CUDA 基准数据，替换当前报告中的目标档位模板。
 3. 增加 provider telemetry（成功率/超时率/回退率）并接入 nightly summary。
 
 ### 5.7 项目级优化建议（与 MiniCPM 解耦的横向改进）

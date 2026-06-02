@@ -24,6 +24,7 @@
     "onCommand:graphflow.showGraph",
     "onCommand:graphflow.showSkills",
     "onCommand:graphflow.enrichGraph",
+    "onCommand:graphflow.downloadModel",
     "onChatParticipant:roarpeng.graphflow-vscode.graphflowAgent"
   ],
   "main": "./dist/extension.js",
@@ -60,6 +61,10 @@
       {
         "command": "graphflow.enrichGraph",
         "title": "GraphFlow: Enrich Graph Semantics"
+      },
+      {
+        "command": "graphflow.downloadModel",
+        "title": "GraphFlow: Download MiniCPM Model"
       }
     ],
     "chatParticipants": [
