@@ -444,14 +444,17 @@ profiles: [
   - CLI: `graphflow model download [name]`
   - MCP: `graphflow_model_download`
   - 支持 `url/sha256/targetPath/force` 参数
+- ✅ 模型下载已支持基础断点续传与完整性校验回滚（`.part` 续传、sha256 不匹配自动删除）
+- ✅ openbmb embedded 默认启用 worker 线程隔离（`GRAPHFLOW_OPENBMB_USE_WORKER` 可关闭）
+- ✅ 新增 m31 推理基准测试骨架：`tests/m31-inference-bench.test.ts`（默认跳过，`GRAPHFLOW_RUN_PERF=1` 启用）
 - ✅ VS Code 扩展已新增命令：`GraphFlow: Enrich Graph Semantics`，并支持聊天命令 `/enrich`
-- ✅ 验证结果：TypeScript 编译通过，Vitest **111/111 全部通过**
+- ✅ 验证结果：TypeScript 编译通过，Vitest **111 通过 / 1 跳过（m31 手动性能测试）**
 - ✅ 扩展验证：`npm --prefix vscode-extension run build` 通过
 
 未完成（仍需外部依赖或下一迭代）：
 - ⏳ `node-llama-cpp` 生产化稳定：GPU/Metal/CUDA 参数自动探测 + 上下文复用与内存回收
-- ⏳ 模型下载生产化：断点续传 + 下载进度 + 校验失败自动回滚
-- ⏳ `worker_threads` 隔离嵌入式推理（当前由 provider 超时兜底）
+- ⏳ 模型下载生产化增强：实时进度回传（CLI/MCP/VSCode）+ 并发下载保护
+- ⏳ worker 隔离进一步增强：长生命周期 worker 池 + 任务队列 + 优雅退出
 - ⏳ VS Code 扩展可观测增强：enrich 进度条与失败明细面板
 - ⏳ 推理性能基准 `m31-inference-bench` 与 200 t/s 硬件分层验收
 - ⏳ provider 生产强化：统一配额/速率限制策略 + provider 级 telemetry

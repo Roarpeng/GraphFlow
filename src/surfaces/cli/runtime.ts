@@ -1,8 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { createReadStream } from "node:fs";
 import { brainstormTask } from "../../agents/brainstormer";
 import { planTasks } from "../../agents/planner";
 import { loadConfig, validateConfig } from "../../config/loader";
@@ -396,6 +395,7 @@ export interface ModelDownloadResult {
   bytes: number;
   skipped: boolean;
   verified: boolean;
+  resumed?: boolean;
 }
 
 export async function indexGraph(rootDir?: string, configPath?: string): Promise<GraphIndexResult> {
@@ -469,6 +469,7 @@ export async function downloadOpenBmbModel(
   const targetPath = configuredPath ?? fallbackPath;
   const force = options?.force ?? false;
   const expectedSha = options?.sha256 ?? process.env.GRAPHFLOW_MINICPM_MODEL_SHA256;
+  const partialPath = `${targetPath}.part`;
 
   if (existsSync(targetPath) && !force) {
     const bytes = getFileSize(targetPath);
@@ -488,17 +489,66 @@ export async function downloadOpenBmbModel(
 
   mkdirSync(dirname(targetPath), { recursive: true });
 
-  const response = await fetch(url);
+  let partialSize = 0;
+  if (existsSync(partialPath) && !force) {
+    try {
+      partialSize = statSync(partialPath).size;
+    } catch {
+      partialSize = 0;
+    }
+  }
+
+  if (force) {
+    rmSync(partialPath, { force: true });
+    partialSize = 0;
+  }
+
+  const fetchInit: RequestInit = {};
+  if (partialSize > 0) {
+    fetchInit.headers = { range: `bytes=${partialSize}-` };
+  }
+  const response = await fetch(url, fetchInit);
   if (!response.ok) {
     throw new Error(`Model download failed: ${response.status} ${response.statusText}`);
   }
 
-  const bytes = Buffer.from(await response.arrayBuffer());
-  writeFileSync(targetPath, bytes);
+  const acceptsRange = response.status === 206;
+  if (!acceptsRange && partialSize > 0) {
+    rmSync(partialPath, { force: true });
+    partialSize = 0;
+  }
+
+  const stream = response.body;
+  if (!stream) {
+    throw new Error("Model download failed: empty response body");
+  }
+
+  const reader = stream.getReader();
+  const chunks: Buffer[] = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (value) {
+      chunks.push(Buffer.from(value));
+    }
+  }
+
+  const downloadedBuffer = Buffer.concat(chunks);
+  if (partialSize > 0 && acceptsRange) {
+    const previous = readFileSync(partialPath);
+    writeFileSync(partialPath, Buffer.concat([previous, downloadedBuffer]));
+  } else {
+    writeFileSync(partialPath, downloadedBuffer);
+  }
+
+  renameSync(partialPath, targetPath);
 
   if (expectedSha) {
     const actual = await sha256File(targetPath);
     if (actual !== expectedSha.toLowerCase()) {
+      rmSync(targetPath, { force: true });
       throw new Error(`Model sha256 mismatch. expected=${expectedSha.toLowerCase()} actual=${actual}`);
     }
   }
@@ -510,6 +560,7 @@ export async function downloadOpenBmbModel(
     bytes: finalBytes,
     skipped: false,
     verified: Boolean(expectedSha),
+    ...(partialSize > 0 && acceptsRange ? { resumed: true } : {}),
   };
 }
 
@@ -886,7 +937,7 @@ function parseEnvPlaceholder(value?: string): string | undefined {
 
 function getFileSize(path: string): number {
   try {
-    return readFileSync(path).byteLength;
+    return statSync(path).size;
   } catch {
     return 0;
   }
