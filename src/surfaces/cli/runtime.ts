@@ -728,11 +728,34 @@ export async function inspectGraph(
       .map(([relation, count]) => ({ relation, count }))
       .sort((a, b) => b.count - a.count || a.relation.localeCompare(b.relation))
       .slice(0, 8),
-    sampleNodes: store.nodes.slice(0, nodeLimit).map((node) => ({
-      id: node.id,
-      type: node.type,
-      contentPreview: compactPreview(node.content, 96),
-    })),
+    sampleNodes: (() => {
+      const isMetaFile = (id: string) => {
+        const lower = id.toLowerCase();
+        return lower.includes(".md") || lower.includes(".json") || lower.includes(".yml") || lower.includes(".yaml") || lower.includes(".github") || lower.includes(".claude") || lower.includes(".codex");
+      };
+      
+      const scoredNodes = store.nodes.map(node => {
+        let score = 0;
+        if (node.type === "Symbol") {
+          score = 100;
+        } else if (node.type === "File" && !isMetaFile(node.id)) {
+          score = 50;
+        } else if (node.type === "File") {
+          score = 10;
+        } else if (node.type === "Module") {
+          score = 5;
+        }
+        return { node, score };
+      });
+      
+      scoredNodes.sort((a, b) => b.score - a.score || a.node.id.localeCompare(b.node.id));
+      
+      return scoredNodes.slice(0, nodeLimit).map(({ node }) => ({
+        id: node.id,
+        type: node.type,
+        contentPreview: compactPreview(node.content, 96),
+      }));
+    })(),
     sampleEdges: store.edges.slice(0, edgeLimit).map((edge) => ({
       from: edge.from,
       relation: edge.relation,
