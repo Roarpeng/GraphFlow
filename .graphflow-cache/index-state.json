@@ -990,8 +990,8 @@
     "numNodes": 2
   },
   "Spec.md": {
-    "mtimeMs": 1780489905051.5889,
-    "hash": "f3e6ff34a5f1617863220115bb91a038",
+    "mtimeMs": 1780492448849.252,
+    "hash": "951cf184f9b64749e313176427f7bbec",
     "numNodes": 2
   },
   "src/agents/brainstormer.ts": {
@@ -1060,8 +1060,8 @@
     "numNodes": 28
   },
   "src/graph/file-indexer.ts": {
-    "mtimeMs": 1780491147226.258,
-    "hash": "d66f2cca8b36bb513125a232bc02ae08",
+    "mtimeMs": 1780493573191.5354,
+    "hash": "3d8524cc21a42e7f1ac4bcd9d8f8569d",
     "numNodes": 27
   },
   "src/graph/graph-indexer.ts": {
@@ -1245,8 +1245,8 @@
     "numNodes": 10
   },
   "src/surfaces/cli/runtime.ts": {
-    "mtimeMs": 1780491327580.0747,
-    "hash": "f00d2ac0b9259b7fb77148884dd612d1",
+    "mtimeMs": 1780495506472.6577,
+    "hash": "8cc0b00db4d72ccb1fc9ba3e04168dfe",
     "numNodes": 72
   },
   "src/surfaces/mcp/server.ts": {
@@ -1440,8 +1440,8 @@
     "numNodes": 2
   },
   "vscode-extension/media/graph-snapshot.js": {
-    "mtimeMs": 1780313613800.5752,
-    "hash": "c990aa97bcefc03bcc1df6bd02be1806",
+    "mtimeMs": 1780495995920.3816,
+    "hash": "712d67af79381601439b3152d7fc028e",
     "numNodes": 2
   },
   "vscode-extension/media/settings.js": {
@@ -1460,8 +1460,8 @@
     "numNodes": 2
   },
   "vscode-extension/package.json": {
-    "mtimeMs": 1780488954806.2942,
-    "hash": "26fcfbf14a208914858def2269fb9082",
+    "mtimeMs": 1780492441047.2058,
+    "hash": "35b04c8fb795846cf39f9b4128f66aae",
     "numNodes": 2
   },
   "vscode-extension/README.md": {
@@ -1470,13 +1470,13 @@
     "numNodes": 2
   },
   "vscode-extension/src/extension.ts": {
-    "mtimeMs": 1780488954809.48,
-    "hash": "d3da8c2118fdd8ce408b355355f6c513",
+    "mtimeMs": 1780494230956.038,
+    "hash": "b7d1e955fec5a8e6a01ecb9b8b942cb3",
     "numNodes": 33
   },
   "vscode-extension/src/panels.ts": {
-    "mtimeMs": 1780314700257.1106,
-    "hash": "642105250b6e8b7a9ffceb7c1c2a17a2",
+    "mtimeMs": 1780495513214.0076,
+    "hash": "a8d8437b1fcdeef4cc02b8f660d3965c",
     "numNodes": 19
   },
   "vscode-extension/tsconfig.json": {
@@ -1485,8 +1485,8 @@
     "numNodes": 2
   },
   ".graphflow-cache/index-state.json": {
-    "mtimeMs": 1780492046791.254,
-    "hash": "c280be787392ffb6da4875a6ea9cb6a5",
+    "mtimeMs": 1780496058106.4827,
+    "hash": "2a00816cf1d0ae3bebe3f276501f2dda",
     "numNodes": 2
   }
 }

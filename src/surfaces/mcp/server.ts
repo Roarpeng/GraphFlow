@@ -392,31 +392,30 @@ export function startStdioServer(
   input: Readable = process.stdin,
   output: Writable = process.stdout
 ): void {
-  let buffer = Buffer.alloc(0);
+  let buffer = "";
 
-  input.on("data", async (chunk: Buffer | string) => {
-    buffer = Buffer.concat([buffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+  input.setEncoding("utf8");
+  input.on("data", async (chunk: string) => {
+    buffer += chunk;
 
-    while (true) {
-      const headerEnd = buffer.indexOf("\r\n\r\n");
-      if (headerEnd === -1) {
-        return;
+    let newlineIndex: number;
+    while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, newlineIndex).trim();
+      buffer = buffer.slice(newlineIndex + 1);
+
+      if (!line) {
+        continue;
       }
 
-      const headerText = buffer.subarray(0, headerEnd).toString("utf8");
-      const contentLength = parseContentLength(headerText);
-      const frameEnd = headerEnd + 4 + contentLength;
-      if (buffer.length < frameEnd) {
-        return;
-      }
-
-      const body = buffer.subarray(headerEnd + 4, frameEnd).toString("utf8");
-      buffer = buffer.subarray(frameEnd);
-
-      const request = JSON.parse(body) as JsonRpcRequest;
-      const response = await server.handleRequest(request);
-      if (response) {
-        writeMessage(output, response);
+      try {
+        const request = JSON.parse(line) as JsonRpcRequest;
+        const response = await server.handleRequest(request);
+        if (response) {
+          writeMessage(output, response);
+        }
+      } catch (err) {
+        // Ignore parse errors from invalid JSON lines
+        console.error("[GraphFlow MCP] Error parsing incoming message:", err);
       }
     }
   });
@@ -424,24 +423,7 @@ export function startStdioServer(
 
 function writeMessage(output: Writable, response: JsonRpcResponse | JsonRpcNotification): void {
   const payload = JSON.stringify(response);
-  output.write(`Content-Length: ${Buffer.byteLength(payload, "utf8")}\r\n\r\n${payload}`);
-}
-
-function parseContentLength(headerText: string): number {
-  const line = headerText
-    .split("\r\n")
-    .find((entry) => entry.toLowerCase().startsWith("content-length:"));
-
-  if (!line) {
-    throw new Error("Missing Content-Length header.");
-  }
-
-  const value = Number(line.split(":")[1]?.trim() ?? "0");
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error("Invalid Content-Length header.");
-  }
-
-  return value;
+  output.write(`${payload}\n`);
 }
 
 function textResponse(data: unknown): ToolCallResponse {

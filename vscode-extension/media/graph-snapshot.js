@@ -90,14 +90,89 @@
     const positions = new Map();
 
     visibleNodes.forEach((node, index) => {
-      const isFocused = selectedId ? node.id === selectedId : index === 0;
-      const angle = (Math.PI * 2 * index) / total;
-      const radial = isFocused ? radius * 0.4 : radius;
+      const angle = (Math.PI * 2 * index) / visibleNodes.length;
       positions.set(node.id, {
-        x: centerX + radial * Math.cos(angle),
-        y: centerY + radial * Math.sin(angle),
+        x: centerX + Math.cos(angle) * 100 + (Math.random() - 0.5) * 40,
+        y: centerY + Math.sin(angle) * 100 + (Math.random() - 0.5) * 40,
+        vx: 0,
+        vy: 0,
       });
     });
+
+    const iterations = 150;
+    const k = 40;
+    const repulsion = 4000;
+
+    for (let i = 0; i < iterations; i++) {
+      const temp = 1.0 - i / iterations;
+
+      for (let a = 0; a < visibleNodes.length; a++) {
+        for (let b = a + 1; b < visibleNodes.length; b++) {
+          const p1 = positions.get(visibleNodes[a].id);
+          const p2 = positions.get(visibleNodes[b].id);
+          const dx = p1.x - p2.x;
+          const dy = p1.y - p2.y;
+          let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+
+          const force = (repulsion / (dist * dist)) * temp;
+          const fx = (dx / dist) * force;
+          const fy = (dy / dist) * force;
+
+          p1.vx += fx; p1.vy += fy;
+          p2.vx -= fx; p2.vy -= fy;
+        }
+      }
+
+      visibleEdges.forEach((edge) => {
+        const p1 = positions.get(edge.from);
+        const p2 = positions.get(edge.to);
+        if (!p1 || !p2) return;
+
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+
+        const force = ((dist * dist) / (k * k)) * 0.1 * temp;
+        const fx = (dx / dist) * force;
+        const fy = (dy / dist) * force;
+
+        p1.vx += fx; p1.vy += fy;
+        p2.vx -= fx; p2.vy -= fy;
+      });
+
+      visibleNodes.forEach((node) => {
+        const p = positions.get(node.id);
+        const dx = centerX - p.x;
+        const dy = centerY - p.y;
+        let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+
+        const gravityForce = 0.05 * temp;
+        p.vx += dx * gravityForce;
+        p.vy += dy * gravityForce;
+
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vx *= 0.5;
+        p.vy *= 0.5;
+      });
+    }
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of positions.values()) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    }
+
+    const contentWidth = Math.max(maxX - minX, 1);
+    const contentHeight = Math.max(maxY - minY, 1);
+    const scale = Math.min((width - 150) / contentWidth, (height - 100) / contentHeight);
+
+    for (const [id, p] of positions.entries()) {
+      p.x = centerX + (p.x - centerX) * scale;
+      p.y = centerY + (p.y - centerY) * scale;
+    }
 
     visibleEdges.forEach((edge) => {
       const from = positions.get(edge.from);

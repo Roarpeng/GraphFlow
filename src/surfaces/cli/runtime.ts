@@ -733,16 +733,6 @@ export async function inspectGraph(
         const lower = id.toLowerCase();
         return lower.includes(".md") || lower.includes(".json") || lower.includes(".yml") || lower.includes(".yaml") || lower.includes(".github") || lower.includes(".claude") || lower.includes(".codex");
       };
-      
-      const rootNode = store.nodes.find(n => n.type === "File" && !isMetaFile(n.id)) 
-                    || store.nodes.find(n => n.type === "File") 
-                    || store.nodes[0];
-
-      if (!rootNode) return { sampleNodes: [], sampleEdges: [] };
-
-      const visited = new Set<string>();
-      const queue = [rootNode.id];
-      const selected = [];
 
       const adj = new Map<string, string[]>();
       for (const e of store.edges) {
@@ -753,25 +743,39 @@ export async function inspectGraph(
       }
 
       const nodeMap = new Map(store.nodes.map(n => [n.id, n]));
-
-      while (queue.length > 0 && selected.length < nodeLimit) {
-        const id = queue.shift()!;
-        if (visited.has(id)) continue;
-        visited.add(id);
-        const node = nodeMap.get(id);
-        if (node) {
-          selected.push(node);
-          const neighbors = adj.get(id) || [];
-          queue.push(...neighbors);
-        }
+      
+      const degree = (id: string) => adj.get(id)?.length || 0;
+      
+      const sortedCandidates = store.nodes
+        .filter(n => n.type === "File" && !isMetaFile(n.id))
+        .sort((a, b) => degree(b.id) - degree(a.id));
+      
+      if (sortedCandidates.length === 0) {
+        return { sampleNodes: [], sampleEdges: [] };
       }
 
-      if (selected.length < nodeLimit) {
-        const remaining = store.nodes.filter(n => !visited.has(n.id) && n.type === "File" && !isMetaFile(n.id));
-        for (const n of remaining) {
-          if (selected.length >= nodeLimit) break;
-          selected.push(n);
-          visited.add(n.id);
+      const visited = new Set<string>();
+      const selected = [];
+      let candidateIndex = 0;
+
+      while (selected.length < nodeLimit && candidateIndex < sortedCandidates.length) {
+        let root = sortedCandidates[candidateIndex++];
+        while (root && visited.has(root.id) && candidateIndex < sortedCandidates.length) {
+          root = sortedCandidates[candidateIndex++];
+        }
+        if (!root || visited.has(root.id)) break;
+
+        const queue = [root.id];
+        while (queue.length > 0 && selected.length < nodeLimit) {
+          const id = queue.shift()!;
+          if (visited.has(id)) continue;
+          visited.add(id);
+          const node = nodeMap.get(id);
+          if (node) {
+            selected.push(node);
+            const neighbors = adj.get(id) || [];
+            queue.push(...neighbors);
+          }
         }
       }
 

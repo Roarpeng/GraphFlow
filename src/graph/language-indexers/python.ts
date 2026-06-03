@@ -53,14 +53,30 @@ export const pythonIndexer: LanguageIndexer = {
           if (child.type === "dotted_name" || child.type === "aliased_import") {
             const nameNode = child.type === "aliased_import" ? child.childForFieldName("name") : child;
             if (nameNode) {
-              imports.push({ module: nameNode.text, raw: node.text });
+              imports.push({ module: nameNode.text.replace(/\./g, "/"), raw: node.text });
             }
           }
         }
       } else if (node.type === "import_from_statement") {
         const moduleNameNode = node.childForFieldName("module_name");
         if (moduleNameNode) {
-          imports.push({ module: moduleNameNode.text, raw: node.text });
+          let modName = moduleNameNode.text;
+          if (modName.startsWith(".")) {
+            let upLevel = 0;
+            while (modName.startsWith(".")) {
+              upLevel++;
+              modName = modName.slice(1);
+            }
+            const parts = filePath.split(/[\\/]/);
+            // parts.length - 1 is the directory
+            const dirParts = parts.slice(0, parts.length - upLevel);
+            if (modName) {
+              dirParts.push(...modName.split("."));
+            }
+            imports.push({ module: dirParts.join("/"), raw: node.text });
+          } else {
+            imports.push({ module: modName.replace(/\./g, "/"), raw: node.text });
+          }
         }
       }
 

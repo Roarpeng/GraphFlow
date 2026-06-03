@@ -511,8 +511,8 @@ function layoutSnapshotPositions(
   nodes.forEach((node, index) => {
     const angle = (Math.PI * 2 * index) / nodes.length;
     positions.set(node.id, {
-      x: centerX + Math.cos(angle) * 100,
-      y: centerY + Math.sin(angle) * 100,
+      x: centerX + Math.cos(angle) * 100 + (Math.random() - 0.5) * 40,
+      y: centerY + Math.sin(angle) * 100 + (Math.random() - 0.5) * 40,
       vx: 0,
       vy: 0,
     });
