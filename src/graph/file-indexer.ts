@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync, mkdirSync, writeFileSync } from "node:fs";
-import { join, relative, dirname } from "node:path";
+import { join, relative, dirname, posix } from "node:path";
 import { createHash } from "node:crypto";
 import type { GraphEdge, GraphNode } from "../core/types";
 import type { GraphClient } from "./client-factory";
@@ -186,7 +186,7 @@ export async function indexWorkspaceFiles(
     }
 
     for (const target of imports) {
-      const targetModule = normalizeImportTarget(target);
+      const targetModule = normalizeImportTarget(target, relPath);
       if (!targetModule) {
         continue;
       }
@@ -300,13 +300,22 @@ function walkFiles(rootDir: string, includeExtensions: string[]): string[] {
   return files;
 }
 
-function normalizeImportTarget(target: string): string | undefined {
-  const cleaned = target
+function normalizeImportTarget(target: string, importerRelPath: string): string | undefined {
+  let cleaned = target
     .replace(/\\/g, "/")
     .replace(/\.(ts|tsx|js|jsx|py|rs|go|hpp|hxx|cpp|cxx|cc|h|c)$/i, "");
   if (!cleaned) {
     return undefined;
   }
+
+  if (cleaned.startsWith(".")) {
+    const dir = posix.dirname(importerRelPath.replace(/\\/g, "/"));
+    cleaned = posix.join(dir, cleaned);
+    if (cleaned.startsWith("./")) {
+      cleaned = cleaned.slice(2);
+    }
+  }
+
   return cleaned;
 }
 
