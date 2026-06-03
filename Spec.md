@@ -503,4 +503,40 @@ profiles: [
 3. **不要追求 vLLM/TRT-LLM 那种极致 throughput**：嵌入式场景的瓶颈在"用户机器是否有 GPU"，不在"框架是否够快"。
 4. **优先级排序**：先把 MiniCPM 真跑起来（任何速度），再做投机解码 / GPU 调优。性能优化属于第二阶段。
 
+---
 
+## 6. v0.4.3 编排核心、基础设施与学习图谱深化重构 (2026-06-03)
+
+在落实了 v0.5 初步规划后，我们通过**多 Agent 并发流水线**（Subagent A、B、C）对 GraphFlow 的核心能力进行了全面加固和补齐。本次重构聚焦于编排内核的可靠性、基础设施的健壮性以及学习图谱的生命周期管理，确立了 GraphFlow 作为高级 Agent IDE 辅助引擎的工业级水准。
+
+### 6.1 编排核心加固 (Orchestration Core)
+* **状态机回路闭环 (`state-machine.ts`)**：
+  * **验证反馈注入 (Retry Feedback Injection)**：彻底解决了重试逻辑退化为随机碰撞的问题。在重试循环中，将上次验证失败的具体反馈 (`missingCriteria`, `riskTags`) 显式附加到 Worker 的任务上下文中，引导大模型进行针对性修复。
+  * **LLM 智能验证激活 (LLM Validator Activation)**：正式对接了 `validateTaskResultLlm` 接口。当传入 `validatorSelection` 时，自动从规则验证平滑升级为严格的 LLM 语义验证。
+* **DAG 引擎生产化 (`dag-engine.ts`)**：
+  * **级联失败阻断 (Blocked Propagation)**：新增 `blocked` 状态。当上游节点 `failed` 时，其所有依赖下游节点自动标记为 `blocked` 并终止调度，避免无效执行和死锁。
+  * **并发与超时控制 (Concurrency & Timeout)**：引入 `concurrencyLimit` 限制最大并行发散度，保护 API 速率配额；引入基于 `Promise.race` 的 `nodeTimeoutMs`，防止单个失控节点挂起整个执行图。
+
+### 6.2 基础设施补齐 (Infrastructure)
+* **桥接模式 Worker (`worker.ts`)**：
+  * **Bridge Mode**：新增了专为 Agent IDE（如 Cursor / Claude Code）设计的桥接模式。在该模式下，Worker 不再直接调取本地 LLM 执行代码，而是输出结构化 JSON 格式的任务描述符（Task Descriptor，包含任务目标、上下文摘要与 `retryFeedback`），直接交由外部宿主 Agent 执行，实现了完美的 IDE 对接。
+* **Provider 健康观测 (`provider-health.ts`)**：
+  * **运行时失败追踪 (Consecutive-Failure Tracking)**：引入了纯内存状态的连续失败计数器。即使配置了合法的 API Key，当任何 Provider 遭遇连续 3 次运行时错误后，系统将自动将其标记为 `unhealthy` 并触发 Fallback 路由机制。
+  * `ALL_PROVIDERS` 正式纳入 `openbmb` 支持。
+* **全局 Token 估算统一直径 (`runtime.ts`)**：
+  * 弃用了粗糙的 `length / 4` 估算法。全局统一集成 `gpt-tokenizer/model/gpt-4o` 库进行精准的 BPE 编码计算，消除上下文裁剪与 budget 控制过程中的 Token 漂移。并在库缺失时提供优雅降级。
+
+### 6.3 学习图谱生命周期 (Learning & Graph)
+* **技能金丝雀验证 (Skill Canary Lifecycle) (`skill-flywheel.ts`)**：
+  * **Probation (试用期) → Verified/Demoted (验证/降级)**：为大模型合成的高阶技能（`EvolutionarySkillNode`）引入了严格的落地验证回路。新增 `canaryUses` 和 `canaryPasses` 字段。合成技能必须经历至少 3 次实战调用，当胜率 `≥ 50%` 时才会被晋升为 `verified` 状态；否则打入 `demoted` 状态并大幅降低权重，防止低质量合成知识污染 Planner 上下文。
+* **静默语义富化自动化 (`post-run-sync.ts`)**：
+  * **自动触发引擎**：打通了 `syncGraphAfterRun` 钩子。每次 DAG 运行完成、AST 增量索引写盘后，后台将自动（`try-catch` 不阻塞主线程）触发一小批（Batch Size = 3）无描述符号的 MiniCPM-1B 语义富化调用。
+* **图谱内存膨胀控制 (`episodic-memory.ts` & `graphify-client.ts`)**：
+  * **Episode 软删除裁剪 (Prune Expired Episodes)**：新增基于 `maxAge` (默认 30 天) 和 `maxCount` (默认 200) 的剧集淘汰机制。通过在 metadata 中写入 `pruned: true` 实现逻辑删除，并清洗过滤读取流。
+  * **倒排索引清洗 (Remove Orphan Tokens)**：在 `GraphifyClient` 更新已存在节点（`upsertNodes`）时，自动从底层倒排 `Map<string, Set<string>>` 中解绑并清理旧 token，根绝了节点变异导致的脏索引召回问题。
+
+### 6.4 验收标准与交付质量
+本轮迭代由 3 个 Agent 并发修改了 13 个核心文件，所有逻辑严格遵守向前兼容。全套核心测试簇（`tests/m32`, `tests/m34`, `tests/m35`）全量覆盖上述边缘用例：
+* **门禁测试**：Vitest 139 passed / 0 failed (包含全套 Canary / Blocked / Timeout Mock 验证)。
+* **静态检查**：`npx eslint .` 0 error，`tsc --noEmit` 通过。
+* **版本标定**：全量代码已推送到 GitHub 主干 `v0.4.3`。
