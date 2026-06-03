@@ -21,6 +21,11 @@ export class GraphifyClient {
 
   async upsertNodes(nodes: GraphNode[]): Promise<void> {
     for (const node of nodes) {
+      // 节点已存在时先清理旧 token 的倒排条目，防止索引膨胀
+      if (this.nodes.has(node.id)) {
+        const old = this.nodes.get(node.id)!;
+        this.removeNodeFromIndex(old);
+      }
       this.nodes.set(node.id, node);
       this.indexNode(node);
     }
@@ -117,6 +122,18 @@ export class GraphifyClient {
       nodes: Array.from(this.nodes.values()),
       edges: [...this.edges],
     };
+  }
+
+  private removeNodeFromIndex(node: GraphNode): void {
+    for (const tok of tokenizeForIndex(node.content)) {
+      const set = this.index.get(tok);
+      if (set) {
+        set.delete(node.id);
+        if (set.size === 0) {
+          this.index.delete(tok);
+        }
+      }
+    }
   }
 
   private indexNode(node: GraphNode): void {

@@ -11,6 +11,9 @@ export interface EvolutionarySkillNode {
   score: number;
   uses: number;
   updatedAt: number;
+  canaryUses: number;
+  canaryPasses: number;
+  canaryStatus: 'probation' | 'verified' | 'demoted';
 }
 
 export interface SkillState {
@@ -193,6 +196,10 @@ export async function suggestSkillHints(
   });
 
   const eligibleEvolutions = evolutionStates.filter((evo) => {
+    // 排除已被 demoted 的合成技能
+    if (evo.canaryStatus === 'demoted') {
+      return false;
+    }
     if (evo.score <= 0) {
       return false;
     }
@@ -212,7 +219,8 @@ export async function suggestSkillHints(
   const ranked: Ranked[] = [
     ...eligibleEvolutions.map((e) => ({
       name: e.name,
-      score: e.score,
+      // probation 状态权重降低为 0.5 倍用于排序
+      score: e.canaryStatus === 'probation' ? e.score * 0.5 : e.score,
       uses: e.uses,
       isComposite: true,
       state: { kind: "evolution", ...e },
@@ -260,6 +268,9 @@ export async function suggestSkillHints(
           score: item.state.score,
           uses: item.state.uses + 1,
           updatedAt: Date.now(),
+          canaryUses: item.state.canaryUses ?? 0,
+          canaryPasses: item.state.canaryPasses ?? 0,
+          canaryStatus: item.state.canaryStatus ?? 'probation',
         };
         updates.push({ id: updated.id, type: "Skill", content: JSON.stringify({ kind: "evolution", ...updated }) });
       } else {
@@ -446,6 +457,9 @@ export function parseEvolutionState(content: string): EvolutionarySkillNode | un
       score: parsed.score ?? 0,
       uses: parsed.uses ?? 0,
       updatedAt: parsed.updatedAt ?? 0,
+      canaryUses: parsed.canaryUses ?? 0,
+      canaryPasses: parsed.canaryPasses ?? 0,
+      canaryStatus: parsed.canaryStatus ?? 'probation',
     };
   } catch {
     return undefined;
@@ -508,7 +522,10 @@ export async function evolveCompositeSkillLlm(
       description: parsed.methodologyDescription || "",
       score: previousComposite.score ?? 1,
       uses: previousComposite.uses ?? 1,
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      canaryUses: 0,
+      canaryPasses: 0,
+      canaryStatus: 'probation',
     };
 
     // 返回生成的高阶进化技能节点，在外部写入图谱，并关联 prerequisite 拓扑边
@@ -581,4 +598,45 @@ function cleanJsonString(raw: string, n1: string, n2: string): string {
     return text.slice(start, end + 1);
   }
   return text;
+}
+
+/**
+ * 更新合成技能的 canary 验证状态
+ * 当 canaryUses >= 3 时评估通过率决定 verified 或 demoted
+ */
+export async function updateSkillCanary(
+  client: GraphClient,
+  skillId: string,
+  outcome: 'pass' | 'fail'
+): Promise<EvolutionarySkillNode | undefined> {
+  const existing = await loadEvolutionSkill(client, skillId);
+  if (!existing) {
+    return undefined;
+  }
+
+  existing.canaryUses += 1;
+  if (outcome === 'pass') {
+    existing.canaryPasses += 1;
+  }
+
+  // 累积足够样本后进行阈值判定
+  if (existing.canaryUses >= 3) {
+    const passRate = existing.canaryPasses / existing.canaryUses;
+    if (passRate >= 0.5) {
+      existing.canaryStatus = 'verified';
+    } else {
+      existing.canaryStatus = 'demoted';
+      existing.score = -10;
+    }
+  }
+
+  existing.updatedAt = Date.now();
+
+  await client.upsertNodes([{
+    id: existing.id,
+    type: "Skill",
+    content: JSON.stringify({ kind: "evolution", ...existing }),
+  }]);
+
+  return existing;
 }

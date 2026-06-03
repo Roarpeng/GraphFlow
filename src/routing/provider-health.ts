@@ -1,7 +1,22 @@
 import type { GraphFlowConfig } from "../config/schema";
 import type { ProviderHealthMap, ProviderName } from "./model-router";
 
-const ALL_PROVIDERS: ProviderName[] = ["openai", "anthropic", "bailian", "doubao", "openbmb"];
+export const ALL_PROVIDERS: ProviderName[] = ["openai", "anthropic", "bailian", "doubao", "openbmb"];
+
+// Runtime consecutive-failure tracker (in-memory only)
+const failureCounts = new Map<ProviderName, number>();
+
+export function recordProviderFailure(provider: ProviderName): void {
+  failureCounts.set(provider, (failureCounts.get(provider) ?? 0) + 1);
+}
+
+export function recordProviderSuccess(provider: ProviderName): void {
+  failureCounts.delete(provider);
+}
+
+export function resetProviderHealth(): void {
+  failureCounts.clear();
+}
 
 export function buildProviderHealthMap(config: GraphFlowConfig): ProviderHealthMap {
   const requireApiKey = config.routingPolicy?.requireApiKeyForHealthy ?? false;
@@ -13,7 +28,14 @@ export function buildProviderHealthMap(config: GraphFlowConfig): ProviderHealthM
       return [provider, false] as const;
     }
 
+    // Runtime signal: consecutive failures >= 3 → unhealthy regardless of config
+    const consecutiveFailures = failureCounts.get(provider) ?? 0;
+    if (consecutiveFailures >= 3) {
+      return [provider, false] as const;
+    }
+
     if (!requireApiKey) {
+      // openbmb mode-specific checks (embedded / ollama / openai-compat)
       if (provider === "openbmb") {
         const mode = details.mode ?? "embedded";
         if (mode === "embedded") {

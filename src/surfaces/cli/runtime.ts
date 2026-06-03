@@ -1097,7 +1097,13 @@ function calculateBudgetUsedPercent(compressedTokens: number, maxContextTokens: 
 }
 
 function estimateTokenCount(text: string): number {
-  return Math.max(1, Math.ceil(text.replace(/\s+/g, " ").trim().length / 4));
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { encode } = require("gpt-tokenizer/model/gpt-4o") as { encode: (t: string) => number[] };
+    return Math.max(1, encode(text).length);
+  } catch {
+    return Math.max(1, Math.ceil(text.replace(/\s+/g, " ").trim().length / 4));
+  }
 }
 
 function compactPreview(content: string, maxLength: number): string {

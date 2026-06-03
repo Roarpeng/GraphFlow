@@ -131,11 +131,13 @@ async function collectEpisodeCandidates(
   return Array.from(seen.values());
 }
 
-function parseEpisodes(nodes: GraphNode[]): EpisodeRecord[] {
+export function parseEpisodes(nodes: GraphNode[]): EpisodeRecord[] {
   const out: EpisodeRecord[] = [];
   const seen = new Set<string>();
   for (const node of nodes) {
     if (!isEpisodeNode(node) || seen.has(node.id)) continue;
+    // 过滤已被软删除的 episode
+    if ((node.metadata as any)?.pruned === true) continue;
     const rec = deserialize(node);
     if (rec) {
       seen.add(node.id);
@@ -191,4 +193,72 @@ function hashText(text: string): string {
     hash = ((hash * 33) ^ text.charCodeAt(i)) >>> 0;
   }
   return hash.toString(36);
+}
+
+export interface PruneOptions {
+  maxAge?: number;
+  maxCount?: number;
+}
+
+const DEFAULT_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 天
+const DEFAULT_MAX_COUNT = 200;
+
+/**
+ * 软删除过期或超量的 episode 节点
+ * 由于 GraphClient 无 deleteNode，采用 metadata.pruned 标记
+ */
+export async function pruneExpiredEpisodes(
+  client: GraphClient,
+  options?: PruneOptions
+): Promise<{ pruned: number }> {
+  const maxAge = options?.maxAge ?? DEFAULT_MAX_AGE;
+  const maxCount = options?.maxCount ?? DEFAULT_MAX_COUNT;
+  const now = Date.now();
+
+  const allNodes = await client.queryByKeyword(EPISODE_SENTINEL);
+  const episodeNodes = allNodes.filter(
+    (n) => isEpisodeNode(n) && (n.metadata as any)?.pruned !== true
+  );
+
+  // 反序列化并按 createdAt 新→旧排序
+  const withRecord: { node: GraphNode; createdAt: number }[] = [];
+  for (const node of episodeNodes) {
+    const rec = deserialize(node);
+    withRecord.push({ node, createdAt: rec?.createdAt ?? 0 });
+  }
+  withRecord.sort((a, b) => b.createdAt - a.createdAt);
+
+  const toPrune: GraphNode[] = [];
+
+  // 按 maxAge 淘汰
+  const cutoff = now - maxAge;
+  const surviving: typeof withRecord = [];
+  for (const item of withRecord) {
+    if (item.createdAt < cutoff) {
+      toPrune.push(item.node);
+    } else {
+      surviving.push(item);
+    }
+  }
+
+  // 按 maxCount 淘汰（从旧到新删除多余的）
+  if (surviving.length > maxCount) {
+    const excess = surviving.slice(maxCount);
+    for (const item of excess) {
+      toPrune.push(item.node);
+    }
+  }
+
+  if (toPrune.length === 0) {
+    return { pruned: 0 };
+  }
+
+  // 软删除：标记 metadata.pruned = true
+  const updates: GraphNode[] = toPrune.map((node) => ({
+    ...node,
+    metadata: { ...node.metadata, pruned: true },
+  }));
+  await client.upsertNodes(updates);
+
+  return { pruned: toPrune.length };
 }
