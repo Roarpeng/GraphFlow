@@ -1,12 +1,13 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { GraphFlowConfig } from "../config/schema";
 import type { GraphClient } from "../graph/client-factory";
 import { evaluateCanary } from "./canary-gate";
 import { computeLearningMetrics, exportLearningDataset, type LearningMetrics } from "./exporter";
-import type { FeedbackEvent } from "./feedback-collector";
 import { reflectOnEpisodes } from "./reflector";
 import { buildRankingSamples } from "./sample-builder";
+
+import { readFeedbackEvents } from "./learning-events";
 
 export interface NightlyLearningSummary {
   totalEvents: number;
@@ -18,10 +19,6 @@ export interface NightlyLearningSummary {
   lessonsSynthesized?: number;
 }
 
-export function appendFeedbackEvent(path: string, event: FeedbackEvent): void {
-  mkdirSync(dirname(path), { recursive: true });
-  appendFileSync(path, `${JSON.stringify(event)}\n`, "utf8");
-}
 
 export function runNightlyLearning(config: GraphFlowConfig): NightlyLearningSummary;
 export function runNightlyLearning(
@@ -70,18 +67,6 @@ export function runNightlyLearning(
     writeFileSync(summaryPath, JSON.stringify(summary, null, 2), "utf8");
     return summary;
   })();
-}
-
-function readFeedbackEvents(path: string): FeedbackEvent[] {
-  if (!existsSync(path)) {
-    return [];
-  }
-
-  return readFileSync(path, "utf8")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as FeedbackEvent);
 }
 
 function readPreviousMetrics(path: string): LearningMetrics {

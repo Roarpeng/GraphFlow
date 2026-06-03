@@ -17,11 +17,13 @@ import {
   buildLayeredContextPackage,
   createContextRefillManager,
 } from "../../graph/context-slicer";
-import { appendFeedbackEvent, runNightlyLearning } from "../../learning/nightly-trainer";
+import { runNightlyLearning } from "../../learning/nightly-trainer";
+import { appendFeedbackEvent } from "../../learning/learning-events";
 import { resolveModelForRole, resolveModelWithFallback } from "../../routing/model-router";
 import { buildFallbackChain, buildProviderHealthMap } from "../../routing/provider-health";
 import type { TaskStatus } from "../../core/types";
 import type { EnricherOptions } from "../../graph/semantic-enricher";
+import { withFileLock } from "../../utils/file-lock";
 
 export function getDefaultConfig(): GraphFlowConfig {
   return validateConfig({
@@ -273,9 +275,12 @@ export async function previewContext(query: string, configPath?: string): Promis
     });
   }
 
-  const packageOptions = config.graphPolicy.layerQuota
-    ? { layerQuota: config.graphPolicy.layerQuota }
-    : undefined;
+  const { createLocalEmbeddingProvider } = await import("../../learning/local-embedding.js");
+  const packageOptions: import("../../graph/context-slicer").LayeredPackageOptions = {
+    ...(config.graphPolicy.layerQuota ? { layerQuota: config.graphPolicy.layerQuota } : {}),
+    embeddingProvider: createLocalEmbeddingProvider(),
+    enableVectorRecall: true
+  };
 
   const pkg = await buildLayeredContextPackage(
     graphClient,
@@ -487,8 +492,10 @@ export async function downloadOpenBmbModel(
   const force = options?.force ?? false;
   const expectedSha = options?.sha256 ?? process.env.GRAPHFLOW_MINICPM_MODEL_SHA256;
   const partialPath = `${targetPath}.part`;
+  const lockPath = `${targetPath}.lock`;
 
-  if (existsSync(targetPath) && !force) {
+  return withFileLock(lockPath, async () => {
+    if (existsSync(targetPath) && !force) {
     const bytes = getFileSize(targetPath);
     const verified = expectedSha ? (await sha256File(targetPath)) === expectedSha.toLowerCase() : true;
     options?.onProgress?.({
@@ -648,14 +655,15 @@ export async function downloadOpenBmbModel(
     percent: 100,
     stage: "completed",
   });
-  return {
-    model,
-    targetPath,
-    bytes: finalBytes,
-    skipped: false,
-    verified: Boolean(expectedSha),
-    ...(resumed ? { resumed: true } : {}),
-  };
+    return {
+      model,
+      targetPath,
+      bytes: finalBytes,
+      skipped: false,
+      verified: Boolean(expectedSha),
+      ...(resumed ? { resumed: true } : {}),
+    };
+  });
 }
 
 
@@ -789,11 +797,15 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       });
     }
 
+    const { createLocalEmbeddingProvider } = await import("../../learning/local-embedding.js");
     const orchestrateOptions: OrchestrateOptions = {
       graphClient,
       enableAutoGraphSync: config.graphPolicy.enableAutoBuild,
       maxContextTokens: config.graphPolicy.maxContextTokens,
+      enableEpisodicMemory: config.learningPolicy.enableFlywheel,
+      enableLlmAgents: config.tiers.smart.provider === "openbmb" || config.tiers.economy.provider === "openbmb",
       enableLlmTriage: config.tiers.smart.provider === "openbmb" || config.tiers.economy.provider === "openbmb",
+      embeddingProvider: createLocalEmbeddingProvider(),
       ...(config.skillPolicy?.enableSkillFlywheel
         ? {
             enableSkillFlywheel: true,

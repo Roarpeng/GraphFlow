@@ -124,7 +124,7 @@ class EmbeddedWorkerPool {
         if (typeof createLlama !== "function") {
           throw new Error("node-llama-cpp API not available");
         }
-        llama = llama || await createLlama();
+        llama = llama || await createLlama({ gpu: "auto" });
         loadedModel = await llama.loadModel({ modelPath: task.modelPath });
         loadedContext = await loadedModel.createContext({ contextSize: 2048 });
         loadedSequence = loadedContext.getSequence();
@@ -143,6 +143,7 @@ class EmbeddedWorkerPool {
         if (!text) {
           throw new Error("node-llama-cpp produced empty output");
         }
+        global.gc?.();
         return text;
       }
 
@@ -371,7 +372,7 @@ async function runEmbeddedNodeLlamaCpp(
     throw new Error("node-llama-cpp API not available");
   }
 
-  const llama = await createLlama();
+  const llama = await createLlama({ gpu: "auto" });
   const model = await llama.loadModel({ modelPath });
   const context = await model.createContext({ contextSize: 2048 });
   const sequence = context.getSequence();
@@ -385,6 +386,7 @@ async function runEmbeddedNodeLlamaCpp(
   if (!text) {
     throw new Error("node-llama-cpp produced empty output");
   }
+  global.gc?.();
   return text;
 }
 

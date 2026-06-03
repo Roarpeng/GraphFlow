@@ -31,7 +31,7 @@ export interface ExtractionResult {
 export interface LanguageIndexer {
   language: string;
   extensions: string[];
-  extract(filePath: string, content: string): ExtractionResult;
+  extract(filePath: string, content: string): ExtractionResult | Promise<ExtractionResult>;
 }
 
 const INDEXERS: LanguageIndexer[] = [

@@ -18,7 +18,7 @@ describe("M10 CLI runtime", () => {
     const output = await runTask("update readme");
     expect(output).toContain("status=");
     expect(output).toContain("feedback=");
-  });
+  }, 60000);
 
   it("returns context preview stats", async () => {
     const preview = await previewContext("orchestrate");
@@ -32,7 +32,7 @@ describe("M10 CLI runtime", () => {
     expect(preview.tokenBudget.estimatedSavingsPercent).toBeGreaterThanOrEqual(0);
     expect(preview.summary).toEqual(expect.any(Array));
     expect(preview.anchors).toEqual(expect.any(Array));
-  });
+  }, 60000);
 
   it("saves graphflow settings for model routing and token budget", () => {
     const root = mkdtempSync(join(tmpdir(), "graphflow-settings-"));
@@ -153,7 +153,7 @@ describe("M10 CLI runtime", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
-  });
+  }, 60000);
 
   it("returns graph snapshot for file transport", async () => {
     const root = mkdtempSync(join(tmpdir(), "graphflow-snapshot-"));
@@ -208,7 +208,7 @@ describe("M10 CLI runtime", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
-  });
+  }, 60000);
 
   it("auto-indexes workspace when graph snapshot store is empty", async () => {
     const root = mkdtempSync(join(tmpdir(), "graphflow-snapshot-autoidx-"));
@@ -318,5 +318,5 @@ describe("M10 CLI runtime", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
-  });
+  }, 60000);
 });

@@ -1,15 +1,8 @@
-import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index";
-
-const RE_PACKAGE = /^package\s+(\w+)/;
-const RE_FUNC = /^func\s+(?:\([^)]*\)\s+)?(\w+)\s*\(/;
-const RE_TYPE_STRUCT = /^type\s+(\w+)\s+(struct|interface)\b/;
-const RE_TYPE_ALIAS = /^type\s+(\w+)\s+(?!struct|interface)\S/;
-const RE_VAR = /^var\s+(\w+)/;
-const RE_CONST = /^const\s+(\w+)/;
-const RE_IMPORT_SINGLE = /^import\s+(?:\w+\s+)?"([^"]+)"/;
-const RE_IMPORT_GROUP_ITEM = /^\s*(?:\w+\s+)?"([^"]+)"/;
+import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index.js";
+import { getTreeSitterParser } from "./tree-sitter-loader.js";
 
 function isExported(name: string): boolean {
+  if (!name) return false;
   const first = name.charAt(0);
   return first >= "A" && first <= "Z";
 }
@@ -17,130 +10,87 @@ function isExported(name: string): boolean {
 export const goIndexer: LanguageIndexer = {
   language: "go",
   extensions: [".go"],
-  extract(filePath: string, content: string): ExtractionResult {
+  async extract(filePath: string, content: string): Promise<ExtractionResult> {
     const symbols: DeclaredSymbol[] = [];
     const imports: ImportTarget[] = [];
-    const lines = content.split(/\r?\n/);
-    let inImportGroup = false;
-    let inBlockComment = false;
+    const parser = await getTreeSitterParser("go");
+    const tree = parser.parse(content);
 
-    for (let idx = 0; idx < lines.length; idx += 1) {
-      let line = lines[idx] ?? "";
-      if (inBlockComment) {
-        const end = line.indexOf("*/");
-        if (end < 0) continue;
-        line = line.slice(end + 2);
-        inBlockComment = false;
-      }
-      const blockStart = line.indexOf("/*");
-      if (blockStart >= 0 && line.indexOf("*/", blockStart) < 0) {
-        line = line.slice(0, blockStart);
-        inBlockComment = true;
-      }
-      const slashIdx = line.indexOf("//");
-      if (slashIdx >= 0) line = line.slice(0, slashIdx);
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      const lineNo = idx + 1;
+    const traverse = (node: any) => {
+      const lineNo = node.startPosition.row + 1;
 
-      if (inImportGroup) {
-        if (trimmed === ")") {
-          inImportGroup = false;
-          continue;
+      if (node.type === "package_clause") {
+        const nameNode = node.childForFieldName("package_identifier") || node.namedChildren[0];
+        if (nameNode) {
+          symbols.push({
+            name: nameNode.text,
+            kind: "package",
+            exported: true,
+            line: lineNo,
+            file: filePath,
+          });
         }
-        const m = RE_IMPORT_GROUP_ITEM.exec(line);
-        if (m) imports.push({ module: m[1]!, raw: trimmed });
-        continue;
+      } else if (node.type === "function_declaration" || node.type === "method_declaration") {
+        const nameNode = node.childForFieldName("name");
+        if (nameNode) {
+          const name = nameNode.text;
+          let paramsCount = 0;
+          const paramsNode = node.childForFieldName("parameters");
+          if (paramsNode) {
+            paramsCount = paramsNode.namedChildren.filter((c: any) => c.type === "parameter_declaration").length;
+          }
+          
+          symbols.push({
+            name,
+            kind: node.type === "method_declaration" ? "method" : "func",
+            exported: isExported(name),
+            line: lineNo,
+            file: filePath,
+            paramsCount,
+          });
+        }
+      } else if (node.type === "type_spec") {
+        const nameNode = node.childForFieldName("name");
+        const typeNode = node.childForFieldName("type");
+        if (nameNode) {
+          const name = nameNode.text;
+          const kind = typeNode && typeNode.type === "struct_type" ? "struct" : 
+                       typeNode && typeNode.type === "interface_type" ? "interface" : "type";
+          symbols.push({
+            name,
+            kind,
+            exported: isExported(name),
+            line: lineNo,
+            file: filePath,
+          });
+        }
+      } else if (node.type === "import_spec") {
+        const pathNode = node.childForFieldName("path");
+        if (pathNode) {
+          // Go string literals include quotes
+          const text = pathNode.text.replace(/^"|"$/g, '');
+          imports.push({ module: text, raw: node.text });
+        }
+      } else if (node.type === "var_spec" || node.type === "const_spec") {
+        const nameNodes = node.namedChildren.filter((c: any) => c.type === "identifier");
+        for (const nameNode of nameNodes) {
+          const name = nameNode.text;
+          symbols.push({
+            name,
+            kind: node.type === "const_spec" ? "const" : "variable",
+            exported: isExported(name),
+            line: lineNo,
+            file: filePath,
+          });
+        }
       }
 
-      if (trimmed === "import (") {
-        inImportGroup = true;
-        continue;
+      for (const child of node.children) {
+        traverse(child);
       }
+    };
 
-      const pkgMatch = RE_PACKAGE.exec(line);
-      if (pkgMatch) {
-        symbols.push({
-          name: pkgMatch[1]!,
-          kind: "package",
-          exported: true,
-          line: lineNo,
-          file: filePath,
-        });
-        continue;
-      }
-
-      const importSingle = RE_IMPORT_SINGLE.exec(line);
-      if (importSingle) {
-        imports.push({ module: importSingle[1]!, raw: trimmed });
-        continue;
-      }
-
-      const funcMatch = RE_FUNC.exec(line);
-      if (funcMatch) {
-        const name = funcMatch[1]!;
-        symbols.push({
-          name,
-          kind: "func",
-          exported: isExported(name),
-          line: lineNo,
-          file: filePath,
-        });
-        continue;
-      }
-
-      const tsMatch = RE_TYPE_STRUCT.exec(line);
-      if (tsMatch) {
-        const name = tsMatch[1]!;
-        symbols.push({
-          name,
-          kind: tsMatch[2] === "interface" ? "interface" : "struct",
-          exported: isExported(name),
-          line: lineNo,
-          file: filePath,
-        });
-        continue;
-      }
-
-      const tAlias = RE_TYPE_ALIAS.exec(line);
-      if (tAlias) {
-        const name = tAlias[1]!;
-        symbols.push({
-          name,
-          kind: "type",
-          exported: isExported(name),
-          line: lineNo,
-          file: filePath,
-        });
-        continue;
-      }
-
-      const varMatch = RE_VAR.exec(line);
-      if (varMatch) {
-        const name = varMatch[1]!;
-        symbols.push({
-          name,
-          kind: "variable",
-          exported: isExported(name),
-          line: lineNo,
-          file: filePath,
-        });
-        continue;
-      }
-
-      const constMatch = RE_CONST.exec(line);
-      if (constMatch) {
-        const name = constMatch[1]!;
-        symbols.push({
-          name,
-          kind: "const",
-          exported: isExported(name),
-          line: lineNo,
-          file: filePath,
-        });
-      }
-    }
-
+    traverse(tree.rootNode);
     return { symbols, imports };
   },
 };

@@ -1,111 +1,75 @@
-import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index";
-
-const RE_DEF = /^(\s*)(?:async\s+)?def\s+(\w+)\s*\(/;
-const RE_CLASS = /^(\s*)class\s+(\w+)/;
-const RE_VAR = /^(\w+)\s*(?::\s*[^=]+)?=\s*[^=]/;
-const RE_IMPORT = /^\s*import\s+([\w.]+)/;
-const RE_FROM = /^\s*from\s+([\w.]+)\s+import\b/;
-
-function stripTripleQuotes(line: string, state: { open: string | null }): string {
-  let out = "";
-  let i = 0;
-  while (i < line.length) {
-    if (state.open) {
-      const end = line.indexOf(state.open, i);
-      if (end < 0) return out;
-      i = end + 3;
-      state.open = null;
-      continue;
-    }
-    const t3 = line.slice(i, i + 3);
-    if (t3 === '"""' || t3 === "'''") {
-      const closeIdx = line.indexOf(t3, i + 3);
-      if (closeIdx < 0) {
-        state.open = t3;
-        return out;
-      }
-      i = closeIdx + 3;
-      continue;
-    }
-    out += line[i];
-    i += 1;
-  }
-  return out;
-}
+import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index.js";
+import { getTreeSitterParser } from "./tree-sitter-loader.js";
 
 export const pythonIndexer: LanguageIndexer = {
   language: "python",
   extensions: [".py"],
-  extract(filePath: string, content: string): ExtractionResult {
+  async extract(filePath: string, content: string): Promise<ExtractionResult> {
     const symbols: DeclaredSymbol[] = [];
     const imports: ImportTarget[] = [];
-    const lines = content.split(/\r?\n/);
-    const state = { open: null as string | null };
+    const parser = await getTreeSitterParser("python");
+    const tree = parser.parse(content);
 
-    for (let idx = 0; idx < lines.length; idx += 1) {
-      const raw = lines[idx] ?? "";
-      const inString = state.open !== null;
-      const line = stripTripleQuotes(raw, state);
-      if (inString && state.open !== null) continue;
-      if (!line.trim() || line.trim().startsWith("#")) continue;
+    const traverse = (node: any) => {
+      const lineNo = node.startPosition.row + 1;
 
-      const lineNo = idx + 1;
-      const defMatch = RE_DEF.exec(line);
-      if (defMatch) {
-        const indent = defMatch[1]!.length;
-        const name = defMatch[2]!;
-        symbols.push({
-          name,
-          kind: indent === 0 ? "function" : "method",
-          exported: !name.startsWith("_"),
-          line: lineNo,
-          file: filePath,
-        });
-        continue;
-      }
+      if (node.type === "class_definition") {
+        const nameNode = node.childForFieldName("name");
+        if (nameNode) {
+          const name = nameNode.text;
+          symbols.push({
+            name,
+            kind: "class",
+            exported: !name.startsWith("_"),
+            line: lineNo,
+            file: filePath,
+          });
+        }
+      } else if (node.type === "function_definition") {
+        const nameNode = node.childForFieldName("name");
+        if (nameNode) {
+          const name = nameNode.text;
+          const parentType = node.parent?.type;
+          const kind = parentType === "block" && node.parent?.parent?.type === "class_definition" ? "method" : "function";
+          
+          let paramsCount = 0;
+          const parametersNode = node.childForFieldName("parameters");
+          if (parametersNode) {
+            // Count actual parameters (excluding punctuation like '(' and ',')
+            paramsCount = parametersNode.namedChildren.length;
+          }
 
-      const classMatch = RE_CLASS.exec(line);
-      if (classMatch) {
-        const name = classMatch[2]!;
-        symbols.push({
-          name,
-          kind: "class",
-          exported: !name.startsWith("_"),
-          line: lineNo,
-          file: filePath,
-        });
-        continue;
-      }
-
-      const fromMatch = RE_FROM.exec(line);
-      if (fromMatch) {
-        imports.push({ module: fromMatch[1]!, raw: fromMatch[0]!.trim() });
-        continue;
-      }
-
-      const importMatch = RE_IMPORT.exec(line);
-      if (importMatch) {
-        imports.push({ module: importMatch[1]!, raw: importMatch[0]!.trim() });
-        continue;
-      }
-
-      if (!/^\s/.test(line)) {
-        const varMatch = RE_VAR.exec(line);
-        if (varMatch) {
-          const name = varMatch[1]!;
-          if (!["import", "from", "return", "if", "for", "while", "class", "def", "with", "try", "raise", "yield", "pass", "global", "nonlocal", "assert", "del", "print"].includes(name)) {
-            symbols.push({
-              name,
-              kind: "variable",
-              exported: !name.startsWith("_"),
-              line: lineNo,
-              file: filePath,
-            });
+          symbols.push({
+            name,
+            kind,
+            exported: !name.startsWith("_"),
+            line: lineNo,
+            file: filePath,
+            paramsCount,
+          });
+        }
+      } else if (node.type === "import_statement") {
+        for (const child of node.namedChildren) {
+          if (child.type === "dotted_name" || child.type === "aliased_import") {
+            const nameNode = child.type === "aliased_import" ? child.childForFieldName("name") : child;
+            if (nameNode) {
+              imports.push({ module: nameNode.text, raw: node.text });
+            }
           }
         }
+      } else if (node.type === "import_from_statement") {
+        const moduleNameNode = node.childForFieldName("module_name");
+        if (moduleNameNode) {
+          imports.push({ module: moduleNameNode.text, raw: node.text });
+        }
       }
-    }
 
+      for (const child of node.children) {
+        traverse(child);
+      }
+    };
+
+    traverse(tree.rootNode);
     return { symbols, imports };
   },
 };

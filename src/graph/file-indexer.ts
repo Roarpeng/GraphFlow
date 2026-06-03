@@ -1,5 +1,6 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { readdirSync, readFileSync, statSync, mkdirSync, writeFileSync } from "node:fs";
+import { join, relative, dirname } from "node:path";
+import { createHash } from "node:crypto";
 import type { GraphEdge, GraphNode } from "../core/types";
 import type { GraphClient } from "./client-factory";
 import {
@@ -52,6 +53,17 @@ interface ParsedFile {
   scannable: boolean;
 }
 
+interface CacheState {
+  [path: string]: {
+    mtimeMs: number;
+    hash: string;
+    numNodes: number;
+  };
+}
+
+const CACHE_DIR = ".graphflow-cache";
+const CACHE_FILE = "index-state.json";
+
 export async function indexWorkspaceFiles(
   client: GraphClient,
   rootDir: string,
@@ -59,6 +71,15 @@ export async function indexWorkspaceFiles(
 ): Promise<{ indexedFiles: number; indexedSymbols: number; indexedReferences: number }> {
   const includeExtensions = options?.includeExtensions ?? DEFAULT_EXTENSIONS;
   const maxFileSizeBytes = options?.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE;
+
+  const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
+  let cacheState: CacheState = {};
+  try {
+    const raw = readFileSync(cachePath, "utf8");
+    cacheState = JSON.parse(raw);
+  } catch {
+    // not found or invalid
+  }
 
   const files = walkFiles(rootDir, includeExtensions);
   const nodes: GraphNode[] = [];
@@ -72,7 +93,32 @@ export async function indexWorkspaceFiles(
     }
 
     const relPath = normalizePath(relative(rootDir, file));
-    const content = readFileSync(file, "utf8");
+    const mtimeMs = stat.mtimeMs;
+    const prev = cacheState[relPath];
+
+    let content = "";
+    let currentHash = "";
+    let isChanged = false;
+
+    if (!prev || prev.mtimeMs !== mtimeMs) {
+      content = readFileSync(file, "utf8");
+      currentHash = createHash("md5").update(content).digest("hex");
+      if (!prev || prev.hash !== currentHash) {
+        isChanged = true;
+      }
+    }
+
+    if (!isChanged) {
+      continue;
+    }
+
+    if (!content) {
+      content = readFileSync(file, "utf8");
+      currentHash = createHash("md5").update(content).digest("hex");
+    }
+
+    const nodesStartLen = nodes.length;
+
     const fileNodeId = `file:${relPath}`;
     const moduleNodeId = `module:${moduleKey(relPath)}`;
     const indexer = getIndexerForFile(relPath);
@@ -82,7 +128,7 @@ export async function indexWorkspaceFiles(
     let imports: string[] = [];
 
     if (indexer) {
-      const extracted = indexer.extract(relPath, content);
+      const extracted = await indexer.extract(relPath, content);
       declared = extracted.symbols.map((sym) => ({
         ...sym,
         nodeId: `symbol:${relPath}:${hashText(sym.name)}`,
@@ -157,6 +203,12 @@ export async function indexWorkspaceFiles(
       content,
       scannable: Boolean(indexer),
     });
+
+    cacheState[relPath] = {
+      mtimeMs,
+      hash: currentHash,
+      numNodes: nodes.length - nodesStartLen,
+    };
   }
 
   const symbolIndex = new Map<string, IndexedSymbol[]>();
@@ -206,6 +258,14 @@ export async function indexWorkspaceFiles(
 
   await client.upsertNodes(nodes);
   await client.upsertEdges(dedupEdges(edges));
+
+  try {
+    const dir = dirname(cachePath);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(cachePath, JSON.stringify(cacheState, null, 2), "utf8");
+  } catch {
+    // ignore
+  }
 
   return {
     indexedFiles: nodes.filter((node) => node.type === "File").length,

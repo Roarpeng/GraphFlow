@@ -1,15 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+vi.mock("../src/routing/provider-executor", () => ({
+  executeRolePrompt: vi.fn(
+    (_role: string, task: string, _sel: unknown, _ctx: unknown) =>
+      Promise.resolve(`LLM:${task}`)
+  ),
+}));
+
 // ── Task 1: Worker bridge mode & retryFeedback ──────────────────────────
 describe("Worker bridge mode", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.mock("../src/routing/provider-executor", () => ({
-      executeRolePrompt: vi.fn(
-        (_role: string, task: string, _sel: unknown, _ctx: unknown) =>
-          Promise.resolve(`LLM:${task}`)
-      ),
-    }));
+    vi.clearAllMocks();
   });
 
   it("outputs valid JSON descriptor in bridge mode", async () => {

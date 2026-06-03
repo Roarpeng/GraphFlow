@@ -96,7 +96,15 @@ export class GraphifySqliteClient implements GraphClient {
     this.db = new Database(dbPath);
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("synchronous = NORMAL");
-    this.db.exec(SCHEMA_SQL);
+    this.migrate();
+  }
+
+  private migrate(): void {
+    const currentVersion = this.db.pragma("user_version", { simple: true }) as number;
+    if (currentVersion < 1) {
+      this.db.exec(SCHEMA_SQL);
+      this.db.pragma("user_version = 1");
+    }
   }
 
   async upsertNodes(nodes: GraphNode[]): Promise<void> {

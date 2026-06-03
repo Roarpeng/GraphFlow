@@ -43,6 +43,7 @@ export interface OrchestrateOptions {
   enableGraphContextInPrompt?: boolean;
   enableEpisodicMemory?: boolean;
   enableLlmTriage?: boolean;
+  embeddingProvider?: import("../learning/embeddings").EmbeddingProvider;
 }
 
 export async function orchestrate(
@@ -200,8 +201,10 @@ async function maybeBuildNearLosslessContext(
 
   const query = options.nearLosslessQuery ?? input.task;
   const maxTokens = options.maxContextTokens ?? 1200;
-  const packageOptions = options.layerQuota ? { layerQuota: options.layerQuota } : undefined;
-
+  const packageOptions: import("../graph/context-slicer").LayeredPackageOptions = {
+    ...(options.layerQuota ? { layerQuota: options.layerQuota } : {}),
+    ...(options.embeddingProvider ? { embeddingProvider: options.embeddingProvider, enableVectorRecall: true } : {})
+  };
   const pkg = await buildLayeredContextPackage(options.graphClient, query, maxTokens, packageOptions);
 
   options.onContextPackage?.(pkg);
