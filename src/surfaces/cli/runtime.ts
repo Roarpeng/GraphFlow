@@ -728,7 +728,7 @@ export async function inspectGraph(
       .map(([relation, count]) => ({ relation, count }))
       .sort((a, b) => b.count - a.count || a.relation.localeCompare(b.relation))
       .slice(0, 8),
-    sampleNodes: (() => {
+    ...(() => {
       const isMetaFile = (id: string) => {
         const lower = id.toLowerCase();
         return lower.includes(".md") || lower.includes(".json") || lower.includes(".yml") || lower.includes(".yaml") || lower.includes(".github") || lower.includes(".claude") || lower.includes(".codex");
@@ -749,18 +749,25 @@ export async function inspectGraph(
       });
       
       scoredNodes.sort((a, b) => b.score - a.score || a.node.id.localeCompare(b.node.id));
+      const finalSampleNodes = scoredNodes.slice(0, nodeLimit);
+      const sampleNodeIds = new Set(finalSampleNodes.map(n => n.node.id));
       
-      return scoredNodes.slice(0, nodeLimit).map(({ node }) => ({
-        id: node.id,
-        type: node.type,
-        contentPreview: compactPreview(node.content, 96),
-      }));
+      return {
+        sampleNodes: finalSampleNodes.map(({ node }) => ({
+          id: node.id,
+          type: node.type,
+          contentPreview: compactPreview(node.content, 96),
+        })),
+        sampleEdges: store.edges
+          .filter(edge => sampleNodeIds.has(edge.from) && sampleNodeIds.has(edge.to))
+          .slice(0, edgeLimit)
+          .map(edge => ({
+            from: edge.from,
+            relation: edge.relation,
+            to: edge.to,
+          }))
+      };
     })(),
-    sampleEdges: store.edges.slice(0, edgeLimit).map((edge) => ({
-      from: edge.from,
-      relation: edge.relation,
-      to: edge.to,
-    })),
   };
 }
 
