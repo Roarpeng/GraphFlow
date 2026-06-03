@@ -20,7 +20,7 @@ cpSync(sourceDist, vendorDist, { recursive: true });
 
 // Bundle runtime-only dependencies that the extension host cannot resolve from elsewhere.
 // Native modules (e.g. better-sqlite3) are intentionally skipped — they degrade via fallback.
-const runtimeDeps = ["typescript", "gpt-tokenizer"];
+const runtimeDeps = ["typescript", "gpt-tokenizer", "web-tree-sitter"];
 rmSync(vendorNodeModules, { recursive: true, force: true });
 mkdirSync(vendorNodeModules, { recursive: true });
 for (const dep of runtimeDeps) {
