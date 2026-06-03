@@ -28,6 +28,7 @@ interface GraphFlowRuntime {
   runTask(task: string): Promise<string>;
   planAndBrainstorm(task: string): string;
   previewContext(query: string): Promise<ContextPreviewResult>;
+  indexGraph(rootDir?: string, configPath?: string): Promise<{ indexedFiles: number; indexedSymbols: number; }>;
   enrichSemanticsSilent(configPath?: string, options?: { batchSize?: number; sleepMs?: number; timeoutMs?: number }): Promise<{ enrichedCount: number }>;
   diagnoseRouting(): string;
   runLearningNightly(): string;
@@ -56,6 +57,13 @@ interface GraphFlowRuntime {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+  const workspaceRoot = getWorkspaceRoot();
+  if (workspaceRoot) {
+    runGraphFlow(workspaceRoot, (runtime) => runtime.indexGraph(workspaceRoot)).catch((err) => {
+      console.error("GraphFlow auto-index on activate failed:", err);
+    });
+  }
+
   const runTask = vscode.commands.registerCommand("graphflow.runTask", async () => {
     const task = await vscode.window.showInputBox({
       title: "GraphFlow Run Task",
@@ -425,6 +433,7 @@ async function loadRuntime(): Promise<GraphFlowRuntime> {
         !module.runTask ||
         !module.planAndBrainstorm ||
         !module.previewContext ||
+        !module.indexGraph ||
         !module.enrichSemanticsSilent ||
         !module.diagnoseRouting ||
         !module.runLearningNightly ||
@@ -441,6 +450,7 @@ async function loadRuntime(): Promise<GraphFlowRuntime> {
         runTask: module.runTask,
         planAndBrainstorm: module.planAndBrainstorm,
         previewContext: module.previewContext,
+        indexGraph: module.indexGraph!,
         enrichSemanticsSilent: module.enrichSemanticsSilent,
         diagnoseRouting: module.diagnoseRouting,
         runLearningNightly: module.runLearningNightly,
