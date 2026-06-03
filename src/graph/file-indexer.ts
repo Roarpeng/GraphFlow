@@ -76,7 +76,10 @@ export async function indexWorkspaceFiles(
   let cacheState: CacheState = {};
   try {
     const raw = readFileSync(cachePath, "utf8");
-    cacheState = JSON.parse(raw);
+    const parsedCache = JSON.parse(raw);
+    if (parsedCache.version === 2 && parsedCache.state) {
+      cacheState = parsedCache.state;
+    }
   } catch {
     // not found or invalid
   }
@@ -262,7 +265,7 @@ export async function indexWorkspaceFiles(
   try {
     const dir = dirname(cachePath);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(cachePath, JSON.stringify(cacheState, null, 2), "utf8");
+    writeFileSync(cachePath, JSON.stringify({ version: 2, state: cacheState }, null, 2), "utf8");
   } catch {
     // ignore
   }
