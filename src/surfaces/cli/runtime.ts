@@ -734,26 +734,51 @@ export async function inspectGraph(
         return lower.includes(".md") || lower.includes(".json") || lower.includes(".yml") || lower.includes(".yaml") || lower.includes(".github") || lower.includes(".claude") || lower.includes(".codex");
       };
       
-      const scoredNodes = store.nodes.map(node => {
-        let score = 0;
-        if (node.type === "Symbol") {
-          score = 100;
-        } else if (node.type === "File" && !isMetaFile(node.id)) {
-          score = 50;
-        } else if (node.type === "File") {
-          score = 10;
-        } else if (node.type === "Module") {
-          score = 5;
+      const rootNode = store.nodes.find(n => n.type === "File" && !isMetaFile(n.id)) 
+                    || store.nodes.find(n => n.type === "File") 
+                    || store.nodes[0];
+
+      if (!rootNode) return { sampleNodes: [], sampleEdges: [] };
+
+      const visited = new Set<string>();
+      const queue = [rootNode.id];
+      const selected = [];
+
+      const adj = new Map<string, string[]>();
+      for (const e of store.edges) {
+        if (!adj.has(e.from)) adj.set(e.from, []);
+        if (!adj.has(e.to)) adj.set(e.to, []);
+        adj.get(e.from)!.push(e.to);
+        adj.get(e.to)!.push(e.from);
+      }
+
+      const nodeMap = new Map(store.nodes.map(n => [n.id, n]));
+
+      while (queue.length > 0 && selected.length < nodeLimit) {
+        const id = queue.shift()!;
+        if (visited.has(id)) continue;
+        visited.add(id);
+        const node = nodeMap.get(id);
+        if (node) {
+          selected.push(node);
+          const neighbors = adj.get(id) || [];
+          queue.push(...neighbors);
         }
-        return { node, score };
-      });
-      
-      scoredNodes.sort((a, b) => b.score - a.score || a.node.id.localeCompare(b.node.id));
-      const finalSampleNodes = scoredNodes.slice(0, nodeLimit);
-      const sampleNodeIds = new Set(finalSampleNodes.map(n => n.node.id));
-      
+      }
+
+      if (selected.length < nodeLimit) {
+        const remaining = store.nodes.filter(n => !visited.has(n.id) && n.type === "File" && !isMetaFile(n.id));
+        for (const n of remaining) {
+          if (selected.length >= nodeLimit) break;
+          selected.push(n);
+          visited.add(n.id);
+        }
+      }
+
+      const sampleNodeIds = new Set(selected.map(n => n.id));
+
       return {
-        sampleNodes: finalSampleNodes.map(({ node }) => ({
+        sampleNodes: selected.map(node => ({
           id: node.id,
           type: node.type,
           contentPreview: compactPreview(node.content, 96),
