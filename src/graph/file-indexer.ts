@@ -19,7 +19,7 @@ const DEFAULT_EXTENSIONS = Array.from(
   new Set([...ALL_LANGUAGE_EXTENSIONS, ...BASE_EXTENSIONS])
 );
 const DEFAULT_MAX_FILE_SIZE = 200_000;
-const IGNORED_DIRS = new Set([".git", "node_modules", "dist", "coverage", "tmp"]);
+const IGNORED_DIRS = new Set([".git", "node_modules", "dist", "coverage", "tmp", "venv", ".venv", "env", ".env", "__pycache__", ".vscode", ".idea", ".next", "build"]);
 
 const REFERENCE_SKIPLIST = new Set([
   "if", "for", "let", "const", "var", "this", "new", "return", "true", "false",
