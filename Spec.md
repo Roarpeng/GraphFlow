@@ -77,7 +77,7 @@ Test Files  28 passed (28)
 5.  **全局配置白名单升级**：[loader.ts](file:///c:/Users/roarp/Desktop/TMP/Code/AICode/GraphFlow/src/config/loader.ts)、[schema.ts](file:///c:/Users/roarp/Desktop/TMP/Code/AICode/GraphFlow/src/config/schema.ts)、[runtime.ts](file:///c:/Users/roarp/Desktop/TMP/Code/AICode/GraphFlow/src/surfaces/cli/runtime.ts)
 6.  **ESLint 全局忽略与类型规则放宽**：[eslint.config.js](file:///c:/Users/roarp/Desktop/TMP/Code/AICode/GraphFlow/eslint.config.js)
 7.  **交付总结规格书**：[Spec.md](file:///c:/Users/roarp/Desktop/TMP/Code/AICode/GraphFlow/Spec.md) (本文件)
-8.  **VS Code 插件成品一键打包**：`artifacts/graphflow-vscode-0.4.2.vsix`
+8.  **VS Code 插件成品一键打包**：`artifacts/graphflow-vscode-0.4.3.vsix`
 
 ---
 
