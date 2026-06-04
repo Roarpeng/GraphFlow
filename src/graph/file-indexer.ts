@@ -84,6 +84,11 @@ export async function indexWorkspaceFiles(
     // not found or invalid
   }
 
+  const snapshot = client.readSnapshot?.();
+  if (snapshot && snapshot.nodes.length === 0 && snapshot.edges.length === 0 && Object.keys(cacheState).length > 0) {
+    cacheState = {};
+  }
+
   const files = walkFiles(rootDir, includeExtensions);
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];

@@ -775,3 +775,38 @@ profiles: [
 ### 7.3 MCP 与 IDE 协议栈修复
 - **MCP Transport Layer 切换**：修复了原有的 stdio HTTP headers 引起的阻塞超时 bug，完全适配了标准的 JSON-RPC line-delimited 协议。Cursor 等外部代理（宿主 Agent）能够做到 0 延迟秒连 GraphFlow。
 - **CLI 与 Extension 同步发布**：VSIX 拓展与运行时模块同步构建并提速，版本号成功对齐升级至 `0.5.0`。
+
+## 8. 当前进度更新（2026-06-04）
+
+本次更新围绕“本地 vLLM + OpenAI 兼容模式接入后，Run Task 未显式重建源码图谱”的线上使用反馈进行排查与修复，结论是：
+
+- 并非未触发 `runTask`，而是出现“索引缓存与图存储脱节”场景。
+- 当图文件被清空/重建后，`.graphflow-cache/index-state.json` 仍保留历史增量状态，导致 `indexWorkspaceFiles` 误判多数源码文件为“未变化”并跳过。
+- 最终表现为图中只出现运行时节点（Task/Skill/Episode），缺少 `src/**` 源码节点，用户感知为“没有建立知识图谱”。
+
+### 8.1 根因定位（代码路径）
+
+1. `runTaskResult` 在 `autoIndexOnRun=true` 下会调用 `indexWorkspaceFiles`，执行路径成立。
+2. `file-indexer.ts` 增量判定只依赖缓存中的 `mtime/hash`，未校验当前图存储是否为空。
+3. 当图为空但缓存非空时，索引会被大面积短路，导致图无法恢复源码节点。
+
+### 8.2 修复方案（已落地）
+
+- 在 `src/graph/file-indexer.ts` 增加“空图保护逻辑”：
+  - 若 `client.readSnapshot()` 返回空图（`nodes=0 && edges=0`）且缓存状态非空，则判定缓存失效并清空 `cacheState`。
+  - 触发一次全量重建，确保图存储恢复到与工作区一致的状态。
+
+### 8.3 测试与验收
+
+- 新增回归测试：`tests/m11-file-indexer.test.ts`
+  - 用例：`rebuilds source graph when store is missing but cache still exists`
+  - 先构建图，再删除 graph store，保留缓存，验证二次索引可重建 `file:src/demo.ts`。
+- 测试结果：
+  - `npm test -- tests/m11-file-indexer.test.ts` 通过（2/2 passed）。
+
+### 8.4 与 vLLM 接入的关系说明
+
+- vLLM 的 `openai-compat` 配置已可用于 OpenBMB provider 路由。
+- 本次问题属于“索引增量缓存一致性”缺陷，不属于模型调用失败。
+- 修复后，`Run Task` 在图存储被重置的情况下可自动恢复源码图谱，不再需要人工清理缓存作为常规操作。
+

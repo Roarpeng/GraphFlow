@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { validateConfig } from "../src/config/loader";
@@ -50,6 +50,55 @@ describe("M11 workspace indexing", () => {
       expect(indexed.indexedFiles).toBeGreaterThanOrEqual(2);
       expect(indexed.indexedSymbols).toBeGreaterThanOrEqual(1);
       expect(slice.items.length).toBeGreaterThan(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rebuilds source graph when store is missing but cache still exists", async () => {
+    const root = mkdtempSync(join(tmpdir(), "graphflow-index-rebuild-"));
+    try {
+      mkdirSync(join(root, "src"), { recursive: true });
+      writeFileSync(join(root, "src", "demo.ts"), "export function demo() { return 1; }\n", "utf8");
+
+      const storePath = join(root, "tmp", "graphflow-graph.json");
+      const config = validateConfig({
+        providers: {},
+        tiers: {
+          smart: { provider: "openai", model: "gpt-5.3-codex" },
+          economy: { provider: "openai", model: "gpt-4.1-mini" },
+        },
+        budgetPolicy: { runTokenCap: 2000 },
+        graphPolicy: {
+          enableAutoBuild: true,
+          enableNearLosslessMode: true,
+          autoIndexOnPreview: true,
+          autoIndexOnRun: true,
+          workspaceRoot: root,
+          includeExtensions: [".ts"],
+          transport: "file",
+          graphStorePath: storePath,
+          maxContextTokens: 200,
+        },
+        learningPolicy: {
+          enableFlywheel: true,
+          trainingCadence: "nightly",
+          canaryRatio: 10,
+          exportPath: "tmp/learning-dataset.jsonl",
+        },
+      });
+
+      const client = createGraphClient(config);
+      await indexWorkspaceFiles(client, root, { includeExtensions: [".ts"] });
+
+      expect(existsSync(storePath)).toBe(true);
+      unlinkSync(storePath);
+
+      const rebuilt = await indexWorkspaceFiles(client, root, { includeExtensions: [".ts"] });
+      const store = JSON.parse(readFileSync(storePath, "utf8")) as { nodes: Array<{ id: string }> };
+
+      expect(rebuilt.indexedFiles).toBeGreaterThanOrEqual(1);
+      expect(store.nodes.some((node) => node.id === "file:src/demo.ts")).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
