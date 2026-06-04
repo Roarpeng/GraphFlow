@@ -7,6 +7,9 @@ export interface ProviderConfig {
   engine?: "command" | "node-llama-cpp";
   modelPath?: string;
   commandPath?: string;
+  modelUrl?: string;
+  modelSha256?: string;
+  autoDownloadModel?: boolean;
   timeoutMs?: number;
   maxTokens?: number;
   temperature?: number;

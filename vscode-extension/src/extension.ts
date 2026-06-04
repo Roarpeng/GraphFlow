@@ -63,6 +63,8 @@ export function activate(context: vscode.ExtensionContext): void {
       console.error("GraphFlow auto-index on activate failed:", err);
     });
   }
+  const output = vscode.window.createOutputChannel("GraphFlow");
+  context.subscriptions.push(output);
 
   const runTask = vscode.commands.registerCommand("graphflow.runTask", async () => {
     const task = await vscode.window.showInputBox({
@@ -177,7 +179,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const settings = await runGraphFlow(workspaceRoot, (runtime) =>
       Promise.resolve(runtime.getGraphFlowSettings())
     );
-    showSettingsPanel(context, settings, workspaceRoot);
+    showSettingsPanel(context, settings, workspaceRoot, output);
   });
 
   const showGraph = vscode.commands.registerCommand("graphflow.showGraph", async () => {
@@ -641,7 +643,8 @@ function showContextPreviewPanel(context: vscode.ExtensionContext, preview: Cont
 function showSettingsPanel(
   context: vscode.ExtensionContext,
   settings: GraphFlowSettings,
-  workspaceRoot: string
+  workspaceRoot: string,
+  output: vscode.OutputChannel
 ): void {
   const panel = vscode.window.createWebviewPanel(
     "graphflow.settings",
@@ -664,8 +667,35 @@ function showSettingsPanel(
     }
 
     try {
+      const payload = message.payload as Omit<GraphFlowSettings, "configPath">;
+      if (payload.openbmbAutoDownload) {
+        output.appendLine("[GraphFlow] Auto download enabled. Starting MiniCPM model setup...");
+        output.appendLine("[GraphFlow] Guide: Auto mode applies OpenBMB embedded modelPath after download.");
+        output.show(true);
+
+        const result = await runGraphFlow(workspaceRoot, (runtime) =>
+          runtime.downloadOpenBmbModel(undefined, {
+            model: payload.openbmbModel,
+            ...(payload.openbmbModelUrl ? { url: payload.openbmbModelUrl } : {}),
+            ...(payload.openbmbModelSha256 ? { sha256: payload.openbmbModelSha256 } : {}),
+            ...(payload.openbmbModelPath ? { targetPath: payload.openbmbModelPath } : {}),
+            onProgress: (progress) => {
+              const current = formatBytes(progress.downloadedBytes);
+              const total = progress.totalBytes !== undefined ? formatBytes(progress.totalBytes) : "unknown";
+              const percent = progress.percent !== undefined ? `${progress.percent.toFixed(1)}%` : "...";
+              output.appendLine(`[GraphFlow][Download] ${progress.stage} ${percent} ${current}/${total}`);
+            },
+          })
+        );
+
+        payload.openbmbMode = "embedded";
+        payload.openbmbModelPath = result.targetPath;
+        output.appendLine(`[GraphFlow] Model downloaded and applied: ${result.targetPath}`);
+        output.appendLine("[GraphFlow] Next: run 'GraphFlow: Enrich Graph Semantics' to verify MiniCPM inference path.");
+      }
+
       const saved = await runGraphFlow(workspaceRoot, (runtime) =>
-        Promise.resolve(runtime.saveGraphFlowSettings(message.payload as Omit<GraphFlowSettings, "configPath">))
+        Promise.resolve(runtime.saveGraphFlowSettings(payload))
       );
       panel.webview.postMessage({ type: "settingsSaved", payload: saved });
       vscode.window.showInformationMessage("GraphFlow settings saved.");

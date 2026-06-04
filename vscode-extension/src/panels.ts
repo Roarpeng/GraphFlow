@@ -56,6 +56,15 @@ export interface GraphFlowSettings {
   autoIndexOnRun: boolean;
   transport: "memory" | "mcp-http" | "file" | "sqlite";
   graphStorePath: string;
+  openbmbMode: "embedded" | "ollama" | "openai-compat";
+  openbmbEngine: "command" | "node-llama-cpp";
+  openbmbModel: string;
+  openbmbBaseUrl?: string;
+  openbmbModelPath?: string;
+  openbmbCommandPath?: string;
+  openbmbAutoDownload: boolean;
+  openbmbModelUrl?: string;
+  openbmbModelSha256?: string;
 }
 
 export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri: string): string {
@@ -453,6 +462,7 @@ export function buildSettingsHtml(settings: GraphFlowSettings, scriptUri: string
           ${renderProviderOption("anthropic", settings.provider)}
           ${renderProviderOption("bailian", settings.provider)}
           ${renderProviderOption("doubao", settings.provider)}
+          ${renderProviderOption("openbmb", settings.provider)}
         </select>
       </label>
       <label>API Key Env Var <input id="settings-api-key-env-var" name="apiKeyEnvVar" value="${escapeHtml(settings.apiKeyEnvVar ?? "")}" placeholder="OPENAI_API_KEY" /></label>
@@ -467,6 +477,30 @@ export function buildSettingsHtml(settings: GraphFlowSettings, scriptUri: string
           ${renderTransportOption("mcp-http", settings.transport)}
         </select>
       </label>
+    </section>
+    <section class="panel grid">
+      <label>OpenBMB Model Name <input id="settings-openbmb-model" name="openbmbModel" value="${escapeHtml(settings.openbmbModel)}" placeholder="minicpm-1b" /></label>
+      <label>OpenBMB Mode
+        <select id="settings-openbmb-mode" name="openbmbMode">
+          <option value="embedded" ${settings.openbmbMode === "embedded" ? "selected" : ""}>embedded (local)</option>
+          <option value="ollama" ${settings.openbmbMode === "ollama" ? "selected" : ""}>ollama (manual baseUrl)</option>
+          <option value="openai-compat" ${settings.openbmbMode === "openai-compat" ? "selected" : ""}>openai-compat (manual baseUrl)</option>
+        </select>
+      </label>
+      <label>OpenBMB Engine
+        <select id="settings-openbmb-engine" name="openbmbEngine">
+          <option value="command" ${settings.openbmbEngine === "command" ? "selected" : ""}>command</option>
+          <option value="node-llama-cpp" ${settings.openbmbEngine === "node-llama-cpp" ? "selected" : ""}>node-llama-cpp</option>
+        </select>
+      </label>
+      <label>OpenBMB Base URL (manual mode) <input id="settings-openbmb-base-url" name="openbmbBaseUrl" value="${escapeHtml(settings.openbmbBaseUrl ?? "")}" placeholder="http://localhost:11434" /></label>
+      <label>OpenBMB Model Path (embedded) <input id="settings-openbmb-model-path" name="openbmbModelPath" value="${escapeHtml(settings.openbmbModelPath ?? "")}" placeholder="C:/models/minicpm-1b.gguf" /></label>
+      <label>OpenBMB Command Path (command engine) <input id="settings-openbmb-command-path" name="openbmbCommandPath" value="${escapeHtml(settings.openbmbCommandPath ?? "")}" placeholder="C:/tools/minicpm.exe" /></label>
+      <label>Auto Download URL <input id="settings-openbmb-model-url" name="openbmbModelUrl" value="${escapeHtml(settings.openbmbModelUrl ?? "")}" placeholder="https://.../minicpm-1b.gguf" /></label>
+      <label>Auto Download SHA256 <input id="settings-openbmb-model-sha256" name="openbmbModelSha256" value="${escapeHtml(settings.openbmbModelSha256 ?? "")}" placeholder="optional" /></label>
+    </section>
+    <section class="panel checks">
+      <label><input id="settings-openbmb-auto-download" name="openbmbAutoDownload" type="checkbox" ${settings.openbmbAutoDownload ? "checked" : ""} /> Auto download model and apply on save</label>
     </section>
     <section class="panel grid">
       <label>Max Context Tokens <input id="settings-max-context-tokens" name="maxContextTokens" type="number" min="1" value="${settings.maxContextTokens}" /></label>

@@ -29,6 +29,47 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "GraphFlow",
+      "properties": {
+        "graphflow.openbmb.mode": {
+          "type": "string",
+          "default": "embedded",
+          "enum": ["embedded", "ollama", "openai-compat"],
+          "description": "OpenBMB runtime mode. embedded=local model, ollama/openai-compat=require manual baseUrl."
+        },
+        "graphflow.openbmb.model": {
+          "type": "string",
+          "default": "minicpm-1b",
+          "description": "OpenBMB model name used for enricher/evolver and OpenBMB provider routes."
+        },
+        "graphflow.openbmb.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Manual provider base URL for ollama/openai-compat mode, e.g. http://localhost:11434."
+        },
+        "graphflow.openbmb.autoDownloadModel": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically download and apply MiniCPM model when saving GraphFlow settings panel."
+        },
+        "graphflow.openbmb.modelUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Model download URL used by auto-download workflow."
+        },
+        "graphflow.openbmb.modelSha256": {
+          "type": "string",
+          "default": "",
+          "description": "Optional SHA256 checksum for model file verification."
+        },
+        "graphflow.settings.openCommand": {
+          "type": "string",
+          "default": "GraphFlow: Settings",
+          "description": "Use Command Palette and run this command to open the full GraphFlow settings panel."
+        }
+      }
+    },
     "commands": [
       {
         "command": "graphflow.runTask",

@@ -124,6 +124,15 @@ function applyOpenBmbRuntimeEnv(config: GraphFlowConfig): void {
   if (openbmb.commandPath) {
     process.env.GRAPHFLOW_MINICPM_COMMAND = openbmb.commandPath;
   }
+  if (openbmb.modelUrl) {
+    process.env.GRAPHFLOW_MINICPM_MODEL_URL = openbmb.modelUrl;
+  }
+  if (openbmb.modelSha256) {
+    process.env.GRAPHFLOW_MINICPM_MODEL_SHA256 = openbmb.modelSha256;
+  }
+  if (openbmb.autoDownloadModel !== undefined) {
+    process.env.GRAPHFLOW_OPENBMB_AUTO_DOWNLOAD = openbmb.autoDownloadModel ? "1" : "0";
+  }
   if (openbmb.engine) {
     process.env.GRAPHFLOW_MINICPM_ENGINE = openbmb.engine;
   }
@@ -187,6 +196,15 @@ export interface GraphFlowSettings {
   autoIndexOnRun: boolean;
   transport: GraphFlowConfig["graphPolicy"]["transport"];
   graphStorePath: string;
+  openbmbMode: "embedded" | "ollama" | "openai-compat";
+  openbmbEngine: "command" | "node-llama-cpp";
+  openbmbModel: string;
+  openbmbBaseUrl?: string;
+  openbmbModelPath?: string;
+  openbmbCommandPath?: string;
+  openbmbAutoDownload: boolean;
+  openbmbModelUrl?: string;
+  openbmbModelSha256?: string;
 }
 
 export type GraphFlowSettingsInput = Omit<GraphFlowSettings, "configPath">;
@@ -197,7 +215,17 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
   const rawConfig = readRawConfig(configPath);
   const providerConfig = config.providers[provider] ?? {};
   const rawProviderConfig = rawConfig?.providers?.[provider] ?? {};
+  const rawOpenBmbConfig = rawConfig?.providers?.openbmb ?? {};
+  const openbmbConfig = config.providers.openbmb ?? {};
   const apiKeyEnvVar = parseEnvPlaceholder(rawProviderConfig.apiKey ?? providerConfig.apiKey);
+  const openbmbModelUrl = rawOpenBmbConfig.modelUrl ?? openbmbConfig.modelUrl ?? process.env.GRAPHFLOW_MINICPM_MODEL_URL;
+  const openbmbModelSha256 =
+    rawOpenBmbConfig.modelSha256 ?? openbmbConfig.modelSha256 ?? process.env.GRAPHFLOW_MINICPM_MODEL_SHA256;
+  const openbmbAutoDownloadRaw = rawOpenBmbConfig.autoDownloadModel ?? openbmbConfig.autoDownloadModel;
+  const openbmbAutoDownload =
+    typeof openbmbAutoDownloadRaw === "boolean"
+      ? openbmbAutoDownloadRaw
+      : String(process.env.GRAPHFLOW_OPENBMB_AUTO_DOWNLOAD ?? "0") === "1";
 
   return {
     configPath,
@@ -215,6 +243,28 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
     autoIndexOnRun: config.graphPolicy.autoIndexOnRun ?? true,
     transport: config.graphPolicy.transport,
     graphStorePath: config.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.json",
+    openbmbMode: (openbmbConfig.mode ?? "embedded") as "embedded" | "ollama" | "openai-compat",
+    openbmbEngine: (openbmbConfig.engine ?? "command") as "command" | "node-llama-cpp",
+    openbmbModel:
+      config.graphPolicy.semanticEnrichment?.model ??
+      config.learningPolicy.skillEvolution?.model ??
+      config.tiers.economy.model,
+    ...(rawOpenBmbConfig.baseUrl || openbmbConfig.baseUrl
+      ? { openbmbBaseUrl: rawOpenBmbConfig.baseUrl ?? openbmbConfig.baseUrl }
+      : {}),
+    ...(rawOpenBmbConfig.modelPath || openbmbConfig.modelPath
+      ? { openbmbModelPath: rawOpenBmbConfig.modelPath ?? openbmbConfig.modelPath }
+      : {}),
+    ...(rawOpenBmbConfig.commandPath || openbmbConfig.commandPath
+      ? { openbmbCommandPath: rawOpenBmbConfig.commandPath ?? openbmbConfig.commandPath }
+      : {}),
+    openbmbAutoDownload,
+    ...(typeof openbmbModelUrl === "string" && openbmbModelUrl.trim().length > 0
+      ? { openbmbModelUrl }
+      : {}),
+    ...(typeof openbmbModelSha256 === "string" && openbmbModelSha256.trim().length > 0
+      ? { openbmbModelSha256 }
+      : {}),
   };
 }
 
@@ -227,15 +277,34 @@ export function saveGraphFlowSettings(
     ...(settings.apiKeyEnvVar ? { apiKey: `\${${settings.apiKeyEnvVar}}` } : {}),
     ...(settings.baseUrl ? { baseUrl: settings.baseUrl } : {}),
   };
+
+  const openbmbProviderConfig = {
+    ...(settings.openbmbBaseUrl ? { baseUrl: settings.openbmbBaseUrl } : {}),
+    ...(settings.openbmbModelPath ? { modelPath: settings.openbmbModelPath } : {}),
+    ...(settings.openbmbCommandPath ? { commandPath: settings.openbmbCommandPath } : {}),
+    ...(settings.openbmbModelUrl ? { modelUrl: settings.openbmbModelUrl } : {}),
+    ...(settings.openbmbModelSha256 ? { modelSha256: settings.openbmbModelSha256 } : {}),
+    mode: settings.openbmbMode,
+    engine: settings.openbmbEngine,
+    autoDownloadModel: settings.openbmbAutoDownload,
+  };
+
+  const nextSmartModel = settings.provider === "openbmb" ? settings.openbmbModel : settings.smartModel;
+  const nextEconomyModel = settings.provider === "openbmb" ? settings.openbmbModel : settings.economyModel;
+
   const updated = validateConfig({
     ...current,
     providers: {
       ...current.providers,
       [settings.provider]: providerConfig,
+      openbmb: {
+        ...(current.providers.openbmb ?? {}),
+        ...openbmbProviderConfig,
+      } as GraphFlowConfig["providers"][string],
     },
     tiers: {
-      smart: { provider: settings.provider, model: settings.smartModel },
-      economy: { provider: settings.provider, model: settings.economyModel },
+      smart: { provider: settings.provider, model: nextSmartModel },
+      economy: { provider: settings.provider, model: nextEconomyModel },
     },
     graphPolicy: {
       ...current.graphPolicy,
@@ -250,8 +319,27 @@ export function saveGraphFlowSettings(
         l2: Math.max(0, Math.floor(settings.layerQuota.l2)),
         l3: Math.max(0, Math.floor(settings.layerQuota.l3)),
       },
+      semanticEnrichment: {
+        ...(current.graphPolicy.semanticEnrichment ?? {}),
+        model: settings.openbmbModel,
+      },
+    },
+    learningPolicy: {
+      ...current.learningPolicy,
+      skillEvolution: {
+        ...(current.learningPolicy.skillEvolution ?? {}),
+        model: settings.openbmbModel,
+      },
     },
   });
+
+  if (settings.openbmbModelUrl) {
+    process.env.GRAPHFLOW_MINICPM_MODEL_URL = settings.openbmbModelUrl;
+  }
+  if (settings.openbmbModelSha256) {
+    process.env.GRAPHFLOW_MINICPM_MODEL_SHA256 = settings.openbmbModelSha256;
+  }
+  process.env.GRAPHFLOW_OPENBMB_AUTO_DOWNLOAD = settings.openbmbAutoDownload ? "1" : "0";
 
   const dir = dirname(configPath);
   if (dir && dir !== ".") {
