@@ -1,4 +1,5 @@
-import { openSync, closeSync, unlinkSync } from "node:fs";
+import { logger } from "../utils/logger";
+import { openSync, closeSync, unlinkSync, readFileSync, writeSync } from "node:fs";
 
 export class FileLock {
   private lockFilePath: string;
@@ -13,11 +14,30 @@ export class FileLock {
     while (Date.now() - start < timeoutMs) {
       try {
         this.fd = openSync(this.lockFilePath, "wx");
+        writeSync(this.fd, String(process.pid));
         return true;
       } catch (err: any) {
         if (err.code !== "EEXIST") {
           throw err;
         }
+        
+        try {
+          const pidStr = readFileSync(this.lockFilePath, "utf8");
+          const pid = parseInt(pidStr, 10);
+          if (pid && pid !== process.pid) {
+            try {
+              process.kill(pid, 0);
+            } catch (e: any) {
+              if (e.code === "ESRCH") {
+                unlinkSync(this.lockFilePath);
+                continue;
+              }
+            }
+          }
+        } catch {
+          // ignore
+        }
+        
         await new Promise((resolve) => setTimeout(resolve, retryIntervalMs));
       }
     }
@@ -28,7 +48,8 @@ export class FileLock {
     if (this.fd !== null) {
       try {
         closeSync(this.fd);
-      } catch {
+      } catch (error) {
+        logger.error({ error }, "Caught error");
         // ignore
       }
       this.fd = null;

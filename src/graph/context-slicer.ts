@@ -1,3 +1,4 @@
+import { logger } from "../utils/logger";
 import type { GraphEdge, GraphNode } from "../core/types";
 import {
   cosineSimilarity,
@@ -20,7 +21,8 @@ function getEncoder(): ((text: string) => number[]) | null {
       encoderFn = mod.encode.bind(mod);
       return encoderFn;
     }
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     // fall through
   }
   try {
@@ -30,7 +32,8 @@ function getEncoder(): ((text: string) => number[]) | null {
       encoderFn = mod.encode.bind(mod);
       return encoderFn;
     }
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     // fall through
   }
   encoderFn = null;
@@ -157,7 +160,8 @@ export async function buildLayeredContextPackage(
       const minSim = options.vectorMinSimilarity ?? 0.05;
       const vectorHits = vectorRecall(keywordHits, queryEmbedding, topK, minSim);
       hits = reciprocalRankFusion([keywordHits, vectorHits]);
-    } catch {
+    } catch (error) {
+    logger.error({ error }, "Caught error");
       hits = keywordHits;
     }
   }
@@ -279,7 +283,8 @@ function estimateTokens(text: string): number {
     try {
       const n = enc(text).length;
       return Math.max(1, n);
-    } catch {
+    } catch (error) {
+    logger.error({ error }, "Caught error");
       // fall back below
     }
   }

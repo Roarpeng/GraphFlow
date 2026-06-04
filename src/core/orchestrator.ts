@@ -1,6 +1,7 @@
 import { planTasks, planTasksLlm } from "../agents/planner";
 import { brainstormTaskLlm } from "../agents/brainstormer";
 import type { GraphClient } from "../graph/client-factory";
+import { logger } from "../utils/logger";
 import {
   buildLayeredContextPackage,
   type LayeredContextPackage,
@@ -50,6 +51,7 @@ export async function orchestrate(
   input: OrchestrationInput,
   options?: OrchestrateOptions
 ): Promise<TaskRunResult> {
+  logger.info({ task: input.task }, "Orchestration task started");
   const retryOptions = input.maxRetries !== undefined ? { maxRetries: input.maxRetries } : {};
   const contextPackage = await maybeBuildNearLosslessContext(input, options);
   const routeDecisions = buildRouteDecisions(options?.providerHealth, options?.providerFallbackChain);
@@ -77,6 +79,7 @@ export async function orchestrate(
     const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
     await maybeSyncGraph(input.task, withRoute, options);
     await maybeSyncSkillGraph(input.task, withRoute, options);
+    logger.info({ status: withRoute.status, task: input.task }, "Orchestration task finished (simple mode)");
     return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options);
   }
 
@@ -104,6 +107,7 @@ export async function orchestrate(
   currentPlan = plan;
 
   const runner = async (node: TaskNode): Promise<boolean> => {
+    logger.info({ nodeId: node.id, description: node.description }, "Executing task node");
     const run = await runSimpleTask({
       task: node.description,
       ...retryOptions,
@@ -163,6 +167,7 @@ export async function orchestrate(
     const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
     await maybeSyncGraph(input.task, withRoute, options);
     await maybeSyncSkillGraph(input.task, withRoute, options);
+    logger.error({ status: withRoute.status, failed: result.failed }, "Orchestration task failed or needs human review");
     return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options);
   }
 
@@ -178,6 +183,7 @@ export async function orchestrate(
   const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
   await maybeSyncGraph(input.task, withRoute, options);
   await maybeSyncSkillGraph(input.task, withRoute, options);
+  logger.info({ status: withRoute.status, task: input.task, rounds: result.rounds }, "Orchestration task completed successfully");
   return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options);
 }
 

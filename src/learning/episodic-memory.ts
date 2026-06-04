@@ -253,12 +253,18 @@ export async function pruneExpiredEpisodes(
     return { pruned: 0 };
   }
 
-  // 软删除：标记 metadata.pruned = true
-  const updates: GraphNode[] = toPrune.map((node) => ({
-    ...node,
-    metadata: { ...node.metadata, pruned: true },
-  }));
-  await client.upsertNodes(updates);
+  // 物理删除（如果客户端支持 deleteNode）或回退到软删除
+  if (client.deleteNode) {
+    for (const node of toPrune) {
+      await client.deleteNode(node.id);
+    }
+  } else {
+    const updates: GraphNode[] = toPrune.map((node) => ({
+      ...node,
+      metadata: { ...node.metadata, pruned: true },
+    }));
+    await client.upsertNodes(updates);
+  }
 
   return { pruned: toPrune.length };
 }

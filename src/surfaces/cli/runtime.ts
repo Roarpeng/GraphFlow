@@ -86,6 +86,11 @@ export function resolveConfig(path = "graphflow.config.json"): GraphFlowConfig {
     return loadConfig(path);
   }
 
+  const globalPath = join(require("node:os").homedir(), ".graphflow.config.json");
+  if (existsSync(globalPath)) {
+    return loadConfig(globalPath);
+  }
+
   return getDefaultConfig();
 }
 

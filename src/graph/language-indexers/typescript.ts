@@ -1,3 +1,4 @@
+import { logger } from "../../utils/logger";
 import { createRequire } from "node:module";
 import type * as TsNs from "typescript";
 import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index";
@@ -10,7 +11,8 @@ function loadTs(): typeof TsNs | null {
   if (tsModule !== undefined) return tsModule;
   try {
     tsModule = requireFn("typescript") as typeof TsNs;
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     tsModule = null;
   }
   return tsModule;
@@ -187,7 +189,8 @@ export const typescriptIndexer: LanguageIndexer = {
     if (!ts) return fallbackExtract(filePath, content);
     try {
       return extractFromAst(filePath, content, ts);
-    } catch {
+    } catch (error) {
+    logger.error({ error }, "Caught error");
       return fallbackExtract(filePath, content);
     }
   },

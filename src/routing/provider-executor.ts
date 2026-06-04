@@ -278,12 +278,26 @@ export async function executeRolePrompt(
         circuitState.openedUntil = Date.now() + circuitOpenMs;
       }
 
+      const isRateLimit = /429|too many requests|rate limit/i.test(message);
+
+      console.warn(`[provider-executor] Request failed for ${selection.provider}/${selection.model} (attempt ${attempt}/${retryBudget}): ${message}`);
+
       if (!retryable || attempt >= retryBudget) {
+        console.error(`[provider-executor] Final failure for ${selection.provider}/${selection.model}: ${message}`);
         throw wrapped;
       }
 
       attempt += 1;
-      const backoffMs = Math.min(1500, 100 * 2 ** attempt);
+      let backoffMs = Math.min(1500, 100 * 2 ** attempt);
+      
+      if (isRateLimit) {
+        const jitter = Math.random() * 1000;
+        backoffMs = Math.pow(2, attempt) * 1000 + jitter;
+        console.warn(`[provider-executor] Rate limit hit. Backing off for ${Math.round(backoffMs)}ms...`);
+      } else {
+        console.warn(`[provider-executor] Retrying in ${backoffMs}ms...`);
+      }
+      
       await sleep(backoffMs);
     }
   }

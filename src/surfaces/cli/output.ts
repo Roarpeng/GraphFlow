@@ -18,6 +18,7 @@ export function buildCliUsage(): string {
   return [
     "Usage: graphflow <command> [options]",
     "Commands:",
+    "  config init [--global]",
     '  run "<task>" [--json] [--config <path>]',
     '  plan "<task>" [--json] [--config <path>]',
     '  context preview "<query>" [--json] [--config <path>]',

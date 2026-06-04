@@ -1,3 +1,4 @@
+import { logger } from "../utils/logger";
 import type { ValidationResult } from "../core/types";
 import type { ModelSelection } from "../routing/model-router";
 import { executeRolePrompt, type PromptContext } from "../routing/provider-executor";
@@ -98,7 +99,8 @@ export async function validateTaskResultLlm(
   let raw = "";
   try {
     raw = await executeRolePrompt("validator", prompt, selection, context);
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     return validateTaskResult(task, workerOutput);
   }
 
@@ -130,7 +132,8 @@ function parseValidatorJson(raw: string): ValidationResult | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text.slice(start, end + 1));
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     return null;
   }
 

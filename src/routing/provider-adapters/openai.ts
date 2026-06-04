@@ -1,3 +1,4 @@
+import { logger } from "../../utils/logger";
 export interface ProviderTextRequest {
   prompt: string;
   model: string;
@@ -73,6 +74,7 @@ export async function openaiGenerateText(request: ProviderTextRequest): Promise<
     }
     return content;
   } catch (error) {
+    logger.error({ error }, "Provider adapter caught error");
     if (strict) {
       throw error;
     }

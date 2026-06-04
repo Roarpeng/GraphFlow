@@ -1,3 +1,4 @@
+import { logger } from "../utils/logger";
 import type { GraphClient } from "./client-factory";
 import { executeRolePrompt } from "../routing/provider-executor";
 import type { GraphNode } from "../core/types";
@@ -100,7 +101,8 @@ export async function enrichGraphSemanticsSilent(
       if (sleepMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, sleepMs));
       }
-    } catch {
+    } catch (error) {
+    logger.error({ error }, "Caught error");
       // 异常保护，如果小模型离线或限流，跳过当前节点，保证后台线程绝对健壮
       continue;
     }

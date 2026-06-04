@@ -7,7 +7,10 @@ on:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout
@@ -25,6 +28,9 @@ jobs:
       - name: Install extension dependencies
         run: npm ci --prefix vscode-extension
 
+      - name: Audit
+        run: npm audit --audit-level=moderate
+
       - name: Lint
         run: npm run lint
 
@@ -32,7 +38,7 @@ jobs:
         run: npm run build
 
       - name: Test
-        run: npm test
+        run: npm run test -- --coverage
 
       - name: Build extension
         run: npm run build:extension

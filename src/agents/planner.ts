@@ -1,3 +1,4 @@
+import { logger } from "../utils/logger";
 import type { TaskNode } from "../core/types";
 import type { ModelSelection } from "../routing/model-router";
 import { executeRolePrompt, type PromptContext } from "../routing/provider-executor";
@@ -59,7 +60,8 @@ export async function planTasksLlm(task: string, options: PlanTasksLlmOptions): 
   let raw = "";
   try {
     raw = await executeRolePrompt("planner", prompt, options.selection, options.context);
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     return planTasks(task, options.skillHints);
   }
 
@@ -123,7 +125,8 @@ function parsePlannerJson(raw: string): PlannerJsonItem[] | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(jsonBlock);
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     return null;
   }
 

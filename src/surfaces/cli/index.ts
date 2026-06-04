@@ -19,6 +19,27 @@ import {
 import { buildCliUsage, formatCliResult, getCliVersion, parseCliOptions, type CliCommandResult } from "./output";
 
 async function executeCommand(command: string, args: string[], configPath?: string): Promise<CliCommandResult | undefined> {
+  if (command === "config" && args[0] === "init") {
+    const isGlobal = args.includes("--global");
+    const targetPath = isGlobal 
+      ? require("node:path").join(require("node:os").homedir(), ".graphflow.config.json") 
+      : "graphflow.config.json";
+
+    if (require("node:fs").existsSync(targetPath)) {
+      console.log(`Config already exists at ${targetPath}`);
+      process.exitCode = 1;
+      return undefined;
+    }
+
+    const { getDefaultConfig } = require("./runtime");
+    require("node:fs").writeFileSync(targetPath, JSON.stringify(getDefaultConfig(), null, 2) + "\n");
+    return {
+      command: "config-init",
+      data: { targetPath },
+      legacyText: `Config generated at ${targetPath}`,
+    };
+  }
+
   if (command === "run") {
     const task = args.join(" ").trim();
     if (!task) {

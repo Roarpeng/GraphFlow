@@ -1,3 +1,4 @@
+import { logger } from "../../utils/logger";
 import type { ProviderTextRequest } from "./openai";
 
 export async function doubaoGenerateText(request: ProviderTextRequest): Promise<string> {
@@ -49,6 +50,7 @@ export async function doubaoGenerateText(request: ProviderTextRequest): Promise<
     }
     return text;
   } catch (error) {
+    logger.error({ error }, "Provider adapter caught error");
     if (strict) {
       throw error;
     }

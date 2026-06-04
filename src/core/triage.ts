@@ -1,3 +1,4 @@
+import { logger } from "../utils/logger";
 import { executeRolePrompt, type PromptContext } from "../routing/provider-executor";
 
 export type TaskComplexity = "simple" | "complex";
@@ -62,7 +63,8 @@ export async function triageTaskLlm(
     }
 
     return triageTask(task);
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     return triageTask(task);
   }
 }

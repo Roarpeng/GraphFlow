@@ -1,3 +1,4 @@
+import { logger } from "../utils/logger";
 import type { ModelSelection } from "../routing/model-router";
 import { executeRolePrompt, type PromptContext } from "../routing/provider-executor";
 
@@ -44,7 +45,8 @@ export async function brainstormTaskLlm(
   let raw = "";
   try {
     raw = await executeRolePrompt("planner", prompt, selection, context);
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     return brainstormTask(task);
   }
 

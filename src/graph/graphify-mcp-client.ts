@@ -1,3 +1,4 @@
+import { logger } from "../utils/logger";
 import type { GraphEdge, GraphNode } from "../core/types";
 
 interface JsonRpcResult<T> {
@@ -32,7 +33,8 @@ export class GraphifyMcpClient {
     try {
       const response = await this.call<McpQueryResponse>("graph.get_nodes", { ids });
       return response.nodes ?? [];
-    } catch {
+    } catch (error) {
+    logger.error({ error }, "Caught error");
       return [];
     }
   }
@@ -47,7 +49,8 @@ export class GraphifyMcpClient {
         neighbors?: { node: GraphNode; via: GraphEdge["relation"] }[];
       }>("graph.get_neighbors", { nodeIds, relations, direction });
       return response.neighbors ?? [];
-    } catch {
+    } catch (error) {
+    logger.error({ error }, "Caught error");
       return [];
     }
   }

@@ -534,7 +534,7 @@ const SNAPSHOT_NODE_COLORS: Record<string, string> = {
 function layoutSnapshotPositions(
   nodes: GraphSnapshotResult["sampleNodes"],
   edges: GraphSnapshotResult["sampleEdges"],
-  selectedId?: string
+  _selectedId?: string
 ): Map<string, { x: number; y: number }> {
   const width = 1000;
   const height = 560;
@@ -597,7 +597,6 @@ function layoutSnapshotPositions(
       const p = positions.get(node.id)!;
       const dx = centerX - p.x;
       const dy = centerY - p.y;
-      let dist = Math.sqrt(dx * dx + dy * dy) || 1;
 
       const gravityForce = 0.05 * temp;
       p.vx += dx * gravityForce;

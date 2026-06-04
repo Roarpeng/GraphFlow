@@ -1,3 +1,4 @@
+import { logger } from "../utils/logger";
 import type { GraphClient } from "../graph/client-factory";
 import { indexChanges, type ChangeRecord } from "../graph/graph-indexer";
 import { enrichGraphSemanticsSilent } from "../graph/semantic-enricher";
@@ -17,7 +18,8 @@ export async function syncGraphAfterRun(
   try {
     const result = await enrichGraphSemanticsSilent(client, { batchSize: 3 });
     enriched = result.enrichedCount;
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     // 富化失败不影响主流程
   }
 

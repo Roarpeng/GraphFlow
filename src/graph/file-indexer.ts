@@ -1,3 +1,4 @@
+import { logger } from "../utils/logger";
 import { readdirSync, readFileSync, statSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, relative, dirname, posix } from "node:path";
 import { createHash } from "node:crypto";
@@ -80,7 +81,8 @@ export async function indexWorkspaceFiles(
     if (parsedCache.version === 2 && parsedCache.state) {
       cacheState = parsedCache.state;
     }
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     // not found or invalid
   }
 
@@ -271,7 +273,8 @@ export async function indexWorkspaceFiles(
     const dir = dirname(cachePath);
     mkdirSync(dir, { recursive: true });
     writeFileSync(cachePath, JSON.stringify({ version: 2, state: cacheState }, null, 2), "utf8");
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     // ignore
   }
 

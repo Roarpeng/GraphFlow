@@ -1,3 +1,4 @@
+import { logger } from "../utils/logger";
 import type { GraphEdge, GraphNode, TaskRunResult } from "../core/types";
 import type { GraphClient } from "../graph/client-factory";
 import { executeRolePrompt } from "../routing/provider-executor";
@@ -355,7 +356,8 @@ function parseSkillState(content: string): SkillState | undefined {
       lastOutcome: parsed.lastOutcome === "fail" ? "fail" : "pass",
       updatedAt: parsed.updatedAt ?? 0,
     };
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     return undefined;
   }
 }
@@ -382,7 +384,8 @@ function parseCompositeState(content: string): CompositeSkillState | undefined {
       lastOutcome: parsed.lastOutcome === "fail" ? "fail" : "pass",
       updatedAt: parsed.updatedAt ?? 0,
     };
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     return undefined;
   }
 }
@@ -461,7 +464,8 @@ export function parseEvolutionState(content: string): EvolutionarySkillNode | un
       canaryPasses: parsed.canaryPasses ?? 0,
       canaryStatus: parsed.canaryStatus ?? 'probation',
     };
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     return undefined;
   }
 }
@@ -534,7 +538,8 @@ export async function evolveCompositeSkillLlm(
       type: "Skill",
       content: JSON.stringify({ kind: "evolution", ...record })
     };
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     // 异常安全降级，若推理失败，退回传统规则拼接
     return null;
   }

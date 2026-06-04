@@ -1,3 +1,4 @@
+import { logger } from "../utils/logger";
 import type { TaskNode } from "./types";
 
 export type TaskExecutor = (task: TaskNode) => Promise<boolean>;
@@ -96,7 +97,8 @@ export async function executeDag(
           let ok: boolean;
           try {
             ok = await Promise.race([taskPromise, timeoutPromise]);
-          } catch {
+          } catch (error) {
+    logger.error({ error }, "Caught error");
             ok = false;
           }
           return { task, ok };

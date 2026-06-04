@@ -1,3 +1,4 @@
+import { logger } from "../../utils/logger";
 import type { ProviderTextRequest } from "./openai";
 
 export async function anthropicGenerateText(request: ProviderTextRequest): Promise<string> {
@@ -47,6 +48,7 @@ export async function anthropicGenerateText(request: ProviderTextRequest): Promi
     }
     return text;
   } catch (error) {
+    logger.error({ error }, "Provider adapter caught error");
     if (strict) {
       throw error;
     }

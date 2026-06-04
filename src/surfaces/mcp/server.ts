@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { logger } from "../../utils/logger";
+
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -504,7 +506,8 @@ function resolvePackageVersion(): string {
       readFileSync(join(__dirname, "..", "..", "..", "package.json"), "utf8")
     ) as { version?: string };
     return packageJson.version ?? "0.0.0";
-  } catch {
+  } catch (error) {
+    logger.error({ error }, "Caught error");
     return "0.0.0";
   }
 }

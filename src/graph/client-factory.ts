@@ -1,5 +1,6 @@
 import type { GraphFlowConfig } from "../config/schema";
 import type { GraphEdge, GraphNode } from "../core/types";
+import { logger } from "../utils/logger";
 import { GraphifyClient } from "./graphify-client";
 import { GraphifyFileClient } from "./graphify-file-client";
 import { GraphifyMcpClient } from "./graphify-mcp-client";
@@ -21,6 +22,9 @@ export interface GraphClient {
     relations?: GraphEdge["relation"][],
     direction?: "out" | "in" | "both"
   ): Promise<{ node: GraphNode; via: GraphEdge["relation"] }[]>;
+  deleteNode?(id: string): Promise<void>;
+  deleteEdge?(from: string, to: string, relation: GraphEdge["relation"]): Promise<void>;
+  vacuum?(): Promise<void> | void;
 }
 
 class InMemoryGraphClientAdapter implements GraphClient {
@@ -74,9 +78,9 @@ export function createGraphClient(config: GraphFlowConfig): GraphClient {
       const fallbackPath =
         config.graphPolicy.graphStorePath?.replace(/\.sqlite$/, ".json") ??
         "tmp/graphflow-graph.json";
-      // eslint-disable-next-line no-console
-      console.warn(
-        `[graphflow] sqlite transport unavailable, falling back to file://${fallbackPath}. Reason: ${msg}`
+      logger.warn(
+        { err, fallbackPath },
+        `[graphflow] sqlite transport unavailable, falling back to file. Reason: ${msg}`
       );
       return new GraphifyFileClient(fallbackPath);
     }

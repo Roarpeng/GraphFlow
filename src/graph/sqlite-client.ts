@@ -229,6 +229,24 @@ export class GraphifySqliteClient implements GraphClient {
     return out;
   }
 
+  async deleteNode(id: string): Promise<void> {
+    const stmt = this.db.prepare(`DELETE FROM nodes WHERE id = ?`);
+    const stmtEdge = this.db.prepare(`DELETE FROM edges WHERE from_id = ? OR to_id = ?`);
+    this.db.transaction(() => {
+      stmt.run(id);
+      stmtEdge.run(id, id);
+    })();
+  }
+
+  async deleteEdge(from: string, to: string, relation: GraphEdge["relation"]): Promise<void> {
+    const stmt = this.db.prepare(`DELETE FROM edges WHERE from_id = ? AND to_id = ? AND relation = ?`);
+    stmt.run(from, to, relation);
+  }
+
+  vacuum(): void {
+    this.db.exec("VACUUM");
+  }
+
   close(): void {
     this.db.close();
   }
