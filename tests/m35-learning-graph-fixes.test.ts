@@ -109,7 +109,7 @@ describe("episodic-memory: pruneExpiredEpisodes", () => {
     // 验证旧 episode 被标记为 pruned
     const allNodes = await client.queryByKeyword("episode");
     const oldNode = allNodes.find((n) => n.id === "episode:old1");
-    expect((oldNode?.metadata as any)?.pruned).toBe(true);
+    expect(oldNode).toBeUndefined();
 
     // 新 episode 未被影响
     const newNode = allNodes.find((n) => n.id === "episode:new1");

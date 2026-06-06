@@ -81,4 +81,12 @@ export class GraphifyMcpClient {
 
     return payload.result as T;
   }
+
+  async deleteNode(id: string): Promise<void> {
+    await this.call("graph.delete_node", { id });
+  }
+
+  async deleteEdge(from: string, to: string, relation: GraphEdge["relation"]): Promise<void> {
+    await this.call("graph.delete_edge", { from, to, relation });
+  }
 }

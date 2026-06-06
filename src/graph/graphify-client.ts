@@ -146,4 +146,52 @@ export class GraphifyClient {
       set.add(node.id);
     }
   }
+
+  async deleteNode(id: string): Promise<void> {
+    const node = this.nodes.get(id);
+    if (!node) return;
+    this.removeNodeFromIndex(node);
+
+    for (let i = this.edges.length - 1; i >= 0; i--) {
+      const edge = this.edges[i];
+      if (edge.from === id || edge.to === id) {
+        this.edges.splice(i, 1);
+      }
+    }
+
+    this.edgesByFrom.delete(id);
+    this.edgesByTo.delete(id);
+
+    for (const [k, v] of this.edgesByFrom.entries()) {
+      this.edgesByFrom.set(k, v.filter((e) => e.to !== id));
+    }
+    for (const [k, v] of this.edgesByTo.entries()) {
+      this.edgesByTo.set(k, v.filter((e) => e.from !== id));
+    }
+
+    this.nodes.delete(id);
+  }
+
+  async deleteEdge(from: string, to: string, relation: GraphEdge["relation"]): Promise<void> {
+    for (let i = this.edges.length - 1; i >= 0; i--) {
+      const e = this.edges[i];
+      if (e.from === from && e.to === to && e.relation === relation) {
+        this.edges.splice(i, 1);
+      }
+    }
+    const fromList = this.edgesByFrom.get(from);
+    if (fromList) {
+      this.edgesByFrom.set(
+        from,
+        fromList.filter((e) => !(e.to === to && e.relation === relation))
+      );
+    }
+    const toList = this.edgesByTo.get(to);
+    if (toList) {
+      this.edgesByTo.set(
+        to,
+        toList.filter((e) => !(e.from === from && e.relation === relation))
+      );
+    }
+  }
 }

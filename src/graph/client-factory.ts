@@ -57,6 +57,14 @@ class InMemoryGraphClientAdapter implements GraphClient {
   readSnapshot(): GraphStoreSnapshot {
     return this.client.readSnapshot();
   }
+
+  async deleteNode(id: string): Promise<void> {
+    return this.client.deleteNode(id);
+  }
+
+  async deleteEdge(from: string, to: string, relation: GraphEdge["relation"]): Promise<void> {
+    return this.client.deleteEdge(from, to, relation);
+  }
 }
 
 export function createGraphClient(config: GraphFlowConfig): GraphClient {

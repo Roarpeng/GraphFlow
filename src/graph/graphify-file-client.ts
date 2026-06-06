@@ -145,4 +145,19 @@ export class GraphifyFileClient {
   private edgeKey(edge: GraphEdge): string {
     return `${edge.from}::${edge.relation}::${edge.to}`;
   }
+
+  async deleteNode(id: string): Promise<void> {
+    const store = this.readStore();
+    store.nodes = store.nodes.filter((n) => n.id !== id);
+    store.edges = store.edges.filter((e) => e.from !== id && e.to !== id);
+    this.writeStore(store);
+  }
+
+  async deleteEdge(from: string, to: string, relation: GraphEdge["relation"]): Promise<void> {
+    const store = this.readStore();
+    store.edges = store.edges.filter(
+      (e) => !(e.from === from && e.to === to && e.relation === relation)
+    );
+    this.writeStore(store);
+  }
 }

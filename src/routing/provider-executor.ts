@@ -202,7 +202,16 @@ class TokenBucket {
   }
 }
 
-const globalRateLimiter = new TokenBucket(60, 1);
+const providerRateLimiters = new Map<string, TokenBucket>();
+
+function getRateLimiter(provider: string): TokenBucket {
+  let limiter = providerRateLimiters.get(provider);
+  if (!limiter) {
+    limiter = new TokenBucket(60, 1);
+    providerRateLimiters.set(provider, limiter);
+  }
+  return limiter;
+}
 
 export async function executeRolePrompt(
   role: AgentRole,
@@ -257,7 +266,7 @@ export async function executeRolePrompt(
   while (attempt <= retryBudget) {
     try {
       if (selection.provider !== "openbmb") {
-        await globalRateLimiter.acquire(timeoutMs);
+        await getRateLimiter(selection.provider).acquire(timeoutMs);
       }
       const value = await withTimeout(execute(), timeoutMs, `${selection.provider}/${selection.model}`);
       circuitState.failures = 0;

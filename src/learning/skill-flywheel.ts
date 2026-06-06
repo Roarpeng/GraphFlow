@@ -59,7 +59,13 @@ export function extractSkillAtoms(task: string): string[] {
     .filter((token) => token.length >= 5)
     .slice(0, 8);
 
-  return dedup([...phrases, ...tokenSkills]);
+  const segmenter = new Intl.Segmenter('zh', { granularity: 'word' });
+  const zhWords = Array.from(segmenter.segment(task))
+    .filter((seg) => seg.isWordLike && seg.segment.length >= 2 && /[\u4e00-\u9fa5]/.test(seg.segment))
+    .map((seg) => seg.segment.toLowerCase())
+    .slice(0, 8);
+
+  return dedup([...phrases, ...tokenSkills, ...zhWords]);
 }
 
 export async function applySkillLearning(
