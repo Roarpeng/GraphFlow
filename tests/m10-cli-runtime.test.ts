@@ -83,10 +83,48 @@ describe("M10 CLI runtime", () => {
 
   it("indexes graph from a workspace path", async () => {
     const root = mkdtempSync(join(tmpdir(), "graphflow-cli-index-"));
+    const configPath = join(root, "graphflow.config.json");
     try {
       mkdirSync(join(root, "src"), { recursive: true });
       writeFileSync(join(root, "src", "demo.ts"), "export function demo() { return 1; }", "utf8");
-      const result = await indexGraph(root);
+      writeFileSync(
+        configPath,
+        JSON.stringify(
+          {
+            providers: {},
+            tiers: {
+              smart: { provider: "openai", model: "gpt-4.1" },
+              economy: { provider: "openai", model: "gpt-4.1-mini" },
+            },
+            budgetPolicy: { runTokenCap: 2000 },
+            graphPolicy: {
+              enableAutoBuild: true,
+              enableNearLosslessMode: true,
+              autoIndexOnPreview: false,
+              autoIndexOnRun: false,
+              workspaceRoot: root,
+              includeExtensions: [".ts"],
+              transport: "memory",
+              maxContextTokens: 200,
+              semanticEnrichment: {
+                enabled: false,
+                mode: "off",
+                autoRunOnIndex: false,
+              },
+            },
+            learningPolicy: {
+              enableFlywheel: false,
+              trainingCadence: "nightly",
+              canaryRatio: 10,
+              exportPath: join(root, "learning.jsonl"),
+            },
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+      const result = await indexGraph(root, configPath);
       expect(result.indexedFiles).toBeGreaterThanOrEqual(1);
       expect(result.indexedSymbols).toBeGreaterThanOrEqual(1);
     } finally {

@@ -1,4 +1,5 @@
 import type { AgentRole } from "../core/types";
+import { resolveConfig } from "../config/resolve";
 
 export type ModelTier = "smart" | "economy";
 export type ProviderName = "openai" | "anthropic" | "bailian" | "doubao" | "openbmb";
@@ -38,36 +39,60 @@ const DEFAULT_MODELS: Record<ProviderName, Record<ModelTier, string>> = {
     economy: "doubao-lite-32k",
   },
   openbmb: {
-    smart: "minicpm-1b",
-    economy: "minicpm-1b",
+    smart: "minicpm5-1b",
+    economy: "minicpm5-1b",
   },
 };
 
-export function resolveModelForRole(role: AgentRole): ModelSelection {
+export function resolveModelForRole(role: AgentRole, configPath?: string): ModelSelection {
   const tier = roleTierMap[role];
-  if (role === "enricher" || role === "evolver") {
+
+  try {
+    const config = resolveConfig(configPath ?? "graphflow.config.json");
+
+    if (role === "enricher") {
+      return {
+        provider: "openbmb",
+        model: config.graphPolicy.semanticEnrichment?.model ?? DEFAULT_MODELS.openbmb.economy,
+        tier,
+        fallbackApplied: false,
+      };
+    }
+
+    if (role === "evolver") {
+      const provider = config.tiers.economy.provider as ProviderName;
+      return {
+        provider,
+        model: config.learningPolicy.skillEvolution?.model ?? config.tiers.economy.model,
+        tier: "economy",
+        fallbackApplied: false,
+      };
+    }
+
+    const tierConfig = config.tiers[tier];
     return {
-      provider: "openbmb",
-      model: DEFAULT_MODELS.openbmb[tier],
+      provider: tierConfig.provider as ProviderName,
+      model: tierConfig.model,
+      tier,
+      fallbackApplied: false,
+    };
+  } catch {
+    return {
+      provider: "openai",
+      model: DEFAULT_MODELS.openai[tier],
       tier,
       fallbackApplied: false,
     };
   }
-
-  return {
-    provider: "openai",
-    model: DEFAULT_MODELS.openai[tier],
-    tier,
-    fallbackApplied: false,
-  };
 }
 
 export function resolveModelWithFallback(
   role: AgentRole,
   providerHealth: ProviderHealthMap,
-  fallbackChain?: ProviderName[]
+  fallbackChain?: ProviderName[],
+  configPath?: string
 ): ModelSelection {
-  const base = resolveModelForRole(role);
+  const base = resolveModelForRole(role, configPath);
 
   if (providerHealth[base.provider]) {
     return base;

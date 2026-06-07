@@ -1,5 +1,6 @@
 import type { GraphFlowConfig } from "../config/schema";
 import type { GraphEdge, GraphNode } from "../core/types";
+import { resolveGraphStorePath } from "../config/paths";
 import { logger } from "../utils/logger";
 import { GraphifyClient } from "./graphify-client";
 import { GraphifyFileClient } from "./graphify-file-client";
@@ -73,19 +74,15 @@ export function createGraphClient(config: GraphFlowConfig): GraphClient {
   }
 
   if (config.graphPolicy.transport === "file") {
-    return new GraphifyFileClient(config.graphPolicy.graphStorePath!);
+    return new GraphifyFileClient(resolveGraphStorePath(config));
   }
 
   if (config.graphPolicy.transport === "sqlite") {
     try {
-      return new GraphifySqliteClient(
-        config.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.sqlite"
-      );
+      return new GraphifySqliteClient(resolveGraphStorePath(config));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      const fallbackPath =
-        config.graphPolicy.graphStorePath?.replace(/\.sqlite$/, ".json") ??
-        "tmp/graphflow-graph.json";
+      const fallbackPath = resolveGraphStorePath(config).replace(/\.sqlite$/i, ".json");
       logger.warn(
         { err, fallbackPath },
         `[graphflow] sqlite transport unavailable, falling back to file. Reason: ${msg}`

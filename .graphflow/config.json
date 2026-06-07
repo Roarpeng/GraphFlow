@@ -1,53 +1,40 @@
 {
-  "providers": {
-    "openai": {
-      "apiKey": "${OPENAI_API_KEY}",
-      "baseUrl": "https://api.openai.com/v1"
-    },
-    "anthropic": {
-      "apiKey": "${ANTHROPIC_API_KEY}"
-    },
-    "bailian": {
-      "apiKey": "${BAILIAN_API_KEY}"
-    },
-    "doubao": {
-      "apiKey": "${DOUBAO_API_KEY}"
-    },
-    "openbmb": {
-      "mode": "embedded",
-      "engine": "command",
-      "commandPath": "${GRAPHFLOW_MINICPM_COMMAND}",
-      "modelPath": "${GRAPHFLOW_MINICPM_MODEL_PATH}",
-      "baseUrl": "http://localhost:11434",
-      "timeoutMs": 5000,
-      "maxTokens": 256,
-      "temperature": 0.1
-    }
-  },
+  "providers": {},
   "tiers": {
     "smart": { "provider": "openai", "model": "gpt-4.1" },
     "economy": { "provider": "openai", "model": "gpt-4.1-mini" }
   },
   "budgetPolicy": {
-    "runTokenCap": 4000
+    "runTokenCap": 2000
   },
   "graphPolicy": {
     "enableAutoBuild": true,
     "enableNearLosslessMode": true,
     "autoIndexOnPreview": true,
     "autoIndexOnRun": true,
-    "workspaceRoot": ".",
-    "includeExtensions": [".ts", ".tsx", ".js", ".jsx", ".md", ".json"],
+    "workspaceRoot": "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow",
+    "includeExtensions": [
+      ".ts",
+      ".tsx",
+      ".js",
+      ".jsx",
+      ".md",
+      ".json"
+    ],
     "transport": "file",
     "graphStorePath": "tmp/graphflow-graph.json",
-    "maxContextTokens": 1200,
-    "layerQuota": { "l1": 6, "l2": 4, "l3": 3 },
+    "maxContextTokens": 400,
+    "layerQuota": {
+      "l1": 6,
+      "l2": 4,
+      "l3": 3
+    },
     "semanticEnrichment": {
       "enabled": true,
       "mode": "post-index",
       "model": "minicpm5-1b",
       "batchSize": 5,
-      "sleepMs": 1000,
+      "sleepMs": 0,
       "timeoutMs": 5000,
       "autoRunOnIndex": true
     }
@@ -70,18 +57,16 @@
   "routingPolicy": {
     "enableDynamicRouting": true,
     "requireApiKeyForHealthy": false,
-    "providerPriority": ["openai", "anthropic", "bailian", "doubao", "openbmb"]
+    "providerPriority": [
+      "openai",
+      "anthropic",
+      "bailian",
+      "doubao",
+      "openbmb"
+    ]
   },
   "skillPolicy": {
     "enableSkillFlywheel": true,
     "maxSkillHints": 3
-  },
-  "embeddingPolicy": {
-    "enabled": true,
-    "provider": "local",
-    "model": "Xenova/bge-base-zh-v1.5",
-    "vectorStorePath": ".graphflow-cache/vectors.db",
-    "topK": 8,
-    "minSimilarity": 0.05
   }
 }

@@ -1,5 +1,5 @@
 import { logger } from "../utils/logger";
-import { readdirSync, readFileSync, statSync, mkdirSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join, relative, dirname, posix } from "node:path";
 import { createHash } from "node:crypto";
 import type { GraphEdge, GraphNode } from "../core/types";
@@ -13,6 +13,8 @@ import {
 export interface FileIndexerOptions {
   includeExtensions?: string[];
   maxFileSizeBytes?: number;
+  /** When true, ignore index cache and re-process every file. */
+  forceReindex?: boolean;
 }
 
 const BASE_EXTENSIONS = [".md", ".json"];
@@ -65,6 +67,15 @@ interface CacheState {
 const CACHE_DIR = ".graphflow-cache";
 const CACHE_FILE = "index-state.json";
 
+/** Remove graph store, index cache, and vector DB for a full rebuild. */
+export function clearGraphIndexArtifacts(rootDir: string, graphStorePath: string): void {
+  const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
+  const vectorsPath = join(rootDir, CACHE_DIR, "vectors.db");
+  rmSync(graphStorePath, { force: true });
+  rmSync(cachePath, { force: true });
+  rmSync(vectorsPath, { force: true });
+}
+
 export async function indexWorkspaceFiles(
   client: GraphClient,
   rootDir: string,
@@ -72,6 +83,7 @@ export async function indexWorkspaceFiles(
 ): Promise<{ indexedFiles: number; indexedSymbols: number; indexedReferences: number }> {
   const includeExtensions = options?.includeExtensions ?? DEFAULT_EXTENSIONS;
   const maxFileSizeBytes = options?.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE;
+  const forceReindex = options?.forceReindex ?? false;
 
   const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
   let cacheState: CacheState = {};
@@ -82,8 +94,14 @@ export async function indexWorkspaceFiles(
       cacheState = parsedCache.state;
     }
   } catch (error) {
-    logger.error({ error }, "Caught error");
-    // not found or invalid
+    const err = error as NodeJS.ErrnoException;
+    if (err.code !== "ENOENT") {
+      logger.warn({ error: err.message }, "Failed to read index cache");
+    }
+  }
+
+  if (forceReindex) {
+    cacheState = {};
   }
 
   const snapshot = client.readSnapshot?.();
@@ -92,6 +110,25 @@ export async function indexWorkspaceFiles(
   }
 
   const files = walkFiles(rootDir, includeExtensions);
+  const currentRelPaths = new Set<string>();
+
+  for (const file of files) {
+    const stat = statSync(file);
+    if (stat.size > maxFileSizeBytes) {
+      continue;
+    }
+    currentRelPaths.add(normalizePath(relative(rootDir, file)));
+  }
+
+  if (client.deleteNode) {
+    for (const relPath of Object.keys(cacheState)) {
+      if (!currentRelPaths.has(relPath)) {
+        await pruneFileFromGraph(client, relPath);
+        delete cacheState[relPath];
+      }
+    }
+  }
+
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const parsed: ParsedFile[] = [];
@@ -108,7 +145,7 @@ export async function indexWorkspaceFiles(
 
     let content = "";
     let currentHash = "";
-    let isChanged = false;
+    let isChanged = forceReindex;
 
     if (!prev || prev.mtimeMs !== mtimeMs) {
       content = readFileSync(file, "utf8");
@@ -120,6 +157,10 @@ export async function indexWorkspaceFiles(
 
     if (!isChanged) {
       continue;
+    }
+
+    if (client.deleteNode) {
+      await pruneFileFromGraph(client, relPath);
     }
 
     if (!content) {
@@ -274,8 +315,7 @@ export async function indexWorkspaceFiles(
     mkdirSync(dir, { recursive: true });
     writeFileSync(cachePath, JSON.stringify({ version: 2, state: cacheState }, null, 2), "utf8");
   } catch (error) {
-    logger.error({ error }, "Caught error");
-    // ignore
+    logger.warn({ error }, "Failed to write index cache");
   }
 
   return {
@@ -283,6 +323,26 @@ export async function indexWorkspaceFiles(
     indexedSymbols: nodes.filter((node) => node.type === "Symbol").length,
     indexedReferences: referenceCount,
   };
+}
+
+async function pruneFileFromGraph(client: GraphClient, relPath: string): Promise<void> {
+  if (!client.readSnapshot || !client.deleteNode) {
+    return;
+  }
+
+  const snapshot = client.readSnapshot();
+  const fileNodeId = `file:${relPath}`;
+  const moduleNodeId = `module:${moduleKey(relPath)}`;
+  const symbolPrefix = `symbol:${relPath}:`;
+
+  const toDelete = snapshot.nodes.filter(
+    (node) =>
+      node.id === fileNodeId || node.id === moduleNodeId || node.id.startsWith(symbolPrefix)
+  );
+
+  for (const node of toDelete) {
+    await client.deleteNode(node.id);
+  }
 }
 
 function walkFiles(rootDir: string, includeExtensions: string[]): string[] {

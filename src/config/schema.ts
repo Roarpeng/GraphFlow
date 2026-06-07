@@ -75,4 +75,14 @@ export interface GraphFlowConfig {
     enableSkillFlywheel?: boolean;
     maxSkillHints?: number;
   };
+  embeddingPolicy?: {
+    enabled?: boolean;
+    provider?: "local" | "openai" | "hash";
+    model?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    vectorStorePath?: string;
+    topK?: number;
+    minSimilarity?: number;
+  };
 }

@@ -494,7 +494,7 @@ export async function evolveCompositeSkillLlm(
   n2: string,
   previousComposite: any
 ): Promise<GraphNode | null> {
-  const openbmbModel = process.env.GRAPHFLOW_SKILL_EVOLVE_MODEL ?? "minicpm-1b";
+  const openbmbModel = process.env.GRAPHFLOW_SKILL_EVOLVE_MODEL ?? "minicpm5-1b";
 
   const prompt = [
     `你是一个卓越的代码认知科学家，正模拟人类大脑的技能成长。`,

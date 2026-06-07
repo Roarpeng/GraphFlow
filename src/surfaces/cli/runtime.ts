@@ -4,7 +4,10 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { brainstormTask } from "../../agents/brainstormer";
 import { planTasks } from "../../agents/planner";
-import { loadConfig, validateConfig } from "../../config/loader";
+import { validateConfig } from "../../config/loader";
+import { resolveConfig, resolveConfigPath } from "../../config/resolve";
+import { createEmbeddingProviderFromConfig } from "../../config/embedding-factory";
+import { resolveGraphStorePath, resolveLearningPath } from "../../config/paths";
 import { triageTask } from "../../core/triage";
 import type { GraphEdge, GraphNode } from "../../core/types";
 import type { GraphFlowConfig } from "../../config/schema";
@@ -12,7 +15,7 @@ import { orchestrate, type OrchestrateOptions } from "../../core/orchestrator";
 import { createGraphClient, type GraphClient } from "../../graph/client-factory";
 import { enrichGraphSemanticsSilent } from "../../graph/semantic-enricher";
 import { GraphifySqliteClient } from "../../graph/sqlite-client";
-import { indexWorkspaceFiles } from "../../graph/file-indexer";
+import { indexWorkspaceFiles, clearGraphIndexArtifacts } from "../../graph/file-indexer";
 import {
   buildLayeredContextPackage,
   createContextRefillManager,
@@ -24,74 +27,24 @@ import { buildFallbackChain, buildProviderHealthMap } from "../../routing/provid
 import type { TaskStatus } from "../../core/types";
 import type { EnricherOptions } from "../../graph/semantic-enricher";
 import { withFileLock } from "../../utils/file-lock";
+import { logger } from "../../utils/logger";
 
-export function getDefaultConfig(): GraphFlowConfig {
-  return validateConfig({
-    providers: {},
-    tiers: {
-      smart: { provider: "openai", model: "gpt-4.1" },
-      economy: { provider: "openai", model: "gpt-4.1-mini" },
-    },
-    budgetPolicy: { runTokenCap: 2000 },
-    graphPolicy: {
-      enableAutoBuild: true,
-      enableNearLosslessMode: true,
-      autoIndexOnPreview: true,
-      autoIndexOnRun: true,
-      workspaceRoot: process.cwd(),
-      includeExtensions: [".ts", ".tsx", ".js", ".jsx", ".md", ".json"],
-      transport: "file",
-      graphStorePath: "tmp/graphflow-graph.json",
-      maxContextTokens: 400,
-      layerQuota: { l1: 6, l2: 4, l3: 3 },
-      semanticEnrichment: {
-        enabled: true,
-        mode: "post-index",
-        model: "minicpm-1b",
-        batchSize: 5,
-        sleepMs: 0,
-        timeoutMs: 5000,
-        autoRunOnIndex: true,
-      },
-    },
-    learningPolicy: {
-      enableFlywheel: true,
-      trainingCadence: "nightly",
-      canaryRatio: 10,
-      exportPath: "tmp/learning-dataset.jsonl",
-      eventsPath: "tmp/learning-events.jsonl",
-      summaryPath: "tmp/learning-summary.json",
-      skillEvolution: {
-        enabled: true,
-        model: "minicpm-1b",
-        minCoOccur: 2,
-        minSuccess: 2,
-        enableTripleFusion: true,
-      },
-    },
-    routingPolicy: {
-      enableDynamicRouting: true,
-      requireApiKeyForHealthy: false,
-      providerPriority: ["openai", "anthropic", "bailian", "doubao", "openbmb"],
-    },
-    skillPolicy: {
-      enableSkillFlywheel: true,
-      maxSkillHints: 3,
-    },
-  });
-}
+export { getDefaultConfig } from "../../config/defaults";
+export { resolveConfig, resolveConfigPath } from "../../config/resolve";
 
-export function resolveConfig(path = "graphflow.config.json"): GraphFlowConfig {
-  if (existsSync(path)) {
-    return loadConfig(path);
+function buildEmbeddingOptions(config: GraphFlowConfig) {
+  const embeddingProvider = createEmbeddingProviderFromConfig(config);
+  if (!embeddingProvider) {
+    return {};
   }
-
-  const globalPath = join(require("node:os").homedir(), ".graphflow.config.json");
-  if (existsSync(globalPath)) {
-    return loadConfig(globalPath);
-  }
-
-  return getDefaultConfig();
+  return {
+    embeddingProvider,
+    enableVectorRecall: true as const,
+    ...(config.embeddingPolicy?.topK !== undefined ? { vectorTopK: config.embeddingPolicy.topK } : {}),
+    ...(config.embeddingPolicy?.minSimilarity !== undefined
+      ? { vectorMinSimilarity: config.embeddingPolicy.minSimilarity }
+      : {}),
+  };
 }
 
 function applyOpenBmbRuntimeEnv(config: GraphFlowConfig): void {
@@ -215,9 +168,10 @@ export interface GraphFlowSettings {
 export type GraphFlowSettingsInput = Omit<GraphFlowSettings, "configPath">;
 
 export function getGraphFlowSettings(configPath = "graphflow.config.json"): GraphFlowSettings {
-  const config = resolveConfig(configPath);
+  const actualPath = resolveConfigPath(configPath);
+  const config = resolveConfig(actualPath);
   const provider = config.tiers.smart.provider;
-  const rawConfig = readRawConfig(configPath);
+  const rawConfig = readRawConfig(actualPath);
   const providerConfig = config.providers[provider] ?? {};
   const rawProviderConfig = rawConfig?.providers?.[provider] ?? {};
   const rawOpenBmbConfig = rawConfig?.providers?.openbmb ?? {};
@@ -233,7 +187,7 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
       : String(process.env.GRAPHFLOW_OPENBMB_AUTO_DOWNLOAD ?? "0") === "1";
 
   return {
-    configPath,
+    configPath: actualPath,
     provider,
     smartModel: config.tiers.smart.model,
     economyModel: config.tiers.economy.model,
@@ -277,7 +231,8 @@ export function saveGraphFlowSettings(
   settings: GraphFlowSettingsInput,
   configPath = "graphflow.config.json"
 ): GraphFlowSettings {
-  const current = resolveConfig(configPath);
+  const actualPath = resolveConfigPath(configPath);
+  const current = resolveConfig(actualPath);
   const providerConfig = {
     ...(settings.apiKeyEnvVar ? { apiKey: `\${${settings.apiKeyEnvVar}}` } : {}),
     ...(settings.baseUrl ? { baseUrl: settings.baseUrl } : {}),
@@ -346,12 +301,12 @@ export function saveGraphFlowSettings(
   }
   process.env.GRAPHFLOW_OPENBMB_AUTO_DOWNLOAD = settings.openbmbAutoDownload ? "1" : "0";
 
-  const dir = dirname(configPath);
+  const dir = dirname(actualPath);
   if (dir && dir !== ".") {
     mkdirSync(dir, { recursive: true });
   }
-  writeFileSync(configPath, `${JSON.stringify(updated, null, 2)}\n`, "utf8");
-  return getGraphFlowSettings(configPath);
+  writeFileSync(actualPath, `${JSON.stringify(updated, null, 2)}\n`, "utf8");
+  return getGraphFlowSettings(actualPath);
 }
 
 export async function previewContext(query: string, configPath?: string): Promise<ContextPreviewResult> {
@@ -368,11 +323,9 @@ export async function previewContext(query: string, configPath?: string): Promis
     });
   }
 
-  const { createLocalEmbeddingProvider } = await import("../../learning/local-embedding.js");
   const packageOptions: import("../../graph/context-slicer").LayeredPackageOptions = {
     ...(config.graphPolicy.layerQuota ? { layerQuota: config.graphPolicy.layerQuota } : {}),
-    embeddingProvider: createLocalEmbeddingProvider(),
-    enableVectorRecall: true
+    ...buildEmbeddingOptions(config),
   };
 
   const pkg = await buildLayeredContextPackage(
@@ -422,6 +375,12 @@ export async function previewContext(query: string, configPath?: string): Promis
 export interface GraphIndexResult {
   indexedFiles: number;
   indexedSymbols: number;
+  indexedReferences: number;
+}
+
+export interface GraphRebuildResult extends GraphIndexResult {
+  cleared: boolean;
+  storePath: string;
 }
 
 export interface GraphSnapshotResult {
@@ -520,17 +479,63 @@ export async function indexGraph(rootDir?: string, configPath?: string): Promise
     ...indexOptions,
   });
 
+  await maybeRunSemanticEnrichment(config, graphClient);
+
+  return indexed;
+}
+
+export async function rebuildGraph(rootDir?: string, configPath?: string): Promise<GraphRebuildResult> {
+  const config = resolveConfig(configPath);
+  applyOpenBmbRuntimeEnv(config);
+  const graphClient = createGraphClient(config);
+  const targetDir = rootDir || config.graphPolicy.workspaceRoot || process.cwd();
+  const storePath = resolveGraphStorePath(config);
+
+  clearGraphIndexArtifacts(targetDir, storePath);
+
+  const indexOptions = config.graphPolicy.includeExtensions
+    ? { includeExtensions: config.graphPolicy.includeExtensions }
+    : undefined;
+
+  const indexed = await indexWorkspaceFiles(graphClient, targetDir, {
+    ...indexOptions,
+    forceReindex: true,
+  });
+
+  await maybeRunSemanticEnrichment(config, graphClient);
+
+  return {
+    ...indexed,
+    cleared: true,
+    storePath,
+  };
+}
+
+async function maybeRunSemanticEnrichment(
+  config: GraphFlowConfig,
+  graphClient: GraphClient
+): Promise<void> {
   const enrichPolicy = config.graphPolicy.semanticEnrichment;
-  if (enrichPolicy?.enabled && enrichPolicy.autoRunOnIndex && enrichPolicy.mode !== "off") {
+  if (!enrichPolicy?.enabled || !enrichPolicy.autoRunOnIndex || enrichPolicy.mode === "off") {
+    return;
+  }
+
+  const health = buildProviderHealthMap(config);
+  if (!health.openbmb) {
+    logger.warn("Skipping semantic enrichment: openbmb provider is not configured or healthy");
+    return;
+  }
+
+  try {
     await enrichGraphSemanticsSilent(graphClient, {
       ...(enrichPolicy.batchSize !== undefined ? { batchSize: enrichPolicy.batchSize } : {}),
       ...(enrichPolicy.sleepMs !== undefined ? { sleepMs: enrichPolicy.sleepMs } : {}),
       ...(enrichPolicy.model ? { openbmbModel: enrichPolicy.model } : {}),
       ...(enrichPolicy.timeoutMs !== undefined ? { timeoutMs: enrichPolicy.timeoutMs } : {}),
     });
+  } catch (error) {
+    logger.warn({ error }, "Semantic enrichment skipped after provider failure");
   }
-
-  return indexed;
 }
 
 export async function enrichSemanticsSilent(
@@ -575,7 +580,7 @@ export async function downloadOpenBmbModel(
   const config = resolveConfig(configPath);
   applyOpenBmbRuntimeEnv(config);
 
-  const model = options?.model ?? "minicpm-1b";
+  const model = options?.model ?? "minicpm5-1b";
   const defaultUrl = process.env.GRAPHFLOW_MINICPM_MODEL_URL;
   const url = options?.url ?? defaultUrl;
 
@@ -779,7 +784,7 @@ export async function inspectGraph(
   if (config.graphPolicy.transport === "mcp-http") {
     return {
       transport: config.graphPolicy.transport,
-      ...(config.graphPolicy.graphStorePath ? { storePath: config.graphPolicy.graphStorePath } : {}),
+      storePath: resolveGraphStorePath(config),
       nodeCount: 0,
       edgeCount: 0,
       nodeTypeCount: emptyTypeCount,
@@ -813,7 +818,7 @@ export async function inspectGraph(
 
   return {
     transport: config.graphPolicy.transport,
-    ...(config.graphPolicy.graphStorePath ? { storePath: config.graphPolicy.graphStorePath } : {}),
+    storePath: resolveGraphStorePath(config),
     nodeCount: store.nodes.length,
     edgeCount: store.edges.length,
     nodeTypeCount,
@@ -901,7 +906,7 @@ export async function getSkillInsights(configPath?: string, limit = 12): Promise
     return {
       source: "unavailable",
       transport: config.graphPolicy.transport,
-      ...(config.graphPolicy.graphStorePath ? { storePath: config.graphPolicy.graphStorePath } : {}),
+      storePath: resolveGraphStorePath(config),
       skills: [],
     };
   }
@@ -928,7 +933,7 @@ export async function getSkillInsights(configPath?: string, limit = 12): Promise
   return {
     source: "graph-store",
     transport: config.graphPolicy.transport,
-    ...(config.graphPolicy.graphStorePath ? { storePath: config.graphPolicy.graphStorePath } : {}),
+    storePath: resolveGraphStorePath(config),
     skills,
   };
 }
@@ -936,7 +941,7 @@ export async function getSkillInsights(configPath?: string, limit = 12): Promise
 export async function runTaskResult(task: string, configPath?: string): Promise<RunTaskSummary> {
   const config = resolveConfig(configPath);
   applyOpenBmbRuntimeEnv(config);
-  const eventsPath = config.learningPolicy.eventsPath ?? "tmp/learning-events.jsonl";
+  const eventsPath = resolveLearningPath(config, "eventsPath");
 
   try {
     const graphClient = createGraphClient(config);
@@ -949,7 +954,7 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       });
     }
 
-    const { createLocalEmbeddingProvider } = await import("../../learning/local-embedding.js");
+    const embeddingOptions = buildEmbeddingOptions(config);
     const orchestrateOptions: OrchestrateOptions = {
       graphClient,
       enableAutoGraphSync: config.graphPolicy.enableAutoBuild,
@@ -957,7 +962,7 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       enableEpisodicMemory: config.learningPolicy.enableFlywheel,
       enableLlmAgents: config.tiers.smart.provider === "openbmb" || config.tiers.economy.provider === "openbmb",
       enableLlmTriage: config.tiers.smart.provider === "openbmb" || config.tiers.economy.provider === "openbmb",
-      embeddingProvider: createLocalEmbeddingProvider(),
+      ...embeddingOptions,
       ...(config.skillPolicy?.enableSkillFlywheel
         ? {
             enableSkillFlywheel: true,
@@ -1135,21 +1140,19 @@ function loadGraphStore(config: GraphFlowConfig): { nodes: GraphNode[]; edges: G
   }
 
   if (transport === "sqlite") {
-    const dbPath = config.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.sqlite";
+    const dbPath = resolveGraphStorePath(config);
     try {
       const client = new GraphifySqliteClient(dbPath);
       const snapshot = client.readSnapshot();
       client.close();
       return snapshot;
     } catch {
-      const fallbackPath =
-        config.graphPolicy.graphStorePath?.replace(/\.sqlite$/i, ".json") ?? "tmp/graphflow-graph.json";
+      const fallbackPath = dbPath.replace(/\.sqlite$/i, ".json");
       return readFileGraphStore(fallbackPath);
     }
   }
 
-  const storePath = config.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.json";
-  return readFileGraphStore(storePath);
+  return readFileGraphStore(resolveGraphStorePath(config));
 }
 
 async function resolveGraphStoreAfterIndex(

@@ -153,7 +153,6 @@ class EmbeddedWorkerPool {
           const text = task.engine === "node-llama-cpp" ? await runNodeLlama(task) : await runCommand(task);
           parentPort.postMessage({ id: task.id, ok: true, text });
         } catch (error) {
-          logger.error({ error }, "Provider adapter caught error");
           parentPort.postMessage({ id: task.id, ok: false, error: error instanceof Error ? error.message : String(error) });
         }
       });
@@ -448,8 +447,11 @@ export async function openbmbGenerateText(
       return await runOllama(request, options);
     }
     return await runOpenAiCompat(request, options);
-  } catch (error) {
-    logger.error({ error }, "Provider adapter caught error");
+  } catch (error: unknown) {
+    logger.error(
+      { error: error instanceof Error ? error.message : String(error) },
+      "Provider adapter caught error"
+    );
     const strict = process.env.GRAPHFLOW_OPENBMB_STRICT === "1";
     if (strict) {
       throw error;

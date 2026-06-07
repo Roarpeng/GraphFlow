@@ -42,6 +42,7 @@ describe("M16 agent integrations", () => {
       "graphflow_plan",
       "graphflow_preview_context",
       "graphflow_index",
+      "graphflow_rebuild",
       "graphflow_enrich_graph",
       "graphflow_model_download",
       "graphflow_inspect_graph",

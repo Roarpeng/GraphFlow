@@ -23,6 +23,7 @@ export function buildCliUsage(): string {
     '  plan "<task>" [--json] [--config <path>]',
     '  context preview "<query>" [--json] [--config <path>]',
     "  graph index [path] [--json] [--config <path>]",
+    "  graph rebuild [path] [--json] [--config <path>]",
     "  graph inspect [--json] [--config <path>]",
     "  graph enrich [--json] [--config <path>]",
     "  model download [name] [--json] [--config <path>]",

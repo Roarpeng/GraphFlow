@@ -11,6 +11,7 @@ import {
   planAndBrainstorm,
   planAndBrainstormResult,
   previewContext,
+  rebuildGraph,
   runLearningNightly,
   runLearningNightlyResult,
   runTask,
@@ -19,24 +20,13 @@ import {
 import { buildCliUsage, formatCliResult, getCliVersion, parseCliOptions, type CliCommandResult } from "./output";
 
 async function executeCommand(command: string, args: string[], configPath?: string): Promise<CliCommandResult | undefined> {
-  if (command === "config" && args[0] === "init") {
-    const isGlobal = args.includes("--global");
-    const targetPath = isGlobal 
-      ? require("node:path").join(require("node:os").homedir(), ".graphflow.config.json") 
-      : "graphflow.config.json";
-
-    if (require("node:fs").existsSync(targetPath)) {
-      console.log(`Config already exists at ${targetPath}`);
-      process.exitCode = 1;
-      return undefined;
-    }
-
-    const { getDefaultConfig } = require("./runtime");
-    require("node:fs").writeFileSync(targetPath, JSON.stringify(getDefaultConfig(), null, 2) + "\n");
+  if (command === "init" || (command === "config" && args[0] === "init")) {
+    const { runInit } = require("./init");
+    runInit();
     return {
-      command: "config-init",
-      data: { targetPath },
-      legacyText: `Config generated at ${targetPath}`,
+      command: "init",
+      data: {},
+      legacyText: `Initialization complete`,
     };
   }
 
@@ -102,7 +92,17 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     return {
       command: "graph-index",
       data,
-      legacyText: `indexedFiles=${data.indexedFiles}; indexedSymbols=${data.indexedSymbols}`,
+      legacyText: `indexedFiles=${data.indexedFiles}; indexedSymbols=${data.indexedSymbols}; indexedReferences=${data.indexedReferences}`,
+    };
+  }
+
+  if (command === "graph" && args[0] === "rebuild") {
+    const pathArg = args[1]?.trim();
+    const data = await rebuildGraph(pathArg || undefined, configPath);
+    return {
+      command: "graph-rebuild",
+      data,
+      legacyText: `cleared=${data.cleared}; storePath=${data.storePath}; indexedFiles=${data.indexedFiles}; indexedSymbols=${data.indexedSymbols}`,
     };
   }
 
@@ -164,7 +164,7 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   }
 
   if (command === "model" && args[0] === "download") {
-    const model = args[1]?.trim() || "minicpm-1b";
+    const model = args[1]?.trim() || "minicpm5-1b";
     let lastLine = "";
     const data = await downloadOpenBmbModel(configPath, {
       model,

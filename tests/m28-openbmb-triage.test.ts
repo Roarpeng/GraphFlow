@@ -12,7 +12,7 @@ describe("OpenBMB 1B Triage & Integration", () => {
   it("model-router resolves openbmb and fallback priority", () => {
     const fallback = resolveModelWithFallback("planner", { openbmb: true, openai: false, anthropic: false, bailian: false, doubao: false }, ["openbmb"]);
     expect(fallback.provider).toBe("openbmb");
-    expect(fallback.model).toBe("minicpm-1b");
+    expect(fallback.model).toBe("minicpm5-1b");
   });
 
   it("triageTaskLlm classifies task-1 simple successfully", async () => {

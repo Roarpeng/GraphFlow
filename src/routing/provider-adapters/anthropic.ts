@@ -47,8 +47,11 @@ export async function anthropicGenerateText(request: ProviderTextRequest): Promi
       throw new Error("anthropic response missing text content");
     }
     return text;
-  } catch (error) {
-    logger.error({ error }, "Provider adapter caught error");
+  } catch (error: unknown) {
+    logger.error(
+      { error: error instanceof Error ? error.message : String(error) },
+      "Provider adapter caught error"
+    );
     if (strict) {
       throw error;
     }

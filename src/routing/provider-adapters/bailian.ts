@@ -48,8 +48,11 @@ export async function bailianGenerateText(request: ProviderTextRequest): Promise
       throw new Error("bailian response missing content");
     }
     return text;
-  } catch (error) {
-    logger.error({ error }, "Provider adapter caught error");
+  } catch (error: unknown) {
+    logger.error(
+      { error: error instanceof Error ? error.message : String(error) },
+      "Provider adapter caught error"
+    );
     if (strict) {
       throw error;
     }

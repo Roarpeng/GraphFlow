@@ -15,6 +15,7 @@ import {
   inspectGraph,
   planAndBrainstormResult,
   previewContext,
+  rebuildGraph,
   runTaskResult,
 } from "../cli/runtime";
 
@@ -132,6 +133,18 @@ export function getToolDefinitions(): ToolDefinition[] {
       },
     },
     {
+      name: "graphflow_rebuild",
+      description: "Clear graph store and index cache, then perform a full workspace re-index.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          rootDir: { type: "string", description: "Optional workspace path to index." },
+          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
       name: "graphflow_enrich_graph",
       description: "Run semantic enrichment for pending Symbol nodes using MiniCPM/OpenBMB provider.",
       inputSchema: {
@@ -152,7 +165,7 @@ export function getToolDefinitions(): ToolDefinition[] {
         type: "object",
         properties: {
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-          model: { type: "string", description: "Model name, default minicpm-1b." },
+          model: { type: "string", description: "Model name, default minicpm5-1b." },
           url: { type: "string", description: "Optional model URL override." },
           sha256: { type: "string", description: "Optional expected sha256 checksum." },
           targetPath: { type: "string", description: "Optional target file path." },
@@ -221,6 +234,10 @@ export async function executeToolCall(
     case "graphflow_index":
       return textResponse(
         await indexGraph(readOptionalString(args.rootDir), readOptionalString(args.configPath))
+      );
+    case "graphflow_rebuild":
+      return textResponse(
+        await rebuildGraph(readOptionalString(args.rootDir), readOptionalString(args.configPath))
       );
     case "graphflow_enrich_graph":
       {

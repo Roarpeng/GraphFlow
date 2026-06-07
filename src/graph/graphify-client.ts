@@ -154,6 +154,7 @@ export class GraphifyClient {
 
     for (let i = this.edges.length - 1; i >= 0; i--) {
       const edge = this.edges[i];
+      if (!edge) continue;
       if (edge.from === id || edge.to === id) {
         this.edges.splice(i, 1);
       }
@@ -175,6 +176,7 @@ export class GraphifyClient {
   async deleteEdge(from: string, to: string, relation: GraphEdge["relation"]): Promise<void> {
     for (let i = this.edges.length - 1; i >= 0; i--) {
       const e = this.edges[i];
+      if (!e) continue;
       if (e.from === from && e.to === to && e.relation === relation) {
         this.edges.splice(i, 1);
       }

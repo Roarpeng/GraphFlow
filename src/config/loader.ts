@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { GraphFlowConfig } from "./schema";
 
 export function loadConfig(path = "graphflow.config.json"): GraphFlowConfig {
@@ -108,6 +109,8 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     }
   }
 
+  const workspaceRoot = resolve(input.graphPolicy.workspaceRoot ?? process.cwd());
+
   return {
     ...input,
     graphPolicy: {
@@ -115,7 +118,7 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       enableNearLosslessMode: input.graphPolicy.enableNearLosslessMode ?? false,
       autoIndexOnPreview: input.graphPolicy.autoIndexOnPreview ?? true,
       autoIndexOnRun: input.graphPolicy.autoIndexOnRun ?? true,
-      workspaceRoot: input.graphPolicy.workspaceRoot ?? process.cwd(),
+      workspaceRoot,
       graphStorePath:
         input.graphPolicy.graphStorePath ??
         (input.graphPolicy.transport === "sqlite"
@@ -133,7 +136,7 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       semanticEnrichment: {
         enabled: input.graphPolicy.semanticEnrichment?.enabled ?? true,
         mode: input.graphPolicy.semanticEnrichment?.mode ?? "post-index",
-        model: input.graphPolicy.semanticEnrichment?.model ?? "minicpm-1b",
+        model: input.graphPolicy.semanticEnrichment?.model ?? "minicpm5-1b",
         batchSize: input.graphPolicy.semanticEnrichment?.batchSize ?? 5,
         sleepMs: input.graphPolicy.semanticEnrichment?.sleepMs ?? 0,
         timeoutMs: input.graphPolicy.semanticEnrichment?.timeoutMs ?? 5000,
@@ -148,7 +151,7 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       summaryPath: input.learningPolicy.summaryPath ?? "tmp/learning-summary.json",
       skillEvolution: {
         enabled: input.learningPolicy.skillEvolution?.enabled ?? true,
-        model: input.learningPolicy.skillEvolution?.model ?? "minicpm-1b",
+        model: input.learningPolicy.skillEvolution?.model ?? "minicpm5-1b",
         minCoOccur: input.learningPolicy.skillEvolution?.minCoOccur ?? 2,
         minSuccess: input.learningPolicy.skillEvolution?.minSuccess ?? 2,
         enableTripleFusion: input.learningPolicy.skillEvolution?.enableTripleFusion ?? true,
@@ -168,6 +171,16 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     skillPolicy: {
       enableSkillFlywheel: input.skillPolicy?.enableSkillFlywheel ?? true,
       maxSkillHints: input.skillPolicy?.maxSkillHints ?? 3,
+    },
+    embeddingPolicy: {
+      enabled: input.embeddingPolicy?.enabled ?? true,
+      provider: input.embeddingPolicy?.provider ?? "local",
+      model: input.embeddingPolicy?.model ?? "Xenova/bge-base-zh-v1.5",
+      ...(input.embeddingPolicy?.baseUrl ? { baseUrl: input.embeddingPolicy.baseUrl } : {}),
+      ...(input.embeddingPolicy?.apiKey ? { apiKey: input.embeddingPolicy.apiKey } : {}),
+      vectorStorePath: input.embeddingPolicy?.vectorStorePath ?? ".graphflow-cache/vectors.db",
+      topK: input.embeddingPolicy?.topK ?? 8,
+      minSimilarity: input.embeddingPolicy?.minSimilarity ?? 0.05,
     },
   };
 }

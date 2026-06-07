@@ -23,7 +23,7 @@ export async function enrichGraphSemanticsSilent(
 
   const batchSize = options?.batchSize ?? 5;
   const sleepMs = options?.sleepMs ?? 0;
-  const openbmbModel = options?.openbmbModel ?? "minicpm-1b";
+  const openbmbModel = options?.openbmbModel ?? "minicpm5-1b";
   const timeoutMs = options?.timeoutMs;
 
   // 1. 读取当前图谱快照

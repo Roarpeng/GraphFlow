@@ -79,8 +79,14 @@ describe("M17 release readiness", () => {
   });
 
   it("uses supported default router model names", () => {
-    expect(resolveModelForRole("planner").model).toBe("gpt-4.1");
-    expect(resolveModelForRole("worker").model).toBe("gpt-4.1-mini");
+    const root = mkdtempSync(join(tmpdir(), "graphflow-router-defaults-"));
+    const missingConfigPath = join(root, "missing.config.json");
+    try {
+      expect(resolveModelForRole("planner", missingConfigPath).model).toBe("gpt-4.1");
+      expect(resolveModelForRole("worker", missingConfigPath).model).toBe("gpt-4.1-mini");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("records failed task runs into learning events", async () => {

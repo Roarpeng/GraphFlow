@@ -12,6 +12,7 @@
     "doc": "docs"
   },
   "scripts": {
+    "postinstall": "tsx src/surfaces/cli/init.ts",
     "test": "vitest run",
     "build": "tsc -p tsconfig.json",
     "test:watch": "vitest",

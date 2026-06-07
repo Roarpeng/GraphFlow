@@ -73,8 +73,8 @@ export async function openaiGenerateText(request: ProviderTextRequest): Promise<
       throw new Error("openai response missing content");
     }
     return content;
-  } catch (error) {
-    logger.error({ error }, "Provider adapter caught error");
+  } catch (error: any) {
+    logger.error({ error: error?.message || String(error) }, "Provider adapter caught error");
     if (strict) {
       throw error;
     }
