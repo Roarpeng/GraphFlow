@@ -760,6 +760,13 @@ function wireGraphSnapshotPanel(
   const payload = {
     nodes: snapshot.sampleNodes,
     edges: snapshot.sampleEdges,
+    meta: {
+      nodeCount: snapshot.nodeCount,
+      edgeCount: snapshot.edgeCount,
+      nodeTypeCount: snapshot.nodeTypeCount,
+      topRelations: snapshot.topRelations,
+      storePath: snapshot.storePath,
+    },
   };
 
   const postSnapshot = (): void => {

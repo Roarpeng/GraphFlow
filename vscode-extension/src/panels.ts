@@ -74,11 +74,21 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
   const nodeOptions = snapshot.sampleNodes
     .map(
       (node) =>
-        `<option value="${escapeHtml(node.id)}">${escapeHtml(node.id)} [${escapeHtml(node.type)}]</option>`
+        `<option value="${escapeHtml(node.id)}">${escapeHtml(snapshotShortLabel(node))} [${escapeHtml(node.type)}]</option>`
     )
+    .join("");
+  const relationOptions = snapshot.topRelations
+    .map((item) => `<option value="${escapeHtml(item.relation)}">${escapeHtml(item.relation)} (${item.count})</option>`)
     .join("");
   const relationPills = snapshot.topRelations
     .map((item) => `<span class="pill">${escapeHtml(item.relation)}: ${item.count}</span>`)
+    .join("");
+  const typeLegend = Object.entries(snapshot.nodeTypeCount)
+    .filter(([, count]) => count > 0)
+    .map(([type, count]) => {
+      const color = SNAPSHOT_NODE_COLORS[type] ?? "#64748b";
+      return `<span class="legend-item"><span class="legend-dot" style="background:${color}"></span>${escapeHtml(type)} (${count})</span>`;
+    })
     .join("");
   const serverNodeCards = renderServerNodeCardsHtml(snapshot.sampleNodes);
   const serverSvgMarkup = renderServerSnapshotSvg(snapshot.sampleNodes, snapshot.sampleEdges);
@@ -132,7 +142,7 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
     .metric .value { margin-top: 6px; font-size: 18px; font-weight: 700; }
     .toolbar {
       display: grid;
-      grid-template-columns: 1.3fr 1fr 1fr auto;
+      grid-template-columns: 1.2fr 0.85fr 0.85fr 1fr auto;
       gap: 10px;
       align-items: end;
     }
@@ -172,9 +182,75 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
     .node-meta { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
     .node-title { font-size: 13px; font-weight: 600; word-break: break-all; }
     .node-preview { font-size: 12px; color: var(--muted); margin-top: 6px; }
-    .canvas-wrap { padding: 12px; }
-    svg { width: 100%; height: 560px; display: block; background: linear-gradient(180deg, #fff, #f8f4ed); }
-    .detail-grid { display: grid; gap: 10px; }
+    .canvas-wrap { position: relative; padding: 0; }
+    .canvas-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.72);
+    }
+    .canvas-stats { font-size: 12px; color: var(--muted); }
+    .canvas-controls { display: flex; gap: 6px; }
+    .canvas-controls button {
+      padding: 6px 10px;
+      font-size: 12px;
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      border: 1px solid var(--line);
+    }
+    .canvas-controls button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .legend-row { display: flex; flex-wrap: wrap; gap: 8px 12px; padding: 8px 12px 0; }
+    .legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+    .legend-dot { width: 10px; height: 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.9); box-shadow: 0 0 0 1px rgba(0,0,0,0.08); }
+    svg.graph-canvas {
+      width: 100%;
+      height: 580px;
+      display: block;
+      background:
+        radial-gradient(circle at center, rgba(17, 100, 102, 0.05), transparent 42%),
+        linear-gradient(180deg, #fff, #f8f4ed);
+      cursor: grab;
+      touch-action: none;
+    }
+    svg.graph-canvas.dragging { cursor: grabbing; }
+    .type-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 999px;
+      margin-bottom: 6px;
+    }
+    .neighbor-list { display: grid; gap: 6px; max-height: 220px; overflow: auto; margin-top: 8px; }
+    .neighbor-item {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 8px;
+      align-items: start;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      font-size: 12px;
+    }
+    .relation-tag {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .detail-title { font-size: 15px; font-weight: 700; word-break: break-all; margin: 6px 0; }
+    .detail-path { font-size: 11px; color: var(--muted); word-break: break-all; font-family: Consolas, monospace; }
+    .detail-preview { margin-top: 10px; font-size: 12px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+    .detail-grid { display: grid; gap: 10px; max-height: 620px; overflow: auto; }
     .detail-card { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: #fff; }
     .detail-card pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: Consolas, monospace; font-size: 12px; }
     .pill-row { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -183,7 +259,7 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
     @media (max-width: 1100px) {
       .layout { grid-template-columns: 1fr; }
       .toolbar, .hero-grid { grid-template-columns: 1fr; }
-      svg { height: 420px; }
+      svg.graph-canvas { height: 440px; }
     }
   </style>
 </head>
@@ -191,43 +267,72 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
   <div class="shell">
     <section class="hero">
       <div class="hero-grid">
-        <div class="metric"><div class="label">Transport</div><div class="value">${escapeHtml(snapshot.transport)}</div></div>
-        <div class="metric"><div class="label">Nodes / Edges</div><div class="value">${snapshot.nodeCount} / ${snapshot.edgeCount}</div></div>
-        <div class="metric"><div class="label">Store</div><div class="value">${escapeHtml(snapshot.storePath ?? "n/a")}</div></div>
+        <div class="metric"><div class="label">存储后端</div><div class="value">${escapeHtml(snapshot.transport)}</div></div>
+        <div class="metric"><div class="label">节点 / 边</div><div class="value">${snapshot.nodeCount} / ${snapshot.edgeCount}</div></div>
+        <div class="metric"><div class="label">样本展示</div><div class="value">${snapshot.sampleNodes.length} 节点 · ${snapshot.sampleEdges.length} 边</div></div>
       </div>
+      <div class="legend-row">${typeLegend}</div>
     </section>
     <section class="panel panel-body">
       <div class="toolbar">
         <div class="field">
-          <label for="graph-search">Search nodes</label>
-          <input id="graph-search" type="search" placeholder="Find by id, type, preview" />
+          <label for="graph-search">搜索节点</label>
+          <input id="graph-search" type="search" placeholder="按 ID、类型、摘要搜索" />
         </div>
         <div class="field">
-          <label for="graph-type-filter">Filter by type</label>
-          <select id="graph-type-filter"><option value="all">All types</option>${typeOptions}</select>
+          <label for="graph-type-filter">节点类型</label>
+          <select id="graph-type-filter"><option value="all">全部类型</option>${typeOptions}</select>
         </div>
         <div class="field">
-          <label for="graph-node-list">Focus node</label>
-          <select id="graph-node-list"><option value="">Auto focus</option>${nodeOptions}</select>
+          <label for="graph-relation-filter">关系类型</label>
+          <select id="graph-relation-filter"><option value="all">全部关系</option>${relationOptions}</select>
         </div>
-        <button id="graph-reset" type="button">Reset</button>
+        <div class="field">
+          <label for="graph-node-list">聚焦节点</label>
+          <select id="graph-node-list"><option value="">自动选择</option>${nodeOptions}</select>
+        </div>
+        <button id="graph-reset" type="button">重置</button>
       </div>
     </section>
     <div class="layout">
       <section class="panel">
-        <div class="panel-head"><h2>Node Explorer</h2></div>
+        <div class="panel-head"><h2>节点列表</h2></div>
         <div class="panel-body"><div id="graph-node-cards" class="node-list">${serverNodeCards}</div></div>
       </section>
       <section class="panel">
-        <div class="panel-head"><h2>Graph Canvas</h2></div>
-        <div class="canvas-wrap"><svg id="graph-canvas" data-role="graph-canvas" viewBox="0 0 1000 560" preserveAspectRatio="xMidYMid meet">${serverSvgMarkup}</svg></div>
+        <div class="canvas-toolbar">
+          <div class="canvas-stats" id="graph-canvas-stats">加载图谱中…</div>
+          <div class="canvas-controls">
+            <button id="graph-zoom-out" type="button" title="缩小">−</button>
+            <button id="graph-zoom-in" type="button" title="放大">+</button>
+            <button id="graph-zoom-fit" type="button" class="primary" title="适应画布">适应</button>
+          </div>
+        </div>
+        <div class="canvas-wrap">
+          <svg id="graph-canvas" class="graph-canvas" data-role="graph-canvas" viewBox="0 0 1000 580" preserveAspectRatio="xMidYMid meet">${serverSvgMarkup}</svg>
+        </div>
       </section>
       <section class="panel">
-        <div class="panel-head"><h2>Graph Detail</h2></div>
+        <div class="panel-head"><h2>节点详情</h2></div>
         <div class="panel-body detail-grid" id="graph-detail">
-          <div class="detail-card"><strong>Top relations</strong><div class="pill-row">${relationPills || '<span class="empty">No relation data</span>'}</div></div>
-          <div class="detail-card"><strong>Selection</strong><pre id="graph-selection">Select a node to inspect its neighbors.</pre></div>
-          <div class="detail-card"><strong>Active filter</strong><pre id="graph-filter-state">type=all\nsearch=(none)</pre></div>
+          <div class="detail-card">
+            <strong>当前选中</strong>
+            <div id="graph-detail-body">
+              <div class="empty">点击左侧节点或画布中的圆点查看详情。</div>
+            </div>
+          </div>
+          <div class="detail-card">
+            <strong>邻接关系</strong>
+            <div id="graph-neighbors" class="neighbor-list"><div class="empty">暂无邻接边</div></div>
+          </div>
+          <div class="detail-card">
+            <strong>筛选状态</strong>
+            <pre id="graph-filter-state">type=all\nrelation=all\nsearch=(none)</pre>
+          </div>
+          <div class="detail-card">
+            <strong>关系统计</strong>
+            <div class="pill-row">${relationPills || '<span class="empty">暂无关系数据</span>'}</div>
+          </div>
         </div>
       </section>
     </div>
@@ -531,104 +636,132 @@ const SNAPSHOT_NODE_COLORS: Record<string, string> = {
   Skill: "#0f766e",
 };
 
+const SNAPSHOT_RELATION_COLORS: Record<string, string> = {
+  references: "#64748b",
+  defines: "#9333ea",
+  imports: "#2563eb",
+  depends_on: "#c2410c",
+  co_occurs: "#0f766e",
+  improves: "#16a34a",
+  prerequisite: "#b45309",
+  changes: "#dc2626",
+};
+
+function hashSnapshotString(input: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function snapshotShortLabel(node: GraphSnapshotResult["sampleNodes"][number]): string {
+  const id = node.id || "";
+  if (id.startsWith("file:")) {
+    const path = id.slice(5);
+    return path.split(/[/\\]/).pop() || path;
+  }
+  if (id.startsWith("module:")) {
+    const path = id.slice(7);
+    return path.split(/[/\\]/).pop() || path;
+  }
+  if (id.startsWith("symbol:")) {
+    const preview = node.contentPreview || "";
+    const named = preview.match(/^(function|class|interface|type|method|variable|const|let|enum)\s+([A-Za-z0-9_$]+)/);
+    if (named) return named[2];
+    const beforeAt = preview.split("@")[0]?.trim();
+    if (beforeAt) return beforeAt.length > 28 ? `${beforeAt.slice(0, 27)}…` : beforeAt;
+  }
+  return id.length > 28 ? `${id.slice(0, 27)}…` : id;
+}
+
 function layoutSnapshotPositions(
   nodes: GraphSnapshotResult["sampleNodes"],
-  edges: GraphSnapshotResult["sampleEdges"],
-  _selectedId?: string
+  edges: GraphSnapshotResult["sampleEdges"]
 ): Map<string, { x: number; y: number }> {
   const width = 1000;
-  const height = 560;
+  const height = 580;
   const centerX = width / 2;
   const centerY = height / 2;
   const positions = new Map<string, { x: number; y: number; vx: number; vy: number }>();
+  const typeOrder = ["File", "Module", "Symbol", "Skill", "Decision", "TaskRun"];
+  const groups = new Map<string, GraphSnapshotResult["sampleNodes"]>();
 
-  nodes.forEach((node, index) => {
-    const angle = (Math.PI * 2 * index) / nodes.length;
-    positions.set(node.id, {
-      x: centerX + Math.cos(angle) * 100 + (Math.random() - 0.5) * 40,
-      y: centerY + Math.sin(angle) * 100 + (Math.random() - 0.5) * 40,
-      vx: 0,
-      vy: 0,
+  nodes.forEach((node) => {
+    const bucket = groups.get(node.type) || [];
+    bucket.push(node);
+    groups.set(node.type, bucket);
+  });
+
+  typeOrder.forEach((type, groupIndex) => {
+    const bucket = groups.get(type) || [];
+    const groupAngle = (Math.PI * 2 * groupIndex) / typeOrder.length;
+    const groupRadius = Math.min(width, height) * 0.22;
+    bucket.forEach((node, index) => {
+      const localAngle = (Math.PI * 2 * index) / Math.max(1, bucket.length);
+      const jitter = (hashSnapshotString(node.id) % 100) / 100 - 0.5;
+      positions.set(node.id, {
+        x: centerX + Math.cos(groupAngle + localAngle * 0.35) * groupRadius + jitter * 18,
+        y: centerY + Math.sin(groupAngle + localAngle * 0.35) * groupRadius + jitter * 18,
+        vx: 0,
+        vy: 0,
+      });
     });
   });
 
-  const iterations = 150;
-  const k = 40;
-  const repulsion = 4000;
+  const iterations = 180;
+  const k = 42;
+  const repulsion = 5200;
 
-  for (let i = 0; i < iterations; i++) {
-    const temp = 1.0 - i / iterations;
-
-    for (let a = 0; a < nodes.length; a++) {
-      for (let b = a + 1; b < nodes.length; b++) {
+  for (let i = 0; i < iterations; i += 1) {
+    const temp = 1 - i / iterations;
+    for (let a = 0; a < nodes.length; a += 1) {
+      for (let b = a + 1; b < nodes.length; b += 1) {
         const p1 = positions.get(nodes[a].id)!;
         const p2 = positions.get(nodes[b].id)!;
         const dx = p1.x - p2.x;
         const dy = p1.y - p2.y;
-        let dist = Math.sqrt(dx * dx + dy * dy) || 1;
-
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
         const force = (repulsion / (dist * dist)) * temp;
         const fx = (dx / dist) * force;
         const fy = (dy / dist) * force;
-
-        p1.vx += fx; p1.vy += fy;
-        p2.vx -= fx; p2.vy -= fy;
+        p1.vx += fx;
+        p1.vy += fy;
+        p2.vx -= fx;
+        p2.vy -= fy;
       }
     }
-
     for (const edge of edges) {
       const p1 = positions.get(edge.from);
       const p2 = positions.get(edge.to);
       if (!p1 || !p2) continue;
-
       const dx = p2.x - p1.x;
       const dy = p2.y - p1.y;
-      let dist = Math.sqrt(dx * dx + dy * dy) || 1;
-
-      const force = ((dist * dist) / (k * k)) * 0.1 * temp;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const force = ((dist * dist) / (k * k)) * 0.12 * temp;
       const fx = (dx / dist) * force;
       const fy = (dy / dist) * force;
-
-      p1.vx += fx; p1.vy += fy;
-      p2.vx -= fx; p2.vy -= fy;
+      p1.vx += fx;
+      p1.vy += fy;
+      p2.vx -= fx;
+      p2.vy -= fy;
     }
-
     for (const node of nodes) {
       const p = positions.get(node.id)!;
-      const dx = centerX - p.x;
-      const dy = centerY - p.y;
-
-      const gravityForce = 0.05 * temp;
-      p.vx += dx * gravityForce;
-      p.vy += dy * gravityForce;
-
+      p.vx += (centerX - p.x) * 0.04 * temp;
+      p.vy += (centerY - p.y) * 0.04 * temp;
       p.x += p.vx;
       p.y += p.vy;
-      p.vx *= 0.5;
-      p.vy *= 0.5;
+      p.vx *= 0.52;
+      p.vy *= 0.52;
     }
   }
-
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const p of positions.values()) {
-    minX = Math.min(minX, p.x);
-    minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x);
-    maxY = Math.max(maxY, p.y);
-  }
-
-  const contentWidth = Math.max(maxX - minX, 1);
-  const contentHeight = Math.max(maxY - minY, 1);
-  const scale = Math.min((width - 150) / contentWidth, (height - 100) / contentHeight);
 
   const result = new Map<string, { x: number; y: number }>();
   for (const [id, p] of positions.entries()) {
-    result.set(id, {
-      x: centerX + (p.x - centerX) * scale,
-      y: centerY + (p.y - centerY) * scale,
-    });
+    result.set(id, { x: p.x, y: p.y });
   }
-
   return result;
 }
 
@@ -641,15 +774,19 @@ function renderServerSnapshotSvg(
   }
 
   const positions = layoutSnapshotPositions(nodes, edges);
-  const lines: string[] = [];
+  const lines: string[] = [
+    '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">' +
+      '<path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"></path></marker></defs>',
+  ];
   for (const edge of edges) {
     const from = positions.get(edge.from);
     const to = positions.get(edge.to);
     if (!from || !to) {
       continue;
     }
+    const color = SNAPSHOT_RELATION_COLORS[edge.relation] ?? "#cbbba7";
     lines.push(
-      `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="#cbbba7" stroke-width="1.2" opacity="0.75" />`
+      `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="${color}" stroke-width="1.4" opacity="0.62" marker-end="url(#arrow)" />`
     );
   }
 
@@ -661,7 +798,7 @@ function renderServerSnapshotSvg(
     }
     const isActive = index === 0;
     const fill = SNAPSHOT_NODE_COLORS[node.type] ?? "#64748b";
-    const label = node.id.length > 30 ? `${node.id.slice(0, 29)}...` : node.id;
+    const label = snapshotShortLabel(node);
     shapes.push(
       `<circle cx="${pos.x}" cy="${pos.y}" r="${isActive ? 11 : 8}" fill="${fill}" stroke="${isActive ? "#d97d54" : "#fff"}" stroke-width="${isActive ? 3 : 1.5}" />`,
       `<text x="${pos.x + 12}" y="${pos.y + 4}" font-size="${isActive ? 12 : 11}" fill="#334155">${escapeHtml(label)}</text>`
@@ -673,15 +810,16 @@ function renderServerSnapshotSvg(
 
 function renderServerNodeCardsHtml(nodes: GraphSnapshotResult["sampleNodes"]): string {
   if (nodes.length === 0) {
-    return '<div class="empty">No sample nodes loaded yet. Reload the panel after indexing.</div>';
+    return '<div class="empty">暂无样本节点，请先索引后重新打开面板。</div>';
   }
 
   return nodes
     .map(
       (node, index) =>
         `<button type="button" class="node-item${index === 0 ? " active" : ""}" data-node-id="${escapeHtml(node.id)}">` +
-        `<div class="node-meta">${escapeHtml(node.type)}</div>` +
-        `<div class="node-title">${escapeHtml(node.id)}</div>` +
+        `<span class="type-badge" style="background:${(SNAPSHOT_NODE_COLORS[node.type] ?? "#64748b")}22;color:${SNAPSHOT_NODE_COLORS[node.type] ?? "#64748b"}">${escapeHtml(node.type)}</span>` +
+        `<div class="node-title">${escapeHtml(snapshotShortLabel(node))}</div>` +
+        `<div class="detail-path">${escapeHtml(node.id)}</div>` +
         `<div class="node-preview">${escapeHtml(node.contentPreview || "(empty)")}</div>` +
         `</button>`
     )
