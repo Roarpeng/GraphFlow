@@ -20,8 +20,9 @@
     "start:mcp": "tsx src/surfaces/mcp/server.ts",
     "lint": "eslint .",
     "build:extension": "npm --prefix vscode-extension run build",
+    "test:extension": "npm --prefix vscode-extension run test:runtime",
     "package:extension": "npm --prefix vscode-extension run package",
-    "ci": "npm run lint && npm run build && npm test && npm run build:extension"
+    "ci": "npm run lint && npm run build && npm test && npm run build:extension && npm run test:extension"
   },
   "repository": {
     "type": "git",

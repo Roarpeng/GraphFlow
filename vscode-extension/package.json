@@ -163,8 +163,9 @@
   "scripts": {
     "icon:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/generate-icon.ps1",
     "sync-runtime": "npm --prefix .. run build && node ./scripts/sync-runtime.mjs",
+    "test:runtime": "node ./scripts/test-bundled-runtime.mjs",
     "build": "npm run sync-runtime && tsc -p ./tsconfig.json",
-    "package": "npm run build && node -e \"require('node:fs').mkdirSync('../artifacts',{recursive:true})\" && npx @vscode/vsce package --no-dependencies --out ../artifacts/graphflow-vscode-0.5.0.vsix"
+    "package": "npm run build && npm run test:runtime && node -e \"require('node:fs').mkdirSync('../artifacts',{recursive:true})\" && npx @vscode/vsce package --no-dependencies --out ../artifacts/graphflow-vscode-0.5.0.vsix"
   },
   "devDependencies": {
     "@types/vscode": "^1.99.0",

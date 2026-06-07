@@ -32,8 +32,8 @@ interface GraphFlowRuntime {
   enrichSemanticsSilent(configPath?: string, options?: { batchSize?: number; sleepMs?: number; timeoutMs?: number }): Promise<{ enrichedCount: number }>;
   diagnoseRouting(): string;
   runLearningNightly(): string;
-  inspectGraph(nodeLimit?: number, edgeLimit?: number): Promise<GraphSnapshotResult>;
-  getSkillInsights(limit?: number): Promise<SkillInsightsResult>;
+  inspectGraph(configPath?: string, options?: { nodeLimit?: number; edgeLimit?: number }): Promise<GraphSnapshotResult>;
+  getSkillInsights(configPath?: string, limit?: number): Promise<SkillInsightsResult>;
   getGraphFlowSettings(): GraphFlowSettings;
   saveGraphFlowSettings(settings: Omit<GraphFlowSettings, "configPath">): GraphFlowSettings;
   downloadOpenBmbModel(
@@ -189,7 +189,9 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
-    const snapshot = await runGraphFlow(workspaceRoot, (runtime) => runtime.inspectGraph(48, 96));
+    const snapshot = await runGraphFlow(workspaceRoot, (runtime) =>
+      runtime.inspectGraph(undefined, { nodeLimit: 48, edgeLimit: 96 })
+    );
     showGraphSnapshotPanel(context, snapshot);
   });
 
@@ -200,7 +202,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
-    const insights = await runGraphFlow(workspaceRoot, (runtime) => runtime.getSkillInsights(24));
+    const insights = await runGraphFlow(workspaceRoot, (runtime) => runtime.getSkillInsights(undefined, 24));
     showSkillInsightsPanel(context, insights);
   });
 
@@ -320,7 +322,9 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       if (command === "graph") {
-        const snapshot = await runGraphFlow(workspaceRoot, (runtime) => runtime.inspectGraph(24, 36));
+        const snapshot = await runGraphFlow(workspaceRoot, (runtime) =>
+          runtime.inspectGraph(undefined, { nodeLimit: 24, edgeLimit: 36 })
+        );
         stream.markdown(formatGraphSnapshotMarkdown(snapshot));
         return;
       }
@@ -337,7 +341,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       if (command === "skills") {
-        const insights = await runGraphFlow(workspaceRoot, (runtime) => runtime.getSkillInsights(12));
+        const insights = await runGraphFlow(workspaceRoot, (runtime) => runtime.getSkillInsights(undefined, 12));
         stream.markdown(formatSkillInsightsMarkdown(insights));
         return;
       }
@@ -429,6 +433,7 @@ async function runGraphFlow<T>(
 async function loadRuntime(): Promise<GraphFlowRuntime> {
   if (!runtimePromise) {
     runtimePromise = (async () => {
+      process.env.GRAPHFLOW_LOG_JSON = process.env.GRAPHFLOW_LOG_JSON ?? "1";
       const runtimePath = join(__dirname, "..", "vendor", "graphflow", "dist", "surfaces", "cli", "runtime.js");
       const module = (await import(pathToFileURL(runtimePath).toString())) as Partial<GraphFlowRuntime>;
       if (
