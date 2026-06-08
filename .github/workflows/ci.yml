@@ -8,6 +8,7 @@ on:
 jobs:
   validate:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -23,7 +24,7 @@ jobs:
           cache: npm
 
       - name: Install root dependencies
-        run: npm ci
+        run: npm ci --include=optional
 
       - name: Install extension dependencies
         run: npm ci --prefix vscode-extension
