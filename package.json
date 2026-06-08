@@ -1,6 +1,7 @@
 {
   "name": "graphflow",
   "version": "0.5.0",
+  "packageManager": "npm@10.9.2",
   "description": "**A Context-Aware Multi-Agent Orchestration Engine**",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
