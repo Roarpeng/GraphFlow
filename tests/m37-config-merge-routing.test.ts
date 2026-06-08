@@ -1,3 +1,7 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { mergeGraphFlowConfig } from "../src/config/merge";
 import { validateConfig } from "../src/config/loader";
@@ -60,9 +64,53 @@ describe("M37 config merge and routing", () => {
   });
 
   it("resolveModelForRole reads merged tiers from project configs", () => {
-    expect(resolveModelForRole("planner").model).toBe("deepseek-v4-pro");
-    expect(resolveModelForRole("worker").model).toBe("deepseek-v4-flash");
-    expect(resolveModelForRole("validator").model).toBe("deepseek-v4-pro");
+    const projectRoot = mkdtempSync(join(tmpdir(), "graphflow-m37-"));
+    const overlayDir = join(projectRoot, ".graphflow");
+    mkdirSync(overlayDir, { recursive: true });
+
+    writeFileSync(
+      join(projectRoot, "graphflow.config.json"),
+      `${JSON.stringify(baseConfig, null, 2)}\n`,
+      "utf8"
+    );
+    writeFileSync(
+      join(overlayDir, "config.json"),
+      `${JSON.stringify(
+        validateConfig({
+          providers: {},
+          tiers: {
+            smart: { provider: "openai", model: "gpt-4.1" },
+            economy: { provider: "openai", model: "gpt-4.1-mini" },
+          },
+          budgetPolicy: { runTokenCap: 2000 },
+          graphPolicy: {
+            enableAutoBuild: true,
+            transport: "file",
+            graphStorePath: "tmp/graphflow-graph.json",
+            maxContextTokens: 400,
+          },
+          learningPolicy: {
+            enableFlywheel: true,
+            trainingCadence: "nightly",
+            canaryRatio: 10,
+            exportPath: "tmp/learning-dataset.jsonl",
+          },
+        }),
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const previousCwd = process.cwd();
+    process.chdir(projectRoot);
+    try {
+      expect(resolveModelForRole("planner").model).toBe("deepseek-v4-pro");
+      expect(resolveModelForRole("worker").model).toBe("deepseek-v4-flash");
+      expect(resolveModelForRole("validator").model).toBe("deepseek-v4-pro");
+    } finally {
+      process.chdir(previousCwd);
+    }
   });
 
   it("defaults embeddingPolicy to local Xenova model", () => {
