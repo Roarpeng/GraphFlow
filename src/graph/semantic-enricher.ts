@@ -1,6 +1,7 @@
 import { logger } from "../utils/logger";
 import type { GraphClient } from "./client-factory";
 import { executeRolePrompt } from "../routing/provider-executor";
+import { resolveModelForRole } from "../routing/model-router";
 import type { GraphNode } from "../core/types";
 
 export interface EnricherOptions {
@@ -59,13 +60,10 @@ export async function enrichGraphSemanticsSilent(
     ].join("\n");
 
     try {
-      // 4. 调用 MiniCPM-1B 经济小模型生成摘要
-      const selection = {
-        provider: "openbmb" as const,
-        model: openbmbModel,
-        tier: "economy" as const,
-        fallbackApplied: false
-      };
+      const selection = resolveModelForRole("enricher");
+      if (openbmbModel) {
+        selection.model = openbmbModel;
+      }
 
       const previousTimeout = process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS;
       if (timeoutMs !== undefined) {

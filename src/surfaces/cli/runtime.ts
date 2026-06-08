@@ -520,9 +520,12 @@ async function maybeRunSemanticEnrichment(
     return;
   }
 
+  const selection = resolveModelForRole("enricher");
   const health = buildProviderHealthMap(config);
-  if (!health.openbmb) {
-    logger.warn("Skipping semantic enrichment: openbmb provider is not configured or healthy");
+  if (!health[selection.provider]) {
+    logger.warn(
+      `Skipping semantic enrichment: ${selection.provider} provider is not configured or healthy`
+    );
     return;
   }
 

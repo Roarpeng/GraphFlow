@@ -5,7 +5,7 @@
 ## 1. 配置文件 (`config.json`)
 由于标准的 JSON 格式不支持注释，因此所有关于参数的详细说明都在这里：
 
-- **`providers`**: 配置各个大模型厂商的 API Key 和 Base URL。例如，如果你使用 DeepSeek，可以在 `openai` 字段中配置 Base URL 为 `https://api.deepseek.com` 并填入 `apiKey`。
+- **`providers`**: 配置各个大模型厂商的 API Key 和 Base URL。例如，如果你使用 DeepSeek，可以在 `openai` 字段中配置 Base URL 为 `https://api.deepseek.com`，`apiKey` 使用 `"${DEEPSEEK_API_KEY}"` 占位符（需在环境中设置该变量）。
 - **`tiers`**:
   - `smart`: 核心大脑模型（用于规划器 Planner 和验证器 Validator）。建议配置为能力最强的模型（如 `deepseek-v4-pro`）。
   - `economy`: 经济型干活模型（用于执行器 Worker）。建议配置为速度快、成本低的模型（如 `deepseek-v4-flash`）。

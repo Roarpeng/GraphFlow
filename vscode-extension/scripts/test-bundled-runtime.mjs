@@ -1,3 +1,4 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,39 +11,53 @@ const runtimePath = join(extensionRoot, "vendor", "graphflow", "dist", "surfaces
 process.env.GRAPHFLOW_LOG_JSON = "1";
 process.chdir(workspaceRoot);
 
+const testConfigPath = join(workspaceRoot, "tmp", "bundled-runtime-test.config.json");
+mkdirSync(dirname(testConfigPath), { recursive: true });
+const overlayPath = join(workspaceRoot, ".graphflow", "config.json");
+const examplePath = join(workspaceRoot, "graphflow.config.example.json");
+const configSourcePath = existsSync(overlayPath) ? overlayPath : examplePath;
+const testConfig = JSON.parse(readFileSync(configSourcePath, "utf8"));
+testConfig.graphPolicy = {
+  ...testConfig.graphPolicy,
+  workspaceRoot,
+  graphStorePath: "tmp/bundled-runtime-graph.json",
+};
+writeFileSync(testConfigPath, `${JSON.stringify(testConfig, null, 2)}\n`, "utf8");
+const runtimeConfigPath = testConfigPath;
+
 const runtime = await import(pathToFileURL(runtimePath).toString());
 
 const checks = [
   ["inspectGraph", async () => {
-    const snapshot = await runtime.inspectGraph(undefined, { nodeLimit: 5, edgeLimit: 5 });
+    const snapshot = await runtime.inspectGraph(runtimeConfigPath, { nodeLimit: 5, edgeLimit: 5 });
     if (!snapshot || typeof snapshot.nodeCount !== "number") {
       throw new Error("inspectGraph returned invalid snapshot");
     }
     return `nodes=${snapshot.nodeCount}; edges=${snapshot.edgeCount}`;
   }],
   ["diagnoseRouting", async () => {
-    const text = runtime.diagnoseRouting();
+    const text = runtime.diagnoseRouting(runtimeConfigPath);
     if (!text.includes("planner=")) {
       throw new Error(`unexpected diagnose output: ${text}`);
     }
     return text.split("; ").slice(0, 3).join("; ");
   }],
   ["getSkillInsights", async () => {
-    const insights = await runtime.getSkillInsights(undefined, 5);
+    const insights = await runtime.getSkillInsights(runtimeConfigPath, 5);
     if (!insights || !Array.isArray(insights.skills)) {
       throw new Error("getSkillInsights returned invalid payload");
     }
     return `skills=${insights.skills.length}; transport=${insights.transport}`;
   }],
   ["previewContext", async () => {
-    const preview = await runtime.previewContext("graph snapshot routing");
+    const preview = await runtime.previewContext("graph snapshot routing", runtimeConfigPath);
     if (!preview || typeof preview.tokenEstimate !== "number") {
       throw new Error("previewContext returned invalid payload");
     }
     return `tokens=${preview.tokenEstimate}; anchors=${preview.anchorCount}`;
   }],
   ["getGraphFlowSettings", async () => {
-    const settings = runtime.getGraphFlowSettings();
+    const settings = runtime.getGraphFlowSettings(runtimeConfigPath);
     if (!settings?.smartModel) {
       throw new Error("getGraphFlowSettings returned invalid payload");
     }

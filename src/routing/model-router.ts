@@ -51,9 +51,10 @@ export function resolveModelForRole(role: AgentRole, configPath?: string): Model
     const config = resolveConfig(configPath ?? "graphflow.config.json");
 
     if (role === "enricher") {
+      const provider = config.tiers.economy.provider as ProviderName;
       return {
-        provider: "openbmb",
-        model: config.graphPolicy.semanticEnrichment?.model ?? DEFAULT_MODELS.openbmb.economy,
+        provider,
+        model: config.graphPolicy.semanticEnrichment?.model ?? config.tiers.economy.model,
         tier,
         fallbackApplied: false,
       };

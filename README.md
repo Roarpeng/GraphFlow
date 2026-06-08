@@ -361,7 +361,7 @@ cp graphflow.config.example.json graphflow.config.json
 ### 方式 A：安装已打包 VSIX
 
 ```bash
-code --install-extension artifacts/graphflow-vscode-0.3.0.vsix
+code --install-extension artifacts/graphflow-vscode-0.5.0.vsix
 ```
 
 安装后可在命令面板执行：
@@ -384,8 +384,8 @@ code --install-extension artifacts/graphflow-vscode-0.3.0.vsix
 
 分发给同事：
 
-1. 直接发送 `artifacts/graphflow-vscode-0.3.0.vsix`
-2. 同事执行 `code --install-extension artifacts/graphflow-vscode-0.3.0.vsix`
+1. 直接发送 `artifacts/graphflow-vscode-0.5.0.vsix`
+2. 同事执行 `code --install-extension artifacts/graphflow-vscode-0.5.0.vsix`
 3. 不需要克隆 GraphFlow 仓库即可使用插件核心能力
 
 ### 方式 B：开发模式运行扩展

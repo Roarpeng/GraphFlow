@@ -11,8 +11,8 @@ GraphFlow VS Code 扩展用于在编辑器内快速触发 GraphFlow CLI 任务�
 
 ## 当前版本
 
-1. Extension: `0.3.0`
-2. 对应 VSIX: `../artifacts/graphflow-vscode-0.3.0.vsix`
+1. Extension: `0.5.0`
+2. 对应 VSIX: `../artifacts/graphflow-vscode-0.5.0.vsix`
 3. 依赖：扩展内置 GraphFlow runtime（默认）
 
 ## 功能命令
@@ -66,8 +66,8 @@ npm test
 
 可以，直接把 VSIX 文件发给同事安装即可：
 
-1. `artifacts/graphflow-vscode-0.3.0.vsix`
-2. 安装命令：`code --install-extension artifacts/graphflow-vscode-0.3.0.vsix`
+1. `artifacts/graphflow-vscode-0.5.0.vsix`
+2. 安装命令：`code --install-extension artifacts/graphflow-vscode-0.5.0.vsix`
 
 同事本地不需要拉取 GraphFlow 仓库代码。
 
@@ -76,7 +76,7 @@ npm test
 在仓库根目录执行：
 
 ```bash
-code --install-extension artifacts/graphflow-vscode-0.3.0.vsix
+code --install-extension artifacts/graphflow-vscode-0.5.0.vsix
 ```
 
 然后重启 VS Code，在命令面板执行：
@@ -114,7 +114,7 @@ npm run package
 
 默认输出：
 
-`../artifacts/graphflow-vscode-0.3.0.vsix`
+`../artifacts/graphflow-vscode-0.5.0.vsix`
 
 ## 扩展图标
 

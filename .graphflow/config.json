@@ -12,7 +12,7 @@
     "enableNearLosslessMode": true,
     "autoIndexOnPreview": true,
     "autoIndexOnRun": true,
-    "workspaceRoot": "C:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow",
+    "workspaceRoot": ".",
     "includeExtensions": [
       ".ts",
       ".tsx",
@@ -23,7 +23,7 @@
     ],
     "transport": "file",
     "graphStorePath": "tmp/graphflow-graph.json",
-    "maxContextTokens": 400,
+    "maxContextTokens": 1200,
     "layerQuota": {
       "l1": 6,
       "l2": 4,
@@ -32,7 +32,7 @@
     "semanticEnrichment": {
       "enabled": true,
       "mode": "post-index",
-      "model": "minicpm5-1b",
+      "model": "deepseek-v4-flash",
       "batchSize": 5,
       "sleepMs": 0,
       "timeoutMs": 5000,
@@ -48,7 +48,7 @@
     "summaryPath": "tmp/learning-summary.json",
     "skillEvolution": {
       "enabled": true,
-      "model": "minicpm5-1b",
+      "model": "deepseek-v4-flash",
       "minCoOccur": 2,
       "minSuccess": 2,
       "enableTripleFusion": true
@@ -57,13 +57,7 @@
   "routingPolicy": {
     "enableDynamicRouting": true,
     "requireApiKeyForHealthy": false,
-    "providerPriority": [
-      "openai",
-      "anthropic",
-      "bailian",
-      "doubao",
-      "openbmb"
-    ]
+    "providerPriority": ["openai"]
   },
   "skillPolicy": {
     "enableSkillFlywheel": true,

@@ -1,12 +1,13 @@
-name: CI
+name: Build
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  validate:
+  build:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -32,21 +33,17 @@ jobs:
         run: npm rebuild better-sqlite3
         continue-on-error: ${{ matrix.os == 'windows-latest' }}
 
-      - name: Audit
-        run: npm audit --audit-level=moderate
-        continue-on-error: true
+      - name: Lint, build, test, and package extension
+        run: npm run lint && npm run build && npm test && npm run build:extension && npm run test:extension
 
-      - name: Lint
-        run: npm run lint
+      - name: Package VSIX
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run package:extension
 
-      - name: Build core
-        run: npm run build
-
-      - name: Test
-        run: npm run test -- --coverage
-
-      - name: Build extension
-        run: npm run build:extension
-
-      - name: Test extension
-        run: npm run test:extension
+      - name: Upload VSIX artifact
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: graphflow-vscode-extension
+          path: artifacts/graphflow-vscode-*.vsix
+          retention-days: 14
