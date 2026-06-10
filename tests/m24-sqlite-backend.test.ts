@@ -1,7 +1,21 @@
+import { createRequire } from "node:module";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+
+const require = createRequire(import.meta.url);
+
+function hasBetterSqlite3(): boolean {
+  try {
+    const Database = require("better-sqlite3") as new (path: string) => { close(): void };
+    const db = new Database(":memory:");
+    db.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
 import { validateConfig } from "../src/config/loader";
 import { createGraphClient } from "../src/graph/client-factory";
 import { GraphifySqliteClient } from "../src/graph/sqlite-client";
@@ -27,7 +41,7 @@ afterAll(() => {
   }
 });
 
-describe("M24 SQLite + FTS5 backend", () => {
+describe.skipIf(!hasBetterSqlite3())("M24 SQLite + FTS5 backend", () => {
   it("A: FTS5 multi-token query returns nodes containing all tokens", async () => {
     const client = freshClient("a");
     const nodes: GraphNode[] = [

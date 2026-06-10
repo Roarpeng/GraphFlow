@@ -10,6 +10,7 @@ All notable changes to this project are documented in this file.
 
 - MCP install on Windows now uses `mcp-launcher.cmd` / `mcp-launcher.cjs` so `server.js` is never the MCP `command` (fixes Cursor opening the file as an editor tab).
 - Vendor bundle skips Linux-only `onnxruntime-node`; GitHub Release VSIX is built on `windows-latest`.
+- CI: Ubuntu runs full tests; Windows job only packages the VSIX. SQLite tests skip when optional `better-sqlite3` is unavailable.
 
 ## [0.6.1] - 2026-06-10
 
