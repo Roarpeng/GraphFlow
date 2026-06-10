@@ -36,6 +36,8 @@ function buildReadmeContent(workspaceRoot: string, installResults: McpInstallRes
   - \`economy\`: 经济型干活模型（用于执行器 Worker）。建议配置为速度快、成本低的模型（如 \`deepseek-v4-flash\`）。
 - **\`embeddingPolicy\`**: 嵌入式向量模型，用于语义召回。默认使用本地 \`Xenova/bge-base-zh-v1.5\`；也可改为 \`openai\` 或轻量 \`hash\` 模式。
 - **\`graphPolicy\`**: 控制图谱的生成和索引行为。如果你想让其分析整个仓库，确保 \`workspaceRoot\` 正确指向你的代码根目录。
+  - \`autoIndexOnPreview\` / \`autoIndexOnRun\`: 在预览上下文或执行任务前自动索引（默认开启）。
+  - \`semanticEnrichment\`: 知识图谱 Symbol 节点的 LLM 语义摘要；\`provider\`/\`model\` 可留空以继承 Economy 层；\`autoRunOnIndex\` 在索引后静默小批量富化。
 
 ## 2. MCP (Model Context Protocol) 自动注入
 安装时已自动嗅探本机 Agent 工具，并将 GraphFlow MCP 写入检测到的配置。

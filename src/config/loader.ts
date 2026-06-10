@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { extractEnvPlaceholderName } from "./secrets";
 import type { GraphFlowConfig } from "./schema";
 
 export function loadConfig(path = "graphflow.config.json"): GraphFlowConfig {
@@ -8,9 +9,18 @@ export function loadConfig(path = "graphflow.config.json"): GraphFlowConfig {
   return validateConfig(parsed);
 }
 
+function trimOptional(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 function resolveEnvTemplates(value: unknown): unknown {
   if (typeof value === "string") {
-    return value.replace(/\$\{([A-Z0-9_]+)\}/gi, (_match, name: string) => process.env[name] ?? "");
+    const envName = extractEnvPlaceholderName(value);
+    if (envName) {
+      return process.env[envName] ?? "";
+    }
+    return value;
   }
 
   if (Array.isArray(value)) {
@@ -78,6 +88,17 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     }
   }
 
+  const enrichProvider = trimOptional(input.graphPolicy.semanticEnrichment?.provider);
+  const enrichModel = trimOptional(input.graphPolicy.semanticEnrichment?.model);
+  const skillEvolutionModel = trimOptional(input.learningPolicy.skillEvolution?.model);
+
+  if (enrichProvider) {
+    const allowed = new Set(["openai", "anthropic", "bailian", "doubao", "openbmb"]);
+    if (!allowed.has(enrichProvider)) {
+      throw new Error("Invalid config: graphPolicy.semanticEnrichment.provider is unknown.");
+    }
+  }
+
   if (input.learningPolicy.canaryRatio < 0 || input.learningPolicy.canaryRatio > 100) {
     throw new Error("Invalid config: learningPolicy.canaryRatio must be 0-100.");
   }
@@ -136,7 +157,8 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       semanticEnrichment: {
         enabled: input.graphPolicy.semanticEnrichment?.enabled ?? true,
         mode: input.graphPolicy.semanticEnrichment?.mode ?? "post-index",
-        model: input.graphPolicy.semanticEnrichment?.model ?? "minicpm5-1b",
+        ...(enrichProvider ? { provider: enrichProvider } : {}),
+        ...(enrichModel ? { model: enrichModel } : {}),
         batchSize: input.graphPolicy.semanticEnrichment?.batchSize ?? 5,
         sleepMs: input.graphPolicy.semanticEnrichment?.sleepMs ?? 0,
         timeoutMs: input.graphPolicy.semanticEnrichment?.timeoutMs ?? 5000,
@@ -151,7 +173,7 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       summaryPath: input.learningPolicy.summaryPath ?? "tmp/learning-summary.json",
       skillEvolution: {
         enabled: input.learningPolicy.skillEvolution?.enabled ?? true,
-        model: input.learningPolicy.skillEvolution?.model ?? "minicpm5-1b",
+        ...(skillEvolutionModel ? { model: skillEvolutionModel } : {}),
         minCoOccur: input.learningPolicy.skillEvolution?.minCoOccur ?? 2,
         minSuccess: input.learningPolicy.skillEvolution?.minSuccess ?? 2,
         enableTripleFusion: input.learningPolicy.skillEvolution?.enableTripleFusion ?? true,

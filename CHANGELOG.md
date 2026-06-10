@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-06-10
+
+### Added
+
+- `src/config/secrets.ts`: API Key 支持环境变量名、`${VAR}` 占位符、或直接 `sk-...` 明文；运行时按类型自动解析。
+- Settings 面板新增 **Graph Semantic Enrichment**（知识图谱语义提取）：可单独配置 provider/model，或留空继承 Economy 层。
+- `graphPolicy.semanticEnrichment.provider` 可选字段，允许语义提取使用与 Worker 不同的 provider。
+
+### Changed
+
+- Smart / Economy 模型改为可选；未配置时由 `model-router` 默认表按 provider 回退。
+- 语义提取模型不再默认 `minicpm5-1b`；可配置 DeepSeek（`openai` + `baseUrl` + 模型名）或其它云端/本地模型，也可留空。
+- OpenBMB 设置与语义提取解耦；OpenBMB 区块仅用于本地 MiniCPM。
+- `formatModelConfigGuide` 与初始化文档补充 API Key 规则与图谱更新说明。
+
 ## [0.6.2] - 2026-06-10
 
 ### Fixed

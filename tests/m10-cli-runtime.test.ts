@@ -53,6 +53,12 @@ describe("M10 CLI runtime", () => {
           autoIndexOnRun: true,
           transport: "file",
           graphStorePath: "tmp/custom-graph.json",
+          enrichmentProvider: "",
+          enrichmentModel: "",
+          openbmbMode: "embedded",
+          openbmbEngine: "command",
+          openbmbModel: "",
+          openbmbAutoDownload: false,
         },
         configPath
       );

@@ -1,3 +1,4 @@
+import { resolveConfigSecret } from "./secrets";
 import type { GraphFlowConfig } from "./schema";
 import { DEFAULT_EMBEDDING_MODEL } from "./defaults";
 import type { EmbeddingProvider } from "../learning/embeddings";
@@ -23,8 +24,8 @@ export function createEmbeddingProviderFromConfig(
 
   if (provider === "openai") {
     const apiKey =
-      policy?.apiKey ??
-      config.providers.openai?.apiKey ??
+      resolveConfigSecret(policy?.apiKey) ??
+      resolveConfigSecret(config.providers.openai?.apiKey) ??
       process.env.OPENAI_API_KEY ??
       "";
     if (!apiKey) {

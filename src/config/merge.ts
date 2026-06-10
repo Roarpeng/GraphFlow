@@ -4,7 +4,7 @@ import { SCAFFOLD_TIERS } from "./defaults";
 
 function isScaffoldTier(
   tier: "smart" | "economy",
-  value: { provider: string; model: string }
+  value: { provider: string; model?: string }
 ): boolean {
   const scaffold = SCAFFOLD_TIERS[tier];
   return value.provider === scaffold.provider && value.model === scaffold.model;
@@ -14,7 +14,7 @@ function mergeTier(
   base: GraphFlowConfig,
   overlay: GraphFlowConfig,
   tier: "smart" | "economy"
-): { provider: string; model: string } {
+): { provider: string; model?: string } {
   const overlayProvidersEmpty = Object.keys(overlay.providers ?? {}).length === 0;
   if (overlayProvidersEmpty && isScaffoldTier(tier, overlay.tiers[tier])) {
     return { ...base.tiers[tier] };
@@ -22,8 +22,24 @@ function mergeTier(
   return { ...base.tiers[tier], ...overlay.tiers[tier] };
 }
 
+function mergedEnrichmentField(
+  overlayValue: string | undefined,
+  baseValue: string | undefined
+): string | undefined {
+  return overlayValue ?? baseValue;
+}
+
 /** Merge project overlay onto root config; overlay wins for defined fields. */
 export function mergeGraphFlowConfig(base: GraphFlowConfig, overlay: GraphFlowConfig): GraphFlowConfig {
+  const enrichProvider = mergedEnrichmentField(
+    overlay.graphPolicy.semanticEnrichment?.provider,
+    base.graphPolicy.semanticEnrichment?.provider
+  );
+  const enrichModel = mergedEnrichmentField(
+    overlay.graphPolicy.semanticEnrichment?.model,
+    base.graphPolicy.semanticEnrichment?.model
+  );
+
   return validateConfig({
     providers: { ...base.providers, ...overlay.providers },
     tiers: {
@@ -48,10 +64,8 @@ export function mergeGraphFlowConfig(base: GraphFlowConfig, overlay: GraphFlowCo
           overlay.graphPolicy.semanticEnrichment?.mode ??
           base.graphPolicy.semanticEnrichment?.mode ??
           "post-index",
-        model:
-          overlay.graphPolicy.semanticEnrichment?.model ??
-          base.graphPolicy.semanticEnrichment?.model ??
-          "minicpm5-1b",
+        ...(enrichProvider ? { provider: enrichProvider } : {}),
+        ...(enrichModel ? { model: enrichModel } : {}),
         batchSize:
           overlay.graphPolicy.semanticEnrichment?.batchSize ??
           base.graphPolicy.semanticEnrichment?.batchSize ??

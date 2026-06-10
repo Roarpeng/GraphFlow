@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { brainstormTask } from "../../agents/brainstormer";
 import { planTasks } from "../../agents/planner";
 import { validateConfig } from "../../config/loader";
+import { formatApiKeyForConfig, formatApiKeyForSettings, resolveConfigSecret } from "../../config/secrets";
 import { resolveConfig, resolveConfigPath } from "../../config/resolve";
 import { createEmbeddingProviderFromConfig } from "../../config/embedding-factory";
 import { resolveGraphStorePath, resolveLearningPath } from "../../config/paths";
@@ -61,8 +62,9 @@ function applyOpenBmbRuntimeEnv(config: GraphFlowConfig): void {
       continue;
     }
     const envPrefix = name.toUpperCase();
-    if (cfg.apiKey) {
-      process.env[`${envPrefix}_API_KEY`] = cfg.apiKey;
+    const apiKey = resolveConfigSecret(cfg.apiKey);
+    if (apiKey) {
+      process.env[`${envPrefix}_API_KEY`] = apiKey;
     }
     if (cfg.baseUrl) {
       process.env[`${envPrefix}_BASE_URL`] = cfg.baseUrl;
@@ -79,14 +81,17 @@ function applyOpenBmbRuntimeEnv(config: GraphFlowConfig): void {
   if (openbmb.baseUrl) {
     process.env.GRAPHFLOW_OPENBMB_BASE_URL = openbmb.baseUrl;
   }
-  if (openbmb.apiKey) {
-    process.env.GRAPHFLOW_OPENBMB_API_KEY = openbmb.apiKey;
+  const openbmbApiKey = resolveConfigSecret(openbmb.apiKey);
+  if (openbmbApiKey) {
+    process.env.GRAPHFLOW_OPENBMB_API_KEY = openbmbApiKey;
   }
-  if (openbmb.modelPath) {
-    process.env.GRAPHFLOW_OPENBMB_MODEL_PATH = openbmb.modelPath;
+  const modelPath = resolveConfigSecret(openbmb.modelPath);
+  if (modelPath) {
+    process.env.GRAPHFLOW_OPENBMB_MODEL_PATH = modelPath;
   }
-  if (openbmb.commandPath) {
-    process.env.GRAPHFLOW_MINICPM_COMMAND = openbmb.commandPath;
+  const commandPath = resolveConfigSecret(openbmb.commandPath);
+  if (commandPath) {
+    process.env.GRAPHFLOW_MINICPM_COMMAND = commandPath;
   }
   if (openbmb.modelUrl) {
     process.env.GRAPHFLOW_MINICPM_MODEL_URL = openbmb.modelUrl;
@@ -160,6 +165,8 @@ export interface GraphFlowSettings {
   autoIndexOnRun: boolean;
   transport: GraphFlowConfig["graphPolicy"]["transport"];
   graphStorePath: string;
+  enrichmentProvider: string;
+  enrichmentModel: string;
   openbmbMode: "embedded" | "ollama" | "openai-compat";
   openbmbEngine: "command" | "node-llama-cpp";
   openbmbModel: string;
@@ -182,7 +189,7 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
   const rawProviderConfig = rawConfig?.providers?.[provider] ?? {};
   const rawOpenBmbConfig = rawConfig?.providers?.openbmb ?? {};
   const openbmbConfig = config.providers.openbmb ?? {};
-  const apiKeyEnvVar = parseEnvPlaceholder(rawProviderConfig.apiKey ?? providerConfig.apiKey);
+  const apiKeyEnvVar = formatApiKeyForSettings(rawProviderConfig.apiKey ?? providerConfig.apiKey);
   const openbmbModelUrl = rawOpenBmbConfig.modelUrl ?? openbmbConfig.modelUrl ?? process.env.GRAPHFLOW_MINICPM_MODEL_URL;
   const openbmbModelSha256 =
     rawOpenBmbConfig.modelSha256 ?? openbmbConfig.modelSha256 ?? process.env.GRAPHFLOW_MINICPM_MODEL_SHA256;
@@ -195,8 +202,8 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
   return {
     configPath: actualPath,
     provider,
-    smartModel: config.tiers.smart.model,
-    economyModel: config.tiers.economy.model,
+    smartModel: config.tiers.smart.model ?? "",
+    economyModel: config.tiers.economy.model ?? "",
     ...(apiKeyEnvVar ? { apiKeyEnvVar } : {}),
     ...(rawProviderConfig.baseUrl || providerConfig.baseUrl
       ? { baseUrl: rawProviderConfig.baseUrl ?? providerConfig.baseUrl }
@@ -208,12 +215,13 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
     autoIndexOnRun: config.graphPolicy.autoIndexOnRun ?? true,
     transport: config.graphPolicy.transport,
     graphStorePath: config.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.json",
+    enrichmentProvider: config.graphPolicy.semanticEnrichment?.provider ?? "",
+    enrichmentModel: config.graphPolicy.semanticEnrichment?.model ?? "",
     openbmbMode: (openbmbConfig.mode ?? "embedded") as "embedded" | "ollama" | "openai-compat",
     openbmbEngine: (openbmbConfig.engine ?? "command") as "command" | "node-llama-cpp",
     openbmbModel:
-      config.graphPolicy.semanticEnrichment?.model ??
       config.learningPolicy.skillEvolution?.model ??
-      config.tiers.economy.model,
+      (provider === "openbmb" ? config.tiers.economy.model ?? config.tiers.smart.model ?? "" : ""),
     ...(rawOpenBmbConfig.baseUrl || openbmbConfig.baseUrl
       ? { openbmbBaseUrl: rawOpenBmbConfig.baseUrl ?? openbmbConfig.baseUrl }
       : {}),
@@ -240,7 +248,7 @@ export function saveGraphFlowSettings(
   const actualPath = resolveConfigPath(configPath);
   const current = resolveConfig(actualPath);
   const providerConfig = {
-    ...(settings.apiKeyEnvVar ? { apiKey: `\${${settings.apiKeyEnvVar}}` } : {}),
+    ...(settings.apiKeyEnvVar?.trim() ? { apiKey: formatApiKeyForConfig(settings.apiKeyEnvVar) } : {}),
     ...(settings.baseUrl ? { baseUrl: settings.baseUrl } : {}),
   };
 
@@ -269,8 +277,22 @@ export function saveGraphFlowSettings(
       } as GraphFlowConfig["providers"][string],
     },
     tiers: {
-      smart: { provider: settings.provider, model: nextSmartModel },
-      economy: { provider: settings.provider, model: nextEconomyModel },
+      smart: {
+        provider: settings.provider,
+        ...(nextSmartModel?.trim()
+          ? { model: nextSmartModel.trim() }
+          : current.tiers.smart.model
+            ? { model: current.tiers.smart.model }
+            : {}),
+      },
+      economy: {
+        provider: settings.provider,
+        ...(nextEconomyModel?.trim()
+          ? { model: nextEconomyModel.trim() }
+          : current.tiers.economy.model
+            ? { model: current.tiers.economy.model }
+            : {}),
+      },
     },
     graphPolicy: {
       ...current.graphPolicy,
@@ -287,14 +309,23 @@ export function saveGraphFlowSettings(
       },
       semanticEnrichment: {
         ...(current.graphPolicy.semanticEnrichment ?? {}),
-        model: settings.openbmbModel,
+        ...(settings.enrichmentProvider?.trim()
+          ? { provider: settings.enrichmentProvider.trim() }
+          : current.graphPolicy.semanticEnrichment?.provider
+            ? { provider: current.graphPolicy.semanticEnrichment.provider }
+            : {}),
+        ...(settings.enrichmentModel?.trim()
+          ? { model: settings.enrichmentModel.trim() }
+          : current.graphPolicy.semanticEnrichment?.model
+            ? { model: current.graphPolicy.semanticEnrichment.model }
+            : {}),
       },
     },
     learningPolicy: {
       ...current.learningPolicy,
       skillEvolution: {
         ...(current.learningPolicy.skillEvolution ?? {}),
-        model: settings.openbmbModel,
+        ...(settings.openbmbModel?.trim() ? { model: settings.openbmbModel.trim() } : {}),
       },
     },
   });
@@ -539,7 +570,7 @@ async function maybeRunSemanticEnrichment(
     await enrichGraphSemanticsSilent(graphClient, {
       ...(enrichPolicy.batchSize !== undefined ? { batchSize: enrichPolicy.batchSize } : {}),
       ...(enrichPolicy.sleepMs !== undefined ? { sleepMs: enrichPolicy.sleepMs } : {}),
-      ...(enrichPolicy.model ? { openbmbModel: enrichPolicy.model } : {}),
+      ...(enrichPolicy.model ? { model: enrichPolicy.model } : {}),
       ...(enrichPolicy.timeoutMs !== undefined ? { timeoutMs: enrichPolicy.timeoutMs } : {}),
     });
   } catch (error) {
@@ -569,7 +600,7 @@ export async function enrichSemanticsSilent(
     enricherOptions.timeoutMs = timeoutMs;
   }
   if (enrichPolicy?.model) {
-    enricherOptions.openbmbModel = enrichPolicy.model;
+    enricherOptions.model = enrichPolicy.model;
   }
 
   return enrichGraphSemanticsSilent(graphClient, enricherOptions);
@@ -1204,15 +1235,6 @@ function readFileGraphStore(storePath: string): { nodes: GraphNode[]; edges: Gra
   } catch {
     return { nodes: [], edges: [] };
   }
-}
-
-function parseEnvPlaceholder(value?: string): string | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  const match = value.match(/^\$\{([A-Z0-9_]+)\}$/i);
-  return match?.[1];
 }
 
 function getFileSize(path: string): number {

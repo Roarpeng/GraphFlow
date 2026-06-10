@@ -51,10 +51,14 @@ export function resolveModelForRole(role: AgentRole, configPath?: string): Model
     const config = resolveConfig(configPath ?? "graphflow.config.json");
 
     if (role === "enricher") {
-      const provider = config.tiers.economy.provider as ProviderName;
+      const enrichPolicy = config.graphPolicy.semanticEnrichment;
+      const provider = (enrichPolicy?.provider ?? config.tiers.economy.provider) as ProviderName;
       return {
         provider,
-        model: config.graphPolicy.semanticEnrichment?.model ?? config.tiers.economy.model,
+        model:
+          enrichPolicy?.model ??
+          config.tiers.economy.model ??
+          DEFAULT_MODELS[provider].economy,
         tier,
         fallbackApplied: false,
       };
@@ -64,16 +68,20 @@ export function resolveModelForRole(role: AgentRole, configPath?: string): Model
       const provider = config.tiers.economy.provider as ProviderName;
       return {
         provider,
-        model: config.learningPolicy.skillEvolution?.model ?? config.tiers.economy.model,
+        model:
+          config.learningPolicy.skillEvolution?.model ??
+          config.tiers.economy.model ??
+          DEFAULT_MODELS[provider].economy,
         tier: "economy",
         fallbackApplied: false,
       };
     }
 
     const tierConfig = config.tiers[tier];
+    const provider = tierConfig.provider as ProviderName;
     return {
-      provider: tierConfig.provider as ProviderName,
-      model: tierConfig.model,
+      provider,
+      model: tierConfig.model || DEFAULT_MODELS[provider][tier],
       tier,
       fallbackApplied: false,
     };

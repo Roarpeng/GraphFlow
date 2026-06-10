@@ -32,6 +32,8 @@
         economyModel: getString("settings-economy-model"),
         apiKeyEnvVar: getString("settings-api-key-env-var"),
         baseUrl: getString("settings-base-url"),
+        enrichmentProvider: getString("settings-enrichment-provider"),
+        enrichmentModel: getString("settings-enrichment-model"),
         openbmbMode: getString("settings-openbmb-mode"),
         openbmbEngine: getString("settings-openbmb-engine"),
         openbmbModel: getString("settings-openbmb-model"),

@@ -7,6 +7,9 @@ import type { GraphNode } from "../core/types";
 export interface EnricherOptions {
   batchSize?: number;
   sleepMs?: number;
+  /** Explicit model override; when omitted, routing uses semanticEnrichment/economy tier config. */
+  model?: string;
+  /** @deprecated Use `model` instead. */
   openbmbModel?: string;
   timeoutMs?: number;
 }
@@ -24,7 +27,7 @@ export async function enrichGraphSemanticsSilent(
 
   const batchSize = options?.batchSize ?? 5;
   const sleepMs = options?.sleepMs ?? 0;
-  const openbmbModel = options?.openbmbModel ?? "minicpm5-1b";
+  const modelOverride = options?.model ?? options?.openbmbModel;
   const timeoutMs = options?.timeoutMs;
 
   // 1. 读取当前图谱快照
@@ -61,8 +64,8 @@ export async function enrichGraphSemanticsSilent(
 
     try {
       const selection = resolveModelForRole("enricher");
-      if (openbmbModel) {
-        selection.model = openbmbModel;
+      if (modelOverride?.trim()) {
+        selection.model = modelOverride.trim();
       }
 
       const previousTimeout = process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS;

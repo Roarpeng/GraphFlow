@@ -18,8 +18,8 @@ export interface ProviderConfig {
 export interface GraphFlowConfig {
   providers: Record<string, ProviderConfig>;
   tiers: {
-    smart: { provider: string; model: string };
-    economy: { provider: string; model: string };
+    smart: { provider: string; model?: string };
+    economy: { provider: string; model?: string };
   };
   budgetPolicy: {
     runTokenCap: number;
@@ -44,6 +44,9 @@ export interface GraphFlowConfig {
     semanticEnrichment?: {
       enabled?: boolean;
       mode?: "streaming" | "post-index" | "off";
+      /** When set, overrides economy tier provider for graph semantic enrichment. */
+      provider?: string;
+      /** When set, overrides economy tier model; leave unset to inherit economy/default routing. */
       model?: string;
       batchSize?: number;
       sleepMs?: number;

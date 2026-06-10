@@ -30,7 +30,6 @@ export function getDefaultConfig(): GraphFlowConfig {
       semanticEnrichment: {
         enabled: true,
         mode: "post-index",
-        model: "minicpm5-1b",
         batchSize: 5,
         sleepMs: 0,
         timeoutMs: 5000,
@@ -46,7 +45,6 @@ export function getDefaultConfig(): GraphFlowConfig {
       summaryPath: "tmp/learning-summary.json",
       skillEvolution: {
         enabled: true,
-        model: "minicpm5-1b",
         minCoOccur: 2,
         minSuccess: 2,
         enableTripleFusion: true,

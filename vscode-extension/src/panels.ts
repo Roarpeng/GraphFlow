@@ -56,6 +56,8 @@ export interface GraphFlowSettings {
   autoIndexOnRun: boolean;
   transport: "memory" | "mcp-http" | "file" | "sqlite";
   graphStorePath: string;
+  enrichmentProvider: string;
+  enrichmentModel: string;
   openbmbMode: "embedded" | "ollama" | "openai-compat";
   openbmbEngine: "command" | "node-llama-cpp";
   openbmbModel: string;
@@ -558,7 +560,7 @@ export function buildSettingsHtml(settings: GraphFlowSettings, scriptUri: string
   <form id="settings-form">
     <section class="panel">
       <h1>GraphFlow Settings</h1>
-      <p>Saved to <code>${escapeHtml(settings.configPath)}</code>. API keys are stored as environment variable placeholders.</p>
+      <p>Saved to <code>${escapeHtml(settings.configPath)}</code>. API Key: use <code>DEEPSEEK_API_KEY</code> / <code>\${DEEPSEEK_API_KEY}</code> for env lookup, or paste a key directly.</p>
     </section>
     <section class="panel grid">
       <label>Provider
@@ -570,10 +572,25 @@ export function buildSettingsHtml(settings: GraphFlowSettings, scriptUri: string
           ${renderProviderOption("openbmb", settings.provider)}
         </select>
       </label>
-      <label>API Key Env Var <input id="settings-api-key-env-var" name="apiKeyEnvVar" value="${escapeHtml(settings.apiKeyEnvVar ?? "")}" placeholder="OPENAI_API_KEY" /></label>
-      <label>Smart Model <input id="settings-smart-model" name="smartModel" value="${escapeHtml(settings.smartModel)}" /></label>
-      <label>Economy Model <input id="settings-economy-model" name="economyModel" value="${escapeHtml(settings.economyModel)}" /></label>
+      <label>API Key / Env Var <input id="settings-api-key-env-var" name="apiKeyEnvVar" value="${escapeHtml(settings.apiKeyEnvVar ?? "")}" placeholder="DEEPSEEK_API_KEY or sk-..." /></label>
+      <label>Smart Model (optional) <input id="settings-smart-model" name="smartModel" value="${escapeHtml(settings.smartModel)}" placeholder="deepseek-v4-pro" /></label>
+      <label>Economy Model (optional) <input id="settings-economy-model" name="economyModel" value="${escapeHtml(settings.economyModel)}" placeholder="deepseek-v4-flash" /></label>
       <label>Base URL <input id="settings-base-url" name="baseUrl" value="${escapeHtml(settings.baseUrl ?? "")}" placeholder="https://api.openai.com/v1" /></label>
+    </section>
+    <section class="panel grid">
+      <h2>Graph Semantic Enrichment</h2>
+      <p>Knowledge-graph symbol summaries. Leave provider/model empty to inherit Economy tier (e.g. DeepSeek via openai + base URL).</p>
+      <label>Enrichment Provider (optional)
+        <select id="settings-enrichment-provider" name="enrichmentProvider">
+          <option value=""${settings.enrichmentProvider ? "" : " selected"}>inherit economy tier</option>
+          ${renderProviderOption("openai", settings.enrichmentProvider)}
+          ${renderProviderOption("anthropic", settings.enrichmentProvider)}
+          ${renderProviderOption("bailian", settings.enrichmentProvider)}
+          ${renderProviderOption("doubao", settings.enrichmentProvider)}
+          ${renderProviderOption("openbmb", settings.enrichmentProvider)}
+        </select>
+      </label>
+      <label>Enrichment Model (optional) <input id="settings-enrichment-model" name="enrichmentModel" value="${escapeHtml(settings.enrichmentModel)}" placeholder="deepseek-v4-flash" /></label>
       <label>Transport
         <select id="settings-transport" name="transport">
           ${renderTransportOption("file", settings.transport)}
@@ -584,7 +601,8 @@ export function buildSettingsHtml(settings: GraphFlowSettings, scriptUri: string
       </label>
     </section>
     <section class="panel grid">
-      <label>OpenBMB Model Name <input id="settings-openbmb-model" name="openbmbModel" value="${escapeHtml(settings.openbmbModel)}" placeholder="minicpm-1b" /></label>
+      <h2>OpenBMB (local MiniCPM)</h2>
+      <label>OpenBMB Model Name (optional) <input id="settings-openbmb-model" name="openbmbModel" value="${escapeHtml(settings.openbmbModel)}" placeholder="minicpm-1b" /></label>
       <label>OpenBMB Mode
         <select id="settings-openbmb-mode" name="openbmbMode">
           <option value="embedded" ${settings.openbmbMode === "embedded" ? "selected" : ""}>embedded (local)</option>

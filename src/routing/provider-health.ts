@@ -1,3 +1,4 @@
+import { resolveConfigSecret } from "../config/secrets";
 import type { GraphFlowConfig } from "../config/schema";
 import type { ProviderHealthMap, ProviderName } from "./model-router";
 
@@ -48,7 +49,7 @@ export function buildProviderHealthMap(config: GraphFlowConfig): ProviderHealthM
       return [provider, true] as const;
     }
 
-    return [provider, Boolean(details.apiKey)] as const;
+    return [provider, Boolean(resolveConfigSecret(details.apiKey))] as const;
   });
 
   return Object.fromEntries(healthEntries) as ProviderHealthMap;
