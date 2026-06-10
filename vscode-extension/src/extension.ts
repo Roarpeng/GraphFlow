@@ -58,6 +58,7 @@ interface GraphFlowRuntime {
     workspaceRoot?: string;
     npmScriptCwd?: string;
     bundledServerPath?: string;
+    launcherPath?: string;
     bundledRuntimeRoot?: string;
     nodeCommand?: string;
     electronExecPath?: string;
@@ -507,6 +508,10 @@ async function runMcpBootstrap(
   const extensionPath = context.extensionPath;
   const bundledRuntimeRoot = join(extensionPath, "vendor", "graphflow");
   const bundledServerPath = join(bundledRuntimeRoot, "dist", "surfaces", "mcp", "server.js");
+  const launcherPath =
+    process.platform === "win32"
+      ? join(extensionPath, "mcp-launcher.cmd")
+      : join(extensionPath, "mcp-launcher.cjs");
   const cwdRoot = workspaceRoot ?? process.cwd();
 
   try {
@@ -517,6 +522,7 @@ async function runMcpBootstrap(
           workspaceRoot: workspaceRoot,
           bundledServerPath,
           bundledRuntimeRoot,
+          launcherPath,
           electronExecPath: process.execPath,
         })
       )

@@ -30,8 +30,13 @@ function readPackage(name, modulesRoot) {
   return JSON.parse(readFileSync(pkgPath, "utf8"));
 }
 
+const SKIP_VENDOR_PACKAGES = new Set([
+  // Platform-specific native binaries must not be copied from the build OS into the VSIX.
+  "onnxruntime-node",
+]);
+
 function bundlePackage(name, modulesRoot, vendorModules, visited) {
-  if (visited.has(name)) {
+  if (visited.has(name) || SKIP_VENDOR_PACKAGES.has(name)) {
     return;
   }
   visited.add(name);

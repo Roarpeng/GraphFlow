@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-06-10
+
+### Fixed
+
+- MCP install on Windows now uses `mcp-launcher.cmd` / `mcp-launcher.cjs` so `server.js` is never the MCP `command` (fixes Cursor opening the file as an editor tab).
+- Vendor bundle skips Linux-only `onnxruntime-node`; GitHub Release VSIX is built on `windows-latest`.
+
 ## [0.6.1] - 2026-06-10
 
 ### Fixed

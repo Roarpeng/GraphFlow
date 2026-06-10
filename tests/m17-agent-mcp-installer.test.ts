@@ -47,6 +47,15 @@ describe("M17 agent MCP installer", () => {
       GRAPHFLOW_LOG_JSON: "1",
     });
 
+    const launcherNode = buildMcpServerNode({
+      strategy: "node-bundled",
+      bundledServerPath: "/tmp/server.js",
+      bundledRuntimeRoot: "/tmp/runtime",
+      launcherPath: "C:\\ext\\mcp-launcher.cmd",
+      nodeCommand: "/usr/bin/node",
+    });
+    expect(launcherNode.command).toBe("C:\\ext\\mcp-launcher.cmd");
+    expect(launcherNode.args).toEqual([]);
   });
 
   it("creates MCP config when agent marker exists", () => {

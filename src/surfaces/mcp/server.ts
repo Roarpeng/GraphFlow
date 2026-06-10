@@ -537,6 +537,18 @@ function resolvePackageVersion(): string {
   return "0.0.0";
 }
 
+function installMcpProcessGuards(): void {
+  process.on("uncaughtException", (error) => {
+    console.error("[GraphFlow MCP] uncaughtException:", error);
+    process.exit(1);
+  });
+  process.on("unhandledRejection", (reason) => {
+    console.error("[GraphFlow MCP] unhandledRejection:", reason);
+    process.exit(1);
+  });
+}
+
 if (require.main === module) {
+  installMcpProcessGuards();
   startStdioServer();
 }

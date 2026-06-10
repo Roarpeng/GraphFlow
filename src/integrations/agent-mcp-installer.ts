@@ -19,6 +19,8 @@ export interface McpInstallOptions {
   workspaceRoot?: string;
   npmScriptCwd?: string;
   bundledServerPath?: string;
+  /** Cross-platform launcher script (preferred on Windows; never use server.js as command). */
+  launcherPath?: string;
   /** Vendor runtime root (parent of dist/). Used as MCP cwd for module resolution. */
   bundledRuntimeRoot?: string;
   /** Explicit node binary. When omitted, resolves system node or editor-bundled node. */
@@ -210,6 +212,28 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
     }
     const runtimeRoot =
       options.bundledRuntimeRoot ?? join(options.bundledServerPath, "..", "..", "..");
+    if (options.launcherPath) {
+      if (isWindows() && options.launcherPath.toLowerCase().endsWith(".cmd")) {
+        return {
+          command: options.launcherPath,
+          args: [],
+          cwd: runtimeRoot,
+          env: { ...MCP_STDIO_ENV },
+        };
+      }
+
+      const launch = resolveMcpNodeLaunch({
+        ...(options.nodeCommand !== undefined ? { nodeCommand: options.nodeCommand } : {}),
+        ...(options.electronExecPath !== undefined ? { electronExecPath: options.electronExecPath } : {}),
+      });
+      return {
+        command: launch.command,
+        args: [options.launcherPath],
+        cwd: runtimeRoot,
+        env: launch.env,
+      };
+    }
+
     const launch = resolveMcpNodeLaunch({
       ...(options.nodeCommand !== undefined ? { nodeCommand: options.nodeCommand } : {}),
       ...(options.electronExecPath !== undefined ? { electronExecPath: options.electronExecPath } : {}),
