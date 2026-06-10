@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -48,4 +51,25 @@ jobs:
         with:
           name: graphflow-vscode-extension
           path: artifacts/graphflow-vscode-*.vsix
-          retention-days: 14
+          retention-days: 90
+
+      - name: Publish VSIX to GitHub Releases
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          TAG="v${VERSION}"
+          VSIX=$(ls artifacts/graphflow-vscode-*.vsix | head -1)
+          NOTES="GraphFlow VS Code/Cursor extension **v${VERSION}**.
+
+          Install: download \`graphflow-vscode-${VERSION}.vsix\` and use **Extensions → Install from VSIX**.
+
+          Built from commit ${GITHUB_SHA::7} on main."
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$VSIX" --clobber
+            gh release edit "$TAG" --notes "$NOTES"
+          else
+            gh release create "$TAG" "$VSIX" --title "GraphFlow VS Code Extension v${VERSION}" --notes "$NOTES" --latest
+          fi
