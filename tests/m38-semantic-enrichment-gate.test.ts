@@ -140,4 +140,61 @@ describe("M38 semantic enrichment provider gate", () => {
     expect(selection.model).toBe("deepseek-v4-flash");
     rmSync(join(inheritedPath, ".."), { recursive: true, force: true });
   });
+
+  it("routes local backend to openbmb and network backend to cloud provider", () => {
+    const localConfig = validateConfig({
+      providers: { openai: { apiKey: "test-key" } },
+      tiers: {
+        smart: { provider: "openai", model: "deepseek-v4-pro" },
+        economy: { provider: "openai", model: "deepseek-v4-flash" },
+      },
+      budgetPolicy: { runTokenCap: 2000 },
+      graphPolicy: {
+        enableAutoBuild: true,
+        transport: "memory",
+        maxContextTokens: 200,
+        semanticEnrichment: { enabled: true, backend: "local", model: "minicpm5-1b" },
+      },
+      learningPolicy: {
+        enableFlywheel: false,
+        trainingCadence: "nightly",
+        canaryRatio: 10,
+        exportPath: "tmp/learning-dataset.jsonl",
+      },
+    });
+
+    const networkConfig = validateConfig({
+      providers: { openai: { apiKey: "test-key", baseUrl: "https://api.deepseek.com" } },
+      tiers: {
+        smart: { provider: "openai", model: "deepseek-v4-pro" },
+        economy: { provider: "openai", model: "deepseek-v4-flash" },
+      },
+      budgetPolicy: { runTokenCap: 2000 },
+      graphPolicy: {
+        enableAutoBuild: true,
+        transport: "memory",
+        maxContextTokens: 200,
+        semanticEnrichment: {
+          enabled: true,
+          backend: "network",
+          provider: "openai",
+          model: "deepseek-v4-pro",
+        },
+      },
+      learningPolicy: {
+        enableFlywheel: false,
+        trainingCadence: "nightly",
+        canaryRatio: 10,
+        exportPath: "tmp/learning-dataset.jsonl",
+      },
+    });
+
+    const localPath = writeTempConfig(localConfig);
+    const networkPath = writeTempConfig(networkConfig);
+    expect(resolveModelForRole("enricher", localPath).provider).toBe("openbmb");
+    expect(resolveModelForRole("enricher", networkPath).provider).toBe("openai");
+    expect(resolveModelForRole("enricher", networkPath).model).toBe("deepseek-v4-pro");
+    rmSync(join(localPath, ".."), { recursive: true, force: true });
+    rmSync(join(networkPath, ".."), { recursive: true, force: true });
+  });
 });

@@ -56,8 +56,11 @@ export interface GraphFlowSettings {
   autoIndexOnRun: boolean;
   transport: "memory" | "mcp-http" | "file" | "sqlite";
   graphStorePath: string;
+  enrichmentBackend: "network" | "local" | "inherit";
   enrichmentProvider: string;
   enrichmentModel: string;
+  enrichmentApiKey?: string;
+  enrichmentBaseUrl?: string;
   openbmbMode: "embedded" | "ollama" | "openai-compat";
   openbmbEngine: "command" | "node-llama-cpp";
   openbmbModel: string;
@@ -579,18 +582,28 @@ export function buildSettingsHtml(settings: GraphFlowSettings, scriptUri: string
     </section>
     <section class="panel grid">
       <h2>Graph Semantic Enrichment</h2>
-      <p>Knowledge-graph symbol summaries. Leave provider/model empty to inherit Economy tier (e.g. DeepSeek via openai + base URL).</p>
-      <label>Enrichment Provider (optional)
-        <select id="settings-enrichment-provider" name="enrichmentProvider">
-          <option value=""${settings.enrichmentProvider ? "" : " selected"}>inherit economy tier</option>
-          ${renderProviderOption("openai", settings.enrichmentProvider)}
-          ${renderProviderOption("anthropic", settings.enrichmentProvider)}
-          ${renderProviderOption("bailian", settings.enrichmentProvider)}
-          ${renderProviderOption("doubao", settings.enrichmentProvider)}
-          ${renderProviderOption("openbmb", settings.enrichmentProvider)}
+      <p>知识图谱 Symbol 语义摘要。可选网络模型（DeepSeek/OpenAI 等）或本地 OpenBMB。</p>
+      <label>语义提取后端
+        <select id="settings-enrichment-backend" name="enrichmentBackend">
+          <option value="inherit"${settings.enrichmentBackend === "inherit" ? " selected" : ""}>继承 Economy（网络）</option>
+          <option value="network"${settings.enrichmentBackend === "network" ? " selected" : ""}>自定义网络模型</option>
+          <option value="local"${settings.enrichmentBackend === "local" ? " selected" : ""}>本地 OpenBMB</option>
         </select>
       </label>
-      <label>Enrichment Model (optional) <input id="settings-enrichment-model" name="enrichmentModel" value="${escapeHtml(settings.enrichmentModel)}" placeholder="deepseek-v4-flash" /></label>
+      <div id="settings-enrichment-network-fields" class="grid-span">
+        <label>网络 Provider
+          <select id="settings-enrichment-provider" name="enrichmentProvider">
+            <option value=""${settings.enrichmentProvider ? "" : " selected"}>inherit economy tier</option>
+            ${renderProviderOption("openai", settings.enrichmentProvider)}
+            ${renderProviderOption("anthropic", settings.enrichmentProvider)}
+            ${renderProviderOption("bailian", settings.enrichmentProvider)}
+            ${renderProviderOption("doubao", settings.enrichmentProvider)}
+          </select>
+        </label>
+        <label>网络 Model (optional) <input id="settings-enrichment-model" name="enrichmentModel" value="${escapeHtml(settings.enrichmentModel)}" placeholder="deepseek-v4-flash" /></label>
+        <label>网络 API Key / Env Var (optional) <input id="settings-enrichment-api-key" name="enrichmentApiKey" value="${escapeHtml(settings.enrichmentApiKey ?? "")}" placeholder="DEEPSEEK_API_KEY or sk-..." /></label>
+        <label>网络 Base URL (optional) <input id="settings-enrichment-base-url" name="enrichmentBaseUrl" value="${escapeHtml(settings.enrichmentBaseUrl ?? "")}" placeholder="https://api.deepseek.com" /></label>
+      </div>
       <label>Transport
         <select id="settings-transport" name="transport">
           ${renderTransportOption("file", settings.transport)}

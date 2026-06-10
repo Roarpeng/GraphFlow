@@ -146,7 +146,7 @@ export function getToolDefinitions(): ToolDefinition[] {
     },
     {
       name: "graphflow_enrich_graph",
-      description: "Run semantic enrichment for pending Symbol nodes using MiniCPM/OpenBMB provider.",
+      description: "Run semantic enrichment for pending Symbol nodes using configured network (cloud API) or local OpenBMB backend.",
       inputSchema: {
         type: "object",
         properties: {

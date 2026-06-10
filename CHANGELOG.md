@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-06-10
+
+### Added
+
+- `graphPolicy.semanticEnrichment.backend`: `inherit` | `network` | `local`，明确区分网络模型与本地 OpenBMB。
+- 语义提取可单独配置网络 API Key / Base URL（`semanticEnrichment.apiKey` / `baseUrl`）。
+- Settings 面板「语义提取后端」：继承 Economy（网络）/ 自定义网络模型 / 本地 OpenBMB。
+
+### Changed
+
+- 语义富化运行时注入独立网络凭证（`applyEnrichmentProviderEnv`）；任务编排后增量富化同步应用。
+- MCP `graphflow_enrich_graph` 描述更新为支持云端或本地后端。
+
 ## [0.6.3] - 2026-06-10
 
 ### Added

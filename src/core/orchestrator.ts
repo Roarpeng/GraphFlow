@@ -387,12 +387,16 @@ async function maybeSyncGraph(
     return;
   }
 
-  await syncGraphAfterRun(options.graphClient, [
-    {
-      filePath: "runtime:task",
-      summary: `Task completed: ${task}`,
-    },
-  ]);
+  await syncGraphAfterRun(
+    options.graphClient,
+    [
+      {
+        filePath: "runtime:task",
+        summary: `Task completed: ${task}`,
+      },
+    ],
+    options.configPath
+  );
 }
 
 async function maybeBuildSkillHints(task: string, options?: OrchestrateOptions): Promise<string[]> {

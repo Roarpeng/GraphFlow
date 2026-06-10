@@ -39,6 +39,20 @@ export function mergeGraphFlowConfig(base: GraphFlowConfig, overlay: GraphFlowCo
     overlay.graphPolicy.semanticEnrichment?.model,
     base.graphPolicy.semanticEnrichment?.model
   );
+  const enrichBackendRaw =
+    overlay.graphPolicy.semanticEnrichment?.backend ?? base.graphPolicy.semanticEnrichment?.backend;
+  const enrichBackend =
+    enrichBackendRaw === "network" || enrichBackendRaw === "local" || enrichBackendRaw === "inherit"
+      ? enrichBackendRaw
+      : undefined;
+  const enrichApiKey = mergedEnrichmentField(
+    overlay.graphPolicy.semanticEnrichment?.apiKey,
+    base.graphPolicy.semanticEnrichment?.apiKey
+  );
+  const enrichBaseUrl = mergedEnrichmentField(
+    overlay.graphPolicy.semanticEnrichment?.baseUrl,
+    base.graphPolicy.semanticEnrichment?.baseUrl
+  );
 
   return validateConfig({
     providers: { ...base.providers, ...overlay.providers },
@@ -64,8 +78,11 @@ export function mergeGraphFlowConfig(base: GraphFlowConfig, overlay: GraphFlowCo
           overlay.graphPolicy.semanticEnrichment?.mode ??
           base.graphPolicy.semanticEnrichment?.mode ??
           "post-index",
+        ...(enrichBackend ? { backend: enrichBackend } : {}),
         ...(enrichProvider ? { provider: enrichProvider } : {}),
         ...(enrichModel ? { model: enrichModel } : {}),
+        ...(enrichApiKey ? { apiKey: enrichApiKey } : {}),
+        ...(enrichBaseUrl ? { baseUrl: enrichBaseUrl } : {}),
         batchSize:
           overlay.graphPolicy.semanticEnrichment?.batchSize ??
           base.graphPolicy.semanticEnrichment?.batchSize ??

@@ -90,7 +90,14 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
 
   const enrichProvider = trimOptional(input.graphPolicy.semanticEnrichment?.provider);
   const enrichModel = trimOptional(input.graphPolicy.semanticEnrichment?.model);
+  const enrichBackend = input.graphPolicy.semanticEnrichment?.backend;
+  const enrichApiKey = trimOptional(input.graphPolicy.semanticEnrichment?.apiKey);
+  const enrichBaseUrl = trimOptional(input.graphPolicy.semanticEnrichment?.baseUrl);
   const skillEvolutionModel = trimOptional(input.learningPolicy.skillEvolution?.model);
+
+  if (enrichBackend && enrichBackend !== "network" && enrichBackend !== "local" && enrichBackend !== "inherit") {
+    throw new Error("Invalid config: graphPolicy.semanticEnrichment.backend must be network|local|inherit.");
+  }
 
   if (enrichProvider) {
     const allowed = new Set(["openai", "anthropic", "bailian", "doubao", "openbmb"]);
@@ -157,8 +164,11 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       semanticEnrichment: {
         enabled: input.graphPolicy.semanticEnrichment?.enabled ?? true,
         mode: input.graphPolicy.semanticEnrichment?.mode ?? "post-index",
+        ...(enrichBackend ? { backend: enrichBackend } : {}),
         ...(enrichProvider ? { provider: enrichProvider } : {}),
         ...(enrichModel ? { model: enrichModel } : {}),
+        ...(enrichApiKey ? { apiKey: enrichApiKey } : {}),
+        ...(enrichBaseUrl ? { baseUrl: enrichBaseUrl } : {}),
         batchSize: input.graphPolicy.semanticEnrichment?.batchSize ?? 5,
         sleepMs: input.graphPolicy.semanticEnrichment?.sleepMs ?? 0,
         timeoutMs: input.graphPolicy.semanticEnrichment?.timeoutMs ?? 5000,

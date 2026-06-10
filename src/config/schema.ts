@@ -44,10 +44,15 @@ export interface GraphFlowConfig {
     semanticEnrichment?: {
       enabled?: boolean;
       mode?: "streaming" | "post-index" | "off";
+      /** network=cloud API, local=OpenBMB, inherit=economy tier (default). */
+      backend?: "network" | "local" | "inherit";
       /** When set, overrides economy tier provider for graph semantic enrichment. */
       provider?: string;
       /** When set, overrides economy tier model; leave unset to inherit economy/default routing. */
       model?: string;
+      /** Optional enrichment-only API key / base URL (network backend). */
+      apiKey?: string;
+      baseUrl?: string;
       batchSize?: number;
       sleepMs?: number;
       timeoutMs?: number;

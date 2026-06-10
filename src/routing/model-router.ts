@@ -52,7 +52,25 @@ export function resolveModelForRole(role: AgentRole, configPath?: string): Model
 
     if (role === "enricher") {
       const enrichPolicy = config.graphPolicy.semanticEnrichment;
-      const provider = (enrichPolicy?.provider ?? config.tiers.economy.provider) as ProviderName;
+      const backend = enrichPolicy?.backend ?? "inherit";
+
+      if (backend === "local" || enrichPolicy?.provider === "openbmb") {
+        return {
+          provider: "openbmb",
+          model:
+            enrichPolicy?.model ??
+            config.learningPolicy.skillEvolution?.model ??
+            DEFAULT_MODELS.openbmb.economy,
+          tier,
+          fallbackApplied: false,
+        };
+      }
+
+      const provider = (
+        backend === "network" && enrichPolicy?.provider
+          ? enrichPolicy.provider
+          : enrichPolicy?.provider ?? config.tiers.economy.provider
+      ) as ProviderName;
       return {
         provider,
         model:

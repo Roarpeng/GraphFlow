@@ -52,7 +52,6 @@ export async function enrichGraphSemanticsSilent(
     const codeSignature = node.content; // 原有的代码签名行
     const fileSource = node.metadata?.file ?? "unknown";
 
-    // 构建极度精炼、专为 1B 小模型设计的分类富化 prompt
     const prompt = [
       "你是一个卓越的代码语义分析器。",
       "请用一句话极其精炼地总结以下代码片段或函数签名的核心功能，限 20 字以内（使用中文）。",

@@ -54,7 +54,51 @@ function buildEmbeddingOptions(config: GraphFlowConfig) {
   };
 }
 
-function applyOpenBmbRuntimeEnv(config: GraphFlowConfig): void {
+function resolveEnrichmentBackend(
+  policy: GraphFlowConfig["graphPolicy"]["semanticEnrichment"]
+): "network" | "local" | "inherit" {
+  if (policy?.backend === "network" || policy?.backend === "local" || policy?.backend === "inherit") {
+    return policy.backend;
+  }
+  if (policy?.provider === "openbmb") {
+    return "local";
+  }
+  if (policy?.model || policy?.provider || policy?.apiKey || policy?.baseUrl) {
+    return "network";
+  }
+  return "inherit";
+}
+
+/** Apply enrichment-specific cloud credentials over generic provider env (network backend only). */
+export function prepareSemanticEnrichmentRuntime(configPath?: string): void {
+  if (!configPath) {
+    return;
+  }
+  const config = resolveConfig(configPath);
+  applyOpenBmbRuntimeEnv(config);
+  applyEnrichmentProviderEnv(config);
+}
+
+export function applyEnrichmentProviderEnv(config: GraphFlowConfig): void {
+  const policy = config.graphPolicy.semanticEnrichment;
+  const backend = resolveEnrichmentBackend(policy);
+  if (backend === "local") {
+    return;
+  }
+
+  const providerName = (policy?.provider ?? config.tiers.economy.provider).toUpperCase();
+  const providerCfg = config.providers[providerName.toLowerCase()] ?? {};
+  const apiKey = resolveConfigSecret(policy?.apiKey) ?? resolveConfigSecret(providerCfg.apiKey);
+  const baseUrl = policy?.baseUrl ?? providerCfg.baseUrl;
+  if (apiKey) {
+    process.env[`${providerName}_API_KEY`] = apiKey;
+  }
+  if (baseUrl) {
+    process.env[`${providerName}_BASE_URL`] = baseUrl;
+  }
+}
+
+export function applyOpenBmbRuntimeEnv(config: GraphFlowConfig): void {
   const genericProviders = ["openai", "anthropic", "bailian", "doubao"] as const;
   for (const name of genericProviders) {
     const cfg = config.providers[name];
@@ -165,8 +209,11 @@ export interface GraphFlowSettings {
   autoIndexOnRun: boolean;
   transport: GraphFlowConfig["graphPolicy"]["transport"];
   graphStorePath: string;
+  enrichmentBackend: "network" | "local" | "inherit";
   enrichmentProvider: string;
   enrichmentModel: string;
+  enrichmentApiKey?: string;
+  enrichmentBaseUrl?: string;
   openbmbMode: "embedded" | "ollama" | "openai-compat";
   openbmbEngine: "command" | "node-llama-cpp";
   openbmbModel: string;
@@ -215,8 +262,21 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
     autoIndexOnRun: config.graphPolicy.autoIndexOnRun ?? true,
     transport: config.graphPolicy.transport,
     graphStorePath: config.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.json",
+    enrichmentBackend: resolveEnrichmentBackend(config.graphPolicy.semanticEnrichment),
     enrichmentProvider: config.graphPolicy.semanticEnrichment?.provider ?? "",
     enrichmentModel: config.graphPolicy.semanticEnrichment?.model ?? "",
+    ...((): Record<string, string> => {
+      const enrichPolicy = config.graphPolicy.semanticEnrichment;
+      const enrichProvider = enrichPolicy?.provider ?? config.tiers.economy.provider;
+      const rawEnrichPolicy = rawConfig?.graphPolicy?.semanticEnrichment ?? {};
+      const rawEnrichProvider = rawConfig?.providers?.[enrichProvider] ?? {};
+      const apiKey = formatApiKeyForSettings(rawEnrichPolicy.apiKey ?? rawEnrichProvider.apiKey);
+      const baseUrl = rawEnrichPolicy.baseUrl ?? rawEnrichProvider.baseUrl;
+      return {
+        ...(apiKey ? { enrichmentApiKey: apiKey } : {}),
+        ...(typeof baseUrl === "string" && baseUrl.trim() ? { enrichmentBaseUrl: baseUrl.trim() } : {}),
+      };
+    })(),
     openbmbMode: (openbmbConfig.mode ?? "embedded") as "embedded" | "ollama" | "openai-compat",
     openbmbEngine: (openbmbConfig.engine ?? "command") as "command" | "node-llama-cpp",
     openbmbModel:
@@ -309,16 +369,27 @@ export function saveGraphFlowSettings(
       },
       semanticEnrichment: {
         ...(current.graphPolicy.semanticEnrichment ?? {}),
-        ...(settings.enrichmentProvider?.trim()
-          ? { provider: settings.enrichmentProvider.trim() }
-          : current.graphPolicy.semanticEnrichment?.provider
-            ? { provider: current.graphPolicy.semanticEnrichment.provider }
-            : {}),
+        backend: settings.enrichmentBackend,
+        ...(settings.enrichmentBackend === "local"
+          ? { provider: "openbmb" }
+          : settings.enrichmentProvider?.trim()
+            ? { provider: settings.enrichmentProvider.trim() }
+            : settings.enrichmentBackend === "inherit"
+              ? {}
+              : current.graphPolicy.semanticEnrichment?.provider
+                ? { provider: current.graphPolicy.semanticEnrichment.provider }
+                : {}),
         ...(settings.enrichmentModel?.trim()
           ? { model: settings.enrichmentModel.trim() }
           : current.graphPolicy.semanticEnrichment?.model
             ? { model: current.graphPolicy.semanticEnrichment.model }
             : {}),
+        ...(settings.enrichmentBackend !== "local" && settings.enrichmentApiKey?.trim()
+          ? { apiKey: formatApiKeyForConfig(settings.enrichmentApiKey) }
+          : {}),
+        ...(settings.enrichmentBackend !== "local" && settings.enrichmentBaseUrl?.trim()
+          ? { baseUrl: settings.enrichmentBaseUrl.trim() }
+          : {}),
       },
     },
     learningPolicy: {
@@ -566,6 +637,8 @@ async function maybeRunSemanticEnrichment(
     return;
   }
 
+  applyEnrichmentProviderEnv(config);
+
   try {
     await enrichGraphSemanticsSilent(graphClient, {
       ...(enrichPolicy.batchSize !== undefined ? { batchSize: enrichPolicy.batchSize } : {}),
@@ -584,6 +657,7 @@ export async function enrichSemanticsSilent(
 ): Promise<{ enrichedCount: number }> {
   const config = resolveConfig(configPath);
   applyOpenBmbRuntimeEnv(config);
+  applyEnrichmentProviderEnv(config);
   const graphClient = createGraphClient(config);
   const enrichPolicy = config.graphPolicy.semanticEnrichment;
   const enricherOptions: EnricherOptions = {};
