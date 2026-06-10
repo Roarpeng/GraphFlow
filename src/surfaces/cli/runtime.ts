@@ -30,6 +30,12 @@ import { withFileLock } from "../../utils/file-lock";
 import { logger } from "../../utils/logger";
 
 export { getDefaultConfig } from "../../config/defaults";
+export {
+  ensureGlobalGraphFlowConfig,
+  ensureWorkspaceGraphFlowConfig,
+  resolveGlobalConfigPath,
+  type ConfigScaffoldResult,
+} from "../../config/scaffold";
 export { resolveConfig, resolveConfigPath } from "../../config/resolve";
 
 function buildEmbeddingOptions(config: GraphFlowConfig) {

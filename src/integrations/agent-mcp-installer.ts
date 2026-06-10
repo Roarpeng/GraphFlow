@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -18,6 +19,12 @@ export interface McpInstallOptions {
   workspaceRoot?: string;
   npmScriptCwd?: string;
   bundledServerPath?: string;
+  /** Vendor runtime root (parent of dist/). Used as MCP cwd for module resolution. */
+  bundledRuntimeRoot?: string;
+  /** Explicit node binary. When omitted, resolves system node or editor-bundled node. */
+  nodeCommand?: string;
+  /** Editor executable for ELECTRON_RUN_AS_NODE fallback when system node is unavailable. */
+  electronExecPath?: string;
   serverName?: string;
   /** Test hook: override auto-detected agent ids. Empty array means no agents. */
   agentIdsOverride?: string[];
@@ -154,6 +161,46 @@ export function detectInstalledAgents(): DetectedAgent[] {
   return detected;
 }
 
+const MCP_STDIO_ENV: Record<string, string> = {
+  GRAPHFLOW_MCP_STDIO: "1",
+  GRAPHFLOW_LOG_JSON: "1",
+};
+
+export function resolveSystemNodeCommand(): string | undefined {
+  try {
+    const lookup = isWindows() ? "where.exe" : "which";
+    const target = isWindows() ? "node.exe" : "node";
+    const output = execFileSync(lookup, [target], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const firstLine = output.split(/\r?\n/).find((line) => line.trim().length > 0);
+    return firstLine?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function resolveMcpNodeLaunch(options: {
+  nodeCommand?: string;
+  electronExecPath?: string;
+}): { command: string; env: Record<string, string> } {
+  const explicitNode = options.nodeCommand?.trim();
+  const systemNode = explicitNode || resolveSystemNodeCommand();
+  if (systemNode) {
+    return { command: systemNode, env: { ...MCP_STDIO_ENV } };
+  }
+
+  const electronExecPath = options.electronExecPath ?? process.execPath;
+  return {
+    command: electronExecPath,
+    env: {
+      ...MCP_STDIO_ENV,
+      ELECTRON_RUN_AS_NODE: "1",
+    },
+  };
+}
+
 export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
   const cwd = options.workspaceRoot ?? options.npmScriptCwd ?? process.cwd();
 
@@ -161,11 +208,17 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
     if (!options.bundledServerPath) {
       throw new Error("bundledServerPath is required for node-bundled strategy");
     }
+    const runtimeRoot =
+      options.bundledRuntimeRoot ?? join(options.bundledServerPath, "..", "..", "..");
+    const launch = resolveMcpNodeLaunch({
+      ...(options.nodeCommand !== undefined ? { nodeCommand: options.nodeCommand } : {}),
+      ...(options.electronExecPath !== undefined ? { electronExecPath: options.electronExecPath } : {}),
+    });
     return {
-      command: process.execPath,
+      command: launch.command,
       args: [options.bundledServerPath],
-      cwd,
-      env: {},
+      cwd: runtimeRoot,
+      env: launch.env,
     };
   }
 

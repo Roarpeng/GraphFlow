@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getDefaultOverlayConfig } from "../../config/defaults";
+import { ensureGlobalGraphFlowConfig } from "../../config/scaffold";
 import {
   detectInstalledAgents,
   formatModelConfigGuide,
@@ -72,6 +73,13 @@ export function runInit() {
 
   const workspaceRoot = process.cwd();
   console.log("[START] Initializing GraphFlow project config...");
+
+  const globalConfig = ensureGlobalGraphFlowConfig();
+  if (globalConfig.status === "created") {
+    console.log(`[CREATED] Global config: ${globalConfig.path}`);
+  } else {
+    console.log(`[SKIP] Global config already exists: ${globalConfig.path}`);
+  }
 
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });

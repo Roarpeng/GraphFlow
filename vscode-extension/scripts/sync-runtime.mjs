@@ -63,6 +63,7 @@ function bundlePackage(name, modulesRoot, vendorModules, visited) {
 rmSync(vendorDist, { recursive: true, force: true });
 mkdirSync(vendorRoot, { recursive: true });
 cpSync(sourceDist, vendorDist, { recursive: true });
+cpSync(join(repoRoot, "package.json"), join(vendorRoot, "package.json"));
 
 rmSync(vendorNodeModules, { recursive: true, force: true });
 mkdirSync(vendorNodeModules, { recursive: true });

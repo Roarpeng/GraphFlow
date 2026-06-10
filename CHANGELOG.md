@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-10
+
+### Fixed
+
+- MCP auto-install now uses system `node` (or Cursor/Electron with `ELECTRON_RUN_AS_NODE`) instead of writing `process.execPath` from the extension host, which broke MCP stdio on other machines.
+- MCP server logs are redirected to stderr so JSON-RPC on stdout is not corrupted.
+- Bundled MCP `cwd` points at the extension vendor runtime root for reliable module resolution.
+- Extension first-install now scaffolds `~/.graphflow.config.json` (global) and workspace `.graphflow/config.json` when a folder is open.
+
 ## [0.6.0] - 2026-06-09
 
 ### Added

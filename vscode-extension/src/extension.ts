@@ -51,11 +51,16 @@ interface GraphFlowRuntime {
   getGraphFlowSettings(): GraphFlowSettings;
   saveGraphFlowSettings(settings: Omit<GraphFlowSettings, "configPath">): GraphFlowSettings;
   detectInstalledAgents(): DetectedAgent[];
+  ensureGlobalGraphFlowConfig(): { path: string; status: "created" | "skipped" };
+  ensureWorkspaceGraphFlowConfig(workspaceRoot: string): { path: string; status: "created" | "skipped" };
   installMcpToDetectedAgents(options: {
     strategy: "npx" | "npm-script" | "node-bundled";
     workspaceRoot?: string;
     npmScriptCwd?: string;
     bundledServerPath?: string;
+    bundledRuntimeRoot?: string;
+    nodeCommand?: string;
+    electronExecPath?: string;
   }): McpInstallResult[];
   formatModelConfigGuide(workspaceRoot?: string): string;
   downloadOpenBmbModel(
@@ -246,6 +251,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const installMcp = vscode.commands.registerCommand("graphflow.installMcp", async () => {
     const root = getWorkspaceRoot();
+    await runConfigBootstrap(root, output);
     await runMcpBootstrap(context, root, output, { forceNotify: true });
   });
 
@@ -450,6 +456,8 @@ async function bootstrapExtension(
   workspaceRoot: string | undefined,
   output: vscode.OutputChannel
 ): Promise<void> {
+  await runConfigBootstrap(workspaceRoot, output);
+
   const extensionVersion = context.extension.packageJSON.version as string;
   const lastInstalledVersion = context.globalState.get<string>(MCP_INSTALL_VERSION_KEY);
   const shouldInstall = lastInstalledVersion !== extensionVersion;
@@ -462,13 +470,43 @@ async function bootstrapExtension(
   await context.globalState.update(MCP_INSTALL_VERSION_KEY, extensionVersion);
 }
 
+async function runConfigBootstrap(
+  workspaceRoot: string | undefined,
+  output: vscode.OutputChannel
+): Promise<void> {
+  const cwdRoot = workspaceRoot ?? process.cwd();
+
+  try {
+    const globalResult = await runGraphFlow(cwdRoot, (runtime) =>
+      Promise.resolve(runtime.ensureGlobalGraphFlowConfig())
+    );
+    output.appendLine(
+      `[GraphFlow] Global config ${globalResult.status}: ${globalResult.path}`
+    );
+
+    if (workspaceRoot) {
+      const workspaceResult = await runGraphFlow(cwdRoot, (runtime) =>
+        Promise.resolve(runtime.ensureWorkspaceGraphFlowConfig(workspaceRoot))
+      );
+      output.appendLine(
+        `[GraphFlow] Workspace config ${workspaceResult.status}: ${workspaceResult.path}`
+      );
+    }
+  } catch (err) {
+    const text = err instanceof Error ? err.message : String(err);
+    output.appendLine(`[GraphFlow] Config scaffold failed: ${text}`);
+  }
+}
+
 async function runMcpBootstrap(
   context: vscode.ExtensionContext,
   workspaceRoot: string | undefined,
   output: vscode.OutputChannel,
   options: { forceNotify: boolean }
 ): Promise<void> {
-  const bundledServerPath = join(__dirname, "..", "vendor", "graphflow", "dist", "surfaces", "mcp", "server.js");
+  const extensionPath = context.extensionPath;
+  const bundledRuntimeRoot = join(extensionPath, "vendor", "graphflow");
+  const bundledServerPath = join(bundledRuntimeRoot, "dist", "surfaces", "mcp", "server.js");
   const cwdRoot = workspaceRoot ?? process.cwd();
 
   try {
@@ -478,6 +516,8 @@ async function runMcpBootstrap(
           strategy: "node-bundled",
           workspaceRoot: workspaceRoot,
           bundledServerPath,
+          bundledRuntimeRoot,
+          electronExecPath: process.execPath,
         })
       )
     );
@@ -590,6 +630,8 @@ async function loadRuntime(): Promise<GraphFlowRuntime> {
         !module.getGraphFlowSettings ||
         !module.saveGraphFlowSettings ||
         !module.detectInstalledAgents ||
+        !module.ensureGlobalGraphFlowConfig ||
+        !module.ensureWorkspaceGraphFlowConfig ||
         !module.installMcpToDetectedAgents ||
         !module.formatModelConfigGuide ||
         !module.downloadOpenBmbModel
@@ -610,6 +652,8 @@ async function loadRuntime(): Promise<GraphFlowRuntime> {
         getGraphFlowSettings: module.getGraphFlowSettings,
         saveGraphFlowSettings: module.saveGraphFlowSettings,
         detectInstalledAgents: module.detectInstalledAgents,
+        ensureGlobalGraphFlowConfig: module.ensureGlobalGraphFlowConfig,
+        ensureWorkspaceGraphFlowConfig: module.ensureWorkspaceGraphFlowConfig,
         installMcpToDetectedAgents: module.installMcpToDetectedAgents,
         formatModelConfigGuide: module.formatModelConfigGuide,
         downloadOpenBmbModel: module.downloadOpenBmbModel,
