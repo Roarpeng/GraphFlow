@@ -2,9 +2,6 @@
 process.env.GRAPHFLOW_MCP_STDIO ??= "1";
 process.env.GRAPHFLOW_LOG_JSON ??= "1";
 
-import { logger } from "../../utils/logger";
-
-
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
