@@ -1,13 +1,28 @@
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { getDefaultOverlayConfig } from "../../config/defaults";
+import {
+  detectInstalledAgents,
+  formatModelConfigGuide,
+  installMcpToDetectedAgents,
+  type McpInstallResult,
+} from "../../integrations/agent-mcp-installer";
 
 const CONFIG_DIR = ".graphflow";
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 const README_FILE = join(CONFIG_DIR, "README.md");
 
-const README_CONTENT = `# GraphFlow 配置文件说明
+function buildReadmeContent(workspaceRoot: string, installResults: McpInstallResult[]): string {
+  const detectedAgents = detectInstalledAgents().map((agent) => agent.name).join(", ") || "未检测到";
+  const installedLines =
+    installResults.length > 0
+      ? installResults
+          .filter((result) => result.status === "injected" || result.status === "created")
+          .map((result) => `- ${result.agentName} (${result.scope}): ${result.configPath}`)
+          .join("\n")
+      : "- 无";
+
+  return `# GraphFlow 配置文件说明
 
 欢迎使用 GraphFlow！本目录下包含 GraphFlow 的核心配置。
 
@@ -22,7 +37,12 @@ const README_CONTENT = `# GraphFlow 配置文件说明
 - **\`graphPolicy\`**: 控制图谱的生成和索引行为。如果你想让其分析整个仓库，确保 \`workspaceRoot\` 正确指向你的代码根目录。
 
 ## 2. MCP (Model Context Protocol) 自动注入
-我们在安装时已经自动尝试将 GraphFlow MCP 节点注入到你的常见 AI IDE（VS Code, Trae, Cursor, Claude Code）配置中了。
+安装时已自动嗅探本机 Agent 工具，并将 GraphFlow MCP 写入检测到的配置。
+
+**已嗅探到的 Agent：** ${detectedAgents}
+
+**已写入的配置：**
+${installedLines}
 
 **如何验证 MCP 是否可用？**
 在你的 AI Agent（或 IDE 的对话框）中直接说：
@@ -35,59 +55,19 @@ const README_CONTENT = `# GraphFlow 配置文件说明
 "graphflow": {
   "command": "npx",
   "args": ["-y", "graphflow-mcp"],
-  "cwd": "${process.cwd().replace(/\\/g, '\\\\')}"
+  "cwd": "${workspaceRoot.replace(/\\/g, "\\\\")}"
 }
 \`\`\`
+
+## 3. 模型配置
+${formatModelConfigGuide(workspaceRoot)}
 `;
-
-function injectMcpConfig() {
-  const isWindows = process.platform === "win32";
-  const appData = process.env.APPDATA || (isWindows ? join(homedir(), "AppData", "Roaming") : "");
-  const home = homedir();
-
-  const ideConfigs = [
-    // VS Code
-    { path: isWindows ? join(appData, "Code", "User", "mcp.json") : join(home, ".config", "Code", "User", "mcp.json"), key: "servers" },
-    // Trae
-    { path: isWindows ? join(appData, "Trae", "User", "mcp.json") : join(home, ".config", "Trae", "User", "mcp.json"), key: "mcpServers" },
-    // Cursor
-    { path: isWindows ? join(appData, "Cursor", "User", "globalStorage", "roval.cursor", "mcp.json") : join(home, ".cursor", "mcp.json"), key: "mcpServers" },
-    // Claude Code
-    { path: isWindows ? join(appData, "Claude Code", "mcp.json") : join(home, ".claude", "mcp.json"), key: "mcpServers" },
-  ];
-
-  const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
-  const mcpNode = {
-    command: npmCmd,
-    args: ["run", "start:mcp"],
-    env: {},
-    cwd: process.cwd()
-  };
-
-  for (const ide of ideConfigs) {
-    if (!ide.path || !existsSync(ide.path)) continue;
-
-    try {
-      const raw = readFileSync(ide.path, "utf8");
-      const json = raw.trim() ? JSON.parse(raw) : {};
-      
-      const targetKey = ide.key;
-      if (!json[targetKey]) {
-        json[targetKey] = {};
-      }
-      
-      json[targetKey]["graphflow"] = mcpNode;
-      writeFileSync(ide.path, JSON.stringify(json, null, 2) + "\n", "utf8");
-      console.log(`[SUCCESS] Injected GraphFlow MCP to: ${ide.path}`);
-    } catch (e) {
-      console.error(`[ERROR] Failed to update MCP config at ${ide.path}:`, e);
-    }
-  }
 }
 
 export function runInit() {
+  const workspaceRoot = process.cwd();
   console.log("[START] Initializing GraphFlow project config...");
-  
+
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });
     console.log(`[CREATED] Directory: ${CONFIG_DIR}`);
@@ -100,13 +80,27 @@ export function runInit() {
     console.log(`[SKIP] Config already exists: ${CONFIG_FILE}`);
   }
 
-  if (!existsSync(README_FILE)) {
-    writeFileSync(README_FILE, README_CONTENT, "utf8");
-    console.log(`[CREATED] Documentation: ${README_FILE}`);
+  const installResults = installMcpToDetectedAgents({
+    strategy: existsSync(join(workspaceRoot, "package.json")) ? "npm-script" : "npx",
+    workspaceRoot,
+    npmScriptCwd: workspaceRoot,
+  });
+
+  for (const result of installResults) {
+    if (result.status === "error") {
+      console.error(`[ERROR] ${result.agentName} (${result.configPath}): ${result.message}`);
+      continue;
+    }
+    if (result.status === "skipped") {
+      console.log(`[SKIP] ${result.message ?? "MCP install skipped"}`);
+      continue;
+    }
+    console.log(`[SUCCESS] ${result.status === "created" ? "Created" : "Updated"} GraphFlow MCP for ${result.agentName}: ${result.configPath}`);
   }
 
-  injectMcpConfig();
-  console.log("[FINISH] Initialization complete! Please check .graphflow/README.md for configuration instructions.");
+  writeFileSync(README_FILE, buildReadmeContent(workspaceRoot, installResults), "utf8");
+  console.log(`[CREATED] Documentation: ${README_FILE}`);
+  console.log("[FINISH] Initialization complete! Please check .graphflow/README.md for MCP and model configuration.");
 }
 
 if (require.main === module) {

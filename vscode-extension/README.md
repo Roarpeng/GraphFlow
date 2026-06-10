@@ -4,6 +4,8 @@ GraphFlow VS Code 扩展用于在编辑器内快速触发 GraphFlow CLI 任务�
 
 从 `0.3.0` 起，扩展已内置 GraphFlow runtime，安装后不再依赖工作区存在 GraphFlow 源码或 `npm run start` 命令。
 
+从 `0.6.0` 起，扩展在首次安装/升级时会自动嗅探本机 Agent 工具（Cursor、VS Code、Trae、Claude Code、Windsurf），并将 GraphFlow MCP 写入对应配置；安装完成后会提示如何配置模型。
+
 支持两种触发方式：
 
 1. 命令面板触发
@@ -11,8 +13,8 @@ GraphFlow VS Code 扩展用于在编辑器内快速触发 GraphFlow CLI 任务�
 
 ## 当前版本
 
-1. Extension: `0.5.0`
-2. 对应 VSIX: `../artifacts/graphflow-vscode-0.5.0.vsix`
+1. Extension: `0.6.0`
+2. 对应 VSIX: `../artifacts/graphflow-vscode-0.6.0.vsix`
 3. 依赖：扩展内置 GraphFlow runtime（默认）
 
 ## 功能命令
@@ -22,6 +24,23 @@ GraphFlow VS Code 扩展用于在编辑器内快速触发 GraphFlow CLI 任务�
 3. `GraphFlow: Plan & Brainstorm`
 4. `GraphFlow: Graph Snapshot`
 5. `GraphFlow: Skill Insights`
+6. `GraphFlow: Install MCP to Agents`（手动重试 MCP 自动安装）
+7. `GraphFlow: Model Setup Guide`（查看模型配置说明）
+8. `GraphFlow: Settings`（图形化配置 provider / 模型 / token 预算）
+
+## 安装后配置模型（推荐流程）
+
+1. 安装 VSIX 后重启 VS Code，等待弹窗 `GraphFlow MCP 已安装到: ...`
+2. 点击 **配置模型**，或运行 `GraphFlow: Settings`
+3. 选择 provider，填写 API Key 环境变量名与 Base URL（如 DeepSeek: `https://api.deepseek.com`）
+4. 设置 `smart` / `economy` 模型名（规划用强模型，执行用快模型）
+5. 保存后重启 Cursor / Claude Code 等 Agent 工具，使 MCP 生效
+6. 在 Agent 对话框验证：`使用 graphflow 预览 orchestrator 相关上下文`
+
+可选本地语义增强：
+
+1. `GraphFlow: Download MiniCPM Model`
+2. `GraphFlow: Enrich Graph Semantics`
 
 其中：
 
@@ -66,8 +85,8 @@ npm test
 
 可以，直接把 VSIX 文件发给同事安装即可：
 
-1. `artifacts/graphflow-vscode-0.5.0.vsix`
-2. 安装命令：`code --install-extension artifacts/graphflow-vscode-0.5.0.vsix`
+1. `artifacts/graphflow-vscode-0.6.0.vsix`
+2. 安装命令：`code --install-extension artifacts/graphflow-vscode-0.6.0.vsix`
 
 同事本地不需要拉取 GraphFlow 仓库代码。
 
@@ -76,7 +95,7 @@ npm test
 在仓库根目录执行：
 
 ```bash
-code --install-extension artifacts/graphflow-vscode-0.5.0.vsix
+code --install-extension artifacts/graphflow-vscode-0.6.0.vsix
 ```
 
 然后重启 VS Code，在命令面板执行：
@@ -114,7 +133,7 @@ npm run package
 
 默认输出：
 
-`../artifacts/graphflow-vscode-0.5.0.vsix`
+`../artifacts/graphflow-vscode-0.6.0.vsix`
 
 ## 扩展图标
 

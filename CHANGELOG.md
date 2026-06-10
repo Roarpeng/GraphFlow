@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-09
+
+### Added
+
+- Agent MCP auto-installer: sniffs Cursor, VS Code, Trae, Claude Code, and Windsurf; writes GraphFlow MCP to user and workspace config (creates missing files).
+- VS Code extension auto-installs bundled MCP on first install/upgrade (`onStartupFinished`).
+- New extension commands: `GraphFlow: Install MCP to Agents`, `GraphFlow: Model Setup Guide`.
+- Post-install model configuration guide in Output panel and `.graphflow/README.md`.
+
 ## [0.4.2] - 2026-06-01
 
 ### Fixed

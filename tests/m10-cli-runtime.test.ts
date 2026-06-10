@@ -301,6 +301,9 @@ describe("M10 CLI runtime", () => {
   });
 
   it("returns skill insights after task execution", async () => {
+    const previousTimeout = process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS;
+    process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS = "1000";
+
     const root = mkdtempSync(join(tmpdir(), "graphflow-skill-insights-"));
     const configPath = join(root, "graphflow.config.json");
     const storePath = join(root, "graph-store.json");
@@ -328,6 +331,10 @@ describe("M10 CLI runtime", () => {
               transport: "file",
               graphStorePath: storePath,
               maxContextTokens: 200,
+              semanticEnrichment: {
+                enabled: false,
+                mode: "off",
+              },
             },
             learningPolicy: {
               enableFlywheel: true,
@@ -339,6 +346,10 @@ describe("M10 CLI runtime", () => {
               enableSkillFlywheel: true,
               maxSkillHints: 4,
             },
+            routingPolicy: {
+              enableDynamicRouting: false,
+              requireApiKeyForHealthy: true,
+            },
           },
           null,
           2
@@ -346,7 +357,7 @@ describe("M10 CLI runtime", () => {
         "utf8"
       );
 
-      await runTask("refactor planner and add tests", configPath);
+      await runTask("update readme", configPath);
       const insights = await getSkillInsights(configPath, 10);
 
       expect(insights.source).toBe("graph-store");
@@ -354,6 +365,11 @@ describe("M10 CLI runtime", () => {
       expect(insights.skills.length).toBeGreaterThan(0);
       expect(insights.skills[0]?.uses).toBeGreaterThan(0);
     } finally {
+      if (previousTimeout === undefined) {
+        delete process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS;
+      } else {
+        process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS = previousTimeout;
+      }
       rmSync(root, { recursive: true, force: true });
     }
   }, 60000);

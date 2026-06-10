@@ -965,6 +965,7 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       enableEpisodicMemory: config.learningPolicy.enableFlywheel,
       enableLlmAgents: config.tiers.smart.provider === "openbmb" || config.tiers.economy.provider === "openbmb",
       enableLlmTriage: config.tiers.smart.provider === "openbmb" || config.tiers.economy.provider === "openbmb",
+      ...(configPath ? { configPath } : {}),
       ...embeddingOptions,
       ...(config.skillPolicy?.enableSkillFlywheel
         ? {
@@ -974,11 +975,9 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
               : {}),
           }
         : { enableSkillFlywheel: false }),
+      providerHealth: buildProviderHealthMap(config),
       ...(config.routingPolicy?.enableDynamicRouting
-        ? {
-            providerHealth: buildProviderHealthMap(config),
-            providerFallbackChain: buildFallbackChain(config),
-          }
+        ? { providerFallbackChain: buildFallbackChain(config) }
         : {}),
       ...(config.graphPolicy.enableNearLosslessMode !== undefined
         ? { enableNearLosslessMode: config.graphPolicy.enableNearLosslessMode }
@@ -1125,6 +1124,17 @@ export function planAndBrainstorm(task: string): string {
       .join(" | ")}`,
   ].join("; ");
 }
+
+export {
+  buildMcpServerNode,
+  detectInstalledAgents,
+  formatModelConfigGuide,
+  installMcpToDetectedAgents,
+  type DetectedAgent,
+  type McpInstallOptions,
+  type McpInstallResult,
+  type McpInstallStrategy,
+} from "../../integrations/agent-mcp-installer";
 
 function extractTokenCost(feedback: string): number {
   const match = feedback.match(/tokens=(\d+)/);

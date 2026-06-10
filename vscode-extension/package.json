@@ -4,7 +4,7 @@
   "displayName": "GraphFlow",
   "description": "GraphFlow orchestration panel and command runner",
   "icon": "media/graphflow.png",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"
@@ -24,7 +24,10 @@
     "onCommand:graphflow.showGraph",
     "onCommand:graphflow.showSkills",
     "onCommand:graphflow.enrichGraph",
+    "onCommand:graphflow.installMcp",
+    "onCommand:graphflow.showSetupGuide",
     "onCommand:graphflow.downloadModel",
+    "onStartupFinished",
     "onChatParticipant:roarpeng.graphflow-vscode.graphflowAgent"
   ],
   "main": "./dist/extension.js",
@@ -104,6 +107,14 @@
         "title": "GraphFlow: Enrich Graph Semantics"
       },
       {
+        "command": "graphflow.installMcp",
+        "title": "GraphFlow: Install MCP to Agents"
+      },
+      {
+        "command": "graphflow.showSetupGuide",
+        "title": "GraphFlow: Model Setup Guide"
+      },
+      {
         "command": "graphflow.downloadModel",
         "title": "GraphFlow: Download MiniCPM Model"
       }
@@ -165,7 +176,7 @@
     "sync-runtime": "npm --prefix .. run build && node ./scripts/sync-runtime.mjs",
     "test:runtime": "node ./scripts/test-bundled-runtime.mjs",
     "build": "npm run sync-runtime && tsc -p ./tsconfig.json",
-    "package": "npm run build && npm run test:runtime && node -e \"require('node:fs').mkdirSync('../artifacts',{recursive:true})\" && npx @vscode/vsce package --no-dependencies --out ../artifacts/graphflow-vscode-0.5.0.vsix"
+    "package": "npm run build && npm run test:runtime && node -e \"require('node:fs').mkdirSync('../artifacts',{recursive:true})\" && npx @vscode/vsce package --no-dependencies --out ../artifacts/graphflow-vscode-0.6.0.vsix"
   },
   "devDependencies": {
     "@types/vscode": "^1.99.0",

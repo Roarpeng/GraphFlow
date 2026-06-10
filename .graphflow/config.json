@@ -1,8 +1,8 @@
 {
   "providers": {},
   "tiers": {
-    "smart": { "provider": "openai", "model": "gpt-4.1" },
-    "economy": { "provider": "openai", "model": "gpt-4.1-mini" }
+    "smart": { "provider": "openai", "model": "deepseek-v4-pro" },
+    "economy": { "provider": "openai", "model": "deepseek-v4-flash" }
   },
   "budgetPolicy": {
     "runTokenCap": 2000
@@ -58,6 +58,14 @@
     "enableDynamicRouting": true,
     "requireApiKeyForHealthy": false,
     "providerPriority": ["openai"]
+  },
+  "embeddingPolicy": {
+    "enabled": true,
+    "provider": "local",
+    "model": "Xenova/bge-base-zh-v1.5",
+    "vectorStorePath": ".graphflow-cache/vectors.db",
+    "topK": 8,
+    "minSimilarity": 0.05
   },
   "skillPolicy": {
     "enableSkillFlywheel": true,

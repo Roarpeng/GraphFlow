@@ -45,6 +45,7 @@ export interface OrchestrateOptions {
   enableEpisodicMemory?: boolean;
   enableLlmTriage?: boolean;
   embeddingProvider?: import("../learning/embeddings").EmbeddingProvider;
+  configPath?: string;
 }
 
 export async function orchestrate(
@@ -54,7 +55,11 @@ export async function orchestrate(
   logger.info({ task: input.task }, "Orchestration task started");
   const retryOptions = input.maxRetries !== undefined ? { maxRetries: input.maxRetries } : {};
   const contextPackage = await maybeBuildNearLosslessContext(input, options);
-  const routeDecisions = buildRouteDecisions(options?.providerHealth, options?.providerFallbackChain);
+  const routeDecisions = buildRouteDecisions(
+    options?.providerHealth,
+    options?.providerFallbackChain,
+    options?.configPath
+  );
   const skillHints = await maybeBuildSkillHints(input.task, options);
   const similarEpisodes = await maybeFindSimilarEpisodes(input.task, options);
   const episodeSummaries = similarEpisodes.map((ep) => summarizeEpisodeForPrompt(ep));
@@ -68,11 +73,19 @@ export async function orchestrate(
   let currentPlan: TaskNode[] = [];
 
   if (mode === "simple") {
+    const workerSelection = selectionIfHealthy(
+      decisionToSelection(routeDecisions.worker),
+      options?.providerHealth
+    );
+    const validatorSelection = selectionIfHealthy(
+      decisionToSelection(routeDecisions.validator),
+      options?.providerHealth
+    );
     const run = await runSimpleTask({
       task: input.task,
       ...retryOptions,
-      workerSelection: decisionToSelection(routeDecisions.worker),
-      validatorSelection: decisionToSelection(routeDecisions.validator),
+      ...(workerSelection ? { workerSelection } : {}),
+      ...(validatorSelection ? { validatorSelection } : {}),
       ...(promptContext ? { workerContext: promptContext, validatorContext: promptContext } : {}),
     });
     const finalRun = appendContextFeedback(run, contextPackage, promptContextLines, options);
@@ -108,11 +121,19 @@ export async function orchestrate(
 
   const runner = async (node: TaskNode): Promise<boolean> => {
     logger.info({ nodeId: node.id, description: node.description }, "Executing task node");
+    const workerSelection = selectionIfHealthy(
+      decisionToSelection(routeDecisions.worker),
+      options?.providerHealth
+    );
+    const validatorSelection = selectionIfHealthy(
+      decisionToSelection(routeDecisions.validator),
+      options?.providerHealth
+    );
     const run = await runSimpleTask({
       task: node.description,
       ...retryOptions,
-      workerSelection: decisionToSelection(routeDecisions.worker),
-      validatorSelection: decisionToSelection(routeDecisions.validator),
+      ...(workerSelection ? { workerSelection } : {}),
+      ...(validatorSelection ? { validatorSelection } : {}),
       ...(promptContext ? { workerContext: promptContext, validatorContext: promptContext } : {}),
     });
     return run.status === "COMPLETED";
@@ -285,33 +306,34 @@ function appendRouteFeedback(
   };
 }
 
+function selectionIfHealthy(
+  selection: ReturnType<typeof decisionToSelection>,
+  providerHealth?: ProviderHealthMap
+): ReturnType<typeof decisionToSelection> | undefined {
+  if (!providerHealth) {
+    return selection;
+  }
+  return providerHealth[selection.provider as ProviderName] ? selection : undefined;
+}
+
 function buildRouteDecisions(
   providerHealth?: ProviderHealthMap,
-  providerFallbackChain?: ProviderName[]
+  providerFallbackChain?: ProviderName[],
+  configPath?: string
 ): {
   planner: RouteDecision;
   worker: RouteDecision;
   validator: RouteDecision;
 } {
+  const resolve = (role: "planner" | "worker" | "validator") =>
+    providerHealth
+      ? resolveModelWithFallback(role, providerHealth, providerFallbackChain, configPath)
+      : resolveModelForRole(role, configPath);
+
   return {
-    planner: selectionToDecision(
-      "planner",
-      providerHealth
-        ? resolveModelWithFallback("planner", providerHealth, providerFallbackChain)
-        : resolveModelForRole("planner")
-    ),
-    worker: selectionToDecision(
-      "worker",
-      providerHealth
-        ? resolveModelWithFallback("worker", providerHealth, providerFallbackChain)
-        : resolveModelForRole("worker")
-    ),
-    validator: selectionToDecision(
-      "validator",
-      providerHealth
-        ? resolveModelWithFallback("validator", providerHealth, providerFallbackChain)
-        : resolveModelForRole("validator")
-    ),
+    planner: selectionToDecision("planner", resolve("planner")),
+    worker: selectionToDecision("worker", resolve("worker")),
+    validator: selectionToDecision("validator", resolve("validator")),
   };
 }
 

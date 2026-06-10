@@ -75,7 +75,7 @@ describe("M17 release readiness", () => {
   it("exposes stable help and version text for CLI users", () => {
     expect(buildCliUsage()).toContain("Usage: graphflow <command> [options]");
     expect(buildCliUsage()).toContain("run \"<task>\" [--json] [--config <path>]");
-    expect(getCliVersion()).toMatch(/^0\.5\./);
+    expect(getCliVersion()).toMatch(/^0\.6\./);
   });
 
   it("uses supported default router model names", () => {

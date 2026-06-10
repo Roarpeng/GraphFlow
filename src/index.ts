@@ -16,7 +16,17 @@ export {
   runLearningNightlyResult,
   planAndBrainstorm,
   planAndBrainstormResult,
+  buildMcpServerNode,
+  detectInstalledAgents,
+  formatModelConfigGuide,
+  installMcpToDetectedAgents,
 } from "./surfaces/cli/runtime";
+export type {
+  DetectedAgent,
+  McpInstallOptions,
+  McpInstallResult,
+  McpInstallStrategy,
+} from "./integrations/agent-mcp-installer";
 export { parseCliOptions, formatCliResult, type CliCommandResult } from "./surfaces/cli/output";
 export {
   createMcpServer,
