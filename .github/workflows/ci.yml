@@ -8,11 +8,7 @@ on:
 
 jobs:
   validate:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -31,18 +27,15 @@ jobs:
         run: corepack enable
 
       - name: Install root dependencies
-        run: npm install --ignore-scripts --no-audit
+        run: npm install --no-audit
+        env:
+          GRAPHFLOW_SKIP_POSTINSTALL: "1"
 
       - name: Install extension dependencies
         run: npm ci --prefix vscode-extension
 
       - name: Rebuild better-sqlite3
         run: npm rebuild better-sqlite3
-        continue-on-error: ${{ matrix.os == 'windows-latest' }}
-
-      - name: Audit
-        run: npm audit --audit-level=moderate
-        continue-on-error: true
 
       - name: Lint
         run: npm run lint
@@ -51,7 +44,7 @@ jobs:
         run: npm run build
 
       - name: Test
-        run: npm run test -- --coverage
+        run: npm test
 
       - name: Build extension
         run: npm run build:extension

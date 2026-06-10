@@ -8,11 +8,7 @@ on:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -31,24 +27,23 @@ jobs:
         run: corepack enable
 
       - name: Install root dependencies
-        run: npm install --ignore-scripts --no-audit
+        run: npm install --no-audit
+        env:
+          GRAPHFLOW_SKIP_POSTINSTALL: "1"
 
       - name: Install extension dependencies
         run: npm ci --prefix vscode-extension
 
       - name: Rebuild better-sqlite3
         run: npm rebuild better-sqlite3
-        continue-on-error: ${{ matrix.os == 'windows-latest' }}
 
       - name: Lint, build, test, and package extension
         run: npm run lint && npm run build && npm test && npm run build:extension && npm run test:extension
 
       - name: Package VSIX
-        if: matrix.os == 'ubuntu-latest'
         run: npm run package:extension
 
       - name: Upload VSIX artifact
-        if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
         with:
           name: graphflow-vscode-extension

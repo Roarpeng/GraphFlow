@@ -65,6 +65,11 @@ ${formatModelConfigGuide(workspaceRoot)}
 }
 
 export function runInit() {
+  if (process.env.GRAPHFLOW_SKIP_POSTINSTALL === "1" || process.env.CI === "true") {
+    console.log("[SKIP] GraphFlow postinstall skipped in CI/automation.");
+    return;
+  }
+
   const workspaceRoot = process.cwd();
   console.log("[START] Initializing GraphFlow project config...");
 
