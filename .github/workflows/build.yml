@@ -31,7 +31,7 @@ jobs:
         run: corepack enable
 
       - name: Install root dependencies
-        run: npm ci --include=optional
+        run: npm ci
 
       - name: Install extension dependencies
         run: npm ci --prefix vscode-extension
