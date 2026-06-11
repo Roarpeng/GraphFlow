@@ -1,5 +1,5 @@
 {
-  "mcpServers": {
+  "servers": {
     "graphflow": {
       "command": "c:\\Users\\roarp\\.antigravity-ide\\extensions\\roarpeng.graphflow-vscode-0.6.4\\mcp-launcher.cmd",
       "args": [],

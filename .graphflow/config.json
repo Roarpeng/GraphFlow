@@ -1,8 +1,24 @@
 {
-  "providers": {},
+  "providers": {
+    "openai": {
+      "apiKey": "sk-1aee7b2149b84cf88abaeefefdcbd570",
+      "baseUrl": "https://api.deepseek.com"
+    },
+    "openbmb": {
+      "mode": "embedded",
+      "engine": "command",
+      "autoDownloadModel": false
+    }
+  },
   "tiers": {
-    "smart": { "provider": "openai", "model": "deepseek-v4-pro" },
-    "economy": { "provider": "openai", "model": "deepseek-v4-flash" }
+    "smart": {
+      "provider": "openai",
+      "model": "deepseek-v4-pro"
+    },
+    "economy": {
+      "provider": "openai",
+      "model": "deepseek-v4-flash"
+    }
   },
   "budgetPolicy": {
     "runTokenCap": 2000
@@ -12,7 +28,7 @@
     "enableNearLosslessMode": true,
     "autoIndexOnPreview": true,
     "autoIndexOnRun": true,
-    "workspaceRoot": ".",
+    "workspaceRoot": "c:\\Users\\roarp\\Desktop\\TMP\\Code\\AICode\\GraphFlow",
     "includeExtensions": [
       ".ts",
       ".tsx",
@@ -23,7 +39,7 @@
     ],
     "transport": "file",
     "graphStorePath": "tmp/graphflow-graph.json",
-    "maxContextTokens": 1200,
+    "maxContextTokens": 2000,
     "layerQuota": {
       "l1": 6,
       "l2": 4,
@@ -32,6 +48,7 @@
     "semanticEnrichment": {
       "enabled": true,
       "mode": "post-index",
+      "backend": "network",
       "model": "deepseek-v4-flash",
       "batchSize": 5,
       "sleepMs": 0,
@@ -57,7 +74,17 @@
   "routingPolicy": {
     "enableDynamicRouting": true,
     "requireApiKeyForHealthy": false,
-    "providerPriority": ["openai"]
+    "providerPriority": [
+      "openai",
+      "anthropic",
+      "bailian",
+      "doubao",
+      "openbmb"
+    ]
+  },
+  "skillPolicy": {
+    "enableSkillFlywheel": true,
+    "maxSkillHints": 3
   },
   "embeddingPolicy": {
     "enabled": true,
@@ -66,9 +93,5 @@
     "vectorStorePath": ".graphflow-cache/vectors.db",
     "topK": 8,
     "minSimilarity": 0.05
-  },
-  "skillPolicy": {
-    "enableSkillFlywheel": true,
-    "maxSkillHints": 3
   }
 }

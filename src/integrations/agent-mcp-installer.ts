@@ -42,7 +42,7 @@ export interface McpInstallResult {
   agentName: string;
   configPath: string;
   scope: "user" | "workspace";
-  status: "injected" | "created" | "skipped" | "error";
+  status: "injected" | "created" | "skipped" | "error" | "updated";
   message?: string;
 }
 
@@ -142,6 +142,52 @@ function buildAgentProfiles(): AgentProfile[] {
       userTargets: [
         {
           configPath: join(home, ".codeium", "windsurf", "mcp_config.json"),
+          serversKey: "mcpServers",
+        },
+      ],
+    },
+    {
+      id: "cline",
+      name: "Cline",
+      markerPaths: [
+        join(appData, "Code", "User", "globalStorage", "saoudrizwan.claude-dev"),
+        join(appData, "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev"),
+        join(home, ".config", "Code", "User", "globalStorage", "saoudrizwan.claude-dev"),
+      ],
+      userTargets: [
+        {
+          configPath: isWindows()
+            ? join(appData, "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json")
+            : join(home, ".config", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
+          serversKey: "mcpServers",
+        },
+        {
+          configPath: isWindows()
+            ? join(appData, "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json")
+            : join(home, ".config", "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
+          serversKey: "mcpServers",
+        },
+      ],
+    },
+    {
+      id: "roo-code",
+      name: "Roo Code",
+      markerPaths: [
+        join(appData, "Code", "User", "globalStorage", "roval.vscode-roo-cline"),
+        join(appData, "Cursor", "User", "globalStorage", "roval.vscode-roo-cline"),
+        join(home, ".config", "Code", "User", "globalStorage", "roval.vscode-roo-cline"),
+      ],
+      userTargets: [
+        {
+          configPath: isWindows()
+            ? join(appData, "Code", "User", "globalStorage", "roval.vscode-roo-cline", "settings", "cline_mcp_settings.json")
+            : join(home, ".config", "Code", "User", "globalStorage", "roval.vscode-roo-cline", "settings", "cline_mcp_settings.json"),
+          serversKey: "mcpServers",
+        },
+        {
+          configPath: isWindows()
+            ? join(appData, "Cursor", "User", "globalStorage", "roval.vscode-roo-cline", "settings", "cline_mcp_settings.json")
+            : join(home, ".config", "Cursor", "User", "globalStorage", "roval.vscode-roo-cline", "settings", "cline_mcp_settings.json"),
           serversKey: "mcpServers",
         },
       ],
@@ -361,14 +407,19 @@ function injectIntoConfig(
   serversKey: McpServersKey,
   serverName: string,
   node: McpServerNode
-): "injected" | "created" {
+): "injected" | "created" | "updated" {
   const existed = existsSync(configPath);
   const json = readJsonConfig(configPath);
   const servers = (json[serversKey] as Record<string, McpServerNode> | undefined) ?? {};
+  
+  const serverExisted = !!servers[serverName];
   servers[serverName] = node;
   json[serversKey] = servers;
   writeJsonConfig(configPath, json);
-  return existed ? "injected" : "created";
+  
+  if (!existed) return "created";
+  if (!serverExisted) return "injected";
+  return "updated";
 }
 
 export function installMcpToDetectedAgents(options: McpInstallOptions): McpInstallResult[] {

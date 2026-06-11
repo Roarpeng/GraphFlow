@@ -461,14 +461,13 @@ async function bootstrapExtension(
 
   const extensionVersion = context.extension.packageJSON.version as string;
   const lastInstalledVersion = context.globalState.get<string>(MCP_INSTALL_VERSION_KEY);
-  const shouldInstall = lastInstalledVersion !== extensionVersion;
+  const isFreshInstall = lastInstalledVersion !== extensionVersion;
 
-  if (!shouldInstall) {
-    return;
+  await runMcpBootstrap(context, workspaceRoot, output, { forceNotify: isFreshInstall, isFreshInstall });
+
+  if (isFreshInstall) {
+    await context.globalState.update(MCP_INSTALL_VERSION_KEY, extensionVersion);
   }
-
-  await runMcpBootstrap(context, workspaceRoot, output, { forceNotify: true });
-  await context.globalState.update(MCP_INSTALL_VERSION_KEY, extensionVersion);
 }
 
 async function runConfigBootstrap(
@@ -503,7 +502,7 @@ async function runMcpBootstrap(
   context: vscode.ExtensionContext,
   workspaceRoot: string | undefined,
   output: vscode.OutputChannel,
-  options: { forceNotify: boolean }
+  options: { forceNotify: boolean; isFreshInstall?: boolean }
 ): Promise<void> {
   const extensionPath = context.extensionPath;
   const bundledRuntimeRoot = join(extensionPath, "vendor", "graphflow");
@@ -529,6 +528,7 @@ async function runMcpBootstrap(
     );
 
     const successes = results.filter((result) => result.status === "injected" || result.status === "created");
+    const updated = results.filter((result) => result.status === "updated");
     const detected = await runGraphFlow(cwdRoot, (runtime) => Promise.resolve(runtime.detectInstalledAgents()));
     const guide = await runGraphFlow(cwdRoot, (runtime) =>
       Promise.resolve(runtime.formatModelConfigGuide(workspaceRoot))
@@ -541,12 +541,16 @@ async function runMcpBootstrap(
     output.appendLine("");
     output.appendLine(guide);
 
-    if (!options.forceNotify) {
+    if (options.isFreshInstall) {
+      void vscode.commands.executeCommand("graphflow.showSetupGuide");
+    }
+
+    if (!options.forceNotify && successes.length === 0) {
       return;
     }
 
     const agentNames = detected.map((agent) => agent.name).join(", ") || "未检测到";
-    if (successes.length === 0) {
+    if (successes.length === 0 && updated.length === 0) {
       vscode.window.showWarningMessage(
         `GraphFlow 未写入 MCP（嗅探到: ${agentNames}）。可运行 "GraphFlow: Install MCP to Agents" 重试。`,
         "打开设置",
@@ -561,7 +565,8 @@ async function runMcpBootstrap(
       return;
     }
 
-    const installedNames = [...new Set(successes.map((result) => result.agentName))].join(", ");
+    const allNotified = [...successes, ...updated];
+    const installedNames = [...new Set(allNotified.map((result) => result.agentName))].join(", ");
     vscode.window
       .showInformationMessage(
         `GraphFlow MCP 已安装到: ${installedNames}。请配置模型 API Key 后重启对应 Agent 工具。`,
@@ -572,7 +577,7 @@ async function runMcpBootstrap(
         if (choice === "配置模型") {
           void vscode.commands.executeCommand("graphflow.showSettings");
         } else if (choice === "查看说明") {
-          output.show(true);
+          void vscode.commands.executeCommand("graphflow.showSetupGuide");
         }
       });
   } catch (err) {
