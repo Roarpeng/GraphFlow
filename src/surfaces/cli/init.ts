@@ -115,7 +115,22 @@ export function runInit() {
 
   writeFileSync(README_FILE, buildReadmeContent(workspaceRoot, installResults), "utf8");
   console.log(`[CREATED] Documentation: ${README_FILE}`);
+
+  void bootstrapGraphIndex(workspaceRoot).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[WARN] Bootstrap graph index skipped: ${message}`);
+  });
+
   console.log("[FINISH] Initialization complete! Please check .graphflow/README.md for MCP and model configuration.");
+}
+
+async function bootstrapGraphIndex(workspaceRoot: string): Promise<void> {
+  const { indexGraph } = await import("./runtime.js");
+  const configPath = existsSync(CONFIG_FILE) ? CONFIG_FILE : undefined;
+  const result = await indexGraph(workspaceRoot, configPath);
+  console.log(
+    `[INDEX] Bootstrap complete: indexedFiles=${result.indexedFiles}; indexedSymbols=${result.indexedSymbols}`
+  );
 }
 
 if (require.main === module) {

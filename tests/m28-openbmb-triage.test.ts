@@ -31,7 +31,12 @@ describe("OpenBMB 1B Triage & Integration", () => {
 
   it("triageTaskLlm falls back to heuristic rule when provider throws error", async () => {
     // 强制传一个会抛错的配置（如 null/undefined 驱动）来验证优雅降级
-    const selection = { provider: "invalid-provider" as any, model: "minicpm-1b", tier: "economy" as const, fallbackApplied: false };
+    const selection = {
+      provider: "openbmb",
+      model: "minicpm-1b",
+      tier: "economy" as const,
+      fallbackApplied: false,
+    };
     const res = await triageTaskLlm("Refactor module A and update module B", selection);
     expect(res).toBe("complex"); // 启发式规则判定为 complex
   });

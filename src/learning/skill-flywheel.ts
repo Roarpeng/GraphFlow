@@ -221,7 +221,7 @@ export async function suggestSkillHints(
     score: number;
     uses: number;
     isComposite: boolean;
-    state?: any;
+    state?: ({ kind: "evolution" } & EvolutionarySkillNode) | ({ kind: "composite" } & CompositeSkillState);
   };
   const ranked: Ranked[] = [
     ...eligibleEvolutions.map((e) => ({
@@ -492,7 +492,7 @@ export async function evolveCompositeSkillLlm(
   client: GraphClient,
   n1: string,
   n2: string,
-  previousComposite: any
+  previousComposite: CompositeSkillState | null
 ): Promise<GraphNode | null> {
   const openbmbModel = process.env.GRAPHFLOW_SKILL_EVOLVE_MODEL ?? "minicpm5-1b";
 
@@ -530,8 +530,8 @@ export async function evolveCompositeSkillLlm(
       parents: [skillNodeId(n1), skillNodeId(n2)],
       domain: parsed.domainC,
       description: parsed.methodologyDescription || "",
-      score: previousComposite.score ?? 1,
-      uses: previousComposite.uses ?? 1,
+      score: previousComposite?.score ?? 1,
+      uses: previousComposite?.uses ?? 1,
       updatedAt: Date.now(),
       canaryUses: 0,
       canaryPasses: 0,

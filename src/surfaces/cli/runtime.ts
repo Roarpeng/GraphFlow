@@ -6,6 +6,7 @@ import { brainstormTask } from "../../agents/brainstormer";
 import { planTasks } from "../../agents/planner";
 import { validateConfig } from "../../config/loader";
 import { formatApiKeyForConfig, formatApiKeyForSettings, resolveConfigSecret } from "../../config/secrets";
+import { listConfigOverlayKeys } from "../../config/merge";
 import { resolveConfig, resolveConfigPath } from "../../config/resolve";
 import { createEmbeddingProviderFromConfig } from "../../config/embedding-factory";
 import { resolveGraphStorePath, resolveLearningPath } from "../../config/paths";
@@ -207,6 +208,7 @@ export interface GraphFlowSettings {
   enableNearLosslessMode: boolean;
   autoIndexOnPreview: boolean;
   autoIndexOnRun: boolean;
+  autoIndexOnSave: boolean;
   transport: GraphFlowConfig["graphPolicy"]["transport"];
   graphStorePath: string;
   enrichmentBackend: "network" | "local" | "inherit";
@@ -260,6 +262,7 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
     enableNearLosslessMode: config.graphPolicy.enableNearLosslessMode ?? false,
     autoIndexOnPreview: config.graphPolicy.autoIndexOnPreview ?? true,
     autoIndexOnRun: config.graphPolicy.autoIndexOnRun ?? true,
+    autoIndexOnSave: config.graphPolicy.autoIndexOnSave ?? false,
     transport: config.graphPolicy.transport,
     graphStorePath: config.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.json",
     enrichmentBackend: resolveEnrichmentBackend(config.graphPolicy.semanticEnrichment),
@@ -359,6 +362,7 @@ export function saveGraphFlowSettings(
       enableNearLosslessMode: settings.enableNearLosslessMode,
       autoIndexOnPreview: settings.autoIndexOnPreview,
       autoIndexOnRun: settings.autoIndexOnRun,
+      autoIndexOnSave: settings.autoIndexOnSave,
       transport: settings.transport,
       graphStorePath: settings.graphStorePath,
       maxContextTokens: Math.max(1, Math.floor(settings.maxContextTokens)),
@@ -1177,6 +1181,34 @@ export function diagnoseRouting(configPath?: string): string {
   ].join("; ");
 }
 
+export interface SettingsPanelStatusData {
+  graphNodeCount: number;
+  graphEdgeCount: number;
+  graphLastModified: string | null;
+  diagnoseSummary: string;
+  overlayKeys: string[];
+  baseConfigPath: string;
+}
+
+export async function getSettingsPanelStatus(configPath?: string): Promise<SettingsPanelStatusData> {
+  const config = resolveConfig(configPath);
+  const snapshot = await inspectGraph(configPath, { nodeLimit: 1, edgeLimit: 1 });
+  const storePath = resolveGraphStorePath(config);
+  let graphLastModified: string | null = null;
+  if (existsSync(storePath)) {
+    graphLastModified = new Date(statSync(storePath).mtimeMs).toISOString();
+  }
+
+  return {
+    graphNodeCount: snapshot.nodeCount,
+    graphEdgeCount: snapshot.edgeCount,
+    graphLastModified,
+    diagnoseSummary: diagnoseRouting(configPath),
+    overlayKeys: listConfigOverlayKeys(),
+    baseConfigPath: existsSync("graphflow.config.json") ? "graphflow.config.json" : "（未创建）",
+  };
+}
+
 export function runLearningNightlyResult(configPath?: string): LearningNightlyResult {
   const config = resolveConfig(configPath);
   const summary = runNightlyLearning(config);
@@ -1380,7 +1412,6 @@ function calculateBudgetUsedPercent(compressedTokens: number, maxContextTokens: 
 
 function estimateTokenCount(text: string): number {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { encode } = require("gpt-tokenizer/model/gpt-4o") as { encode: (t: string) => number[] };
     return Math.max(1, encode(text).length);
   } catch {

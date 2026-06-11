@@ -68,7 +68,7 @@ export async function orchestrate(
 
   let mode = triageTask(input.task);
   if (options?.enableLlmTriage) {
-    mode = await triageTaskLlm(input.task, routeDecisions.planner, promptContext);
+    mode = await triageTaskLlm(input.task, decisionToSelection(routeDecisions.planner), promptContext);
   }
   let currentPlan: TaskNode[] = [];
 

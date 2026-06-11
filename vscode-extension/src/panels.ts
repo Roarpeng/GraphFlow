@@ -70,6 +70,17 @@ export interface GraphFlowSettings {
   openbmbAutoDownload: boolean;
   openbmbModelUrl?: string;
   openbmbModelSha256?: string;
+  autoIndexOnSave?: boolean;
+}
+
+export interface SettingsPanelStatus {
+  extensionVersion: string;
+  graphNodeCount: number;
+  graphEdgeCount: number;
+  graphLastModified: string | null;
+  diagnoseSummary: string;
+  overlayKeys: string[];
+  baseConfigPath: string;
 }
 
 export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri: string): string {
@@ -538,7 +549,22 @@ export function buildContextPreviewHtml(preview: ContextPreviewResult, scriptUri
 </html>`;
 }
 
-export function buildSettingsHtml(settings: GraphFlowSettings, scriptUri: string): string {
+export function buildSettingsHtml(
+  settings: GraphFlowSettings,
+  scriptUri: string,
+  status?: SettingsPanelStatus
+): string {
+  const overlayList =
+    status && status.overlayKeys.length > 0
+      ? status.overlayKeys.map((key) => `<li><code>${escapeHtml(key)}</code></li>`).join("")
+      : "<li>无覆盖项（完全继承基础配置）</li>";
+  const diagnoseLines = status?.diagnoseSummary
+    ? status.diagnoseSummary.split("; ").map((line) => `<li>${escapeHtml(line)}</li>`).join("")
+    : "<li>保存配置后点击「运行路由诊断」</li>";
+  const graphModified = status?.graphLastModified
+    ? escapeHtml(new Date(status.graphLastModified).toLocaleString())
+    : "尚未索引";
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -564,13 +590,40 @@ export function buildSettingsHtml(settings: GraphFlowSettings, scriptUri: string
     <section class="panel">
       <h1 style="margin-bottom: 8px;">GraphFlow 模型配置指南 (Settings)</h1>
       <p style="margin-top: 0;">当前配置覆盖层：<code>${escapeHtml(settings.configPath)}</code></p>
-      
+      ${
+        status
+          ? `<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px;">
+        <div style="border: 1px solid #d8c9b7; border-radius: 12px; padding: 10px; background: #fff;">
+          <div style="font-size: 11px; color: #6d7f88;">Extension</div>
+          <div style="font-weight: 700;">v${escapeHtml(status.extensionVersion)}</div>
+        </div>
+        <div style="border: 1px solid #d8c9b7; border-radius: 12px; padding: 10px; background: #fff;">
+          <div style="font-size: 11px; color: #6d7f88;">图谱规模</div>
+          <div style="font-weight: 700;">${status.graphNodeCount} 节点 / ${status.graphEdgeCount} 边</div>
+        </div>
+        <div style="border: 1px solid #d8c9b7; border-radius: 12px; padding: 10px; background: #fff;">
+          <div style="font-size: 11px; color: #6d7f88;">上次索引</div>
+          <div style="font-weight: 700; font-size: 13px;">${graphModified}</div>
+        </div>
+      </div>`
+          : ""
+      }
+      <div style="background: #f0f9ff; border: 1px solid #bae6fd; padding: 14px; border-radius: 12px; margin-top: 12px;">
+        <h3 style="margin-top: 0; color: #0369a1;">配置覆盖层 diff</h3>
+        <p style="margin: 0 0 8px; font-size: 12px; color: #334155;">基础配置：<code>${escapeHtml(status?.baseConfigPath ?? "graphflow.config.json")}</code> → 覆盖层：<code>${escapeHtml(settings.configPath)}</code></p>
+        <ul style="margin: 0; padding-left: 20px; font-size: 12px;">${overlayList}</ul>
+      </div>
+      <div style="background: #f8fafc; border: 1px solid #cbd5e1; padding: 14px; border-radius: 12px; margin-top: 12px;">
+        <h3 style="margin-top: 0; color: #0f172a;">路由诊断</h3>
+        <ul id="settings-diagnose-list" style="margin: 0 0 10px; padding-left: 20px; font-size: 12px; line-height: 1.6;">${diagnoseLines}</ul>
+        <button id="settings-run-diagnose" type="button" style="background: #1e40af;">运行路由诊断</button>
+      </div>
       <div style="background: #fdf5eb; border: 1px solid #d8c9b7; padding: 14px; border-radius: 12px; margin-top: 16px;">
         <h3 style="margin-top: 0; color: #b45309;">🚀 验证与使用指南</h3>
         <ul style="margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.6; color: #213547;">
           <li><strong>验证 MCP 注入：</strong>配置完成后，在 Cursor / Claude Code / Roo 等 Agent 对话框中说：<br/><code>"使用 graphflow 预览当前项目的 orchestrator 相关上下文"</code></li>
           <li><strong>验证大模型路由：</strong>保存本配置后，在 VS Code Chat 输入 <code>@graphflow /diagnose</code> 查看大模型接口是否畅通。</li>
-          <li><strong>图谱何时更新：</strong>GraphFlow <strong>非</strong>常驻后台守护进程。仅在运行 `run`、`preview` 任务或手动 `index` 时才会扫描并更新代码结构图谱。</li>
+          <li><strong>图谱何时更新：</strong>GraphFlow <strong>非</strong>常驻后台守护进程。仅在运行 <code>run</code>、<code>preview</code> 任务、保存文件（可选）或手动 <code>index</code> 时才会扫描并更新代码结构图谱。</li>
           <li><strong>配置文件位置：</strong>基础配置在项目根目录 <code>graphflow.config.json</code>，当前面板修改的是 <code>.graphflow/config.json</code> 覆盖层。</li>
         </ul>
       </div>
@@ -672,6 +725,7 @@ export function buildSettingsHtml(settings: GraphFlowSettings, scriptUri: string
       <label><input id="settings-enable-near-lossless" name="enableNearLosslessMode" type="checkbox" ${settings.enableNearLosslessMode ? "checked" : ""} /> Enable near-lossless context</label>
       <label><input id="settings-auto-index-preview" name="autoIndexOnPreview" type="checkbox" ${settings.autoIndexOnPreview ? "checked" : ""} /> Auto index on preview</label>
       <label><input id="settings-auto-index-run" name="autoIndexOnRun" type="checkbox" ${settings.autoIndexOnRun ? "checked" : ""} /> Auto index on run</label>
+      <label><input id="settings-auto-index-save" name="autoIndexOnSave" type="checkbox" ${settings.autoIndexOnSave ? "checked" : ""} /> Auto index on file save (debounced)</label>
     </section>
     <button id="settings-save" type="submit">Save Settings</button>
     <p id="settings-status"></p>

@@ -1,6 +1,14 @@
 import { logger } from "../utils/logger";
 import { openSync, closeSync, unlinkSync, readFileSync, writeSync } from "node:fs";
 
+function nodeErrorCode(error: unknown): string | undefined {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    return typeof code === "string" ? code : undefined;
+  }
+  return undefined;
+}
+
 export class FileLock {
   private lockFilePath: string;
   private fd: number | null = null;
@@ -16,8 +24,8 @@ export class FileLock {
         this.fd = openSync(this.lockFilePath, "wx");
         writeSync(this.fd, String(process.pid));
         return true;
-      } catch (err: any) {
-        if (err.code !== "EEXIST") {
+      } catch (err: unknown) {
+        if (nodeErrorCode(err) !== "EEXIST") {
           throw err;
         }
         
@@ -27,8 +35,8 @@ export class FileLock {
           if (pid && pid !== process.pid) {
             try {
               process.kill(pid, 0);
-            } catch (e: any) {
-              if (e.code === "ESRCH") {
+            } catch (e: unknown) {
+              if (nodeErrorCode(e) === "ESRCH") {
                 unlinkSync(this.lockFilePath);
                 continue;
               }
@@ -55,8 +63,8 @@ export class FileLock {
       this.fd = null;
       try {
         unlinkSync(this.lockFilePath);
-      } catch (_err: any) {
-        if (_err && _err.code !== "ENOENT") {
+      } catch (_err: unknown) {
+        if (nodeErrorCode(_err) && nodeErrorCode(_err) !== "ENOENT") {
           throw _err;
         }
       }

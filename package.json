@@ -23,7 +23,11 @@
     "build:extension": "npm --prefix vscode-extension run build",
     "test:extension": "npm --prefix vscode-extension run test:runtime",
     "package:extension": "npm --prefix vscode-extension run package",
-    "ci": "npm run lint && npm run build && npm test && npm run build:extension && npm run test:extension"
+    "ci": "npm run lint && npm run build && npm test && npm run build:extension && npm run test:extension",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.ts": "eslint --fix"
   },
   "repository": {
     "type": "git",
@@ -50,6 +54,8 @@
     "@typescript-eslint/parser": "^8.60.0",
     "@vitest/coverage-v8": "^4.1.8",
     "eslint": "^10.4.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "prettier": "^3.8.3",
     "tsx": "^4.22.3",
     "typescript": "^6.0.3",

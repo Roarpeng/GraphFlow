@@ -36,8 +36,8 @@ export async function enrichGraphSemanticsSilent(
   // 2. 筛选出缺乏自然语言摘要说明的 Symbol 节点
   const pendingNodes = snapshot.nodes.filter((node) => {
     if (node.type !== "Symbol") return false;
-    const meta = (node.metadata || {}) as any;
-    return !meta.summary || meta.summary.trim().length === 0;
+    const summary = node.metadata?.summary;
+    return typeof summary !== "string" || summary.trim().length === 0;
   });
 
   if (pendingNodes.length === 0) {

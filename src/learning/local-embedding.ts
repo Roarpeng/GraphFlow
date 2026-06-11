@@ -3,15 +3,20 @@ import type { EmbeddingProvider } from "./embeddings.js";
 export function createLocalEmbeddingProvider(
   modelName: string = "Xenova/bge-base-zh-v1.5"
 ): EmbeddingProvider {
-  let pipelinePromise: Promise<any> | null = null;
+  let pipelinePromise: Promise<
+    (text: string, options: { pooling: "mean"; normalize: boolean }) => Promise<{ data: ArrayLike<number> }>
+  > | null = null;
 
   return {
     async embed(text: string): Promise<number[]> {
       if (!pipelinePromise) {
         pipelinePromise = (async () => {
-          // import dynamically to avoid blocking
           const { pipeline } = await import("@xenova/transformers");
-          return await pipeline("feature-extraction", modelName);
+          const extractor = await pipeline("feature-extraction", modelName);
+          return extractor as (
+            text: string,
+            options: { pooling: "mean"; normalize: boolean }
+          ) => Promise<{ data: ArrayLike<number> }>;
         })();
       }
 

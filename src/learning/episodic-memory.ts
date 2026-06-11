@@ -137,7 +137,7 @@ export function parseEpisodes(nodes: GraphNode[]): EpisodeRecord[] {
   for (const node of nodes) {
     if (!isEpisodeNode(node) || seen.has(node.id)) continue;
     // 过滤已被软删除的 episode
-    if ((node.metadata as any)?.pruned === true) continue;
+    if (node.metadata?.pruned === true) continue;
     const rec = deserialize(node);
     if (rec) {
       seen.add(node.id);
@@ -217,7 +217,7 @@ export async function pruneExpiredEpisodes(
 
   const allNodes = await client.queryByKeyword(EPISODE_SENTINEL);
   const episodeNodes = allNodes.filter(
-    (n) => isEpisodeNode(n) && (n.metadata as any)?.pruned !== true
+    (n) => isEpisodeNode(n) && n.metadata?.pruned !== true
   );
 
   // 反序列化并按 createdAt 新→旧排序

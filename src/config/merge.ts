@@ -1,6 +1,49 @@
+import { existsSync, readFileSync } from "node:fs";
 import type { GraphFlowConfig } from "./schema";
 import { validateConfig } from "./loader";
 import { SCAFFOLD_TIERS } from "./defaults";
+
+function collectOverlayDiffKeys(base: unknown, overlay: unknown, prefix = ""): string[] {
+  if (overlay === null || overlay === undefined) {
+    return [];
+  }
+
+  if (typeof overlay !== "object" || Array.isArray(overlay)) {
+    return JSON.stringify(base) !== JSON.stringify(overlay) ? [prefix || "root"] : [];
+  }
+
+  const result: string[] = [];
+  for (const [key, overlayValue] of Object.entries(overlay as Record<string, unknown>)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    const baseValue = (base as Record<string, unknown> | undefined)?.[key];
+    if (overlayValue && typeof overlayValue === "object" && !Array.isArray(overlayValue)) {
+      result.push(...collectOverlayDiffKeys(baseValue, overlayValue, path));
+      continue;
+    }
+    if (JSON.stringify(baseValue) !== JSON.stringify(overlayValue)) {
+      result.push(path);
+    }
+  }
+  return result;
+}
+
+/** List dotted paths where project overlay differs from root graphflow.config.json. */
+export function listConfigOverlayKeys(
+  rootPath = "graphflow.config.json",
+  overlayPath = ".graphflow/config.json"
+): string[] {
+  if (!existsSync(rootPath) || !existsSync(overlayPath)) {
+    return [];
+  }
+
+  try {
+    const base = JSON.parse(readFileSync(rootPath, "utf8")) as unknown;
+    const overlay = JSON.parse(readFileSync(overlayPath, "utf8")) as unknown;
+    return collectOverlayDiffKeys(base, overlay);
+  } catch {
+    return [];
+  }
+}
 
 function isScaffoldTier(
   tier: "smart" | "economy",

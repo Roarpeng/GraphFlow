@@ -146,6 +146,7 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       enableNearLosslessMode: input.graphPolicy.enableNearLosslessMode ?? false,
       autoIndexOnPreview: input.graphPolicy.autoIndexOnPreview ?? true,
       autoIndexOnRun: input.graphPolicy.autoIndexOnRun ?? true,
+      autoIndexOnSave: input.graphPolicy.autoIndexOnSave ?? false,
       workspaceRoot,
       graphStorePath:
         input.graphPolicy.graphStorePath ??

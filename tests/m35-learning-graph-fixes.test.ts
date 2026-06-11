@@ -113,7 +113,7 @@ describe("episodic-memory: pruneExpiredEpisodes", () => {
 
     // 新 episode 未被影响
     const newNode = allNodes.find((n) => n.id === "episode:new1");
-    expect((newNode?.metadata as any)?.pruned).toBeUndefined();
+    expect(newNode?.metadata?.pruned).toBeUndefined();
   });
 
   it("should prune excess episodes beyond maxCount", async () => {
