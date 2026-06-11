@@ -141,7 +141,7 @@ describe("M15 VS Code observability panels", () => {
       },
       "https://example.vscode-cdn.net/media/settings.js",
       {
-        extensionVersion: "0.6.5",
+        extensionVersion: "0.6.6",
         graphNodeCount: 120,
         graphEdgeCount: 88,
         graphLastModified: "2026-06-11T00:00:00.000Z",
@@ -155,7 +155,10 @@ describe("M15 VS Code observability panels", () => {
     expect(html).toContain('id="settings-provider"');
     expect(html).toContain('id="settings-smart-model"');
     expect(html).toContain('id="settings-max-context-tokens"');
-    expect(html).toContain('id="settings-run-diagnose"');
+    expect(html).toContain('id="settings-index-graph"');
+    expect(html).toContain("建立图谱（无需 LLM）");
+    expect(html).toContain('id="settings-test-routing"');
+    expect(html).toContain("路由连通性测试（可选）");
     expect(html).toContain('id="settings-auto-index-save"');
     expect(html).toContain("120 节点 / 88 边");
     expect(html).toContain('src="https://example.vscode-cdn.net/media/settings.js"');
