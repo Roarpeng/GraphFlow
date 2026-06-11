@@ -562,10 +562,25 @@ export function buildSettingsHtml(settings: GraphFlowSettings, scriptUri: string
 <body>
   <form id="settings-form">
     <section class="panel">
-      <h1>GraphFlow Settings</h1>
-      <p>Saved to <code>${escapeHtml(settings.configPath)}</code>. API Key: use <code>DEEPSEEK_API_KEY</code> / <code>\${DEEPSEEK_API_KEY}</code> for env lookup, or paste a key directly.</p>
+      <h1 style="margin-bottom: 8px;">GraphFlow 模型配置指南 (Settings)</h1>
+      <p style="margin-top: 0;">当前配置覆盖层：<code>${escapeHtml(settings.configPath)}</code></p>
+      
+      <div style="background: #fdf5eb; border: 1px solid #d8c9b7; padding: 14px; border-radius: 12px; margin-top: 16px;">
+        <h3 style="margin-top: 0; color: #b45309;">🚀 验证与使用指南</h3>
+        <ul style="margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.6; color: #213547;">
+          <li><strong>验证 MCP 注入：</strong>配置完成后，在 Cursor / Claude Code / Roo 等 Agent 对话框中说：<br/><code>"使用 graphflow 预览当前项目的 orchestrator 相关上下文"</code></li>
+          <li><strong>验证大模型路由：</strong>保存本配置后，在 VS Code Chat 输入 <code>@graphflow /diagnose</code> 查看大模型接口是否畅通。</li>
+          <li><strong>图谱何时更新：</strong>GraphFlow <strong>非</strong>常驻后台守护进程。仅在运行 `run`、`preview` 任务或手动 `index` 时才会扫描并更新代码结构图谱。</li>
+          <li><strong>配置文件位置：</strong>基础配置在项目根目录 <code>graphflow.config.json</code>，当前面板修改的是 <code>.graphflow/config.json</code> 覆盖层。</li>
+        </ul>
+      </div>
     </section>
+    
     <section class="panel grid">
+      <div style="grid-column: 1 / -1;">
+        <h2 style="margin-top: 0; margin-bottom: 8px;">配置 LLM Provider（规划 / 执行任务）</h2>
+        <p style="margin: 0; font-size: 12px; color: #6d7f88; line-height: 1.5;">API Key 支持填写环境变量名（如 <code>DEEPSEEK_API_KEY</code>）或直接填写 <code>sk-...</code>。<br/>若使用 DeepSeek 等兼容接口，请务必填写对应的 Base URL（如 <code>https://api.deepseek.com</code>）。</p>
+      </div>
       <label>Provider
         <select id="settings-provider" name="provider">
           ${renderProviderOption("openai", settings.provider)}
@@ -580,9 +595,12 @@ export function buildSettingsHtml(settings: GraphFlowSettings, scriptUri: string
       <label>Economy Model (optional) <input id="settings-economy-model" name="economyModel" value="${escapeHtml(settings.economyModel)}" placeholder="deepseek-v4-flash" /></label>
       <label>Base URL <input id="settings-base-url" name="baseUrl" value="${escapeHtml(settings.baseUrl ?? "")}" placeholder="https://api.openai.com/v1" /></label>
     </section>
+    
     <section class="panel grid">
-      <h2>Graph Semantic Enrichment</h2>
-      <p>知识图谱 Symbol 语义摘要。可选网络模型（DeepSeek/OpenAI 等）或本地 OpenBMB。</p>
+      <div style="grid-column: 1 / -1;">
+        <h2 style="margin-top: 0; margin-bottom: 8px;">知识图谱语义提取（可选）</h2>
+        <p style="margin: 0; font-size: 12px; color: #6d7f88; line-height: 1.5;">用于提取代码节点（Symbol）的中文摘要。<br/>若开启 <code>autoRunOnIndex</code>，则在索引完成后自动静默小批量执行；也可以手动运行 <code>GraphFlow: Enrich Graph Semantics</code> 命令提取。</p>
+      </div>
       <label>语义提取后端
         <select id="settings-enrichment-backend" name="enrichmentBackend">
           <option value="inherit"${settings.enrichmentBackend === "inherit" ? " selected" : ""}>继承 Economy（网络）</option>
@@ -613,8 +631,12 @@ export function buildSettingsHtml(settings: GraphFlowSettings, scriptUri: string
         </select>
       </label>
     </section>
+    
     <section class="panel grid">
-      <h2>OpenBMB (local MiniCPM)</h2>
+      <div style="grid-column: 1 / -1;">
+        <h2 style="margin-top: 0; margin-bottom: 8px;">OpenBMB 本地模型（可选）</h2>
+        <p style="margin: 0; font-size: 12px; color: #6d7f88; line-height: 1.5;">使用本地 MiniCPM 模型进行语义提取。<br/>可勾选下方“自动下载”，或手动执行 <code>GraphFlow: Download MiniCPM Model</code> 命令下载推理模型。</p>
+      </div>
       <label>OpenBMB Model Name (optional) <input id="settings-openbmb-model" name="openbmbModel" value="${escapeHtml(settings.openbmbModel)}" placeholder="minicpm-1b" /></label>
       <label>OpenBMB Mode
         <select id="settings-openbmb-mode" name="openbmbMode">
@@ -635,8 +657,9 @@ export function buildSettingsHtml(settings: GraphFlowSettings, scriptUri: string
       <label>Auto Download URL <input id="settings-openbmb-model-url" name="openbmbModelUrl" value="${escapeHtml(settings.openbmbModelUrl ?? "")}" placeholder="https://.../minicpm-1b.gguf" /></label>
       <label>Auto Download SHA256 <input id="settings-openbmb-model-sha256" name="openbmbModelSha256" value="${escapeHtml(settings.openbmbModelSha256 ?? "")}" placeholder="optional" /></label>
     </section>
+    
     <section class="panel checks">
-      <label><input id="settings-openbmb-auto-download" name="openbmbAutoDownload" type="checkbox" ${settings.openbmbAutoDownload ? "checked" : ""} /> Auto download model and apply on save</label>
+      <label><input id="settings-openbmb-auto-download" name="openbmbAutoDownload" type="checkbox" ${settings.openbmbAutoDownload ? "checked" : ""} /> 保存本面板配置后，自动下载并应用 MiniCPM 模型</label>
     </section>
     <section class="panel grid">
       <label>Max Context Tokens <input id="settings-max-context-tokens" name="maxContextTokens" type="number" min="1" value="${settings.maxContextTokens}" /></label>
