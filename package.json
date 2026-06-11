@@ -6,6 +6,7 @@
   },
   "files": [
     "dist",
+    "scripts/safe-postinstall.cjs",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
@@ -24,7 +25,7 @@
     "doc": "docs"
   },
   "scripts": {
-    "postinstall": "node dist/surfaces/cli/init.js",
+    "postinstall": "node scripts/safe-postinstall.cjs",
     "prepublishOnly": "npm run build",
     "test": "vitest run",
     "build": "tsc -p tsconfig.json",
