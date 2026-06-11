@@ -59,6 +59,33 @@ interface GraphFlowRuntime {
     baseConfigPath: string;
   }>;
   saveGraphFlowSettings(settings: Omit<GraphFlowSettings, "configPath">): GraphFlowSettings;
+  indexGraphFromSettings(
+    settings: Omit<GraphFlowSettings, "configPath">,
+    workspaceRoot?: string
+  ): Promise<{
+    ok: boolean;
+    validationIssues: Array<{ field: string; message: string }>;
+    graphIndex?: { indexedFiles: number; indexedSymbols: number };
+    graphSnapshot?: { nodeCount: number; edgeCount: number };
+  }>;
+  testRoutingAndIndexGraph(
+    settings: Omit<GraphFlowSettings, "configPath">,
+    workspaceRoot?: string
+  ): Promise<{
+    ok: boolean;
+    validationIssues: Array<{ field: string; message: string }>;
+    probes: Array<{
+      role: string;
+      provider: string;
+      model: string;
+      ok: boolean;
+      latencyMs?: number;
+      error?: string;
+      sample?: string;
+    }>;
+    graphIndex?: { indexedFiles: number; indexedSymbols: number };
+    graphSnapshot?: { nodeCount: number; edgeCount: number };
+  }>;
   detectInstalledAgents(): DetectedAgent[];
   ensureGlobalGraphFlowConfig(): { path: string; status: "created" | "skipped" };
   ensureWorkspaceGraphFlowConfig(workspaceRoot: string): { path: string; status: "created" | "skipped" };
@@ -663,6 +690,8 @@ async function loadRuntime(): Promise<GraphFlowRuntime> {
         !module.getSkillInsights ||
         !module.getGraphFlowSettings ||
         !module.getSettingsPanelStatus ||
+        !module.indexGraphFromSettings ||
+        !module.testRoutingAndIndexGraph ||
         !module.saveGraphFlowSettings ||
         !module.detectInstalledAgents ||
         !module.ensureGlobalGraphFlowConfig ||
@@ -686,6 +715,8 @@ async function loadRuntime(): Promise<GraphFlowRuntime> {
         getSkillInsights: module.getSkillInsights,
         getGraphFlowSettings: module.getGraphFlowSettings,
         getSettingsPanelStatus: module.getSettingsPanelStatus,
+        indexGraphFromSettings: module.indexGraphFromSettings,
+        testRoutingAndIndexGraph: module.testRoutingAndIndexGraph,
         saveGraphFlowSettings: module.saveGraphFlowSettings,
         detectInstalledAgents: module.detectInstalledAgents,
         ensureGlobalGraphFlowConfig: module.ensureGlobalGraphFlowConfig,
@@ -926,15 +957,99 @@ function showSettingsPanel(
   );
   panel.webview.html = buildSettingsHtml(settings, scriptUri.toString(), status);
   panel.webview.onDidReceiveMessage(async (message) => {
-    if (message?.type === "runDiagnose") {
+    if (message?.type === "indexGraphOnly") {
+      const payload = message.payload as Omit<GraphFlowSettings, "configPath">;
       try {
-        const diagnoseSummary = await runGraphFlow(workspaceRoot, (runtime) =>
-          Promise.resolve(runtime.diagnoseRouting())
+        output.appendLine("[GraphFlow] Building knowledge graph (structural index, LLM optional)...");
+        output.show(true);
+
+        const result = await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: "GraphFlow 建立知识图谱",
+            cancellable: false,
+          },
+          async () =>
+            runGraphFlow(workspaceRoot, (runtime) => runtime.indexGraphFromSettings(payload, workspaceRoot))
         );
-        panel.webview.postMessage({ type: "diagnoseResult", payload: diagnoseSummary });
+
+        if (result.ok && result.graphIndex) {
+          output.appendLine(
+            `[GraphFlow] Graph indexed: files=${result.graphIndex.indexedFiles}; symbols=${result.graphIndex.indexedSymbols}`
+          );
+          void vscode.commands.executeCommand("graphflow.showGraph");
+          vscode.window.showInformationMessage(
+            `知识图谱已建立：${result.graphIndex.indexedFiles} 个文件（结构索引，无需 LLM）。`
+          );
+        } else if (!result.ok) {
+          const reason =
+            result.validationIssues?.map((issue) => issue.message).join("; ") || "索引失败";
+          vscode.window.showWarningMessage(`GraphFlow 建立图谱未成功：${reason}`);
+        }
+
+        panel.webview.postMessage({
+          type: "graphIndexResult",
+          payload: result,
+        });
       } catch (err) {
         const text = err instanceof Error ? err.message : String(err);
         panel.webview.postMessage({ type: "settingsError", payload: text });
+        vscode.window.showErrorMessage(`GraphFlow 建立图谱失败: ${text}`);
+      }
+      return;
+    }
+
+    if (message?.type === "testRoutingAndIndex") {
+      const payload = message.payload as Omit<GraphFlowSettings, "configPath">;
+      try {
+        output.appendLine("[GraphFlow] Testing routing connectivity (planner + worker)...");
+        output.show(true);
+
+        const result = await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: "GraphFlow 路由连通性测试",
+            cancellable: false,
+          },
+          async () =>
+            runGraphFlow(workspaceRoot, (runtime) => runtime.testRoutingAndIndexGraph(payload, workspaceRoot))
+        );
+
+        const diagnoseSummary = await runGraphFlow(workspaceRoot, (runtime) =>
+          Promise.resolve(runtime.diagnoseRouting())
+        );
+
+        for (const probe of result.probes) {
+          output.appendLine(
+            `[GraphFlow][Route] ${probe.role} ${probe.provider}/${probe.model}: ${
+              probe.ok ? `OK (${probe.latencyMs}ms)` : probe.error ?? "failed"
+            }`
+          );
+        }
+
+        if (result.ok && result.graphIndex) {
+          output.appendLine(
+            `[GraphFlow] Graph indexed: files=${result.graphIndex.indexedFiles}; symbols=${result.graphIndex.indexedSymbols}`
+          );
+          void vscode.commands.executeCommand("graphflow.showGraph");
+          vscode.window.showInformationMessage(
+            `GraphFlow 路由测试通过，已索引 ${result.graphIndex.indexedFiles} 个文件。`
+          );
+        } else if (!result.ok) {
+          vscode.window.showWarningMessage("GraphFlow 路由测试未通过，请检查 API Key 与 Base URL。");
+        }
+
+        panel.webview.postMessage({
+          type: "routingTestResult",
+          payload: {
+            ...result,
+            diagnosisSummary: diagnoseSummary,
+          },
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : String(err);
+        panel.webview.postMessage({ type: "settingsError", payload: text });
+        vscode.window.showErrorMessage(`GraphFlow 路由测试失败: ${text}`);
       }
       return;
     }

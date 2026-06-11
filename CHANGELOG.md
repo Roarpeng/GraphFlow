@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-06-11
+
+### Added
+
+- Settings 面板：**建立图谱（无需 LLM）** — 仅需图谱存储路径即可扫描工作区并生成结构图谱（文件、符号、依赖）。
+- Settings 面板：**路由连通性测试（可选）** — LLM 配置就绪后探测 Smart / Economy 路由，连通通过后自动索引并可运行语义提取。
+- Runtime API：`indexGraphFromSettings`、`testRoutingAndIndexGraph`、`validateSettingsForGraphIndex`、`validateSettingsForRouting`。
+
+### Changed
+
+- 配置指南明确双路径：无 LLM 结构索引与可选 LLM 路由验证并存；语义提取失败时仍保留结构图谱。
+
 ## [0.6.5] - 2026-06-11
 
 ### Added

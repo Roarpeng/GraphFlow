@@ -613,19 +613,14 @@ export function buildSettingsHtml(
         <p style="margin: 0 0 8px; font-size: 12px; color: #334155;">基础配置：<code>${escapeHtml(status?.baseConfigPath ?? "graphflow.config.json")}</code> → 覆盖层：<code>${escapeHtml(settings.configPath)}</code></p>
         <ul style="margin: 0; padding-left: 20px; font-size: 12px;">${overlayList}</ul>
       </div>
-      <div style="background: #f8fafc; border: 1px solid #cbd5e1; padding: 14px; border-radius: 12px; margin-top: 12px;">
-        <h3 style="margin-top: 0; color: #0f172a;">路由诊断</h3>
-        <ul id="settings-diagnose-list" style="margin: 0 0 10px; padding-left: 20px; font-size: 12px; line-height: 1.6;">${diagnoseLines}</ul>
-        <button id="settings-run-diagnose" type="button" style="background: #1e40af;">运行路由诊断</button>
-      </div>
       <div style="background: #fdf5eb; border: 1px solid #d8c9b7; padding: 14px; border-radius: 12px; margin-top: 16px;">
-        <h3 style="margin-top: 0; color: #b45309;">🚀 验证与使用指南</h3>
-        <ul style="margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.6; color: #213547;">
-          <li><strong>验证 MCP 注入：</strong>配置完成后，在 Cursor / Claude Code / Roo 等 Agent 对话框中说：<br/><code>"使用 graphflow 预览当前项目的 orchestrator 相关上下文"</code></li>
-          <li><strong>验证大模型路由：</strong>保存本配置后，在 VS Code Chat 输入 <code>@graphflow /diagnose</code> 查看大模型接口是否畅通。</li>
-          <li><strong>图谱何时更新：</strong>GraphFlow <strong>非</strong>常驻后台守护进程。仅在运行 <code>run</code>、<code>preview</code> 任务、保存文件（可选）或手动 <code>index</code> 时才会扫描并更新代码结构图谱。</li>
-          <li><strong>配置文件位置：</strong>基础配置在项目根目录 <code>graphflow.config.json</code>，当前面板修改的是 <code>.graphflow/config.json</code> 覆盖层。</li>
-        </ul>
+        <h3 style="margin-top: 0; color: #b45309;">🚀 配置与验证流程</h3>
+        <ol style="margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.6; color: #213547;">
+          <li>填写 <strong>Graph Store Path</strong> 等基础配置，点击 <strong>Save Settings</strong> 保存。</li>
+          <li>在页面底部点击 <strong>建立图谱（无需 LLM）</strong>，即可扫描项目并生成结构图谱（文件、符号、依赖）。</li>
+          <li>（可选）配置 LLM 后，在 <strong>路由连通性测试</strong> 中验证 Smart / Economy 路由；连通性 OK 时会再次索引，并可自动运行语义提取（效果更好）。</li>
+        </ol>
+        <p style="margin: 12px 0 0; font-size: 12px; color: #6d7f88;">MCP 验证：在 Agent 对话框中说 <code>"使用 graphflow 预览当前项目的 orchestrator 相关上下文"</code></p>
       </div>
     </section>
     
@@ -729,6 +724,29 @@ export function buildSettingsHtml(
     </section>
     <button id="settings-save" type="submit">Save Settings</button>
     <p id="settings-status"></p>
+    <section class="panel" id="settings-graph-index-panel" style="background: #eff6ff; border-color: #93c5fd;">
+      <h2 style="margin-top: 0; color: #1d4ed8;">📊 建立知识图谱</h2>
+      <p style="margin: 0 0 10px; font-size: 12px; color: #334155; line-height: 1.5;">
+        无需 LLM 也可建立结构图谱。填写图谱存储路径后，点击下方按钮扫描工作区并索引文件与符号。
+        若已配置 LLM 且开启语义提取，索引完成后会自动尝试增强节点摘要（失败时仍保留结构图谱）。
+      </p>
+      <ul id="settings-graph-readiness-list" style="margin: 0 0 12px; padding-left: 20px; font-size: 12px; line-height: 1.6;"></ul>
+      <ul id="settings-graph-index-list" style="margin: 0 0 12px; padding-left: 20px; font-size: 12px; line-height: 1.6; display: none;"></ul>
+      <button id="settings-index-graph" type="button" style="background: #1d4ed8;">建立图谱（无需 LLM）</button>
+    </section>
+    <section class="panel" id="settings-routing-panel" style="background: #ecfdf5; border-color: #6ee7b7;">
+      <h2 style="margin-top: 0; color: #047857;">✅ 配置完成 · 路由连通性测试（可选）</h2>
+      <p style="margin: 0 0 10px; font-size: 12px; color: #334155; line-height: 1.5;">
+        当必填 LLM 配置与图谱功能开关均已就绪后，可测试 Smart / Economy 路由是否可用。
+        连通性通过后，将自动索引知识图谱（含可选语义提取）。
+      </p>
+      <p style="margin: 0 0 8px; font-size: 11px; color: #6d7f88;">当前路由快照：</p>
+      <ul id="settings-diagnose-list" style="margin: 0 0 12px; padding-left: 20px; font-size: 12px; line-height: 1.6;">${diagnoseLines}</ul>
+      <p style="margin: 0 0 6px; font-size: 11px; color: #6d7f88;">必填项检查：</p>
+      <ul id="settings-readiness-list" style="margin: 0 0 12px; padding-left: 20px; font-size: 12px; line-height: 1.6;"></ul>
+      <ul id="settings-route-test-list" style="margin: 0 0 12px; padding-left: 20px; font-size: 12px; line-height: 1.6; display: none;"></ul>
+      <button id="settings-test-routing" type="button" disabled style="background: #047857;">测试路由并建立图谱</button>
+    </section>
   </form>
   <script src="${scriptUri}"></script>
 </body>

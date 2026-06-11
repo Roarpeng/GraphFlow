@@ -4,7 +4,7 @@ A Context-Aware Multi-Agent Orchestration Engine.
 
 GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，当前版本聚焦于工程可用性：任务分流、DAG 执行、结果校验、图谱索引、近无损上下文压缩、CLI 与 VS Code 扩展联动。
 
-## 当前进度（v0.6.5）
+## 当前进度（v0.6.6）
 
 GraphFlow 已演进为面向多 agent 协作的工程级编排 + 上下文引擎，覆盖 **任务编排 / 路由 / 图谱 / 检索 / 学习 / Agent 接入** 全链路。
 
@@ -12,22 +12,27 @@ GraphFlow 已演进为面向多 agent 协作的工程级编排 + 上下文引擎
 
 > 从 task 描述出发，自动规划 → 路由模型 → 压缩图谱上下文（含向量召回）→ 执行/校验/重试，并把经验沉淀回知识图谱。
 
-### v0.6.5 本轮重点
+### v0.6.6 本轮重点
 
-1. **Settings 可观测性**：图谱规模、上次索引、配置覆盖层 diff、面板内路由诊断。
+1. **无 LLM 也能建图谱**：Settings 底部「建立图谱（无需 LLM）」仅需 `graphStorePath`，即可扫描工作区生成结构图谱（文件、符号、依赖）。
+2. **可选路由连通性测试**：配置 LLM 后，可一键探测 Smart / Economy 路由；连通通过后自动索引，并可触发语义提取（有 LLM 效果更好，失败时结构图谱仍保留）。
+3. **双路径配置指南**：结构索引与 LLM 路由验证并列，互不替代。
+
+### v0.6.5 回顾
+
+1. **Settings 可观测性**：图谱规模、上次索引、配置覆盖层 diff。
 2. **保存即索引（可选）**：`autoIndexOnSave` 在文件保存后 debounce 增量索引。
 3. **发布流水线**：main 推送自动构建 VSIX 并发布 GitHub Release；`v*` tag 额外触发 npm publish（需 `NPM_TOKEN`）。
-4. **推送前门禁**：Husky + lint-staged 在 `git push` 前运行 ESLint，避免 CI 才发现语法错误。
 
 ### 工程质量
 
-- 测试：**39 文件** 全绿（`npm run ci` 含 extension build + bundled runtime smoke）。
+- 测试：**39 文件 / 156+ tests** 全绿（`npm run ci` 含 extension build + bundled runtime smoke）。
 - 类型：TypeScript 6 strict + exactOptionalPropertyTypes + NodeNext。
 - License：Apache-2.0。
 
 发布信息：
 
-1. 最新版本：`v0.6.5`（root + vscode-extension）
+1. 最新版本：`v0.6.6`（root + vscode-extension）；npm 包：`@roarpeng/graphflow@0.6.6`
 2. **GitHub Release**：push 到 `main` 且 CI 通过后自动发布 VSIX（见 [Actions](https://github.com/Roarpeng/GraphFlow/actions)）
 3. 变更日志：`CHANGELOG.md`
 
@@ -52,7 +57,7 @@ npm test
 
 1. `lint` 无错误
 2. `build` 成功
-3. `vitest` 全量通过（当前应为 146 tests / 33 files passed）
+3. `vitest` 全量通过（当前应为 156+ tests / 37+ files passed）
 
 可选一键 CI 本地校验：
 
@@ -354,6 +359,16 @@ cp graphflow.config.example.json graphflow.config.json
 
 1. `docs/testing/2026-05-28-formal-usage-test-plan.md`
 2. `docs/testing/2026-05-28-formal-usage-test-report.md`
+
+## VS Code Settings 配置与建图
+
+打开命令面板 → **GraphFlow: Show Settings**，推荐流程：
+
+1. 填写 **Graph Store Path** 等基础项，点击 **Save Settings**。
+2. 点击 **建立图谱（无需 LLM）**：生成结构图谱，不依赖 API Key。
+3. （可选）配置 Provider / API Key / Base URL 与 near-lossless、auto index 开关后，点击 **测试路由并建立图谱**：验证 Smart / Economy 连通性，通过后自动索引并可运行语义提取。
+
+其它建图入口：`graph index` CLI、MCP `graphflow_index`、`autoIndexOnPreview` / `autoIndexOnRun` / `autoIndexOnSave`、安装后轻量 bootstrap 索引。
 
 ## VS Code 扩展本地试用
 

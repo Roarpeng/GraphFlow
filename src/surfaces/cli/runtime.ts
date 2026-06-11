@@ -24,8 +24,14 @@ import {
 } from "../../graph/context-slicer";
 import { runNightlyLearning } from "../../learning/nightly-trainer";
 import { appendFeedbackEvent } from "../../learning/learning-events";
-import { resolveModelForRole, resolveModelWithFallback } from "../../routing/model-router";
+import {
+  resolveModelForRole,
+  resolveModelWithFallback,
+  type ModelSelection,
+  type ProviderName,
+} from "../../routing/model-router";
 import { buildFallbackChain, buildProviderHealthMap } from "../../routing/provider-health";
+import { executeRolePrompt } from "../../routing/provider-executor";
 import type { TaskStatus } from "../../core/types";
 import type { EnricherOptions } from "../../graph/semantic-enricher";
 import { withFileLock } from "../../utils/file-lock";
@@ -1179,6 +1185,212 @@ export function diagnoseRouting(configPath?: string): string {
     `worker=${result.worker.provider}/${result.worker.model}${result.worker.fallbackApplied ? ":fallback" : ""}`,
     `validator=${result.validator.provider}/${result.validator.model}${result.validator.fallbackApplied ? ":fallback" : ""}`,
   ].join("; ");
+}
+
+export interface SettingsValidationIssue {
+  field: string;
+  message: string;
+}
+
+export interface RoutingConnectivityProbe {
+  role: "planner" | "worker";
+  provider: string;
+  model: string;
+  ok: boolean;
+  latencyMs?: number;
+  error?: string;
+  sample?: string;
+}
+
+export interface RoutingConnectivityResult {
+  ok: boolean;
+  validationIssues: SettingsValidationIssue[];
+  diagnosis: RoutingDiagnosisResult;
+  probes: RoutingConnectivityProbe[];
+  graphIndex?: { indexedFiles: number; indexedSymbols: number };
+  graphSnapshot?: { nodeCount: number; edgeCount: number };
+}
+
+function hasResolvableApiKey(apiKeyEnvVar?: string): boolean {
+  if (!apiKeyEnvVar?.trim()) {
+    return false;
+  }
+  return Boolean(resolveConfigSecret(formatApiKeyForConfig(apiKeyEnvVar)));
+}
+
+export function validateSettingsForGraphIndex(settings: GraphFlowSettingsInput): SettingsValidationIssue[] {
+  const issues: SettingsValidationIssue[] = [];
+  if (!settings.graphStorePath?.trim()) {
+    issues.push({ field: "graphStorePath", message: "请填写图谱存储路径" });
+  }
+  return issues;
+}
+
+export interface GraphIndexFromSettingsResult {
+  ok: boolean;
+  validationIssues: SettingsValidationIssue[];
+  graphIndex?: { indexedFiles: number; indexedSymbols: number };
+  graphSnapshot?: { nodeCount: number; edgeCount: number };
+}
+
+export async function indexGraphFromSettings(
+  settings: GraphFlowSettingsInput,
+  workspaceRoot?: string,
+  configPath?: string
+): Promise<GraphIndexFromSettingsResult> {
+  const validationIssues = validateSettingsForGraphIndex(settings);
+  const actualPath = resolveConfigPath(configPath ?? "graphflow.config.json");
+  if (validationIssues.length > 0) {
+    return { ok: false, validationIssues };
+  }
+
+  saveGraphFlowSettings(settings, actualPath);
+  const graphIndex = await indexGraph(workspaceRoot, actualPath);
+  const snapshot = await inspectGraph(actualPath, { nodeLimit: 1, edgeLimit: 1 });
+
+  return {
+    ok: true,
+    validationIssues: [],
+    graphIndex,
+    graphSnapshot: {
+      nodeCount: snapshot.nodeCount,
+      edgeCount: snapshot.edgeCount,
+    },
+  };
+}
+
+export function validateSettingsForRouting(settings: GraphFlowSettingsInput): SettingsValidationIssue[] {
+  const issues: SettingsValidationIssue[] = [];
+  const provider = settings.provider?.trim();
+
+  if (!provider) {
+    issues.push({ field: "provider", message: "请选择 LLM Provider" });
+  }
+
+  if (provider === "openbmb") {
+    if (settings.openbmbMode === "embedded" && !settings.openbmbModelPath?.trim() && !settings.openbmbAutoDownload) {
+      issues.push({ field: "openbmbModelPath", message: "本地 OpenBMB 需填写模型路径或勾选自动下载" });
+    }
+    if (
+      (settings.openbmbMode === "ollama" || settings.openbmbMode === "openai-compat") &&
+      !settings.openbmbBaseUrl?.trim()
+    ) {
+      issues.push({ field: "openbmbBaseUrl", message: "OpenBMB 手动模式需填写 Base URL" });
+    }
+  } else if (!hasResolvableApiKey(settings.apiKeyEnvVar)) {
+    issues.push({ field: "apiKeyEnvVar", message: "请填写可用的 API Key 或已配置的环境变量名" });
+  }
+
+  if (provider === "openai" && !settings.baseUrl?.trim()) {
+    issues.push({ field: "baseUrl", message: "OpenAI 兼容接口需填写 Base URL（如 DeepSeek）" });
+  }
+
+  if (!settings.graphStorePath?.trim()) {
+    issues.push({ field: "graphStorePath", message: "请填写图谱存储路径" });
+  }
+  if (!settings.enableNearLosslessMode) {
+    issues.push({ field: "enableNearLosslessMode", message: "请开启 near-lossless 上下文压缩" });
+  }
+  if (!settings.autoIndexOnPreview) {
+    issues.push({ field: "autoIndexOnPreview", message: "请开启 Auto index on preview" });
+  }
+  if (!settings.autoIndexOnRun) {
+    issues.push({ field: "autoIndexOnRun", message: "请开启 Auto index on run" });
+  }
+
+  return issues;
+}
+
+function diagnosisRoleToSelection(
+  role: "planner" | "worker",
+  diagnosis: RoutingDiagnosisResult
+): ModelSelection {
+  const entry = diagnosis[role];
+  return {
+    provider: entry.provider as ProviderName,
+    model: entry.model,
+    tier: role === "planner" ? "smart" : "economy",
+    fallbackApplied: entry.fallbackApplied,
+  };
+}
+
+async function probeRoleConnectivity(
+  role: "planner" | "worker",
+  selection: ModelSelection
+): Promise<RoutingConnectivityProbe> {
+  const started = Date.now();
+  try {
+    const sample = await executeRolePrompt(role, "Reply with exactly: ok", selection);
+    const cleaned = sample.trim().slice(0, 120);
+    const ok = cleaned.length > 0 && !/^\[(openai|anthropic|openbmb|bailian|doubao):/i.test(cleaned);
+    return {
+      role,
+      provider: selection.provider,
+      model: selection.model,
+      ok,
+      latencyMs: Date.now() - started,
+      sample: cleaned,
+      ...(ok ? {} : { error: "Provider returned placeholder/fallback output" }),
+    };
+  } catch (error) {
+    return {
+      role,
+      provider: selection.provider,
+      model: selection.model,
+      ok: false,
+      latencyMs: Date.now() - started,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export async function testRoutingAndIndexGraph(
+  settings: GraphFlowSettingsInput,
+  workspaceRoot?: string,
+  configPath?: string
+): Promise<RoutingConnectivityResult> {
+  const validationIssues = validateSettingsForRouting(settings);
+  const actualPath = resolveConfigPath(configPath ?? "graphflow.config.json");
+  if (validationIssues.length > 0) {
+    return {
+      ok: false,
+      validationIssues,
+      diagnosis: diagnoseRoutingResult(actualPath),
+      probes: [],
+    };
+  }
+
+  saveGraphFlowSettings(settings, actualPath);
+  const diagnosis = diagnoseRoutingResult(actualPath);
+  const probes = await Promise.all([
+    probeRoleConnectivity("planner", diagnosisRoleToSelection("planner", diagnosis)),
+    probeRoleConnectivity("worker", diagnosisRoleToSelection("worker", diagnosis)),
+  ]);
+
+  const connectivityOk = probes.every((probe) => probe.ok);
+  if (!connectivityOk) {
+    return {
+      ok: false,
+      validationIssues: [],
+      diagnosis,
+      probes,
+    };
+  }
+
+  const graphIndex = await indexGraph(workspaceRoot, actualPath);
+  const snapshot = await inspectGraph(actualPath, { nodeLimit: 1, edgeLimit: 1 });
+
+  return {
+    ok: true,
+    validationIssues: [],
+    diagnosis,
+    probes,
+    graphIndex,
+    graphSnapshot: {
+      nodeCount: snapshot.nodeCount,
+      edgeCount: snapshot.edgeCount,
+    },
+  };
 }
 
 export interface SettingsPanelStatusData {
