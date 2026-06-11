@@ -117,7 +117,7 @@ describe("M15 VS Code observability panels", () => {
   it("renders settings form for models and token budget", () => {
     const html = buildSettingsHtml(
       {
-        configPath: "graphflow.config.json",
+        configPath: ".graphflow/config.json",
         provider: "openai",
         smartModel: "gpt-4.1",
         economyModel: "gpt-4.1-mini",
@@ -128,16 +128,36 @@ describe("M15 VS Code observability panels", () => {
         enableNearLosslessMode: true,
         autoIndexOnPreview: true,
         autoIndexOnRun: true,
+        autoIndexOnSave: false,
         transport: "file",
         graphStorePath: "tmp/graphflow-graph.json",
+        enrichmentBackend: "inherit",
+        enrichmentProvider: "",
+        enrichmentModel: "",
+        openbmbMode: "embedded",
+        openbmbEngine: "command",
+        openbmbModel: "",
+        openbmbAutoDownload: false,
       },
-      "https://example.vscode-cdn.net/media/settings.js"
+      "https://example.vscode-cdn.net/media/settings.js",
+      {
+        extensionVersion: "0.6.5",
+        graphNodeCount: 120,
+        graphEdgeCount: 88,
+        graphLastModified: "2026-06-11T00:00:00.000Z",
+        diagnoseSummary: "dynamicRouting=on; planner=openai/gpt-4.1",
+        overlayKeys: ["providers.openai.apiKey"],
+        baseConfigPath: "graphflow.config.json",
+      }
     );
 
     expect(html).toContain("GraphFlow Settings");
     expect(html).toContain('id="settings-provider"');
     expect(html).toContain('id="settings-smart-model"');
     expect(html).toContain('id="settings-max-context-tokens"');
+    expect(html).toContain('id="settings-run-diagnose"');
+    expect(html).toContain('id="settings-auto-index-save"');
+    expect(html).toContain("120 节点 / 88 边");
     expect(html).toContain('src="https://example.vscode-cdn.net/media/settings.js"');
   });
 });

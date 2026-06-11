@@ -367,7 +367,22 @@ async function runEmbeddedNodeLlamaCpp(
     throw new Error("openbmb embedded node-llama-cpp mode requires modelPath");
   }
 
-  const module = (await import("node-llama-cpp")) as any;
+  type LlamaRuntime = {
+    loadModel: (options: { modelPath: string }) => Promise<{
+      createContext: (options: { contextSize: number }) => Promise<{
+        getSequence: () => {
+          prompt: (
+            text: string,
+            options: { temperature?: number; maxTokens?: number; stopOnAbortSignal?: AbortSignal }
+          ) => Promise<string | unknown>;
+        };
+      }>;
+    }>;
+  };
+  const module = (await import("node-llama-cpp")) as {
+    getLlama?: (options: { gpu: string }) => Promise<LlamaRuntime>;
+    createLlama?: (options: { gpu: string }) => Promise<LlamaRuntime>;
+  };
   const createLlama = module.getLlama ?? module.createLlama;
   if (typeof createLlama !== "function") {
     throw new Error("node-llama-cpp API not available");

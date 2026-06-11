@@ -63,6 +63,13 @@ const checks = [
     }
     return `smart=${settings.smartModel}; economy=${settings.economyModel}`;
   }],
+  ["getSettingsPanelStatus", async () => {
+    const status = await runtime.getSettingsPanelStatus(runtimeConfigPath);
+    if (!status || typeof status.graphNodeCount !== "number") {
+      throw new Error("getSettingsPanelStatus returned invalid payload");
+    }
+    return `nodes=${status.graphNodeCount}; overlay=${status.overlayKeys.length}`;
+  }],
   ["planAndBrainstorm", async () => {
     const output = runtime.planAndBrainstorm("health check");
     if (!output.includes("mode=")) {

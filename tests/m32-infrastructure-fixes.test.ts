@@ -101,7 +101,7 @@ describe("Provider health", () => {
       routingPolicy: { requireApiKeyForHealthy: false },
       learningPolicy: { enableFlywheel: false, trainingCadence: "nightly" as const, canaryRatio: 10, exportPath: "", eventsPath: "", summaryPath: "" },
       skillPolicy: { enableSkillFlywheel: false, maxSkillHints: 0 },
-    } as any;
+    } as import("../src/config/schema").GraphFlowConfig;
 
     // 2 failures → still healthy
     recordProviderFailure("openai");
@@ -130,7 +130,7 @@ describe("Provider health", () => {
       routingPolicy: { requireApiKeyForHealthy: false },
       learningPolicy: { enableFlywheel: false, trainingCadence: "nightly" as const, canaryRatio: 10, exportPath: "", eventsPath: "", summaryPath: "" },
       skillPolicy: { enableSkillFlywheel: false, maxSkillHints: 0 },
-    } as any;
+    } as import("../src/config/schema").GraphFlowConfig;
 
     recordProviderFailure("anthropic");
     recordProviderFailure("anthropic");

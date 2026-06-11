@@ -1,5 +1,5 @@
 import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index.js";
-import { getTreeSitterParser } from "./tree-sitter-loader.js";
+import { getTreeSitterParser, type TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
 
 export const pythonIndexer: LanguageIndexer = {
   language: "python",
@@ -10,7 +10,7 @@ export const pythonIndexer: LanguageIndexer = {
     const parser = await getTreeSitterParser("python");
     const tree = parser.parse(content);
 
-    const traverse = (node: any) => {
+    const traverse = (node: TreeSitterSyntaxNode) => {
       const lineNo = node.startPosition.row + 1;
 
       if (node.type === "class_definition") {
@@ -80,7 +80,7 @@ export const pythonIndexer: LanguageIndexer = {
         }
       }
 
-      for (const child of node.children) {
+      for (const child of node.children ?? node.namedChildren) {
         traverse(child);
       }
     };

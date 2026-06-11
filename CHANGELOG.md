@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-06-11
+
+### Added
+
+- Settings 面板：图谱状态（节点/边数、上次索引时间）、配置覆盖层 diff、一键路由诊断。
+- `graphPolicy.autoIndexOnSave`：保存文件后 debounce 增量索引（Extension 可选开关）。
+- `getSettingsPanelStatus` / `listConfigOverlayKeys`：Settings 与 CLI 共用状态 API。
+- Husky pre-push：`lint-staged` 在推送前自动跑 ESLint。
+- CI：`validate.yml` 可复用工作流；PR 与 main 发布分离；`v*` tag 触发 Build / npm publish。
+- `postinstall` 完成后轻量 bootstrap `indexGraph`（非 CI 环境）。
+
+### Fixed
+
+- Settings 面板 HTML 模板中反引号导致 ESLint 解析失败，阻断 0.6.5 GitHub Actions 与 Release。
+
+### Changed
+
+- 收紧多处 `any` 类型；提交 `vitest.config.ts` 排除 extension 测试。
+- README 更新至 v0.6.5，补充 Release 与本地 `npm run ci` 说明。
+
 ## [0.6.4] - 2026-06-10
 
 ### Added

@@ -1,5 +1,5 @@
 import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index.js";
-import { getTreeSitterParser } from "./tree-sitter-loader.js";
+import { getTreeSitterParser, type TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
 
 function isExported(name: string): boolean {
   if (!name) return false;
@@ -16,7 +16,7 @@ export const goIndexer: LanguageIndexer = {
     const parser = await getTreeSitterParser("go");
     const tree = parser.parse(content);
 
-    const traverse = (node: any) => {
+    const traverse = (node: TreeSitterSyntaxNode) => {
       const lineNo = node.startPosition.row + 1;
 
       if (node.type === "package_clause") {
@@ -37,7 +37,7 @@ export const goIndexer: LanguageIndexer = {
           let paramsCount = 0;
           const paramsNode = node.childForFieldName("parameters");
           if (paramsNode) {
-            paramsCount = paramsNode.namedChildren.filter((c: any) => c.type === "parameter_declaration").length;
+            paramsCount = paramsNode.namedChildren.filter((c) => c.type === "parameter_declaration").length;
           }
           
           symbols.push({
@@ -72,7 +72,7 @@ export const goIndexer: LanguageIndexer = {
           imports.push({ module: text, raw: node.text });
         }
       } else if (node.type === "var_spec" || node.type === "const_spec") {
-        const nameNodes = node.namedChildren.filter((c: any) => c.type === "identifier");
+        const nameNodes = node.namedChildren.filter((c) => c.type === "identifier");
         for (const nameNode of nameNodes) {
           const name = nameNode.text;
           symbols.push({
@@ -85,7 +85,7 @@ export const goIndexer: LanguageIndexer = {
         }
       }
 
-      for (const child of node.children) {
+      for (const child of node.children ?? node.namedChildren) {
         traverse(child);
       }
     };

@@ -29,6 +29,7 @@ export interface GraphFlowConfig {
     enableNearLosslessMode?: boolean;
     autoIndexOnPreview?: boolean;
     autoIndexOnRun?: boolean;
+    autoIndexOnSave?: boolean;
     workspaceRoot?: string;
     includeExtensions?: string[];
     transport: "memory" | "mcp-http" | "file" | "sqlite";

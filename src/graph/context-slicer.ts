@@ -15,7 +15,6 @@ function getEncoder(): ((text: string) => number[]) | null {
   if (encoderLoaded) return encoderFn;
   encoderLoaded = true;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require("gpt-tokenizer/encoding/o200k_base") as { encode: (t: string) => number[] };
     if (typeof mod.encode === "function") {
       encoderFn = mod.encode.bind(mod);
@@ -26,7 +25,6 @@ function getEncoder(): ((text: string) => number[]) | null {
     // fall through
   }
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require("gpt-tokenizer") as { encode: (t: string) => number[] };
     if (typeof mod.encode === "function") {
       encoderFn = mod.encode.bind(mod);

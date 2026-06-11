@@ -4,7 +4,7 @@ A Context-Aware Multi-Agent Orchestration Engine.
 
 GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，当前版本聚焦于工程可用性：任务分流、DAG 执行、结果校验、图谱索引、近无损上下文压缩、CLI 与 VS Code 扩展联动。
 
-## 当前进度（v0.5.0）
+## 当前进度（v0.6.5）
 
 GraphFlow 已演进为面向多 agent 协作的工程级编排 + 上下文引擎，覆盖 **任务编排 / 路由 / 图谱 / 检索 / 学习 / Agent 接入** 全链路。
 
@@ -12,25 +12,24 @@ GraphFlow 已演进为面向多 agent 协作的工程级编排 + 上下文引擎
 
 > 从 task 描述出发，自动规划 → 路由模型 → 压缩图谱上下文（含向量召回）→ 执行/校验/重试，并把经验沉淀回知识图谱。
 
-### v0.5.0 本轮重点
+### v0.6.5 本轮重点
 
-1. **图谱路径统一**：`graphStorePath` 相对 `workspaceRoot` 解析，消除双份图谱。
-2. **全量重建**：`graphflow graph rebuild` + MCP `graphflow_rebuild`。
-3. **增量索引 GC**：删除/变更文件时 prune 陈旧节点。
-4. **配置合并**：`.graphflow/config.json` overlay 继承根目录 `graphflow.config.json` 的 providers/tiers（脚手架 tiers 不再覆盖 DeepSeek 等自定义模型）。
-5. **embeddingPolicy**：可配置本地 Xenova 向量模型 / OpenAI embedding / hash 模式。
-6. **MCP 工具集**：10 个工具（含 rebuild、enrich、model download 等）。
+1. **Settings 可观测性**：图谱规模、上次索引、配置覆盖层 diff、面板内路由诊断。
+2. **保存即索引（可选）**：`autoIndexOnSave` 在文件保存后 debounce 增量索引。
+3. **发布流水线**：main 推送自动构建 VSIX 并发布 GitHub Release；`v*` tag 额外触发 npm publish（需 `NPM_TOKEN`）。
+4. **推送前门禁**：Husky + lint-staged 在 `git push` 前运行 ESLint，避免 CI 才发现语法错误。
 
 ### 工程质量
 
-- 测试：**33 文件 / 146 用例** 全绿（`npm run ci` 含 extension build）。
+- 测试：**39 文件** 全绿（`npm run ci` 含 extension build + bundled runtime smoke）。
 - 类型：TypeScript 6 strict + exactOptionalPropertyTypes + NodeNext。
 - License：Apache-2.0。
 
 发布信息：
 
-1. 最新版本：`v0.5.0`（root + vscode-extension）
-2. 变更日志：`CHANGELOG.md`
+1. 最新版本：`v0.6.5`（root + vscode-extension）
+2. **GitHub Release**：push 到 `main` 且 CI 通过后自动发布 VSIX（见 [Actions](https://github.com/Roarpeng/GraphFlow/actions)）
+3. 变更日志：`CHANGELOG.md`
 
 ## 环境要求
 

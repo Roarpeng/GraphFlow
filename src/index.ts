@@ -5,6 +5,7 @@ export {
   runTaskResult,
   previewContext,
   getGraphFlowSettings,
+  getSettingsPanelStatus,
   saveGraphFlowSettings,
   indexGraph,
   inspectGraph,

@@ -9,6 +9,7 @@ import {
   type ContextPreviewResult,
   type GraphSnapshotResult,
   type GraphFlowSettings,
+  type SettingsPanelStatus,
   type SkillInsightsResult,
 } from "./panels";
 
@@ -29,7 +30,7 @@ interface McpInstallResult {
   agentName: string;
   configPath: string;
   scope: "user" | "workspace";
-  status: "injected" | "created" | "skipped" | "error";
+  status: "injected" | "created" | "skipped" | "error" | "updated";
   message?: string;
 }
 
@@ -49,6 +50,14 @@ interface GraphFlowRuntime {
   inspectGraph(configPath?: string, options?: { nodeLimit?: number; edgeLimit?: number }): Promise<GraphSnapshotResult>;
   getSkillInsights(configPath?: string, limit?: number): Promise<SkillInsightsResult>;
   getGraphFlowSettings(): GraphFlowSettings;
+  getSettingsPanelStatus(): Promise<{
+    graphNodeCount: number;
+    graphEdgeCount: number;
+    graphLastModified: string | null;
+    diagnoseSummary: string;
+    overlayKeys: string[];
+    baseConfigPath: string;
+  }>;
   saveGraphFlowSettings(settings: Omit<GraphFlowSettings, "configPath">): GraphFlowSettings;
   detectInstalledAgents(): DetectedAgent[];
   ensureGlobalGraphFlowConfig(): { path: string; status: "created" | "skipped" };
@@ -97,6 +106,7 @@ export function activate(context: vscode.ExtensionContext): void {
     runGraphFlow(workspaceRoot, (runtime) => runtime.indexGraph(workspaceRoot)).catch((err) => {
       console.error("GraphFlow auto-index on activate failed:", err);
     });
+    registerDebouncedIndexOnSave(context, workspaceRoot);
   }
 
   const runTask = vscode.commands.registerCommand("graphflow.runTask", async () => {
@@ -209,10 +219,23 @@ export function activate(context: vscode.ExtensionContext): void {
       return;
     }
 
-    const settings = await runGraphFlow(workspaceRoot, (runtime) =>
-      Promise.resolve(runtime.getGraphFlowSettings())
+    const [settings, panelStatus] = await runGraphFlow(workspaceRoot, async (runtime) => {
+      const loaded = runtime.getGraphFlowSettings();
+      const status = await runtime.getSettingsPanelStatus();
+      return [loaded, status] as const;
+    });
+    const extensionVersion =
+      context.extension.packageJSON.version?.toString() ?? "unknown";
+    showSettingsPanel(
+      context,
+      settings,
+      {
+        ...panelStatus,
+        extensionVersion,
+      },
+      workspaceRoot,
+      output
     );
-    showSettingsPanel(context, settings, workspaceRoot, output);
   });
 
   const showGraph = vscode.commands.registerCommand("graphflow.showGraph", async () => {
@@ -639,6 +662,7 @@ async function loadRuntime(): Promise<GraphFlowRuntime> {
         !module.inspectGraph ||
         !module.getSkillInsights ||
         !module.getGraphFlowSettings ||
+        !module.getSettingsPanelStatus ||
         !module.saveGraphFlowSettings ||
         !module.detectInstalledAgents ||
         !module.ensureGlobalGraphFlowConfig ||
@@ -661,6 +685,7 @@ async function loadRuntime(): Promise<GraphFlowRuntime> {
         inspectGraph: module.inspectGraph,
         getSkillInsights: module.getSkillInsights,
         getGraphFlowSettings: module.getGraphFlowSettings,
+        getSettingsPanelStatus: module.getSettingsPanelStatus,
         saveGraphFlowSettings: module.saveGraphFlowSettings,
         detectInstalledAgents: module.detectInstalledAgents,
         ensureGlobalGraphFlowConfig: module.ensureGlobalGraphFlowConfig,
@@ -847,9 +872,41 @@ function showContextPreviewPanel(context: vscode.ExtensionContext, preview: Cont
   context.subscriptions.push(panel);
 }
 
+function registerDebouncedIndexOnSave(context: vscode.ExtensionContext, workspaceRoot: string): void {
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const scheduleIndex = (): void => {
+    void runGraphFlow(workspaceRoot, async (runtime) => {
+      const settings = runtime.getGraphFlowSettings();
+      if (!settings.autoIndexOnSave) {
+        return;
+      }
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      debounceTimer = setTimeout(() => {
+        void runGraphFlow(workspaceRoot, (activeRuntime) =>
+          activeRuntime.indexGraph(workspaceRoot)
+        ).catch((err) => {
+          console.error("GraphFlow debounced index on save failed:", err);
+        });
+      }, 3000);
+    }).catch((err) => {
+      console.error("GraphFlow save-index settings lookup failed:", err);
+    });
+  };
+
+  const watcher = vscode.workspace.createFileSystemWatcher("**/*.{ts,tsx,js,jsx,md,json}");
+  watcher.onDidChange(scheduleIndex);
+  watcher.onDidCreate(scheduleIndex);
+  watcher.onDidDelete(scheduleIndex);
+  context.subscriptions.push(watcher);
+}
+
 function showSettingsPanel(
   context: vscode.ExtensionContext,
   settings: GraphFlowSettings,
+  status: SettingsPanelStatus,
   workspaceRoot: string,
   output: vscode.OutputChannel
 ): void {
@@ -867,8 +924,21 @@ function showSettingsPanel(
   const scriptUri = panel.webview.asWebviewUri(
     vscode.Uri.joinPath(context.extensionUri, "media", "settings.js")
   );
-  panel.webview.html = buildSettingsHtml(settings, scriptUri.toString());
+  panel.webview.html = buildSettingsHtml(settings, scriptUri.toString(), status);
   panel.webview.onDidReceiveMessage(async (message) => {
+    if (message?.type === "runDiagnose") {
+      try {
+        const diagnoseSummary = await runGraphFlow(workspaceRoot, (runtime) =>
+          Promise.resolve(runtime.diagnoseRouting())
+        );
+        panel.webview.postMessage({ type: "diagnoseResult", payload: diagnoseSummary });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : String(err);
+        panel.webview.postMessage({ type: "settingsError", payload: text });
+      }
+      return;
+    }
+
     if (message?.type !== "saveSettings") {
       return;
     }

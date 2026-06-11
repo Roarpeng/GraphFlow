@@ -1,0 +1,50 @@
+name: Validate
+
+on:
+  workflow_call:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            vscode-extension/package-lock.json
+
+      - name: Enable package manager
+        run: corepack enable
+
+      - name: Install root dependencies
+        run: npm install --no-audit
+        env:
+          GRAPHFLOW_SKIP_POSTINSTALL: "1"
+
+      - name: Install extension dependencies
+        run: npm ci --prefix vscode-extension
+
+      - name: Rebuild better-sqlite3
+        run: npm rebuild better-sqlite3
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build core
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Build extension
+        run: npm run build:extension
+
+      - name: Test extension
+        run: npm run test:extension

@@ -4,7 +4,21 @@ import { join } from "node:path";
 
 let initialized = false;
 
-export async function getTreeSitterParser(language: "python" | "go"): Promise<any> {
+export interface TreeSitterSyntaxNode {
+  type: string;
+  text: string;
+  startPosition: { row: number };
+  parent?: TreeSitterSyntaxNode;
+  namedChildren: TreeSitterSyntaxNode[];
+  children?: TreeSitterSyntaxNode[];
+  childForFieldName(name: string): TreeSitterSyntaxNode | null;
+}
+
+export interface TreeSitterParser {
+  parse(content: string): { rootNode: TreeSitterSyntaxNode };
+}
+
+export async function getTreeSitterParser(language: "python" | "go"): Promise<TreeSitterParser> {
   if (!initialized) {
     await Parser.init();
     initialized = true;
@@ -32,5 +46,5 @@ export async function getTreeSitterParser(language: "python" | "go"): Promise<an
   const parser = new Parser();
   const lang = await Parser.Language.load(wasmPath);
   parser.setLanguage(lang);
-  return parser;
+  return parser as TreeSitterParser;
 }

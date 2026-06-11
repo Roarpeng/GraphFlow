@@ -19,3 +19,7 @@ graphflow.config.json
 graphify-out/
 stdout.txt
 stderr.txt
+.graphflow/
+.cursor/mcp.json
+.vscode/mcp.json
+vscode-extension/vendor/

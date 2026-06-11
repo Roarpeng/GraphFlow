@@ -4,6 +4,8 @@
   const status = document.getElementById("settings-status");
   const networkFields = document.getElementById("settings-enrichment-network-fields");
   const backendSelect = document.getElementById("settings-enrichment-backend");
+  const diagnoseButton = document.getElementById("settings-run-diagnose");
+  const diagnoseList = document.getElementById("settings-diagnose-list");
 
   function getNumber(id) {
     const value = Number(document.getElementById(id).value);
@@ -27,6 +29,15 @@
 
   backendSelect?.addEventListener("change", syncEnrichmentFields);
   syncEnrichmentFields();
+
+  diagnoseButton?.addEventListener("click", () => {
+    if (!vscode) {
+      status.textContent = "VS Code API unavailable.";
+      return;
+    }
+    status.textContent = "Running diagnose...";
+    vscode.postMessage({ type: "runDiagnose" });
+  });
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -67,6 +78,7 @@
         enableNearLosslessMode: getChecked("settings-enable-near-lossless"),
         autoIndexOnPreview: getChecked("settings-auto-index-preview"),
         autoIndexOnRun: getChecked("settings-auto-index-run"),
+        autoIndexOnSave: getChecked("settings-auto-index-save"),
         transport: getString("settings-transport"),
         graphStorePath: getString("settings-graph-store-path"),
       },
@@ -75,6 +87,15 @@
 
   window.addEventListener("message", (event) => {
     const message = event.data;
+    if (message?.type === "diagnoseResult") {
+      if (diagnoseList) {
+        diagnoseList.innerHTML = String(message.payload || "")
+          .split("; ")
+          .map((line) => "<li>" + line + "</li>")
+          .join("");
+      }
+      status.textContent = "Diagnose complete.";
+    }
     if (message?.type === "settingsSaved") {
       status.textContent = "Saved.";
     }

@@ -1,4 +1,5 @@
 import { logger } from "../utils/logger";
+import type { ModelSelection } from "../routing/model-router";
 import { executeRolePrompt, type PromptContext } from "../routing/provider-executor";
 
 export type TaskComplexity = "simple" | "complex";
@@ -28,7 +29,7 @@ export function triageTask(task: string): TaskComplexity {
 
 export async function triageTaskLlm(
   task: string,
-  selection: { provider: string; model: string },
+  selection: ModelSelection,
   context?: PromptContext
 ): Promise<TaskComplexity> {
   if (!task.trim()) {
@@ -44,7 +45,7 @@ export async function triageTaskLlm(
   ].join("\n");
 
   try {
-    const raw = await executeRolePrompt("planner", prompt, selection as any, context);
+    const raw = await executeRolePrompt("planner", prompt, selection, context);
     const cleaned = raw.trim().toLowerCase();
 
     if (
