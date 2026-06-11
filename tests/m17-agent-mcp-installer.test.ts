@@ -30,7 +30,7 @@ describe("M17 agent MCP installer", () => {
   it("builds npx and bundled MCP nodes", () => {
     const npxNode = buildMcpServerNode({ strategy: "npx", workspaceRoot: "/repo" });
     expect(npxNode.command).toContain("npx");
-    expect(npxNode.args).toEqual(["-y", "graphflow-mcp"]);
+    expect(npxNode.args).toEqual(["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"]);
     expect(npxNode.cwd).toBe("/repo");
 
     const bundledNode = buildMcpServerNode({
@@ -99,7 +99,11 @@ describe("M17 agent MCP installer", () => {
       const userConfig = JSON.parse(readFileSync(join(fakeHome, ".cursor", "mcp.json"), "utf8")) as {
         mcpServers?: Record<string, { command: string; args: string[] }>;
       };
-      expect(userConfig.mcpServers?.graphflow?.args).toEqual(["-y", "graphflow-mcp"]);
+      expect(userConfig.mcpServers?.graphflow?.args).toEqual([
+        "-y",
+        "--package=@roarpeng/graphflow",
+        "graphflow-mcp",
+      ]);
     } finally {
       if (process.platform === "win32") {
         if (previousHome) {

@@ -16,7 +16,7 @@ Installed package:
   "mcpServers": {
     "graphflow": {
       "command": "npx",
-      "args": ["-y", "graphflow-mcp"]
+      "args": ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"]
     }
   }
 }
@@ -50,9 +50,9 @@ From this repository:
 Examples:
 
 ```bash
-npx graphflow plan "refactor planner and add tests" --json
-npx graphflow context preview "orchestrator" --json
-npx graphflow route diagnose --json
+npx @roarpeng/graphflow plan "refactor planner and add tests" --json
+npx @roarpeng/graphflow context preview "orchestrator" --json
+npx @roarpeng/graphflow route diagnose --json
 ```
 
 Always pass `--json` when another agent or script is parsing the output.
