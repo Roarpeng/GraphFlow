@@ -11,7 +11,7 @@ Add a local MCP server entry that launches GraphFlow over stdio:
   "mcpServers": {
     "graphflow": {
       "command": "npx",
-      "args": ["-y", "graphflow-mcp"]
+      "args": ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"]
     }
   }
 }

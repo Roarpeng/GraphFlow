@@ -305,7 +305,7 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
   const npxCmd = isWindows() ? "npx.cmd" : "npx";
   return {
     command: npxCmd,
-    args: ["-y", "graphflow-mcp"],
+    args: ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
     ...(options.workspaceRoot ? { cwd: options.workspaceRoot } : {}),
     env: {},
   };

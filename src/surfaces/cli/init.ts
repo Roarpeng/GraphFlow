@@ -57,7 +57,7 @@ ${installedLines}
 \`\`\`json
 "graphflow": {
   "command": "npx",
-  "args": ["-y", "graphflow-mcp"],
+  "args": ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
   "cwd": "${workspaceRoot.replace(/\\/g, "\\\\")}"
 }
 \`\`\`

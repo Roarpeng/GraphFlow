@@ -1,6 +1,17 @@
 {
-  "name": "graphflow",
+  "name": "@roarpeng/graphflow",
   "version": "0.6.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "AGENTS.md",
+    "CLAUDE.md"
+  ],
   "packageManager": "npm@10.9.2",
   "description": "**A Context-Aware Multi-Agent Orchestration Engine**",
   "main": "dist/index.js",
@@ -13,7 +24,8 @@
     "doc": "docs"
   },
   "scripts": {
-    "postinstall": "tsx src/surfaces/cli/init.ts",
+    "postinstall": "node dist/surfaces/cli/init.js",
+    "prepublishOnly": "npm run build",
     "test": "vitest run",
     "build": "tsc -p tsconfig.json",
     "test:watch": "vitest",
