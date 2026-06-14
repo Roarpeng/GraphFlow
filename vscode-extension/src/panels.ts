@@ -374,7 +374,7 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
           </div>
         </div>
         <div class="canvas-wrap">
-          <svg id="graph-canvas" class="graph-canvas" data-role="graph-canvas" viewBox="0 0 1000 580" preserveAspectRatio="xMidYMid meet">${serverSvgMarkup}</svg>
+          <svg id="graph-canvas" class="graph-canvas" data-role="graph-canvas" viewBox="0 0 1000 620" preserveAspectRatio="xMidYMid meet">${serverSvgMarkup}</svg>
         </div>
       </section>
       <section class="panel">
@@ -857,12 +857,48 @@ function snapshotShortLabel(node: GraphSnapshotSampleNode): string {
   return id.length > 28 ? `${id.slice(0, 27)}…` : id;
 }
 
+function normalizeSnapshotPositions(
+  positions: Map<string, { x: number; y: number }>,
+  width: number,
+  height: number,
+  pad: number
+): void {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const point of positions.values()) {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  }
+
+  if (!Number.isFinite(minX)) {
+    return;
+  }
+
+  const spanX = Math.max(maxX - minX, 1);
+  const spanY = Math.max(maxY - minY, 1);
+  const innerW = Math.max(width - pad * 2, 1);
+  const innerH = Math.max(height - pad * 2, 1);
+  const scale = Math.min(innerW / spanX, innerH / spanY);
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+
+  for (const point of positions.values()) {
+    point.x = width / 2 + (point.x - centerX) * scale;
+    point.y = height / 2 + (point.y - centerY) * scale;
+  }
+}
+
 function layoutSnapshotPositions(
   nodes: GraphSnapshotResult["sampleNodes"],
   edges: GraphSnapshotResult["sampleEdges"]
 ): Map<string, { x: number; y: number }> {
   const width = 1000;
-  const height = 580;
+  const height = 620;
   const centerX = width / 2;
   const centerY = height / 2;
   const positions = new Map<string, { x: number; y: number; vx: number; vy: number }>();
@@ -943,6 +979,7 @@ function layoutSnapshotPositions(
   for (const [id, p] of positions.entries()) {
     result.set(id, { x: p.x, y: p.y });
   }
+  normalizeSnapshotPositions(result, width, height, 72);
   return result;
 }
 
