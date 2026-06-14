@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-06-14
+
+### Added
+
+- 全局配置优先：`resolveWritableConfigPath` 默认将 Settings 保存到 `~/.graphflow.config.json`。
+- MCP 安装范围：`installScope: "user" | "all"`，默认仅写入用户级 Agent 配置（如 `~/.cursor/mcp.json`）。
+- 测试 `m40-config-global-first`：覆盖全局读取/写入与 MCP 用户级默认行为。
+
+### Changed
+
+- 扩展首次安装只 scaffold 全局 `~/.graphflow.config.json`，不再自动创建 `.graphflow/config.json` 工作区覆盖层。
+- `resolveConfig` 以全局配置为底，项目 `graphflow.config.json` / `.graphflow/config.json` 作为可选覆盖层合并。
+- `npm postinstall` / `graphflow init` 改为全局配置 + 用户级 MCP；README 说明更新为一次配置、所有项目可用。
+- 配置指南（`formatModelConfigGuide`）优先展示全局配置路径。
+
+### Fixed
+
+- `saveGraphFlowSettings` 补全 `resolveGlobalConfigPath` 导入，修复扩展打包 TypeScript 编译错误。
+
 ## [0.6.6] - 2026-06-11
 
 ### Added
