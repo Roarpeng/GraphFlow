@@ -5,7 +5,7 @@
     "target": "ES2022",
     "lib": ["ES2022"],
     "strict": true,
-    "outDir": "dist",
+    "noEmit": true,
     "rootDir": "src",
     "types": ["node", "vscode"],
     "skipLibCheck": true

@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.10] - 2026-06-14
+
+### Added
+
+- `runtime/` 子模块：`env`、`settings`、`graph`、`routing`、`panel`、`helpers`、`facade`。
+- `GraphFlowRuntimeModule` 与 `assertGraphFlowRuntime()`：扩展动态加载时使用统一类型校验。
+- VS Code 扩展 esbuild 单文件打包（`dist/extension.js`）。
+
+### Changed
+
+- `runtime.ts` 改为薄 re-export 层；业务逻辑拆分到子模块。
+- 扩展移除手写 `GraphFlowRuntime` 接口，改用 core 导出的类型。
+
 ## [0.6.9] - 2026-06-14
 
 ### Added

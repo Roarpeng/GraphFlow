@@ -13,6 +13,7 @@ import {
   type SettingsPanelStatus,
   type SkillInsightsResult,
 } from "./panels";
+import type { GraphFlowRuntime } from "./runtime-types";
 
 interface RunRecord {
   task: string;
@@ -25,102 +26,6 @@ interface RunRecord {
 const runs: RunRecord[] = [];
 const CHAT_PARTICIPANT_ID = "roarpeng.graphflow-vscode.graphflowAgent";
 let runtimePromise: Promise<GraphFlowRuntime> | undefined;
-
-interface McpInstallResult {
-  agentId: string;
-  agentName: string;
-  configPath: string;
-  scope: "user" | "workspace";
-  status: "injected" | "created" | "skipped" | "error" | "updated";
-  message?: string;
-}
-
-interface DetectedAgent {
-  id: string;
-  name: string;
-}
-
-interface GraphFlowRuntime {
-  runTask(task: string): Promise<string>;
-  planAndBrainstorm(task: string): string;
-  previewContext(query: string): Promise<ContextPreviewResult>;
-  indexGraph(rootDir?: string, configPath?: string): Promise<{ indexedFiles: number; indexedSymbols: number; }>;
-  enrichSemanticsSilent(configPath?: string, options?: { batchSize?: number; sleepMs?: number; timeoutMs?: number }): Promise<{ enrichedCount: number }>;
-  diagnoseRouting(): string;
-  runLearningNightly(): string;
-  inspectGraph(configPath?: string, options?: { nodeLimit?: number; edgeLimit?: number }): Promise<GraphSnapshotResult>;
-  getSkillInsights(configPath?: string, limit?: number): Promise<SkillInsightsResult>;
-  getGraphFlowSettings(): GraphFlowSettings;
-  getSettingsPanelStatus(): Promise<{
-    graphNodeCount: number;
-    graphEdgeCount: number;
-    graphLastModified: string | null;
-    diagnoseSummary: string;
-    overlayKeys: string[];
-    baseConfigPath: string;
-  }>;
-  saveGraphFlowSettings(settings: Omit<GraphFlowSettings, "configPath">): GraphFlowSettings;
-  indexGraphFromSettings(
-    settings: Omit<GraphFlowSettings, "configPath">,
-    workspaceRoot?: string
-  ): Promise<{
-    ok: boolean;
-    validationIssues: Array<{ field: string; message: string }>;
-    graphIndex?: { indexedFiles: number; indexedSymbols: number };
-    graphSnapshot?: { nodeCount: number; edgeCount: number };
-  }>;
-  testRoutingAndIndexGraph(
-    settings: Omit<GraphFlowSettings, "configPath">,
-    workspaceRoot?: string
-  ): Promise<{
-    ok: boolean;
-    validationIssues: Array<{ field: string; message: string }>;
-    probes: Array<{
-      role: string;
-      provider: string;
-      model: string;
-      ok: boolean;
-      latencyMs?: number;
-      error?: string;
-      sample?: string;
-    }>;
-    graphIndex?: { indexedFiles: number; indexedSymbols: number };
-    graphSnapshot?: { nodeCount: number; edgeCount: number };
-  }>;
-  detectInstalledAgents(): DetectedAgent[];
-  ensureGlobalGraphFlowConfig(): { path: string; status: "created" | "skipped" };
-  ensureWorkspaceGraphFlowConfig(workspaceRoot: string): { path: string; status: "created" | "skipped" };
-  installMcpToDetectedAgents(options: {
-    strategy: "npx" | "npm-script" | "node-bundled";
-    installScope?: "user" | "all";
-    workspaceRoot?: string;
-    npmScriptCwd?: string;
-    bundledServerPath?: string;
-    launcherPath?: string;
-    bundledRuntimeRoot?: string;
-    nodeCommand?: string;
-    electronExecPath?: string;
-  }): McpInstallResult[];
-  formatModelConfigGuide(workspaceRoot?: string): string;
-  downloadOpenBmbModel(
-    configPath?: string,
-    options?: {
-      model?: string;
-      url?: string;
-      sha256?: string;
-      targetPath?: string;
-      force?: boolean;
-      onProgress?: (progress: {
-        model: string;
-        targetPath: string;
-        downloadedBytes: number;
-        totalBytes?: number;
-        percent?: number;
-        stage: "starting" | "downloading" | "verifying" | "completed" | "skipped";
-      }) => void;
-    }
-  ): Promise<{ model: string; targetPath: string; bytes: number; skipped: boolean; verified: boolean; resumed?: boolean }>;
-}
 
 const MCP_INSTALL_VERSION_KEY = "graphflow.mcpInstallVersion";
 
@@ -644,54 +549,14 @@ async function loadRuntime(): Promise<GraphFlowRuntime> {
     runtimePromise = (async () => {
       process.env.GRAPHFLOW_LOG_JSON = process.env.GRAPHFLOW_LOG_JSON ?? "1";
       const runtimePath = join(__dirname, "..", "vendor", "graphflow", "dist", "surfaces", "cli", "runtime.js");
-      const module = (await import(pathToFileURL(runtimePath).toString())) as Partial<GraphFlowRuntime>;
-      if (
-        !module.runTask ||
-        !module.planAndBrainstorm ||
-        !module.previewContext ||
-        !module.indexGraph ||
-        !module.enrichSemanticsSilent ||
-        !module.diagnoseRouting ||
-        !module.runLearningNightly ||
-        !module.inspectGraph ||
-        !module.getSkillInsights ||
-        !module.getGraphFlowSettings ||
-        !module.getSettingsPanelStatus ||
-        !module.indexGraphFromSettings ||
-        !module.testRoutingAndIndexGraph ||
-        !module.saveGraphFlowSettings ||
-        !module.detectInstalledAgents ||
-        !module.ensureGlobalGraphFlowConfig ||
-        !module.ensureWorkspaceGraphFlowConfig ||
-        !module.installMcpToDetectedAgents ||
-        !module.formatModelConfigGuide ||
-        !module.downloadOpenBmbModel
-      ) {
-        throw new Error("Bundled GraphFlow runtime is missing required exports.");
+      const loaded = (await import(pathToFileURL(runtimePath).toString())) as {
+        assertGraphFlowRuntime?: (module: unknown) => GraphFlowRuntime;
+      };
+      if (typeof loaded.assertGraphFlowRuntime === "function") {
+        return loaded.assertGraphFlowRuntime(loaded);
       }
 
-      return {
-        runTask: module.runTask,
-        planAndBrainstorm: module.planAndBrainstorm,
-        previewContext: module.previewContext,
-        indexGraph: module.indexGraph!,
-        enrichSemanticsSilent: module.enrichSemanticsSilent,
-        diagnoseRouting: module.diagnoseRouting,
-        runLearningNightly: module.runLearningNightly,
-        inspectGraph: module.inspectGraph,
-        getSkillInsights: module.getSkillInsights,
-        getGraphFlowSettings: module.getGraphFlowSettings,
-        getSettingsPanelStatus: module.getSettingsPanelStatus,
-        indexGraphFromSettings: module.indexGraphFromSettings,
-        testRoutingAndIndexGraph: module.testRoutingAndIndexGraph,
-        saveGraphFlowSettings: module.saveGraphFlowSettings,
-        detectInstalledAgents: module.detectInstalledAgents,
-        ensureGlobalGraphFlowConfig: module.ensureGlobalGraphFlowConfig,
-        ensureWorkspaceGraphFlowConfig: module.ensureWorkspaceGraphFlowConfig,
-        installMcpToDetectedAgents: module.installMcpToDetectedAgents,
-        formatModelConfigGuide: module.formatModelConfigGuide,
-        downloadOpenBmbModel: module.downloadOpenBmbModel,
-      };
+      throw new Error("Bundled GraphFlow runtime is missing assertGraphFlowRuntime export.");
     })();
   }
 
