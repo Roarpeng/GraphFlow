@@ -4,7 +4,7 @@
   "displayName": "GraphFlow",
   "description": "GraphFlow orchestration panel and command runner",
   "icon": "media/graphflow.png",
-  "version": "0.6.9",
+  "version": "0.6.10",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"
@@ -38,7 +38,11 @@
         "graphflow.openbmb.mode": {
           "type": "string",
           "default": "embedded",
-          "enum": ["embedded", "ollama", "openai-compat"],
+          "enum": [
+            "embedded",
+            "ollama",
+            "openai-compat"
+          ],
           "description": "OpenBMB runtime mode. embedded=local model, ollama/openai-compat=require manual baseUrl."
         },
         "graphflow.openbmb.model": {
@@ -175,12 +179,15 @@
     "icon:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/generate-icon.ps1",
     "sync-runtime": "npm --prefix .. run build && node ./scripts/sync-runtime.mjs",
     "test:runtime": "node ./scripts/test-bundled-runtime.mjs",
-    "build": "npm run sync-runtime && tsc -p ./tsconfig.json",
+    "bundle": "node ./scripts/bundle-extension.mjs",
+    "typecheck": "tsc --noEmit -p ./tsconfig.json",
+    "build": "npm run sync-runtime && npm run bundle",
     "package": "npm run build && npm run test:runtime && node ./scripts/package-vsix.mjs"
   },
   "devDependencies": {
     "@types/vscode": "^1.99.0",
     "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.12",
     "typescript": "^6.0.3"
   }
 }

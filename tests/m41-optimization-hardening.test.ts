@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { loadConfigSafe } from "../src/config/loader";
 import { hasPendingGraphIndexWork } from "../src/graph/file-indexer";
 import { resolveRuntimeCwd, requireWorkspaceFolder } from "../vscode-extension/src/workspace";
+import { assertGraphFlowRuntime } from "../src/surfaces/cli/runtime/facade";
+import * as runtime from "../src/surfaces/cli/runtime";
 
 const tempRoots: string[] = [];
 
@@ -50,5 +52,17 @@ describe("M41 optimization hardening", () => {
   it("requireWorkspaceFolder guards graph-only actions", () => {
     expect(requireWorkspaceFolder(undefined)).toBe(false);
     expect(requireWorkspaceFolder("/repo")).toBe(true);
+  });
+
+  it("assertGraphFlowRuntime validates bundled module exports", () => {
+    const validated = assertGraphFlowRuntime(runtime);
+    expect(typeof validated.runTask).toBe("function");
+    expect(typeof validated.previewContext).toBe("function");
+  });
+
+  it("assertGraphFlowRuntime rejects incomplete modules", () => {
+    expect(() => assertGraphFlowRuntime({ runTask: () => Promise.resolve("") })).toThrow(
+      /missing required exports/i
+    );
   });
 });

@@ -25,7 +25,9 @@ export {
   detectInstalledAgents,
   formatModelConfigGuide,
   installMcpToDetectedAgents,
+  assertGraphFlowRuntime,
 } from "./surfaces/cli/runtime";
+export type { GraphFlowRuntime, GraphFlowRuntimeModule } from "./surfaces/cli/runtime";
 export type {
   DetectedAgent,
   McpInstallOptions,
