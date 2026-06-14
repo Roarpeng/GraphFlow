@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-06-14
+
+### Fixed
+
+- 扩展在无工作区文件夹时也可打开 Settings 并保存全局模型配置；首次安装自动弹出 Settings 面板。
+- `showSetupGuide` 不再因未打开项目而失败；图谱建立/路由测试在无工作区时给出中文提示。
+
 ## [0.6.7] - 2026-06-14
 
 ### Added
