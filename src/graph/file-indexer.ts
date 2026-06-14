@@ -76,6 +76,67 @@ export function clearGraphIndexArtifacts(rootDir: string, graphStorePath: string
   rmSync(vectorsPath, { force: true });
 }
 
+interface ScannedFile {
+  absPath: string;
+  relPath: string;
+  size: number;
+  mtimeMs: number;
+}
+
+function loadCacheState(cachePath: string, forceReindex: boolean): CacheState {
+  if (forceReindex) {
+    return {};
+  }
+
+  try {
+    const raw = readFileSync(cachePath, "utf8");
+    const parsedCache = JSON.parse(raw);
+    if (parsedCache.version === 2 && parsedCache.state) {
+      return parsedCache.state as CacheState;
+    }
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code !== "ENOENT") {
+      logger.warn({ error: err.message }, "Failed to read index cache");
+    }
+  }
+
+  return {};
+}
+
+/** Returns true when workspace files changed since last index (or cache is empty). */
+export function hasPendingGraphIndexWork(
+  rootDir: string,
+  options?: Pick<FileIndexerOptions, "includeExtensions" | "maxFileSizeBytes" | "forceReindex">
+): boolean {
+  const includeExtensions = options?.includeExtensions ?? DEFAULT_EXTENSIONS;
+  const maxFileSizeBytes = options?.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE;
+  const forceReindex = options?.forceReindex ?? false;
+  if (forceReindex) {
+    return true;
+  }
+
+  const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
+  const cacheState = loadCacheState(cachePath, false);
+  const scanned = walkScannableFiles(rootDir, includeExtensions, maxFileSizeBytes);
+  const currentRelPaths = new Set(scanned.map((file) => file.relPath));
+
+  for (const relPath of Object.keys(cacheState)) {
+    if (!currentRelPaths.has(relPath)) {
+      return true;
+    }
+  }
+
+  for (const file of scanned) {
+    const prev = cacheState[file.relPath];
+    if (!prev || prev.mtimeMs !== file.mtimeMs) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export async function indexWorkspaceFiles(
   client: GraphClient,
   rootDir: string,
@@ -86,39 +147,15 @@ export async function indexWorkspaceFiles(
   const forceReindex = options?.forceReindex ?? false;
 
   const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
-  let cacheState: CacheState = {};
-  try {
-    const raw = readFileSync(cachePath, "utf8");
-    const parsedCache = JSON.parse(raw);
-    if (parsedCache.version === 2 && parsedCache.state) {
-      cacheState = parsedCache.state;
-    }
-  } catch (error) {
-    const err = error as NodeJS.ErrnoException;
-    if (err.code !== "ENOENT") {
-      logger.warn({ error: err.message }, "Failed to read index cache");
-    }
-  }
-
-  if (forceReindex) {
-    cacheState = {};
-  }
+  let cacheState = loadCacheState(cachePath, forceReindex);
 
   const snapshot = client.readSnapshot?.();
   if (snapshot && snapshot.nodes.length === 0 && snapshot.edges.length === 0 && Object.keys(cacheState).length > 0) {
     cacheState = {};
   }
 
-  const files = walkFiles(rootDir, includeExtensions);
-  const currentRelPaths = new Set<string>();
-
-  for (const file of files) {
-    const stat = statSync(file);
-    if (stat.size > maxFileSizeBytes) {
-      continue;
-    }
-    currentRelPaths.add(normalizePath(relative(rootDir, file)));
-  }
+  const scanned = walkScannableFiles(rootDir, includeExtensions, maxFileSizeBytes);
+  const currentRelPaths = new Set(scanned.map((file) => file.relPath));
 
   if (client.deleteNode) {
     for (const relPath of Object.keys(cacheState)) {
@@ -133,14 +170,9 @@ export async function indexWorkspaceFiles(
   const edges: GraphEdge[] = [];
   const parsed: ParsedFile[] = [];
 
-  for (const file of files) {
-    const stat = statSync(file);
-    if (stat.size > maxFileSizeBytes) {
-      continue;
-    }
-
-    const relPath = normalizePath(relative(rootDir, file));
-    const mtimeMs = stat.mtimeMs;
+  for (const file of scanned) {
+    const relPath = file.relPath;
+    const mtimeMs = file.mtimeMs;
     const prev = cacheState[relPath];
 
     let content = "";
@@ -148,7 +180,7 @@ export async function indexWorkspaceFiles(
     let isChanged = forceReindex;
 
     if (!prev || prev.mtimeMs !== mtimeMs) {
-      content = readFileSync(file, "utf8");
+      content = readFileSync(file.absPath, "utf8");
       currentHash = createHash("md5").update(content).digest("hex");
       if (!prev || prev.hash !== currentHash) {
         isChanged = true;
@@ -164,7 +196,7 @@ export async function indexWorkspaceFiles(
     }
 
     if (!content) {
-      content = readFileSync(file, "utf8");
+      content = readFileSync(file.absPath, "utf8");
       currentHash = createHash("md5").update(content).digest("hex");
     }
 
@@ -204,7 +236,7 @@ export async function indexWorkspaceFiles(
         language,
         exports: uniqueExports,
         symbolCount: declared.length,
-        sizeBytes: stat.size,
+        sizeBytes: file.size,
       },
     });
     nodes.push({ id: moduleNodeId, type: "Module", content: moduleKey(relPath) });
@@ -343,6 +375,30 @@ async function pruneFileFromGraph(client: GraphClient, relPath: string): Promise
   for (const node of toDelete) {
     await client.deleteNode(node.id);
   }
+}
+
+function walkScannableFiles(
+  rootDir: string,
+  includeExtensions: string[],
+  maxFileSizeBytes: number
+): ScannedFile[] {
+  const files = walkFiles(rootDir, includeExtensions);
+  const scanned: ScannedFile[] = [];
+
+  for (const absPath of files) {
+    const stat = statSync(absPath);
+    if (stat.size > maxFileSizeBytes) {
+      continue;
+    }
+    scanned.push({
+      absPath,
+      relPath: normalizePath(relative(rootDir, absPath)),
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+    });
+  }
+
+  return scanned;
 }
 
 function walkFiles(rootDir: string, includeExtensions: string[]): string[] {

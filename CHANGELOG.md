@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.9] - 2026-06-14
+
+### Added
+
+- `loadConfigSafe`：损坏/缺失配置文件时回退默认配置并记录告警。
+- `hasPendingGraphIndexWork`：无文件变更时跳过 preview/run 的自动索引。
+- `runtime/types.ts`：CLI/MCP 公共类型集中导出。
+- `vscode-extension/src/workspace.ts`：可测试的工作区 cwd 解析。
+- 测试 `m41-optimization-hardening`。
+
+### Changed
+
+- `postinstall` 默认不再自动 init/MCP 注入；需 `GRAPHFLOW_ENABLE_POSTINSTALL=1` 显式开启。
+- CI 根依赖安装改为 `npm ci`，提升可复现构建。
+- 默认 `maxContextTokens` 从 400 提升到 1500，避免宽查询预览为空。
+- 文件索引器合并 stat 遍历，减少重复 I/O。
+- VSIX `.vscodeignore` 裁剪 vendor 中的 map/d.ts/tests/docs。
+
+### Fixed
+
+- 损坏的全局/项目 JSON 不再导致 GraphFlow 启动失败。
+
 ## [0.6.8] - 2026-06-14
 
 ### Fixed

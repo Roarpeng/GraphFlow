@@ -25,7 +25,7 @@ export function getDefaultConfig(): GraphFlowConfig {
       includeExtensions: [".ts", ".tsx", ".js", ".jsx", ".md", ".json"],
       transport: "file",
       graphStorePath: "tmp/graphflow-graph.json",
-      maxContextTokens: 400,
+      maxContextTokens: 1500,
       layerQuota: { l1: 6, l2: 4, l3: 3 },
       semanticEnrichment: {
         enabled: true,

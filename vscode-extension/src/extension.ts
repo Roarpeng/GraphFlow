@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { pathToFileURL } from "node:url";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveRuntimeCwd, requireWorkspaceFolder } from "./workspace";
 import {
   buildContextPreviewHtml,
   buildGraphSnapshotHtml,
@@ -776,18 +776,6 @@ function getWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
-function resolveRuntimeCwd(workspaceRoot?: string): string {
-  return workspaceRoot ?? homedir();
-}
-
-function requireWorkspaceFolder(workspaceRoot: string | undefined): workspaceRoot is string {
-  if (!workspaceRoot) {
-    vscode.window.showWarningMessage("请先打开一个项目文件夹后再建立或索引知识图谱。");
-    return false;
-  }
-  return true;
-}
-
 async function openGraphFlowSettings(
   context: vscode.ExtensionContext,
   output: vscode.OutputChannel
@@ -961,6 +949,7 @@ function showSettingsPanel(
   panel.webview.onDidReceiveMessage(async (message) => {
     if (message?.type === "indexGraphOnly") {
       if (!requireWorkspaceFolder(workspaceRoot)) {
+        vscode.window.showWarningMessage("请先打开一个项目文件夹后再建立或索引知识图谱。");
         return;
       }
       const payload = message.payload as Omit<GraphFlowSettings, "configPath">;
@@ -1006,6 +995,7 @@ function showSettingsPanel(
 
     if (message?.type === "testRoutingAndIndex") {
       if (!requireWorkspaceFolder(workspaceRoot)) {
+        vscode.window.showWarningMessage("请先打开一个项目文件夹后再建立或索引知识图谱。");
         return;
       }
       const payload = message.payload as Omit<GraphFlowSettings, "configPath">;

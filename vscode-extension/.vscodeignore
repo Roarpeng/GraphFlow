@@ -4,3 +4,15 @@ node_modules/**
 !vendor/**
 tsconfig.json
 package-lock.json
+vendor/**/node_modules/**/*.map
+vendor/**/node_modules/**/*.d.ts
+vendor/**/node_modules/**/*.d.ts.map
+vendor/**/node_modules/**/test/**
+vendor/**/node_modules/**/tests/**
+vendor/**/node_modules/**/__tests__/**
+vendor/**/node_modules/**/docs/**
+vendor/**/node_modules/**/doc/**
+vendor/**/node_modules/**/README*
+vendor/**/node_modules/**/CHANGELOG*
+vendor/**/node_modules/**/LICENSE*
+vendor/**/node_modules/**/.github/**

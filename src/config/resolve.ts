@@ -1,10 +1,11 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { GraphFlowConfig } from "./schema";
-import { loadConfig } from "./loader";
+import { loadConfigSafe } from "./loader";
 import { mergeGraphFlowConfig } from "./merge";
 import { getDefaultConfig } from "./defaults";
 import { resolveGlobalConfigPath } from "./scaffold";
+import { logger } from "../utils/logger";
 
 function isDefaultProjectConfigPath(path: string): boolean {
   const projectRootConfig = resolve("graphflow.config.json");
@@ -51,31 +52,40 @@ export function resolveWritableConfigPath(path = "graphflow.config.json"): strin
 
 export function resolveConfig(path = "graphflow.config.json"): GraphFlowConfig {
   if (!isDefaultProjectConfigPath(path)) {
-    if (existsSync(path)) {
-      return loadConfig(path);
+    const result = loadConfigSafe(path);
+    if (result.usedFallback && result.error) {
+      logger.warn({ path: result.configPath, error: result.error }, "Using default config for explicit path");
     }
-    return getDefaultConfig();
+    return result.config;
   }
 
   const globalPath = resolveGlobalConfigPath();
-  const base = existsSync(globalPath) ? loadConfig(globalPath) : getDefaultConfig();
+  const base = existsSync(globalPath) ? loadLayer(globalPath) : getDefaultConfig();
 
   const projectRoot = resolve("graphflow.config.json");
   const overlayPath = resolve(".graphflow/config.json");
 
   if (existsSync(projectRoot) && existsSync(overlayPath)) {
-    const rootConfig = loadConfig(projectRoot);
-    const withRoot = mergeGraphFlowConfig(base, rootConfig);
-    return mergeGraphFlowConfig(withRoot, loadConfig(overlayPath));
+    const withRoot = mergeGraphFlowConfig(base, loadLayer(projectRoot));
+    return mergeGraphFlowConfig(withRoot, loadLayer(overlayPath));
   }
 
   if (existsSync(projectRoot)) {
-    return mergeGraphFlowConfig(base, loadConfig(projectRoot));
+    return mergeGraphFlowConfig(base, loadLayer(projectRoot));
   }
 
   if (existsSync(overlayPath)) {
-    return mergeGraphFlowConfig(base, loadConfig(overlayPath));
+    return mergeGraphFlowConfig(base, loadLayer(overlayPath));
   }
 
   return base;
+}
+
+function loadLayer(path: string): GraphFlowConfig {
+  const result = loadConfigSafe(path);
+  if (result.usedFallback && result.error) {
+    logger.warn({ path: result.configPath, error: result.error }, "Config layer ignored due to load failure");
+    return getDefaultConfig();
+  }
+  return result.config;
 }
