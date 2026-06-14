@@ -61,6 +61,8 @@
   },
   "homepage": "https://github.com/Roarpeng/GraphFlow#readme",
   "devDependencies": {
+    "@emnapi/core": "^1.11.1",
+    "@emnapi/runtime": "^1.11.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.9.1",
     "@typescript-eslint/eslint-plugin": "^8.60.0",
