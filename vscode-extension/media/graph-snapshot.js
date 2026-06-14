@@ -11,6 +11,63 @@
   let lastLayoutKey = "";
   let cachedLayout = null;
 
+  const CANVAS_WIDTH = 1000;
+  const CANVAS_HEIGHT = 620;
+  const CANVAS_PAD = 72;
+
+  function normalizeLayoutPositions(positions, width, height, pad) {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for (const point of positions.values()) {
+      if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+        continue;
+      }
+      minX = Math.min(minX, point.x);
+      minY = Math.min(minY, point.y);
+      maxX = Math.max(maxX, point.x);
+      maxY = Math.max(maxY, point.y);
+    }
+
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) {
+      return { x: 0, y: 0, w: width, h: height };
+    }
+
+    const spanX = Math.max(maxX - minX, 1);
+    const spanY = Math.max(maxY - minY, 1);
+    const innerW = Math.max(width - pad * 2, 1);
+    const innerH = Math.max(height - pad * 2, 1);
+    const scale = Math.min(innerW / spanX, innerH / spanY);
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    for (const point of positions.values()) {
+      point.x = width / 2 + (point.x - centerX) * scale;
+      point.y = height / 2 + (point.y - centerY) * scale;
+    }
+
+    return { x: 0, y: 0, w: width, h: height };
+  }
+
+  function sanitizeBounds(bounds) {
+    if (
+      !bounds ||
+      !Number.isFinite(bounds.x) ||
+      !Number.isFinite(bounds.y) ||
+      !Number.isFinite(bounds.w) ||
+      !Number.isFinite(bounds.h) ||
+      bounds.w <= 0 ||
+      bounds.h <= 0 ||
+      bounds.w > CANVAS_WIDTH * 20 ||
+      bounds.h > CANVAS_HEIGHT * 20
+    ) {
+      return { x: 0, y: 0, w: CANVAS_WIDTH, h: CANVAS_HEIGHT };
+    }
+    return bounds;
+  }
+
   const searchInput = document.getElementById("graph-search");
   const typeFilter = document.getElementById("graph-type-filter");
   const relationFilter = document.getElementById("graph-relation-filter");
@@ -160,11 +217,18 @@
   }
 
   function layoutGraph(visibleNodes, visibleEdges) {
-    const width = 1000;
-    const height = 620;
+    const width = CANVAS_WIDTH;
+    const height = CANVAS_HEIGHT;
     const centerX = width / 2;
     const centerY = height / 2;
     const positions = new Map();
+
+    if (visibleNodes.length === 0) {
+      return {
+        positions,
+        bounds: { x: 0, y: 0, w: width, h: height },
+      };
+    }
 
     const folderGroups = new Map();
     visibleNodes.forEach((node) => {
@@ -177,7 +241,7 @@
     const groups = Array.from(folderGroups.entries());
     groups.forEach(([groupName, bucket], groupIndex) => {
       const groupAngle = (Math.PI * 2 * groupIndex) / Math.max(1, groups.length);
-      const groupRadius = Math.min(width, height) * (groups.length > 6 ? 0.28 : 0.24);
+      const groupRadius = Math.min(width, height) * (groups.length > 6 ? 0.24 : 0.2);
       const typeOrder = ["File", "Module", "Symbol", "Skill", "Decision", "TaskRun"];
       bucket.sort((a, b) => typeOrder.indexOf(a.type) - typeOrder.indexOf(b.type));
 
@@ -185,8 +249,8 @@
         const localAngle = (Math.PI * 2 * index) / Math.max(1, bucket.length);
         const jitter = (hashString(node.id) % 100) / 100 - 0.5;
         positions.set(node.id, {
-          x: centerX + Math.cos(groupAngle + localAngle * 0.42) * groupRadius + jitter * 22,
-          y: centerY + Math.sin(groupAngle + localAngle * 0.42) * groupRadius + jitter * 22,
+          x: centerX + Math.cos(groupAngle + localAngle * 0.42) * groupRadius + jitter * 16,
+          y: centerY + Math.sin(groupAngle + localAngle * 0.42) * groupRadius + jitter * 16,
           vx: 0,
           vy: 0,
           folderGroup: groupName,
@@ -194,18 +258,20 @@
       });
     });
 
-    const iterations = 200;
-    const k = 48;
-    const repulsion = 6200;
+    const iterations = 120;
+    const k = 42;
+    const repulsion = 2400;
+    const maxVelocity = 24;
     for (let i = 0; i < iterations; i += 1) {
       const temp = 1 - i / iterations;
       for (let a = 0; a < visibleNodes.length; a += 1) {
         for (let b = a + 1; b < visibleNodes.length; b += 1) {
           const p1 = positions.get(visibleNodes[a].id);
           const p2 = positions.get(visibleNodes[b].id);
+          if (!p1 || !p2) continue;
           const dx = p1.x - p2.x;
           const dy = p1.y - p2.y;
-          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 12);
           const sameFolder = p1.folderGroup === p2.folderGroup ? 0.85 : 1;
           const force = ((repulsion * sameFolder) / (dist * dist)) * temp;
           const fx = (dx / dist) * force;
@@ -222,8 +288,8 @@
         if (!p1 || !p2) return;
         const dx = p2.x - p1.x;
         const dy = p2.y - p1.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const force = ((dist * dist) / (k * k)) * 0.14 * temp;
+        const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 12);
+        const force = ((dist * dist) / (k * k)) * 0.1 * temp;
         const fx = (dx / dist) * force;
         const fy = (dy / dist) * force;
         p1.vx += fx;
@@ -233,44 +299,31 @@
       });
       visibleNodes.forEach((node) => {
         const p = positions.get(node.id);
-        p.vx += (centerX - p.x) * 0.035 * temp;
-        p.vy += (centerY - p.y) * 0.035 * temp;
+        if (!p) return;
+        p.vx += (centerX - p.x) * 0.06 * temp;
+        p.vy += (centerY - p.y) * 0.06 * temp;
+        p.vx = Math.max(-maxVelocity, Math.min(maxVelocity, p.vx));
+        p.vy = Math.max(-maxVelocity, Math.min(maxVelocity, p.vy));
         p.x += p.vx;
         p.y += p.vy;
-        p.vx *= 0.5;
-        p.vy *= 0.5;
+        p.vx *= 0.55;
+        p.vy *= 0.55;
       });
     }
 
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const p of positions.values()) {
-      minX = Math.min(minX, p.x);
-      minY = Math.min(minY, p.y);
-      maxX = Math.max(maxX, p.x);
-      maxY = Math.max(maxY, p.y);
-    }
-    const pad = 80;
-    return {
-      positions,
-      bounds: {
-        x: minX - pad,
-        y: minY - pad,
-        w: Math.max(maxX - minX + pad * 2, 1),
-        h: Math.max(maxY - minY + pad * 2, 1),
-      },
-    };
+    const bounds = normalizeLayoutPositions(positions, width, height, CANVAS_PAD);
+    return { positions, bounds };
   }
 
   function applyViewBox() {
+    if (!svg) return;
     svg.setAttribute("viewBox", `${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`);
   }
 
   function fitToBounds(bounds) {
-    fitViewBox = { ...bounds };
-    viewBox = { ...bounds };
+    const safe = sanitizeBounds(bounds);
+    fitViewBox = { ...safe };
+    viewBox = { ...safe };
     applyViewBox();
   }
 
@@ -596,6 +649,11 @@
     lastLayoutKey = "";
     cachedLayout = null;
     render(false);
+    requestAnimationFrame(() => {
+      if (cachedLayout?.bounds) {
+        fitToBounds(cachedLayout.bounds);
+      }
+    });
   });
 
   if (vscode) {

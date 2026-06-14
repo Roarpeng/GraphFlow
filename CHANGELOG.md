@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.13] - 2026-06-14
+
+### Fixed
+
+- 知识图谱面板力导向布局在大量节点时坐标爆炸，导致 viewBox 过大、画布仅显示角落小点；布局后归一化到画布并收紧力模拟参数。
+
 ## [0.6.12] - 2026-06-14
 
 ### Added
