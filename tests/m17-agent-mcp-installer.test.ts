@@ -85,6 +85,7 @@ describe("M17 agent MCP installer", () => {
       const results = installMcpToDetectedAgents({
         strategy: "npx",
         workspaceRoot,
+        installScope: "all",
       });
 
       const userResult = results.find((result) => result.scope === "user" && result.agentId === "cursor");
@@ -104,6 +105,42 @@ describe("M17 agent MCP installer", () => {
         "--package=@roarpeng/graphflow",
         "graphflow-mcp",
       ]);
+    } finally {
+      if (process.platform === "win32") {
+        if (previousHome) {
+          process.env.USERPROFILE = previousHome;
+        } else {
+          delete process.env.USERPROFILE;
+        }
+      } else if (previousHome) {
+        process.env.HOME = previousHome;
+      } else {
+        delete process.env.HOME;
+      }
+    }
+  });
+
+  it("defaults to user scope without workspace MCP config", () => {
+    const fakeHome = createTempRoot("graphflow-agent-home-user-only");
+    const workspaceRoot = createTempRoot("graphflow-agent-workspace-user-only");
+    const cursorMarker = join(fakeHome, ".cursor");
+    mkdirSync(cursorMarker, { recursive: true });
+
+    const previousHome = process.env.USERPROFILE ?? process.env.HOME;
+    if (process.platform === "win32") {
+      process.env.USERPROFILE = fakeHome;
+    } else {
+      process.env.HOME = fakeHome;
+    }
+
+    try {
+      const results = installMcpToDetectedAgents({
+        strategy: "npx",
+        workspaceRoot,
+      });
+
+      expect(results.some((result) => result.scope === "user" && result.status === "created")).toBe(true);
+      expect(results.some((result) => result.scope === "workspace")).toBe(false);
     } finally {
       if (process.platform === "win32") {
         if (previousHome) {

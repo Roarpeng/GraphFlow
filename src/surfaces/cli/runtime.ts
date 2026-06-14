@@ -7,7 +7,8 @@ import { planTasks } from "../../agents/planner";
 import { validateConfig } from "../../config/loader";
 import { formatApiKeyForConfig, formatApiKeyForSettings, resolveConfigSecret } from "../../config/secrets";
 import { listConfigOverlayKeys } from "../../config/merge";
-import { resolveConfig, resolveConfigPath } from "../../config/resolve";
+import { resolveGlobalConfigPath } from "../../config/scaffold";
+import { resolveConfig, resolveConfigPath, resolveWritableConfigPath } from "../../config/resolve";
 import { createEmbeddingProviderFromConfig } from "../../config/embedding-factory";
 import { resolveGraphStorePath, resolveLearningPath } from "../../config/paths";
 import { triageTask } from "../../core/triage";
@@ -44,7 +45,7 @@ export {
   resolveGlobalConfigPath,
   type ConfigScaffoldResult,
 } from "../../config/scaffold";
-export { resolveConfig, resolveConfigPath } from "../../config/resolve";
+export { resolveConfig, resolveConfigPath, resolveWritableConfigPath } from "../../config/resolve";
 
 function buildEmbeddingOptions(config: GraphFlowConfig) {
   const embeddingProvider = createEmbeddingProviderFromConfig(config);
@@ -314,8 +315,8 @@ export function saveGraphFlowSettings(
   settings: GraphFlowSettingsInput,
   configPath = "graphflow.config.json"
 ): GraphFlowSettings {
-  const actualPath = resolveConfigPath(configPath);
-  const current = resolveConfig(actualPath);
+  const actualPath = resolveWritableConfigPath(configPath);
+  const current = resolveConfig(configPath);
   const providerConfig = {
     ...(settings.apiKeyEnvVar?.trim() ? { apiKey: formatApiKeyForConfig(settings.apiKeyEnvVar) } : {}),
     ...(settings.baseUrl ? { baseUrl: settings.baseUrl } : {}),
@@ -1417,7 +1418,11 @@ export async function getSettingsPanelStatus(configPath?: string): Promise<Setti
     graphLastModified,
     diagnoseSummary: diagnoseRouting(configPath),
     overlayKeys: listConfigOverlayKeys(),
-    baseConfigPath: existsSync("graphflow.config.json") ? "graphflow.config.json" : "（未创建）",
+    baseConfigPath: existsSync(resolveGlobalConfigPath())
+      ? resolveGlobalConfigPath()
+      : existsSync("graphflow.config.json")
+        ? "graphflow.config.json"
+        : "（未创建）",
   };
 }
 

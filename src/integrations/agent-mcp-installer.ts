@@ -13,9 +13,12 @@ export interface McpServerNode {
 }
 
 export type McpInstallStrategy = "npx" | "npm-script" | "node-bundled";
+export type McpInstallScope = "user" | "all";
 
 export interface McpInstallOptions {
   strategy: McpInstallStrategy;
+  /** When "user" (default), only write MCP into user-level agent configs. */
+  installScope?: McpInstallScope;
   workspaceRoot?: string;
   npmScriptCwd?: string;
   bundledServerPath?: string;
@@ -329,7 +332,8 @@ function uniqueTargets(
 
 function resolveTargetsForAgents(
   agentIds: Set<string>,
-  workspaceRoot?: string
+  workspaceRoot: string | undefined,
+  installScope: McpInstallScope
 ): Array<{ agentId: string; agentName: string; configPath: string; serversKey: McpServersKey; scope: "user" | "workspace" }> {
   const profiles = buildAgentProfiles();
   const targets: Array<{
@@ -355,7 +359,7 @@ function resolveTargetsForAgents(
       });
     }
 
-    if (workspaceRoot && profile.workspaceRelativePaths) {
+    if (installScope === "all" && workspaceRoot && profile.workspaceRelativePaths) {
       for (const workspaceTarget of profile.workspaceRelativePaths) {
         targets.push({
           agentId: profile.id,
@@ -443,7 +447,8 @@ export function installMcpToDetectedAgents(options: McpInstallOptions): McpInsta
     ];
   }
 
-  const targets = resolveTargetsForAgents(agentIds, options.workspaceRoot);
+  const installScope = options.installScope ?? "user";
+  const targets = resolveTargetsForAgents(agentIds, options.workspaceRoot, installScope);
   for (const target of targets) {
     try {
       const status = injectIntoConfig(target.configPath, target.serversKey, serverName, node);
@@ -494,8 +499,9 @@ export function formatModelConfigGuide(workspaceRoot?: string): string {
     "- **语义富化**（Symbol 中文摘要）：索引后若 `semanticEnrichment.autoRunOnIndex=true` 则静默小批量执行；任务编排改文件后也会增量富化；也可手动 `Enrich Graph Semantics`",
     "",
     "## 5. 配置文件位置",
-    `- 项目根目录：\`${join(root, "graphflow.config.json")}\``,
-    `- 覆盖层：\`${join(root, ".graphflow", "config.json")}\``,
+    "- 全局默认（推荐，一次配置所有项目可用）：`~/.graphflow.config.json`",
+    `- 项目根目录（可选覆盖）：\`${join(root, "graphflow.config.json")}\``,
+    `- 项目覆盖层（可选）：\`${join(root, ".graphflow", "config.json")}\``,
     "",
     "## 6. OpenBMB 本地模型（可选）",
     "- 在设置面板启用 OpenBMB auto-download，或运行 `GraphFlow: Download MiniCPM Model`",

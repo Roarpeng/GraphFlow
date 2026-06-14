@@ -91,6 +91,7 @@ interface GraphFlowRuntime {
   ensureWorkspaceGraphFlowConfig(workspaceRoot: string): { path: string; status: "created" | "skipped" };
   installMcpToDetectedAgents(options: {
     strategy: "npx" | "npm-script" | "node-bundled";
+    installScope?: "user" | "all";
     workspaceRoot?: string;
     npmScriptCwd?: string;
     bundledServerPath?: string;
@@ -533,15 +534,6 @@ async function runConfigBootstrap(
     output.appendLine(
       `[GraphFlow] Global config ${globalResult.status}: ${globalResult.path}`
     );
-
-    if (workspaceRoot) {
-      const workspaceResult = await runGraphFlow(cwdRoot, (runtime) =>
-        Promise.resolve(runtime.ensureWorkspaceGraphFlowConfig(workspaceRoot))
-      );
-      output.appendLine(
-        `[GraphFlow] Workspace config ${workspaceResult.status}: ${workspaceResult.path}`
-      );
-    }
   } catch (err) {
     const text = err instanceof Error ? err.message : String(err);
     output.appendLine(`[GraphFlow] Config scaffold failed: ${text}`);
@@ -568,7 +560,7 @@ async function runMcpBootstrap(
       Promise.resolve(
         runtime.installMcpToDetectedAgents({
           strategy: "node-bundled",
-          workspaceRoot: workspaceRoot,
+          installScope: "user",
           bundledServerPath,
           bundledRuntimeRoot,
           launcherPath,
