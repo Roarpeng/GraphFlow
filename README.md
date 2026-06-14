@@ -2,39 +2,58 @@
 
 A Context-Aware Multi-Agent Orchestration Engine.
 
-GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，当前版本聚焦于工程可用性：任务分流、DAG 执行、结果校验、图谱索引、近无损上下文压缩、CLI 与 VS Code 扩展联动。
+GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，将 **Graphify 式知识图谱** 与 **Superpowers 式任务编排** 整合为可本地运行的上下文层：自动建图、压缩检索、规划执行、经验沉淀，并通过 CLI、MCP 与 VS Code 扩展对外暴露。
 
-## 当前进度（v0.6.6）
+## 当前能力总览（v0.6.13）
 
-GraphFlow 已演进为面向多 agent 协作的工程级编排 + 上下文引擎，覆盖 **任务编排 / 路由 / 图谱 / 检索 / 学习 / Agent 接入** 全链路。
+| 能力域 | 说明 |
+| --- | --- |
+| **任务编排** | 按任务复杂度分流 simple / complex；DAG 并行执行、校验、重试、集成轮 |
+| **模型路由** | Smart / Economy 双 tier；多 provider 健康探测与 fallback（OpenAI、Anthropic、百炼、豆包、OpenBMB） |
+| **知识图谱** | 工作区 AST 索引（TS/JS/Python/Rust/Go/C/C++）；File / Module / Symbol 节点 + 依赖/引用/定义边 |
+| **上下文压缩** | L1/L2/L3 分层锚点；近无损打包；可选向量召回 + RRF 融合；默认 `maxContextTokens: 1500` |
+| **持续建图** | 默认 `autoIndexOnSave`；preview / run 前按需增量索引（`hasPendingGraphIndexWork`） |
+| **语义增强** | 可选 post-index LLM 语义 enrich；OpenBMB 本地 embedded 模式 |
+| **学习飞轮** | Episodic Memory、Reflection、Skill 节点、nightly 学习、技能提示注入规划 |
+| **Agent 接入** | CLI `--json`；MCP stdio（9 工具）；Cursor / Claude Code 规则与示例配置 |
+| **VS Code 扩展** | Settings、建图、路由测试、Context Preview、**知识图谱可视化**、Skill Insights、Chat Agent |
+| **存储后端** | `file`（JSON）/ `memory` / `sqlite`（FTS5）/ `mcp-http`（Graphify） |
+| **工程质量** | TypeScript strict；**41 测试文件 / 177 tests**；`npm run ci` 含扩展 esbuild 打包与 bundled runtime smoke |
 
 ### 一句话总结
 
-> 从 task 描述出发，自动规划 → 路由模型 → 压缩图谱上下文（含向量召回）→ 执行/校验/重试，并把经验沉淀回知识图谱。
+> 从 task 描述出发，自动规划 → 路由模型 → 压缩图谱上下文（含向量召回）→ 执行/校验/重试，并把经验沉淀回知识图谱；Coding Agent 通过 MCP/CLI 优先消费压缩上下文而非整库扫描。
 
-### v0.6.6 本轮重点
+### v0.6.7 – v0.6.13 近期演进
 
-1. **无 LLM 也能建图谱**：Settings 底部「建立图谱（无需 LLM）」仅需 `graphStorePath`，即可扫描工作区生成结构图谱（文件、符号、依赖）。
-2. **可选路由连通性测试**：配置 LLM 后，可一键探测 Smart / Economy 路由；连通通过后自动索引，并可触发语义提取（有 LLM 效果更好，失败时结构图谱仍保留）。
-3. **双路径配置指南**：结构索引与 LLM 路由验证并列，互不替代。
+1. **知识图谱可视化（v0.6.12–0.6.13）**
+   - 可读标签（文件名、符号名、目录组）、代码层 / 学习层 Tab
+   - 暗色面板、目录聚类着色、关系线型、缩放/平移
+   - 双击节点或「打开源文件」跳转源码行
+   - 布局归一化修复大图谱「只剩角落小点」问题
 
-### v0.6.5 回顾
+2. **持续静默建图（v0.6.11）**
+   - `autoIndexOnSave` 默认开启；保存文件后 debounce 增量索引
+   - 旧配置 `maxContextTokens: 400` 自动升级到 1500
 
-1. **Settings 可观测性**：图谱规模、上次索引、配置覆盖层 diff。
-2. **保存即索引（可选）**：`autoIndexOnSave` 在文件保存后 debounce 增量索引。
-3. **发布流水线**：main 推送自动构建 VSIX 并发布 GitHub Release；`v*` tag 额外触发 npm publish（需 `NPM_TOKEN`）。
+3. **Runtime 模块化与扩展打包（v0.6.10）**
+   - `runtime/` 子模块 + `GraphFlowRuntimeModule` 类型校验
+   - VS Code 扩展 esbuild 单文件 bundle
 
-### 工程质量
+4. **配置与健壮性（v0.6.7–0.6.9）**
+   - 全局配置优先（`~/.graphflow.config.json`）
+   - 损坏 JSON 容错；postinstall 需显式 `GRAPHFLOW_ENABLE_POSTINSTALL=1`
+   - 无工作区也可打开 Settings；CI 可复现 `npm ci`
 
-- 测试：**39 文件 / 156+ tests** 全绿（`npm run ci` 含 extension build + bundled runtime smoke）。
-- 类型：TypeScript 6 strict + exactOptionalPropertyTypes + NodeNext。
-- License：Apache-2.0。
+5. **无 LLM 也能建图（v0.6.6 起）**
+   - Settings「建立图谱（无需 LLM）」或 `graph index` 即可生成结构图谱
+   - 可选「测试路由并建立图谱」在 LLM 连通后触发语义 enrich
 
-发布信息：
+### 发布信息
 
-1. 最新版本：`v0.6.6`（root + vscode-extension）；npm 包：`@roarpeng/graphflow@0.6.6`
-2. **GitHub Release**：push 到 `main` 且 CI 通过后自动发布 VSIX（见 [Actions](https://github.com/Roarpeng/GraphFlow/actions)）
-3. 变更日志：`CHANGELOG.md`
+- 最新版本：**v0.6.13**（root + vscode-extension）；npm：`@roarpeng/graphflow@0.6.13`
+- **GitHub Release**：push 到 `main` 且 CI 通过后自动发布 VSIX（见 [Actions](https://github.com/Roarpeng/GraphFlow/actions)）
+- 变更日志：`CHANGELOG.md`
 
 ## 环境要求
 
@@ -42,184 +61,103 @@ GraphFlow 已演进为面向多 agent 协作的工程级编排 + 上下文引擎
 2. npm >= 10
 3. Windows / macOS / Linux 均可
 
-## 5 分钟本地试跑（推荐）
-
-在仓库根目录执行：
+## 5 分钟本地试跑
 
 ```bash
 npm install
-npm run lint
-npm run build
-npm test
-```
-
-预期结果：
-
-1. `lint` 无错误
-2. `build` 成功
-3. `vitest` 全量通过（当前应为 156+ tests / 37+ files passed）
-
-可选一键 CI 本地校验：
-
-```bash
 npm run ci
 ```
 
+预期：`lint` 无错误、`build` 成功、**177 tests** 通过、扩展 bundle 与 runtime smoke 通过。
+
 ## Agent 工具接入
 
-GraphFlow 已支持两种对外接入方式：
+GraphFlow 支持两种对外接入方式：
 
-1. CLI 机器输出：所有核心命令支持 `--json`
-2. MCP stdio server：可被 Cursor、Claude Code 等支持 MCP 的 agent 直接调用
+1. **CLI 机器输出**：核心命令均支持 `--json`
+2. **MCP stdio server**：Cursor、Claude Code 等可直接调用
 
-本仓库内直接启动 MCP server：
+本仓库启动 MCP：
 
 ```bash
 npm run start:mcp
 ```
 
-CLI 结构化输出示例：
+### MCP 工具一览
+
+| 工具 | 用途 |
+| --- | --- |
+| `graphflow_preview_context` | 压缩任务相关上下文（优先调用） |
+| `graphflow_plan` | 多步任务分解 |
+| `graphflow_run` | 执行编排循环 |
+| `graphflow_index` / `graphflow_rebuild` | 增量 / 全量建图 |
+| `graphflow_inspect_graph` | 图谱快照与统计 |
+| `graphflow_enrich_graph` | 语义增强 |
+| `graphflow_skill_insights` | 技能学习洞察 |
+| `graphflow_diagnose` | 路由健康诊断 |
+| `graphflow_model_download` | OpenBMB 模型下载 |
+
+CLI 示例：
 
 ```bash
 npm run start -- plan "refactor planner and add tests" --json
+npm run start -- context preview "orchestrator" --json
+npm run start -- graph inspect --json
 ```
 
-CLI 标准帮助与版本：
-
-```bash
-npm run start -- --help
-npm run start -- --version
-```
-
-外部 agent 约定文件：
-
-1. `AGENTS.md`
-2. `CLAUDE.md`
-3. `.cursor/rules/graphflow.mdc`
-4. `docs/integrations/cursor.mcp.json`
-5. `docs/integrations/claude-code.mcp.json`
-6. `docs/integrations/claude-desktop-config.json`
+外部 agent 约定文件：`AGENTS.md`、`CLAUDE.md`、`.cursor/rules/graphflow.mdc`、`docs/integrations/*.json`
 
 ## 本地功能验证（CLI）
 
-### 1) 图谱索引
+### 图谱索引
 
 ```bash
 npm run start -- graph index .
 ```
 
-预期输出示例：
+预期：`indexedFiles=…; indexedSymbols=…`
 
-```text
-indexedFiles=52; indexedSymbols=98
-```
-
-### 2) 上下文压缩预览
+### 上下文压缩预览
 
 ```bash
 npm run start -- context preview "orchestrator"
 ```
 
-预期输出示例：
+预期：`summary=…; anchors=…; tokens=…`（相对原始上下文通常可节省 **90%+ token**）
 
-```text
-summary=6; anchors=6; tokens=98; truncated=false; L1=3; L2=2; L3=1
-```
-
-### 3) 执行任务
+### 执行任务 / 规划
 
 ```bash
 npm run start -- run "update readme and add tests"
-```
-
-说明：该命令会根据任务复杂度自动走 simple 或 complex 工作流。
-
-### 4) 规划与头脑风暴
-
-```bash
 npm run start -- plan "update readme and add tests and refactor architecture module"
 ```
 
-预期输出示例：
-
-```text
-mode=complex; ideas=...; plan=task-1... | task-2... | task-3...
-```
-
-### 5) 动态路由诊断
+### 路由诊断 / 学习 / 洞察
 
 ```bash
 npm run start -- route diagnose
-```
-
-预期输出示例：
-
-```text
-dynamicRouting=on; health=openai:true,...; planner=openai/...; worker=openai/...
-```
-
-### 6) 学习夜跑
-
-```bash
 npm run start -- learn nightly
-```
-
-预期输出示例：
-
-```text
-events=12; passRate=0.833; avgTokens=118.0; canary=allow; dataset=tmp/learning-dataset.jsonl
-```
-
-### 7) 图谱快照洞察
-
-```bash
 npm run start -- graph inspect
-```
-
-预期输出示例：
-
-```text
-nodes=120; edges=184; types=File:20,Symbol:54,...; relations=defines:44,imports:20,...
-```
-
-### 8) 技能洞察
-
-```bash
 npm run start -- skill insights
 ```
 
-预期输出示例：
+## 进阶能力
 
-```text
-source=graph-store; transport=file; count=8; top=add tests:4/6,refactor planner:3/4
-```
-
-## v0.4 新能力使用指南
-
-### 1) 切换到 SQLite/FTS5 图谱后端
-
-将 `graphflow.config.json` 的 `graphPolicy` 改为：
+### SQLite / FTS5 后端
 
 ```json
 {
   "graphPolicy": {
-    "enableAutoBuild": true,
     "transport": "sqlite",
     "graphStorePath": "tmp/graphflow-graph.sqlite",
-    "maxContextTokens": 1200
+    "maxContextTokens": 1500
   }
 }
 ```
 
-特点：
+WAL + FTS5 全文索引；与 `file` / `memory` 接口一致。
 
-1. WAL 模式 + FTS5 全文索引，关键词查询 O(log n)
-2. 边表三索引（from / to / relation），`getNeighbors` O(度)
-3. 与 `file` / `memory` transport 接口完全一致，零业务代码改动
-
-### 2) 启用向量召回 + RRF 双路融合
-
-代码侧（`buildLayeredContextPackage` 调用方）打开：
+### 向量召回 + RRF 融合
 
 ```ts
 import { createHashEmbeddingProvider } from "graphflow/dist/learning/embeddings";
@@ -228,181 +166,80 @@ const pkg = await buildLayeredContextPackage(client, query, {
   enableVectorRecall: true,
   embeddingProvider: createHashEmbeddingProvider(),
   vectorTopK: 8,
-  vectorMinSimilarity: 0.2,
 });
 ```
 
-切换到 OpenAI 真向量：
-
-```ts
-import { createOpenAiEmbeddingProvider } from "graphflow/dist/learning/embeddings";
-
-const provider = createOpenAiEmbeddingProvider({
-  apiKey: process.env.OPENAI_API_KEY!,
-  model: "text-embedding-3-small",
-});
-```
-
-关键词命中 + 向量相似度通过 RRF（k=60）融合排序，对自然语言任务描述召回更稳。
-
-### 3) Episodic Memory + Reflection
-
-在 `orchestrate(...)` 选项里打开：
+### Episodic Memory + Reflection
 
 ```ts
 const run = await orchestrate(
   { task: "refactor planner module and add tests" },
-  {
-    graphClient,
-    enableEpisodicMemory: true,
-    enableGraphContextInPrompt: true,
-  }
+  { graphClient, enableEpisodicMemory: true, enableGraphContextInPrompt: true }
 );
-
-console.log(run.episodeId);       // "episode:xxx"
-console.log(run.similarEpisodes); // 历史相似 task 的 keyDecisions
 ```
 
-行为：
+每次 task 写入 Episode；相似 task 注入历史决策；`learn nightly` 合成 Lesson 节点。
 
-1. 每次 task 结束写入一个 `Episode` 节点（含 plan / outcome / keyDecisions / attempts）
-2. 复现相似 task 时，Top-K 历史决策自动注入 PromptContext.extraInstructions
-3. `learn nightly` 调用 reflector：将多次成功 episode 聚类合成 `Lesson` 节点 + `improves` 边，可被技能提示复用
+### 跨语言 AST 索引
 
-### 4) 跨语言 AST 索引
+| 语言 | 扩展 |
+| --- | --- |
+| TypeScript / JavaScript | `.ts .tsx .js .jsx` |
+| Python | `.py` |
+| Rust | `.rs` |
+| Go | `.go` |
+| C / C++ | `.c .h .cc .cpp .cxx .hpp .hxx` |
 
-无需额外配置。`graph index` 会自动识别并解析：
-
-```bash
-npm run start -- graph index .
-```
-
-支持的语言/扩展：
-
-| 语言 | 扩展 | 解析方式 |
-| --- | --- | --- |
-| TypeScript / JavaScript | `.ts .tsx .js .jsx` | TS Compiler API |
-| Python | `.py` | 语言专用 indexer |
-| Rust | `.rs` | 语言专用 indexer |
-| Go | `.go` | 语言专用 indexer |
-| C / C++ | `.c .h .cc .cpp .cxx .hpp .hxx` | 语言专用 indexer |
-
-统一输出 `Symbol` / `Module` 节点 + `defines` / `imports` / `references` 边，下游图谱检索、prompt 注入、episode 召回完全透明复用。
-
-如需限制扫描语言，调整 `graphPolicy.includeExtensions` 即可。
+通过 `graphPolicy.includeExtensions` 限制扫描范围。
 
 ## 配置文件
 
-默认使用根目录 `graphflow.config.json`。
-
-首次使用建议从模板复制：
-
-Windows CMD:
-
-```bash
-copy graphflow.config.example.json graphflow.config.json
-```
-
-PowerShell / macOS / Linux:
+默认：`graphflow.config.json`（也可使用 `~/.graphflow.config.json` 全局配置）。
 
 ```bash
 cp graphflow.config.example.json graphflow.config.json
 ```
 
-关键配置：
+关键项：
 
-1. `graphPolicy.transport`
-- `file`：本地持久化图谱（JSON，默认，适合正式使用测试）
-- `memory`：本地内存图谱（适合轻量调试）
-- `sqlite`：SQLite + FTS5 后端（v0.4 新增，适合大型工作区与跨会话持久化）
-- `mcp-http`：连接 Graphify MCP HTTP 服务
-2. `graphPolicy.graphStorePath`
-- `file` transport 的 JSON 路径，或 `sqlite` transport 的 `.sqlite` 路径
-2. `graphPolicy.enableNearLosslessMode`
-- 开启后启用近无损上下文打包
-3. `graphPolicy.autoIndexOnPreview`
-- `context preview` 前自动索引工作区
-4. `graphPolicy.autoIndexOnRun`
-- `run` 前自动索引工作区
-5. `graphPolicy.layerQuota`
-- 控制 L1/L2/L3 锚点配额
-6. `learningPolicy.exportPath`
-- 学习样本导出路径
-7. `learningPolicy.eventsPath`
-- 运行反馈事件日志路径（用于 nightly 学习）
-8. `learningPolicy.summaryPath`
-- 学习汇总指标路径
-9. `routingPolicy.enableDynamicRouting`
-- 启用按 provider 健康状态的自动路由
-10. `routingPolicy.requireApiKeyForHealthy`
-- 若开启，缺少 apiKey 的 provider 会被标记为不健康并触发 fallback
-11. `routingPolicy.providerPriority`
-- 设置 fallback 优先级，例如 `["anthropic", "openai", "bailian", "doubao"]`
-12. `skillPolicy.enableSkillFlywheel`
-- 开启技能飞轮（技能抽取、技能连接、技能提示复用）
-13. `skillPolicy.maxSkillHints`
-- 每次规划注入的技能提示上限
+| 配置 | 说明 |
+| --- | --- |
+| `graphPolicy.transport` | `file` / `memory` / `sqlite` / `mcp-http` |
+| `graphPolicy.graphStorePath` | JSON 或 `.sqlite` 路径 |
+| `graphPolicy.maxContextTokens` | 压缩上下文预算（默认 **1500**） |
+| `graphPolicy.autoIndexOnSave` | 保存后增量索引（默认 **true**） |
+| `graphPolicy.autoIndexOnPreview` / `autoIndexOnRun` | preview / run 前自动索引 |
+| `graphPolicy.enableNearLosslessMode` | 近无损上下文打包 |
+| `graphPolicy.layerQuota` | L1/L2/L3 锚点配额 |
+| `routingPolicy.enableDynamicRouting` | provider 健康路由 |
+| `skillPolicy.enableSkillFlywheel` | 技能飞轮 |
 
-## 本地测试验收清单
+## VS Code 扩展
 
-你可以按下面清单判断“本地可用”：
+### 命令面板
 
-1. 质量门禁通过：`npm run lint && npm run build && npm test`
-2. `graph index` 返回 `indexedFiles > 0`
-3. `context preview` 返回 `summary > 0` 且 `anchors > 0`
-4. `run "..."` 能返回正常执行输出
-5. `plan "..."` 返回 `mode=...; ideas=...; plan=...`
+| 命令 | 说明 |
+| --- | --- |
+| GraphFlow: Show Settings | 配置、建图、路由测试 |
+| GraphFlow: Show Graph | **知识图谱可视化**（分层、搜索、跳转源码） |
+| GraphFlow: Preview Context | 上下文压缩与 Token Budget |
+| GraphFlow: Plan & Brainstorm | 任务规划 |
+| GraphFlow: Run Task | 执行任务 |
+| GraphFlow: Skill Insights | 技能学习面板 |
+| GraphFlow: Enrich Graph | 语义增强 |
+| GraphFlow: Install MCP | 注入 MCP 配置 |
 
-## 正式使用测试
+Chat Agent（`@graphflow`）：`/run`、`/plan`、`/graph`、`/skills`、`/diagnose`、`/learn`、`/history`
 
-正式使用测试脚本（含通过标准）见：
+### Settings 推荐流程
 
-1. `docs/testing/2026-05-28-formal-usage-test-plan.md`
-2. `docs/testing/2026-05-28-formal-usage-test-report.md`
+1. 填写 Graph Store Path → **Save Settings**
+2. **建立图谱（无需 LLM）** → 生成结构图谱
+3. （可选）配置 Provider → **测试路由并建立图谱** → 语义 enrich
 
-## VS Code Settings 配置与建图
+其它建图入口：`graph index` CLI、MCP `graphflow_index`、`autoIndexOnPreview` / `autoIndexOnRun` / `autoIndexOnSave`
 
-打开命令面板 → **GraphFlow: Show Settings**，推荐流程：
-
-1. 填写 **Graph Store Path** 等基础项，点击 **Save Settings**。
-2. 点击 **建立图谱（无需 LLM）**：生成结构图谱，不依赖 API Key。
-3. （可选）配置 Provider / API Key / Base URL 与 near-lossless、auto index 开关后，点击 **测试路由并建立图谱**：验证 Smart / Economy 连通性，通过后自动索引并可运行语义提取。
-
-其它建图入口：`graph index` CLI、MCP `graphflow_index`、`autoIndexOnPreview` / `autoIndexOnRun` / `autoIndexOnSave`、安装后轻量 bootstrap 索引。
-
-## VS Code 扩展本地试用
-
-### 方式 A：安装已打包 VSIX
-
-```bash
-code --install-extension artifacts/graphflow-vscode-0.5.0.vsix
-```
-
-安装后可在命令面板执行：
-
-1. `GraphFlow: Run Task`
-2. `GraphFlow: Show Runs`
-3. `GraphFlow: Plan & Brainstorm`
-4. `GraphFlow: Graph Snapshot`
-5. `GraphFlow: Skill Insights`
-
-并可在 Agent 对话框通过 `@graphflow` 使用：
-
-1. `/run <task>`
-2. `/plan <task>`
-3. `/history`
-4. `/diagnose`
-5. `/learn`
-6. `/graph`
-7. `/skills`
-
-分发给同事：
-
-1. 直接发送 `artifacts/graphflow-vscode-0.5.0.vsix`
-2. 同事执行 `code --install-extension artifacts/graphflow-vscode-0.5.0.vsix`
-3. 不需要克隆 GraphFlow 仓库即可使用插件核心能力
-
-### 方式 B：开发模式运行扩展
+### 开发模式
 
 ```bash
 cd vscode-extension
@@ -410,40 +247,66 @@ npm install
 npm run build
 ```
 
-然后在 VS Code 中按 `F5` 启动 Extension Development Host 进行联调。
+在 VS Code 中 `F5` 启动 Extension Development Host。
+
+### 安装 VSIX
+
+从 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases) 下载最新 VSIX，或本地：
+
+```bash
+cd vscode-extension && npm run package
+code --install-extension artifacts/graphflow-vscode-*.vsix
+```
+
+## 本地验收清单
+
+1. `npm run ci` 全绿
+2. `graph index` → `indexedFiles > 0`
+3. `context preview` → `summary > 0` 且 `anchors > 0`
+4. VS Code **Show Graph** → 画布正常显示节点聚类（非角落小点）
+5. `plan` / `run` 返回正常输出
+
+正式测试文档：`docs/testing/2026-05-28-formal-usage-test-plan.md`
 
 ## 常见问题
 
-1. `context preview` 返回 0 anchors
-- 先执行 `npm run start -- graph index .`
-- 检查查询词是否命中现有代码符号（例如 `orchestrator`, `runtime`, `planner`）
+**`context preview` 返回 0 anchors**
 
-2. 扩展打包产物不存在
-- 确认目录 `artifacts/` 已存在
-- 在 `vscode-extension` 目录执行 `npm run package`
+- 先执行 `graph index` 或 Settings 建图
+- 检查查询词是否命中代码符号（如 `orchestrator`、`planner`）
 
-3. API Key 未配置导致模型调用失败
-- 在 `graphflow.config.json` 中配置对应 provider 的 `apiKey`
-- `graphflow.config.json` 与示例模板支持 `${ENV_VAR}` 环境变量占位写法
+**知识图谱面板空白或只有小点**
 
-## 项目结构（简版）
+- 升级到 **v0.6.13+** 并重载窗口
+- 点击画布工具栏 **「适应」**
+
+**API Key 未配置**
+
+- 在 `graphflow.config.json` 配置 provider `apiKey`，支持 `${ENV_VAR}` 占位
+
+**无 LLM 时能用吗**
+
+- 可以：结构索引、图谱可视化、context preview（基于结构图谱）、MCP `graphflow_inspect_graph` 均不强制 LLM
+
+## 项目结构
 
 ```text
 GraphFlow/
 ├── src/
-│   ├── core/
-│   ├── graph/
-│   ├── routing/
-│   ├── learning/
-│   └── surfaces/cli/
-├── tests/
-├── docs/releases/
-├── vscode-extension/
-└── artifacts/
+│   ├── core/           # 编排核心类型
+│   ├── graph/          # 索引、上下文切片、snapshot-view
+│   ├── routing/        # 模型路由与健康探测
+│   ├── learning/       # 向量、episode、skill
+│   └── surfaces/
+│       ├── cli/        # CLI + runtime 子模块
+│       └── mcp/        # MCP server
+├── tests/              # 41 文件 / 177 tests
+├── vscode-extension/   # VS Code 面板与命令
+├── docs/
+└── CHANGELOG.md
 ```
 
 ## 版本与变更
 
-1. 变更日志：`CHANGELOG.md`
-2. 发布文档：`docs/releases/v0.3.0.md`
-3. License：`LICENSE`
+- 变更日志：`CHANGELOG.md`
+- License：Apache-2.0
