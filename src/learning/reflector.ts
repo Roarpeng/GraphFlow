@@ -5,6 +5,7 @@ import {
   loadAllEpisodes,
   type EpisodeRecord,
 } from "./episodic-memory";
+import { hashText } from "../utils/hash";
 
 export interface LessonRecord {
   id: string;
@@ -144,16 +145,7 @@ function haveTokenOverlap(a: string[], b: string[], min: number): boolean {
   }
   return false;
 }
-
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max - 3)}...`;
-}
-
-function hashText(text: string): string {
-  let hash = 5381;
-  for (let i = 0; i < text.length; i += 1) {
-    hash = ((hash * 33) ^ text.charCodeAt(i)) >>> 0;
-  }
-  return hash.toString(36);
 }

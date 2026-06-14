@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { GraphEdge, GraphNode } from "../core/types";
-import { tokenizeForIndex } from "./graphify-client";
+import { tokenizeForIndex } from "./graph-utils";
 
 interface GraphStore {
   nodes: GraphNode[];

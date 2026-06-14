@@ -13,19 +13,27 @@ export function isEnvPlaceholder(value?: string): boolean {
   return Boolean(extractEnvPlaceholderName(value));
 }
 
-/** Resolve `${ENV_VAR}` from process.env; return direct secrets/values as-is. */
+/** 
+ * Resolve `${ENV_VAR}` from process.env; return direct secrets/values as-is.
+ * Supports auto-detection of environment variable placeholders formatted as `${ENV_VAR}`
+ * and extracts the corresponding value from process.env. If it's a plaintext key,
+ * it returns the value directly.
+ */
 export function resolveConfigSecret(value?: string): string | undefined {
   if (!value?.trim()) {
     return undefined;
   }
 
   const trimmed = value.trim();
+  // Auto-detect if the value is an environment variable placeholder like ${MY_KEY}
   const envName = extractEnvPlaceholderName(trimmed);
   if (envName) {
+    // Extract corresponding environment variable value from process.env
     const resolved = process.env[envName]?.trim();
     return resolved || undefined;
   }
 
+  // Fallback: return direct plaintext key
   return trimmed;
 }
 

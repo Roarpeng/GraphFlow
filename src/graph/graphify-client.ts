@@ -1,16 +1,7 @@
 import type { GraphEdge, GraphNode } from "../core/types";
 
-const TOKEN_SPLIT = /[^a-z0-9_]+/g;
-
-export function tokenizeForIndex(text: string): string[] {
-  if (!text) return [];
-  const tokens = text.toLowerCase().split(TOKEN_SPLIT);
-  const out: string[] = [];
-  for (const t of tokens) {
-    if (t.length >= 2) out.push(t);
-  }
-  return out;
-}
+import { tokenizeForIndex } from "./graph-utils";
+export { tokenizeForIndex };
 
 export class GraphifyClient {
   private readonly nodes = new Map<string, GraphNode>();
