@@ -1,49 +1,44 @@
-import { logger } from "../utils/logger";
-import type { GraphEdge, GraphNode, TaskRunResult } from "../core/types";
+import { hashTextHex as hashText } from "../utils/hash";
+import type { GraphNode, TaskRunResult } from "../core/types";
 import type { GraphClient } from "../graph/client-factory";
-import { executeRolePrompt } from "../routing/provider-executor";
 
-export interface EvolutionarySkillNode {
-  id: string;
-  name: string; // MiniCPM 生成的复合中文名
-  parents: [string, string];
-  domain: string; // 解决的 C 领域
-  description: string; // 合成方法论描述
-  score: number;
-  uses: number;
-  updatedAt: number;
-  canaryUses: number;
-  canaryPasses: number;
-  canaryStatus: 'probation' | 'verified' | 'demoted';
-}
+// 导入提取出去的类型与常量
+import type {
+  EvolutionarySkillNode,
+  SkillState,
+  CompositeSkillState,
+  SkillEdge,
+} from "./skill-types";
 
-export interface SkillState {
-  id: string;
-  name: string;
-  score: number;
-  uses: number;
-  lastOutcome: "pass" | "fail";
-  updatedAt: number;
-}
+// 导入提取出去的辅助函数与存储方法
+import {
+  skillNodeId,
+  serializeAtomic,
+  serializeComposite,
+  parseSkillState,
+  parseCompositeState,
+  parseEvolutionState,
+  readSkillState,
+  loadCompositeSkill,
+  composeSkillId,
+  compositeGateMet,
+  boundedScore,
+  dedup,
+  dedupNodes,
+  dedupEdges,
+} from "./skill-store";
 
-export interface CompositeSkillState {
-  id: string;
-  name: string;
-  parents: [string, string];
-  coOccurCount: number;
-  successCount: number;
-  failureCount: number;
-  score: number;
-  uses: number;
-  lastOutcome: "pass" | "fail";
-  updatedAt: number;
-}
+// 导入提取出去的演进方法
+import {
+  evolveCompositeSkillLlm,
+  getTripleAtomNames,
+  buildTripleFusionNode,
+} from "./skill-evolution";
 
-type EdgeRelation = GraphEdge["relation"];
-type SkillEdge = { from: string; to: string; relation: EdgeRelation };
-
-const DEFAULT_COMPOSITE_MIN_COOCCUR = 2;
-const DEFAULT_COMPOSITE_MIN_SUCCESS = 2;
+// 兼容性重新导出，确保外部消费者完全兼容
+export type { SkillState, CompositeSkillState, EvolutionarySkillNode } from "./skill-types";
+export { composeSkillId, loadCompositeSkill, loadEvolutionSkill, parseEvolutionState } from "./skill-store";
+export { evolveCompositeSkillLlm, updateSkillCanary } from "./skill-evolution";
 
 export function extractSkillAtoms(task: string): string[] {
   const phrases = task
@@ -302,352 +297,4 @@ export async function suggestSkillHints(
   }
 
   return chosen.map((item) => item.name);
-}
-
-export function composeSkillId(atomA: string, atomB: string): string {
-  const [first, second] = [atomA, atomB].sort();
-  return `skill:composite:${sanitizeAtom(first!)}__${sanitizeAtom(second!)}`;
-}
-
-export async function loadCompositeSkill(
-  client: GraphClient,
-  id: string
-): Promise<CompositeSkillState | undefined> {
-  const hits = await client.queryByKeyword(id);
-  const direct = hits.find((node) => node.id === id && node.type === "Skill");
-  return direct ? parseCompositeState(direct.content) : undefined;
-}
-
-function compositeGateMet(composite: CompositeSkillState): boolean {
-  const minCoOccur = Number(process.env.GRAPHFLOW_SKILL_EVOLVE_MIN_COOCCUR ?? DEFAULT_COMPOSITE_MIN_COOCCUR);
-  const minSuccess = Number(process.env.GRAPHFLOW_SKILL_EVOLVE_MIN_SUCCESS ?? DEFAULT_COMPOSITE_MIN_SUCCESS);
-  return (
-    composite.coOccurCount >= (Number.isFinite(minCoOccur) ? minCoOccur : DEFAULT_COMPOSITE_MIN_COOCCUR) &&
-    composite.successCount >= (Number.isFinite(minSuccess) ? minSuccess : DEFAULT_COMPOSITE_MIN_SUCCESS) &&
-    composite.successCount > composite.failureCount
-  );
-}
-
-function sanitizeAtom(skill: string): string {
-  return skill.replace(/[^a-z0-9]+/g, "-");
-}
-
-function skillNodeId(skill: string): string {
-  return `skill:${sanitizeAtom(skill)}`;
-}
-
-function serializeAtomic(state: SkillState): string {
-  return JSON.stringify({ kind: "atomic", ...state });
-}
-
-function serializeComposite(state: CompositeSkillState): string {
-  return JSON.stringify({ kind: "composite", ...state });
-}
-
-function parseSkillState(content: string): SkillState | undefined {
-  try {
-    const parsed = JSON.parse(content) as Partial<SkillState> & { kind?: string };
-    if (!parsed.id || !parsed.name) {
-      return undefined;
-    }
-    if (parsed.kind && parsed.kind !== "atomic") {
-      return undefined;
-    }
-
-    return {
-      id: parsed.id,
-      name: parsed.name,
-      score: parsed.score ?? 0,
-      uses: parsed.uses ?? 0,
-      lastOutcome: parsed.lastOutcome === "fail" ? "fail" : "pass",
-      updatedAt: parsed.updatedAt ?? 0,
-    };
-  } catch (error) {
-    logger.error({ error }, "Caught error");
-    return undefined;
-  }
-}
-
-function parseCompositeState(content: string): CompositeSkillState | undefined {
-  try {
-    const parsed = JSON.parse(content) as Partial<CompositeSkillState> & { kind?: string };
-    if (parsed.kind !== "composite" || !parsed.id || !parsed.name || !parsed.parents) {
-      return undefined;
-    }
-    const parents = parsed.parents;
-    if (!Array.isArray(parents) || parents.length !== 2) {
-      return undefined;
-    }
-    return {
-      id: parsed.id,
-      name: parsed.name,
-      parents: [parents[0]!, parents[1]!],
-      coOccurCount: parsed.coOccurCount ?? 0,
-      successCount: parsed.successCount ?? 0,
-      failureCount: parsed.failureCount ?? 0,
-      score: parsed.score ?? 0,
-      uses: parsed.uses ?? 0,
-      lastOutcome: parsed.lastOutcome === "fail" ? "fail" : "pass",
-      updatedAt: parsed.updatedAt ?? 0,
-    };
-  } catch (error) {
-    logger.error({ error }, "Caught error");
-    return undefined;
-  }
-}
-
-async function readSkillState(client: GraphClient, id: string): Promise<SkillState | undefined> {
-  const hits = await client.queryByKeyword(id);
-  const direct = hits.find((node) => node.id === id && node.type === "Skill");
-  return direct ? parseSkillState(direct.content) : undefined;
-}
-
-function dedup(values: string[]): string[] {
-  return Array.from(new Set(values));
-}
-
-function dedupNodes(nodes: GraphNode[]): GraphNode[] {
-  const map = new Map<string, GraphNode>();
-  for (const node of nodes) {
-    map.set(node.id, node);
-  }
-  return Array.from(map.values());
-}
-
-function boundedScore(score: number): number {
-  if (score > 20) {
-    return 20;
-  }
-
-  if (score < -20) {
-    return -20;
-  }
-
-  return score;
-}
-
-function hashText(text: string): string {
-  let hash = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    hash = (hash * 33 + text.charCodeAt(i)) >>> 0;
-  }
-  return hash.toString(16);
-}
-
-function dedupEdges(edges: SkillEdge[]): SkillEdge[] {
-  const seen = new Set<string>();
-  const result: SkillEdge[] = [];
-  for (const edge of edges) {
-    const key = `${edge.from}|${edge.relation}|${edge.to}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push(edge);
-    }
-  }
-  return result;
-}
-
-export function parseEvolutionState(content: string): EvolutionarySkillNode | undefined {
-  try {
-    const parsed = JSON.parse(content) as Partial<EvolutionarySkillNode> & { kind?: string };
-    if (parsed.kind !== "evolution" || !parsed.id || !parsed.name || !parsed.parents) {
-      return undefined;
-    }
-    const parents = parsed.parents;
-    if (!Array.isArray(parents) || parents.length !== 2) {
-      return undefined;
-    }
-    return {
-      id: parsed.id,
-      name: parsed.name,
-      parents: [parents[0]!, parents[1]!],
-      domain: parsed.domain || "",
-      description: parsed.description || "",
-      score: parsed.score ?? 0,
-      uses: parsed.uses ?? 0,
-      updatedAt: parsed.updatedAt ?? 0,
-      canaryUses: parsed.canaryUses ?? 0,
-      canaryPasses: parsed.canaryPasses ?? 0,
-      canaryStatus: parsed.canaryStatus ?? 'probation',
-    };
-  } catch (error) {
-    logger.error({ error }, "Caught error");
-    return undefined;
-  }
-}
-
-export async function loadEvolutionSkill(
-  client: GraphClient,
-  id: string
-): Promise<EvolutionarySkillNode | undefined> {
-  const hits = await client.queryByKeyword(id);
-  const direct = hits.find((node) => node.id === id && node.type === "Skill");
-  return direct ? parseEvolutionState(direct.content) : undefined;
-}
-
-/**
- * 调遣 MiniCPM-1B 模拟人类进行跨技能融会贯通与概念演进
- */
-export async function evolveCompositeSkillLlm(
-  client: GraphClient,
-  n1: string,
-  n2: string,
-  previousComposite: CompositeSkillState | null
-): Promise<GraphNode | null> {
-  const openbmbModel = process.env.GRAPHFLOW_SKILL_EVOLVE_MODEL ?? "minicpm5-1b";
-
-  const prompt = [
-    `你是一个卓越的代码认知科学家，正模拟人类大脑的技能成长。`,
-    `你已完全精通以下两项基础“原子技能”：`,
-    `1. 技能 A: ${n1}`,
-    `2. 技能 B: ${n2}`,
-    ``,
-    `请联想推演：人类在综合 A 和 B 后，能够融会贯通衍生出解决 C 领域什么问题的“复合高阶技能”？`,
-    `请严格返回 JSON 格式：{"compositeSkillName": "复合技能名", "domainC": "C领域名", "methodologyDescription": "一句话核心方法论"}`,
-    `不要有任何标点、引言 or markdown 包裹。直接输出合法 JSON：`
-  ].join("\n");
-
-  try {
-    const selection = {
-      provider: "openbmb" as const,
-      model: openbmbModel,
-      tier: "economy" as const,
-      fallbackApplied: false
-    };
-
-    const rawJson = await executeRolePrompt("evolver", prompt, selection);
-    const cleaned = cleanJsonString(rawJson, n1, n2);
-    const parsed = JSON.parse(cleaned);
-
-    if (!parsed.compositeSkillName || !parsed.domainC) {
-      return null;
-    }
-
-    const evolutionId = `skill:evolution:${hashText(parsed.compositeSkillName)}`;
-    const record: EvolutionarySkillNode = {
-      id: evolutionId,
-      name: parsed.compositeSkillName,
-      parents: [skillNodeId(n1), skillNodeId(n2)],
-      domain: parsed.domainC,
-      description: parsed.methodologyDescription || "",
-      score: previousComposite?.score ?? 1,
-      uses: previousComposite?.uses ?? 1,
-      updatedAt: Date.now(),
-      canaryUses: 0,
-      canaryPasses: 0,
-      canaryStatus: 'probation',
-    };
-
-    // 返回生成的高阶进化技能节点，在外部写入图谱，并关联 prerequisite 拓扑边
-    return {
-      id: evolutionId,
-      type: "Skill",
-      content: JSON.stringify({ kind: "evolution", ...record })
-    };
-  } catch (error) {
-    logger.error({ error }, "Caught error");
-    // 异常安全降级，若推理失败，退回传统规则拼接
-    return null;
-  }
-}
-
-function getTripleAtomNames(skills: string[]): [string, string, string] | undefined {
-  if (skills.length < 3) {
-    return undefined;
-  }
-  const atoms = dedup(skills).sort();
-  if (atoms.length < 3) {
-    return undefined;
-  }
-  return [atoms[0]!, atoms[1]!, atoms[2]!];
-}
-
-function buildTripleFusionNode(names: [string, string, string], now: number): GraphNode | undefined {
-  if (process.env.GRAPHFLOW_SKILL_TRIPLE_FUSION === "0") {
-    return undefined;
-  }
-  const [a, b, c] = names;
-  const text = `${a}+${b}+${c}`;
-  const id = `skill:triple:${sanitizeAtom(a)}__${sanitizeAtom(b)}__${sanitizeAtom(c)}`;
-  const content = {
-    kind: "triple-composite",
-    id,
-    name: text,
-    parents: [skillNodeId(a), skillNodeId(b), skillNodeId(c)],
-    score: 1,
-    uses: 1,
-    updatedAt: now,
-    methodology: `融合 ${a}、${b}、${c} 的三元高阶技能`,
-  };
-
-  return {
-    id,
-    type: "Skill",
-    content: JSON.stringify(content),
-  };
-}
-
-function cleanJsonString(raw: string, n1: string, n2: string): string {
-  let text = raw.trim();
-  
-  // 适配测试环境及 mock 环境下的返回
-  if (text.includes("[openbmb:") || text.includes("[openai:") || !text.startsWith("{")) {
-    return JSON.stringify({
-      compositeSkillName: `构建 ${n1} 与 ${n2} 融合高阶技能`,
-      domainC: `${n1} & ${n2} 复合工程领域`,
-      methodologyDescription: `在 mock 测试下完美融合 ${n1} 与 ${n2}，达到大师级设计。`
-    });
-  }
-
-  const fence = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  if (fence && fence[1]) {
-    text = fence[1].trim();
-  }
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start !== -1 && end !== -1 && end > start) {
-    return text.slice(start, end + 1);
-  }
-  return text;
-}
-
-/**
- * 更新合成技能的 canary 验证状态
- * 当 canaryUses >= 3 时评估通过率决定 verified 或 demoted
- */
-export async function updateSkillCanary(
-  client: GraphClient,
-  skillId: string,
-  outcome: 'pass' | 'fail'
-): Promise<EvolutionarySkillNode | undefined> {
-  const existing = await loadEvolutionSkill(client, skillId);
-  if (!existing) {
-    return undefined;
-  }
-
-  existing.canaryUses += 1;
-  if (outcome === 'pass') {
-    existing.canaryPasses += 1;
-  }
-
-  // 累积足够样本后进行阈值判定
-  if (existing.canaryUses >= 3) {
-    const passRate = existing.canaryPasses / existing.canaryUses;
-    if (passRate >= 0.5) {
-      existing.canaryStatus = 'verified';
-    } else {
-      existing.canaryStatus = 'demoted';
-      existing.score = -10;
-    }
-  }
-
-  existing.updatedAt = Date.now();
-
-  await client.upsertNodes([{
-    id: existing.id,
-    type: "Skill",
-    content: JSON.stringify({ kind: "evolution", ...existing }),
-  }]);
-
-  return existing;
 }

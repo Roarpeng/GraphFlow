@@ -1,4 +1,5 @@
 import { logger } from "../utils/logger";
+import { hashTextHex as hashText } from "../utils/hash";
 import { readdirSync, readFileSync, statSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join, relative, dirname, posix } from "node:path";
 import { createHash } from "node:crypto";
@@ -461,14 +462,6 @@ function dedupEdges(edges: GraphEdge[]): GraphEdge[] {
     }
   }
   return result;
-}
-
-function hashText(text: string): string {
-  let hash = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
-  }
-  return hash.toString(16);
 }
 
 function normalizePath(pathText: string): string {

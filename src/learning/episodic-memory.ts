@@ -1,5 +1,6 @@
 import type { GraphNode } from "../core/types";
 import type { GraphClient } from "../graph/client-factory";
+import { hashText } from "../utils/hash";
 
 export interface EpisodeRecord {
   id: string;
@@ -185,14 +186,6 @@ function deserialize(node: GraphNode): EpisodeRecord | undefined {
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max - 3)}...`;
-}
-
-function hashText(text: string): string {
-  let hash = 5381;
-  for (let i = 0; i < text.length; i += 1) {
-    hash = ((hash * 33) ^ text.charCodeAt(i)) >>> 0;
-  }
-  return hash.toString(36);
 }
 
 export interface PruneOptions {
