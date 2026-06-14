@@ -12,7 +12,7 @@ const readySettings = {
   enableNearLosslessMode: true,
   autoIndexOnPreview: true,
   autoIndexOnRun: true,
-  autoIndexOnSave: false,
+  autoIndexOnSave: true,
   transport: "file" as const,
   graphStorePath: "tmp/graphflow-graph.json",
   enrichmentBackend: "inherit" as const,
@@ -61,6 +61,14 @@ describe("M40 routing connectivity validation", () => {
     expect(issues.map((issue) => issue.field)).toEqual(
       expect.arrayContaining(["apiKeyEnvVar", "enableNearLosslessMode", "autoIndexOnPreview"])
     );
+  });
+
+  it("requires auto index on save for routing readiness", () => {
+    const issues = validateSettingsForRouting({
+      ...readySettings,
+      autoIndexOnSave: false,
+    });
+    expect(issues.some((issue) => issue.field === "autoIndexOnSave")).toBe(true);
   });
 
   it("requires base url for openai-compatible providers", () => {

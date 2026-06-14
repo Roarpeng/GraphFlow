@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.11] - 2026-06-14
+
+### Changed
+
+- 默认开启 `autoIndexOnSave`：保存/变更文件后 debounce 增量索引，实现项目更新时持续静默建图。
+- 路由就绪校验要求开启 Auto index on file save。
+- 旧配置中遗留的 `maxContextTokens: 400` 自动升级到 1500。
+- `graphflow.config.example.json` 同步 `autoIndexOnSave` 与 `maxContextTokens: 1500`。
+
 ## [0.6.10] - 2026-06-14
 
 ### Added

@@ -7,6 +7,16 @@ export const SCAFFOLD_TIERS = {
 } as const;
 
 export const DEFAULT_EMBEDDING_MODEL = "Xenova/bge-base-zh-v1.5";
+export const DEFAULT_MAX_CONTEXT_TOKENS = 1500;
+/** Pre-v0.6.9 default; upgraded automatically when still present in saved configs. */
+export const LEGACY_MAX_CONTEXT_TOKENS = 400;
+
+export function resolveMaxContextTokens(value?: number): number {
+  if (value === undefined || value === LEGACY_MAX_CONTEXT_TOKENS) {
+    return DEFAULT_MAX_CONTEXT_TOKENS;
+  }
+  return Math.max(1, Math.floor(value));
+}
 
 export function getDefaultConfig(): GraphFlowConfig {
   return validateConfig({
@@ -21,6 +31,7 @@ export function getDefaultConfig(): GraphFlowConfig {
       enableNearLosslessMode: true,
       autoIndexOnPreview: true,
       autoIndexOnRun: true,
+      autoIndexOnSave: true,
       workspaceRoot: process.cwd(),
       includeExtensions: [".ts", ".tsx", ".js", ".jsx", ".md", ".json"],
       transport: "file",
