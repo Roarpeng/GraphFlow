@@ -1,12 +1,52 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { extractEnvPlaceholderName } from "./secrets";
 import type { GraphFlowConfig } from "./schema";
+import { getDefaultConfig } from "./defaults";
+import { logger } from "../utils/logger";
+
+export interface LoadConfigResult {
+  config: GraphFlowConfig;
+  usedFallback: boolean;
+  configPath: string;
+  error?: string;
+}
 
 export function loadConfig(path = "graphflow.config.json"): GraphFlowConfig {
-  const raw = readFileSync(path, "utf8");
-  const parsed = resolveEnvTemplates(JSON.parse(raw)) as GraphFlowConfig;
-  return validateConfig(parsed);
+  return loadConfigSafe(path).config;
+}
+
+/** Load config with fallback to defaults when JSON is missing, invalid, or fails validation. */
+export function loadConfigSafe(path = "graphflow.config.json"): LoadConfigResult {
+  const resolvedPath = resolve(path);
+
+  if (!existsSync(resolvedPath)) {
+    return {
+      config: getDefaultConfig(),
+      usedFallback: true,
+      configPath: resolvedPath,
+      error: "Config file not found",
+    };
+  }
+
+  try {
+    const raw = readFileSync(resolvedPath, "utf8");
+    const parsed = resolveEnvTemplates(JSON.parse(raw)) as GraphFlowConfig;
+    return {
+      config: validateConfig(parsed),
+      usedFallback: false,
+      configPath: resolvedPath,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn({ path: resolvedPath, error: message }, "Failed to load config; using defaults");
+    return {
+      config: getDefaultConfig(),
+      usedFallback: true,
+      configPath: resolvedPath,
+      error: message,
+    };
+  }
 }
 
 function trimOptional(value?: string): string | undefined {

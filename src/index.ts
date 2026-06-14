@@ -44,4 +44,4 @@ export {
   createGraphClient,
   type GraphClient,
 } from "./graph/client-factory";
-export { validateConfig, loadConfig } from "./config/loader";
+export { validateConfig, loadConfig, loadConfigSafe, type LoadConfigResult } from "./config/loader";

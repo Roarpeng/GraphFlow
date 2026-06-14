@@ -107,6 +107,7 @@ export function runInit() {
   });
 
   console.log(`[FINISH] Initialization complete! Global config: ${join(homedir(), ".graphflow.config.json")}`);
+  console.log("[HINT] To run init on npm install, set GRAPHFLOW_ENABLE_POSTINSTALL=1");
 }
 
 async function bootstrapGraphIndex(workspaceRoot: string): Promise<void> {
