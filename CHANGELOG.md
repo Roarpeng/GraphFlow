@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.12] - 2026-06-14
+
+### Added
+
+- `snapshot-view` 模块：图谱样本的可读标签（`displayLabel`、`displayPath`、`folderGroup`）、分层视图（代码层 / 学习层）、按目录多样性采样。
+- 知识图谱面板：暗色主题、分层 Tab、目录聚类着色、关系线型区分、双击/按钮跳转源文件。
+
+### Changed
+
+- `inspectGraph` 默认样本上限提升至 96 节点 / 160 边；VS Code「查看图谱」命令使用 120 / 200。
+- 节点摘要预览长度由 96 提升至 160 字符。
+
 ## [0.6.11] - 2026-06-14
 
 ### Changed

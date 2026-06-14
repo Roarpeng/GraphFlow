@@ -12,6 +12,7 @@ import {
 } from "../../../graph/context-slicer";
 import { indexWorkspaceFiles, clearGraphIndexArtifacts, hasPendingGraphIndexWork } from "../../../graph/file-indexer";
 import { enrichGraphSemanticsSilent, type EnricherOptions } from "../../../graph/semantic-enricher";
+import { sampleGraphForSnapshot } from "../../../graph/snapshot-view.js";
 import { resolveModelForRole } from "../../../routing/model-router";
 import { buildProviderHealthMap } from "../../../routing/provider-health";
 import { withFileLock } from "../../../utils/file-lock";
@@ -24,7 +25,6 @@ import {
 import {
   calculateBudgetUsedPercent,
   calculateSavingsPercent,
-  compactPreview,
   estimateRawContextTokens,
   getFileSize,
   loadGraphStore,
@@ -419,8 +419,8 @@ export async function inspectGraph(
   options?: { nodeLimit?: number; edgeLimit?: number }
 ): Promise<GraphSnapshotResult> {
   const config = resolveConfig(configPath);
-  const nodeLimit = Math.max(1, options?.nodeLimit ?? 24);
-  const edgeLimit = Math.max(1, options?.edgeLimit ?? 36);
+  const nodeLimit = Math.max(1, options?.nodeLimit ?? 96);
+  const edgeLimit = Math.max(1, options?.edgeLimit ?? 160);
   const emptyTypeCount: Record<GraphNode["type"], number> = {
     File: 0,
     Symbol: 0,
@@ -475,75 +475,7 @@ export async function inspectGraph(
       .map(([relation, count]) => ({ relation, count }))
       .sort((a, b) => b.count - a.count || a.relation.localeCompare(b.relation))
       .slice(0, 8),
-    ...(() => {
-      const isMetaFile = (id: string) => {
-        const lower = id.toLowerCase();
-        return lower.includes(".md") || lower.includes(".json") || lower.includes(".yml") || lower.includes(".yaml") || lower.includes(".github") || lower.includes(".claude") || lower.includes(".codex");
-      };
-
-      const adj = new Map<string, string[]>();
-      for (const e of store.edges) {
-        if (!adj.has(e.from)) adj.set(e.from, []);
-        if (!adj.has(e.to)) adj.set(e.to, []);
-        adj.get(e.from)!.push(e.to);
-        adj.get(e.to)!.push(e.from);
-      }
-
-      const nodeMap = new Map(store.nodes.map(n => [n.id, n]));
-
-      const degree = (id: string) => adj.get(id)?.length || 0;
-
-      const sortedCandidates = store.nodes
-        .filter(n => n.type === "File" && !isMetaFile(n.id))
-        .sort((a, b) => degree(b.id) - degree(a.id));
-
-      if (sortedCandidates.length === 0) {
-        return { sampleNodes: [], sampleEdges: [] };
-      }
-
-      const visited = new Set<string>();
-      const selected = [];
-      let candidateIndex = 0;
-
-      while (selected.length < nodeLimit && candidateIndex < sortedCandidates.length) {
-        let root = sortedCandidates[candidateIndex++];
-        while (root && visited.has(root.id) && candidateIndex < sortedCandidates.length) {
-          root = sortedCandidates[candidateIndex++];
-        }
-        if (!root || visited.has(root.id)) break;
-
-        const queue = [root.id];
-        while (queue.length > 0 && selected.length < nodeLimit) {
-          const id = queue.shift()!;
-          if (visited.has(id)) continue;
-          visited.add(id);
-          const node = nodeMap.get(id);
-          if (node) {
-            selected.push(node);
-            const neighbors = adj.get(id) || [];
-            queue.push(...neighbors);
-          }
-        }
-      }
-
-      const sampleNodeIds = new Set(selected.map(n => n.id));
-
-      return {
-        sampleNodes: selected.map(node => ({
-          id: node.id,
-          type: node.type,
-          contentPreview: compactPreview(node.content, 96),
-        })),
-        sampleEdges: store.edges
-          .filter(edge => sampleNodeIds.has(edge.from) && sampleNodeIds.has(edge.to))
-          .slice(0, edgeLimit)
-          .map(edge => ({
-            from: edge.from,
-            relation: edge.relation,
-            to: edge.to,
-          }))
-      };
-    })(),
+    ...sampleGraphForSnapshot(store.nodes, store.edges, nodeLimit, edgeLimit),
   };
 }
 

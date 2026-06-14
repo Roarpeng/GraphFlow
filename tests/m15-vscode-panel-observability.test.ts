@@ -27,8 +27,27 @@ describe("M15 VS Code observability panels", () => {
         { relation: "defines", count: 2 },
       ],
       sampleNodes: [
-        { id: "file:src/index.ts", type: "File", contentPreview: "export {}" },
-        { id: "symbol:runTask", type: "Symbol", contentPreview: "run task" },
+        {
+          id: "file:src/index.ts",
+          type: "File",
+          contentPreview: "export {}",
+          displayLabel: "index.ts",
+          displayPath: "src/index.ts",
+          folderGroup: "src",
+          sourcePath: "src/index.ts",
+          viewLayer: "code",
+        },
+        {
+          id: "symbol:runTask",
+          type: "Symbol",
+          contentPreview: "function runTask",
+          displayLabel: "runTask",
+          displayPath: "src/index.ts",
+          sourcePath: "src/index.ts",
+          sourceLine: 3,
+          folderGroup: "src",
+          viewLayer: "code",
+        },
       ],
       sampleEdges: [{ from: "file:src/index.ts", relation: "defines", to: "symbol:runTask" }],
       },
@@ -42,7 +61,9 @@ describe("M15 VS Code observability panels", () => {
     expect(html).toContain('id="graph-node-list"');
     expect(html).toContain('id="graph-detail"');
     expect(html).toContain('data-role="graph-canvas"');
-    expect(html).toContain("file:src/index.ts");
+    expect(html).toContain('id="graph-layer-tabs"');
+    expect(html).toContain("index.ts");
+    expect(html).toContain('id="graph-open-source"');
   });
 
   it("renders skill insights controls for sorting and outcome filtering", () => {

@@ -1,4 +1,7 @@
 import type { GraphEdge, GraphNode, TaskStatus } from "../../../core/types";
+import type { GraphSnapshotSampleEdge, GraphSnapshotSampleNode } from "../../../graph/snapshot-view.js";
+
+export type { GraphSnapshotSampleEdge, GraphSnapshotSampleNode };
 import type { GraphFlowConfig } from "../../../config/schema";
 
 export interface ContextPreviewResult {
@@ -75,8 +78,8 @@ export interface GraphSnapshotResult {
   edgeCount: number;
   nodeTypeCount: Record<GraphNode["type"], number>;
   topRelations: Array<{ relation: GraphEdge["relation"]; count: number }>;
-  sampleNodes: Array<{ id: string; type: GraphNode["type"]; contentPreview: string }>;
-  sampleEdges: Array<{ from: string; relation: GraphEdge["relation"]; to: string }>;
+  sampleNodes: GraphSnapshotSampleNode[];
+  sampleEdges: GraphSnapshotSampleEdge[];
 }
 
 export interface SkillInsightItem {

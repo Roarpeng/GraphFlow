@@ -1,3 +1,15 @@
+export interface GraphSnapshotSampleNode {
+  id: string;
+  type: string;
+  contentPreview: string;
+  displayLabel: string;
+  displayPath?: string;
+  folderGroup?: string;
+  sourcePath?: string;
+  sourceLine?: number;
+  viewLayer: "code" | "learning";
+}
+
 export interface GraphSnapshotResult {
   transport: "memory" | "mcp-http" | "file" | "sqlite";
   storePath?: string;
@@ -5,7 +17,7 @@ export interface GraphSnapshotResult {
   edgeCount: number;
   nodeTypeCount: Record<"File" | "Symbol" | "Module" | "TaskRun" | "Decision" | "Skill", number>;
   topRelations: Array<{ relation: string; count: number }>;
-  sampleNodes: Array<{ id: string; type: string; contentPreview: string }>;
+  sampleNodes: GraphSnapshotSampleNode[];
   sampleEdges: Array<{ from: string; relation: string; to: string }>;
 }
 
@@ -90,7 +102,7 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
   const nodeOptions = snapshot.sampleNodes
     .map(
       (node) =>
-        `<option value="${escapeHtml(node.id)}">${escapeHtml(snapshotShortLabel(node))} [${escapeHtml(node.type)}]</option>`
+        `<option value="${escapeHtml(node.id)}">${escapeHtml(snapshotShortLabel(node))} · ${escapeHtml(node.type)}</option>`
     )
     .join("");
   const relationOptions = snapshot.topRelations
@@ -110,43 +122,44 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
   const serverSvgMarkup = renderServerSnapshotSvg(snapshot.sampleNodes, snapshot.sampleEdges);
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GraphFlow Graph Snapshot</title>
+  <title>GraphFlow 知识图谱</title>
   <style>
     :root {
-      color-scheme: light;
-      --bg: #f4efe6;
-      --panel: #fffaf2;
-      --ink: #213547;
-      --muted: #6d7f88;
-      --line: #d8c9b7;
-      --accent: #116466;
-      --accent-soft: #d9efe8;
-      --accent-2: #d97d54;
-      --shadow: 0 14px 34px rgba(33, 53, 71, 0.08);
+      color-scheme: dark;
+      --bg: #0b1017;
+      --panel: #141b26;
+      --panel-soft: #1a2332;
+      --ink: #e6edf3;
+      --muted: #8b949e;
+      --line: #30363d;
+      --accent: #3fb950;
+      --accent-soft: rgba(63, 185, 80, 0.14);
+      --accent-2: #58a6ff;
+      --shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: "Segoe UI", sans-serif;
+      font-family: "Segoe UI", "PingFang SC", sans-serif;
       color: var(--ink);
       background:
-        radial-gradient(circle at top right, rgba(217, 125, 84, 0.18), transparent 22%),
-        radial-gradient(circle at top left, rgba(17, 100, 102, 0.15), transparent 28%),
+        radial-gradient(circle at top right, rgba(88, 166, 255, 0.12), transparent 24%),
+        radial-gradient(circle at top left, rgba(63, 185, 80, 0.1), transparent 30%),
         var(--bg);
     }
     .shell { padding: 16px; display: grid; gap: 14px; }
     .hero {
-      background: linear-gradient(135deg, rgba(255, 250, 242, 0.96), rgba(244, 239, 230, 0.92));
+      background: linear-gradient(135deg, rgba(20, 27, 38, 0.98), rgba(11, 16, 23, 0.96));
       border: 1px solid var(--line);
       border-radius: 18px;
       padding: 16px;
       box-shadow: var(--shadow);
     }
-    .hero-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .hero-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
     .metric, .panel {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -154,13 +167,35 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
       box-shadow: var(--shadow);
     }
     .metric { padding: 12px; }
-    .metric .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+    .metric .label { font-size: 12px; color: var(--muted); letter-spacing: 0.04em; }
     .metric .value { margin-top: 6px; font-size: 18px; font-weight: 700; }
     .toolbar {
       display: grid;
-      grid-template-columns: 1.2fr 0.85fr 0.85fr 1fr auto;
+      grid-template-columns: 1.1fr 0.8fr 0.8fr 1fr auto auto;
       gap: 10px;
       align-items: end;
+    }
+    .layer-tabs {
+      display: inline-flex;
+      gap: 6px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel-soft);
+    }
+    .layer-tab {
+      width: auto;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .layer-tab.active {
+      background: var(--accent-soft);
+      color: var(--accent);
     }
     .field { display: grid; gap: 6px; }
     .field label { font-size: 12px; color: var(--muted); }
@@ -170,33 +205,36 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
       border: 1px solid var(--line);
       padding: 10px 12px;
       font: inherit;
-      background: #fff;
+      background: var(--panel-soft);
       color: var(--ink);
     }
     button {
       width: auto;
       background: var(--accent);
-      color: #fff;
+      color: #041007;
       cursor: pointer;
       border: none;
       padding-inline: 18px;
+      font-weight: 600;
     }
-    .layout { display: grid; grid-template-columns: 280px minmax(0, 1fr) 320px; gap: 12px; }
+    .layout { display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px; gap: 12px; }
     .panel { overflow: hidden; }
-    .panel h2 { margin: 0; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+    .panel h2 { margin: 0; font-size: 14px; letter-spacing: 0.04em; color: var(--muted); }
     .panel-head { padding: 12px 14px; border-bottom: 1px solid var(--line); }
     .panel-body { padding: 12px 14px; }
     .node-list { display: grid; gap: 8px; max-height: 540px; overflow: auto; }
     .node-item {
       border: 1px solid var(--line);
-      background: #fff;
+      background: var(--panel-soft);
       border-radius: 12px;
       padding: 10px;
       cursor: pointer;
+      text-align: left;
     }
     .node-item.active { border-color: var(--accent); background: var(--accent-soft); }
     .node-meta { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
-    .node-title { font-size: 13px; font-weight: 600; word-break: break-all; }
+    .node-title { font-size: 13px; font-weight: 600; word-break: break-word; }
+    .node-subpath { font-size: 11px; color: var(--muted); margin-top: 4px; word-break: break-all; }
     .node-preview { font-size: 12px; color: var(--muted); margin-top: 6px; }
     .canvas-wrap { position: relative; padding: 0; }
     .canvas-toolbar {
@@ -206,7 +244,7 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
       gap: 10px;
       padding: 10px 12px;
       border-bottom: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.72);
+      background: rgba(20, 27, 38, 0.92);
     }
     .canvas-stats { font-size: 12px; color: var(--muted); }
     .canvas-controls { display: flex; gap: 6px; }
@@ -214,21 +252,21 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
       padding: 6px 10px;
       font-size: 12px;
       border-radius: 8px;
-      background: #fff;
+      background: var(--panel-soft);
       color: var(--ink);
       border: 1px solid var(--line);
     }
-    .canvas-controls button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .canvas-controls button.primary { background: var(--accent); color: #041007; border-color: var(--accent); }
     .legend-row { display: flex; flex-wrap: wrap; gap: 8px 12px; padding: 8px 12px 0; }
     .legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
-    .legend-dot { width: 10px; height: 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.9); box-shadow: 0 0 0 1px rgba(0,0,0,0.08); }
+    .legend-dot { width: 10px; height: 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.15); }
     svg.graph-canvas {
       width: 100%;
-      height: 580px;
+      height: 620px;
       display: block;
       background:
-        radial-gradient(circle at center, rgba(17, 100, 102, 0.05), transparent 42%),
-        linear-gradient(180deg, #fff, #f8f4ed);
+        radial-gradient(circle at center, rgba(88, 166, 255, 0.06), transparent 42%),
+        linear-gradient(180deg, #101722, #0b1017);
       cursor: grab;
       touch-action: none;
     }
@@ -238,7 +276,6 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
       font-size: 10px;
       font-weight: 700;
       letter-spacing: 0.04em;
-      text-transform: uppercase;
       padding: 2px 8px;
       border-radius: 999px;
       margin-bottom: 6px;
@@ -252,26 +289,32 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
       padding: 8px;
       border: 1px solid var(--line);
       border-radius: 10px;
-      background: #fff;
+      background: var(--panel-soft);
       font-size: 12px;
     }
     .relation-tag {
       font-size: 10px;
       font-weight: 700;
-      text-transform: uppercase;
       padding: 3px 8px;
       border-radius: 999px;
       white-space: nowrap;
     }
-    .detail-title { font-size: 15px; font-weight: 700; word-break: break-all; margin: 6px 0; }
+    .detail-title { font-size: 15px; font-weight: 700; word-break: break-word; margin: 6px 0; }
     .detail-path { font-size: 11px; color: var(--muted); word-break: break-all; font-family: Consolas, monospace; }
     .detail-preview { margin-top: 10px; font-size: 12px; line-height: 1.5; color: var(--ink); white-space: pre-wrap; word-break: break-word; }
     .detail-grid { display: grid; gap: 10px; max-height: 620px; overflow: auto; }
-    .detail-card { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: #fff; }
-    .detail-card pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: Consolas, monospace; font-size: 12px; }
+    .detail-card { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--panel-soft); }
+    .detail-card pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: Consolas, monospace; font-size: 12px; color: var(--muted); }
+    .detail-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .detail-actions button.secondary {
+      background: transparent;
+      color: var(--accent-2);
+      border: 1px solid var(--accent-2);
+    }
     .pill-row { display: flex; gap: 8px; flex-wrap: wrap; }
     .pill { background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 4px 10px; font-size: 12px; }
     .empty { color: var(--muted); font-size: 13px; }
+    .empty-guide { padding: 24px; text-align: center; color: var(--muted); line-height: 1.6; }
     @media (max-width: 1100px) {
       .layout { grid-template-columns: 1fr; }
       .toolbar, .hero-grid { grid-template-columns: 1fr; }
@@ -284,16 +327,17 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
     <section class="hero">
       <div class="hero-grid">
         <div class="metric"><div class="label">存储后端</div><div class="value">${escapeHtml(snapshot.transport)}</div></div>
-        <div class="metric"><div class="label">节点 / 边</div><div class="value">${snapshot.nodeCount} / ${snapshot.edgeCount}</div></div>
-        <div class="metric"><div class="label">样本展示</div><div class="value">${snapshot.sampleNodes.length} 节点 · ${snapshot.sampleEdges.length} 边</div></div>
+        <div class="metric"><div class="label">全库规模</div><div class="value">${snapshot.nodeCount} 节点 · ${snapshot.edgeCount} 边</div></div>
+        <div class="metric"><div class="label">当前样本</div><div class="value">${snapshot.sampleNodes.length} / ${snapshot.nodeCount} 节点</div></div>
+        <div class="metric"><div class="label">样本边</div><div class="value">${snapshot.sampleEdges.length} / ${snapshot.edgeCount} 边</div></div>
       </div>
       <div class="legend-row">${typeLegend}</div>
     </section>
     <section class="panel panel-body">
       <div class="toolbar">
         <div class="field">
-          <label for="graph-search">搜索节点</label>
-          <input id="graph-search" type="search" placeholder="按 ID、类型、摘要搜索" />
+          <label for="graph-search">搜索</label>
+          <input id="graph-search" type="search" placeholder="名称、路径、摘要…" />
         </div>
         <div class="field">
           <label for="graph-type-filter">节点类型</label>
@@ -306,6 +350,11 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
         <div class="field">
           <label for="graph-node-list">聚焦节点</label>
           <select id="graph-node-list"><option value="">自动选择</option>${nodeOptions}</select>
+        </div>
+        <div class="layer-tabs" id="graph-layer-tabs">
+          <button type="button" class="layer-tab active" data-layer="all">全部</button>
+          <button type="button" class="layer-tab" data-layer="code">代码层</button>
+          <button type="button" class="layer-tab" data-layer="learning">学习层</button>
         </div>
         <button id="graph-reset" type="button">重置</button>
       </div>
@@ -335,6 +384,9 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
             <strong>当前选中</strong>
             <div id="graph-detail-body">
               <div class="empty">点击左侧节点或画布中的圆点查看详情。</div>
+            </div>
+            <div class="detail-actions">
+              <button id="graph-open-source" type="button" class="secondary" disabled>打开源文件</button>
             </div>
           </div>
           <div class="detail-card">
@@ -782,7 +834,10 @@ function hashSnapshotString(input: string): number {
   return hash >>> 0;
 }
 
-function snapshotShortLabel(node: GraphSnapshotResult["sampleNodes"][number]): string {
+function snapshotShortLabel(node: GraphSnapshotSampleNode): string {
+  if (node.displayLabel) {
+    return node.displayLabel;
+  }
   const id = node.id || "";
   if (id.startsWith("file:")) {
     const path = id.slice(5);
@@ -927,16 +982,16 @@ function renderServerSnapshotSvg(
     const label = snapshotShortLabel(node);
     shapes.push(
       `<circle cx="${pos.x}" cy="${pos.y}" r="${isActive ? 11 : 8}" fill="${fill}" stroke="${isActive ? "#d97d54" : "#fff"}" stroke-width="${isActive ? 3 : 1.5}" />`,
-      `<text x="${pos.x + 12}" y="${pos.y + 4}" font-size="${isActive ? 12 : 11}" fill="#334155">${escapeHtml(label)}</text>`
+      `<text x="${pos.x + 12}" y="${pos.y + 4}" font-size="${isActive ? 12 : 11}" fill="#c9d1d9">${escapeHtml(label)}</text>`
     );
   });
 
   return `${lines.join("")}${shapes.join("")}`;
 }
 
-function renderServerNodeCardsHtml(nodes: GraphSnapshotResult["sampleNodes"]): string {
+function renderServerNodeCardsHtml(nodes: GraphSnapshotSampleNode[]): string {
   if (nodes.length === 0) {
-    return '<div class="empty">暂无样本节点，请先索引后重新打开面板。</div>';
+    return '<div class="empty-guide">暂无图谱数据。<br/>请运行「建立图谱」或保存文件触发自动索引后重新打开。</div>';
   }
 
   return nodes
@@ -945,7 +1000,8 @@ function renderServerNodeCardsHtml(nodes: GraphSnapshotResult["sampleNodes"]): s
         `<button type="button" class="node-item${index === 0 ? " active" : ""}" data-node-id="${escapeHtml(node.id)}">` +
         `<span class="type-badge" style="background:${(SNAPSHOT_NODE_COLORS[node.type] ?? "#64748b")}22;color:${SNAPSHOT_NODE_COLORS[node.type] ?? "#64748b"}">${escapeHtml(node.type)}</span>` +
         `<div class="node-title">${escapeHtml(snapshotShortLabel(node))}</div>` +
-        `<div class="detail-path">${escapeHtml(node.id)}</div>` +
+        (node.displayPath ? `<div class="node-subpath">${escapeHtml(node.displayPath)}</div>` : `<div class="node-subpath">${escapeHtml(node.id)}</div>`) +
+        (node.folderGroup ? `<div class="node-meta">目录组 · ${escapeHtml(node.folderGroup)}</div>` : "") +
         `<div class="node-preview">${escapeHtml(node.contentPreview || "(empty)")}</div>` +
         `</button>`
     )
