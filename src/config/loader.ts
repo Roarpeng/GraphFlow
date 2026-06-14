@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { extractEnvPlaceholderName } from "./secrets";
 import type { GraphFlowConfig } from "./schema";
-import { getDefaultConfig } from "./defaults";
+import { getDefaultConfig, resolveMaxContextTokens } from "./defaults";
 import { logger } from "../utils/logger";
 
 export interface LoadConfigResult {
@@ -186,7 +186,8 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       enableNearLosslessMode: input.graphPolicy.enableNearLosslessMode ?? false,
       autoIndexOnPreview: input.graphPolicy.autoIndexOnPreview ?? true,
       autoIndexOnRun: input.graphPolicy.autoIndexOnRun ?? true,
-      autoIndexOnSave: input.graphPolicy.autoIndexOnSave ?? false,
+      autoIndexOnSave: input.graphPolicy.autoIndexOnSave ?? true,
+      maxContextTokens: resolveMaxContextTokens(input.graphPolicy.maxContextTokens),
       workspaceRoot,
       graphStorePath:
         input.graphPolicy.graphStorePath ??

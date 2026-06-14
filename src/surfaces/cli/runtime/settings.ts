@@ -41,7 +41,7 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
     enableNearLosslessMode: config.graphPolicy.enableNearLosslessMode ?? false,
     autoIndexOnPreview: config.graphPolicy.autoIndexOnPreview ?? true,
     autoIndexOnRun: config.graphPolicy.autoIndexOnRun ?? true,
-    autoIndexOnSave: config.graphPolicy.autoIndexOnSave ?? false,
+    autoIndexOnSave: config.graphPolicy.autoIndexOnSave ?? true,
     transport: config.graphPolicy.transport,
     graphStorePath: config.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.json",
     enrichmentBackend: resolveEnrichmentBackend(config.graphPolicy.semanticEnrichment),
@@ -252,6 +252,9 @@ export function validateSettingsForRouting(settings: GraphFlowSettingsInput): Se
   }
   if (!settings.autoIndexOnRun) {
     issues.push({ field: "autoIndexOnRun", message: "请开启 Auto index on run" });
+  }
+  if (!settings.autoIndexOnSave) {
+    issues.push({ field: "autoIndexOnSave", message: "请开启 Auto index on file save" });
   }
 
   return issues;
