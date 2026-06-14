@@ -158,7 +158,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     const snapshot = await runGraphFlow(workspaceRoot, (runtime) =>
-      runtime.inspectGraph(undefined, { nodeLimit: 48, edgeLimit: 96 })
+      runtime.inspectGraph(undefined, { nodeLimit: 120, edgeLimit: 200 })
     );
     showGraphSnapshotPanel(context, snapshot);
   });
@@ -966,7 +966,7 @@ function showSettingsPanel(
 function showGraphSnapshotPanel(context: vscode.ExtensionContext, snapshot: GraphSnapshotResult): void {
   const panel = vscode.window.createWebviewPanel(
     "graphflow.graphSnapshot",
-    "GraphFlow Graph Snapshot",
+    "GraphFlow 知识图谱",
     vscode.ViewColumn.Active,
     {
       enableScripts: true,
@@ -1023,9 +1023,29 @@ function wireGraphSnapshotPanel(
     void panel.webview.postMessage({ type: "snapshot", payload });
   };
 
-  panel.webview.onDidReceiveMessage((message) => {
+  panel.webview.onDidReceiveMessage(async (message) => {
     if (message?.type === "ready") {
       postSnapshot();
+      return;
+    }
+    if (message?.type === "openSource" && typeof message.path === "string" && message.path.length > 0) {
+      const folder = vscode.workspace.workspaceFolders?.[0];
+      if (!folder) {
+        void vscode.window.showWarningMessage("请先打开工作区文件夹后再跳转源文件。");
+        return;
+      }
+      const uri = vscode.Uri.joinPath(folder.uri, message.path);
+      try {
+        const doc = await vscode.workspace.openTextDocument(uri);
+        const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+        const line = typeof message.line === "number" && message.line > 0 ? message.line - 1 : 0;
+        const position = new vscode.Position(line, 0);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        void vscode.window.showErrorMessage(`无法打开源文件 ${message.path}: ${text}`);
+      }
     }
   });
 

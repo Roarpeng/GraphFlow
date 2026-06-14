@@ -1,0 +1,266 @@
+import type { GraphEdge, GraphNode } from "../core/types.js";
+
+export type SnapshotViewLayer = "code" | "learning";
+
+export interface GraphSnapshotSampleNode {
+  id: string;
+  type: GraphNode["type"];
+  contentPreview: string;
+  displayLabel: string;
+  displayPath?: string;
+  folderGroup?: string;
+  sourcePath?: string;
+  sourceLine?: number;
+  viewLayer: SnapshotViewLayer;
+}
+
+export interface GraphSnapshotSampleEdge {
+  from: string;
+  relation: GraphEdge["relation"];
+  to: string;
+}
+
+function compactPreview(content: string, maxLength: number): string {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+function basename(path: string): string {
+  const parts = path.split(/[/\\]/);
+  return parts[parts.length - 1] || path;
+}
+
+export function folderGroupFromPath(relPath: string): string {
+  const parts = relPath.split(/[/\\]/).filter(Boolean);
+  if (parts.length <= 1) {
+    return ".";
+  }
+  return parts[0] ?? ".";
+}
+
+export function viewLayerForType(type: GraphNode["type"]): SnapshotViewLayer {
+  return type === "Skill" || type === "TaskRun" || type === "Decision" ? "learning" : "code";
+}
+
+function isMetaFile(id: string): boolean {
+  const lower = id.toLowerCase();
+  return (
+    lower.includes(".md") ||
+    lower.includes(".json") ||
+    lower.includes(".yml") ||
+    lower.includes(".yaml") ||
+    lower.includes(".github") ||
+    lower.includes(".claude") ||
+    lower.includes(".codex")
+  );
+}
+
+function buildAdjacency(edges: GraphEdge[]): Map<string, string[]> {
+  const adj = new Map<string, string[]>();
+  for (const edge of edges) {
+    if (!adj.has(edge.from)) adj.set(edge.from, []);
+    if (!adj.has(edge.to)) adj.set(edge.to, []);
+    adj.get(edge.from)!.push(edge.to);
+    adj.get(edge.to)!.push(edge.from);
+  }
+  return adj;
+}
+
+export function enrichNodeForSnapshot(node: GraphNode, previewLength = 160): GraphSnapshotSampleNode {
+  const contentPreview = compactPreview(node.content, previewLength);
+  const meta = node.metadata ?? {};
+
+  let displayLabel = node.id;
+  let displayPath: string | undefined;
+  let sourcePath: string | undefined;
+  let sourceLine: number | undefined;
+  let folderGroup: string | undefined;
+
+  if (node.type === "File") {
+    const path = node.id.startsWith("file:")
+      ? node.id.slice(5)
+      : String(meta.path ?? node.content.split("#")[0]?.trim() ?? node.id);
+    displayLabel = basename(path);
+    displayPath = path;
+    sourcePath = path;
+    folderGroup = folderGroupFromPath(path);
+  } else if (node.type === "Module") {
+    const path = node.id.startsWith("module:") ? node.id.slice(7) : node.content;
+    displayLabel = basename(path) || path;
+    displayPath = path;
+    folderGroup = folderGroupFromPath(path);
+  } else if (node.type === "Symbol") {
+    const name = typeof meta.name === "string" ? meta.name : undefined;
+    const file = typeof meta.file === "string" ? meta.file : undefined;
+    const line = typeof meta.line === "number" ? meta.line : undefined;
+    const kind = typeof meta.kind === "string" ? meta.kind : "";
+    if (name) {
+      displayLabel = kind ? `${kind} ${name}` : name;
+    } else {
+      const named = node.content.match(
+        /^(function|class|interface|type|method|variable|const|let|enum)\s+([A-Za-z0-9_$]+)/
+      );
+      const fallback = node.content.split("@")[0]?.trim();
+      displayLabel = named?.[2] ?? (fallback && fallback.length > 0 ? fallback : node.id);
+      if (displayLabel.length > 48) {
+        displayLabel = `${displayLabel.slice(0, 47)}…`;
+      }
+    }
+    displayPath = file;
+    sourcePath = file;
+    sourceLine = line;
+    folderGroup = file ? folderGroupFromPath(file) : undefined;
+  } else if (node.type === "Skill") {
+    displayLabel =
+      typeof meta.name === "string" ? meta.name : node.id.replace(/^skill:/, "") || "Skill";
+    displayPath = node.id;
+  } else if (node.type === "TaskRun") {
+    displayLabel = compactPreview(node.content, 48) || node.id.replace(/^taskrun:/, "") || "TaskRun";
+  } else if (node.type === "Decision") {
+    displayLabel = compactPreview(node.content, 48) || node.id.replace(/^decision:/, "") || "Decision";
+  }
+
+  return {
+    id: node.id,
+    type: node.type,
+    contentPreview,
+    displayLabel,
+    viewLayer: viewLayerForType(node.type),
+    ...(displayPath ? { displayPath } : {}),
+    ...(folderGroup ? { folderGroup } : {}),
+    ...(sourcePath ? { sourcePath } : {}),
+    ...(sourceLine !== undefined ? { sourceLine } : {}),
+  };
+}
+
+export function sampleGraphForSnapshot(
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  nodeLimit: number,
+  edgeLimit: number
+): { sampleNodes: GraphSnapshotSampleNode[]; sampleEdges: GraphSnapshotSampleEdge[] } {
+  if (nodes.length === 0) {
+    return { sampleNodes: [], sampleEdges: [] };
+  }
+
+  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
+  const adj = buildAdjacency(edges);
+  const degree = (id: string) => adj.get(id)?.length ?? 0;
+
+  const learningNodes = nodes.filter((node) => viewLayerForType(node.type) === "learning");
+  const learningBudget = Math.min(learningNodes.length, Math.max(4, Math.floor(nodeLimit * 0.15)));
+  const codeBudget = Math.max(1, nodeLimit - learningBudget);
+
+  const selected: GraphNode[] = [];
+  const visited = new Set<string>();
+
+  const countLayer = (layer: SnapshotViewLayer) =>
+    selected.filter((node) => viewLayerForType(node.type) === layer).length;
+
+  const fileCandidates = nodes
+    .filter((node) => node.type === "File" && !isMetaFile(node.id))
+    .sort((a, b) => degree(b.id) - degree(a.id));
+
+  const byFolder = new Map<string, GraphNode[]>();
+  for (const file of fileCandidates) {
+    const path = file.id.startsWith("file:") ? file.id.slice(5) : file.content.split("#")[0]?.trim() ?? file.id;
+    const group = folderGroupFromPath(path);
+    const bucket = byFolder.get(group) ?? [];
+    bucket.push(file);
+    byFolder.set(group, bucket);
+  }
+
+  const folderBuckets = Array.from(byFolder.values());
+  let round = 0;
+  while (countLayer("code") < codeBudget && round < 5000) {
+    let pickedAny = false;
+    for (const bucket of folderBuckets) {
+      if (countLayer("code") >= codeBudget) {
+        break;
+      }
+      const root = bucket[round];
+      if (!root || visited.has(root.id)) {
+        continue;
+      }
+      pickedAny = true;
+      const queue = [root.id];
+      while (queue.length > 0 && countLayer("code") < codeBudget) {
+        const id = queue.shift()!;
+        if (visited.has(id)) {
+          continue;
+        }
+        visited.add(id);
+        const node = nodeMap.get(id);
+        if (!node || viewLayerForType(node.type) !== "code") {
+          continue;
+        }
+        selected.push(node);
+        for (const neighbor of adj.get(id) ?? []) {
+          if (!visited.has(neighbor)) {
+            queue.push(neighbor);
+          }
+        }
+      }
+    }
+    round += 1;
+    if (!pickedAny) {
+      break;
+    }
+  }
+
+  if (countLayer("code") < codeBudget) {
+    const fallbackRoots = fileCandidates.filter((node) => !visited.has(node.id));
+    for (const root of fallbackRoots) {
+      if (countLayer("code") >= codeBudget) {
+        break;
+      }
+      const queue = [root.id];
+      while (queue.length > 0 && countLayer("code") < codeBudget) {
+        const id = queue.shift()!;
+        if (visited.has(id)) {
+          continue;
+        }
+        visited.add(id);
+        const node = nodeMap.get(id);
+        if (!node || viewLayerForType(node.type) !== "code") {
+          continue;
+        }
+        selected.push(node);
+        for (const neighbor of adj.get(id) ?? []) {
+          if (!visited.has(neighbor)) {
+            queue.push(neighbor);
+          }
+        }
+      }
+    }
+  }
+
+  const sortedLearning = [...learningNodes].sort((a, b) => degree(b.id) - degree(a.id));
+  for (const node of sortedLearning) {
+    if (countLayer("learning") >= learningBudget || selected.length >= nodeLimit) {
+      break;
+    }
+    if (visited.has(node.id)) {
+      continue;
+    }
+    visited.add(node.id);
+    selected.push(node);
+  }
+
+  const sampleNodeIds = new Set(selected.map((node) => node.id));
+
+  return {
+    sampleNodes: selected.map((node) => enrichNodeForSnapshot(node)),
+    sampleEdges: edges
+      .filter((edge) => sampleNodeIds.has(edge.from) && sampleNodeIds.has(edge.to))
+      .slice(0, edgeLimit)
+      .map((edge) => ({
+        from: edge.from,
+        relation: edge.relation,
+        to: edge.to,
+      })),
+  };
+}
