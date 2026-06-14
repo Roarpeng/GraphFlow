@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { pathToFileURL } from "node:url";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   buildContextPreviewHtml,
@@ -241,29 +242,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   const showSettings = vscode.commands.registerCommand("graphflow.showSettings", async () => {
-    const workspaceRoot = getWorkspaceRoot();
-    if (!workspaceRoot) {
-      vscode.window.showErrorMessage("No workspace folder found.");
-      return;
-    }
-
-    const [settings, panelStatus] = await runGraphFlow(workspaceRoot, async (runtime) => {
-      const loaded = runtime.getGraphFlowSettings();
-      const status = await runtime.getSettingsPanelStatus();
-      return [loaded, status] as const;
-    });
-    const extensionVersion =
-      context.extension.packageJSON.version?.toString() ?? "unknown";
-    showSettingsPanel(
-      context,
-      settings,
-      {
-        ...panelStatus,
-        extensionVersion,
-      },
-      workspaceRoot,
-      output
-    );
+    await openGraphFlowSettings(context, output);
   });
 
   const showGraph = vscode.commands.registerCommand("graphflow.showGraph", async () => {
@@ -309,10 +288,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const showSetupGuide = vscode.commands.registerCommand("graphflow.showSetupGuide", async () => {
     const root = getWorkspaceRoot();
-    if (!root) {
-      vscode.window.showErrorMessage("No workspace folder found.");
-      return;
-    }
     const guide = await runGraphFlow(root, (runtime) =>
       Promise.resolve(runtime.formatModelConfigGuide(root))
     );
@@ -584,7 +559,7 @@ async function runMcpBootstrap(
     output.appendLine(guide);
 
     if (options.isFreshInstall) {
-      void vscode.commands.executeCommand("graphflow.showSetupGuide");
+      void vscode.commands.executeCommand("graphflow.showSettings");
     }
 
     if (!options.forceNotify && successes.length === 0) {
@@ -657,11 +632,11 @@ function parseCliResult(line: string): { status: string; attempts: number; feedb
 }
 
 async function runGraphFlow<T>(
-  workspaceRoot: string,
+  workspaceRoot: string | undefined,
   execute: (runtime: GraphFlowRuntime) => Promise<T>
 ): Promise<T> {
   const runtime = await loadRuntime();
-  return withWorkspaceCwd(workspaceRoot, () => execute(runtime));
+  return withWorkspaceCwd(resolveRuntimeCwd(workspaceRoot), () => execute(runtime));
 }
 
 async function loadRuntime(): Promise<GraphFlowRuntime> {
@@ -801,6 +776,41 @@ function getWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
+function resolveRuntimeCwd(workspaceRoot?: string): string {
+  return workspaceRoot ?? homedir();
+}
+
+function requireWorkspaceFolder(workspaceRoot: string | undefined): workspaceRoot is string {
+  if (!workspaceRoot) {
+    vscode.window.showWarningMessage("请先打开一个项目文件夹后再建立或索引知识图谱。");
+    return false;
+  }
+  return true;
+}
+
+async function openGraphFlowSettings(
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel
+): Promise<void> {
+  const workspaceRoot = getWorkspaceRoot();
+  const [settings, panelStatus] = await runGraphFlow(workspaceRoot, async (runtime) => {
+    const loaded = runtime.getGraphFlowSettings();
+    const status = await runtime.getSettingsPanelStatus();
+    return [loaded, status] as const;
+  });
+  const extensionVersion = context.extension.packageJSON.version?.toString() ?? "unknown";
+  showSettingsPanel(
+    context,
+    settings,
+    {
+      ...panelStatus,
+      extensionVersion,
+    },
+    workspaceRoot,
+    output
+  );
+}
+
 function formatGraphSnapshotMarkdown(snapshot: GraphSnapshotResult): string {
   const typeLine = Object.entries(snapshot.nodeTypeCount)
     .map(([type, count]) => `${type}:${count}`)
@@ -930,7 +940,7 @@ function showSettingsPanel(
   context: vscode.ExtensionContext,
   settings: GraphFlowSettings,
   status: SettingsPanelStatus,
-  workspaceRoot: string,
+  workspaceRoot: string | undefined,
   output: vscode.OutputChannel
 ): void {
   const panel = vscode.window.createWebviewPanel(
@@ -950,6 +960,9 @@ function showSettingsPanel(
   panel.webview.html = buildSettingsHtml(settings, scriptUri.toString(), status);
   panel.webview.onDidReceiveMessage(async (message) => {
     if (message?.type === "indexGraphOnly") {
+      if (!requireWorkspaceFolder(workspaceRoot)) {
+        return;
+      }
       const payload = message.payload as Omit<GraphFlowSettings, "configPath">;
       try {
         output.appendLine("[GraphFlow] Building knowledge graph (structural index, LLM optional)...");
@@ -992,6 +1005,9 @@ function showSettingsPanel(
     }
 
     if (message?.type === "testRoutingAndIndex") {
+      if (!requireWorkspaceFolder(workspaceRoot)) {
+        return;
+      }
       const payload = message.payload as Omit<GraphFlowSettings, "configPath">;
       try {
         output.appendLine("[GraphFlow] Testing routing connectivity (planner + worker)...");
