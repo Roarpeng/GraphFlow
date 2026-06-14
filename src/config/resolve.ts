@@ -1,51 +1,81 @@
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import type { GraphFlowConfig } from "./schema";
 import { loadConfig } from "./loader";
 import { mergeGraphFlowConfig } from "./merge";
 import { getDefaultConfig } from "./defaults";
+import { resolveGlobalConfigPath } from "./scaffold";
 
-export function resolveConfigPath(path = "graphflow.config.json"): string {
+function isDefaultProjectConfigPath(path: string): boolean {
   const projectRootConfig = resolve("graphflow.config.json");
-  const isDefaultProjectConfig =
-    path === "graphflow.config.json" || resolve(path) === projectRootConfig;
+  return path === "graphflow.config.json" || resolve(path) === projectRootConfig;
+}
 
-  if (!isDefaultProjectConfig) {
+/** Path used for reading settings metadata (most specific existing config). */
+export function resolveConfigPath(path = "graphflow.config.json"): string {
+  if (!isDefaultProjectConfigPath(path)) {
     return path;
   }
 
-  const projectConfigPath = ".graphflow/config.json";
-  if (existsSync(projectConfigPath)) {
-    return projectConfigPath;
+  const projectRootConfig = resolve("graphflow.config.json");
+  if (existsSync(projectRootConfig)) {
+    return projectRootConfig;
   }
 
-  if (existsSync(path)) {
-    return path;
-  }
-
-  const globalPath = join(homedir(), ".graphflow.config.json");
+  const globalPath = resolveGlobalConfigPath();
   if (existsSync(globalPath)) {
     return globalPath;
+  }
+
+  const overlayPath = resolve(".graphflow/config.json");
+  if (existsSync(overlayPath)) {
+    return overlayPath;
   }
 
   return path;
 }
 
+/** Path used when persisting settings; defaults to global unless a project root config already exists. */
+export function resolveWritableConfigPath(path = "graphflow.config.json"): string {
+  if (!isDefaultProjectConfigPath(path)) {
+    return path;
+  }
+
+  const projectRootConfig = resolve("graphflow.config.json");
+  if (existsSync(projectRootConfig)) {
+    return projectRootConfig;
+  }
+
+  return resolveGlobalConfigPath();
+}
+
 export function resolveConfig(path = "graphflow.config.json"): GraphFlowConfig {
-  const actualPath = resolveConfigPath(path);
-  const normalizedActual = actualPath.replace(/\\/g, "/");
-  const isProjectOverlay = normalizedActual.endsWith(".graphflow/config.json");
-  const rootConfigPath = "graphflow.config.json";
-
-  if (isProjectOverlay && existsSync(rootConfigPath)) {
-    const base = loadConfig(rootConfigPath);
-    const overlay = existsSync(actualPath) ? loadConfig(actualPath) : getDefaultConfig();
-    return mergeGraphFlowConfig(base, overlay);
+  if (!isDefaultProjectConfigPath(path)) {
+    if (existsSync(path)) {
+      return loadConfig(path);
+    }
+    return getDefaultConfig();
   }
 
-  if (existsSync(actualPath)) {
-    return loadConfig(actualPath);
+  const globalPath = resolveGlobalConfigPath();
+  const base = existsSync(globalPath) ? loadConfig(globalPath) : getDefaultConfig();
+
+  const projectRoot = resolve("graphflow.config.json");
+  const overlayPath = resolve(".graphflow/config.json");
+
+  if (existsSync(projectRoot) && existsSync(overlayPath)) {
+    const rootConfig = loadConfig(projectRoot);
+    const withRoot = mergeGraphFlowConfig(base, rootConfig);
+    return mergeGraphFlowConfig(withRoot, loadConfig(overlayPath));
   }
-  return getDefaultConfig();
+
+  if (existsSync(projectRoot)) {
+    return mergeGraphFlowConfig(base, loadConfig(projectRoot));
+  }
+
+  if (existsSync(overlayPath)) {
+    return mergeGraphFlowConfig(base, loadConfig(overlayPath));
+  }
+
+  return base;
 }
