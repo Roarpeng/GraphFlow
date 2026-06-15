@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { validateSettingsForGraphIndex, validateSettingsForRouting } from "../src/surfaces/cli/runtime";
 
 const readySettings = {
@@ -21,7 +21,7 @@ const readySettings = {
   autoIndexOnSave: true,
   autoRunOnIndex: true,
   transport: "file" as const,
-  graphStorePath: "tmp/graphflow-graph.json",
+  graphStorePath: "graphflow-out/graphflow-graph.json",
   enrichmentBackend: "inherit" as const,
   enrichmentProvider: "",
   enrichmentModel: "",

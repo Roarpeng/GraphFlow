@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import {
   buildContextPreviewHtml,
   buildGraphSnapshotHtml,
@@ -11,7 +11,7 @@ describe("M15 VS Code observability panels", () => {
     const html = buildGraphSnapshotHtml(
       {
       transport: "file",
-      storePath: "tmp/graphflow-graph.json",
+      storePath: "graphflow-out/graphflow-graph.json",
       nodeCount: 5,
       edgeCount: 4,
       nodeTypeCount: {
@@ -71,7 +71,7 @@ describe("M15 VS Code observability panels", () => {
       {
       source: "graph-store",
       transport: "file",
-      storePath: "tmp/graphflow-graph.json",
+      storePath: "graphflow-out/graphflow-graph.json",
       skills: [
         {
           id: "skill:add-tests",
@@ -151,7 +151,7 @@ describe("M15 VS Code observability panels", () => {
         autoIndexOnRun: true,
         autoIndexOnSave: false,
         transport: "file",
-        graphStorePath: "tmp/graphflow-graph.json",
+        graphStorePath: "graphflow-out/graphflow-graph.json",
         enrichmentBackend: "inherit",
         enrichmentProvider: "",
         enrichmentModel: "",

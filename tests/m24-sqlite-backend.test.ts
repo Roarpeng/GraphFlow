@@ -1,4 +1,4 @@
-import { createRequire } from "node:module";
+﻿import { createRequire } from "node:module";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -145,7 +145,7 @@ describe.skipIf(!hasBetterSqlite3())("M24 SQLite + FTS5 backend", () => {
         enableFlywheel: true,
         trainingCadence: "nightly",
         canaryRatio: 10,
-        exportPath: "tmp/learning-dataset.jsonl",
+        exportPath: "graphflow-out/learning-dataset.jsonl",
       },
     });
     expect(cfg.graphPolicy.transport).toBe("sqlite");

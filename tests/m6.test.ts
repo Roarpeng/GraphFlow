@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+﻿import { describe, expect, it, vi } from "vitest";
 import { validateConfig } from "../src/config/loader";
 import { createGraphClient } from "../src/graph/client-factory";
 import { computeLearningMetrics, exportLearningDataset } from "../src/learning/exporter";
@@ -22,7 +22,7 @@ const baseConfig = {
     enableFlywheel: true,
     trainingCadence: "nightly" as const,
     canaryRatio: 10,
-    exportPath: "tmp/learning-dataset.jsonl",
+    exportPath: "graphflow-out/learning-dataset.jsonl",
   },
 };
 
@@ -52,7 +52,7 @@ describe("M6 config + graph + learning", () => {
       { query: "b", passed: false, tokenCost: 300, retries: 2 },
     ]);
 
-    const outFile = "tmp/learning-dataset.jsonl";
+    const outFile = "graphflow-out/learning-dataset.jsonl";
     exportLearningDataset(
       outFile,
       [

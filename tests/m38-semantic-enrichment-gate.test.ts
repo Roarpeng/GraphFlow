@@ -1,4 +1,4 @@
-import { writeFileSync, rmSync } from "node:fs";
+﻿import { writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -39,7 +39,7 @@ describe("M38 semantic enrichment provider gate", () => {
         enableFlywheel: false,
         trainingCadence: "nightly",
         canaryRatio: 10,
-        exportPath: "tmp/learning-dataset.jsonl",
+        exportPath: "graphflow-out/learning-dataset.jsonl",
       },
     });
 
@@ -74,7 +74,7 @@ describe("M38 semantic enrichment provider gate", () => {
         enableFlywheel: false,
         trainingCadence: "nightly",
         canaryRatio: 10,
-        exportPath: "tmp/learning-dataset.jsonl",
+        exportPath: "graphflow-out/learning-dataset.jsonl",
       },
     });
 
@@ -105,7 +105,7 @@ describe("M38 semantic enrichment provider gate", () => {
         enableFlywheel: false,
         trainingCadence: "nightly",
         canaryRatio: 10,
-        exportPath: "tmp/learning-dataset.jsonl",
+        exportPath: "graphflow-out/learning-dataset.jsonl",
       },
     });
 
@@ -130,7 +130,7 @@ describe("M38 semantic enrichment provider gate", () => {
         enableFlywheel: false,
         trainingCadence: "nightly",
         canaryRatio: 10,
-        exportPath: "tmp/learning-dataset.jsonl",
+        exportPath: "graphflow-out/learning-dataset.jsonl",
       },
     });
 
@@ -159,7 +159,7 @@ describe("M38 semantic enrichment provider gate", () => {
         enableFlywheel: false,
         trainingCadence: "nightly",
         canaryRatio: 10,
-        exportPath: "tmp/learning-dataset.jsonl",
+        exportPath: "graphflow-out/learning-dataset.jsonl",
       },
     });
 
@@ -185,7 +185,7 @@ describe("M38 semantic enrichment provider gate", () => {
         enableFlywheel: false,
         trainingCadence: "nightly",
         canaryRatio: 10,
-        exportPath: "tmp/learning-dataset.jsonl",
+        exportPath: "graphflow-out/learning-dataset.jsonl",
       },
     });
 

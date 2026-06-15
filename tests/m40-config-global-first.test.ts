@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+﻿import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -67,14 +67,14 @@ describe("M40 global-first config resolution", () => {
           graphPolicy: {
             enableAutoBuild: true,
             transport: "file",
-            graphStorePath: "tmp/graphflow-graph.json",
+            graphStorePath: "graphflow-out/graphflow-graph.json",
             maxContextTokens: 400,
           },
           learningPolicy: {
             enableFlywheel: true,
             trainingCadence: "nightly",
             canaryRatio: 10,
-            exportPath: "tmp/learning-dataset.jsonl",
+            exportPath: "graphflow-out/learning-dataset.jsonl",
           },
         }),
         null,
@@ -115,14 +115,14 @@ describe("M40 global-first config resolution", () => {
           graphPolicy: {
             enableAutoBuild: true,
             transport: "file",
-            graphStorePath: "tmp/graphflow-graph.json",
+            graphStorePath: "graphflow-out/graphflow-graph.json",
             maxContextTokens: 400,
           },
           learningPolicy: {
             enableFlywheel: true,
             trainingCadence: "nightly",
             canaryRatio: 10,
-            exportPath: "tmp/learning-dataset.jsonl",
+            exportPath: "graphflow-out/learning-dataset.jsonl",
           },
         }),
         null,
@@ -149,7 +149,7 @@ describe("M40 global-first config resolution", () => {
       autoIndexOnRun: true,
       autoIndexOnSave: false,
       transport: "file",
-      graphStorePath: "tmp/graphflow-graph.json",
+      graphStorePath: "graphflow-out/graphflow-graph.json",
       enrichmentBackend: "inherit",
       enrichmentProvider: "",
       enrichmentModel: "",

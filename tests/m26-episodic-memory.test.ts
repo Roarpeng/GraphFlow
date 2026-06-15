@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+﻿import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/routing/provider-executor", async () => {
   const actual = await vi.importActual<typeof import("../src/routing/provider-executor")>(
@@ -45,7 +45,7 @@ function makeClient(): GraphClient {
       enableFlywheel: true,
       trainingCadence: "nightly",
       canaryRatio: 10,
-      exportPath: "tmp/learning-dataset.jsonl",
+      exportPath: "graphflow-out/learning-dataset.jsonl",
     },
   });
   return createGraphClient(config);

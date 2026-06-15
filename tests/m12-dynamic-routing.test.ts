@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+﻿import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -27,7 +27,7 @@ describe("M12 dynamic routing", () => {
         enableFlywheel: true,
         trainingCadence: "nightly",
         canaryRatio: 10,
-        exportPath: "tmp/learning-dataset.jsonl",
+        exportPath: "graphflow-out/learning-dataset.jsonl",
       },
       routingPolicy: {
         enableDynamicRouting: true,

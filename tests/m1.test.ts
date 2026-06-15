@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { runSimpleTask, type RunInput } from "../src/core/state-machine";
 import { resolveModelForRole } from "../src/routing/model-router";
 import { validateTaskResult } from "../src/agents/validator";

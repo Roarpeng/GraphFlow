@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+﻿import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,14 +23,14 @@ describe("M37 config merge and routing", () => {
     graphPolicy: {
       enableAutoBuild: true,
       transport: "file",
-      graphStorePath: "tmp/graphflow-graph.json",
+      graphStorePath: "graphflow-out/graphflow-graph.json",
       maxContextTokens: 400,
     },
     learningPolicy: {
       enableFlywheel: true,
       trainingCadence: "nightly",
       canaryRatio: 10,
-      exportPath: "tmp/learning-dataset.jsonl",
+      exportPath: "graphflow-out/learning-dataset.jsonl",
     },
   });
 
@@ -45,7 +45,7 @@ describe("M37 config merge and routing", () => {
       graphPolicy: {
         enableAutoBuild: true,
         transport: "file",
-        graphStorePath: "tmp/graphflow-graph.json",
+        graphStorePath: "graphflow-out/graphflow-graph.json",
         maxContextTokens: 400,
         semanticEnrichment: { sleepMs: 0 },
       },
@@ -53,7 +53,7 @@ describe("M37 config merge and routing", () => {
         enableFlywheel: true,
         trainingCadence: "nightly",
         canaryRatio: 10,
-        exportPath: "tmp/learning-dataset.jsonl",
+        exportPath: "graphflow-out/learning-dataset.jsonl",
       },
     });
 
@@ -86,14 +86,14 @@ describe("M37 config merge and routing", () => {
           graphPolicy: {
             enableAutoBuild: true,
             transport: "file",
-            graphStorePath: "tmp/graphflow-graph.json",
+            graphStorePath: "graphflow-out/graphflow-graph.json",
             maxContextTokens: 400,
           },
           learningPolicy: {
             enableFlywheel: true,
             trainingCadence: "nightly",
             canaryRatio: 10,
-            exportPath: "tmp/learning-dataset.jsonl",
+            exportPath: "graphflow-out/learning-dataset.jsonl",
           },
         }),
         null,
@@ -124,14 +124,14 @@ describe("M37 config merge and routing", () => {
       graphPolicy: {
         enableAutoBuild: true,
         transport: "file",
-        graphStorePath: "tmp/graphflow-graph.json",
+        graphStorePath: "graphflow-out/graphflow-graph.json",
         maxContextTokens: 400,
       },
       learningPolicy: {
         enableFlywheel: true,
         trainingCadence: "nightly",
         canaryRatio: 10,
-        exportPath: "tmp/learning-dataset.jsonl",
+        exportPath: "graphflow-out/learning-dataset.jsonl",
       },
     }));
 

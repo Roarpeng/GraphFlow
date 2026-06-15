@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+﻿import { afterEach, describe, expect, it } from "vitest";
 import {
   formatApiKeyForConfig,
   formatApiKeyForSettings,
@@ -43,7 +43,7 @@ describe("M39 config secrets", () => {
           autoIndexOnPreview: true,
           autoIndexOnRun: true,
           transport: "file",
-          graphStorePath: "tmp/graph.json",
+          graphStorePath: "graphflow-out/graph.json",
           enrichmentBackend: "inherit",
           enrichmentProvider: "",
           enrichmentModel: "",
@@ -73,7 +73,7 @@ describe("M39 config secrets", () => {
           autoIndexOnPreview: true,
           autoIndexOnRun: true,
           transport: "file",
-          graphStorePath: "tmp/graph.json",
+          graphStorePath: "graphflow-out/graph.json",
           enrichmentBackend: "network",
           enrichmentProvider: "",
           enrichmentModel: "deepseek-v4-flash",
