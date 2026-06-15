@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -39,7 +39,7 @@ describe("M11 workspace indexing", () => {
           enableFlywheel: true,
           trainingCadence: "nightly",
           canaryRatio: 10,
-          exportPath: "tmp/learning-dataset.jsonl",
+          exportPath: "graphflow-out/learning-dataset.jsonl",
         },
       });
 
@@ -84,7 +84,7 @@ describe("M11 workspace indexing", () => {
           enableFlywheel: true,
           trainingCadence: "nightly",
           canaryRatio: 10,
-          exportPath: "tmp/learning-dataset.jsonl",
+          exportPath: "graphflow-out/learning-dataset.jsonl",
         },
       });
 

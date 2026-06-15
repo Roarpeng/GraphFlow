@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { validateConfig } from "../src/config/loader";
 import { createGraphClient } from "../src/graph/client-factory";
 import {
@@ -22,7 +22,7 @@ const baseConfig = validateConfig({
     enableFlywheel: true,
     trainingCadence: "nightly",
     canaryRatio: 10,
-    exportPath: "tmp/learning-dataset.jsonl",
+    exportPath: "graphflow-out/learning-dataset.jsonl",
   },
 });
 

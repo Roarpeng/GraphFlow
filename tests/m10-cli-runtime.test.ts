@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -52,7 +52,7 @@ describe("M10 CLI runtime", () => {
           autoIndexOnPreview: true,
           autoIndexOnRun: true,
           transport: "file",
-          graphStorePath: "tmp/custom-graph.json",
+          graphStorePath: "graphflow-out/custom-graph.json",
           enrichmentBackend: "network",
           enrichmentProvider: "",
           enrichmentModel: "",

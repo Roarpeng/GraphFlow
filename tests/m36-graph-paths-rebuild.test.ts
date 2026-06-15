@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import {
   existsSync,
   mkdtempSync,
@@ -34,14 +34,14 @@ describe("M36 graph paths and rebuild", () => {
           workspaceRoot: root,
           includeExtensions: [".ts"],
           transport: "file",
-          graphStorePath: "tmp/graphflow-graph.json",
+          graphStorePath: "graphflow-out/graphflow-graph.json",
           maxContextTokens: 200,
         },
         learningPolicy: {
           enableFlywheel: false,
           trainingCadence: "nightly",
           canaryRatio: 10,
-          exportPath: "tmp/learning-dataset.jsonl",
+          exportPath: "graphflow-out/learning-dataset.jsonl",
         },
       });
 
@@ -79,7 +79,7 @@ describe("M36 graph paths and rebuild", () => {
               workspaceRoot: root,
               includeExtensions: [".ts"],
               transport: "file",
-              graphStorePath: "tmp/graphflow-graph.json",
+              graphStorePath: "graphflow-out/graphflow-graph.json",
               maxContextTokens: 200,
               semanticEnrichment: {
                 enabled: false,
@@ -91,7 +91,7 @@ describe("M36 graph paths and rebuild", () => {
               enableFlywheel: false,
               trainingCadence: "nightly",
               canaryRatio: 10,
-              exportPath: "tmp/learning-dataset.jsonl",
+              exportPath: "graphflow-out/learning-dataset.jsonl",
             },
             routingPolicy: { enableDynamicRouting: false },
             skillPolicy: { enableSkillFlywheel: false, maxSkillHints: 0 },
@@ -152,7 +152,7 @@ describe("M36 graph paths and rebuild", () => {
           enableFlywheel: false,
           trainingCadence: "nightly",
           canaryRatio: 10,
-          exportPath: "tmp/learning-dataset.jsonl",
+          exportPath: "graphflow-out/learning-dataset.jsonl",
         },
       });
 

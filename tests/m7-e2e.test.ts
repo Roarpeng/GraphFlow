@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { orchestrate } from "../src/core/orchestrator";
 import { validateConfig } from "../src/config/loader";
 import { createGraphClient } from "../src/graph/client-factory";
@@ -22,7 +22,7 @@ describe("M7 e2e run -> graph sync -> context slice", () => {
         enableFlywheel: true,
         trainingCadence: "nightly",
         canaryRatio: 10,
-        exportPath: "tmp/learning-dataset.jsonl",
+        exportPath: "graphflow-out/learning-dataset.jsonl",
       },
     });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+﻿import { describe, it, expect, vi, beforeEach } from "vitest";
 import { runSimpleTask } from "../src/core/state-machine";
 import { executeDag, type TaskExecutor } from "../src/core/dag-engine";
 import type { TaskNode } from "../src/core/types";
