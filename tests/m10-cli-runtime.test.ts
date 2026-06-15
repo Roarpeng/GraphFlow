@@ -65,6 +65,8 @@ describe("M10 CLI runtime", () => {
       );
 
       expect(settings.configPath).toBe(configPath);
+      expect(settings.smartProvider).toBe("anthropic");
+      expect(settings.economyProvider).toBe("anthropic");
       expect(settings.provider).toBe("anthropic");
       expect(settings.smartModel).toBe("claude-4.6-sonnet-medium-thinking");
       expect(settings.economyModel).toBe("claude-3-5-haiku-latest");
@@ -81,6 +83,7 @@ describe("M10 CLI runtime", () => {
       expect(persisted.graphPolicy.maxContextTokens).toBe(900);
 
       const loaded = getGraphFlowSettings(configPath);
+      expect(loaded.smartProvider).toBe("anthropic");
       expect(loaded.provider).toBe("anthropic");
       expect(loaded.apiKeyEnvVar).toBe("ANTHROPIC_API_KEY");
     } finally {

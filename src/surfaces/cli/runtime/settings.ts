@@ -8,16 +8,80 @@ import { resolveEnrichmentBackend } from "./env.js";
 import { readRawConfig } from "./helpers.js";
 import type { GraphFlowSettings, GraphFlowSettingsInput, SettingsValidationIssue } from "./types.js";
 
+type TierName = "smart" | "economy";
+
+interface ResolvedTier {
+  provider: string;
+  apiKey?: string;
+  model: string;
+  baseUrl?: string;
+}
+
+function resolveTier(settings: GraphFlowSettingsInput, tier: TierName): ResolvedTier {
+  const isSmart = tier === "smart";
+  const provider = (
+    isSmart ? settings.smartProvider : settings.economyProvider
+  )?.trim() || settings.provider?.trim() || "";
+  const apiKey = isSmart
+    ? settings.smartApiKey ?? settings.apiKeyEnvVar
+    : settings.economyApiKey ?? settings.apiKeyEnvVar;
+  const model = isSmart ? settings.smartModel : settings.economyModel;
+  const baseUrl = isSmart
+    ? settings.smartBaseUrl ?? settings.baseUrl
+    : settings.economyBaseUrl ?? settings.baseUrl;
+
+  return {
+    provider,
+    ...(apiKey?.trim() ? { apiKey: apiKey.trim() } : {}),
+    model: model ?? "",
+    ...(baseUrl?.trim() ? { baseUrl: baseUrl.trim() } : {}),
+  };
+}
+
+function readTierFromConfig(
+  config: GraphFlowConfig,
+  rawConfig: Partial<GraphFlowConfig> | undefined,
+  tier: TierName
+): ResolvedTier {
+  const tierConfig = tier === "smart" ? config.tiers.smart : config.tiers.economy;
+  const provider = tierConfig.provider;
+  const rawProvider = rawConfig?.providers?.[provider] ?? {};
+  const resolvedProvider = config.providers[provider] ?? {};
+  const apiKey = formatApiKeyForSettings(rawProvider.apiKey ?? resolvedProvider.apiKey);
+  const baseUrl = rawProvider.baseUrl ?? resolvedProvider.baseUrl;
+
+  return {
+    provider,
+    model: tierConfig.model ?? "",
+    ...(apiKey ? { apiKey } : {}),
+    ...(typeof baseUrl === "string" && baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+  };
+}
+
+function mergeProviderConfig(
+  providers: GraphFlowConfig["providers"],
+  provider: string,
+  patch: { apiKey?: string; baseUrl?: string }
+): void {
+  if (!provider) {
+    return;
+  }
+  const current = providers[provider] ?? {};
+  providers[provider] = {
+    ...current,
+    ...(patch.apiKey?.trim() ? { apiKey: formatApiKeyForConfig(patch.apiKey) } : {}),
+    ...(patch.baseUrl?.trim() ? { baseUrl: patch.baseUrl.trim() } : {}),
+  } as GraphFlowConfig["providers"][string];
+}
+
 export function getGraphFlowSettings(configPath = "graphflow.config.json"): GraphFlowSettings {
   const actualPath = resolveConfigPath(configPath);
   const config = resolveConfig(actualPath);
-  const provider = config.tiers.smart.provider;
   const rawConfig = readRawConfig(actualPath);
-  const providerConfig = config.providers[provider] ?? {};
-  const rawProviderConfig = rawConfig?.providers?.[provider] ?? {};
+  const smart = readTierFromConfig(config, rawConfig, "smart");
+  const economy = readTierFromConfig(config, rawConfig, "economy");
   const rawOpenBmbConfig = rawConfig?.providers?.openbmb ?? {};
   const openbmbConfig = config.providers.openbmb ?? {};
-  const apiKeyEnvVar = formatApiKeyForSettings(rawProviderConfig.apiKey ?? providerConfig.apiKey);
   const openbmbModelUrl = rawOpenBmbConfig.modelUrl ?? openbmbConfig.modelUrl ?? process.env.GRAPHFLOW_MINICPM_MODEL_URL;
   const openbmbModelSha256 =
     rawOpenBmbConfig.modelSha256 ?? openbmbConfig.modelSha256 ?? process.env.GRAPHFLOW_MINICPM_MODEL_SHA256;
@@ -29,19 +93,24 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
 
   return {
     configPath: actualPath,
-    provider,
-    smartModel: config.tiers.smart.model ?? "",
-    economyModel: config.tiers.economy.model ?? "",
-    ...(apiKeyEnvVar ? { apiKeyEnvVar } : {}),
-    ...(rawProviderConfig.baseUrl || providerConfig.baseUrl
-      ? { baseUrl: rawProviderConfig.baseUrl ?? providerConfig.baseUrl }
-      : {}),
+    smartProvider: smart.provider,
+    ...(smart.apiKey ? { smartApiKey: smart.apiKey } : {}),
+    smartModel: smart.model,
+    ...(smart.baseUrl ? { smartBaseUrl: smart.baseUrl } : {}),
+    economyProvider: economy.provider,
+    ...(economy.apiKey ? { economyApiKey: economy.apiKey } : {}),
+    economyModel: economy.model,
+    ...(economy.baseUrl ? { economyBaseUrl: economy.baseUrl } : {}),
+    provider: smart.provider,
+    ...(smart.apiKey ? { apiKeyEnvVar: smart.apiKey } : {}),
+    ...(smart.baseUrl ? { baseUrl: smart.baseUrl } : {}),
     maxContextTokens: config.graphPolicy.maxContextTokens,
     layerQuota: config.graphPolicy.layerQuota ?? { l1: 6, l2: 4, l3: 3 },
     enableNearLosslessMode: config.graphPolicy.enableNearLosslessMode ?? false,
     autoIndexOnPreview: config.graphPolicy.autoIndexOnPreview ?? true,
     autoIndexOnRun: config.graphPolicy.autoIndexOnRun ?? true,
     autoIndexOnSave: config.graphPolicy.autoIndexOnSave ?? true,
+    autoRunOnIndex: config.graphPolicy.semanticEnrichment?.autoRunOnIndex ?? true,
     transport: config.graphPolicy.transport,
     graphStorePath: config.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.json",
     enrichmentBackend: resolveEnrichmentBackend(config.graphPolicy.semanticEnrichment),
@@ -63,7 +132,9 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
     openbmbEngine: (openbmbConfig.engine ?? "command") as "command" | "node-llama-cpp",
     openbmbModel:
       config.learningPolicy.skillEvolution?.model ??
-      (provider === "openbmb" ? config.tiers.economy.model ?? config.tiers.smart.model ?? "" : ""),
+      (smart.provider === "openbmb"
+        ? config.tiers.economy.model ?? config.tiers.smart.model ?? ""
+        : ""),
     ...(rawOpenBmbConfig.baseUrl || openbmbConfig.baseUrl
       ? { openbmbBaseUrl: rawOpenBmbConfig.baseUrl ?? openbmbConfig.baseUrl }
       : {}),
@@ -89,10 +160,8 @@ export function saveGraphFlowSettings(
 ): GraphFlowSettings {
   const actualPath = resolveWritableConfigPath(configPath);
   const current = resolveConfig(configPath);
-  const providerConfig = {
-    ...(settings.apiKeyEnvVar?.trim() ? { apiKey: formatApiKeyForConfig(settings.apiKeyEnvVar) } : {}),
-    ...(settings.baseUrl ? { baseUrl: settings.baseUrl } : {}),
-  };
+  const smart = resolveTier(settings, "smart");
+  const economy = resolveTier(settings, "economy");
 
   const openbmbProviderConfig = {
     ...(settings.openbmbBaseUrl ? { baseUrl: settings.openbmbBaseUrl } : {}),
@@ -105,22 +174,30 @@ export function saveGraphFlowSettings(
     autoDownloadModel: settings.openbmbAutoDownload,
   };
 
-  const nextSmartModel = settings.provider === "openbmb" ? settings.openbmbModel : settings.smartModel;
-  const nextEconomyModel = settings.provider === "openbmb" ? settings.openbmbModel : settings.economyModel;
+  const nextSmartModel =
+    smart.provider === "openbmb" ? settings.openbmbModel : smart.model;
+  const nextEconomyModel =
+    economy.provider === "openbmb" ? settings.openbmbModel : economy.model;
+
+  const providers: GraphFlowConfig["providers"] = {
+    ...current.providers,
+    openbmb: {
+      ...(current.providers.openbmb ?? {}),
+      ...openbmbProviderConfig,
+    } as GraphFlowConfig["providers"][string],
+  };
+
+  mergeProviderConfig(providers, smart.provider, smart);
+  if (economy.provider && economy.provider !== smart.provider) {
+    mergeProviderConfig(providers, economy.provider, economy);
+  }
 
   const updated = validateConfig({
     ...current,
-    providers: {
-      ...current.providers,
-      [settings.provider]: providerConfig,
-      openbmb: {
-        ...(current.providers.openbmb ?? {}),
-        ...openbmbProviderConfig,
-      } as GraphFlowConfig["providers"][string],
-    },
+    providers,
     tiers: {
       smart: {
-        provider: settings.provider,
+        provider: smart.provider || current.tiers.smart.provider,
         ...(nextSmartModel?.trim()
           ? { model: nextSmartModel.trim() }
           : current.tiers.smart.model
@@ -128,7 +205,7 @@ export function saveGraphFlowSettings(
             : {}),
       },
       economy: {
-        provider: settings.provider,
+        provider: economy.provider || current.tiers.economy.provider,
         ...(nextEconomyModel?.trim()
           ? { model: nextEconomyModel.trim() }
           : current.tiers.economy.model
@@ -152,7 +229,8 @@ export function saveGraphFlowSettings(
       },
       semanticEnrichment: {
         ...(current.graphPolicy.semanticEnrichment ?? {}),
-        backend: settings.enrichmentBackend,
+        backend: settings.autoRunOnIndex ? "inherit" : settings.enrichmentBackend,
+        autoRunOnIndex: settings.autoRunOnIndex,
         ...(settings.enrichmentBackend === "local"
           ? { provider: "openbmb" }
           : settings.enrichmentProvider?.trim()
@@ -207,6 +285,69 @@ function hasResolvableApiKey(apiKeyEnvVar?: string): boolean {
   return Boolean(resolveConfigSecret(formatApiKeyForConfig(apiKeyEnvVar)));
 }
 
+function tierIsConfigured(tier: ResolvedTier): boolean {
+  return Boolean(tier.provider?.trim() && tier.model?.trim());
+}
+
+function validateTierRouting(
+  tierName: TierName,
+  tier: ResolvedTier,
+  settings: GraphFlowSettingsInput
+): SettingsValidationIssue[] {
+  const issues: SettingsValidationIssue[] = [];
+  const prefix = tierName === "smart" ? "smart" : "economy";
+  const label = tierName === "smart" ? "Smart" : "Economy";
+
+  if (!tier.provider?.trim()) {
+    if (tier.apiKey || tier.model?.trim()) {
+      issues.push({ field: `${prefix}Provider`, message: `请为 ${label} 层选择 Provider` });
+    }
+    return issues;
+  }
+
+  if (!tierIsConfigured(tier) && (tier.apiKey || tier.provider)) {
+    if (!tier.model?.trim()) {
+      issues.push({ field: `${prefix}Model`, message: `请填写 ${label} 层模型` });
+    }
+  }
+
+  if (!tierIsConfigured(tier)) {
+    return issues;
+  }
+
+  if (tier.provider === "openbmb") {
+    if (settings.openbmbMode === "embedded" && !settings.openbmbModelPath?.trim() && !settings.openbmbAutoDownload) {
+      issues.push({
+        field: "openbmbModelPath",
+        message: `${label} 层使用 OpenBMB 时需填写模型路径或勾选自动下载`,
+      });
+    }
+    if (
+      (settings.openbmbMode === "ollama" || settings.openbmbMode === "openai-compat") &&
+      !settings.openbmbBaseUrl?.trim()
+    ) {
+      issues.push({ field: "openbmbBaseUrl", message: `${label} 层 OpenBMB 手动模式需填写 Base URL` });
+    }
+    return issues;
+  }
+
+  if (!hasResolvableApiKey(tier.apiKey)) {
+    issues.push({
+      field: `${prefix}ApiKey`,
+      message: `请为 ${label} 层填写可用的 API Key 或环境变量名`,
+    });
+  }
+
+  if (tier.provider === "openai" && !tier.baseUrl?.trim()) {
+    issues.push({
+      field: `${prefix}BaseUrl`,
+      message: `${label} 层 OpenAI 兼容接口需填写 Base URL（可在高级选项中覆盖）`,
+    });
+  }
+
+  return issues;
+}
+
 export function validateSettingsForGraphIndex(settings: GraphFlowSettingsInput): SettingsValidationIssue[] {
   const issues: SettingsValidationIssue[] = [];
   if (!settings.graphStorePath?.trim()) {
@@ -216,29 +357,18 @@ export function validateSettingsForGraphIndex(settings: GraphFlowSettingsInput):
 }
 
 export function validateSettingsForRouting(settings: GraphFlowSettingsInput): SettingsValidationIssue[] {
-  const issues: SettingsValidationIssue[] = [];
-  const provider = settings.provider?.trim();
+  const smart = resolveTier(settings, "smart");
+  const economy = resolveTier(settings, "economy");
+  const issues: SettingsValidationIssue[] = [
+    ...validateTierRouting("smart", smart, settings),
+    ...validateTierRouting("economy", economy, settings),
+  ];
 
-  if (!provider) {
-    issues.push({ field: "provider", message: "请选择 LLM Provider" });
-  }
-
-  if (provider === "openbmb") {
-    if (settings.openbmbMode === "embedded" && !settings.openbmbModelPath?.trim() && !settings.openbmbAutoDownload) {
-      issues.push({ field: "openbmbModelPath", message: "本地 OpenBMB 需填写模型路径或勾选自动下载" });
-    }
-    if (
-      (settings.openbmbMode === "ollama" || settings.openbmbMode === "openai-compat") &&
-      !settings.openbmbBaseUrl?.trim()
-    ) {
-      issues.push({ field: "openbmbBaseUrl", message: "OpenBMB 手动模式需填写 Base URL" });
-    }
-  } else if (!hasResolvableApiKey(settings.apiKeyEnvVar)) {
-    issues.push({ field: "apiKeyEnvVar", message: "请填写可用的 API Key 或已配置的环境变量名" });
-  }
-
-  if (provider === "openai" && !settings.baseUrl?.trim()) {
-    issues.push({ field: "baseUrl", message: "OpenAI 兼容接口需填写 Base URL（如 DeepSeek）" });
+  if (!tierIsConfigured(smart) && !tierIsConfigured(economy)) {
+    issues.push({
+      field: "smartProvider",
+      message: "请至少完整配置 Smart 或 Economy 一层（Provider、API Key、Model）",
+    });
   }
 
   if (!settings.graphStorePath?.trim()) {

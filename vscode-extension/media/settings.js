@@ -2,15 +2,14 @@
   const vscode = typeof acquireVsCodeApi === "function" ? acquireVsCodeApi() : undefined;
   const form = document.getElementById("settings-form");
   const status = document.getElementById("settings-status");
-  const networkFields = document.getElementById("settings-enrichment-network-fields");
-  const backendSelect = document.getElementById("settings-enrichment-backend");
+  const tierReadinessList = document.getElementById("settings-tier-readiness-list");
   const diagnoseList = document.getElementById("settings-diagnose-list");
-  const readinessList = document.getElementById("settings-readiness-list");
   const routeTestList = document.getElementById("settings-route-test-list");
   const testRoutingButton = document.getElementById("settings-test-routing");
-  const graphReadinessList = document.getElementById("settings-graph-readiness-list");
   const graphIndexList = document.getElementById("settings-graph-index-list");
   const indexGraphButton = document.getElementById("settings-index-graph");
+  const advancedToggle = document.getElementById("settings-advanced-toggle");
+  const advancedPanel = document.getElementById("settings-advanced-panel");
 
   function getNumber(id) {
     const value = Number(document.getElementById(id).value);
@@ -18,27 +17,47 @@
   }
 
   function getString(id) {
-    return String(document.getElementById(id).value || "").trim();
+    const element = document.getElementById(id);
+    if (!element) {
+      return "";
+    }
+    return String(element.value || "").trim();
   }
 
   function getChecked(id) {
-    return Boolean(document.getElementById(id).checked);
+    const element = document.getElementById(id);
+    return element ? Boolean(element.checked) : false;
   }
 
   function collectPayload() {
+    const smartProvider = getString("settings-smart-provider");
+    const economyProvider = getString("settings-economy-provider");
+    const smartApiKey = getString("settings-smart-api-key");
+    const economyApiKey = getString("settings-economy-api-key");
+    const smartModel = getString("settings-smart-model");
+    const economyModel = getString("settings-economy-model");
+    const smartBaseUrl = getString("settings-smart-base-url");
+    const economyBaseUrl = getString("settings-economy-base-url");
+
     return {
-      provider: getString("settings-provider"),
-      smartModel: getString("settings-smart-model"),
-      economyModel: getString("settings-economy-model"),
-      apiKeyEnvVar: getString("settings-api-key-env-var"),
-      baseUrl: getString("settings-base-url"),
+      smartProvider,
+      smartApiKey,
+      smartModel,
+      smartBaseUrl,
+      economyProvider,
+      economyApiKey,
+      economyModel,
+      economyBaseUrl,
+      provider: smartProvider,
+      apiKeyEnvVar: smartApiKey,
+      baseUrl: smartBaseUrl,
       enrichmentBackend: getString("settings-enrichment-backend") || "inherit",
       enrichmentProvider: getString("settings-enrichment-provider"),
       enrichmentModel: getString("settings-enrichment-model"),
       enrichmentApiKey: getString("settings-enrichment-api-key"),
       enrichmentBaseUrl: getString("settings-enrichment-base-url"),
-      openbmbMode: getString("settings-openbmb-mode"),
-      openbmbEngine: getString("settings-openbmb-engine"),
+      openbmbMode: getString("settings-openbmb-mode") || "embedded",
+      openbmbEngine: getString("settings-openbmb-engine") || "command",
       openbmbModel: getString("settings-openbmb-model"),
       openbmbBaseUrl: getString("settings-openbmb-base-url"),
       openbmbModelPath: getString("settings-openbmb-model-path"),
@@ -56,6 +75,7 @@
       autoIndexOnPreview: getChecked("settings-auto-index-preview"),
       autoIndexOnRun: getChecked("settings-auto-index-run"),
       autoIndexOnSave: getChecked("settings-auto-index-save"),
+      autoRunOnIndex: getChecked("settings-auto-run-on-index"),
       transport: getString("settings-transport"),
       graphStorePath: getString("settings-graph-store-path"),
     };
@@ -71,6 +91,21 @@
     return /^[A-Z][A-Z0-9_]*$/.test(value);
   }
 
+  function tierSnapshot(tier) {
+    const prefix = tier === "smart" ? "smart" : "economy";
+    return {
+      provider: getString(`settings-${prefix}-provider`),
+      apiKey: getString(`settings-${prefix}-api-key`),
+      model: getString(`settings-${prefix}-model`),
+      baseUrl: getString(`settings-${prefix}-base-url`),
+      label: tier === "smart" ? "Smart" : "Economy",
+    };
+  }
+
+  function tierIsConfigured(tier) {
+    return Boolean(tier.provider && tier.model);
+  }
+
   function collectGraphIndexIssues(payload) {
     const issues = [];
     if (!payload.graphStorePath) {
@@ -79,31 +114,66 @@
     return issues;
   }
 
-  function collectValidationIssues(payload) {
+  function collectTierIssues(tier, payload) {
     const issues = [];
-    const provider = payload.provider;
+    const prefix = tier === "smart" ? "smart" : "economy";
+    const snapshot = tierSnapshot(tier);
+    const label = snapshot.label;
 
-    if (!provider) {
-      issues.push({ field: "provider", message: "请选择 LLM Provider" });
+    if (!snapshot.provider) {
+      if (snapshot.apiKey || snapshot.model) {
+        issues.push({ field: `${prefix}Provider`, message: `请为 ${label} 层选择 Provider` });
+      }
+      return issues;
     }
 
-    if (provider === "openbmb") {
+    if (!snapshot.model) {
+      if (snapshot.provider || snapshot.apiKey) {
+        issues.push({ field: `${prefix}Model`, message: `请填写 ${label} 层模型` });
+      }
+      return issues;
+    }
+
+    if (snapshot.provider === "openbmb") {
       if (payload.openbmbMode === "embedded" && !payload.openbmbModelPath && !payload.openbmbAutoDownload) {
-        issues.push({ field: "openbmbModelPath", message: "本地 OpenBMB 需填写模型路径或勾选自动下载" });
+        issues.push({ field: "openbmbModelPath", message: `${label} 层使用 OpenBMB 时需填写模型路径或勾选自动下载` });
       }
       if (
         (payload.openbmbMode === "ollama" || payload.openbmbMode === "openai-compat") &&
         !payload.openbmbBaseUrl
       ) {
-        issues.push({ field: "openbmbBaseUrl", message: "OpenBMB 手动模式需填写 Base URL" });
+        issues.push({ field: "openbmbBaseUrl", message: `${label} 层 OpenBMB 手动模式需填写 Base URL` });
       }
-    } else if (!hasResolvableApiKey(payload.apiKeyEnvVar)) {
-      issues.push({ field: "apiKeyEnvVar", message: "请填写可用的 API Key 或环境变量名" });
+      return issues;
     }
 
-    if (provider === "openai" && !payload.baseUrl) {
-      issues.push({ field: "baseUrl", message: "OpenAI 兼容接口需填写 Base URL" });
+    if (!hasResolvableApiKey(snapshot.apiKey)) {
+      issues.push({ field: `${prefix}ApiKey`, message: `请为 ${label} 层填写可用的 API Key 或环境变量名` });
     }
+
+    if (snapshot.provider === "openai" && !snapshot.baseUrl) {
+      issues.push({
+        field: `${prefix}BaseUrl`,
+        message: `${label} 层 OpenAI 兼容接口需填写 Base URL（可在高级选项中覆盖）`,
+      });
+    }
+
+    return issues;
+  }
+
+  function collectValidationIssues(payload) {
+    const issues = [
+      ...collectTierIssues("smart", payload),
+      ...collectTierIssues("economy", payload),
+    ];
+
+    if (!tierIsConfigured(tierSnapshot("smart")) && !tierIsConfigured(tierSnapshot("economy"))) {
+      issues.push({
+        field: "smartProvider",
+        message: "请至少完整配置 Smart 或 Economy 一层（Provider、API Key、Model）",
+      });
+    }
+
     if (!payload.graphStorePath) {
       issues.push({ field: "graphStorePath", message: "请填写图谱存储路径" });
     }
@@ -116,60 +186,65 @@
     if (!payload.autoIndexOnRun) {
       issues.push({ field: "autoIndexOnRun", message: "请开启 Auto index on run" });
     }
+    if (!payload.autoIndexOnSave) {
+      issues.push({ field: "autoIndexOnSave", message: "请开启 Auto index on file save" });
+    }
 
     return issues;
   }
 
-  function renderGraphReadiness() {
-    if (!graphReadinessList || !indexGraphButton) {
+  function renderTierReadiness() {
+    if (!tierReadinessList) {
       return;
     }
 
-    const issues = collectGraphIndexIssues(collectPayload());
-    if (issues.length === 0) {
-      graphReadinessList.innerHTML = '<li style="color: #1d4ed8;">✓ 可建立结构图谱（无需 LLM）</li>';
-      indexGraphButton.disabled = false;
-      return;
+    const payload = collectPayload();
+    const lines = [];
+    for (const tier of ["smart", "economy"]) {
+      const snapshot = tierSnapshot(tier);
+      if (tierIsConfigured(snapshot) && hasResolvableApiKey(snapshot.apiKey)) {
+        lines.push(`<li style="color: #047857;">✓ ${snapshot.label} 层：${snapshot.provider} / ${snapshot.model}</li>`);
+      } else if (snapshot.provider || snapshot.model || snapshot.apiKey) {
+        lines.push(`<li style="color: #b45309;">○ ${snapshot.label} 层：未完成配置</li>`);
+      } else {
+        lines.push(`<li>○ ${snapshot.label} 层：未配置</li>`);
+      }
     }
 
-    graphReadinessList.innerHTML = issues
-      .map((issue) => '<li style="color: #b45309;">✗ ' + issue.message + "</li>")
-      .join("");
-    indexGraphButton.disabled = true;
+    if (payload.graphStorePath) {
+      lines.push('<li style="color: #047857;">✓ 图谱路径：已填写</li>');
+    } else {
+      lines.push('<li style="color: #b45309;">○ 图谱路径：未填写</li>');
+    }
+
+    tierReadinessList.innerHTML = lines.join("");
   }
 
   function renderReadiness() {
-    renderGraphReadiness();
+    renderTierReadiness();
 
-    if (!readinessList || !testRoutingButton) {
+    if (!testRoutingButton) {
       return;
     }
 
     const issues = collectValidationIssues(collectPayload());
-    if (issues.length === 0) {
-      readinessList.innerHTML = '<li style="color: #047857;">✓ 必填项已就绪，可进行路由测试</li>';
-      testRoutingButton.disabled = false;
-      return;
-    }
+    testRoutingButton.disabled = issues.length > 0;
 
-    readinessList.innerHTML = issues
-      .map((issue) => '<li style="color: #b45309;">✗ ' + issue.message + "</li>")
-      .join("");
-    testRoutingButton.disabled = true;
+    if (indexGraphButton) {
+      const graphIssues = collectGraphIndexIssues(collectPayload());
+      indexGraphButton.disabled = graphIssues.length > 0;
+    }
   }
 
-  function syncEnrichmentFields() {
-    if (!networkFields || !backendSelect) {
+  advancedToggle?.addEventListener("click", () => {
+    if (!advancedPanel || !advancedToggle) {
       return;
     }
-    networkFields.style.display = backendSelect.value === "local" ? "none" : "grid";
-  }
-
-  backendSelect?.addEventListener("change", () => {
-    syncEnrichmentFields();
-    renderReadiness();
+    const open = advancedPanel.classList.toggle("open");
+    advancedToggle.textContent = open
+      ? "▾ 高级选项：Max Context Tokens · L1/L2/L3 Anchors · Base URL 覆盖"
+      : "▸ 高级选项：Max Context Tokens · L1/L2/L3 Anchors · Base URL 覆盖";
   });
-  syncEnrichmentFields();
 
   form?.addEventListener("input", renderReadiness);
   form?.addEventListener("change", renderReadiness);
@@ -337,7 +412,7 @@
     }
 
     if (message?.type === "settingsSaved") {
-      status.textContent = "Saved. 可点击下方「建立图谱」或「测试路由并建立图谱」。";
+      status.textContent = "已保存。可点击「建立图谱」或「测试路由」。";
       renderReadiness();
     }
     if (message?.type === "settingsError") {

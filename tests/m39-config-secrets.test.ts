@@ -96,6 +96,8 @@ describe("M39 config secrets", () => {
 
       const loaded = getGraphFlowSettings(configPath);
       expect(loaded.apiKeyEnvVar).toBe("DEEPSEEK_API_KEY");
+      expect(loaded.smartProvider).toBe("openai");
+      expect(loaded.economyProvider).toBe("openai");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -2,9 +2,15 @@ import { describe, expect, it } from "vitest";
 import { validateSettingsForGraphIndex, validateSettingsForRouting } from "../src/surfaces/cli/runtime";
 
 const readySettings = {
-  provider: "openai",
+  smartProvider: "openai",
+  smartApiKey: "sk-test-key-12345678",
   smartModel: "deepseek-v4-pro",
+  smartBaseUrl: "https://api.deepseek.com",
+  economyProvider: "openai",
+  economyApiKey: "sk-test-key-12345678",
   economyModel: "deepseek-v4-flash",
+  economyBaseUrl: "https://api.deepseek.com",
+  provider: "openai",
   apiKeyEnvVar: "sk-test-key-12345678",
   baseUrl: "https://api.deepseek.com",
   maxContextTokens: 1200,
@@ -13,6 +19,7 @@ const readySettings = {
   autoIndexOnPreview: true,
   autoIndexOnRun: true,
   autoIndexOnSave: true,
+  autoRunOnIndex: true,
   transport: "file" as const,
   graphStorePath: "tmp/graphflow-graph.json",
   enrichmentBackend: "inherit" as const,
@@ -54,12 +61,14 @@ describe("M40 routing connectivity validation", () => {
   it("reports missing api key and feature toggles", () => {
     const issues = validateSettingsForRouting({
       ...readySettings,
+      smartApiKey: "",
+      economyApiKey: "",
       apiKeyEnvVar: "",
       enableNearLosslessMode: false,
       autoIndexOnPreview: false,
     });
     expect(issues.map((issue) => issue.field)).toEqual(
-      expect.arrayContaining(["apiKeyEnvVar", "enableNearLosslessMode", "autoIndexOnPreview"])
+      expect.arrayContaining(["smartApiKey", "enableNearLosslessMode", "autoIndexOnPreview"])
     );
   });
 
@@ -74,8 +83,11 @@ describe("M40 routing connectivity validation", () => {
   it("requires base url for openai-compatible providers", () => {
     const issues = validateSettingsForRouting({
       ...readySettings,
+      smartBaseUrl: "",
+      economyBaseUrl: "",
       baseUrl: "",
     });
-    expect(issues.some((issue) => issue.field === "baseUrl")).toBe(true);
+    expect(issues.some((issue) => issue.field === "smartBaseUrl")).toBe(true);
+    expect(issues.some((issue) => issue.field === "economyBaseUrl")).toBe(true);
   });
 });
