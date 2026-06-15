@@ -56,9 +56,15 @@ export interface ContextPreviewResult {
 
 export interface GraphFlowSettings {
   configPath: string;
-  provider: string;
+  smartProvider: string;
+  smartApiKey?: string;
   smartModel: string;
+  smartBaseUrl?: string;
+  economyProvider: string;
+  economyApiKey?: string;
   economyModel: string;
+  economyBaseUrl?: string;
+  provider: string;
   apiKeyEnvVar?: string;
   baseUrl?: string;
   maxContextTokens: number;
@@ -66,6 +72,8 @@ export interface GraphFlowSettings {
   enableNearLosslessMode: boolean;
   autoIndexOnPreview: boolean;
   autoIndexOnRun: boolean;
+  autoIndexOnSave?: boolean;
+  autoRunOnIndex: boolean;
   transport: "memory" | "mcp-http" | "file" | "sqlite";
   graphStorePath: string;
   enrichmentBackend: "network" | "local" | "inherit";
@@ -82,7 +90,6 @@ export interface GraphFlowSettings {
   openbmbAutoDownload: boolean;
   openbmbModelUrl?: string;
   openbmbModelSha256?: string;
-  autoIndexOnSave?: boolean;
 }
 
 export interface SettingsPanelStatus {
@@ -606,199 +613,180 @@ export function buildSettingsHtml(
   scriptUri: string,
   status?: SettingsPanelStatus
 ): string {
-  const overlayList =
-    status && status.overlayKeys.length > 0
-      ? status.overlayKeys.map((key) => `<li><code>${escapeHtml(key)}</code></li>`).join("")
-      : "<li>无覆盖项（完全继承基础配置）</li>";
   const diagnoseLines = status?.diagnoseSummary
     ? status.diagnoseSummary.split("; ").map((line) => `<li>${escapeHtml(line)}</li>`).join("")
-    : "<li>保存配置后点击「运行路由诊断」</li>";
+    : "<li>当前状态：尚未测试</li>";
   const graphModified = status?.graphLastModified
     ? escapeHtml(new Date(status.graphLastModified).toLocaleString())
     : "尚未索引";
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>GraphFlow Settings</title>
   <style>
-    body { margin: 0; padding: 16px; font-family: "Segoe UI", sans-serif; color: #1f2937; background: #f4efe6; }
+    :root {
+      --bg: #f4efe6;
+      --panel: #fffaf2;
+      --ink: #1f2937;
+      --muted: #6d7f88;
+      --line: #d8c9b7;
+      --accent: #116466;
+      --accent-blue: #1d4ed8;
+      --accent-green: #047857;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 16px; font-family: "Segoe UI", "PingFang SC", sans-serif; color: var(--ink); background: var(--bg); }
     form { display: grid; gap: 12px; max-width: 980px; }
-    .panel { background: #fffaf2; border: 1px solid #d8c9b7; border-radius: 16px; padding: 14px; box-shadow: 0 14px 34px rgba(33,53,71,.08); }
-    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-    label { display: grid; gap: 6px; font-size: 12px; color: #6d7f88; }
-    input, select { border: 1px solid #d8c9b7; border-radius: 12px; padding: 10px 12px; font: inherit; color: #213547; background: #fff; }
-    .checks { display: flex; gap: 16px; flex-wrap: wrap; }
-    .checks label { display: flex; flex-direction: row; align-items: center; gap: 8px; }
-    button { width: fit-content; border: 0; border-radius: 12px; padding: 10px 18px; background: #116466; color: #fff; cursor: pointer; }
-    code { background: #f1e6d9; padding: 2px 6px; border-radius: 6px; }
-    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px; box-shadow: 0 14px 34px rgba(33,53,71,.08); }
+    .panel h1, .panel h2 { margin: 0 0 8px; }
+    .panel p { margin: 0; }
+    .metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .metric { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: #fff; }
+    .metric .label { font-size: 11px; color: var(--muted); }
+    .metric .value { margin-top: 4px; font-weight: 700; font-size: 14px; }
+    .flow-box { background: #fdf5eb; border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-top: 10px; }
+    .flow-box h3 { margin: 0 0 8px; color: #b45309; font-size: 14px; }
+    .flow-box ol { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.6; color: #213547; }
+    .flow-hint { margin-top: 10px; font-size: 12px; color: var(--muted); }
+    .tier-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .tier-card { border-radius: 14px; padding: 12px; display: grid; gap: 10px; }
+    .tier-card.smart { background: #faf5ff; border: 1px solid #ddd6fe; }
+    .tier-card.economy { background: #f0fdfa; border: 1px solid #99f6e4; }
+    .tier-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .tier-badge { font-size: 10px; font-weight: 600; color: #fff; padding: 4px 8px; border-radius: 999px; }
+    .tier-badge.smart { background: #7c3aed; }
+    .tier-badge.economy { background: #0f766e; }
+    .tier-hint { font-size: 11px; color: var(--muted); line-height: 1.4; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+    input, select { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: inherit; color: #213547; background: #fff; width: 100%; }
+    .checks label { display: flex; flex-direction: row; align-items: center; gap: 8px; color: #213547; font-size: 13px; }
+    .checks input[type="checkbox"] { width: auto; }
+    .advanced { display: none; gap: 12px; }
+    .advanced.open { display: grid; }
+    .advanced-toggle { background: none; border: 0; padding: 0; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; text-align: left; }
+    .action-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    button { border: 0; border-radius: 12px; padding: 10px 18px; font: inherit; font-weight: 600; cursor: pointer; color: #fff; }
+    .btn-save { background: var(--accent); }
+    .btn-route { background: var(--accent-green); }
+    .btn-route:disabled { background: #9ca3af; cursor: not-allowed; }
+    .btn-index { background: var(--accent-blue); }
+    .btn-index:disabled { background: #9ca3af; cursor: not-allowed; }
+    .route-panel { background: #ecfdf5; border-color: #6ee7b7; }
+    .route-panel h2 { color: var(--accent-green); }
+    .status-list { margin: 0; padding-left: 20px; font-size: 12px; line-height: 1.6; color: #334155; }
+    #settings-status { margin: 0; font-size: 12px; color: var(--muted); min-height: 18px; }
+    .hidden-legacy { display: none; }
+    @media (max-width: 800px) { .metrics, .tier-row, .grid-2 { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <form id="settings-form">
     <section class="panel">
-      <h1 style="margin-bottom: 8px;">GraphFlow 模型配置指南 (Settings)</h1>
-      <p style="margin-top: 0;">当前配置覆盖层：<code>${escapeHtml(settings.configPath)}</code></p>
+      <h1>GraphFlow 初次配置</h1>
+      <p class="flow-hint">配置保存至 <code>${escapeHtml(settings.configPath)}</code> · 一次配置，所有项目可用</p>
       ${
         status
-          ? `<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px;">
-        <div style="border: 1px solid #d8c9b7; border-radius: 12px; padding: 10px; background: #fff;">
-          <div style="font-size: 11px; color: #6d7f88;">Extension</div>
-          <div style="font-weight: 700;">v${escapeHtml(status.extensionVersion)}</div>
-        </div>
-        <div style="border: 1px solid #d8c9b7; border-radius: 12px; padding: 10px; background: #fff;">
-          <div style="font-size: 11px; color: #6d7f88;">图谱规模</div>
-          <div style="font-weight: 700;">${status.graphNodeCount} 节点 / ${status.graphEdgeCount} 边</div>
-        </div>
-        <div style="border: 1px solid #d8c9b7; border-radius: 12px; padding: 10px; background: #fff;">
-          <div style="font-size: 11px; color: #6d7f88;">上次索引</div>
-          <div style="font-weight: 700; font-size: 13px;">${graphModified}</div>
-        </div>
+          ? `<div class="metrics" style="margin-top: 12px;">
+        <div class="metric"><div class="label">Extension</div><div class="value">v${escapeHtml(status.extensionVersion)}</div></div>
+        <div class="metric"><div class="label">图谱规模</div><div class="value">${status.graphNodeCount} 节点 / ${status.graphEdgeCount} 边</div></div>
+        <div class="metric"><div class="label">上次索引</div><div class="value">${graphModified}</div></div>
       </div>`
           : ""
       }
-      <div style="background: #f0f9ff; border: 1px solid #bae6fd; padding: 14px; border-radius: 12px; margin-top: 12px;">
-        <h3 style="margin-top: 0; color: #0369a1;">配置覆盖层 diff</h3>
-        <p style="margin: 0 0 8px; font-size: 12px; color: #334155;">基础配置：<code>${escapeHtml(status?.baseConfigPath ?? "graphflow.config.json")}</code> → 覆盖层：<code>${escapeHtml(settings.configPath)}</code></p>
-        <ul style="margin: 0; padding-left: 20px; font-size: 12px;">${overlayList}</ul>
-      </div>
-      <div style="background: #fdf5eb; border: 1px solid #d8c9b7; padding: 14px; border-radius: 12px; margin-top: 16px;">
-        <h3 style="margin-top: 0; color: #b45309;">🚀 配置与验证流程</h3>
-        <ol style="margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.6; color: #213547;">
-          <li>填写 <strong>Graph Store Path</strong> 等基础配置，点击 <strong>Save Settings</strong> 保存。</li>
-          <li>在页面底部点击 <strong>建立图谱（无需 LLM）</strong>，即可扫描项目并生成结构图谱（文件、符号、依赖）。</li>
-          <li>（可选）配置 LLM 后，在 <strong>路由连通性测试</strong> 中验证 Smart / Economy 路由；连通性 OK 时会再次索引，并可自动运行语义提取（效果更好）。</li>
+      <div class="flow-box">
+        <h3>快速上手</h3>
+        <ol>
+          <li>填写图谱存储路径，点击「建立图谱」—— 无需 LLM 即可索引代码结构。</li>
+          <li>（可选）配置 Smart / Economy 两层模型，分别用于规划推理与轻量摘要。</li>
+          <li>保存后运行「测试路由」，验证模型连通性并可选语义增强。</li>
         </ol>
-        <p style="margin: 12px 0 0; font-size: 12px; color: #6d7f88;">MCP 验证：在 Agent 对话框中说 <code>"使用 graphflow 预览当前项目的 orchestrator 相关上下文"</code></p>
+        <p class="flow-hint">提示：API Key 可填环境变量名（如 <code>DEEPSEEK_API_KEY</code>）或直接填 <code>sk-...</code></p>
       </div>
     </section>
-    
-    <section class="panel grid">
-      <div style="grid-column: 1 / -1;">
-        <h2 style="margin-top: 0; margin-bottom: 8px;">配置 LLM Provider（规划 / 执行任务）</h2>
-        <p style="margin: 0; font-size: 12px; color: #6d7f88; line-height: 1.5;">API Key 支持填写环境变量名（如 <code>DEEPSEEK_API_KEY</code>）或直接填写 <code>sk-...</code>。<br/>若使用 DeepSeek 等兼容接口，请务必填写对应的 Base URL（如 <code>https://api.deepseek.com</code>）。</p>
+
+    <section class="panel">
+      <h2>LLM 配置（可选）</h2>
+      <p class="flow-hint" style="margin-bottom: 12px;">Smart 用于规划与复杂推理；Economy 用于语义摘要与轻量任务。两层可独立选择 Provider、API Key 与模型。</p>
+      <div class="tier-row">
+        ${renderSettingsTierCard("smart", "Smart 层", "规划 / 推理", settings)}
+        ${renderSettingsTierCard("economy", "Economy 层", "摘要 / 轻量", settings)}
       </div>
-      <label>Provider
-        <select id="settings-provider" name="provider">
-          ${renderProviderOption("openai", settings.provider)}
-          ${renderProviderOption("anthropic", settings.provider)}
-          ${renderProviderOption("bailian", settings.provider)}
-          ${renderProviderOption("doubao", settings.provider)}
-          ${renderProviderOption("openbmb", settings.provider)}
-        </select>
-      </label>
-      <label>API Key / Env Var <input id="settings-api-key-env-var" name="apiKeyEnvVar" value="${escapeHtml(settings.apiKeyEnvVar ?? "")}" placeholder="DEEPSEEK_API_KEY or sk-..." /></label>
-      <label>Smart Model (optional) <input id="settings-smart-model" name="smartModel" value="${escapeHtml(settings.smartModel)}" placeholder="deepseek-v4-pro" /></label>
-      <label>Economy Model (optional) <input id="settings-economy-model" name="economyModel" value="${escapeHtml(settings.economyModel)}" placeholder="deepseek-v4-flash" /></label>
-      <label>Base URL <input id="settings-base-url" name="baseUrl" value="${escapeHtml(settings.baseUrl ?? "")}" placeholder="https://api.openai.com/v1" /></label>
     </section>
-    
-    <section class="panel grid">
-      <div style="grid-column: 1 / -1;">
-        <h2 style="margin-top: 0; margin-bottom: 8px;">知识图谱语义提取（可选）</h2>
-        <p style="margin: 0; font-size: 12px; color: #6d7f88; line-height: 1.5;">用于提取代码节点（Symbol）的中文摘要。<br/>若开启 <code>autoRunOnIndex</code>，则在索引完成后自动静默小批量执行；也可以手动运行 <code>GraphFlow: Enrich Graph Semantics</code> 命令提取。</p>
-      </div>
-      <label>语义提取后端
-        <select id="settings-enrichment-backend" name="enrichmentBackend">
-          <option value="inherit"${settings.enrichmentBackend === "inherit" ? " selected" : ""}>继承 Economy（网络）</option>
-          <option value="network"${settings.enrichmentBackend === "network" ? " selected" : ""}>自定义网络模型</option>
-          <option value="local"${settings.enrichmentBackend === "local" ? " selected" : ""}>本地 OpenBMB</option>
-        </select>
-      </label>
-      <div id="settings-enrichment-network-fields" class="grid-span">
-        <label>网络 Provider
-          <select id="settings-enrichment-provider" name="enrichmentProvider">
-            <option value=""${settings.enrichmentProvider ? "" : " selected"}>inherit economy tier</option>
-            ${renderProviderOption("openai", settings.enrichmentProvider)}
-            ${renderProviderOption("anthropic", settings.enrichmentProvider)}
-            ${renderProviderOption("bailian", settings.enrichmentProvider)}
-            ${renderProviderOption("doubao", settings.enrichmentProvider)}
+
+    <section class="panel">
+      <h2>图谱与索引</h2>
+      <p class="flow-hint" style="margin-bottom: 12px;">无需 LLM 即可建立结构图谱。语义摘要依赖 Economy 层配置。</p>
+      <div class="grid-2">
+        <label>Graph Store Path
+          <input id="settings-graph-store-path" name="graphStorePath" value="${escapeHtml(settings.graphStorePath)}" />
+        </label>
+        <label>Transport
+          <select id="settings-transport" name="transport">
+            ${renderTransportOption("file", settings.transport)}
+            ${renderTransportOption("sqlite", settings.transport)}
+            ${renderTransportOption("memory", settings.transport)}
+            ${renderTransportOption("mcp-http", settings.transport)}
           </select>
         </label>
-        <label>网络 Model (optional) <input id="settings-enrichment-model" name="enrichmentModel" value="${escapeHtml(settings.enrichmentModel)}" placeholder="deepseek-v4-flash" /></label>
-        <label>网络 API Key / Env Var (optional) <input id="settings-enrichment-api-key" name="enrichmentApiKey" value="${escapeHtml(settings.enrichmentApiKey ?? "")}" placeholder="DEEPSEEK_API_KEY or sk-..." /></label>
-        <label>网络 Base URL (optional) <input id="settings-enrichment-base-url" name="enrichmentBaseUrl" value="${escapeHtml(settings.enrichmentBaseUrl ?? "")}" placeholder="https://api.deepseek.com" /></label>
       </div>
-      <label>Transport
-        <select id="settings-transport" name="transport">
-          ${renderTransportOption("file", settings.transport)}
-          ${renderTransportOption("sqlite", settings.transport)}
-          ${renderTransportOption("memory", settings.transport)}
-          ${renderTransportOption("mcp-http", settings.transport)}
-        </select>
-      </label>
-    </section>
-    
-    <section class="panel grid">
-      <div style="grid-column: 1 / -1;">
-        <h2 style="margin-top: 0; margin-bottom: 8px;">OpenBMB 本地模型（可选）</h2>
-        <p style="margin: 0; font-size: 12px; color: #6d7f88; line-height: 1.5;">使用本地 MiniCPM 模型进行语义提取。<br/>可勾选下方“自动下载”，或手动执行 <code>GraphFlow: Download MiniCPM Model</code> 命令下载推理模型。</p>
+      <div class="checks" style="margin-top: 10px;">
+        <label><input id="settings-auto-index-save" name="autoIndexOnSave" type="checkbox" ${settings.autoIndexOnSave ? "checked" : ""} /> 保存文件后自动索引（防抖）</label>
+        <label><input id="settings-auto-run-on-index" name="autoRunOnIndex" type="checkbox" ${settings.autoRunOnIndex ? "checked" : ""} /> 索引完成后自动语义提取（使用 Economy 层）</label>
       </div>
-      <label>OpenBMB Model Name (optional) <input id="settings-openbmb-model" name="openbmbModel" value="${escapeHtml(settings.openbmbModel)}" placeholder="minicpm-1b" /></label>
-      <label>OpenBMB Mode
-        <select id="settings-openbmb-mode" name="openbmbMode">
-          <option value="embedded" ${settings.openbmbMode === "embedded" ? "selected" : ""}>embedded (local)</option>
-          <option value="ollama" ${settings.openbmbMode === "ollama" ? "selected" : ""}>ollama (manual baseUrl)</option>
-          <option value="openai-compat" ${settings.openbmbMode === "openai-compat" ? "selected" : ""}>openai-compat (manual baseUrl)</option>
-        </select>
-      </label>
-      <label>OpenBMB Engine
-        <select id="settings-openbmb-engine" name="openbmbEngine">
-          <option value="command" ${settings.openbmbEngine === "command" ? "selected" : ""}>command</option>
-          <option value="node-llama-cpp" ${settings.openbmbEngine === "node-llama-cpp" ? "selected" : ""}>node-llama-cpp</option>
-        </select>
-      </label>
-      <label>OpenBMB Base URL (manual mode) <input id="settings-openbmb-base-url" name="openbmbBaseUrl" value="${escapeHtml(settings.openbmbBaseUrl ?? "")}" placeholder="http://localhost:11434" /></label>
-      <label>OpenBMB Model Path (embedded) <input id="settings-openbmb-model-path" name="openbmbModelPath" value="${escapeHtml(settings.openbmbModelPath ?? "")}" placeholder="C:/models/minicpm-1b.gguf" /></label>
-      <label>OpenBMB Command Path (command engine) <input id="settings-openbmb-command-path" name="openbmbCommandPath" value="${escapeHtml(settings.openbmbCommandPath ?? "")}" placeholder="C:/tools/minicpm.exe" /></label>
-      <label>Auto Download URL <input id="settings-openbmb-model-url" name="openbmbModelUrl" value="${escapeHtml(settings.openbmbModelUrl ?? "")}" placeholder="https://.../minicpm-1b.gguf" /></label>
-      <label>Auto Download SHA256 <input id="settings-openbmb-model-sha256" name="openbmbModelSha256" value="${escapeHtml(settings.openbmbModelSha256 ?? "")}" placeholder="optional" /></label>
+      <button type="button" class="advanced-toggle" id="settings-advanced-toggle" style="margin-top: 10px;">▸ 高级选项：Max Context Tokens · L1/L2/L3 Anchors · Base URL 覆盖</button>
+      <div class="advanced" id="settings-advanced-panel">
+        <div class="grid-2">
+          <label>Max Context Tokens <input id="settings-max-context-tokens" name="maxContextTokens" type="number" min="1" value="${settings.maxContextTokens}" /></label>
+          <label>Smart Base URL (optional) <input id="settings-smart-base-url" name="smartBaseUrl" value="${escapeHtml(settings.smartBaseUrl ?? "")}" placeholder="https://api.deepseek.com" /></label>
+          <label>L1 Anchors <input id="settings-layer-l1" name="l1" type="number" min="0" value="${settings.layerQuota.l1}" /></label>
+          <label>Economy Base URL (optional) <input id="settings-economy-base-url" name="economyBaseUrl" value="${escapeHtml(settings.economyBaseUrl ?? "")}" placeholder="https://api.deepseek.com" /></label>
+          <label>L2 Anchors <input id="settings-layer-l2" name="l2" type="number" min="0" value="${settings.layerQuota.l2}" /></label>
+          <label>L3 Anchors <input id="settings-layer-l3" name="l3" type="number" min="0" value="${settings.layerQuota.l3}" /></label>
+        </div>
+      </div>
+      <div style="margin-top: 12px;">
+        <button id="settings-index-graph" type="button" class="btn-index">建立图谱（无需 LLM）</button>
+      </div>
+      <ul id="settings-graph-index-list" class="status-list" style="display: none;"></ul>
     </section>
-    
-    <section class="panel checks">
-      <label><input id="settings-openbmb-auto-download" name="openbmbAutoDownload" type="checkbox" ${settings.openbmbAutoDownload ? "checked" : ""} /> 保存本面板配置后，自动下载并应用 MiniCPM 模型</label>
+
+    <section class="panel route-panel" id="settings-routing-panel">
+      <h2>路由连通性测试（可选）</h2>
+      <p class="flow-hint" style="margin-bottom: 10px;">配置 Smart / Economy 任一层后，可一键测试模型连通性；通过后自动索引并可选语义增强。</p>
+      <ul id="settings-tier-readiness-list" class="status-list"></ul>
+      <ul id="settings-diagnose-list" class="status-list">${diagnoseLines}</ul>
+      <ul id="settings-route-test-list" class="status-list" style="display: none;"></ul>
     </section>
-    <section class="panel grid">
-      <label>Max Context Tokens <input id="settings-max-context-tokens" name="maxContextTokens" type="number" min="1" value="${settings.maxContextTokens}" /></label>
-      <label>Graph Store Path <input id="settings-graph-store-path" name="graphStorePath" value="${escapeHtml(settings.graphStorePath)}" /></label>
-      <label>L1 Anchors <input id="settings-layer-l1" name="l1" type="number" min="0" value="${settings.layerQuota.l1}" /></label>
-      <label>L2 Anchors <input id="settings-layer-l2" name="l2" type="number" min="0" value="${settings.layerQuota.l2}" /></label>
-      <label>L3 Anchors <input id="settings-layer-l3" name="l3" type="number" min="0" value="${settings.layerQuota.l3}" /></label>
-    </section>
-    <section class="panel checks">
-      <label><input id="settings-enable-near-lossless" name="enableNearLosslessMode" type="checkbox" ${settings.enableNearLosslessMode ? "checked" : ""} /> Enable near-lossless context</label>
-      <label><input id="settings-auto-index-preview" name="autoIndexOnPreview" type="checkbox" ${settings.autoIndexOnPreview ? "checked" : ""} /> Auto index on preview</label>
-      <label><input id="settings-auto-index-run" name="autoIndexOnRun" type="checkbox" ${settings.autoIndexOnRun ? "checked" : ""} /> Auto index on run</label>
-      <label><input id="settings-auto-index-save" name="autoIndexOnSave" type="checkbox" ${settings.autoIndexOnSave ? "checked" : ""} /> Auto index on file save (debounced)</label>
-    </section>
-    <button id="settings-save" type="submit">Save Settings</button>
+
+    <div class="action-row">
+      <button id="settings-save" type="submit" class="btn-save">Save Settings</button>
+      <button id="settings-test-routing" type="button" class="btn-route" disabled>测试路由</button>
+    </div>
     <p id="settings-status"></p>
-    <section class="panel" id="settings-graph-index-panel" style="background: #eff6ff; border-color: #93c5fd;">
-      <h2 style="margin-top: 0; color: #1d4ed8;">📊 建立知识图谱</h2>
-      <p style="margin: 0 0 10px; font-size: 12px; color: #334155; line-height: 1.5;">
-        无需 LLM 也可建立结构图谱。填写图谱存储路径后，点击下方按钮扫描工作区并索引文件与符号。
-        若已配置 LLM 且开启语义提取，索引完成后会自动尝试增强节点摘要（失败时仍保留结构图谱）。
-      </p>
-      <ul id="settings-graph-readiness-list" style="margin: 0 0 12px; padding-left: 20px; font-size: 12px; line-height: 1.6;"></ul>
-      <ul id="settings-graph-index-list" style="margin: 0 0 12px; padding-left: 20px; font-size: 12px; line-height: 1.6; display: none;"></ul>
-      <button id="settings-index-graph" type="button" style="background: #1d4ed8;">建立图谱（无需 LLM）</button>
-    </section>
-    <section class="panel" id="settings-routing-panel" style="background: #ecfdf5; border-color: #6ee7b7;">
-      <h2 style="margin-top: 0; color: #047857;">✅ 配置完成 · 路由连通性测试（可选）</h2>
-      <p style="margin: 0 0 10px; font-size: 12px; color: #334155; line-height: 1.5;">
-        当必填 LLM 配置与图谱功能开关均已就绪后，可测试 Smart / Economy 路由是否可用。
-        连通性通过后，将自动索引知识图谱（含可选语义提取）。
-      </p>
-      <p style="margin: 0 0 8px; font-size: 11px; color: #6d7f88;">当前路由快照：</p>
-      <ul id="settings-diagnose-list" style="margin: 0 0 12px; padding-left: 20px; font-size: 12px; line-height: 1.6;">${diagnoseLines}</ul>
-      <p style="margin: 0 0 6px; font-size: 11px; color: #6d7f88;">必填项检查：</p>
-      <ul id="settings-readiness-list" style="margin: 0 0 12px; padding-left: 20px; font-size: 12px; line-height: 1.6;"></ul>
-      <ul id="settings-route-test-list" style="margin: 0 0 12px; padding-left: 20px; font-size: 12px; line-height: 1.6; display: none;"></ul>
-      <button id="settings-test-routing" type="button" disabled style="background: #047857;">测试路由并建立图谱</button>
-    </section>
+
+    <div class="hidden-legacy">
+      <input id="settings-enable-near-lossless" name="enableNearLosslessMode" type="checkbox" ${settings.enableNearLosslessMode ? "checked" : ""} />
+      <input id="settings-auto-index-preview" name="autoIndexOnPreview" type="checkbox" ${settings.autoIndexOnPreview ? "checked" : ""} />
+      <input id="settings-auto-index-run" name="autoIndexOnRun" type="checkbox" ${settings.autoIndexOnRun ? "checked" : ""} />
+      <input id="settings-enrichment-backend" name="enrichmentBackend" value="${escapeHtml(settings.enrichmentBackend)}" />
+      <input id="settings-enrichment-provider" name="enrichmentProvider" value="${escapeHtml(settings.enrichmentProvider)}" />
+      <input id="settings-enrichment-model" name="enrichmentModel" value="${escapeHtml(settings.enrichmentModel)}" />
+      <input id="settings-enrichment-api-key" name="enrichmentApiKey" value="${escapeHtml(settings.enrichmentApiKey ?? "")}" />
+      <input id="settings-enrichment-base-url" name="enrichmentBaseUrl" value="${escapeHtml(settings.enrichmentBaseUrl ?? "")}" />
+      <input id="settings-openbmb-mode" name="openbmbMode" value="${escapeHtml(settings.openbmbMode)}" />
+      <input id="settings-openbmb-engine" name="openbmbEngine" value="${escapeHtml(settings.openbmbEngine)}" />
+      <input id="settings-openbmb-model" name="openbmbModel" value="${escapeHtml(settings.openbmbModel)}" />
+      <input id="settings-openbmb-base-url" name="openbmbBaseUrl" value="${escapeHtml(settings.openbmbBaseUrl ?? "")}" />
+      <input id="settings-openbmb-model-path" name="openbmbModelPath" value="${escapeHtml(settings.openbmbModelPath ?? "")}" />
+      <input id="settings-openbmb-command-path" name="openbmbCommandPath" value="${escapeHtml(settings.openbmbCommandPath ?? "")}" />
+      <input id="settings-openbmb-auto-download" name="openbmbAutoDownload" type="checkbox" ${settings.openbmbAutoDownload ? "checked" : ""} />
+      <input id="settings-openbmb-model-url" name="openbmbModelUrl" value="${escapeHtml(settings.openbmbModelUrl ?? "")}" />
+      <input id="settings-openbmb-model-sha256" name="openbmbModelSha256" value="${escapeHtml(settings.openbmbModelSha256 ?? "")}" />
+    </div>
   </form>
   <script src="${scriptUri}"></script>
 </body>
@@ -1084,6 +1072,41 @@ function renderServerSkillTableRows(skills: SkillInsightsResult["skills"]): stri
       );
     })
     .join("");
+}
+
+function renderSettingsTierCard(
+  tier: "smart" | "economy",
+  title: string,
+  badge: string,
+  settings: GraphFlowSettings
+): string {
+  const provider = tier === "smart" ? settings.smartProvider : settings.economyProvider;
+  const apiKey = tier === "smart" ? settings.smartApiKey : settings.economyApiKey;
+  const model = tier === "smart" ? settings.smartModel : settings.economyModel;
+  const prefix = tier === "smart" ? "smart" : "economy";
+
+  return `<div class="tier-card ${tier}">
+    <div class="tier-head">
+      <strong>${escapeHtml(title)}</strong>
+      <span class="tier-badge ${tier}">${escapeHtml(badge)}</span>
+    </div>
+    <label>Provider
+      <select id="settings-${prefix}-provider" name="${prefix}Provider">
+        ${renderProviderOption("openai", provider)}
+        ${renderProviderOption("anthropic", provider)}
+        ${renderProviderOption("bailian", provider)}
+        ${renderProviderOption("doubao", provider)}
+        ${renderProviderOption("openbmb", provider)}
+      </select>
+    </label>
+    <label>API Key
+      <input id="settings-${prefix}-api-key" name="${prefix}ApiKey" value="${escapeHtml(apiKey ?? "")}" placeholder="DEEPSEEK_API_KEY or sk-..." />
+    </label>
+    <label>Model
+      <input id="settings-${prefix}-model" name="${prefix}Model" value="${escapeHtml(model)}" placeholder="${tier === "smart" ? "deepseek-reasoner" : "deepseek-chat"}" />
+    </label>
+    <p class="tier-hint">Base URL 可在下方高级选项中按层覆盖；OpenAI 兼容接口通常需要填写。</p>
+  </div>`;
 }
 
 function renderProviderOption(provider: string, selected: string): string {

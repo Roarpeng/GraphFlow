@@ -29,10 +29,19 @@ export interface ContextPreviewResult {
 
 export interface GraphFlowSettings {
   configPath: string;
-  provider: string;
+  smartProvider: string;
+  smartApiKey?: string;
   smartModel: string;
+  smartBaseUrl?: string;
+  economyProvider: string;
+  economyApiKey?: string;
   economyModel: string;
+  economyBaseUrl?: string;
+  /** @deprecated use smartProvider */
+  provider: string;
+  /** @deprecated use smartApiKey / economyApiKey */
   apiKeyEnvVar?: string;
+  /** @deprecated use smartBaseUrl / economyBaseUrl */
   baseUrl?: string;
   maxContextTokens: number;
   layerQuota: { l1: number; l2: number; l3: number };
@@ -40,6 +49,7 @@ export interface GraphFlowSettings {
   autoIndexOnPreview: boolean;
   autoIndexOnRun: boolean;
   autoIndexOnSave: boolean;
+  autoRunOnIndex: boolean;
   transport: GraphFlowConfig["graphPolicy"]["transport"];
   graphStorePath: string;
   enrichmentBackend: "network" | "local" | "inherit";
