@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   buildContextPreviewHtml,
   buildGraphSnapshotHtml,
@@ -173,7 +173,7 @@ describe("M15 VS Code observability panels", () => {
     );
 
     expect(html).toContain("GraphFlow Settings");
-    expect(html).toContain('id="settings-provider"');
+    expect(html).toContain('id="settings-smart-provider"');
     expect(html).toContain('id="settings-smart-model"');
     expect(html).toContain('id="settings-max-context-tokens"');
     expect(html).toContain('id="settings-index-graph"');
