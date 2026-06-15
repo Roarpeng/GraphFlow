@@ -8,6 +8,8 @@ export const SCAFFOLD_TIERS = {
 
 export const DEFAULT_EMBEDDING_MODEL = "Xenova/bge-base-zh-v1.5";
 export const DEFAULT_MAX_CONTEXT_TOKENS = 1500;
+/** Unified output directory for all knowledge-graph artifacts. */
+export const DEFAULT_OUTPUT_DIR = "graphflow-out";
 /** Pre-v0.6.9 default; upgraded automatically when still present in saved configs. */
 export const LEGACY_MAX_CONTEXT_TOKENS = 400;
 
@@ -35,7 +37,7 @@ export function getDefaultConfig(): GraphFlowConfig {
       workspaceRoot: process.cwd(),
       includeExtensions: [".ts", ".tsx", ".js", ".jsx", ".md", ".json"],
       transport: "file",
-      graphStorePath: "tmp/graphflow-graph.json",
+      graphStorePath: `${DEFAULT_OUTPUT_DIR}/graphflow-graph.json`,
       maxContextTokens: 1500,
       layerQuota: { l1: 6, l2: 4, l3: 3 },
       semanticEnrichment: {
@@ -51,9 +53,9 @@ export function getDefaultConfig(): GraphFlowConfig {
       enableFlywheel: true,
       trainingCadence: "nightly",
       canaryRatio: 10,
-      exportPath: "tmp/learning-dataset.jsonl",
-      eventsPath: "tmp/learning-events.jsonl",
-      summaryPath: "tmp/learning-summary.json",
+      exportPath: `${DEFAULT_OUTPUT_DIR}/learning-dataset.jsonl`,
+      eventsPath: `${DEFAULT_OUTPUT_DIR}/learning-events.jsonl`,
+      summaryPath: `${DEFAULT_OUTPUT_DIR}/learning-summary.json`,
       skillEvolution: {
         enabled: true,
         minCoOccur: 2,
@@ -74,7 +76,7 @@ export function getDefaultConfig(): GraphFlowConfig {
       enabled: true,
       provider: "local",
       model: DEFAULT_EMBEDDING_MODEL,
-      vectorStorePath: ".graphflow-cache/vectors.db",
+      vectorStorePath: `${DEFAULT_OUTPUT_DIR}/vectors.db`,
       topK: 8,
       minSimilarity: 0.05,
     },

@@ -40,7 +40,7 @@
     "workspaceRoot": ".",
     "includeExtensions": [".ts", ".tsx", ".js", ".jsx", ".md", ".json"],
     "transport": "file",
-    "graphStorePath": "tmp/graphflow-graph.json",
+    "graphStorePath": "graphflow-out/graphflow-graph.json",
     "maxContextTokens": 1500,
     "layerQuota": { "l1": 6, "l2": 4, "l3": 3 },
     "semanticEnrichment": {
@@ -57,9 +57,9 @@
     "enableFlywheel": true,
     "trainingCadence": "nightly",
     "canaryRatio": 10,
-    "exportPath": "tmp/learning-dataset.jsonl",
-    "eventsPath": "tmp/learning-events.jsonl",
-    "summaryPath": "tmp/learning-summary.json",
+    "exportPath": "graphflow-out/learning-dataset.jsonl",
+    "eventsPath": "graphflow-out/learning-events.jsonl",
+    "summaryPath": "graphflow-out/learning-summary.json",
     "skillEvolution": {
       "enabled": true,
       "model": "minicpm5-1b",
@@ -81,7 +81,7 @@
     "enabled": true,
     "provider": "local",
     "model": "Xenova/bge-base-zh-v1.5",
-    "vectorStorePath": ".graphflow-cache/vectors.db",
+    "vectorStorePath": "graphflow-out/vectors.db",
     "topK": 8,
     "minSimilarity": 0.05
   }

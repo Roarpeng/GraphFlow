@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { validateConfig } from "../../../config/loader";
+import { DEFAULT_OUTPUT_DIR } from "../../../config/defaults";
 import { formatApiKeyForConfig, formatApiKeyForSettings, resolveConfigSecret } from "../../../config/secrets";
 import { resolveConfig, resolveConfigPath, resolveWritableConfigPath } from "../../../config/resolve";
 import type { GraphFlowConfig } from "../../../config/schema";
@@ -112,7 +113,7 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
     autoIndexOnSave: config.graphPolicy.autoIndexOnSave ?? true,
     autoRunOnIndex: config.graphPolicy.semanticEnrichment?.autoRunOnIndex ?? true,
     transport: config.graphPolicy.transport,
-    graphStorePath: config.graphPolicy.graphStorePath ?? "tmp/graphflow-graph.json",
+    graphStorePath: config.graphPolicy.graphStorePath ?? `${DEFAULT_OUTPUT_DIR}/graphflow-graph.json`,
     enrichmentBackend: resolveEnrichmentBackend(config.graphPolicy.semanticEnrichment),
     enrichmentProvider: config.graphPolicy.semanticEnrichment?.provider ?? "",
     enrichmentModel: config.graphPolicy.semanticEnrichment?.model ?? "",

@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { extractEnvPlaceholderName } from "./secrets";
 import type { GraphFlowConfig } from "./schema";
-import { getDefaultConfig, resolveMaxContextTokens } from "./defaults";
+import { getDefaultConfig, resolveMaxContextTokens, DEFAULT_OUTPUT_DIR } from "./defaults";
 import { logger } from "../utils/logger";
 
 export interface LoadConfigResult {
@@ -192,8 +192,8 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       graphStorePath:
         input.graphPolicy.graphStorePath ??
         (input.graphPolicy.transport === "sqlite"
-          ? "tmp/graphflow-graph.sqlite"
-          : "tmp/graphflow-graph.json"),
+          ? `${DEFAULT_OUTPUT_DIR}/graphflow-graph.sqlite`
+          : `${DEFAULT_OUTPUT_DIR}/graphflow-graph.json`),
       includeExtensions: input.graphPolicy.includeExtensions ?? [
         ".ts",
         ".tsx",
@@ -221,8 +221,8 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       ...input.learningPolicy,
       trainingCadence: input.learningPolicy.trainingCadence ?? "nightly",
       canaryRatio: input.learningPolicy.canaryRatio ?? 10,
-      eventsPath: input.learningPolicy.eventsPath ?? "tmp/learning-events.jsonl",
-      summaryPath: input.learningPolicy.summaryPath ?? "tmp/learning-summary.json",
+      eventsPath: input.learningPolicy.eventsPath ?? `${DEFAULT_OUTPUT_DIR}/learning-events.jsonl`,
+      summaryPath: input.learningPolicy.summaryPath ?? `${DEFAULT_OUTPUT_DIR}/learning-summary.json`,
       skillEvolution: {
         enabled: input.learningPolicy.skillEvolution?.enabled ?? true,
         ...(skillEvolutionModel ? { model: skillEvolutionModel } : {}),
@@ -252,7 +252,7 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       model: input.embeddingPolicy?.model ?? "Xenova/bge-base-zh-v1.5",
       ...(input.embeddingPolicy?.baseUrl ? { baseUrl: input.embeddingPolicy.baseUrl } : {}),
       ...(input.embeddingPolicy?.apiKey ? { apiKey: input.embeddingPolicy.apiKey } : {}),
-      vectorStorePath: input.embeddingPolicy?.vectorStorePath ?? ".graphflow-cache/vectors.db",
+      vectorStorePath: input.embeddingPolicy?.vectorStorePath ?? `${DEFAULT_OUTPUT_DIR}/vectors.db`,
       topK: input.embeddingPolicy?.topK ?? 8,
       minSimilarity: input.embeddingPolicy?.minSimilarity ?? 0.05,
     },

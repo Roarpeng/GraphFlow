@@ -17,6 +17,7 @@ patch-adapters.ts
 graphflow.config.json
 .graphflow-cache/
 graphify-out/
+graphflow-out/
 stdout.txt
 stderr.txt
 .graphflow/
