@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   existsSync,
   mkdtempSync,
@@ -45,7 +45,7 @@ describe("M36 graph paths and rebuild", () => {
         },
       });
 
-      expect(resolveGraphStorePath(config)).toBe(join(root, "tmp", "graphflow-graph.json"));
+      expect(resolveGraphStorePath(config)).toBe(join(root, "graphflow-out", "graphflow-graph.json"));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -54,7 +54,7 @@ describe("M36 graph paths and rebuild", () => {
   it("rebuildGraph clears store and removes stale deleted-file nodes", async () => {
     const root = mkdtempSync(join(tmpdir(), "graphflow-rebuild-"));
     const configPath = join(root, "graphflow.config.json");
-    const storePath = join(root, "tmp", "graphflow-graph.json");
+    const storePath = join(root, "graphflow-out", "graphflow-graph.json");
 
     try {
       mkdirSync(join(root, "src"), { recursive: true });
@@ -145,7 +145,7 @@ describe("M36 graph paths and rebuild", () => {
           workspaceRoot: root,
           includeExtensions: [".ts"],
           transport: "file",
-          graphStorePath: join(root, "tmp", "graphflow-graph.json"),
+          graphStorePath: join(root, "graphflow-out", "graphflow-graph.json"),
           maxContextTokens: 200,
         },
         learningPolicy: {
@@ -162,7 +162,7 @@ describe("M36 graph paths and rebuild", () => {
       writeFileSync(join(root, "src", "demo.ts"), "export function alpha() { return 1; }\n", "utf8");
       await indexWorkspaceFiles(client, root, { includeExtensions: [".ts"] });
 
-      const store = JSON.parse(readFileSync(join(root, "tmp", "graphflow-graph.json"), "utf8")) as {
+      const store = JSON.parse(readFileSync(join(root, "graphflow-out", "graphflow-graph.json"), "utf8")) as {
         nodes: Array<{ id: string; content: string }>;
       };
       const betaNodes = store.nodes.filter(
