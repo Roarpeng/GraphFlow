@@ -20,6 +20,7 @@ graphify-out/
 graphflow-out/
 stdout.txt
 stderr.txt
+runs.json
 .graphflow/
 .cursor/mcp.json
 .vscode/mcp.json

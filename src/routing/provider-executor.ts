@@ -1,4 +1,5 @@
 import type { AgentRole } from "../core/types";
+import { logger } from "../utils/logger";
 import type { ModelSelection } from "./model-router";
 import { anthropicGenerateText } from "./provider-adapters/anthropic";
 import { bailianGenerateText } from "./provider-adapters/bailian";
@@ -289,24 +290,36 @@ export async function executeRolePrompt(
 
       const isRateLimit = /429|too many requests|rate limit/i.test(message);
 
-      console.warn(`[provider-executor] Request failed for ${selection.provider}/${selection.model} (attempt ${attempt}/${retryBudget}): ${message}`);
+      logger.warn(
+        { provider: selection.provider, model: selection.model, attempt, retryBudget, message },
+        "Provider request failed",
+      );
 
       if (!retryable || attempt >= retryBudget) {
-        console.error(`[provider-executor] Final failure for ${selection.provider}/${selection.model}: ${message}`);
+        logger.error(
+          { provider: selection.provider, model: selection.model, message },
+          "Provider request final failure",
+        );
         throw wrapped;
       }
 
       attempt += 1;
       let backoffMs = Math.min(1500, 100 * 2 ** attempt);
-      
+
       if (isRateLimit) {
         const jitter = Math.random() * 1000;
         backoffMs = Math.pow(2, attempt) * 1000 + jitter;
-        console.warn(`[provider-executor] Rate limit hit. Backing off for ${Math.round(backoffMs)}ms...`);
+        logger.warn(
+          { provider: selection.provider, model: selection.model, backoffMs: Math.round(backoffMs) },
+          "Rate limit hit, backing off",
+        );
       } else {
-        console.warn(`[provider-executor] Retrying in ${backoffMs}ms...`);
+        logger.warn(
+          { provider: selection.provider, model: selection.model, backoffMs },
+          "Retrying provider request",
+        );
       }
-      
+
       await sleep(backoffMs);
     }
   }
