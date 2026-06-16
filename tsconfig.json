@@ -20,6 +20,7 @@
     "sourceMap": true,
     "declaration": true,
     "declarationMap": true,
+    "forceConsistentCasingInFileNames": true,
 
     // Stricter Typechecking Options
     "noUncheckedIndexedAccess": true,

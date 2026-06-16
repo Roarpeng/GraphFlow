@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -14,6 +14,20 @@ import {
 } from "../src/surfaces/cli/runtime";
 
 describe("M10 CLI runtime", () => {
+  const previousTimeout = process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS;
+
+  beforeAll(() => {
+    process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS = "1000";
+  });
+
+  afterAll(() => {
+    if (previousTimeout === undefined) {
+      delete process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS;
+    } else {
+      process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS = previousTimeout;
+    }
+  });
+
   it("runs task and returns standard output line", async () => {
     const output = await runTask("update readme");
     expect(output).toContain("status=");
