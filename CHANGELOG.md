@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.6.15] - 2026-06-16
+
+### Added
+
+- MCP server 优雅停机：监听 `SIGTERM`/`SIGINT`，停止接收新的 stdin 输入并给在途请求短暂 flush 窗口后退出，避免长驻进程被硬杀导致状态丢失。
+- `VectorStore.close()`：释放底层 SQLite 句柄，与 `SqliteClient.close()` 对齐，避免长驻进程文件描述符泄漏。
+- MCP 工具入参长度上限（`MAX_STRING_FIELD_LENGTH`），防止超大 payload / prompt injection 风险。
+
+### Changed
+
+- `provider-executor` 改用结构化 `logger` 替换裸 `console.warn/error`，确保生产环境日志可被聚合采集。
+- `orchestrate()` 增加顶层错误边界：上下文构建 / DAG 执行 / 图同步的未捕获异常统一收敛为结构化 `HUMAN_REVIEW_REQUIRED` 结果，不再裸抛给调用方。
+
+### Fixed
+
+- DAG 执行 timeout 定时器在任务成功路径未被清除，长驻进程下存在 timer 泄漏；改为 `finally` 中 `clearTimeout`。
+- `m12-dynamic-routing` 测试不再依赖对 `api.anthropic.com` 的外网可达性：将 anthropic `baseUrl` 指向本地立即拒绝连接的地址，确定性触发非 strict 降级路径。
+
 ## [0.6.13] - 2026-06-14
 
 ### Fixed

@@ -89,17 +89,22 @@ export async function executeDag(
     for (const batch of batches) {
       const results = await Promise.all(
         batch.map(async (task) => {
-          // 包裹 timeout
+          // 包裹 timeout，成功路径也要清掉定时器，避免长驻进程里 timer 泄漏
+          let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
           const taskPromise = executor(task);
           const timeoutPromise = new Promise<boolean>((_, reject) => {
-            setTimeout(() => reject(new Error("TIMEOUT")), timeoutMs);
+            timeoutHandle = setTimeout(() => reject(new Error("TIMEOUT")), timeoutMs);
           });
           let ok: boolean;
           try {
             ok = await Promise.race([taskPromise, timeoutPromise]);
           } catch (error) {
-    logger.error({ error }, "Caught error");
+            logger.error({ error, taskId: task.id }, "DAG task execution failed");
             ok = false;
+          } finally {
+            if (timeoutHandle) {
+              clearTimeout(timeoutHandle);
+            }
           }
           return { task, ok };
         }),

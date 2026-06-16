@@ -456,9 +456,16 @@ function textResponse(data: unknown): ToolCallResponse {
   };
 }
 
+const MAX_STRING_FIELD_LENGTH = 100_000;
+
 function readRequiredString(value: unknown, field: string): string {
   if (typeof value !== "string" || !value.trim()) {
     throw new Error(`Field '${field}' must be a non-empty string.`);
+  }
+  if (value.length > MAX_STRING_FIELD_LENGTH) {
+    throw new Error(
+      `Field '${field}' exceeds maximum length of ${MAX_STRING_FIELD_LENGTH} characters.`,
+    );
   }
 
   return value;
@@ -546,6 +553,21 @@ function installMcpProcessGuards(): void {
     console.error("[GraphFlow MCP] unhandledRejection:", reason);
     process.exit(1);
   });
+
+  let shuttingDown = false;
+  const shutdown = (signal: string): void => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+    console.error(`[GraphFlow MCP] Received ${signal}, shutting down gracefully...`);
+    // Stop accepting new stdin input so in-flight requests can settle.
+    process.stdin.pause();
+    // Give in-flight handlers a brief window to flush before exiting.
+    setTimeout(() => process.exit(0), 500).unref();
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 if (require.main === module) {

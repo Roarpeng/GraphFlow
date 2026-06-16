@@ -1,12 +1,26 @@
 ﻿import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { validateConfig } from "../src/config/loader";
 import { buildFallbackChain, buildProviderHealthMap } from "../src/routing/provider-health";
 import { runTask } from "../src/surfaces/cli/runtime";
 
 describe("M12 dynamic routing", () => {
+  const previousTimeout = process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS;
+
+  beforeAll(() => {
+    process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS = "1000";
+  });
+
+  afterAll(() => {
+    if (previousTimeout === undefined) {
+      delete process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS;
+    } else {
+      process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS = previousTimeout;
+    }
+  });
+
   it("marks providers unhealthy without api key in strict mode", () => {
     const config = validateConfig({
       providers: {
@@ -55,7 +69,10 @@ describe("M12 dynamic routing", () => {
           {
             providers: {
               openai: {},
-              anthropic: { apiKey: "anthropic-key" },
+              // baseUrl 指向本地立即拒绝连接的地址：anthropic 仍被判定 healthy（有 apiKey），
+              // 但 adapter 的真实请求会瞬间 ECONNREFUSED，命中非 strict 降级路径，
+              // 使测试确定性通过，不再依赖对 api.anthropic.com 的外网可达性。
+              anthropic: { apiKey: "anthropic-key", baseUrl: "http://127.0.0.1:9" },
               bailian: {},
               doubao: {},
             },
