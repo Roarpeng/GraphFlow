@@ -80,4 +80,9 @@ export class VectorStore {
     const stmt = this.db.prepare(`DELETE FROM vector_nodes WHERE id = ?`);
     stmt.run(id);
   }
+
+  /** 关闭底层 SQLite 句柄，长驻进程退出前必须调用以避免文件描述符泄漏。 */
+  public close(): void {
+    this.db.close();
+  }
 }

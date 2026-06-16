@@ -52,6 +52,25 @@ export async function orchestrate(
   input: OrchestrationInput,
   options?: OrchestrateOptions
 ): Promise<TaskRunResult> {
+  try {
+    return await runOrchestration(input, options);
+  } catch (error) {
+    // 顶层错误边界：任何来自上下文构建/DAG 执行/图同步的未捕获异常
+    // 都收敛为结构化的 HUMAN_REVIEW_REQUIRED 结果，而不是裸抛给调用方。
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error({ error, task: input.task }, "Orchestration failed with unhandled error");
+    return {
+      status: "HUMAN_REVIEW_REQUIRED",
+      attempts: 0,
+      feedback: `Orchestration aborted due to unexpected error: ${message}`,
+    };
+  }
+}
+
+async function runOrchestration(
+  input: OrchestrationInput,
+  options?: OrchestrateOptions
+): Promise<TaskRunResult> {
   logger.info({ task: input.task }, "Orchestration task started");
   const retryOptions = input.maxRetries !== undefined ? { maxRetries: input.maxRetries } : {};
   const contextPackage = await maybeBuildNearLosslessContext(input, options);
