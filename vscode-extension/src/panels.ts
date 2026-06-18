@@ -100,6 +100,14 @@ export interface SettingsPanelStatus {
   diagnoseSummary: string;
   overlayKeys: string[];
   baseConfigPath: string;
+  mcpAgents: Array<{
+    agentId: string;
+    agentName: string;
+    configPath: string;
+    scope: "user" | "workspace";
+    detected: boolean;
+    installed: boolean;
+  }>;
 }
 
 export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri: string): string {
@@ -619,6 +627,7 @@ export function buildSettingsHtml(
   const graphModified = status?.graphLastModified
     ? escapeHtml(new Date(status.graphLastModified).toLocaleString())
     : "尚未索引";
+  const mcpStatusLines = renderMcpStatusLines(status?.mcpAgents ?? []);
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -709,6 +718,16 @@ export function buildSettingsHtml(
     </section>
 
     <section class="panel">
+      <h2>MCP 自动配置</h2>
+      <p class="flow-hint" style="margin-bottom: 10px;">安装扩展时会自动将 GraphFlow MCP 写入本机已检测到的 AI Agent / IDE 用户级配置。配置后请<strong>重启对应工具</strong>以加载 MCP。</p>
+      <ul id="settings-mcp-status-list" class="status-list">${mcpStatusLines}</ul>
+      <div style="margin-top: 10px;">
+        <button id="settings-install-mcp" type="button" class="btn-index">安装 / 更新 MCP 到已检测 Agent</button>
+      </div>
+      <p id="settings-mcp-action-status" class="flow-hint" style="margin-top: 8px;"></p>
+    </section>
+
+    <section class="panel">
       <h2>LLM 配置（可选）</h2>
       <p class="flow-hint" style="margin-bottom: 12px;">Smart 用于规划与复杂推理；Economy 用于语义摘要与轻量任务。两层可独立选择 Provider、API Key 与模型。</p>
       <div class="tier-row">
@@ -737,13 +756,11 @@ export function buildSettingsHtml(
         <label><input id="settings-auto-index-save" name="autoIndexOnSave" type="checkbox" ${settings.autoIndexOnSave ? "checked" : ""} /> 保存文件后自动索引（防抖）</label>
         <label><input id="settings-auto-run-on-index" name="autoRunOnIndex" type="checkbox" ${settings.autoRunOnIndex ? "checked" : ""} /> 索引完成后自动语义提取（使用 Economy 层）</label>
       </div>
-      <button type="button" class="advanced-toggle" id="settings-advanced-toggle" style="margin-top: 10px;">▸ 高级选项：Max Context Tokens · L1/L2/L3 Anchors · Base URL 覆盖</button>
+      <button type="button" class="advanced-toggle" id="settings-advanced-toggle" style="margin-top: 10px;">▸ 高级选项：Max Context Tokens · L1/L2/L3 Anchors</button>
       <div class="advanced" id="settings-advanced-panel">
         <div class="grid-2">
           <label>Max Context Tokens <input id="settings-max-context-tokens" name="maxContextTokens" type="number" min="1" value="${settings.maxContextTokens}" /></label>
-          <label>Smart Base URL (optional) <input id="settings-smart-base-url" name="smartBaseUrl" value="${escapeHtml(settings.smartBaseUrl ?? "")}" placeholder="https://api.deepseek.com" /></label>
           <label>L1 Anchors <input id="settings-layer-l1" name="l1" type="number" min="0" value="${settings.layerQuota.l1}" /></label>
-          <label>Economy Base URL (optional) <input id="settings-economy-base-url" name="economyBaseUrl" value="${escapeHtml(settings.economyBaseUrl ?? "")}" placeholder="https://api.deepseek.com" /></label>
           <label>L2 Anchors <input id="settings-layer-l2" name="l2" type="number" min="0" value="${settings.layerQuota.l2}" /></label>
           <label>L3 Anchors <input id="settings-layer-l3" name="l3" type="number" min="0" value="${settings.layerQuota.l3}" /></label>
         </div>
@@ -1083,6 +1100,7 @@ function renderSettingsTierCard(
   const provider = tier === "smart" ? settings.smartProvider : settings.economyProvider;
   const apiKey = tier === "smart" ? settings.smartApiKey : settings.economyApiKey;
   const model = tier === "smart" ? settings.smartModel : settings.economyModel;
+  const baseUrl = tier === "smart" ? settings.smartBaseUrl : settings.economyBaseUrl;
   const prefix = tier === "smart" ? "smart" : "economy";
 
   return `<div class="tier-card ${tier}">
@@ -1102,11 +1120,31 @@ function renderSettingsTierCard(
     <label>API Key
       <input id="settings-${prefix}-api-key" name="${prefix}ApiKey" value="${escapeHtml(apiKey ?? "")}" placeholder="DEEPSEEK_API_KEY or sk-..." />
     </label>
+    <label>Base URL
+      <input id="settings-${prefix}-base-url" name="${prefix}BaseUrl" value="${escapeHtml(baseUrl ?? "")}" placeholder="https://api.deepseek.com（OpenAI 兼容接口必填）" />
+    </label>
     <label>Model
       <input id="settings-${prefix}-model" name="${prefix}Model" value="${escapeHtml(model)}" placeholder="${tier === "smart" ? "deepseek-reasoner" : "deepseek-chat"}" />
     </label>
-    <p class="tier-hint">Base URL 可在下方高级选项中按层覆盖；OpenAI 兼容接口通常需要填写。</p>
+    <p class="tier-hint">使用 DeepSeek 等 OpenAI 兼容 API 时，Provider 选 openai 并填写 Base URL。</p>
   </div>`;
+}
+
+function renderMcpStatusLines(
+  agents: SettingsPanelStatus["mcpAgents"]
+): string {
+  if (agents.length === 0) {
+    return '<li style="color: #b45309;">未检测到本机 AI Agent / IDE。可手动运行命令面板中的「GraphFlow: Install MCP to Agents」。</li>';
+  }
+
+  return agents
+    .map((agent) => {
+      const state = agent.installed
+        ? `<span style="color: #047857;">已安装</span>`
+        : `<span style="color: #b45309;">未安装</span>`;
+      return `<li>${state} · ${escapeHtml(agent.agentName)} · <code>${escapeHtml(agent.configPath)}</code></li>`;
+    })
+    .join("");
 }
 
 function renderProviderOption(provider: string, selected: string): string {

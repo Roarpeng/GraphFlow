@@ -10,6 +10,9 @@
   const indexGraphButton = document.getElementById("settings-index-graph");
   const advancedToggle = document.getElementById("settings-advanced-toggle");
   const advancedPanel = document.getElementById("settings-advanced-panel");
+  const installMcpButton = document.getElementById("settings-install-mcp");
+  const mcpStatusList = document.getElementById("settings-mcp-status-list");
+  const mcpActionStatus = document.getElementById("settings-mcp-action-status");
 
   function getNumber(id) {
     const value = Number(document.getElementById(id).value);
@@ -154,7 +157,7 @@
     if (snapshot.provider === "openai" && !snapshot.baseUrl) {
       issues.push({
         field: `${prefix}BaseUrl`,
-        message: `${label} 层 OpenAI 兼容接口需填写 Base URL（可在高级选项中覆盖）`,
+        message: `${label} 层 OpenAI 兼容接口需填写 Base URL`,
       });
     }
 
@@ -242,8 +245,35 @@
     }
     const open = advancedPanel.classList.toggle("open");
     advancedToggle.textContent = open
-      ? "▾ 高级选项：Max Context Tokens · L1/L2/L3 Anchors · Base URL 覆盖"
-      : "▸ 高级选项：Max Context Tokens · L1/L2/L3 Anchors · Base URL 覆盖";
+      ? "▾ 高级选项：Max Context Tokens · L1/L2/L3 Anchors"
+      : "▸ 高级选项：Max Context Tokens · L1/L2/L3 Anchors";
+  });
+
+  function renderMcpStatus(agents) {
+    if (!mcpStatusList) {
+      return;
+    }
+    if (!Array.isArray(agents) || agents.length === 0) {
+      mcpStatusList.innerHTML =
+        '<li style="color: #b45309;">未检测到本机 AI Agent / IDE。可点击下方按钮重试，或运行命令面板中的「GraphFlow: Install MCP to Agents」。</li>';
+      return;
+    }
+    mcpStatusList.innerHTML = agents
+      .map((agent) => {
+        const state = agent.installed
+          ? '<span style="color: #047857;">已安装</span>'
+          : '<span style="color: #b45309;">未安装</span>';
+        return `<li>${state} · ${agent.agentName} · <code>${agent.configPath}</code></li>`;
+      })
+      .join("");
+  }
+
+  installMcpButton?.addEventListener("click", () => {
+    if (mcpActionStatus) {
+      mcpActionStatus.textContent = "正在安装 MCP...";
+    }
+    installMcpButton.disabled = true;
+    vscode?.postMessage({ type: "installMcp" });
   });
 
   form?.addEventListener("input", renderReadiness);
@@ -409,6 +439,19 @@
       status.textContent = result.ok
         ? "路由连通性 OK，知识图谱已建立。"
         : "路由测试未通过，请检查配置与 API Key。";
+    }
+
+    if (message?.type === "mcpInstallResult") {
+      const result = message.payload || {};
+      if (installMcpButton) {
+        installMcpButton.disabled = false;
+      }
+      if (Array.isArray(result.mcpAgents)) {
+        renderMcpStatus(result.mcpAgents);
+      }
+      if (mcpActionStatus) {
+        mcpActionStatus.textContent = result.message || (result.ok ? "MCP 安装完成。" : "MCP 安装失败。");
+      }
     }
 
     if (message?.type === "settingsSaved") {

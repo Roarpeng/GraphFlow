@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildMcpServerNode,
   detectInstalledAgents,
+  getMcpInstallStatus,
   installMcpToDetectedAgents,
 } from "../src/integrations/agent-mcp-installer";
 
@@ -160,5 +161,40 @@ describe("M17 agent MCP installer", () => {
     const results = installMcpToDetectedAgents({ strategy: "npx", agentIdsOverride: [] });
     expect(results).toHaveLength(1);
     expect(results[0]?.status).toBe("skipped");
+  });
+
+  it("reports MCP install status for detected agents", () => {
+    const fakeHome = createTempRoot("graphflow-agent-home-status");
+    const cursorMarker = join(fakeHome, ".cursor");
+    mkdirSync(cursorMarker, { recursive: true });
+    const mcpPath = join(fakeHome, ".cursor", "mcp.json");
+
+    const previousHome = process.env.USERPROFILE ?? process.env.HOME;
+    if (process.platform === "win32") {
+      process.env.USERPROFILE = fakeHome;
+    } else {
+      process.env.HOME = fakeHome;
+    }
+
+    try {
+      let statuses = getMcpInstallStatus();
+      expect(statuses.some((item) => item.agentId === "cursor" && !item.installed)).toBe(true);
+
+      installMcpToDetectedAgents({ strategy: "npx", agentIdsOverride: ["cursor"] });
+      statuses = getMcpInstallStatus();
+      expect(statuses.some((item) => item.configPath === mcpPath && item.installed)).toBe(true);
+    } finally {
+      if (process.platform === "win32") {
+        if (previousHome) {
+          process.env.USERPROFILE = previousHome;
+        } else {
+          delete process.env.USERPROFILE;
+        }
+      } else if (previousHome) {
+        process.env.HOME = previousHome;
+      } else {
+        delete process.env.HOME;
+      }
+    }
   });
 });

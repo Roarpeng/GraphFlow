@@ -49,6 +49,15 @@ export interface McpInstallResult {
   message?: string;
 }
 
+export interface McpAgentInstallStatus {
+  agentId: string;
+  agentName: string;
+  configPath: string;
+  scope: "user" | "workspace";
+  detected: boolean;
+  installed: boolean;
+}
+
 interface AgentProfile {
   id: string;
   name: string;
@@ -238,6 +247,52 @@ export function detectInstalledAgents(): DetectedAgent[] {
   }
 
   return detected;
+}
+
+function isGraphflowMcpInstalled(
+  configPath: string,
+  serversKey: McpServersKey,
+  serverName: string
+): boolean {
+  if (!existsSync(configPath)) {
+    return false;
+  }
+  const json = readJsonConfig(configPath);
+  const servers = (json[serversKey] as Record<string, McpServerNode> | undefined) ?? {};
+  return Boolean(servers[serverName]);
+}
+
+/** Inspect detected agents and whether GraphFlow MCP is present in each config file. */
+export function getMcpInstallStatus(serverName = "graphflow"): McpAgentInstallStatus[] {
+  const detectedIds = new Set(detectInstalledAgents().map((agent) => agent.id));
+  const profiles = buildAgentProfiles();
+  const seen = new Set<string>();
+  const statuses: McpAgentInstallStatus[] = [];
+
+  for (const profile of profiles) {
+    const detected = detectedIds.has(profile.id);
+    if (!detected) {
+      continue;
+    }
+
+    for (const userTarget of profile.userTargets) {
+      const key = `${userTarget.configPath}::${userTarget.serversKey}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      statuses.push({
+        agentId: profile.id,
+        agentName: profile.name,
+        configPath: userTarget.configPath,
+        scope: "user",
+        detected: true,
+        installed: isGraphflowMcpInstalled(userTarget.configPath, userTarget.serversKey, serverName),
+      });
+    }
+  }
+
+  return statuses;
 }
 
 const MCP_STDIO_ENV: Record<string, string> = {
@@ -511,9 +566,9 @@ export function formatModelConfigGuide(workspaceRoot?: string): string {
     "在 VS Code 命令面板运行：`GraphFlow: Settings`",
     "",
     "## 2. 配置 LLM Provider（规划 / 执行任务）",
-    "- 在设置面板选择 provider（如 openai / anthropic / bailian / doubao）",
+    "- 在设置面板的 Smart / Economy 层分别选择 provider（如 openai / anthropic / bailian / doubao）",
     "- API Key：填环境变量名（如 `DEEPSEEK_API_KEY`）、`${DEEPSEEK_API_KEY}`、或直接 `sk-...`",
-    "- 如使用 DeepSeek 等 OpenAI 兼容接口，填写 Base URL（如 `https://api.deepseek.com`）",
+    "- Base URL：每层卡片内直接填写（如 DeepSeek 使用 `https://api.deepseek.com`）",
     "- Smart / Economy 模型均可选；留空则使用 provider 默认路由",
     "",
     "## 3. 知识图谱语义提取（可选）",
