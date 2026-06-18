@@ -71,7 +71,7 @@ function resolveHomePaths(): { home: string; appData: string; localAppData: stri
 function buildAgentProfiles(): AgentProfile[] {
   const { home, appData, localAppData } = resolveHomePaths();
 
-  return [
+  const profiles: AgentProfile[] = [
     {
       id: "cursor",
       name: "Cursor",
@@ -195,7 +195,35 @@ function buildAgentProfiles(): AgentProfile[] {
         },
       ],
     },
+    {
+      id: "gemini",
+      name: "Gemini",
+      markerPaths: [
+        join(home, ".gemini", "antigravity"),
+      ],
+      userTargets: [
+        {
+          configPath: join(home, ".gemini", "antigravity", "mcp.json"),
+          serversKey: "mcpServers",
+        },
+      ],
+    },
   ];
+
+  const customEnv = process.env.GRAPHFLOW_MCP_CUSTOM_TARGETS;
+  if (customEnv) {
+    const paths = customEnv.split(isWindows() ? ";" : ":").map((p) => p.trim()).filter(Boolean);
+    if (paths.length > 0) {
+      profiles.push({
+        id: "custom",
+        name: "Custom IDE",
+        markerPaths: paths.map((p) => dirname(p)),
+        userTargets: paths.map((p) => ({ configPath: p, serversKey: "mcpServers" })),
+      });
+    }
+  }
+
+  return profiles;
 }
 
 export function detectInstalledAgents(): DetectedAgent[] {
