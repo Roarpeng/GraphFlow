@@ -3,6 +3,7 @@ import { listConfigOverlayKeys } from "../../../config/merge";
 import { resolveGlobalConfigPath } from "../../../config/scaffold";
 import { resolveConfig, resolveConfigPath } from "../../../config/resolve";
 import { resolveGraphStorePath } from "../../../config/paths";
+import { getMcpInstallStatus } from "../../../integrations/agent-mcp-installer";
 import { inspectGraph, indexGraph } from "./graph.js";
 import {
   diagnoseRouting,
@@ -113,5 +114,6 @@ export async function getSettingsPanelStatus(configPath?: string): Promise<Setti
       : existsSync("graphflow.config.json")
         ? "graphflow.config.json"
         : "（未创建）",
+    mcpAgents: getMcpInstallStatus(),
   };
 }

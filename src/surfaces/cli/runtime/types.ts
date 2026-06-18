@@ -201,6 +201,14 @@ export interface SettingsPanelStatusData {
   diagnoseSummary: string;
   overlayKeys: string[];
   baseConfigPath: string;
+  mcpAgents: Array<{
+    agentId: string;
+    agentName: string;
+    configPath: string;
+    scope: "user" | "workspace";
+    detected: boolean;
+    installed: boolean;
+  }>;
 }
 
 export interface PlanPreviewResult {

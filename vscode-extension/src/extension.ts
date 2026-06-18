@@ -425,7 +425,10 @@ async function runMcpBootstrap(
   workspaceRoot: string | undefined,
   output: vscode.OutputChannel,
   options: { forceNotify: boolean; isFreshInstall?: boolean }
-): Promise<void> {
+): Promise<{
+  results: Awaited<ReturnType<GraphFlowRuntime["installMcpToDetectedAgents"]>>;
+  mcpAgents: Awaited<ReturnType<GraphFlowRuntime["getSettingsPanelStatus"]>>["mcpAgents"];
+} | undefined> {
   const extensionPath = context.extensionPath;
   const bundledRuntimeRoot = join(extensionPath, "vendor", "graphflow");
   const bundledServerPath = join(bundledRuntimeRoot, "dist", "surfaces", "mcp", "server.js");
@@ -455,6 +458,7 @@ async function runMcpBootstrap(
     const guide = await runGraphFlow(cwdRoot, (runtime) =>
       Promise.resolve(runtime.formatModelConfigGuide(workspaceRoot))
     );
+    const panelStatus = await runGraphFlow(cwdRoot, (runtime) => runtime.getSettingsPanelStatus());
 
     output.appendLine("[GraphFlow] MCP auto-install results:");
     for (const result of results) {
@@ -468,7 +472,7 @@ async function runMcpBootstrap(
     }
 
     if (!options.forceNotify && successes.length === 0) {
-      return;
+      return { results, mcpAgents: panelStatus.mcpAgents };
     }
 
     const agentNames = detected.map((agent) => agent.name).join(", ") || "未检测到";
@@ -484,7 +488,7 @@ async function runMcpBootstrap(
           void vscode.commands.executeCommand("graphflow.showSetupGuide");
         }
       });
-      return;
+      return { results, mcpAgents: panelStatus.mcpAgents };
     }
 
     const allNotified = [...successes, ...updated];
@@ -502,12 +506,14 @@ async function runMcpBootstrap(
           void vscode.commands.executeCommand("graphflow.showSetupGuide");
         }
       });
+    return { results, mcpAgents: panelStatus.mcpAgents };
   } catch (err) {
     const text = err instanceof Error ? err.message : String(err);
     output.appendLine(`[GraphFlow] MCP auto-install failed: ${text}`);
     if (options.forceNotify) {
       vscode.window.showErrorMessage(`GraphFlow MCP 自动安装失败: ${text}`);
     }
+    return undefined;
   }
 }
 
@@ -812,6 +818,35 @@ function showSettingsPanel(
   );
   panel.webview.html = buildSettingsHtml(settings, scriptUri.toString(), status);
   panel.webview.onDidReceiveMessage(async (message) => {
+    if (message?.type === "installMcp") {
+      try {
+        const bootstrap = await runMcpBootstrap(context, workspaceRoot, output, { forceNotify: false });
+        const panelStatus = await runGraphFlow(workspaceRoot, (runtime) => runtime.getSettingsPanelStatus());
+        const successes =
+          bootstrap?.results.filter((result) => result.status === "injected" || result.status === "created" || result.status === "updated") ??
+          [];
+        const installedNames = [...new Set(successes.map((result) => result.agentName))].join(", ");
+        panel.webview.postMessage({
+          type: "mcpInstallResult",
+          payload: {
+            ok: successes.length > 0,
+            mcpAgents: panelStatus.mcpAgents,
+            message:
+              successes.length > 0
+                ? `MCP 已写入: ${installedNames}。请重启对应 Agent / IDE 以加载 graphflow 工具。`
+                : "未写入 MCP。请确认本机已安装 Cursor / VS Code / Claude Code 等工具后重试。",
+          },
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : String(err);
+        panel.webview.postMessage({
+          type: "mcpInstallResult",
+          payload: { ok: false, message: `MCP 安装失败: ${text}` },
+        });
+      }
+      return;
+    }
+
     if (message?.type === "indexGraphOnly") {
       if (!requireWorkspaceFolder(workspaceRoot)) {
         vscode.window.showWarningMessage("请先打开一个项目文件夹后再建立或索引知识图谱。");
