@@ -1,7 +1,7 @@
 import pino from "pino";
 
 function createLogger(): pino.Logger {
-  const level = process.env.LOG_LEVEL || "info";
+  const level = process.env.LOG_LEVEL || (process.env.NODE_ENV === "test" ? "silent" : "info");
 
   // MCP stdio transport must never write logs to stdout (JSON-RPC uses stdout).
   if (process.env.GRAPHFLOW_MCP_STDIO === "1") {
