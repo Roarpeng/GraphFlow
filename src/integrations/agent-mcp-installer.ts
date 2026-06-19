@@ -58,12 +58,14 @@ export interface McpAgentInstallStatus {
   installed: boolean;
 }
 
+export type McpConfigFormat = "json" | "codex-toml";
+
 interface AgentProfile {
   id: string;
   name: string;
   markerPaths: string[];
-  userTargets: Array<{ configPath: string; serversKey: McpServersKey }>;
-  workspaceRelativePaths?: Array<{ relativePath: string; serversKey: McpServersKey }>;
+  userTargets: Array<{ configPath: string; serversKey: McpServersKey; configFormat?: McpConfigFormat }>;
+  workspaceRelativePaths?: Array<{ relativePath: string; serversKey: McpServersKey; configFormat?: McpConfigFormat }>;
 }
 
 function isWindows(): boolean {
@@ -120,9 +122,12 @@ function buildAgentProfiles(): AgentProfile[] {
     {
       id: "trae",
       name: "Trae",
-      markerPaths: [join(appData, "Trae"), join(localAppData, "Programs", "Trae")],
+      markerPaths: [
+        join(home, ".trae"),
+        join(appData, "Trae"),
+        join(localAppData, "Programs", "Trae"),
+      ],
       userTargets: [
-        { configPath: join(appData, "Trae", "User", "mcp.json"), serversKey: "mcpServers" },
         {
           configPath: isWindows()
             ? join(appData, "Trae", "User", "mcp.json")
@@ -217,6 +222,18 @@ function buildAgentProfiles(): AgentProfile[] {
         },
       ],
     },
+    {
+      id: "codex",
+      name: "Codex",
+      markerPaths: [join(home, ".codex"), join(localAppData, "OpenAI", "Codex")],
+      userTargets: [
+        {
+          configPath: join(home, ".codex", "config.toml"),
+          serversKey: "mcpServers",
+          configFormat: "codex-toml",
+        },
+      ],
+    },
   ];
 
   const customEnv = process.env.GRAPHFLOW_MCP_CUSTOM_TARGETS;
@@ -252,14 +269,23 @@ export function detectInstalledAgents(): DetectedAgent[] {
 function isGraphflowMcpInstalled(
   configPath: string,
   serversKey: McpServersKey,
-  serverName: string
+  serverName: string,
+  configFormat: McpConfigFormat = "json"
 ): boolean {
   if (!existsSync(configPath)) {
     return false;
   }
+  if (configFormat === "codex-toml") {
+    const raw = readFileSync(configPath, "utf8");
+    return new RegExp(`^\\[mcp_servers\\.${escapeRegExp(serverName)}\\]`, "m").test(raw);
+  }
   const json = readJsonConfig(configPath);
   const servers = (json[serversKey] as Record<string, McpServerNode> | undefined) ?? {};
   return Boolean(servers[serverName]);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** Inspect detected agents and whether GraphFlow MCP is present in each config file. */
@@ -276,7 +302,7 @@ export function getMcpInstallStatus(serverName = "graphflow"): McpAgentInstallSt
     }
 
     for (const userTarget of profile.userTargets) {
-      const key = `${userTarget.configPath}::${userTarget.serversKey}`;
+      const key = `${userTarget.configPath}::${userTarget.serversKey}::${userTarget.configFormat ?? "json"}`;
       if (seen.has(key)) {
         continue;
       }
@@ -287,7 +313,12 @@ export function getMcpInstallStatus(serverName = "graphflow"): McpAgentInstallSt
         configPath: userTarget.configPath,
         scope: "user",
         detected: true,
-        installed: isGraphflowMcpInstalled(userTarget.configPath, userTarget.serversKey, serverName),
+        installed: isGraphflowMcpInstalled(
+          userTarget.configPath,
+          userTarget.serversKey,
+          serverName,
+          userTarget.configFormat ?? "json"
+        ),
       });
     }
   }
@@ -333,6 +364,27 @@ export function resolveMcpNodeLaunch(options: {
       ELECTRON_RUN_AS_NODE: "1",
     },
   };
+}
+
+function resolveWindowsNpxLaunch(): { command: string; args: string[] } | undefined {
+  const node = resolveSystemNodeCommand();
+  if (!node) {
+    return undefined;
+  }
+  const nodeDir = dirname(node);
+  const candidates = [
+    join(nodeDir, "node_modules", "npm", "bin", "npx-cli.js"),
+    join(nodeDir, "..", "lib", "node_modules", "npm", "bin", "npx-cli.js"),
+  ];
+  for (const npxCli of candidates) {
+    if (existsSync(npxCli)) {
+      return {
+        command: node,
+        args: [npxCli, "-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
+      };
+    }
+  }
+  return undefined;
 }
 
 export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
@@ -388,22 +440,49 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
     };
   }
 
+  if (isWindows()) {
+    const winNpx = resolveWindowsNpxLaunch();
+    if (winNpx) {
+      return {
+        command: winNpx.command,
+        args: winNpx.args,
+        ...(options.workspaceRoot ? { cwd: options.workspaceRoot } : {}),
+        env: { ...MCP_STDIO_ENV },
+      };
+    }
+  }
+
   const npxCmd = isWindows() ? "npx.cmd" : "npx";
   return {
     command: npxCmd,
     args: ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
     ...(options.workspaceRoot ? { cwd: options.workspaceRoot } : {}),
-    env: {},
+    env: { ...MCP_STDIO_ENV },
   };
 }
 
 function uniqueTargets(
-  targets: Array<{ configPath: string; serversKey: McpServersKey; scope: "user" | "workspace" }>
-): Array<{ configPath: string; serversKey: McpServersKey; scope: "user" | "workspace" }> {
+  targets: Array<{
+    configPath: string;
+    serversKey: McpServersKey;
+    configFormat: McpConfigFormat;
+    scope: "user" | "workspace";
+  }>
+): Array<{
+  configPath: string;
+  serversKey: McpServersKey;
+  configFormat: McpConfigFormat;
+  scope: "user" | "workspace";
+}> {
   const seen = new Set<string>();
-  const unique: Array<{ configPath: string; serversKey: McpServersKey; scope: "user" | "workspace" }> = [];
+  const unique: Array<{
+    configPath: string;
+    serversKey: McpServersKey;
+    configFormat: McpConfigFormat;
+    scope: "user" | "workspace";
+  }> = [];
   for (const target of targets) {
-    const key = `${target.configPath}::${target.serversKey}`;
+    const key = `${target.configPath}::${target.serversKey}::${target.configFormat}`;
     if (seen.has(key)) {
       continue;
     }
@@ -417,13 +496,21 @@ function resolveTargetsForAgents(
   agentIds: Set<string>,
   workspaceRoot: string | undefined,
   installScope: McpInstallScope
-): Array<{ agentId: string; agentName: string; configPath: string; serversKey: McpServersKey; scope: "user" | "workspace" }> {
+): Array<{
+  agentId: string;
+  agentName: string;
+  configPath: string;
+  serversKey: McpServersKey;
+  configFormat: McpConfigFormat;
+  scope: "user" | "workspace";
+}> {
   const profiles = buildAgentProfiles();
   const targets: Array<{
     agentId: string;
     agentName: string;
     configPath: string;
     serversKey: McpServersKey;
+    configFormat: McpConfigFormat;
     scope: "user" | "workspace";
   }> = [];
 
@@ -438,6 +525,7 @@ function resolveTargetsForAgents(
         agentName: profile.name,
         configPath: userTarget.configPath,
         serversKey: userTarget.serversKey,
+        configFormat: userTarget.configFormat ?? "json",
         scope: "user",
       });
     }
@@ -449,6 +537,7 @@ function resolveTargetsForAgents(
           agentName: profile.name,
           configPath: join(workspaceRoot, workspaceTarget.relativePath),
           serversKey: workspaceTarget.serversKey,
+          configFormat: workspaceTarget.configFormat ?? "json",
           scope: "workspace",
         });
       }
@@ -487,6 +576,67 @@ function writeJsonConfig(path: string, json: Record<string, unknown>): void {
     mkdirSync(dir, { recursive: true });
   }
   writeFileSync(path, `${JSON.stringify(json, null, 2)}\n`, "utf8");
+}
+
+function removeCodexMcpSection(content: string, serverName: string): string {
+  const blockPattern = new RegExp(
+    `\\n?\\[mcp_servers\\.${escapeRegExp(serverName)}(?:\\.[^\\]]+)?\\][^\\[]*`,
+    "g"
+  );
+  return content.replace(blockPattern, "").trimEnd();
+}
+
+function formatCodexMcpTomlBlock(serverName: string, node: McpServerNode): string {
+  const args =
+    node.args.length > 0 ? `args = [${node.args.map((arg) => JSON.stringify(arg)).join(", ")}]` : undefined;
+  const lines = [
+    `[mcp_servers.${serverName}]`,
+    `command = ${JSON.stringify(node.command)}`,
+    ...(args ? [args] : []),
+    "enabled = true",
+    "startup_timeout_sec = 120",
+  ];
+  if (node.env && Object.keys(node.env).length > 0) {
+    lines.push("", `[mcp_servers.${serverName}.env]`);
+    for (const [key, value] of Object.entries(node.env)) {
+      lines.push(`${key} = ${JSON.stringify(value)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function injectIntoCodexToml(
+  configPath: string,
+  serverName: string,
+  node: McpServerNode
+): "injected" | "created" | "updated" {
+  const existed = existsSync(configPath);
+  const previous = existed ? readFileSync(configPath, "utf8") : "";
+  const serverExisted = existed && new RegExp(`^\\[mcp_servers\\.${escapeRegExp(serverName)}\\]`, "m").test(previous);
+  const cleaned = removeCodexMcpSection(previous, serverName);
+  const block = formatCodexMcpTomlBlock(serverName, node);
+  const next = cleaned.length > 0 ? `${cleaned}\n\n${block}\n` : `${block}\n`;
+  const dir = dirname(configPath);
+  if (dir && dir !== ".") {
+    mkdirSync(dir, { recursive: true });
+  }
+  writeFileSync(configPath, next, "utf8");
+  if (!existed) return "created";
+  if (!serverExisted) return "injected";
+  return "updated";
+}
+
+function injectIntoAgentConfig(
+  configPath: string,
+  serversKey: McpServersKey,
+  configFormat: McpConfigFormat,
+  serverName: string,
+  node: McpServerNode
+): "injected" | "created" | "updated" {
+  if (configFormat === "codex-toml") {
+    return injectIntoCodexToml(configPath, serverName, node);
+  }
+  return injectIntoConfig(configPath, serversKey, serverName, node);
 }
 
 function injectIntoConfig(
@@ -534,7 +684,13 @@ export function installMcpToDetectedAgents(options: McpInstallOptions): McpInsta
   const targets = resolveTargetsForAgents(agentIds, options.workspaceRoot, installScope);
   for (const target of targets) {
     try {
-      const status = injectIntoConfig(target.configPath, target.serversKey, serverName, node);
+      const status = injectIntoAgentConfig(
+        target.configPath,
+        target.serversKey,
+        target.configFormat,
+        serverName,
+        node
+      );
       results.push({
         agentId: target.agentId,
         agentName: target.agentName,
@@ -591,8 +747,10 @@ export function formatModelConfigGuide(workspaceRoot?: string): string {
     "- 然后运行 `GraphFlow: Enrich Graph Semantics` 验证本地推理路径",
     "",
     "## 7. 验证 MCP",
-    "在 Cursor / Claude Code / VS Code Agent 对话框中说：",
+    "在 Cursor / Claude Code / VS Code / Trae / Codex 对话框中说：",
     '> "使用 graphflow 预览当前项目的 orchestrator 相关上下文"',
+    "",
+    "Codex 配置写入 `~/.codex/config.toml` 的 `[mcp_servers.graphflow]`；Trae 写入 `User/mcp.json`。",
     "",
     "## 8. 验证路由",
     "运行 `GraphFlow: Settings` 保存后，在 Chat 输入 `@graphflow /diagnose` 查看 provider 健康状态。",
