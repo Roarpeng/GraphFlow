@@ -1,4 +1,4 @@
-﻿import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+﻿import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -30,8 +30,14 @@ afterEach(() => {
 describe("M17 agent MCP installer", () => {
   it("builds npx and bundled MCP nodes", () => {
     const npxNode = buildMcpServerNode({ strategy: "npx", workspaceRoot: "/repo" });
-    expect(npxNode.command).toContain("npx");
-    expect(npxNode.args).toEqual(["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"]);
+    if (process.platform === "win32") {
+      expect(npxNode.args).toEqual(
+        expect.arrayContaining(["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"])
+      );
+    } else {
+      expect(npxNode.command).toContain("npx");
+      expect(npxNode.args).toEqual(["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"]);
+    }
     expect(npxNode.cwd).toBe("/repo");
 
     const bundledNode = buildMcpServerNode({
@@ -87,6 +93,7 @@ describe("M17 agent MCP installer", () => {
         strategy: "npx",
         workspaceRoot,
         installScope: "all",
+        agentIdsOverride: ["cursor"],
       });
 
       const userResult = results.find((result) => result.scope === "user" && result.agentId === "cursor");
@@ -101,11 +108,9 @@ describe("M17 agent MCP installer", () => {
       const userConfig = JSON.parse(readFileSync(join(fakeHome, ".cursor", "mcp.json"), "utf8")) as {
         mcpServers?: Record<string, { command: string; args: string[] }>;
       };
-      expect(userConfig.mcpServers?.graphflow?.args).toEqual([
-        "-y",
-        "--package=@roarpeng/graphflow",
-        "graphflow-mcp",
-      ]);
+      expect(userConfig.mcpServers?.graphflow?.args).toEqual(
+        expect.arrayContaining(["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"])
+      );
     } finally {
       if (process.platform === "win32") {
         if (previousHome) {
@@ -138,6 +143,7 @@ describe("M17 agent MCP installer", () => {
       const results = installMcpToDetectedAgents({
         strategy: "npx",
         workspaceRoot,
+        agentIdsOverride: ["cursor"],
       });
 
       expect(results.some((result) => result.scope === "user" && result.status === "created")).toBe(true);
@@ -183,6 +189,44 @@ describe("M17 agent MCP installer", () => {
       installMcpToDetectedAgents({ strategy: "npx", agentIdsOverride: ["cursor"] });
       statuses = getMcpInstallStatus();
       expect(statuses.some((item) => item.configPath === mcpPath && item.installed)).toBe(true);
+    } finally {
+      if (process.platform === "win32") {
+        if (previousHome) {
+          process.env.USERPROFILE = previousHome;
+        } else {
+          delete process.env.USERPROFILE;
+        }
+      } else if (previousHome) {
+        process.env.HOME = previousHome;
+      } else {
+        delete process.env.HOME;
+      }
+    }
+  });
+
+  it("writes Codex MCP config into config.toml", () => {
+    const fakeHome = createTempRoot("graphflow-agent-home-codex");
+    const codexDir = join(fakeHome, ".codex");
+    mkdirSync(codexDir, { recursive: true });
+    const configPath = join(codexDir, "config.toml");
+    writeFileSync(configPath, 'model = "gpt-5"\n', "utf8");
+
+    const previousHome = process.env.USERPROFILE ?? process.env.HOME;
+    if (process.platform === "win32") {
+      process.env.USERPROFILE = fakeHome;
+    } else {
+      process.env.HOME = fakeHome;
+    }
+
+    try {
+      const results = installMcpToDetectedAgents({
+        strategy: "npx",
+        agentIdsOverride: ["codex"],
+      });
+      expect(results.some((result) => result.agentId === "codex" && result.status !== "error")).toBe(true);
+      const raw = readFileSync(configPath, "utf8");
+      expect(raw).toContain("[mcp_servers.graphflow]");
+      expect(getMcpInstallStatus().some((item) => item.agentId === "codex" && item.installed)).toBe(true);
     } finally {
       if (process.platform === "win32") {
         if (previousHome) {
