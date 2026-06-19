@@ -12,9 +12,32 @@ export interface RunInput {
   validatorSelection?: ModelSelection;
   workerContext?: PromptContext;
   validatorContext?: PromptContext;
+  executionMode?: "bridge" | "llm";
 }
 
 export async function runSimpleTask(input: RunInput): Promise<TaskRunResult> {
+  // Bridge mode: return structured task descriptor without executing
+  // Skip bridge mode if workerOutput is provided (test shortcut)
+  if (input.executionMode === "bridge" && input.workerOutput === undefined) {
+    const contextStr = input.workerContext
+      ? Object.entries(input.workerContext)
+          .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
+          .join("; ")
+      : "";
+
+    return {
+      status: "HUMAN_REVIEW_REQUIRED",
+      attempts: 0,
+      feedback: "[DELEGATED] Task packaged for external agent execution. Use executionDescriptor to execute.",
+      executionDescriptor: {
+        action: "execute",
+        task: input.task,
+        context: contextStr,
+        retryHints: [],
+      },
+    };
+  }
+
   const maxRetries = input.maxRetries ?? 3;
   let attempts = 0;
   let status: TaskStatus = "PENDING";

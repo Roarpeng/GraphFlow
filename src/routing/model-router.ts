@@ -1,4 +1,5 @@
 import type { AgentRole } from "../core/types";
+import type { GraphFlowConfig } from "../config/schema";
 import { resolveConfig } from "../config/resolve";
 
 export type ModelTier = "smart" | "economy";
@@ -19,6 +20,7 @@ const roleTierMap: Record<AgentRole, ModelTier> = {
   worker: "economy",
   enricher: "economy",
   evolver: "economy",
+  compressor: "economy",
 };
 
 const DEFAULT_MODELS: Record<ProviderName, Record<ModelTier, string>> = {
@@ -43,6 +45,43 @@ const DEFAULT_MODELS: Record<ProviderName, Record<ModelTier, string>> = {
     economy: "minicpm5-1b",
   },
 };
+
+/**
+ * Resolves the compression model selection from an in-memory config object
+ * (no disk re-read). Shared by resolveModelForRole and describeCompressionBackend
+ * so config and selection always come from the same source.
+ */
+export function resolveCompressorSelection(config: GraphFlowConfig): ModelSelection {
+  const tier: ModelTier = "economy";
+  const compressionPolicy = config.graphPolicy.compression;
+  const backend = compressionPolicy?.backend ?? "inherit";
+
+  // local backend → force embedded minicpm
+  if (backend === "local" || compressionPolicy?.provider === "openbmb") {
+    return {
+      provider: "openbmb",
+      model: compressionPolicy?.model ?? DEFAULT_MODELS.openbmb.economy,
+      tier,
+      fallbackApplied: false,
+    };
+  }
+
+  // network backend with explicit provider override, else inherit economy tier
+  const provider = (
+    backend === "network" && compressionPolicy?.provider
+      ? compressionPolicy.provider
+      : compressionPolicy?.provider ?? config.tiers.economy.provider
+  ) as ProviderName;
+  return {
+    provider,
+    model:
+      compressionPolicy?.model ??
+      config.tiers.economy.model ??
+      DEFAULT_MODELS[provider].economy,
+    tier,
+    fallbackApplied: false,
+  };
+}
 
 export function resolveModelForRole(role: AgentRole, configPath?: string): ModelSelection {
   const tier = roleTierMap[role];
@@ -93,6 +132,10 @@ export function resolveModelForRole(role: AgentRole, configPath?: string): Model
         tier: "economy",
         fallbackApplied: false,
       };
+    }
+
+    if (role === "compressor") {
+      return resolveCompressorSelection(config);
     }
 
     const tierConfig = config.tiers[tier];

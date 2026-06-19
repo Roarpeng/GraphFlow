@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "0.6.15",
+  "version": "1.0.0",
   "publishConfig": {
     "access": "public"
   },
@@ -86,6 +86,7 @@
   },
   "optionalDependencies": {
     "better-sqlite3": "^12.10.0",
+    "hnswlib-node": "^3.0.0",
     "node-llama-cpp": "^3.15.6"
   }
 }

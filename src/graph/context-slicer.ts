@@ -7,6 +7,21 @@ import {
   type EmbeddingProvider,
 } from "../learning/embeddings";
 import type { GraphClient } from "./client-factory";
+import {
+  extractConnectedSubgraph,
+  computePageRank,
+  blendWithCentrality,
+  type ConnectedSubgraphOptions,
+} from "./graph-compression";
+import { buildRepoMap, formatRepoMapString } from "./repo-map";
+import {
+  applySemanticCompression,
+  type ClusteringOptions,
+  type SummarizerOptions,
+  type DensifierOptions,
+} from "./semantic-compression";
+import { estimateContextBudget, type TaskMode } from "./adaptive-budget";
+import type { CompressionModelHandle } from "./compression-model";
 
 let encoderFn: ((text: string) => number[]) | null = null;
 let encoderLoaded = false;
@@ -69,6 +84,22 @@ export interface LayeredPackageOptions {
   embeddingProvider?: EmbeddingProvider;
   vectorTopK?: number;
   vectorMinSimilarity?: number;
+  /** Use HNSW ANN index for large candidate sets (>=200 nodes). Default true. */
+  enableHnsw?: boolean;
+  /** Enable graph-structure compression (edge weights, PageRank, connected subgraph). */
+  enableGraphCompression?: boolean;
+  graphCompressionOptions?: ConnectedSubgraphOptions;
+  /** Enable semantic compression via minicpm-1b (clustering, summarization, densification). */
+  enableSemanticCompression?: boolean;
+  clusteringOptions?: ClusteringOptions;
+  summarizerOptions?: SummarizerOptions;
+  densifierOptions?: DensifierOptions;
+  /** Unified compression model handle (auto-selects external economy tier or embedded minicpm). */
+  compressionModel?: CompressionModelHandle;
+  /** Return RepoMap overview if token budget is low. */
+  enableRepoMapFallback?: boolean;
+  /** Adaptive budget estimation based on task complexity. */
+  taskMode?: TaskMode;
 }
 
 export interface SubgraphExpansionOptions {
@@ -333,4 +364,176 @@ function markLayerUsed(layer: ContextLayer, used: { l1: number; l2: number; l3: 
   }
 
   used.l3 += 1;
+}
+
+/**
+ * Enhanced context packaging with graph-structure compression, semantic
+ * compression (minicpm-1b), and adaptive budgeting.
+ *
+ * Compression pipeline:
+ *   1. [Optional] RepoMap fallback for low budgets
+ *   2. Keyword + vector retrieval (existing)
+ *   3. Graph compression: connected subgraph + PageRank re-ranking
+ *   4. Semantic compression: cluster similar nodes, summarize, densify
+ *   5. Layer quotas + token budgeting (existing)
+ */
+export async function buildEnhancedContextPackage(
+  client: GraphClient,
+  query: string,
+  task: string,
+  maxTokens: number,
+  options?: LayeredPackageOptions
+): Promise<LayeredContextPackage> {
+  // Step 0: Adaptive budget estimation.
+  if (options?.taskMode) {
+    const estimate = estimateContextBudget(task, options.taskMode);
+    maxTokens = estimate.tokens;
+    logger.info({ estimate }, "Adaptive budget estimated");
+  }
+
+  // Step 1: RepoMap fallback for tight budgets.
+  if (options?.enableRepoMapFallback && maxTokens < 1000) {
+    try {
+      const repoMap = await buildRepoMap(client);
+      const mapStr = formatRepoMapString(repoMap);
+      const tokens = estimateTokens(mapStr);
+      if (tokens < maxTokens) {
+        return {
+          summaryChannel: [mapStr],
+          anchorChannel: [],
+          tokenEstimate: tokens,
+          truncated: false,
+        };
+      }
+    } catch (error) {
+      logger.warn({ error }, "RepoMap fallback failed, proceeding with normal retrieval");
+    }
+  }
+
+  // Step 2: Keyword + vector retrieval (existing logic).
+  const keywordHits = await client.queryByKeyword(query);
+  let hits: GraphNode[] = keywordHits;
+
+  if (options?.enableVectorRecall === true && options.embeddingProvider) {
+    try {
+      const queryEmbedding = await options.embeddingProvider.embed(query);
+      const topK = options.vectorTopK ?? 8;
+      const minSim = options.vectorMinSimilarity ?? 0.05;
+
+      let vectorHits: GraphNode[];
+      // For large candidate sets, use HNSW ANN index (10-100x faster).
+      if (options.enableHnsw !== false && keywordHits.length >= 200) {
+        const { HnswVectorIndex } = await import("../learning/hnsw-index.js");
+        const index = new HnswVectorIndex({ space: "cosine" });
+        index.load(keywordHits);
+        const results = await index.search(queryEmbedding, topK, minSim);
+        vectorHits = results.map((r) => r.node);
+        logger.info({ backend: index.backend, candidates: keywordHits.length }, "Vector recall via HNSW");
+      } else {
+        vectorHits = vectorRecall(keywordHits, queryEmbedding, topK, minSim);
+      }
+      hits = reciprocalRankFusion([keywordHits, vectorHits]);
+    } catch (error) {
+      logger.error({ error }, "Vector recall failed");
+      hits = keywordHits;
+    }
+  }
+  if (options?.enableGraphCompression && hits.length > 0) {
+    try {
+      const ranked = await extractConnectedSubgraph(client, hits, options.graphCompressionOptions);
+      const snapshot = client.readSnapshot?.();
+      if (snapshot) {
+        const pageRank = computePageRank(
+          ranked.map((r) => r.node),
+          snapshot.edges
+        );
+        hits = blendWithCentrality(
+          ranked.map((r) => r.node),
+          pageRank,
+          0.3
+        );
+      } else {
+        hits = ranked.map((r) => r.node);
+      }
+    } catch (error) {
+      logger.warn({ error }, "Graph compression failed, using uncompressed hits");
+    }
+  }
+
+  // Step 4: Semantic compression - cluster + summarize + densify.
+  if (options?.enableSemanticCompression) {
+    try {
+      hits = await applySemanticCompression(hits, {
+        ...(options.clusteringOptions ? { clusteringOptions: options.clusteringOptions } : {}),
+        ...(options.summarizerOptions ? { summarizerOptions: options.summarizerOptions } : {}),
+        ...(options.densifierOptions ? { densifierOptions: options.densifierOptions } : {}),
+        ...(options.compressionModel ? { modelHandle: options.compressionModel } : {}),
+      });
+    } catch (error) {
+      logger.warn({ error }, "Semantic compression failed, using uncompressed hits");
+    }
+  }
+
+  // Step 5: Build layered package (existing logic).
+  const summaryChannel: string[] = [];
+  const anchorChannel: ContextAnchorItem[] = [];
+  let tokens = 0;
+  let truncated = false;
+
+  const quota = {
+    l1: options?.layerQuota?.l1 ?? Number.POSITIVE_INFINITY,
+    l2: options?.layerQuota?.l2 ?? Number.POSITIVE_INFINITY,
+    l3: options?.layerQuota?.l3 ?? Number.POSITIVE_INFINITY,
+  };
+  const used = { l1: 0, l2: 0, l3: 0 };
+  const added = new Set<string>();
+
+  for (const hit of hits) {
+    const layer = classifyLayer(hit);
+    if (!canUseLayer(layer, quota, used)) {
+      continue;
+    }
+
+    const summary = `${hit.type}: ${hit.content}`;
+    const estimate = estimateTokens(summary);
+    if (tokens + estimate > maxTokens) {
+      truncated = true;
+      break;
+    }
+
+    summaryChannel.push(summary);
+    anchorChannel.push({ id: hit.id, type: hit.type, layer });
+    added.add(hit.id);
+    tokens += estimate;
+    markLayerUsed(layer, used);
+  }
+
+  // Step 6: Edge expansion (existing logic).
+  const enableExpansion = options?.enableEdgeExpansion !== false;
+  if (enableExpansion && !truncated && typeof client.getNeighbors === "function") {
+    const seedIds = anchorChannel.slice(0, 5).map((a) => a.id);
+    if (seedIds.length > 0) {
+      const expanded = await expandSubgraph(client, seedIds, { hops: 1 });
+      for (const node of expanded) {
+        if (added.has(node.id)) continue;
+        const layer = classifyLayer(node);
+        if (!canUseLayer(layer, quota, used)) continue;
+
+        const summary = `${node.type}: ${node.content}`;
+        const estimate = estimateTokens(summary);
+        if (tokens + estimate > maxTokens) {
+          truncated = true;
+          break;
+        }
+
+        summaryChannel.push(summary);
+        anchorChannel.push({ id: node.id, type: node.type, layer });
+        added.add(node.id);
+        tokens += estimate;
+        markLayerUsed(layer, used);
+      }
+    }
+  }
+
+  return { summaryChannel, anchorChannel, tokenEstimate: tokens, truncated };
 }

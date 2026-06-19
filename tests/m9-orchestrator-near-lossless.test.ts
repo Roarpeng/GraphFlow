@@ -41,25 +41,31 @@ describe("M9 orchestrator near-lossless integration", () => {
         nearLosslessQuery: "orchestrate",
         maxContextTokens: 120,
         layerQuota: { l1: 2, l2: 1, l3: 1 },
+        executionMode: "bridge",
         onContextPackage: (pkg) => {
           capturedAnchors = pkg.anchorChannel.length;
         },
       }
     );
 
-    expect(run.status).toBe("COMPLETED");
+    expect(run.status).toBe("HUMAN_REVIEW_REQUIRED");
     expect(run.feedback).toContain("context(summary=");
     expect(run.routeDecisions?.length).toBe(3);
+    expect(run.executionDescriptor).toBeDefined();
     expect(capturedAnchors).toBeGreaterThan(0);
   });
 
-  it("records parallel execution rounds for complex tasks", async () => {
-    const run = await orchestrate({
-      task: "update readme and add tests and refactor architecture module",
-    });
+  it("packages complex tasks for delegation in bridge mode", async () => {
+    const run = await orchestrate(
+      {
+        task: "update readme and add tests and refactor architecture module",
+      },
+      { executionMode: "bridge" }
+    );
 
-    expect(run.status).toBe("COMPLETED");
-    expect(run.executionRounds?.length).toBeGreaterThan(1);
-    expect(run.executionRounds?.[0]?.length).toBeGreaterThan(1);
+    expect(run.status).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(run.feedback).toContain("[DELEGATED]");
+    expect(run.executionDescriptor).toBeDefined();
+    expect(run.executionDescriptor?.task).toContain("update readme");
   });
 });

@@ -84,11 +84,11 @@ export function getToolDefinitions(): ToolDefinition[] {
   return [
     {
       name: "graphflow_run",
-      description: "Run a task through GraphFlow orchestration and return structured execution status.",
+      description: "Plan and package a task with compressed context, returning a structured execution descriptor for external coding agents (Cursor, Claude Code) to execute. Bridge mode by default.",
       inputSchema: {
         type: "object",
         properties: {
-          task: { type: "string", description: "Task description to run." },
+          task: { type: "string", description: "Task description to plan and package." },
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
         },
         required: ["task"],

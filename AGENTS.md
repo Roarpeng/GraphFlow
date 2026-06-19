@@ -40,7 +40,7 @@ From this repository:
 
 - Use `graphflow_plan` before multi-step edits.
 - Use `graphflow_preview_context` before large refactors or codebase-wide questions.
-- Use `graphflow_run` when you want GraphFlow to execute its own orchestration loop.
+- Use `graphflow_run` when you want GraphFlow to plan and package a task with compressed context, returning a structured execution descriptor (executionDescriptor) for you to execute. GraphFlow delegates execution to external coding agents by default (bridge mode).
 - Use `graphflow_index` after workspace changes if graph freshness matters.
 - Use `graphflow_inspect_graph` and `graphflow_skill_insights` for observability.
 - Use `graphflow_diagnose` when model/provider routing looks wrong.

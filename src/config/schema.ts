@@ -59,6 +59,37 @@ export interface GraphFlowConfig {
       timeoutMs?: number;
       autoRunOnIndex?: boolean;
     };
+    /**
+     * Context compression model selection. Compression (cluster summarization,
+     * node densification) reuses the economy tier by default ("inherit"), so
+     * no extra config is needed: whatever provider powers economy also powers
+     * compression. Falls back to an auto-downloaded embedded minicpm-1b when no
+     * external provider is configured.
+     */
+    compression?: {
+      enabled?: boolean;
+      /** inherit=reuse economy tier (default), network=external API, local=embedded minicpm. */
+      backend?: "inherit" | "network" | "local";
+      /** Override provider (network backend only). */
+      provider?: string;
+      /** Override model; leave unset to inherit economy/default routing. */
+      model?: string;
+      apiKey?: string;
+      baseUrl?: string;
+      /** Auto-download embedded model on first use when falling back to local. Default true. */
+      autoDownloadEmbedded?: boolean;
+      /** Override embedded model path; defaults to ~/.graphflow/models/minicpm-1b.gguf. */
+      embeddedModelPath?: string;
+      timeoutMs?: number;
+      /** Zero-cost graph-structure compression (edge weights + PageRank). Default true. */
+      enableGraphCompression?: boolean;
+      /** Return module-level RepoMap overview when budget is tight (<1000 tokens). Default false. */
+      enableRepoMapFallback?: boolean;
+      /** Adaptively size the token budget from task complexity. Default false. */
+      enableAdaptiveBudget?: boolean;
+      /** Use HNSW ANN index for large candidate sets (>=200 nodes). Default true. */
+      enableHnsw?: boolean;
+    };
   };
   learningPolicy: {
     enableFlywheel: boolean;

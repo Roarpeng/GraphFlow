@@ -7,7 +7,6 @@ import type { GraphFlowConfig } from "../../../config/schema";
 import type { GraphEdge, GraphNode } from "../../../core/types";
 import { createGraphClient, type GraphClient } from "../../../graph/client-factory";
 import {
-  buildLayeredContextPackage,
   createContextRefillManager,
 } from "../../../graph/context-slicer";
 import { indexWorkspaceFiles, clearGraphIndexArtifacts, hasPendingGraphIndexWork } from "../../../graph/file-indexer";
@@ -97,8 +96,41 @@ export async function previewContext(query: string, configPath?: string): Promis
     ...buildEmbeddingOptions(config),
   };
 
-  const pkg = await buildLayeredContextPackage(
+  const compressionPolicy = config.graphPolicy.compression;
+
+  // Graph-structure compression is zero-cost; enabled by default unless explicitly disabled.
+  packageOptions.enableGraphCompression = compressionPolicy?.enableGraphCompression !== false;
+
+  // HNSW ANN for large candidate sets; enabled by default unless explicitly disabled.
+  packageOptions.enableHnsw = compressionPolicy?.enableHnsw !== false;
+
+  // RepoMap overview fallback for tight budgets (opt-in).
+  if (compressionPolicy?.enableRepoMapFallback === true) {
+    packageOptions.enableRepoMapFallback = true;
+  }
+
+  // Semantic compression (minicpm/economy LLM) is opt-in via config.
+  const compressionEnabled = compressionPolicy?.enabled === true;
+  if (compressionEnabled) {
+    try {
+      const { resolveCompressionModel } = await import("../../../graph/compression-model.js");
+      const model = await resolveCompressionModel(config, configPath);
+      if (model.available) {
+        packageOptions.enableSemanticCompression = true;
+        packageOptions.compressionModel = model;
+      } else {
+        // No usable model → degrade gracefully to graph-structure-only compression.
+        logger.info("Semantic compression skipped: no usable model (graph-structure compression still active)");
+      }
+    } catch (error) {
+      logger.warn({ error }, "Compression model unavailable; using structure-only compression");
+    }
+  }
+
+  const { buildEnhancedContextPackage } = await import("../../../graph/context-slicer.js");
+  const pkg = await buildEnhancedContextPackage(
     graphClient,
+    query,
     query,
     config.graphPolicy.maxContextTokens,
     packageOptions

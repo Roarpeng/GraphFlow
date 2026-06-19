@@ -3,7 +3,6 @@ import { brainstormTaskLlm } from "../agents/brainstormer";
 import type { GraphClient } from "../graph/client-factory";
 import { logger } from "../utils/logger";
 import {
-  buildLayeredContextPackage,
   type LayeredContextPackage,
 } from "../graph/context-slicer";
 import { syncGraphAfterRun } from "../hooks/post-run-sync";
@@ -46,6 +45,13 @@ export interface OrchestrateOptions {
   enableLlmTriage?: boolean;
   embeddingProvider?: import("../learning/embeddings").EmbeddingProvider;
   configPath?: string;
+  executionMode?: "bridge" | "llm";
+  /** Enable zero-cost graph-structure compression (edge weights + PageRank). Default true. */
+  enableGraphCompression?: boolean;
+  /** Adaptively size the context token budget from task complexity. Default false. */
+  enableAdaptiveBudget?: boolean;
+  /** Return module-level RepoMap overview when budget is tight. Default false. */
+  enableRepoMapFallback?: boolean;
 }
 
 export async function orchestrate(
@@ -106,6 +112,7 @@ async function runOrchestration(
       ...(workerSelection ? { workerSelection } : {}),
       ...(validatorSelection ? { validatorSelection } : {}),
       ...(promptContext ? { workerContext: promptContext, validatorContext: promptContext } : {}),
+      ...(options?.executionMode ? { executionMode: options.executionMode } : {}),
     });
     const finalRun = appendContextFeedback(run, contextPackage, promptContextLines, options);
     const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
@@ -137,6 +144,37 @@ async function runOrchestration(
     plan = planTasks(input.task, skillHints);
   }
   currentPlan = plan;
+
+  // Bridge mode: package the planned DAG for external agent execution instead of running it
+  if (options?.executionMode === "bridge") {
+    const planProjection = plan.map((node) => ({
+      id: node.id,
+      description: node.description,
+      dependencies: node.dependencies,
+    }));
+    const contextStr = promptContext
+      ? Object.entries(promptContext)
+          .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
+          .join("; ")
+      : "";
+    const bridgeRun: TaskRunResult = {
+      status: "HUMAN_REVIEW_REQUIRED",
+      attempts: 0,
+      feedback: `[DELEGATED] Planned ${plan.length} task(s) for external agent execution; plannerDraft=${shorten(plannerDraft)}`,
+      ...(brainstormIdeas ? { brainstormIdeas } : {}),
+      executionDescriptor: {
+        action: "execute",
+        task: input.task,
+        context: `plan=${JSON.stringify(planProjection)}${contextStr ? `; ${contextStr}` : ""}`,
+        retryHints: [],
+      },
+    };
+    const finalRun = appendContextFeedback(bridgeRun, contextPackage, promptContextLines, options);
+    const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
+    await maybeSyncSkillGraph(input.task, withRoute, options);
+    logger.info({ status: withRoute.status, task: input.task }, "Orchestration task delegated (bridge mode)");
+    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options);
+  }
 
   const runner = async (node: TaskNode): Promise<boolean> => {
     logger.info({ nodeId: node.id, description: node.description }, "Executing task node");
@@ -249,9 +287,30 @@ async function maybeBuildNearLosslessContext(
   const maxTokens = options.maxContextTokens ?? 1200;
   const packageOptions: import("../graph/context-slicer").LayeredPackageOptions = {
     ...(options.layerQuota ? { layerQuota: options.layerQuota } : {}),
-    ...(options.embeddingProvider ? { embeddingProvider: options.embeddingProvider, enableVectorRecall: true } : {})
+    ...(options.embeddingProvider ? { embeddingProvider: options.embeddingProvider, enableVectorRecall: true } : {}),
+    // Graph-structure compression is zero-cost; enable by default unless explicitly disabled.
+    enableGraphCompression: options.enableGraphCompression !== false,
   };
-  const pkg = await buildLayeredContextPackage(options.graphClient, query, maxTokens, packageOptions);
+
+  // Adaptive budget: derive task complexity from triage and let the package
+  // estimator resize the token budget.
+  if (options.enableAdaptiveBudget) {
+    packageOptions.taskMode = triageTask(input.task);
+  }
+
+  // RepoMap overview fallback for tight budgets (opt-in).
+  if (options.enableRepoMapFallback) {
+    packageOptions.enableRepoMapFallback = true;
+  }
+
+  const { buildEnhancedContextPackage } = await import("../graph/context-slicer.js");
+  const pkg = await buildEnhancedContextPackage(
+    options.graphClient,
+    query,
+    input.task,
+    maxTokens,
+    packageOptions
+  );
 
   options.onContextPackage?.(pkg);
   return pkg;
