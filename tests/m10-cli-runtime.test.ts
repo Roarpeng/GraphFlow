@@ -217,7 +217,9 @@ describe("M10 CLI runtime", () => {
       );
 
       await runTask("update readme", configPath);
-      const preview = await previewContext("Task completed", configPath);
+      // Explicitly index to ensure nodes exist for preview (bridge mode doesn't wait for async index)
+      await indexGraph(root, configPath);
+      const preview = await previewContext("demo", configPath);
 
       expect(preview.summaryCount).toBeGreaterThan(0);
       expect(preview.anchorCount).toBeGreaterThan(0);

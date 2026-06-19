@@ -107,7 +107,7 @@ describe("M12 dynamic routing", () => {
       );
 
       const output = await runTask("health check", configPath);
-      expect(output).toContain("status=COMPLETED");
+      expect(output).toContain("status=HUMAN_REVIEW_REQUIRED");
       expect(output).toContain("routes(planner=anthropic/");
       expect(output).toContain(",worker=anthropic/");
       expect(output).toContain(",validator=anthropic/");

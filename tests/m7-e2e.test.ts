@@ -27,14 +27,23 @@ describe("M7 e2e run -> graph sync -> context slice", () => {
     });
 
     const graphClient = createGraphClient(config);
+
+    // Pre-populate graph with a task node for context retrieval testing
+    await graphClient.upsertNodes([
+      { id: "task:update-readme", type: "TaskRun", content: "Task completed: update readme and add tests" },
+    ]);
+
     const run = await orchestrate(
       { task: "update readme and add tests" },
-      { graphClient, enableAutoGraphSync: true }
+      { graphClient, enableAutoGraphSync: true, executionMode: "bridge" }
     );
 
     const slice = await buildContextSlice(graphClient, "Task completed", 100);
 
-    expect(run.status).toBe("COMPLETED");
+    // Bridge mode delegates execution, returning HUMAN_REVIEW_REQUIRED with executionDescriptor
+    expect(run.status).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(run.feedback).toContain("[DELEGATED]");
+    expect(run.executionDescriptor).toBeDefined();
     expect(slice.items.length).toBeGreaterThan(0);
     expect(slice.tokenEstimate).toBeLessThanOrEqual(100);
   });

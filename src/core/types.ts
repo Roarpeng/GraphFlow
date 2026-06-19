@@ -6,7 +6,7 @@ export type TaskStatus =
   | "FAILED"
   | "HUMAN_REVIEW_REQUIRED";
 
-export type AgentRole = "planner" | "worker" | "validator" | "enricher" | "evolver";
+export type AgentRole = "planner" | "worker" | "validator" | "enricher" | "evolver" | "compressor";
 
 export interface ValidationResult {
   passed: boolean;
@@ -40,6 +40,12 @@ export interface TaskRunResult {
   promptContextLines?: number;
   episodeId?: string;
   similarEpisodes?: Array<{ id: string; task: string; score: number }>;
+  executionDescriptor?: {
+    action: "execute";
+    task: string;
+    context: string;
+    retryHints: string[];
+  };
 }
 
 export interface TaskNode {

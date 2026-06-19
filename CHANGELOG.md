@@ -4,7 +4,34 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-## [0.6.15] - 2026-06-16
+## [1.0.0] - 2026-06-19
+
+首个正式版本。在 0.6.x 基础上完成「诚实执行语义」收敛与「上下文压缩」体系，所有新增能力均端到端接线到 CLI / MCP / orchestrator。
+
+### Added
+
+- **混合压缩模型策略（compressor role）**：新增 `compressor` 角色，默认复用 economy tier（`backend: "inherit"`）——配置了外部 provider（OpenAI/Anthropic/百炼）就用其 economy 模型，纯离线则回退内嵌 minicpm。零额外配置。
+- **内嵌模型首次自动下载**：无外部 LLM 时，`resolveCompressionModel` 复用既有断点续传下载器，首次按需拉取 minicpm GGUF 到 `~/.graphflow/models/`（类似 Playwright 浏览器下载）。
+- **图结构压缩（零成本，默认开启）**：`graph-compression.ts` 提供边权重加权连通子图（`extractConnectedSubgraph`）、加权 PageRank 中心性（`computePageRank`）、检索序与中心性融合重排（`blendWithCentrality`）。preview / orchestrator 默认启用。
+- **语义压缩（opt-in）**：`semantic-compression.ts` 通过 minicpm/economy LLM 对相似节点聚类合并（`clusterSimilarNodes` + `summarizeCluster`）、长节点改写（`densifyNodeContent`），由 `graphPolicy.compression.enabled` 开启。
+- **RepoMap 概览模式（opt-in）**：`repo-map.ts` 在 token 预算紧张时返回模块级地图（每模块一行 exports 摘要），由 `compression.enableRepoMapFallback` 开启。
+- **自适应 Token 预算（opt-in）**：`adaptive-budget.ts` 的 `estimateContextBudget` 按任务复杂度（refactor/多文件/架构/局部修复/加测试）动态调整预算，由 `compression.enableAdaptiveBudget` 开启。
+- **HNSW 向量索引（可选依赖）**：`hnsw-index.ts` 在候选集 ≥200 节点时使用 hnswlib-node ANN 加速（10~100x），未安装时优雅降级线性扫描。`hnswlib-node` 列为 optionalDependency。
+- **`buildEnhancedContextPackage`**：统一六步压缩 pipeline（RepoMap fallback → 关键词+向量召回 → 图压缩 → 语义压缩 → 分层配额 → 边扩展），preview 与 orchestrator 共用。
+- **压缩诊断**：`route diagnose` 输出新增 `compression=<backend>:<provider>/<model>` 行，可查当前压缩模型来源。
+- 测试 m43（bridge 模式）、m44（增强压缩）、m45（真机 benchmark）。
+
+### Changed
+
+- **执行语义诚实化（bridge 模式）**：`graphflow_run` 默认进入 bridge 模式——规划 + 压缩上下文后输出 `executionDescriptor` 移交外部 coding agent 执行，状态为 `HUMAN_REVIEW_REQUIRED` 并标注 `[DELEGATED]`，不再伪造 `COMPLETED`。
+- **校验启发式标注**：规则校验结果统一标注 `[heuristic]` 与 `heuristic_validation` riskTag；检测并拒绝 provider 占位符回显（`[openai:model] ...`）。
+- `graphPolicy.compression` 配置项扩展：`enableGraphCompression` / `enableRepoMapFallback` / `enableAdaptiveBudget` / `enableHnsw`。
+
+### Fixed
+
+- worker 兜底分支不再返回 `"Simulated change..."` 伪造输出，无可用执行模式时抛出明确错误。
+- README 版本号、测试数与失效文档引用同步至 1.0。
+
 
 ### Added
 

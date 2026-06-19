@@ -4,25 +4,25 @@ A Context-Aware Multi-Agent Orchestration Engine.
 
 GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，将 **Graphify 式知识图谱** 与 **Superpowers 式任务编排** 整合为可本地运行的上下文层：自动建图、压缩检索、规划执行、经验沉淀，并通过 CLI、MCP 与 VS Code 扩展对外暴露。
 
-## 当前能力总览（v0.6.13）
+## 当前能力总览（v1.0.0）
 
 | 能力域 | 说明 |
 | --- | --- |
-| **任务编排** | 按任务复杂度分流 simple / complex；DAG 并行执行、校验、重试、集成轮 |
+| **任务规划与移交** | 按任务复杂度分流 simple / complex；DAG 规划；默认 **bridge 模式**输出结构化任务描述符交给外部 coding agent 执行 |
 | **模型路由** | Smart / Economy 双 tier；多 provider 健康探测与 fallback（OpenAI、Anthropic、百炼、豆包、OpenBMB） |
 | **知识图谱** | 工作区 AST 索引（TS/JS/Python/Rust/Go/C/C++）；File / Module / Symbol 节点 + 依赖/引用/定义边 |
-| **上下文压缩** | L1/L2/L3 分层锚点；近无损打包；可选向量召回 + RRF 融合；默认 `maxContextTokens: 1500` |
+| **上下文压缩** | L1/L2/L3 分层锚点；近无损打包；图结构压缩（边权重+PageRank，零成本默认开启）；可选语义压缩（minicpm/economy LLM 聚类合并）；向量召回 + RRF + HNSW；RepoMap 概览；自适应预算 |
 | **持续建图** | 默认 `autoIndexOnSave`；preview / run 前按需增量索引（`hasPendingGraphIndexWork`） |
 | **语义增强** | 可选 post-index LLM 语义 enrich；OpenBMB 本地 embedded 模式 |
 | **学习飞轮** | Episodic Memory、Reflection、Skill 节点、nightly 学习、技能提示注入规划 |
 | **Agent 接入** | CLI `--json`；MCP stdio（9 工具）；Cursor / Claude Code 规则与示例配置 |
 | **VS Code 扩展** | Settings、建图、路由测试、Context Preview、**知识图谱可视化**、Skill Insights、Chat Agent |
 | **存储后端** | `file`（JSON）/ `memory` / `sqlite`（FTS5）/ `mcp-http`（Graphify） |
-| **工程质量** | TypeScript strict；**41 测试文件 / 177 tests**；`npm run ci` 含扩展 esbuild 打包与 bundled runtime smoke |
+| **工程质量** | TypeScript strict；**45 测试文件 / 200+ tests**；`npm run ci` 含扩展 esbuild 打包与 bundled runtime smoke |
 
 ### 一句话总结
 
-> 从 task 描述出发，自动规划 → 路由模型 → 压缩图谱上下文（含向量召回）→ 执行/校验/重试，并把经验沉淀回知识图谱；Coding Agent 通过 MCP/CLI 优先消费压缩上下文而非整库扫描。
+> 从 task 描述出发，自动规划 → 路由模型 → 压缩图谱上下文（含向量召回）→ **输出结构化执行描述符交给外部 coding agent**，并把经验沉淀回知识图谱；定位为 **上下文与规划服务（context service）**，而非独立执行器。
 
 ### v0.6.7 – v0.6.13 近期演进
 
@@ -51,7 +51,7 @@ GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，将 *
 
 ### 发布信息
 
-- 最新版本：**v0.6.13**（root + vscode-extension）；npm：`@roarpeng/graphflow@0.6.13`
+- 最新版本：**v1.0.0**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.0.0`
 - **GitHub Release**：push 到 `main` 且 CI 通过后自动发布 VSIX（见 [Actions](https://github.com/Roarpeng/GraphFlow/actions)）
 - 变更日志：`CHANGELOG.md`
 
@@ -68,7 +68,7 @@ npm install
 npm run ci
 ```
 
-预期：`lint` 无错误、`build` 成功、**177 tests** 通过、扩展 bundle 与 runtime smoke 通过。
+预期：`lint` 无错误、`build` 成功、**200+ tests** 通过、扩展 bundle 与 runtime smoke 通过。
 
 ## Agent 工具接入
 
@@ -142,6 +142,54 @@ npm run start -- skill insights
 ```
 
 ## 进阶能力
+
+### 上下文压缩（v1.0 核心）
+
+GraphFlow 的压缩采用「三层渐进」策略，先用零成本图结构压缩砍掉冗余节点，再按需用 LLM 做语义合并：
+
+| 层 | 机制 | 成本 | 默认 |
+| --- | --- | --- | --- |
+| 图结构压缩 | 边权重连通子图 + PageRank 中心性重排 | 零 LLM | **开启** |
+| 向量召回 | embedding + RRF 融合；候选 ≥200 自动用 HNSW ANN | 零 LLM | 配 embedding 时开启 |
+| 语义压缩 | minicpm/economy LLM 聚类合并相似节点 + 长节点改写 | LLM | opt-in |
+| RepoMap 概览 | 预算紧张时返回模块级地图 | 零 LLM | opt-in |
+| 自适应预算 | 按任务复杂度动态调整 token 预算 | 零 LLM | opt-in |
+
+**压缩模型策略（零额外配置）**：压缩复用 economy tier——
+
+- 配了外部 provider（OpenAI/Anthropic/百炼）→ 自动用其 economy 模型（如 `gpt-4.1-mini`）
+- 纯离线无外部 LLM → 自动回退内嵌 minicpm，**首次使用按需下载** GGUF 到 `~/.graphflow/models/`（约 650MB，仅一次）
+
+配置示例：
+
+```json
+{
+  "graphPolicy": {
+    "compression": {
+      "enabled": true,
+      "backend": "inherit",
+      "enableGraphCompression": true,
+      "enableHnsw": true,
+      "enableRepoMapFallback": false,
+      "enableAdaptiveBudget": false,
+      "autoDownloadEmbedded": true
+    }
+  }
+}
+```
+
+查看当前压缩模型来源：
+
+```bash
+npm run start -- route diagnose
+# 输出含：compression=inherit:openai/gpt-4.1-mini
+```
+
+**HNSW 加速（可选依赖）**：大仓库（候选 ≥200 节点）向量召回自动使用 HNSW ANN（10~100x 提速）。需安装可选依赖：
+
+```bash
+npm install hnswlib-node   # 未安装时自动降级线性扫描，不影响功能
+```
 
 ### SQLite / FTS5 后端
 
@@ -265,8 +313,7 @@ code --install-extension artifacts/graphflow-vscode-*.vsix
 3. `context preview` → `summary > 0` 且 `anchors > 0`
 4. VS Code **Show Graph** → 画布正常显示节点聚类（非角落小点）
 5. `plan` / `run` 返回正常输出
-
-正式测试文档：`docs/testing/2026-05-28-formal-usage-test-plan.md`
+6. `route diagnose` → 显示 `compression=<backend>:<provider>/<model>`
 
 ## 常见问题
 
@@ -277,7 +324,7 @@ code --install-extension artifacts/graphflow-vscode-*.vsix
 
 **知识图谱面板空白或只有小点**
 
-- 升级到 **v0.6.13+** 并重载窗口
+- 升级到 **v1.0.0+** 并重载窗口
 - 点击画布工具栏 **「适应」**
 
 **API Key 未配置**
@@ -300,7 +347,7 @@ GraphFlow/
 │   └── surfaces/
 │       ├── cli/        # CLI + runtime 子模块
 │       └── mcp/        # MCP server
-├── tests/              # 41 文件 / 177 tests
+├── tests/              # 45 文件 / 200+ tests
 ├── vscode-extension/   # VS Code 面板与命令
 ├── docs/
 └── CHANGELOG.md

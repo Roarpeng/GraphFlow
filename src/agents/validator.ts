@@ -7,20 +7,32 @@ export function validateTaskResult(task: string, workerOutput: string): Validati
   if (!task.trim()) {
     return {
       passed: false,
-      feedback: "Task cannot be empty.",
+      feedback: "[heuristic] Task cannot be empty.",
       matchedCriteria: [],
       missingCriteria: ["task"],
-      riskTags: ["invalid_input"],
+      riskTags: ["invalid_input", "heuristic_validation"],
     };
   }
 
   if (!workerOutput.trim()) {
     return {
       passed: false,
-      feedback: "Worker output is empty.",
+      feedback: "[heuristic] Worker output is empty.",
       matchedCriteria: [],
       missingCriteria: extractCriteria(task),
-      riskTags: ["empty_output"],
+      riskTags: ["empty_output", "heuristic_validation"],
+    };
+  }
+
+  // Detect placeholder/fallback output from provider adapters
+  const isPlaceholder = /^\[(openai|anthropic|bailian|doubao|openbmb):[^\]]+\]/i.test(workerOutput.trim());
+  if (isPlaceholder) {
+    return {
+      passed: false,
+      feedback: "[heuristic] Worker output appears to be a provider fallback placeholder, not real execution result.",
+      matchedCriteria: [],
+      missingCriteria: extractCriteria(task),
+      riskTags: ["placeholder_output", "heuristic_validation"],
     };
   }
 
@@ -31,19 +43,19 @@ export function validateTaskResult(task: string, workerOutput: string): Validati
   if (missingCriteria.length > 0) {
     return {
       passed: false,
-      feedback: `Validation failed: missing criteria -> ${missingCriteria.join(", ")}`,
+      feedback: `[heuristic] Validation failed: missing criteria -> ${missingCriteria.join(", ")}`,
       matchedCriteria,
       missingCriteria,
-      riskTags: ["criteria_mismatch"],
+      riskTags: ["criteria_mismatch", "heuristic_validation"],
     };
   }
 
   return {
     passed: true,
-    feedback: `Validation passed: matched ${matchedCriteria.length}/${criteria.length} criteria.`,
+    feedback: `[heuristic] Validation passed: matched ${matchedCriteria.length}/${criteria.length} criteria. Note: this is substring-based heuristic validation, not semantic verification.`,
     matchedCriteria,
     missingCriteria: [],
-    riskTags: [],
+    riskTags: ["heuristic_validation"],
   };
 }
 

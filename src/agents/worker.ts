@@ -46,6 +46,9 @@ export async function runWorker(input: WorkerInput): Promise<string> {
     return executeRolePrompt("worker", taskWithFeedback, input.selection, input.context);
   }
 
-  // Default simulate path (backward-compatible)
-  return `Simulated change for task: ${input.task}`;
+  // No valid execution mode configured
+  throw new Error(
+    "Worker cannot execute: no selection provided and bridge mode not enabled. " +
+    "Configure a provider/model or set executionMode to 'bridge' to delegate execution to external agents."
+  );
 }

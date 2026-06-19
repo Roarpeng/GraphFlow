@@ -51,6 +51,16 @@
       "sleepMs": 1000,
       "timeoutMs": 5000,
       "autoRunOnIndex": true
+    },
+    "compression": {
+      "enabled": false,
+      "backend": "inherit",
+      "enableGraphCompression": true,
+      "enableHnsw": true,
+      "enableRepoMapFallback": false,
+      "enableAdaptiveBudget": false,
+      "autoDownloadEmbedded": true,
+      "timeoutMs": 5000
     }
   },
   "learningPolicy": {

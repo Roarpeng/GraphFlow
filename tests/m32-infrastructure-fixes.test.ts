@@ -61,10 +61,9 @@ describe("Worker bridge mode", () => {
     );
   });
 
-  it("preserves default simulate string for backward compatibility", async () => {
+  it("throws when no execution mode is configured (no fake simulate output)", async () => {
     const { runWorker } = await import("../src/agents/worker");
-    const result = await runWorker({ task: "do stuff" });
-    expect(result).toBe("Simulated change for task: do stuff");
+    await expect(runWorker({ task: "do stuff" })).rejects.toThrow(/cannot execute/i);
   });
 
   it("preserves outputHint shortcut", async () => {

@@ -41,10 +41,12 @@ describe("M14 skill flywheel", () => {
         graphClient: client,
         enableSkillFlywheel: true,
         skillHintsLimit: 3,
+        executionMode: "bridge",
       }
     );
 
-    expect(run.status).toBe("COMPLETED");
+    expect(run.status).toBe("HUMAN_REVIEW_REQUIRED");
     expect(run.feedback).toContain("skills(hints=");
+    expect(run.executionDescriptor).toBeDefined();
   });
 });

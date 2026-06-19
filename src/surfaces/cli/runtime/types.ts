@@ -112,6 +112,12 @@ export interface RunTaskSummary {
   status: TaskStatus;
   attempts: number;
   feedback: string;
+  executionDescriptor?: {
+    action: "execute";
+    task: string;
+    context: string;
+    retryHints: string[];
+  };
 }
 
 export interface RoutingDiagnosisResult {
@@ -132,6 +138,12 @@ export interface RoutingDiagnosisResult {
     provider: string;
     model: string;
     fallbackApplied: boolean;
+  };
+  compression: {
+    backend: string;
+    provider: string;
+    model: string;
+    embedded: boolean;
   };
 }
 

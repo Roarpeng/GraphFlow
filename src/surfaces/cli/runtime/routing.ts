@@ -16,6 +16,7 @@ import {
 } from "../../../routing/model-router";
 import { buildFallbackChain, buildProviderHealthMap } from "../../../routing/provider-health";
 import { executeRolePrompt } from "../../../routing/provider-executor";
+import { describeCompressionBackend } from "../../../graph/compression-model";
 import { applyOpenBmbRuntimeEnv, buildEmbeddingOptions } from "./env.js";
 import { extractTokenCost } from "./helpers.js";
 import type {
@@ -53,6 +54,7 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       enableEpisodicMemory: config.learningPolicy.enableFlywheel,
       enableLlmAgents: config.tiers.smart.provider === "openbmb" || config.tiers.economy.provider === "openbmb",
       enableLlmTriage: config.tiers.smart.provider === "openbmb" || config.tiers.economy.provider === "openbmb",
+      executionMode: "bridge", // Default to bridge mode: delegate execution to external agents
       ...(configPath ? { configPath } : {}),
       ...embeddingOptions,
       ...(config.skillPolicy?.enableSkillFlywheel
@@ -71,6 +73,15 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
         ? { enableNearLosslessMode: config.graphPolicy.enableNearLosslessMode }
         : {}),
       ...(config.graphPolicy.layerQuota ? { layerQuota: config.graphPolicy.layerQuota } : {}),
+      ...(config.graphPolicy.compression?.enableGraphCompression !== undefined
+        ? { enableGraphCompression: config.graphPolicy.compression.enableGraphCompression }
+        : {}),
+      ...(config.graphPolicy.compression?.enableAdaptiveBudget
+        ? { enableAdaptiveBudget: true }
+        : {}),
+      ...(config.graphPolicy.compression?.enableRepoMapFallback
+        ? { enableRepoMapFallback: true }
+        : {}),
     };
 
     const result = await orchestrate({ task }, orchestrateOptions);
@@ -86,6 +97,7 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       status: result.status,
       attempts: result.attempts,
       feedback: result.feedback,
+      ...(result.executionDescriptor ? { executionDescriptor: result.executionDescriptor } : {}),
     };
   } catch (error) {
     appendFeedbackEvent(eventsPath, {
@@ -120,6 +132,8 @@ export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResu
   const worker = resolve("worker");
   const validator = resolve("validator");
 
+  const compression = describeCompressionBackend(config, configPath);
+
   return {
     dynamicRouting: config.routingPolicy?.enableDynamicRouting ?? false,
     health,
@@ -139,6 +153,7 @@ export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResu
       model: validator.model,
       fallbackApplied: validator.fallbackApplied,
     },
+    compression,
   };
 }
 
@@ -151,6 +166,7 @@ export function diagnoseRouting(configPath?: string): string {
     `planner=${result.planner.provider}/${result.planner.model}${result.planner.fallbackApplied ? ":fallback" : ""}`,
     `worker=${result.worker.provider}/${result.worker.model}${result.worker.fallbackApplied ? ":fallback" : ""}`,
     `validator=${result.validator.provider}/${result.validator.model}${result.validator.fallbackApplied ? ":fallback" : ""}`,
+    `compression=${result.compression.backend}:${result.compression.provider}/${result.compression.model}${result.compression.embedded ? ":embedded" : ""}`,
   ].join("; ");
 }
 
