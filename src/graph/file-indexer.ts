@@ -1,6 +1,6 @@
 import { logger } from "../utils/logger";
 import { hashTextHex as hashText } from "../utils/hash";
-import { readdirSync, readFileSync, statSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join, relative, dirname, posix } from "node:path";
 import { createHash } from "node:crypto";
 import type { GraphEdge, GraphNode } from "../core/types";
@@ -431,7 +431,7 @@ function walkFiles(rootDir: string, includeExtensions: string[]): string[] {
 function normalizeImportTarget(target: string, importerRelPath: string): string | undefined {
   let cleaned = target
     .replace(/\\/g, "/")
-    .replace(/\.(ts|tsx|js|jsx|py|rs|go|hpp|hxx|cpp|cxx|cc|h|c)$/i, "");
+    .replace(/\.(ts|tsx|js|jsx|py|rs|go|hpp|hxx|cpp|cxx|cc|h|c|java|rb|rake|gemspec)$/i, "");
   if (!cleaned) {
     return undefined;
   }
@@ -448,7 +448,7 @@ function normalizeImportTarget(target: string, importerRelPath: string): string 
 }
 
 function moduleKey(relPath: string): string {
-  return relPath.replace(/\.(ts|tsx|js|jsx|md|json|py|rs|go|hpp|hxx|cpp|cxx|cc|h|c)$/i, "");
+  return relPath.replace(/\.(ts|tsx|js|jsx|md|json|py|rs|go|hpp|hxx|cpp|cxx|cc|h|c|java|rb|rake|gemspec)$/i, "");
 }
 
 function dedupEdges(edges: GraphEdge[]): GraphEdge[] {
@@ -466,6 +466,220 @@ function dedupEdges(edges: GraphEdge[]): GraphEdge[] {
 
 function normalizePath(pathText: string): string {
   return pathText.replace(/\\/g, "/");
+}
+
+/**
+ * Incremental single-file indexing — borrowed from codebase-memory-mcp's
+ * file-watcher pattern. Allows VS Code onSave hooks (or any file watcher)
+ * to update the graph for one changed file without walking the entire workspace.
+ *
+ * Steps:
+ *   1. Prune existing nodes/edges for the file (if any)
+ *   2. Extract symbols + imports via the language indexer
+ *   3. Upsert new nodes/edges
+ *   4. Update the index cache entry for this file
+ *
+ * @param client Graph client
+ * @param rootDir Workspace root (for relative path + cache location)
+ * @param absPath Absolute path to the file to index
+ * @param options Optional config
+ */
+export async function indexSingleFile(
+  client: GraphClient,
+  rootDir: string,
+  absPath: string,
+  options?: { includeExtensions?: string[]; maxFileSizeBytes?: number }
+): Promise<{ indexedFiles: number; indexedSymbols: number; indexedReferences: number; skipped: boolean; reason?: string }> {
+  const includeExtensions = options?.includeExtensions ?? DEFAULT_EXTENSIONS;
+  const maxFileSizeBytes = options?.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE;
+
+  // Validate extension
+  if (!includeExtensions.some((ext) => absPath.toLowerCase().endsWith(ext))) {
+    return { indexedFiles: 0, indexedSymbols: 0, indexedReferences: 0, skipped: true, reason: "extension not in includeExtensions" };
+  }
+
+  // Validate size
+  let stat;
+  try {
+    stat = statSync(absPath);
+  } catch {
+    return { indexedFiles: 0, indexedSymbols: 0, indexedReferences: 0, skipped: true, reason: "file stat failed" };
+  }
+  if (stat.size > maxFileSizeBytes) {
+    return { indexedFiles: 0, indexedSymbols: 0, indexedReferences: 0, skipped: true, reason: "file exceeds maxFileSizeBytes" };
+  }
+
+  const relPath = normalizePath(relative(rootDir, absPath));
+  const mtimeMs = stat.mtimeMs;
+  const content = readFileSync(absPath, "utf8");
+  const currentHash = createHash("md5").update(content).digest("hex");
+
+  const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
+  const cacheState = loadCacheState(cachePath, false);
+  const prev = cacheState[relPath];
+
+  // Skip if unchanged
+  if (prev && prev.mtimeMs === mtimeMs && prev.hash === currentHash) {
+    return { indexedFiles: 0, indexedSymbols: 0, indexedReferences: 0, skipped: true, reason: "unchanged" };
+  }
+
+  // Prune existing nodes for this file
+  if (client.deleteNode) {
+    await pruneFileFromGraph(client, relPath);
+  }
+
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+
+  const fileNodeId = `file:${relPath}`;
+  const moduleNodeId = `module:${moduleKey(relPath)}`;
+  const indexer = getIndexerForFile(relPath);
+  const language = indexer?.language ?? (relPath.split(".").pop() ?? "text");
+
+  let declared: IndexedSymbol[] = [];
+  let imports: string[] = [];
+
+  if (indexer) {
+    const extracted = await indexer.extract(relPath, content);
+    declared = extracted.symbols.map((sym) => ({
+      ...sym,
+      nodeId: `symbol:${relPath}:${hashText(sym.name)}`,
+    }));
+    imports = extracted.imports.map((imp) => imp.module);
+  }
+
+  const exportNames = declared
+    .filter((s) => s.exported && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(s.name))
+    .map((s) => s.name);
+  const uniqueExports = Array.from(new Set(exportNames));
+  const exportsSuffix = uniqueExports.length > 0
+    ? ` # exports: ${uniqueExports.slice(0, 8).join(", ")}`
+    : "";
+
+  nodes.push({
+    id: fileNodeId,
+    type: "File",
+    content: `${relPath}${exportsSuffix}`,
+    metadata: {
+      path: relPath,
+      language,
+      exports: uniqueExports,
+      symbolCount: declared.length,
+      sizeBytes: stat.size,
+    },
+  });
+  nodes.push({ id: moduleNodeId, type: "Module", content: moduleKey(relPath) });
+  edges.push({ from: fileNodeId, to: moduleNodeId, relation: "depends_on" });
+
+  for (const symbol of declared) {
+    const compactSig = `${symbol.kind} ${symbol.name}${symbol.exported ? " (exported)" : ""} @${relPath}:${symbol.line}`;
+    const signature = symbol.signature ?? compactSig;
+    const signatureHash = hashText(`${signature}\n${symbol.jsdoc ?? ""}\n${symbol.returnType ?? ""}`);
+    nodes.push({
+      id: symbol.nodeId,
+      type: "Symbol",
+      content: compactSig,
+      metadata: {
+        name: symbol.name,
+        kind: symbol.kind,
+        exported: symbol.exported,
+        line: symbol.line,
+        file: relPath,
+        signature,
+        signatureHash,
+        ...(symbol.jsdoc ? { jsdoc: symbol.jsdoc } : {}),
+        ...(symbol.visibility ? { visibility: symbol.visibility } : {}),
+        ...(symbol.paramsCount !== undefined ? { paramsCount: symbol.paramsCount } : {}),
+        ...(symbol.returnType ? { returnType: symbol.returnType } : {}),
+        ...(symbol.complexity !== undefined ? { complexity: symbol.complexity } : {}),
+      },
+    });
+    edges.push({ from: fileNodeId, to: symbol.nodeId, relation: "defines" });
+  }
+
+  for (const target of imports) {
+    const targetModule = normalizeImportTarget(target, relPath);
+    if (!targetModule) {
+      continue;
+    }
+    const importNodeId = `module:${targetModule}`;
+    nodes.push({ id: importNodeId, type: "Module", content: targetModule });
+    edges.push({ from: moduleNodeId, to: importNodeId, relation: "imports" });
+  }
+
+  // Cross-file references: scan content against existing graph symbols
+  let referenceCount = 0;
+  const snapshot = client.readSnapshot?.();
+  if (snapshot && indexer) {
+    const ownNames = new Set(declared.map((s) => s.name));
+    const identifierRe = /\b\w{3,}\b/g;
+    const matches = content.match(identifierRe);
+    if (matches) {
+      const seenIdent = new Set<string>();
+      // Build symbol index from existing snapshot (excluding this file's own symbols)
+      const symbolIndex = new Map<string, { nodeId: string; file: string }[]>();
+      for (const node of snapshot.nodes) {
+        if (node.type !== "Symbol" || !node.metadata?.name) continue;
+        if (typeof node.metadata.file === "string" && node.metadata.file === relPath) continue;
+        const list = symbolIndex.get(node.metadata.name as string) ?? [];
+        list.push({ nodeId: node.id, file: node.metadata.file as string });
+        symbolIndex.set(node.metadata.name as string, list);
+      }
+      for (const name of matches) {
+        if (seenIdent.has(name)) continue;
+        seenIdent.add(name);
+        if (name.length < 3 || REFERENCE_SKIPLIST.has(name)) continue;
+        if (ownNames.has(name)) continue;
+        const defs = symbolIndex.get(name);
+        if (!defs || defs.length === 0) continue;
+        for (const def of defs) {
+          edges.push({ from: fileNodeId, to: def.nodeId, relation: "references" });
+          referenceCount += 1;
+        }
+      }
+    }
+  }
+
+  await client.upsertNodes(nodes);
+  await client.upsertEdges(dedupEdges(edges));
+
+  // Update cache entry for this file
+  cacheState[relPath] = {
+    mtimeMs,
+    hash: currentHash,
+    numNodes: nodes.length,
+  };
+  try {
+    const dir = dirname(cachePath);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(cachePath, JSON.stringify({ version: 2, state: cacheState }, null, 2), "utf8");
+  } catch (error) {
+    logger.warn({ error }, "Failed to write index cache after single-file index");
+  }
+
+  logger.info({ relPath, symbols: declared.length, references: referenceCount }, "Single file indexed");
+
+  return {
+    indexedFiles: 1,
+    indexedSymbols: declared.length,
+    indexedReferences: referenceCount,
+    skipped: false,
+  };
+}
+
+/**
+ * Quick check whether the index cache exists and is non-empty.
+ * Cheaper than hasPendingGraphIndexWork (no full workspace walk).
+ */
+export function hasIndexCache(rootDir: string): boolean {
+  const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
+  if (!existsSync(cachePath)) return false;
+  try {
+    const cacheState = loadCacheState(cachePath, false);
+    return Object.keys(cacheState).length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function extOf(relPath: string): string {

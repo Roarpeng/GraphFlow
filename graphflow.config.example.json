@@ -38,7 +38,7 @@
     "autoIndexOnRun": true,
     "autoIndexOnSave": true,
     "workspaceRoot": ".",
-    "includeExtensions": [".ts", ".tsx", ".js", ".jsx", ".md", ".json"],
+    "includeExtensions": [".ts", ".tsx", ".js", ".jsx", ".md", ".json", ".py", ".rs", ".go", ".c", ".h", ".cpp", ".cc", ".hpp", ".java", ".rb"],
     "transport": "file",
     "graphStorePath": "graphflow-out/graphflow-graph.json",
     "maxContextTokens": 1500,

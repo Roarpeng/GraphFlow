@@ -1,5 +1,6 @@
 import { brainstormTask } from "../../../agents/brainstormer";
 import { planTasks } from "../../../agents/planner";
+import { planInsight, type SixHatsInsight } from "../../../agents/insight";
 import { resolveConfig } from "../../../config/resolve";
 import { resolveLearningPath } from "../../../config/paths";
 import { orchestrate, type OrchestrateOptions } from "../../../core/orchestrator";
@@ -275,3 +276,32 @@ export function planAndBrainstorm(task: string): string {
       .join(" | ")}`,
   ].join("; ");
 }
+
+export interface PlanInsightResult {
+  insight: SixHatsInsight;
+  plan: Array<{
+    id: string;
+    description: string;
+    dependencies: string[];
+  }>;
+}
+
+export async function planInsightResult(task: string, configPath?: string): Promise<PlanInsightResult> {
+  const config = resolveConfig(configPath);
+  applyOpenBmbRuntimeEnv(config);
+  const selection = resolveModelForRole("planner");
+
+  const { insight, plan } = await planInsight(task, { selection });
+
+  return {
+    insight,
+    plan: plan.map((node) => ({
+      id: node.id,
+      description: node.description,
+      dependencies: node.dependencies,
+    })),
+  };
+}
+
+// Re-export planInsight so it can be imported from runtime.ts
+export { planInsight } from "../../../agents/insight";
