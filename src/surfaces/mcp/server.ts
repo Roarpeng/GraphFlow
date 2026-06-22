@@ -9,11 +9,17 @@ import {
   diagnoseRoutingResult,
   downloadOpenBmbModel,
   enrichSemanticsSilent,
+  exportArtifact,
+  getMetrics,
   getSkillInsights,
+  getTokenSavingsStats,
+  importArtifact,
+  indexFile,
   indexGraph,
   type ModelDownloadProgress,
   inspectGraph,
   planAndBrainstormResult,
+  planInsightResult,
   previewContext,
   rebuildGraph,
   runTaskResult,
@@ -133,6 +139,19 @@ export function getToolDefinitions(): ToolDefinition[] {
       },
     },
     {
+      name: "graphflow_index_file",
+      description: "Incrementally index a single file into the graph store. Use this for file-watcher / onSave hooks to avoid full workspace re-walks. Skips unchanged files automatically.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          filePath: { type: "string", description: "Absolute or workspace-relative path to the file to index." },
+          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+        },
+        required: ["filePath"],
+        additionalProperties: false,
+      },
+    },
+    {
       name: "graphflow_rebuild",
       description: "Clear graph store and index cache, then perform a full workspace re-index.",
       inputSchema: {
@@ -210,6 +229,66 @@ export function getToolDefinitions(): ToolDefinition[] {
         additionalProperties: false,
       },
     },
+    {
+      name: "graphflow_export_artifact",
+      description: "Export the current graph store to a portable gzip-compressed artifact file (analogous to codebase-memory-mcp's graph.db.zst) for team sharing. The artifact can be committed to git and imported by teammates to skip full workspace indexing. Supports --no-compress for plain JSON output.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+          outputPath: { type: "string", description: "Optional output path for the artifact file." },
+          compression: { type: "string", description: "Compression mode: 'gzip' (default) or 'none'." },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "graphflow_import_artifact",
+      description: "Import a graph artifact file into the current graph store. Teammates can use this after cloning a repo to skip the initial full workspace index.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+          inputPath: { type: "string", description: "Optional input path for the artifact file." },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "graphflow_stats",
+      description: "Return cumulative token savings statistics, showing how much GraphFlow has reduced token consumption across all context preview and task runs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "graphflow_plan_insight",
+      description: "Analyze a task through Six Thinking Hats (White/Red/Black/Yellow/Green/Blue) with automatic 5-Why chains on low-certainty observations, then generate a DAG-style plan informed by the insights. This runs a deeper analysis than graphflow_plan — use this for complex or ambiguous tasks where root-cause analysis is needed.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          task: { type: "string", description: "Task description to analyze and plan." },
+          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+        },
+        required: ["task"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "graphflow_metrics",
+      description: "Return Prometheus-compatible metrics for GraphFlow observability: token savings, graph size, compression ratio, index cache stats. Output is Prometheus text exposition format.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+        },
+        additionalProperties: false,
+      },
+    },
   ];
 }
 
@@ -227,6 +306,10 @@ export async function executeToolCall(
       );
     case "graphflow_plan":
       return textResponse(planAndBrainstormResult(readRequiredString(args.task, "task")));
+    case "graphflow_plan_insight":
+      return textResponse(
+        await planInsightResult(readRequiredString(args.task, "task"), readOptionalString(args.configPath))
+      );
     case "graphflow_preview_context":
       return textResponse(
         await previewContext(readRequiredString(args.query, "query"), readOptionalString(args.configPath))
@@ -234,6 +317,10 @@ export async function executeToolCall(
     case "graphflow_index":
       return textResponse(
         await indexGraph(readOptionalString(args.rootDir), readOptionalString(args.configPath))
+      );
+    case "graphflow_index_file":
+      return textResponse(
+        await indexFile(readRequiredString(args.filePath, "filePath"), readOptionalString(args.configPath))
       );
     case "graphflow_rebuild":
       return textResponse(
@@ -305,6 +392,28 @@ export async function executeToolCall(
       );
     case "graphflow_diagnose":
       return textResponse(diagnoseRoutingResult(readOptionalString(args.configPath)));
+    case "graphflow_export_artifact": {
+      const compressionRaw = readOptionalString(args.compression);
+      const compression = compressionRaw === "none" || compressionRaw === "gzip"
+        ? compressionRaw
+        : undefined;
+      return textResponse(
+        await exportArtifact(
+          readOptionalString(args.configPath),
+          readOptionalString(args.outputPath),
+          undefined,
+          compression ? { compression } : undefined
+        )
+      );
+    }
+    case "graphflow_import_artifact":
+      return textResponse(
+        await importArtifact(readOptionalString(args.configPath), readOptionalString(args.inputPath))
+      );
+    case "graphflow_stats":
+      return textResponse(getTokenSavingsStats(readOptionalString(args.configPath)));
+    case "graphflow_metrics":
+      return textResponse(getMetrics(readOptionalString(args.configPath)));
     default:
       throw new Error(`Unknown tool: ${call.name}`);
   }

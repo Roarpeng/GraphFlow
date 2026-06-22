@@ -5,13 +5,20 @@ import {
   diagnoseRoutingResult,
   downloadOpenBmbModel,
   enrichSemanticsSilent,
+  exportArtifact,
+  getMetrics,
   getSkillInsights,
+  getTokenSavingsStats,
+  importArtifact,
+  indexFile,
   indexGraph,
   inspectGraph,
   planAndBrainstorm,
   planAndBrainstormResult,
+  planInsightResult,
   previewContext,
   rebuildGraph,
+  resetTokenSavingsStats,
   runLearningNightly,
   runLearningNightlyResult,
   runTask,
@@ -43,6 +50,22 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       command,
       data,
       legacyText: await runTask(task, configPath),
+    };
+  }
+
+  if (command === "plan" && args[0] === "insight") {
+    const task = args.slice(1).join(" ").trim();
+    if (!task) {
+      console.log("Task is required for 'plan insight'.");
+      process.exitCode = 1;
+      return undefined;
+    }
+
+    const data = await planInsightResult(task, configPath);
+    return {
+      command: "plan-insight",
+      data,
+      legacyText: buildInsightLegacyText(data),
     };
   }
 
@@ -93,6 +116,23 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       command: "graph-index",
       data,
       legacyText: `indexedFiles=${data.indexedFiles}; indexedSymbols=${data.indexedSymbols}; indexedReferences=${data.indexedReferences}`,
+    };
+  }
+
+  if (command === "graph" && args[0] === "file") {
+    const filePath = args[1]?.trim();
+    if (!filePath) {
+      console.log("File path is required for 'graph file <path>'.");
+      process.exitCode = 1;
+      return undefined;
+    }
+    const data = await indexFile(filePath, configPath);
+    return {
+      command: "graph-file",
+      data,
+      legacyText: data.skipped
+        ? `path=${data.path}; skipped=${data.skipped}; reason=${data.reason ?? "unknown"}`
+        : `path=${data.path}; indexedFiles=${data.indexedFiles}; indexedSymbols=${data.indexedSymbols}; indexedReferences=${data.indexedReferences}`,
     };
   }
 
@@ -185,6 +225,63 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
+  if (command === "artifact" && args[0] === "export") {
+    const outputPath = args[1]?.trim() || undefined;
+    const noCompress = args.includes("--no-compress");
+    const data = await exportArtifact(configPath, outputPath, undefined, noCompress ? { compression: "none" } : undefined);
+    return {
+      command: "artifact-export",
+      data,
+      legacyText: `path=${data.path}; nodes=${data.nodeCount}; edges=${data.edgeCount}; bytes=${data.bytes}; uncompressedBytes=${data.uncompressedBytes}; compression=${data.compression}; sha256=${data.sha256.slice(0, 12)}...`,
+    };
+  }
+
+  if (command === "artifact" && args[0] === "import") {
+    const inputPath = args[1]?.trim() || undefined;
+    const data = await importArtifact(configPath, inputPath);
+    return {
+      command: "artifact-import",
+      data,
+      legacyText: data.skipped
+        ? `path=${data.path}; skipped=${data.skipped}; reason=${data.reason ?? "unknown"}`
+        : `path=${data.path}; nodes=${data.nodeCount}; edges=${data.edgeCount}; imported=${data.imported}`,
+    };
+  }
+
+  if (command === "stats") {
+    if (args[0] === "reset") {
+      const data = resetTokenSavingsStats(configPath);
+      return {
+        command: "stats-reset",
+        data,
+        legacyText: `path=${data.path}; reset=${data.reset}`,
+      };
+    }
+    const data = getTokenSavingsStats(configPath);
+    return {
+      command: "stats",
+      data,
+      legacyText: [
+        `runs=${data.totalRuns}`,
+        `rawTokens=${data.totalRawTokens}`,
+        `compressedTokens=${data.totalCompressedTokens}`,
+        `savedTokens=${data.totalSavedTokens}`,
+        `avgSavings=${data.averageSavingsPercent}%`,
+        `firstRun=${data.firstRunAt ?? "n/a"}`,
+        `lastRun=${data.lastRunAt ?? "n/a"}`,
+      ].join("; "),
+    };
+  }
+
+  if (command === "metrics") {
+    const data = getMetrics(configPath);
+    return {
+      command: "metrics",
+      data,
+      legacyText: data.text,
+    };
+  }
+
   console.log(buildCliUsage());
   process.exitCode = 1;
   return undefined;
@@ -236,3 +333,42 @@ main().catch((error) => {
   console.error("GraphFlow execution failed:", error);
   process.exitCode = 1;
 });
+
+function buildInsightLegacyText(
+  data: Awaited<ReturnType<typeof planInsightResult>>
+): string {
+  const lines: string[] = [];
+  lines.push("=== Six Thinking Hats Insight ===");
+  for (const hat of data.insight.hats) {
+    const whyStatus = hat.whyChain !== null ? "[5Why triggered]" : "";
+    lines.push(`[${hat.hat.name}] ${hat.hat.color.toUpperCase()} ${hat.hat.role} — 置信度 ${(hat.certainty * 100).toFixed(0)}% ${whyStatus}`);
+    lines.push(`  观察: ${hat.observation}`);
+    if (hat.whyChain) {
+      for (const step of hat.whyChain.steps) {
+        lines.push(`  Why ${step.level}: ${step.answer}`);
+      }
+      lines.push(`  → 根本原因: ${hat.whyChain.rootCause}`);
+    }
+    lines.push(`  关键洞察: ${hat.criticalInsight}`);
+    lines.push("");
+  }
+  lines.push("=== Blue Hat 综合 ===");
+  lines.push(data.insight.blueHatSynthesis);
+  lines.push("");
+  if (data.insight.rootCauses.length > 0) {
+    lines.push("=== 根本原因汇总 ===");
+    for (const rc of data.insight.rootCauses) {
+      lines.push(`• ${rc}`);
+    }
+    lines.push("");
+  }
+  lines.push("=== refined task ===");
+  lines.push(data.insight.refinedTaskStatement);
+  lines.push("");
+  lines.push("=== plan (informed by insight) ===");
+  for (const node of data.plan) {
+    const deps = node.dependencies.length > 0 ? `[${node.dependencies.join(",")}]` : "[-]";
+    lines.push(`${node.id}${deps}: ${node.description}`);
+  }
+  return lines.join("\n");
+}

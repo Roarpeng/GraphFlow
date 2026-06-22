@@ -35,7 +35,7 @@ export function getDefaultConfig(): GraphFlowConfig {
       autoIndexOnRun: true,
       autoIndexOnSave: true,
       workspaceRoot: process.cwd(),
-      includeExtensions: [".ts", ".tsx", ".js", ".jsx", ".md", ".json"],
+      includeExtensions: [".ts", ".tsx", ".js", ".jsx", ".md", ".json", ".py", ".rs", ".go", ".c", ".h", ".cpp", ".cc", ".hpp", ".java", ".rb"],
       transport: "file",
       graphStorePath: `${DEFAULT_OUTPUT_DIR}/graphflow-graph.json`,
       maxContextTokens: 1500,

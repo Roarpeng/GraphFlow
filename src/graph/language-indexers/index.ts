@@ -3,6 +3,8 @@ import { pythonIndexer } from "./python";
 import { rustIndexer } from "./rust";
 import { goIndexer } from "./go";
 import { cppIndexer } from "./c-cpp";
+import { javaIndexer } from "./java";
+import { rubyIndexer } from "./ruby";
 
 export interface DeclaredSymbol {
   name: string;
@@ -40,6 +42,8 @@ const INDEXERS: LanguageIndexer[] = [
   rustIndexer,
   goIndexer,
   cppIndexer,
+  javaIndexer,
+  rubyIndexer,
 ];
 
 export function getIndexerForFile(filename: string): LanguageIndexer | undefined {

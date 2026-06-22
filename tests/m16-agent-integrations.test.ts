@@ -1,4 +1,4 @@
-﻿import { readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   formatCliResult,
@@ -42,12 +42,18 @@ describe("M16 agent integrations", () => {
       "graphflow_plan",
       "graphflow_preview_context",
       "graphflow_index",
+      "graphflow_index_file",
       "graphflow_rebuild",
       "graphflow_enrich_graph",
       "graphflow_model_download",
       "graphflow_inspect_graph",
       "graphflow_skill_insights",
       "graphflow_diagnose",
+      "graphflow_export_artifact",
+      "graphflow_import_artifact",
+      "graphflow_stats",
+      "graphflow_plan_insight",
+      "graphflow_metrics",
     ]);
   });
 

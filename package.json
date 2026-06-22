@@ -6,6 +6,7 @@
   },
   "files": [
     "dist",
+    "wasm",
     "scripts/safe-postinstall.cjs",
     "README.md",
     "LICENSE",
@@ -26,7 +27,8 @@
   },
   "scripts": {
     "postinstall": "node scripts/safe-postinstall.cjs",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run build && npm run wasm:download",
+    "wasm:download": "node scripts/download-wasm-grammars.cjs",
     "test": "vitest run",
     "build": "tsc -p tsconfig.json",
     "test:watch": "vitest",

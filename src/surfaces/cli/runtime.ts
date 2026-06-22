@@ -21,11 +21,17 @@ export {
 export {
   previewContext,
   indexGraph,
+  indexFile,
   rebuildGraph,
   enrichSemanticsSilent,
   downloadOpenBmbModel,
   inspectGraph,
   getSkillInsights,
+  exportArtifact,
+  importArtifact,
+  getTokenSavingsStats,
+  resetTokenSavingsStats,
+  getMetrics,
 } from "./runtime/graph.js";
 export {
   runTask,
@@ -36,6 +42,8 @@ export {
   runLearningNightlyResult,
   planAndBrainstorm,
   planAndBrainstormResult,
+  planInsightResult,
+  planInsight,
 } from "./runtime/routing.js";
 export {
   getSettingsPanelStatus,

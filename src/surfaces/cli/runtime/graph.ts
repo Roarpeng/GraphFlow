@@ -9,9 +9,11 @@ import { createGraphClient, type GraphClient } from "../../../graph/client-facto
 import {
   createContextRefillManager,
 } from "../../../graph/context-slicer";
-import { indexWorkspaceFiles, clearGraphIndexArtifacts, hasPendingGraphIndexWork } from "../../../graph/file-indexer";
+import { indexWorkspaceFiles, clearGraphIndexArtifacts, hasPendingGraphIndexWork, indexSingleFile } from "../../../graph/file-indexer";
 import { enrichGraphSemanticsSilent, type EnricherOptions } from "../../../graph/semantic-enricher";
 import { sampleGraphForSnapshot } from "../../../graph/snapshot-view.js";
+import { getSavingsStats, resetSavingsStats, recordSavings } from "../../../graph/token-savings.js";
+import { collectMetrics } from "../../../graph/metrics.js";
 import { resolveModelForRole } from "../../../routing/model-router";
 import { buildProviderHealthMap } from "../../../routing/provider-health";
 import { withFileLock } from "../../../utils/file-lock";
@@ -149,6 +151,21 @@ export async function previewContext(query: string, configPath?: string): Promis
     pkg.tokenEstimate
   );
 
+  // Record cumulative token savings for ROI tracking
+  try {
+    const savingsPercent = calculateSavingsPercent(rawTokenEstimate, pkg.tokenEstimate);
+    recordSavings(config, {
+      timestamp: new Date().toISOString(),
+      query,
+      rawTokens: rawTokenEstimate,
+      compressedTokens: pkg.tokenEstimate,
+      savingsPercent,
+      source: "preview_context",
+    });
+  } catch {
+    // Savings tracking is best-effort; don't fail the preview if it errors
+  }
+
   return {
     query,
     summaryCount: pkg.summaryChannel.length,
@@ -190,6 +207,40 @@ export async function indexGraph(rootDir?: string, configPath?: string): Promise
   await maybeRunSemanticEnrichment(config, graphClient);
 
   return indexed;
+}
+
+/**
+ * Incremental single-file indexing — for file-watcher / onSave hooks.
+ *
+ * @param filePath Absolute or relative path to the file to index
+ * @param configPath Optional config path
+ */
+export async function indexFile(
+  filePath: string,
+  configPath?: string
+): Promise<{
+  indexedFiles: number;
+  indexedSymbols: number;
+  indexedReferences: number;
+  skipped: boolean;
+  reason?: string;
+  path: string;
+}> {
+  const config = resolveConfig(configPath);
+  applyOpenBmbRuntimeEnv(config);
+  const graphClient = createGraphClient(config);
+  const root = config.graphPolicy.workspaceRoot ?? process.cwd();
+
+  const absPath = filePath.startsWith("/") || /^[A-Za-z]:/.test(filePath)
+    ? filePath
+    : join(root, filePath);
+
+  const indexOptions = config.graphPolicy.includeExtensions
+    ? { includeExtensions: config.graphPolicy.includeExtensions }
+    : undefined;
+
+  const result = await indexSingleFile(graphClient, root, absPath, indexOptions);
+  return { ...result, path: absPath };
 }
 
 export async function rebuildGraph(rootDir?: string, configPath?: string): Promise<GraphRebuildResult> {
@@ -549,4 +600,71 @@ export async function getSkillInsights(configPath?: string, limit = 12): Promise
     storePath: resolveGraphStorePath(config),
     skills,
   };
+}
+
+export async function exportArtifact(
+  configPath?: string,
+  outputPath?: string,
+  client?: GraphClient,
+  options?: { compression?: "gzip" | "none" }
+): Promise<{
+  path: string;
+  nodeCount: number;
+  edgeCount: number;
+  bytes: number;
+  uncompressedBytes: number;
+  sha256: string;
+  compression: "none" | "gzip";
+}> {
+  const config = resolveConfig(configPath);
+  applyOpenBmbRuntimeEnv(config);
+  const graphClient = client ?? createGraphClient(config);
+  const { exportGraphArtifact } = await import("../../../graph/artifact-manager.js");
+  return exportGraphArtifact(config, outputPath, graphClient, options);
+}
+
+export async function importArtifact(
+  configPath?: string,
+  inputPath?: string
+): Promise<{ path: string; nodeCount: number; edgeCount: number; imported: boolean; skipped: boolean; reason?: string }> {
+  const config = resolveConfig(configPath);
+  applyOpenBmbRuntimeEnv(config);
+  const graphClient = createGraphClient(config);
+  const { importGraphArtifact } = await import("../../../graph/artifact-manager.js");
+  return importGraphArtifact(config, graphClient, inputPath);
+}
+
+export function getTokenSavingsStats(configPath?: string): {
+  totalRuns: number;
+  totalRawTokens: number;
+  totalCompressedTokens: number;
+  totalSavedTokens: number;
+  averageSavingsPercent: number;
+  firstRunAt: string | null;
+  lastRunAt: string | null;
+  recentRecords: Array<{
+    timestamp: string;
+    query: string;
+    rawTokens: number;
+    compressedTokens: number;
+    savingsPercent: number;
+    source: string;
+  }>;
+} {
+  const config = resolveConfig(configPath);
+  return getSavingsStats(config);
+}
+
+export function resetTokenSavingsStats(configPath?: string): { path: string; reset: boolean } {
+  const config = resolveConfig(configPath);
+  return resetSavingsStats(config);
+}
+
+export function getMetrics(configPath?: string): {
+  metrics: Record<string, number>;
+  labels: Record<string, string>;
+  text: string;
+} {
+  const config = resolveConfig(configPath);
+  return collectMetrics(config);
 }
