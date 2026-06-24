@@ -46,13 +46,15 @@ describe("M17 agent MCP installer", () => {
       GRAPHFLOW_LOG_JSON: "1",
     });
 
+    const nodeCommand = existsSync("/usr/bin/node") ? "/usr/bin/node" : process.execPath;
+
     const bundledNode = buildMcpServerNode({
       strategy: "node-bundled",
       bundledServerPath: "/tmp/server.js",
       bundledRuntimeRoot: "/tmp/runtime",
-      nodeCommand: "/usr/bin/node",
+      nodeCommand,
     });
-    expect(bundledNode.command).toBe("/usr/bin/node");
+    expect(bundledNode.command).toBe(nodeCommand);
     expect(bundledNode.args).toEqual(["/tmp/server.js"]);
     expect(bundledNode.cwd).toBe("/tmp/runtime");
     expect(bundledNode.env).toMatchObject({
@@ -68,14 +70,14 @@ describe("M17 agent MCP installer", () => {
       bundledServerPath: "/tmp/server.js",
       bundledRuntimeRoot: "/tmp/runtime",
       launcherPath: process.platform === "win32" ? winLauncher : unixLauncher,
-      nodeCommand: "/usr/bin/node",
+      nodeCommand,
       workspaceRoot: "/repo",
     });
     if (process.platform === "win32") {
       expect(launcherNode.command).toBe(winLauncher);
       expect(launcherNode.args).toEqual([]);
     } else {
-      expect(launcherNode.command).toBe("/usr/bin/node");
+      expect(launcherNode.command).toBe(nodeCommand);
       expect(launcherNode.args).toEqual([unixLauncher]);
     }
     expect(launcherNode.cwd).toBeUndefined();

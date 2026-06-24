@@ -290,6 +290,7 @@ export function getToolDefinitions(): ToolDefinition[] {
         type: "object",
         properties: {
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+          rootDir: { type: "string", description: "Optional workspace root override." },
         },
         additionalProperties: false,
       },
@@ -428,7 +429,9 @@ export async function executeToolCall(
         getTokenSavingsStats(readOptionalString(args.configPath), readOptionalString(args.rootDir))
       );
     case "graphflow_metrics":
-      return textResponse(getMetrics(readOptionalString(args.configPath)));
+      return textResponse(
+        getMetrics(readOptionalString(args.configPath), readOptionalString(args.rootDir))
+      );
     default:
       throw new Error(`Unknown tool: ${call.name}`);
   }

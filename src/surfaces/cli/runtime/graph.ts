@@ -672,11 +672,11 @@ export function resetTokenSavingsStats(configPath?: string): { path: string; res
   return resetSavingsStats(config);
 }
 
-export function getMetrics(configPath?: string): {
+export function getMetrics(configPath?: string, rootDir?: string): {
   metrics: Record<string, number>;
   labels: Record<string, string>;
   text: string;
 } {
-  const config = resolveConfig(configPath);
+  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
   return collectMetrics(config);
 }
