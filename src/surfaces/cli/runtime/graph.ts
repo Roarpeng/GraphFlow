@@ -1,4 +1,4 @@
-import { createWriteStream, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { resolveConfig } from "../../../config/resolve";
@@ -11,6 +11,7 @@ import {
   createContextRefillManager,
 } from "../../../graph/context-slicer";
 import { indexWorkspaceFiles, clearGraphIndexArtifacts, hasPendingGraphIndexWork, indexSingleFile } from "../../../graph/file-indexer";
+import { extractNodeSourcePath } from "../../../graph/graph-utils";
 import { enrichGraphSemanticsSilent, type EnricherOptions } from "../../../graph/semantic-enricher";
 import { sampleGraphForSnapshot } from "../../../graph/snapshot-view.js";
 import { getSavingsStats, resetSavingsStats, recordSavings } from "../../../graph/token-savings.js";
@@ -36,6 +37,7 @@ import {
 } from "./helpers.js";
 import type {
   ContextPreviewResult,
+  ExpandAnchorResult,
   GraphIndexResult,
   GraphRebuildResult,
   GraphSnapshotResult,
@@ -679,4 +681,72 @@ export function getMetrics(configPath?: string, rootDir?: string): {
 } {
   const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
   return collectMetrics(config);
+}
+
+/**
+ * Expand a context anchor to its full content.
+ *
+ * Context anchors returned by `previewContext` are lightweight pointers
+ * (id/type/layer). This function resolves an anchor id back to its full
+ * GraphNode content and, for Symbol nodes, optionally reads the surrounding
+ * source code lines from the original file.
+ *
+ * @param anchorId  The anchor id (e.g. "symbol:src/foo.ts:abc123")
+ * @param configPath Optional config path
+ * @param rootDir    Optional workspace root override
+ */
+export async function expandAnchor(
+  anchorId: string,
+  configPath?: string,
+  rootDir?: string
+): Promise<ExpandAnchorResult | undefined> {
+  const baseConfig = resolveConfig(configPath);
+  // Respect explicit rootDir override; otherwise keep the config's workspaceRoot
+  const config = rootDir
+    ? bindRuntimeWorkspaceRoot(baseConfig, { rootDir })
+    : baseConfig;
+  const graphClient = createGraphClient(config);
+
+  if (!graphClient.getNodesByIds) {
+    return undefined;
+  }
+
+  const nodes = await graphClient.getNodesByIds([anchorId]);
+  const node = nodes.find((n) => n.id === anchorId);
+  if (!node) {
+    return undefined;
+  }
+
+  const sourcePath = extractNodeSourcePath(node);
+  const sourceLine = typeof node.metadata?.line === "number" ? node.metadata.line : undefined;
+
+  // For Symbol nodes, try to read the surrounding source code
+  let sourceSnippet: string | undefined;
+  if (sourcePath && sourceLine !== undefined) {
+    const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
+    const absPath = join(workspaceRoot, sourcePath);
+    if (existsSync(absPath)) {
+      try {
+        const fileContent = readFileSync(absPath, "utf8");
+        const lines = fileContent.split(/\r?\n/);
+        // Read a window of lines around the symbol: 3 lines before to 20 lines after
+        const startLine = Math.max(0, sourceLine - 4);
+        const endLine = Math.min(lines.length, sourceLine + 20);
+        const snippet = lines.slice(startLine, endLine).join("\n");
+        sourceSnippet = snippet;
+      } catch {
+        // Ignore read errors — source file may not be accessible
+      }
+    }
+  }
+
+  return {
+    anchorId: node.id,
+    type: node.type,
+    content: node.content,
+    ...(sourcePath ? { sourcePath } : {}),
+    ...(sourceLine !== undefined ? { sourceLine } : {}),
+    ...(sourceSnippet ? { sourceSnippet } : {}),
+    ...(node.metadata ? { metadata: node.metadata } : {}),
+  };
 }

@@ -4,7 +4,8 @@ export type TaskStatus =
   | "VALIDATING"
   | "COMPLETED"
   | "FAILED"
-  | "HUMAN_REVIEW_REQUIRED";
+  | "HUMAN_REVIEW_REQUIRED"
+  | "DELEGATED";
 
 export type AgentRole = "planner" | "worker" | "validator" | "enricher" | "evolver" | "compressor";
 
@@ -82,5 +83,7 @@ export interface GraphEdge {
     | "co_occurs"
     | "prerequisite"
     | "improves"
-    | "conflicts_with";
+    | "conflicts_with"
+    | "calls"
+    | "inherits";
 }

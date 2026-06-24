@@ -4,10 +4,13 @@ import { planInsight, type SixHatsInsight } from "../../../agents/insight";
 import { resolveConfig } from "../../../config/resolve";
 import { resolveLearningPath } from "../../../config/paths";
 import { orchestrate, type OrchestrateOptions } from "../../../core/orchestrator";
+import type { TaskRunResult } from "../../../core/types";
 import { triageTask } from "../../../core/triage";
 import { createGraphClient } from "../../../graph/client-factory";
 import { indexWorkspaceFiles, hasPendingGraphIndexWork } from "../../../graph/file-indexer";
 import { appendFeedbackEvent } from "../../../learning/learning-events";
+import { updateEpisodeOutcome } from "../../../learning/episodic-memory";
+import { applySkillLearning } from "../../../learning/skill-flywheel";
 import { runNightlyLearning } from "../../../learning/nightly-trainer";
 import {
   resolveModelForRole,
@@ -23,6 +26,7 @@ import { extractTokenCost } from "./helpers.js";
 import type {
   LearningNightlyResult,
   PlanPreviewResult,
+  ReportOutcomeResult,
   RoutingConnectivityProbe,
   RoutingDiagnosisResult,
   RunTaskSummary,
@@ -98,6 +102,7 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       status: result.status,
       attempts: result.attempts,
       feedback: result.feedback,
+      ...(result.episodeId ? { episodeId: result.episodeId } : {}),
       ...(result.executionDescriptor ? { executionDescriptor: result.executionDescriptor } : {}),
     };
   } catch (error) {
@@ -305,3 +310,50 @@ export async function planInsightResult(task: string, configPath?: string): Prom
 
 // Re-export planInsight so it can be imported from runtime.ts
 export { planInsight } from "../../../agents/insight";
+
+/**
+ * Report the real execution outcome of a bridge-mode task back to GraphFlow.
+ *
+ * In bridge mode, `graphflow_run` delegates execution to an external coding
+ * agent and records the episode as "pending". The external agent calls this
+ * function (via the `graphflow_report_outcome` MCP tool) after it finishes
+ * executing the `executionDescriptor`. This closes the learning loop:
+ *
+ * 1. Updates the episode record from "pending" → "pass"/"fail".
+ * 2. Applies skill score updates that were skipped during delegation.
+ */
+export async function reportOutcome(
+  episodeId: string,
+  success: boolean,
+  lessons: string[],
+  configPath?: string
+): Promise<ReportOutcomeResult> {
+  const config = resolveConfig(configPath);
+  const graphClient = createGraphClient(config);
+
+  const updated = await updateEpisodeOutcome(
+    graphClient,
+    episodeId,
+    success ? "pass" : "fail",
+    lessons
+  );
+  if (!updated) {
+    return { ok: false, reason: `Episode not found: ${episodeId}` };
+  }
+
+  // Apply skill score updates that were skipped during bridge delegation.
+  if (config.skillPolicy?.enableSkillFlywheel) {
+    const syntheticRun: TaskRunResult = {
+      status: success ? "COMPLETED" : "FAILED",
+      attempts: updated.attempts,
+      feedback: updated.runFeedback ?? "",
+    };
+    await applySkillLearning(graphClient, updated.task, syntheticRun);
+  }
+
+  return {
+    ok: true,
+    episodeId: updated.id,
+    outcome: success ? "pass" : "fail",
+  };
+}

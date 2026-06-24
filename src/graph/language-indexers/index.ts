@@ -25,9 +25,31 @@ export interface ImportTarget {
   raw?: string;
 }
 
+export interface CallRelation {
+  /** Name of the function/method being called. */
+  callee: string;
+  /** Name of the enclosing function/method that makes the call, if known. */
+  caller?: string;
+  /** Line number where the call occurs. */
+  line: number;
+}
+
+export interface InheritRelation {
+  /** Name of the child type (class/interface/struct). */
+  child: string;
+  /** Name of the parent type being extended/implemented. */
+  parent: string;
+  /** Kind of inheritance: extends (class), implements (interface). */
+  kind: "extends" | "implements";
+  /** Line number of the declaration. */
+  line: number;
+}
+
 export interface ExtractionResult {
   symbols: DeclaredSymbol[];
   imports: ImportTarget[];
+  calls?: CallRelation[];
+  inherits?: InheritRelation[];
 }
 
 export interface LanguageIndexer {

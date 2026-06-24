@@ -158,7 +158,7 @@ async function runOrchestration(
           .join("; ")
       : "";
     const bridgeRun: TaskRunResult = {
-      status: "HUMAN_REVIEW_REQUIRED",
+      status: "DELEGATED",
       attempts: 0,
       feedback: `[DELEGATED] Planned ${plan.length} task(s) for external agent execution; plannerDraft=${shorten(plannerDraft)}`,
       ...(brainstormIdeas ? { brainstormIdeas } : {}),
@@ -493,6 +493,13 @@ async function maybeSyncSkillGraph(
   if (!options?.enableSkillFlywheel || !options.graphClient) {
     return;
   }
+  // Bridge mode: task is delegated to an external agent whose outcome is unknown.
+  // Skip skill score updates until the external agent reports back via
+  // updateEpisodeOutcome + applySkillLearning. Otherwise every delegated task
+  // would be counted as a failure, permanently sinking skill scores to -20.
+  if (run.status === "DELEGATED") {
+    return;
+  }
 
   await applySkillLearning(options.graphClient, task, run);
 }
@@ -507,9 +514,10 @@ async function maybeFindSimilarEpisodes(
   return findSimilarEpisodes(options.graphClient, task, 3);
 }
 
-function statusToOutcome(status: TaskStatus): "pass" | "fail" | "human_review" {
+function statusToOutcome(status: TaskStatus): "pass" | "fail" | "human_review" | "pending" {
   if (status === "COMPLETED") return "pass";
   if (status === "HUMAN_REVIEW_REQUIRED") return "human_review";
+  if (status === "DELEGATED") return "pending";
   return "fail";
 }
 

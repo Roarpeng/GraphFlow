@@ -1,4 +1,4 @@
-import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index.js";
+import type { CallRelation, DeclaredSymbol, ExtractionResult, ImportTarget, InheritRelation, LanguageIndexer } from "./index.js";
 import { getTreeSitterParser, type TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
 
 export const pythonIndexer: LanguageIndexer = {
@@ -7,10 +7,12 @@ export const pythonIndexer: LanguageIndexer = {
   async extract(filePath: string, content: string): Promise<ExtractionResult> {
     const symbols: DeclaredSymbol[] = [];
     const imports: ImportTarget[] = [];
+    const calls: CallRelation[] = [];
+    const inherits: InheritRelation[] = [];
     const parser = await getTreeSitterParser("python");
     const tree = parser.parse(content);
 
-    const traverse = (node: TreeSitterSyntaxNode) => {
+    const traverse = (node: TreeSitterSyntaxNode, caller?: string) => {
       const lineNo = node.startPosition.row + 1;
 
       if (node.type === "class_definition") {
@@ -24,6 +26,23 @@ export const pythonIndexer: LanguageIndexer = {
             line: lineNo,
             file: filePath,
           });
+
+          // Extract inheritance: superclasses field
+          const superclassesNode = node.childForFieldName("superclasses");
+          if (superclassesNode) {
+            for (const arg of superclassesNode.namedChildren) {
+              // argument_list children are the base class expressions
+              const parentText = arg.text.trim();
+              if (parentText && parentText !== "(" && parentText !== ")") {
+                inherits.push({
+                  child: name,
+                  parent: parentText,
+                  kind: "extends",
+                  line: lineNo,
+                });
+              }
+            }
+          }
         }
       } else if (node.type === "function_definition") {
         const nameNode = node.childForFieldName("name");
@@ -31,11 +50,10 @@ export const pythonIndexer: LanguageIndexer = {
           const name = nameNode.text;
           const parentType = node.parent?.type;
           const kind = parentType === "block" && node.parent?.parent?.type === "class_definition" ? "method" : "function";
-          
+
           let paramsCount = 0;
           const parametersNode = node.childForFieldName("parameters");
           if (parametersNode) {
-            // Count actual parameters (excluding punctuation like '(' and ',')
             paramsCount = parametersNode.namedChildren.length;
           }
 
@@ -47,6 +65,31 @@ export const pythonIndexer: LanguageIndexer = {
             file: filePath,
             paramsCount,
           });
+
+          // This function is the caller for nested call expressions
+          caller = name;
+        }
+      } else if (node.type === "call") {
+        // Extract function call: the "function" field holds the callee expression
+        const funcNode = node.childForFieldName("function");
+        if (funcNode) {
+          let calleeName: string | undefined;
+          if (funcNode.type === "identifier") {
+            calleeName = funcNode.text;
+          } else if (funcNode.type === "attribute") {
+            // e.g. self.method() or obj.method() → extract the attribute name
+            const attrNode = funcNode.childForFieldName("attribute");
+            if (attrNode) {
+              calleeName = attrNode.text;
+            }
+          }
+          if (calleeName) {
+            calls.push({
+              callee: calleeName,
+              ...(caller ? { caller } : {}),
+              line: lineNo,
+            });
+          }
         }
       } else if (node.type === "import_statement") {
         for (const child of node.namedChildren) {
@@ -81,11 +124,11 @@ export const pythonIndexer: LanguageIndexer = {
       }
 
       for (const child of node.children ?? node.namedChildren) {
-        traverse(child);
+        traverse(child, caller);
       }
     };
 
     traverse(tree.rootNode);
-    return { symbols, imports };
+    return { symbols, imports, calls, inherits };
   },
 };

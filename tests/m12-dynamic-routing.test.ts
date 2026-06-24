@@ -1,4 +1,4 @@
-﻿import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -107,7 +107,7 @@ describe("M12 dynamic routing", () => {
       );
 
       const output = await runTask("health check", configPath);
-      expect(output).toContain("status=HUMAN_REVIEW_REQUIRED");
+      expect(output).toContain("status=DELEGATED");
       expect(output).toContain("routes(planner=anthropic/");
       expect(output).toContain(",worker=anthropic/");
       expect(output).toContain(",validator=anthropic/");

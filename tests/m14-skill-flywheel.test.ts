@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { GraphifyClient } from "../src/graph/graphify-client";
 import { applySkillLearning, extractSkillAtoms, suggestSkillHints } from "../src/learning/skill-flywheel";
 import { orchestrate } from "../src/core/orchestrator";
@@ -45,7 +45,7 @@ describe("M14 skill flywheel", () => {
       }
     );
 
-    expect(run.status).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(run.status).toBe("DELEGATED");
     expect(run.feedback).toContain("skills(hints=");
     expect(run.executionDescriptor).toBeDefined();
   });

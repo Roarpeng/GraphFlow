@@ -5,7 +5,7 @@ import { validateTaskResult } from "../src/agents/validator";
 describe("M43 bridge mode and validation fixes", () => {
   // ── Task 1: Bridge mode returns executionDescriptor ──────────────────
   describe("Bridge mode execution", () => {
-    it("should return HUMAN_REVIEW_REQUIRED with executionDescriptor in bridge mode", async () => {
+    it("should return DELEGATED with executionDescriptor in bridge mode", async () => {
       const result = await runSimpleTask({
         task: "refactor authentication module",
         executionMode: "bridge",
@@ -15,7 +15,7 @@ describe("M43 bridge mode and validation fixes", () => {
         },
       });
 
-      expect(result.status).toBe("HUMAN_REVIEW_REQUIRED");
+      expect(result.status).toBe("DELEGATED");
       expect(result.feedback).toContain("[DELEGATED]");
       expect(result.executionDescriptor).toBeDefined();
       expect(result.executionDescriptor?.action).toBe("execute");
@@ -89,7 +89,7 @@ describe("M43 bridge mode and validation fixes", () => {
       });
 
       expect(result.status).not.toBe("COMPLETED");
-      expect(result.status).toBe("HUMAN_REVIEW_REQUIRED");
+      expect(result.status).toBe("DELEGATED");
       expect(result.feedback).toContain("DELEGATED");
     });
 

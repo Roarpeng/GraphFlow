@@ -20,6 +20,7 @@ export {
 } from "./runtime/settings.js";
 export {
   previewContext,
+  expandAnchor,
   indexGraph,
   indexFile,
   rebuildGraph,
@@ -36,6 +37,7 @@ export {
 export {
   runTask,
   runTaskResult,
+  reportOutcome,
   diagnoseRouting,
   diagnoseRoutingResult,
   runLearningNightly,

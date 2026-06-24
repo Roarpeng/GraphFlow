@@ -1,7 +1,7 @@
 import { logger } from "../../utils/logger";
 import { createRequire } from "node:module";
 import type * as TsNs from "typescript";
-import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index";
+import type { CallRelation, DeclaredSymbol, ExtractionResult, ImportTarget, InheritRelation, LanguageIndexer } from "./index";
 
 const requireFn = createRequire(__filename);
 
@@ -36,6 +36,8 @@ function extractFromAst(relPath: string, content: string, ts: typeof TsNs): Extr
   const sourceFile = ts.createSourceFile(relPath, content, ts.ScriptTarget.Latest, true, scriptKind);
   const symbols: DeclaredSymbol[] = [];
   const imports: ImportTarget[] = [];
+  const calls: CallRelation[] = [];
+  const inherits: InheritRelation[] = [];
 
   const estimateComplexity = (text: string): number => {
     const hits = text.match(/\b(if|else if|for|while|case|catch|\&\&|\|\|)\b/g);
@@ -108,11 +110,36 @@ function extractFromAst(relPath: string, content: string, ts: typeof TsNs): Extr
     return (flags & ts.ModifierFlags.Export) !== 0;
   };
 
+  const extractHeritage = (node: TsNs.ClassDeclaration | TsNs.InterfaceDeclaration, childName: string, childLine: number): void => {
+    if (!node.heritageClauses) return;
+    for (const clause of node.heritageClauses) {
+      const isImplements = clause.token === ts.SyntaxKind.ImplementsKeyword;
+      const isExtends = clause.token === ts.SyntaxKind.ExtendsKeyword;
+      if (!isImplements && !isExtends) continue;
+      for (const type of clause.types) {
+        const parentText = type.expression.getText(sourceFile);
+        if (parentText) {
+          inherits.push({
+            child: childName,
+            parent: parentText,
+            kind: isImplements ? "implements" : "extends",
+            line: childLine,
+          });
+        }
+      }
+    }
+  };
+
   for (const stmt of sourceFile.statements) {
     if (ts.isFunctionDeclaration(stmt)) {
       addDecl(stmt.name, "function", hasExport(stmt), stmt, declarationType(stmt));
     } else if (ts.isClassDeclaration(stmt)) {
       addDecl(stmt.name, "class", hasExport(stmt), stmt);
+      if (stmt.name && ts.isIdentifier(stmt.name)) {
+        const start = stmt.name.getStart(sourceFile);
+        const { line } = sourceFile.getLineAndCharacterOfPosition(start);
+        extractHeritage(stmt, stmt.name.text, line + 1);
+      }
       for (const member of stmt.members) {
         if (ts.isMethodDeclaration(member) && member.name && ts.isIdentifier(member.name)) {
           addDecl(member.name, "method", false, member, declarationType(member));
@@ -120,6 +147,11 @@ function extractFromAst(relPath: string, content: string, ts: typeof TsNs): Extr
       }
     } else if (ts.isInterfaceDeclaration(stmt)) {
       addDecl(stmt.name, "interface", hasExport(stmt), stmt);
+      if (stmt.name && ts.isIdentifier(stmt.name)) {
+        const start = stmt.name.getStart(sourceFile);
+        const { line } = sourceFile.getLineAndCharacterOfPosition(start);
+        extractHeritage(stmt, stmt.name.text, line + 1);
+      }
     } else if (ts.isTypeAliasDeclaration(stmt)) {
       addDecl(stmt.name, "type", hasExport(stmt), stmt);
     } else if (ts.isEnumDeclaration(stmt)) {
@@ -140,19 +172,49 @@ function extractFromAst(relPath: string, content: string, ts: typeof TsNs): Extr
     }
   }
 
-  const visit = (node: TsNs.Node): void => {
+  const extractCalleeName = (expr: TsNs.Expression): string | undefined => {
+    if (ts.isIdentifier(expr)) return expr.text;
+    if (ts.isPropertyAccessExpression(expr)) {
+      // e.g. obj.method() → "method"
+      return expr.name.text;
+    }
+    if (ts.isElementAccessExpression(expr)) {
+      return undefined;
+    }
+    return undefined;
+  };
+
+  const visit = (node: TsNs.Node, caller?: string): void => {
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
-      if (ts.isIdentifier(callee) && callee.text === "require" && node.arguments.length > 0) {
-        const arg = node.arguments[0];
-        if (arg && ts.isStringLiteral(arg)) imports.push({ module: arg.text, raw: arg.text });
+      // require() calls are already captured as imports
+      if (!(ts.isIdentifier(callee) && callee.text === "require")) {
+        const calleeName = extractCalleeName(callee);
+        if (calleeName) {
+          const start = callee.getStart(sourceFile);
+          const { line } = sourceFile.getLineAndCharacterOfPosition(start);
+          calls.push({
+            callee: calleeName,
+            ...(caller ? { caller } : {}),
+            line: line + 1,
+          });
+        }
       }
     }
-    ts.forEachChild(node, visit);
+    // Track enclosing function/method for call attribution
+    let nextCaller = caller;
+    if (ts.isFunctionDeclaration(node) && node.name && ts.isIdentifier(node.name)) {
+      nextCaller = node.name.text;
+    } else if (ts.isMethodDeclaration(node) && node.name && ts.isIdentifier(node.name)) {
+      nextCaller = node.name.text;
+    } else if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+      // Anonymous — keep parent caller context
+    }
+    ts.forEachChild(node, (child) => visit(child, nextCaller));
   };
-  ts.forEachChild(sourceFile, visit);
+  ts.forEachChild(sourceFile, (child) => visit(child));
 
-  return { symbols, imports };
+  return { symbols, imports, calls, inherits };
 }
 
 function fallbackExtract(relPath: string, content: string): ExtractionResult {
