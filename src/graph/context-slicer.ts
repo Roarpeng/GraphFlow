@@ -7,6 +7,7 @@ import {
   type EmbeddingProvider,
 } from "../learning/embeddings";
 import type { GraphClient } from "./client-factory";
+import { rankNodesForContextQuery } from "./graph-utils";
 import {
   extractConnectedSubgraph,
   computePageRank,
@@ -179,7 +180,7 @@ export async function buildLayeredContextPackage(
   maxTokens: number,
   options?: LayeredPackageOptions
 ): Promise<LayeredContextPackage> {
-  const keywordHits = await client.queryByKeyword(query);
+  const keywordHits = rankNodesForContextQuery(await client.queryByKeyword(query), query);
   let hits: GraphNode[] = keywordHits;
 
   if (options?.enableVectorRecall === true && options.embeddingProvider) {
@@ -411,7 +412,7 @@ export async function buildEnhancedContextPackage(
   }
 
   // Step 2: Keyword + vector retrieval (existing logic).
-  const keywordHits = await client.queryByKeyword(query);
+  const keywordHits = rankNodesForContextQuery(await client.queryByKeyword(query), query);
   let hits: GraphNode[] = keywordHits;
 
   if (options?.enableVectorRecall === true && options.embeddingProvider) {

@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-06-24
+
+### Fixed
+
+- **CI**：`m17` 测试不再硬编码 `/usr/bin/node`，兼容 GitHub Actions hosted Node 路径。
+- **图谱存储**：`graphify-file-client` 原子写入（temp + rename）；损坏 JSON 时优雅降级为空 store 并提示 rebuild。
+- **上下文检索**：`rankNodesForContextQuery` 降低 `.cursor/mcp.json`、`docs/integrations` 等配置噪声，优先 `src/` 与 Symbol 节点。
+- **MCP metrics**：`graphflow_metrics` 支持 `rootDir` 并绑定工作区。
+
 ## [1.0.2] - 2026-06-24
 
 ### Fixed

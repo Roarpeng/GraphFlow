@@ -1,6 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { GraphEdge, GraphNode } from "../core/types";
+import { logger } from "../utils/logger";
 import { tokenizeForIndex } from "./graph-utils";
 
 interface GraphStore {
@@ -49,7 +51,8 @@ export class GraphifyFileClient {
     const tokens = tokenizeForIndex(query);
     if (tokens.length === 0) {
       const normalized = query.toLowerCase();
-      return store.nodes.filter((node) => node.content.toLowerCase().includes(normalized));
+      const hits = store.nodes.filter((node) => node.content.toLowerCase().includes(normalized));
+      return hits;
     }
 
     const index = this.buildIndex(store.nodes);
@@ -130,16 +133,39 @@ export class GraphifyFileClient {
       return { nodes: [], edges: [] };
     }
 
-    const parsed = JSON.parse(raw) as Partial<GraphStore>;
-    return {
-      nodes: parsed.nodes ?? [],
-      edges: parsed.edges ?? [],
-    };
+    try {
+      const parsed = JSON.parse(raw) as Partial<GraphStore>;
+      if (!parsed || typeof parsed !== "object") {
+        throw new Error("Graph store JSON root must be an object");
+      }
+      return {
+        nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
+        edges: Array.isArray(parsed.edges) ? parsed.edges : [],
+      };
+    } catch (error) {
+      logger.warn(
+        { error, storePath: this.storePath },
+        "Corrupt graph store JSON; returning empty store (run graphflow_rebuild to repair)"
+      );
+      return { nodes: [], edges: [] };
+    }
   }
 
   private writeStore(store: GraphStore): void {
-    mkdirSync(dirname(this.storePath), { recursive: true });
-    writeFileSync(this.storePath, JSON.stringify(store, null, 2), "utf8");
+    const dir = dirname(this.storePath);
+    mkdirSync(dir, { recursive: true });
+    const payload = JSON.stringify(store, null, 2);
+    const tempPath = join(
+      dir,
+      `.graphflow-graph-${process.pid}-${randomBytes(4).toString("hex")}.tmp`
+    );
+    writeFileSync(tempPath, payload, "utf8");
+    try {
+      renameSync(tempPath, this.storePath);
+    } catch (error) {
+      rmSync(tempPath, { force: true });
+      throw error;
+    }
   }
 
   private edgeKey(edge: GraphEdge): string {
