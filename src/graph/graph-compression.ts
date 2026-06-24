@@ -16,6 +16,8 @@ export const DEFAULT_EDGE_WEIGHTS: Record<GraphEdge["relation"], number> = {
   depends_on: 0.7,
   prerequisite: 0.7,
   defines: 0.6,
+  calls: 0.65,
+  inherits: 0.6,
   validates: 0.5,
   changes: 0.4,
   improves: 0.4,

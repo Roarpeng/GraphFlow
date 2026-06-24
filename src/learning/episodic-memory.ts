@@ -6,7 +6,7 @@ export interface EpisodeRecord {
   id: string;
   task: string;
   plan: Array<{ id: string; description: string }>;
-  outcome: "pass" | "fail" | "human_review";
+  outcome: "pass" | "fail" | "human_review" | "pending";
   keyDecisions: string[];
   lessons: string[];
   attempts: number;
@@ -59,6 +59,44 @@ export async function recordEpisode(
   };
   await client.upsertNodes([node]);
   return record;
+}
+
+/**
+ * Update an existing episode's outcome after an external agent reports back.
+ * This closes the learning loop in bridge mode: the episode is initially
+ * recorded as "pending", and the external coding agent calls this to report
+ * whether execution succeeded, optionally providing lessons learned.
+ */
+export async function updateEpisodeOutcome(
+  client: GraphClient,
+  episodeId: string,
+  outcome: "pass" | "fail",
+  lessons?: string[]
+): Promise<EpisodeRecord | undefined> {
+  if (!client.getNodesByIds) {
+    return undefined;
+  }
+  const nodes = await client.getNodesByIds([episodeId]);
+  const node = nodes.find((n) => n.id === episodeId);
+  if (!node || !isEpisodeNode(node)) {
+    return undefined;
+  }
+  const rec = deserialize(node);
+  if (!rec) {
+    return undefined;
+  }
+  const updated: EpisodeRecord = {
+    ...rec,
+    outcome,
+    lessons: lessons ? lessons.slice(0, 4) : rec.lessons,
+    updatedAt: Date.now(),
+  };
+  const updatedNode: GraphNode = {
+    ...node,
+    metadata: { ...node.metadata, record: serialize(updated) },
+  };
+  await client.upsertNodes([updatedNode]);
+  return updated;
 }
 
 export async function findSimilarEpisodes(

@@ -26,7 +26,7 @@ export async function runSimpleTask(input: RunInput): Promise<TaskRunResult> {
       : "";
 
     return {
-      status: "HUMAN_REVIEW_REQUIRED",
+      status: "DELEGATED",
       attempts: 0,
       feedback: "[DELEGATED] Task packaged for external agent execution. Use executionDescriptor to execute.",
       executionDescriptor: {

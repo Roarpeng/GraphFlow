@@ -3,7 +3,9 @@ export { createVsCodeRuntime } from "./surfaces/vscode/extension";
 export {
   runTask,
   runTaskResult,
+  reportOutcome,
   previewContext,
+  expandAnchor,
   getGraphFlowSettings,
   getSettingsPanelStatus,
   testRoutingAndIndexGraph,

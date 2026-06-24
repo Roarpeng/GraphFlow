@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { orchestrate } from "../src/core/orchestrator";
 import { validateConfig } from "../src/config/loader";
 import { createGraphClient } from "../src/graph/client-factory";
@@ -48,7 +48,7 @@ describe("M9 orchestrator near-lossless integration", () => {
       }
     );
 
-    expect(run.status).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(run.status).toBe("DELEGATED");
     expect(run.feedback).toContain("context(summary=");
     expect(run.routeDecisions?.length).toBe(3);
     expect(run.executionDescriptor).toBeDefined();
@@ -63,7 +63,7 @@ describe("M9 orchestrator near-lossless integration", () => {
       { executionMode: "bridge" }
     );
 
-    expect(run.status).toBe("HUMAN_REVIEW_REQUIRED");
+    expect(run.status).toBe("DELEGATED");
     expect(run.feedback).toContain("[DELEGATED]");
     expect(run.executionDescriptor).toBeDefined();
     expect(run.executionDescriptor?.task).toContain("update readme");

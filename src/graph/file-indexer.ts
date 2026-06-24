@@ -8,7 +8,9 @@ import type { GraphClient } from "./client-factory";
 import {
   ALL_LANGUAGE_EXTENSIONS,
   getIndexerForFile,
+  type CallRelation,
   type DeclaredSymbol as ExtractedSymbol,
+  type InheritRelation,
 } from "./language-indexers/index";
 
 export interface FileIndexerOptions {
@@ -55,6 +57,8 @@ interface ParsedFile {
   declared: IndexedSymbol[];
   content: string;
   scannable: boolean;
+  calls: CallRelation[];
+  inherits: InheritRelation[];
 }
 
 interface CacheState {
@@ -210,6 +214,8 @@ export async function indexWorkspaceFiles(
 
     let declared: IndexedSymbol[] = [];
     let imports: string[] = [];
+    let fileCalls: CallRelation[] = [];
+    let fileInherits: InheritRelation[] = [];
 
     if (indexer) {
       const extracted = await indexer.extract(relPath, content);
@@ -218,6 +224,8 @@ export async function indexWorkspaceFiles(
         nodeId: `symbol:${relPath}:${hashText(sym.name)}`,
       }));
       imports = extracted.imports.map((imp) => imp.module);
+      fileCalls = extracted.calls ?? [];
+      fileInherits = extracted.inherits ?? [];
     }
 
     const exportNames = declared
@@ -286,6 +294,8 @@ export async function indexWorkspaceFiles(
       declared,
       content,
       scannable: Boolean(indexer),
+      calls: fileCalls,
+      inherits: fileInherits,
     });
 
     cacheState[relPath] = {
@@ -340,6 +350,73 @@ export async function indexWorkspaceFiles(
     }
   }
 
+  // ── Build call graph edges (caller → callee) ──────────────────────
+  let callEdgeCount = 0;
+  for (const file of parsed) {
+    if (file.calls.length === 0) continue;
+    // Map symbol names to node ids within this file for caller resolution
+    const localByName = new Map<string, string>();
+    for (const sym of file.declared) {
+      localByName.set(sym.name, sym.nodeId);
+    }
+    const seenCalls = new Set<string>();
+    for (const call of file.calls) {
+      // Resolve callee via global symbol index (may be in another file)
+      const calleeDefs = symbolIndex.get(call.callee);
+      if (!calleeDefs || calleeDefs.length === 0) continue;
+      // Prefer same-file callee, then first match
+      const calleeDef =
+        calleeDefs.find((d) => d.nodeId.startsWith(`symbol:${file.relPath}:`)) ?? calleeDefs[0];
+      if (!calleeDef) continue;
+
+      // Resolve caller: prefer the caller name from extraction, then fall back
+      // to any local symbol whose body contains the call line.
+      let callerNodeId: string | undefined;
+      if (call.caller) {
+        callerNodeId = localByName.get(call.caller);
+      }
+      if (!callerNodeId) {
+        // Skip if we can't attribute the call to a specific symbol
+        continue;
+      }
+
+      const edgeKey = `${callerNodeId}|${calleeDef.nodeId}|calls`;
+      if (seenCalls.has(edgeKey)) continue;
+      seenCalls.add(edgeKey);
+
+      edges.push({ from: callerNodeId, to: calleeDef.nodeId, relation: "calls" });
+      callEdgeCount += 1;
+    }
+  }
+
+  // ── Build inheritance edges (child → parent) ──────────────────────
+  let inheritEdgeCount = 0;
+  for (const file of parsed) {
+    if (file.inherits.length === 0) continue;
+    const localByName = new Map<string, string>();
+    for (const sym of file.declared) {
+      localByName.set(sym.name, sym.nodeId);
+    }
+    const seenInherits = new Set<string>();
+    for (const rel of file.inherits) {
+      const childNodeId = localByName.get(rel.child);
+      if (!childNodeId) continue;
+      // Resolve parent via global symbol index
+      const parentDefs = symbolIndex.get(rel.parent);
+      if (!parentDefs || parentDefs.length === 0) continue;
+      const parentDef =
+        parentDefs.find((d) => d.nodeId.startsWith(`symbol:${file.relPath}:`)) ?? parentDefs[0];
+      if (!parentDef) continue;
+
+      const edgeKey = `${childNodeId}|${parentDef.nodeId}|inherits`;
+      if (seenInherits.has(edgeKey)) continue;
+      seenInherits.add(edgeKey);
+
+      edges.push({ from: childNodeId, to: parentDef.nodeId, relation: "inherits" });
+      inheritEdgeCount += 1;
+    }
+  }
+
   await client.upsertNodes(nodes);
   await client.upsertEdges(dedupEdges(edges));
 
@@ -354,7 +431,7 @@ export async function indexWorkspaceFiles(
   return {
     indexedFiles: nodes.filter((node) => node.type === "File").length,
     indexedSymbols: nodes.filter((node) => node.type === "Symbol").length,
-    indexedReferences: referenceCount,
+    indexedReferences: referenceCount + callEdgeCount + inheritEdgeCount,
   };
 }
 
@@ -538,6 +615,8 @@ export async function indexSingleFile(
 
   let declared: IndexedSymbol[] = [];
   let imports: string[] = [];
+  let fileCalls: CallRelation[] = [];
+  let fileInherits: InheritRelation[] = [];
 
   if (indexer) {
     const extracted = await indexer.extract(relPath, content);
@@ -546,6 +625,8 @@ export async function indexSingleFile(
       nodeId: `symbol:${relPath}:${hashText(sym.name)}`,
     }));
     imports = extracted.imports.map((imp) => imp.module);
+    fileCalls = extracted.calls ?? [];
+    fileInherits = extracted.inherits ?? [];
   }
 
   const exportNames = declared
@@ -638,6 +719,55 @@ export async function indexSingleFile(
         }
       }
     }
+  }
+
+  // ── Call graph + inheritance edges (single-file incremental) ───────
+  // Build a combined symbol index: local symbols + snapshot symbols
+  const combinedSymbolIndex = new Map<string, { nodeId: string; file: string }[]>();
+  for (const sym of declared) {
+    const list = combinedSymbolIndex.get(sym.name) ?? [];
+    list.push({ nodeId: sym.nodeId, file: relPath });
+    combinedSymbolIndex.set(sym.name, list);
+  }
+  if (snapshot) {
+    for (const node of snapshot.nodes) {
+      if (node.type !== "Symbol" || !node.metadata?.name) continue;
+      const name = node.metadata.name as string;
+      const file = typeof node.metadata.file === "string" ? node.metadata.file : "";
+      const list = combinedSymbolIndex.get(name) ?? [];
+      list.push({ nodeId: node.id, file });
+      combinedSymbolIndex.set(name, list);
+    }
+  }
+
+  const localByName = new Map<string, string>();
+  for (const sym of declared) {
+    localByName.set(sym.name, sym.nodeId);
+  }
+
+  // Call edges
+  for (const call of fileCalls) {
+    const calleeDefs = combinedSymbolIndex.get(call.callee);
+    if (!calleeDefs || calleeDefs.length === 0) continue;
+    const calleeDef = calleeDefs.find((d) => d.file === relPath) ?? calleeDefs[0];
+    if (!calleeDef) continue;
+    let callerNodeId: string | undefined;
+    if (call.caller) {
+      callerNodeId = localByName.get(call.caller);
+    }
+    if (!callerNodeId) continue;
+    edges.push({ from: callerNodeId, to: calleeDef.nodeId, relation: "calls" });
+  }
+
+  // Inheritance edges
+  for (const rel of fileInherits) {
+    const childNodeId = localByName.get(rel.child);
+    if (!childNodeId) continue;
+    const parentDefs = combinedSymbolIndex.get(rel.parent);
+    if (!parentDefs || parentDefs.length === 0) continue;
+    const parentDef = parentDefs.find((d) => d.file === relPath) ?? parentDefs[0];
+    if (!parentDef) continue;
+    edges.push({ from: childNodeId, to: parentDef.nodeId, relation: "inherits" });
   }
 
   await client.upsertNodes(nodes);

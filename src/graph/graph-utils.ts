@@ -52,7 +52,7 @@ export function extractNodeSourcePath(node: GraphNode): string {
   if (node.id.startsWith("symbol:")) {
     const body = node.id.slice("symbol:".length);
     const hashIndex = body.lastIndexOf(":");
-    if (hashIndex > 0 && /^[a-f0-9]+$/i.test(body.slice(hashIndex + 1))) {
+    if (hashIndex > 0 && /^[a-z0-9]+$/i.test(body.slice(hashIndex + 1))) {
       return body.slice(0, hashIndex);
     }
   }

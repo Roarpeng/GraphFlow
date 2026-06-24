@@ -112,6 +112,7 @@ export interface RunTaskSummary {
   status: TaskStatus;
   attempts: number;
   feedback: string;
+  episodeId?: string;
   executionDescriptor?: {
     action: "execute";
     task: string;
@@ -227,4 +228,21 @@ export interface PlanPreviewResult {
   mode: "simple" | "complex";
   ideas: string[];
   nodes: Array<{ id: string; description: string; dependencies: string[] }>;
+}
+
+export interface ReportOutcomeResult {
+  ok: boolean;
+  episodeId?: string;
+  outcome?: "pass" | "fail";
+  reason?: string;
+}
+
+export interface ExpandAnchorResult {
+  anchorId: string;
+  type: GraphNode["type"];
+  content: string;
+  sourcePath?: string;
+  sourceLine?: number;
+  sourceSnippet?: string;
+  metadata?: Record<string, unknown>;
 }

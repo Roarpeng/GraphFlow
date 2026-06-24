@@ -10,6 +10,8 @@ import {
   planAndBrainstorm,
   previewContext,
   runTask,
+  runTaskResult,
+  reportOutcome,
   saveGraphFlowSettings,
 } from "../src/surfaces/cli/runtime";
 
@@ -392,7 +394,11 @@ describe("M10 CLI runtime", () => {
         "utf8"
       );
 
-      await runTask("update readme", configPath);
+      // Bridge mode returns DELEGATED; close the learning loop via reportOutcome
+      const runResult = await runTaskResult("update readme", configPath);
+      if (runResult.episodeId) {
+        await reportOutcome(runResult.episodeId, true, [], configPath);
+      }
       const insights = await getSkillInsights(configPath, 10);
 
       expect(insights.source).toBe("graph-store");

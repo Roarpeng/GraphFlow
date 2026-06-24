@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { orchestrate } from "../src/core/orchestrator";
 import { validateConfig } from "../src/config/loader";
 import { createGraphClient } from "../src/graph/client-factory";
@@ -40,8 +40,8 @@ describe("M7 e2e run -> graph sync -> context slice", () => {
 
     const slice = await buildContextSlice(graphClient, "Task completed", 100);
 
-    // Bridge mode delegates execution, returning HUMAN_REVIEW_REQUIRED with executionDescriptor
-    expect(run.status).toBe("HUMAN_REVIEW_REQUIRED");
+    // Bridge mode delegates execution, returning DELEGATED with executionDescriptor
+    expect(run.status).toBe("DELEGATED");
     expect(run.feedback).toContain("[DELEGATED]");
     expect(run.executionDescriptor).toBeDefined();
     expect(slice.items.length).toBeGreaterThan(0);

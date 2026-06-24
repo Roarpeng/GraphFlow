@@ -11,6 +11,7 @@ import {
   downloadOpenBmbModel,
   enrichSemanticsSilent,
   exportArtifact,
+  expandAnchor,
   getMetrics,
   getSkillInsights,
   getTokenSavingsStats,
@@ -23,6 +24,7 @@ import {
   planInsightResult,
   previewContext,
   rebuildGraph,
+  reportOutcome,
   runTaskResult,
 } from "../cli/runtime";
 
@@ -103,6 +105,25 @@ export function getToolDefinitions(): ToolDefinition[] {
       },
     },
     {
+      name: "graphflow_report_outcome",
+      description: "Report the real execution outcome of a bridge-mode task back to GraphFlow. After an external coding agent executes the executionDescriptor returned by graphflow_run, it calls this tool to close the learning loop: updates the episode record and applies skill score updates that were skipped during delegation.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          episodeId: { type: "string", description: "The episodeId returned by graphflow_run." },
+          success: { type: "boolean", description: "Whether the external agent completed the task successfully." },
+          lessons: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional lessons learned (max 4).",
+          },
+          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+        },
+        required: ["episodeId", "success"],
+        additionalProperties: false,
+      },
+    },
+    {
       name: "graphflow_plan",
       description: "Generate brainstorming ideas and a DAG-style task plan for a request.",
       inputSchema: {
@@ -125,6 +146,20 @@ export function getToolDefinitions(): ToolDefinition[] {
           rootDir: { type: "string", description: "Optional workspace root override." },
         },
         required: ["query"],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "graphflow_expand_anchor",
+      description: "Expand a context anchor to its full content. Anchors returned by graphflow_preview_context are lightweight pointers (id/type/layer). This tool resolves an anchor id back to its full GraphNode content and, for Symbol nodes, reads the surrounding source code lines from the original file.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          anchorId: { type: "string", description: "The anchor id returned by graphflow_preview_context (e.g. \"symbol:src/foo.ts:abc123\")." },
+          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+          rootDir: { type: "string", description: "Optional workspace root override." },
+        },
+        required: ["anchorId"],
         additionalProperties: false,
       },
     },
@@ -310,6 +345,20 @@ export async function executeToolCall(
       return textResponse(
         await runTaskResult(readRequiredString(args.task, "task"), readOptionalString(args.configPath))
       );
+    case "graphflow_report_outcome": {
+      const lessonsRaw = args.lessons;
+      const lessons = Array.isArray(lessonsRaw)
+        ? lessonsRaw.filter((l): l is string => typeof l === "string")
+        : [];
+      return textResponse(
+        await reportOutcome(
+          readRequiredString(args.episodeId, "episodeId"),
+          typeof args.success === "boolean" ? args.success : false,
+          lessons,
+          readOptionalString(args.configPath)
+        )
+      );
+    }
     case "graphflow_plan":
       return textResponse(planAndBrainstormResult(readRequiredString(args.task, "task")));
     case "graphflow_plan_insight":
@@ -320,6 +369,14 @@ export async function executeToolCall(
       return textResponse(
         await previewContext(
           readRequiredString(args.query, "query"),
+          readOptionalString(args.configPath),
+          readOptionalString(args.rootDir)
+        )
+      );
+    case "graphflow_expand_anchor":
+      return textResponse(
+        await expandAnchor(
+          readRequiredString(args.anchorId, "anchorId"),
           readOptionalString(args.configPath),
           readOptionalString(args.rootDir)
         )
