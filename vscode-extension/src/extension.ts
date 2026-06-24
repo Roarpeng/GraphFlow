@@ -443,7 +443,8 @@ async function runMcpBootstrap(
       Promise.resolve(
         runtime.installMcpToDetectedAgents({
           strategy: "node-bundled",
-          installScope: "user",
+          installScope: workspaceRoot ? "all" : "user",
+          ...(workspaceRoot ? { workspaceRoot } : {}),
           bundledServerPath,
           bundledRuntimeRoot,
           launcherPath,

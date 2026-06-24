@@ -389,9 +389,13 @@ function resolveWindowsNpxLaunch(): { command: string; args: string[] } | undefi
 
 export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
   const cwd = options.workspaceRoot ?? options.npmScriptCwd ?? process.cwd();
+  const workspaceRootEnv =
+    options.workspaceRoot?.trim() ||
+    process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim() ||
+    "${workspaceFolder}";
   const mcpEnv: Record<string, string> = {
     ...MCP_STDIO_ENV,
-    ...(options.workspaceRoot ? { GRAPHFLOW_WORKSPACE_ROOT: options.workspaceRoot } : {}),
+    GRAPHFLOW_WORKSPACE_ROOT: workspaceRootEnv,
   };
 
   if (options.strategy === "node-bundled") {
@@ -405,7 +409,6 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
         return {
           command: options.launcherPath,
           args: [],
-          cwd: runtimeRoot,
           env: { ...mcpEnv },
         };
       }
@@ -417,7 +420,6 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
       return {
         command: launch.command,
         args: [options.launcherPath],
-        cwd: runtimeRoot,
         env: { ...mcpEnv, ...launch.env },
       };
     }
@@ -652,9 +654,19 @@ function injectIntoConfig(
   const existed = existsSync(configPath);
   const json = readJsonConfig(configPath);
   const servers = (json[serversKey] as Record<string, McpServerNode> | undefined) ?? {};
-  
+
   const serverExisted = !!servers[serverName];
-  servers[serverName] = node;
+  const previous = servers[serverName];
+  servers[serverName] = {
+    ...previous,
+    ...node,
+    ...(previous?.args && !node.args?.length ? { args: previous.args } : {}),
+    ...(previous?.command && !node.command ? { command: previous.command } : {}),
+    env: {
+      ...(previous?.env ?? {}),
+      ...(node.env ?? {}),
+    },
+  };
   json[serversKey] = servers;
   writeJsonConfig(configPath, json);
   
