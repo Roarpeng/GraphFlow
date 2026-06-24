@@ -4,50 +4,66 @@ A Context-Aware Multi-Agent Orchestration Engine.
 
 GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，将 **Graphify 式知识图谱** 与 **Superpowers 式任务编排** 整合为可本地运行的上下文层：自动建图、压缩检索、规划执行、经验沉淀，并通过 CLI、MCP 与 VS Code 扩展对外暴露。
 
-## 当前能力总览（v1.0.0）
+## 当前能力总览（v1.0.0+）
 
 | 能力域 | 说明 |
 | --- | --- |
-| **任务规划与移交** | 按任务复杂度分流 simple / complex；DAG 规划；默认 **bridge 模式**输出结构化任务描述符交给外部 coding agent 执行 |
+| **任务规划与移交** | 按任务复杂度分流 simple / complex；DAG 规划；`graphflow_plan_insight` 六顶思考帽 + 5-Why 深度分析；默认 **bridge 模式**输出结构化任务描述符交给外部 coding agent 执行 |
 | **模型路由** | Smart / Economy 双 tier；多 provider 健康探测与 fallback（OpenAI、Anthropic、百炼、豆包、OpenBMB） |
-| **知识图谱** | 工作区 AST 索引（TS/JS/Python/Rust/Go/C/C++）；File / Module / Symbol 节点 + 依赖/引用/定义边 |
+| **知识图谱** | 工作区 AST 索引（TS/JS/Python/Rust/Go/C/C++/Java/Ruby）；File / Module / Symbol 节点 + 依赖/引用/定义边；图谱 artifact 导入/导出 |
 | **上下文压缩** | L1/L2/L3 分层锚点；近无损打包；图结构压缩（边权重+PageRank，零成本默认开启）；可选语义压缩（minicpm/economy LLM 聚类合并）；向量召回 + RRF + HNSW；RepoMap 概览；自适应预算 |
-| **持续建图** | 默认 `autoIndexOnSave`；preview / run 前按需增量索引（`hasPendingGraphIndexWork`） |
+| **持续建图** | 默认 `autoIndexOnSave`；preview / run 前按需增量索引（`hasPendingGraphIndexWork`）；MCP `graphflow_index_file` 单文件增量 |
 | **语义增强** | 可选 post-index LLM 语义 enrich；OpenBMB 本地 embedded 模式 |
 | **学习飞轮** | Episodic Memory、Reflection、Skill 节点、nightly 学习、技能提示注入规划 |
-| **Agent 接入** | CLI `--json`；MCP stdio（9 工具）；Cursor / Claude Code 规则与示例配置 |
-| **VS Code 扩展** | Settings、建图、路由测试、Context Preview、**知识图谱可视化**、Skill Insights、Chat Agent |
+| **可观测性** | `graphflow_stats` 累计 token 节省；`graphflow_metrics` Prometheus 指标；VS Code 知识图谱 Snapshot |
+| **Agent 接入** | CLI `--json`；MCP stdio（**16 工具**）；Cursor / Claude Code 规则与示例配置 |
+| **VS Code 扩展** | Settings、建图、路由测试、Context Preview、**知识图谱可视化**、Skill Insights、Chat Agent、一键安装 MCP |
 | **存储后端** | `file`（JSON）/ `memory` / `sqlite`（FTS5）/ `mcp-http`（Graphify） |
-| **工程质量** | TypeScript strict；**45 测试文件 / 200+ tests**；`npm run ci` 含扩展 esbuild 打包与 bundled runtime smoke |
+| **多项目隔离** | 全局配置共享 LLM/路由；**图谱路径按当前工作区解析**，不再串读其它项目的 `graphflow-out` |
+| **工程质量** | TypeScript strict；**49 测试文件 / 200+ tests**；`npm run ci` 含扩展 esbuild 打包与 bundled runtime smoke |
 
 ### 一句话总结
 
 > 从 task 描述出发，自动规划 → 路由模型 → 压缩图谱上下文（含向量召回）→ **输出结构化执行描述符交给外部 coding agent**，并把经验沉淀回知识图谱；定位为 **上下文与规划服务（context service）**，而非独立执行器。
 
-### v0.6.7 – v0.6.13 近期演进
+### v1.0.0 核心（2026-06）
 
-1. **知识图谱可视化（v0.6.12–0.6.13）**
-   - 可读标签（文件名、符号名、目录组）、代码层 / 学习层 Tab
-   - 暗色面板、目录聚类着色、关系线型、缩放/平移
-   - 双击节点或「打开源文件」跳转源码行
-   - 布局归一化修复大图谱「只剩角落小点」问题
+- **诚实执行语义（bridge 模式）**：`graphflow_run` 规划 + 压缩上下文后输出 `executionDescriptor`，交给 Cursor / Claude Code 等外部 agent 执行，不再伪造 `COMPLETED`。
+- **三层渐进压缩**：图结构压缩（默认零成本）→ 向量召回 + HNSW → 可选语义压缩（economy / minicpm）。
+- **混合压缩模型**：`compressor` 角色默认继承 economy tier；纯离线时首次按需下载 minicpm GGUF。
 
-2. **持续静默建图（v0.6.11）**
-   - `autoIndexOnSave` 默认开启；保存文件后 debounce 增量索引
-   - 旧配置 `maxContextTokens: 400` 自动升级到 1500
+### 最新更新（v1.0.x / main）
 
-3. **Runtime 模块化与扩展打包（v0.6.10）**
-   - `runtime/` 子模块 + `GraphFlowRuntimeModule` 类型校验
-   - VS Code 扩展 esbuild 单文件 bundle
+1. **多项目图谱隔离**
+   - 全局配置（`~/.graphflow.config.json`）只保存 LLM、路由等**机器级**设置，**不再持久化 `workspaceRoot`**
+   - 运行时按 `process.cwd()` 或 `GRAPHFLOW_WORKSPACE_ROOT` 解析 `graphflow-out/graphflow-graph.json`
+   - 修复：切换项目后 Snapshot / MCP 仍显示旧项目图谱的问题
 
-4. **配置与健壮性（v0.6.7–0.6.9）**
-   - 全局配置优先（`~/.graphflow.config.json`）
-   - 损坏 JSON 容错；postinstall 需显式 `GRAPHFLOW_ENABLE_POSTINSTALL=1`
-   - 无工作区也可打开 Settings；CI 可复现 `npm ci`
+2. **索引与语言扩展**
+   - 新增 **Java**（`.java`）、**Ruby**（`.rb`）tree-sitter 索引器
+   - C/C++、Rust 索引器增强；WASM 语法包可随 npm 包离线分发（`npm run wasm:download`）
+   - MCP 新增 `graphflow_index_file` 单文件增量索引
 
-5. **无 LLM 也能建图（v0.6.6 起）**
+3. **MCP 工具扩展（9 → 16）**
+   - `graphflow_plan_insight`：六顶思考帽 + 5-Why 深度规划
+   - `graphflow_export_artifact` / `graphflow_import_artifact`：图谱压缩包导入导出
+   - `graphflow_stats`：累计 token 节省统计
+   - `graphflow_metrics`：Prometheus 格式可观测性指标
+
+4. **知识图谱可视化（延续 v0.6.12+）**
+   - 可读标签、代码层/学习层 Tab、目录聚类、缩放平移、跳转源码
+   - Snapshot 为**采样视图**（默认约 120 节点 / 200 边），顶栏显示全库真实规模
+
+5. **配置与工程**
+   - 全局配置优先；损坏 JSON 容错；CI 全链路 validate + VSIX 打包
    - Settings「建立图谱（无需 LLM）」或 `graph index` 即可生成结构图谱
-   - 可选「测试路由并建立图谱」在 LLM 连通后触发语义 enrich
+
+### 历史演进（v0.6.7 – v0.6.13 摘要）
+
+- v0.6.12–0.6.13：知识图谱面板、布局归一化、Snapshot 可读标签
+- v0.6.11：`autoIndexOnSave` 默认开启；`maxContextTokens` 400 → 1500 自动升级
+- v0.6.10：runtime 模块化、VS Code esbuild bundle
+- v0.6.7–0.6.9：全局配置脚手架、无工作区也可打开 Settings
 
 ### 发布信息
 
@@ -83,19 +99,32 @@ GraphFlow 支持两种对外接入方式：
 npm run start:mcp
 ```
 
-### MCP 工具一览
+### MCP 工具一览（16 个）
 
 | 工具 | 用途 |
 | --- | --- |
-| `graphflow_preview_context` | 压缩任务相关上下文（优先调用） |
-| `graphflow_plan` | 多步任务分解 |
-| `graphflow_run` | 执行编排循环 |
-| `graphflow_index` / `graphflow_rebuild` | 增量 / 全量建图 |
-| `graphflow_inspect_graph` | 图谱快照与统计 |
-| `graphflow_enrich_graph` | 语义增强 |
+| `graphflow_preview_context` | 压缩任务相关上下文（**优先调用**） |
+| `graphflow_plan` | 多步任务分解与 DAG 规划 |
+| `graphflow_plan_insight` | 六顶思考帽 + 5-Why 深度分析后规划（复杂任务） |
+| `graphflow_run` | 规划 + 压缩上下文，输出 bridge 执行描述符 |
+| `graphflow_index` | 全工作区增量建图 |
+| `graphflow_index_file` | 单文件增量建图（适合 onSave / watcher） |
+| `graphflow_rebuild` | 清空缓存后全量重建 |
+| `graphflow_inspect_graph` | 图谱快照统计与样本节点 |
+| `graphflow_enrich_graph` | 符号节点语义增强 |
 | `graphflow_skill_insights` | 技能学习洞察 |
-| `graphflow_diagnose` | 路由健康诊断 |
-| `graphflow_model_download` | OpenBMB 模型下载 |
+| `graphflow_diagnose` | 路由与压缩模型健康诊断 |
+| `graphflow_model_download` | OpenBMB / minicpm 模型下载 |
+| `graphflow_export_artifact` | 导出压缩图谱 artifact |
+| `graphflow_import_artifact` | 导入图谱 artifact |
+| `graphflow_stats` | 累计 token 节省 ROI 统计 |
+| `graphflow_metrics` | Prometheus 格式运行指标 |
+
+**MCP 建图提示**：用户级 MCP 进程的 `cwd` 不一定是当前项目。请任选其一：
+
+- 调用 `graphflow_index` 时传入 `rootDir`（项目绝对路径）
+- 在 MCP 配置中设置 `GRAPHFLOW_WORKSPACE_ROOT` 环境变量
+- 使用 VS Code 扩展「建立图谱」或项目级 `.cursor/mcp.json`
 
 CLI 示例：
 
@@ -237,8 +266,10 @@ const run = await orchestrate(
 | Rust | `.rs` |
 | Go | `.go` |
 | C / C++ | `.c .h .cc .cpp .cxx .hpp .hxx` |
+| Java | `.java` |
+| Ruby | `.rb` |
 
-通过 `graphPolicy.includeExtensions` 限制扫描范围。
+通过 `graphPolicy.includeExtensions` 限制扫描范围。tree-sitter WASM 语法包随 npm 包分发；开发/发布前可执行 `npm run wasm:download` 预下载到 `wasm/`。
 
 ## 配置文件
 
@@ -248,12 +279,26 @@ const run = await orchestrate(
 cp graphflow.config.example.json graphflow.config.json
 ```
 
+### 全局 vs 项目配置
+
+| 层级 | 路径 | 适合存放 |
+| --- | --- | --- |
+| 全局 | `~/.graphflow.config.json` | Provider、API Key、Smart/Economy 模型、路由策略 |
+| 项目根 | `graphflow.config.json` | 项目专属覆盖（可选） |
+| 项目覆盖 | `.graphflow/config.json` | 工作区局部覆盖（`graphflow init` 生成） |
+
+**多项目重要约定**：
+
+- 图谱文件默认写在**当前工作区**下的 `graphflow-out/graphflow-graph.json`
+- 全局配置**不应**包含固定的 `workspaceRoot`（旧版本若已写入，请删除该字段）
+- MCP / 脚本可通过环境变量指定工作区：`GRAPHFLOW_WORKSPACE_ROOT=/path/to/project`
+
 关键项：
 
 | 配置 | 说明 |
 | --- | --- |
 | `graphPolicy.transport` | `file` / `memory` / `sqlite` / `mcp-http` |
-| `graphPolicy.graphStorePath` | JSON 或 `.sqlite` 路径 |
+| `graphPolicy.graphStorePath` | 相对当前工作区的 JSON 或 `.sqlite` 路径 |
 | `graphPolicy.maxContextTokens` | 压缩上下文预算（默认 **1500**） |
 | `graphPolicy.autoIndexOnSave` | 保存后增量索引（默认 **true**） |
 | `graphPolicy.autoIndexOnPreview` / `autoIndexOnRun` | preview / run 前自动索引 |
@@ -317,6 +362,18 @@ code --install-extension artifacts/graphflow-vscode-*.vsix
 
 ## 常见问题
 
+**切换项目后 Snapshot 显示别的仓库的图谱**
+
+- 检查 `~/.graphflow.config.json` 是否含有旧的 `workspaceRoot`，**删除该字段**后重载窗口
+- 在当前项目重新「建立图谱」，确认顶栏 `store` 路径指向本项目的 `graphflow-out/`
+- 使用 v1.0.x 最新版（已修复全局 `workspaceRoot` 串项目问题）
+
+**MCP 建图失败或索引到错误目录**
+
+- `graphflow_index` 传入 `rootDir: "/你的项目绝对路径"`
+- 或在 MCP 配置中加 `"env": { "GRAPHFLOW_WORKSPACE_ROOT": "/你的项目绝对路径" }`
+- 离线环境首次索引多语言项目时，确保 `wasm/` 语法包存在或网络可访问 unpkg
+
 **`context preview` 返回 0 anchors**
 
 - 先执行 `graph index` 或 Settings 建图
@@ -326,6 +383,7 @@ code --install-extension artifacts/graphflow-vscode-*.vsix
 
 - 升级到 **v1.0.0+** 并重载窗口
 - 点击画布工具栏 **「适应」**
+- 注意：画布展示的是**采样子图**（约 120 节点），全库规模请看顶栏统计
 
 **API Key 未配置**
 
@@ -347,7 +405,7 @@ GraphFlow/
 │   └── surfaces/
 │       ├── cli/        # CLI + runtime 子模块
 │       └── mcp/        # MCP server
-├── tests/              # 45 文件 / 200+ tests
+├── tests/              # 49 文件 / 200+ tests
 ├── vscode-extension/   # VS Code 面板与命令
 ├── docs/
 └── CHANGELOG.md
