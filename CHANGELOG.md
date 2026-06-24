@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-06-24
+
+### Fixed
+
+- **MCP ENOENT（fnm 临时路径）**：安装 MCP 时不再写入 fnm multishell 临时 `node` 绝对路径；优先使用 IDE 自带 Electron（`ELECTRON_RUN_AS_NODE`），否则回退稳定 `node`。
+- **Trae CN 支持**：安装器识别 `~/.trae-cn` 并写入 `~/.config/Trae CN/User/mcp.json`。
+
 ## [1.0.1] - 2026-06-24
 
 ### Fixed

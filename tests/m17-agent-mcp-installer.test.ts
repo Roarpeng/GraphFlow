@@ -7,6 +7,7 @@ import {
   detectInstalledAgents,
   getMcpInstallStatus,
   installMcpToDetectedAgents,
+  resolveMcpNodeLaunch,
 } from "../src/integrations/agent-mcp-installer";
 
 const tempRoots: string[] = [];
@@ -246,6 +247,46 @@ describe("M17 agent MCP installer", () => {
           delete process.env.USERPROFILE;
         }
       } else if (previousHome) {
+        process.env.HOME = previousHome;
+      } else {
+        delete process.env.HOME;
+      }
+    }
+  });
+
+  it("prefers editor electron over ephemeral fnm node paths", () => {
+    const launch = resolveMcpNodeLaunch({
+      nodeCommand: "/run/user/1000/fnm_multishells/202671_1781939913391/bin/node",
+      electronExecPath: process.execPath,
+    });
+    expect(launch.command).toBe(process.execPath);
+    expect(launch.env.ELECTRON_RUN_AS_NODE).toBe("1");
+  });
+
+  it("updates Trae CN mcp.json when marker exists", () => {
+    const fakeHome = createTempRoot("graphflow-trae-cn-home");
+    const traeCnConfigDir = join(fakeHome, ".config", "Trae CN", "User");
+    mkdirSync(traeCnConfigDir, { recursive: true });
+    mkdirSync(join(fakeHome, ".trae-cn"), { recursive: true });
+
+    const previousHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+
+    try {
+      const results = installMcpToDetectedAgents({
+        strategy: "npx",
+        workspaceRoot: "/repo",
+        agentIdsOverride: ["trae"],
+      });
+      const traeResult = results.find((result) => result.configPath.includes("Trae CN"));
+      expect(traeResult?.status).toMatch(/created|updated|injected/);
+      const config = JSON.parse(readFileSync(join(traeCnConfigDir, "mcp.json"), "utf8")) as {
+        mcpServers?: { graphflow?: { command: string; env?: Record<string, string> } };
+      };
+      expect(config.mcpServers?.graphflow?.command).not.toContain("fnm_multishells");
+      expect(config.mcpServers?.graphflow?.env?.GRAPHFLOW_WORKSPACE_ROOT).toBe("/repo");
+    } finally {
+      if (previousHome) {
         process.env.HOME = previousHome;
       } else {
         delete process.env.HOME;
