@@ -124,14 +124,21 @@ function buildAgentProfiles(): AgentProfile[] {
       name: "Trae",
       markerPaths: [
         join(home, ".trae"),
+        join(home, ".trae-cn"),
         join(appData, "Trae"),
-        join(localAppData, "Programs", "Trae"),
+        join(appData, "Trae CN"),
       ],
       userTargets: [
         {
           configPath: isWindows()
             ? join(appData, "Trae", "User", "mcp.json")
             : join(home, ".config", "Trae", "User", "mcp.json"),
+          serversKey: "mcpServers",
+        },
+        {
+          configPath: isWindows()
+            ? join(appData, "Trae CN", "User", "mcp.json")
+            : join(home, ".config", "Trae CN", "User", "mcp.json"),
           serversKey: "mcpServers",
         },
       ],
@@ -331,7 +338,36 @@ const MCP_STDIO_ENV: Record<string, string> = {
   GRAPHFLOW_LOG_JSON: "1",
 };
 
+const EPHEMERAL_NODE_PATH_MARKERS = ["/fnm_multishells/", "\\fnm_multishells\\"];
+
+/** fnm multishell paths are session-temporary and break MCP after shell restart. */
+export function isEphemeralNodePath(nodePath: string): boolean {
+  const normalized = nodePath.replace(/\\/g, "/").toLowerCase();
+  return EPHEMERAL_NODE_PATH_MARKERS.some((marker) => normalized.includes(marker.toLowerCase()));
+}
+
+function isBareNodeCommand(nodePath: string): boolean {
+  const base = nodePath.trim().toLowerCase();
+  return base === "node" || base === "node.exe";
+}
+
+function isUsableNodeCommand(nodePath: string): boolean {
+  const trimmed = nodePath.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (isBareNodeCommand(trimmed)) {
+    return true;
+  }
+  if (isEphemeralNodePath(trimmed)) {
+    return false;
+  }
+  return existsSync(trimmed);
+}
+
 export function resolveSystemNodeCommand(): string | undefined {
+  const candidates: string[] = [];
+
   try {
     const lookup = isWindows() ? "where.exe" : "which";
     const target = isWindows() ? "node.exe" : "node";
@@ -339,11 +375,22 @@ export function resolveSystemNodeCommand(): string | undefined {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    const firstLine = output.split(/\r?\n/).find((line) => line.trim().length > 0);
-    return firstLine?.trim() || undefined;
+    candidates.push(...output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean));
   } catch {
-    return undefined;
+    // fall through
   }
+
+  if (!isWindows()) {
+    candidates.push("/usr/local/bin/node", "/usr/bin/node");
+  }
+
+  for (const candidate of candidates) {
+    if (isUsableNodeCommand(candidate) && !isEphemeralNodePath(candidate)) {
+      return candidate;
+    }
+  }
+
+  return "node";
 }
 
 export function resolveMcpNodeLaunch(options: {
@@ -351,19 +398,27 @@ export function resolveMcpNodeLaunch(options: {
   electronExecPath?: string;
 }): { command: string; env: Record<string, string> } {
   const explicitNode = options.nodeCommand?.trim();
-  const systemNode = explicitNode || resolveSystemNodeCommand();
+  if (explicitNode && isUsableNodeCommand(explicitNode) && !isEphemeralNodePath(explicitNode)) {
+    return { command: explicitNode, env: { ...MCP_STDIO_ENV } };
+  }
+
+  const electronExecPath = options.electronExecPath?.trim();
+  if (electronExecPath && existsSync(electronExecPath)) {
+    return {
+      command: electronExecPath,
+      env: {
+        ...MCP_STDIO_ENV,
+        ELECTRON_RUN_AS_NODE: "1",
+      },
+    };
+  }
+
+  const systemNode = resolveSystemNodeCommand();
   if (systemNode) {
     return { command: systemNode, env: { ...MCP_STDIO_ENV } };
   }
 
-  const electronExecPath = options.electronExecPath ?? process.execPath;
-  return {
-    command: electronExecPath,
-    env: {
-      ...MCP_STDIO_ENV,
-      ELECTRON_RUN_AS_NODE: "1",
-    },
-  };
+  return { command: "node", env: { ...MCP_STDIO_ENV } };
 }
 
 function resolveWindowsNpxLaunch(): { command: string; args: string[] } | undefined {
@@ -667,6 +722,9 @@ function injectIntoConfig(
       ...(node.env ?? {}),
     },
   };
+  if (!Object.prototype.hasOwnProperty.call(node, "cwd")) {
+    delete servers[serverName].cwd;
+  }
   json[serversKey] = servers;
   writeJsonConfig(configPath, json);
   
