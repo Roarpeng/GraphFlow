@@ -36,9 +36,10 @@ export const cppIndexer: LanguageIndexer = {
         case "function_definition": {
           if (node.text.startsWith("class ")) {
             const match = node.text.match(/class\s+(\w+)/);
-            if (match) {
+            const className = match?.[1];
+            if (className) {
               symbols.push({
-                name: match[1],
+                name: className,
                 kind: "class",
                 exported: true,
                 line: lineNo,
