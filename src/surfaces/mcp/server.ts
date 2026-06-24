@@ -5,6 +5,7 @@ process.env.GRAPHFLOW_LOG_JSON ??= "1";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
+import { ensureMcpWorkspaceEnv } from "../../config/discover-workspace.js";
 import {
   diagnoseRoutingResult,
   downloadOpenBmbModel,
@@ -121,6 +122,7 @@ export function getToolDefinitions(): ToolDefinition[] {
         properties: {
           query: { type: "string", description: "Query to preview." },
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+          rootDir: { type: "string", description: "Optional workspace root override." },
         },
         required: ["query"],
         additionalProperties: false,
@@ -202,6 +204,7 @@ export function getToolDefinitions(): ToolDefinition[] {
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
           nodeLimit: { type: "number", description: "Max sample nodes." },
           edgeLimit: { type: "number", description: "Max sample edges." },
+          rootDir: { type: "string", description: "Optional workspace root override." },
         },
         additionalProperties: false,
       },
@@ -214,6 +217,7 @@ export function getToolDefinitions(): ToolDefinition[] {
         properties: {
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
           limit: { type: "number", description: "Maximum skills to return." },
+          rootDir: { type: "string", description: "Optional workspace root override." },
         },
         additionalProperties: false,
       },
@@ -261,6 +265,7 @@ export function getToolDefinitions(): ToolDefinition[] {
         type: "object",
         properties: {
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+          rootDir: { type: "string", description: "Optional workspace root override." },
         },
         additionalProperties: false,
       },
@@ -312,7 +317,11 @@ export async function executeToolCall(
       );
     case "graphflow_preview_context":
       return textResponse(
-        await previewContext(readRequiredString(args.query, "query"), readOptionalString(args.configPath))
+        await previewContext(
+          readRequiredString(args.query, "query"),
+          readOptionalString(args.configPath),
+          readOptionalString(args.rootDir)
+        )
       );
     case "graphflow_index":
       return textResponse(
@@ -388,7 +397,11 @@ export async function executeToolCall(
       );
     case "graphflow_skill_insights":
       return textResponse(
-        await getSkillInsights(readOptionalString(args.configPath), readOptionalNumber(args.limit))
+        await getSkillInsights(
+          readOptionalString(args.configPath),
+          readOptionalNumber(args.limit),
+          readOptionalString(args.rootDir)
+        )
       );
     case "graphflow_diagnose":
       return textResponse(diagnoseRoutingResult(readOptionalString(args.configPath)));
@@ -411,7 +424,9 @@ export async function executeToolCall(
         await importArtifact(readOptionalString(args.configPath), readOptionalString(args.inputPath))
       );
     case "graphflow_stats":
-      return textResponse(getTokenSavingsStats(readOptionalString(args.configPath)));
+      return textResponse(
+        getTokenSavingsStats(readOptionalString(args.configPath), readOptionalString(args.rootDir))
+      );
     case "graphflow_metrics":
       return textResponse(getMetrics(readOptionalString(args.configPath)));
     default:
@@ -588,13 +603,19 @@ function readOptionalNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function buildInspectOptions(args: Record<string, unknown>): { nodeLimit?: number; edgeLimit?: number } {
+function buildInspectOptions(args: Record<string, unknown>): {
+  nodeLimit?: number;
+  edgeLimit?: number;
+  rootDir?: string;
+} {
   const nodeLimit = readOptionalNumber(args.nodeLimit);
   const edgeLimit = readOptionalNumber(args.edgeLimit);
+  const rootDir = readOptionalString(args.rootDir);
 
   return {
     ...(nodeLimit !== undefined ? { nodeLimit } : {}),
     ...(edgeLimit !== undefined ? { edgeLimit } : {}),
+    ...(rootDir !== undefined ? { rootDir } : {}),
   };
 }
 
@@ -681,5 +702,6 @@ function installMcpProcessGuards(): void {
 
 if (require.main === module) {
   installMcpProcessGuards();
+  ensureMcpWorkspaceEnv();
   startStdioServer();
 }

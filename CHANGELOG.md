@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-06-24
+
+### Fixed
+
+- **多项目工作区隔离**：MCP / 扩展 / npm 包不再把图谱绑定到 vendor 目录或全局配置里的陈旧 `workspaceRoot`。
+- **自动发现工作区**：新增 `discover-workspace`，从 cwd 向上查找项目根；仅在 runtime 目录（vendor、extensions）时回退到 IDE 环境变量。
+- **MCP launcher**：子进程 `cwd` 与 `GRAPHFLOW_WORKSPACE_ROOT` 指向用户打开的项目，不再固定在扩展 vendor。
+- **MCP 安装器**：默认写入 `GRAPHFLOW_WORKSPACE_ROOT: "${workspaceFolder}"`，merge 已有 env，扩展有工作区时同时写用户级与项目级配置。
+- **MCP 工具**：`preview_context`、`inspect_graph`、`skill_insights`、`stats` 支持可选 `rootDir` 覆盖。
+
 ## [1.0.0] - 2026-06-19
 
 首个正式版本。在 0.6.x 基础上完成「诚实执行语义」收敛与「上下文压缩」体系，所有新增能力均端到端接线到 CLI / MCP / orchestrator。

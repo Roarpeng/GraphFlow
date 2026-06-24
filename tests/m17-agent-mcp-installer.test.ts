@@ -39,6 +39,11 @@ describe("M17 agent MCP installer", () => {
       expect(npxNode.args).toEqual(["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"]);
     }
     expect(npxNode.cwd).toBe("/repo");
+    expect(npxNode.env).toMatchObject({
+      GRAPHFLOW_WORKSPACE_ROOT: "/repo",
+      GRAPHFLOW_MCP_STDIO: "1",
+      GRAPHFLOW_LOG_JSON: "1",
+    });
 
     const bundledNode = buildMcpServerNode({
       strategy: "node-bundled",
@@ -50,6 +55,7 @@ describe("M17 agent MCP installer", () => {
     expect(bundledNode.args).toEqual(["/tmp/server.js"]);
     expect(bundledNode.cwd).toBe("/tmp/runtime");
     expect(bundledNode.env).toMatchObject({
+      GRAPHFLOW_WORKSPACE_ROOT: "${workspaceFolder}",
       GRAPHFLOW_MCP_STDIO: "1",
       GRAPHFLOW_LOG_JSON: "1",
     });
@@ -62,6 +68,7 @@ describe("M17 agent MCP installer", () => {
       bundledRuntimeRoot: "/tmp/runtime",
       launcherPath: process.platform === "win32" ? winLauncher : unixLauncher,
       nodeCommand: "/usr/bin/node",
+      workspaceRoot: "/repo",
     });
     if (process.platform === "win32") {
       expect(launcherNode.command).toBe(winLauncher);
@@ -70,6 +77,10 @@ describe("M17 agent MCP installer", () => {
       expect(launcherNode.command).toBe("/usr/bin/node");
       expect(launcherNode.args).toEqual([unixLauncher]);
     }
+    expect(launcherNode.cwd).toBeUndefined();
+    expect(launcherNode.env).toMatchObject({
+      GRAPHFLOW_WORKSPACE_ROOT: "/repo",
+    });
   });
 
   it("creates MCP config when agent marker exists", () => {

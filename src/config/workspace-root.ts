@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import type { GraphFlowConfig } from "./schema";
+import { discoverWorkspaceRoot, isGraphFlowRuntimeDirectory } from "./discover-workspace";
 
 /**
  * Resolve the workspace root used for graph store paths and indexing.
@@ -30,7 +31,17 @@ export function resolveRuntimeWorkspaceRoot(options?: {
     return resolve(options.projectWorkspaceRoot.trim());
   }
 
-  return resolve(process.cwd());
+  const discovered = discoverWorkspaceRoot(process.cwd());
+  if (discovered) {
+    return discovered;
+  }
+
+  const cwd = resolve(process.cwd());
+  if (!isGraphFlowRuntimeDirectory(cwd)) {
+    return cwd;
+  }
+
+  return cwd;
 }
 
 export function bindRuntimeWorkspaceRoot(

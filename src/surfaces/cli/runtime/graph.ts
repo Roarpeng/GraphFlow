@@ -77,8 +77,12 @@ async function maybeRunSemanticEnrichment(
   }
 }
 
-export async function previewContext(query: string, configPath?: string): Promise<ContextPreviewResult> {
-  const config = resolveConfig(configPath);
+export async function previewContext(
+  query: string,
+  configPath?: string,
+  rootDir?: string
+): Promise<ContextPreviewResult> {
+  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
   applyOpenBmbRuntimeEnv(config);
   const graphClient = createGraphClient(config);
 
@@ -500,9 +504,12 @@ export async function downloadOpenBmbModel(
 
 export async function inspectGraph(
   configPath?: string,
-  options?: { nodeLimit?: number; edgeLimit?: number }
+  options?: { nodeLimit?: number; edgeLimit?: number; rootDir?: string }
 ): Promise<GraphSnapshotResult> {
-  const config = resolveConfig(configPath);
+  const config = bindRuntimeWorkspaceRoot(
+    resolveConfig(configPath),
+    options?.rootDir ? { rootDir: options.rootDir } : undefined
+  );
   const nodeLimit = Math.max(1, options?.nodeLimit ?? 96);
   const edgeLimit = Math.max(1, options?.edgeLimit ?? 160);
   const emptyTypeCount: Record<GraphNode["type"], number> = {
@@ -563,8 +570,12 @@ export async function inspectGraph(
   };
 }
 
-export async function getSkillInsights(configPath?: string, limit = 12): Promise<SkillInsightsResult> {
-  const config = resolveConfig(configPath);
+export async function getSkillInsights(
+  configPath?: string,
+  limit = 12,
+  rootDir?: string
+): Promise<SkillInsightsResult> {
+  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
   const boundedLimit = Math.max(1, limit);
 
   if (config.graphPolicy.transport === "mcp-http") {
@@ -635,7 +646,7 @@ export async function importArtifact(
   return importGraphArtifact(config, graphClient, inputPath);
 }
 
-export function getTokenSavingsStats(configPath?: string): {
+export function getTokenSavingsStats(configPath?: string, rootDir?: string): {
   totalRuns: number;
   totalRawTokens: number;
   totalCompressedTokens: number;
@@ -652,7 +663,7 @@ export function getTokenSavingsStats(configPath?: string): {
     source: string;
   }>;
 } {
-  const config = resolveConfig(configPath);
+  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
   return getSavingsStats(config);
 }
 
