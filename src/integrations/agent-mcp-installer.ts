@@ -397,11 +397,22 @@ export function resolveMcpNodeLaunch(options: {
   nodeCommand?: string;
   electronExecPath?: string;
 }): { command: string; env: Record<string, string> } {
+  // 1. Explicit node command (highest priority)
   const explicitNode = options.nodeCommand?.trim();
   if (explicitNode && isUsableNodeCommand(explicitNode) && !isEphemeralNodePath(explicitNode)) {
     return { command: explicitNode, env: { ...MCP_STDIO_ENV } };
   }
 
+  // 2. System Node — preferred over Electron because:
+  //    - Path is stable across IDE updates
+  //    - No need for ELECTRON_RUN_AS_NODE which may not be forwarded by all MCP clients
+  //    - Better compatibility with MCP client spawn logic
+  const systemNode = resolveSystemNodeCommand();
+  if (systemNode && systemNode !== "node") {
+    return { command: systemNode, env: { ...MCP_STDIO_ENV } };
+  }
+
+  // 3. Electron fallback — when system Node is unavailable, use the IDE's bundled Electron
   const electronExecPath = options.electronExecPath?.trim();
   if (electronExecPath && existsSync(electronExecPath)) {
     return {
@@ -413,11 +424,7 @@ export function resolveMcpNodeLaunch(options: {
     };
   }
 
-  const systemNode = resolveSystemNodeCommand();
-  if (systemNode) {
-    return { command: systemNode, env: { ...MCP_STDIO_ENV } };
-  }
-
+  // 4. Last resort: bare "node" (relies on PATH resolution at MCP launch time)
   return { command: "node", env: { ...MCP_STDIO_ENV } };
 }
 
@@ -628,7 +635,19 @@ function readJsonConfig(path: string): Record<string, unknown> {
   if (!raw) {
     return {};
   }
-  return JSON.parse(raw) as Record<string, unknown>;
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    // Existing config is corrupt (manual edit, encoding issue, etc).
+    // Back it up and start fresh so registration can proceed instead of failing.
+    try {
+      const backupPath = `${path}.bak-${Date.now()}`;
+      writeFileSync(backupPath, raw, "utf8");
+    } catch {
+      // Ignore backup failure — proceed with reset
+    }
+    return {};
+  }
 }
 
 function writeJsonConfig(path: string, json: Record<string, unknown>): void {
@@ -712,15 +731,24 @@ function injectIntoConfig(
 
   const serverExisted = !!servers[serverName];
   const previous = servers[serverName];
+
+  // Merge env: start with previous user env, override with new env.
+  // Clean up stale ELECTRON_RUN_AS_NODE when the new command no longer needs it
+  // (e.g. switched from Electron fallback to system Node).
+  const mergedEnv: Record<string, string> = {
+    ...(previous?.env ?? {}),
+    ...(node.env ?? {}),
+  };
+  if (!node.env?.ELECTRON_RUN_AS_NODE) {
+    delete mergedEnv.ELECTRON_RUN_AS_NODE;
+  }
+
   servers[serverName] = {
     ...previous,
     ...node,
     ...(previous?.args && !node.args?.length ? { args: previous.args } : {}),
     ...(previous?.command && !node.command ? { command: previous.command } : {}),
-    env: {
-      ...(previous?.env ?? {}),
-      ...(node.env ?? {}),
-    },
+    env: mergedEnv,
   };
   if (!Object.prototype.hasOwnProperty.call(node, "cwd")) {
     delete servers[serverName].cwd;

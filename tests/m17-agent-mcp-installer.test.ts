@@ -1,4 +1,4 @@
-﻿import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,6 +8,7 @@ import {
   getMcpInstallStatus,
   installMcpToDetectedAgents,
   resolveMcpNodeLaunch,
+  resolveSystemNodeCommand,
 } from "../src/integrations/agent-mcp-installer";
 
 const tempRoots: string[] = [];
@@ -256,13 +257,21 @@ describe("M17 agent MCP installer", () => {
     }
   });
 
-  it("prefers editor electron over ephemeral fnm node paths", () => {
+  it("rejects ephemeral fnm node paths and falls back to system node or electron", () => {
     const launch = resolveMcpNodeLaunch({
       nodeCommand: "/run/user/1000/fnm_multishells/202671_1781939913391/bin/node",
       electronExecPath: process.execPath,
     });
-    expect(launch.command).toBe(process.execPath);
-    expect(launch.env.ELECTRON_RUN_AS_NODE).toBe("1");
+    // fnm path should be rejected; system Node is preferred over Electron when available
+    const systemNode = resolveSystemNodeCommand();
+    if (systemNode && systemNode !== "node") {
+      expect(launch.command).toBe(systemNode);
+      expect(launch.env.ELECTRON_RUN_AS_NODE).toBeUndefined();
+    } else {
+      // No system Node → Electron fallback
+      expect(launch.command).toBe(process.execPath);
+      expect(launch.env.ELECTRON_RUN_AS_NODE).toBe("1");
+    }
   });
 
   it("updates Trae CN mcp.json when marker exists", () => {
