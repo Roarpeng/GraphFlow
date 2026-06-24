@@ -5,6 +5,7 @@ import { loadConfigSafe } from "./loader";
 import { mergeGraphFlowConfig } from "./merge";
 import { getDefaultConfig } from "./defaults";
 import { resolveGlobalConfigPath } from "./scaffold";
+import { bindRuntimeWorkspaceRoot } from "./workspace-root";
 import { logger } from "../utils/logger";
 
 function isDefaultProjectConfigPath(path: string): boolean {
@@ -56,7 +57,9 @@ export function resolveConfig(path = "graphflow.config.json"): GraphFlowConfig {
     if (result.usedFallback && result.error) {
       logger.warn({ path: result.configPath, error: result.error }, "Using default config for explicit path");
     }
-    return result.config;
+    return bindRuntimeWorkspaceRoot(result.config, {
+      projectWorkspaceRoot: result.config.graphPolicy.workspaceRoot,
+    });
   }
 
   const globalPath = resolveGlobalConfigPath();
@@ -65,20 +68,28 @@ export function resolveConfig(path = "graphflow.config.json"): GraphFlowConfig {
   const projectRoot = resolve("graphflow.config.json");
   const overlayPath = resolve(".graphflow/config.json");
 
+  let merged: GraphFlowConfig;
+  let projectWorkspaceRoot: string | undefined;
+
   if (existsSync(projectRoot) && existsSync(overlayPath)) {
-    const withRoot = mergeGraphFlowConfig(base, loadLayer(projectRoot));
-    return mergeGraphFlowConfig(withRoot, loadLayer(overlayPath));
+    const projectLayer = loadLayer(projectRoot);
+    const overlayLayer = loadLayer(overlayPath);
+    merged = mergeGraphFlowConfig(mergeGraphFlowConfig(base, projectLayer), overlayLayer);
+    projectWorkspaceRoot =
+      overlayLayer.graphPolicy.workspaceRoot ?? projectLayer.graphPolicy.workspaceRoot;
+  } else if (existsSync(projectRoot)) {
+    const projectLayer = loadLayer(projectRoot);
+    merged = mergeGraphFlowConfig(base, projectLayer);
+    projectWorkspaceRoot = projectLayer.graphPolicy.workspaceRoot;
+  } else if (existsSync(overlayPath)) {
+    const overlayLayer = loadLayer(overlayPath);
+    merged = mergeGraphFlowConfig(base, overlayLayer);
+    projectWorkspaceRoot = overlayLayer.graphPolicy.workspaceRoot;
+  } else {
+    merged = base;
   }
 
-  if (existsSync(projectRoot)) {
-    return mergeGraphFlowConfig(base, loadLayer(projectRoot));
-  }
-
-  if (existsSync(overlayPath)) {
-    return mergeGraphFlowConfig(base, loadLayer(overlayPath));
-  }
-
-  return base;
+  return bindRuntimeWorkspaceRoot(merged, { projectWorkspaceRoot });
 }
 
 function loadLayer(path: string): GraphFlowConfig {

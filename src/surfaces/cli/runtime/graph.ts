@@ -2,6 +2,7 @@ import { createWriteStream, existsSync, mkdirSync, renameSync, rmSync } from "no
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { resolveConfig } from "../../../config/resolve";
+import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
 import { resolveGraphStorePath } from "../../../config/paths";
 import type { GraphFlowConfig } from "../../../config/schema";
 import type { GraphEdge, GraphNode } from "../../../core/types";
@@ -191,10 +192,10 @@ export async function previewContext(query: string, configPath?: string): Promis
 }
 
 export async function indexGraph(rootDir?: string, configPath?: string): Promise<GraphIndexResult> {
-  const config = resolveConfig(configPath);
+  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
   applyOpenBmbRuntimeEnv(config);
   const graphClient = createGraphClient(config);
-  const targetDir = rootDir || config.graphPolicy.workspaceRoot || process.cwd();
+  const targetDir = config.graphPolicy.workspaceRoot ?? process.cwd();
 
   const indexOptions = config.graphPolicy.includeExtensions
     ? { includeExtensions: config.graphPolicy.includeExtensions }
@@ -244,10 +245,10 @@ export async function indexFile(
 }
 
 export async function rebuildGraph(rootDir?: string, configPath?: string): Promise<GraphRebuildResult> {
-  const config = resolveConfig(configPath);
+  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
   applyOpenBmbRuntimeEnv(config);
   const graphClient = createGraphClient(config);
-  const targetDir = rootDir || config.graphPolicy.workspaceRoot || process.cwd();
+  const targetDir = config.graphPolicy.workspaceRoot ?? process.cwd();
   const storePath = resolveGraphStorePath(config);
 
   clearGraphIndexArtifacts(targetDir, storePath);
