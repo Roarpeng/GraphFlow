@@ -57,9 +57,11 @@ export function resolveConfig(path = "graphflow.config.json"): GraphFlowConfig {
     if (result.usedFallback && result.error) {
       logger.warn({ path: result.configPath, error: result.error }, "Using default config for explicit path");
     }
-    return bindRuntimeWorkspaceRoot(result.config, {
-      projectWorkspaceRoot: result.config.graphPolicy.workspaceRoot,
-    });
+    const projectRoot = result.config.graphPolicy.workspaceRoot;
+    return bindRuntimeWorkspaceRoot(
+      result.config,
+      projectRoot ? { projectWorkspaceRoot: projectRoot } : undefined
+    );
   }
 
   const globalPath = resolveGlobalConfigPath();
@@ -89,7 +91,10 @@ export function resolveConfig(path = "graphflow.config.json"): GraphFlowConfig {
     merged = base;
   }
 
-  return bindRuntimeWorkspaceRoot(merged, { projectWorkspaceRoot });
+  return bindRuntimeWorkspaceRoot(
+    merged,
+    projectWorkspaceRoot ? { projectWorkspaceRoot } : undefined
+  );
 }
 
 function loadLayer(path: string): GraphFlowConfig {
