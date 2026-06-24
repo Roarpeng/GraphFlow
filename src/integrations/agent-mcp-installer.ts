@@ -389,6 +389,10 @@ function resolveWindowsNpxLaunch(): { command: string; args: string[] } | undefi
 
 export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
   const cwd = options.workspaceRoot ?? options.npmScriptCwd ?? process.cwd();
+  const mcpEnv: Record<string, string> = {
+    ...MCP_STDIO_ENV,
+    ...(options.workspaceRoot ? { GRAPHFLOW_WORKSPACE_ROOT: options.workspaceRoot } : {}),
+  };
 
   if (options.strategy === "node-bundled") {
     if (!options.bundledServerPath) {
@@ -402,7 +406,7 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
           command: options.launcherPath,
           args: [],
           cwd: runtimeRoot,
-          env: { ...MCP_STDIO_ENV },
+          env: { ...mcpEnv },
         };
       }
 
@@ -414,7 +418,7 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
         command: launch.command,
         args: [options.launcherPath],
         cwd: runtimeRoot,
-        env: launch.env,
+        env: { ...mcpEnv, ...launch.env },
       };
     }
 
@@ -426,7 +430,7 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
       command: launch.command,
       args: [options.bundledServerPath],
       cwd: runtimeRoot,
-      env: launch.env,
+      env: { ...mcpEnv, ...launch.env },
     };
   }
 
@@ -447,7 +451,7 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
         command: winNpx.command,
         args: winNpx.args,
         ...(options.workspaceRoot ? { cwd: options.workspaceRoot } : {}),
-        env: { ...MCP_STDIO_ENV },
+        env: { ...mcpEnv },
       };
     }
   }
@@ -457,7 +461,7 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
     command: npxCmd,
     args: ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
     ...(options.workspaceRoot ? { cwd: options.workspaceRoot } : {}),
-    env: { ...MCP_STDIO_ENV },
+    env: { ...mcpEnv },
   };
 }
 

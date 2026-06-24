@@ -4,6 +4,8 @@ import { validateConfig } from "../../../config/loader";
 import { DEFAULT_OUTPUT_DIR } from "../../../config/defaults";
 import { formatApiKeyForConfig, formatApiKeyForSettings, resolveConfigSecret } from "../../../config/secrets";
 import { resolveConfig, resolveConfigPath, resolveWritableConfigPath } from "../../../config/resolve";
+import { resolveGlobalConfigPath } from "../../../config/scaffold";
+import { stripWorkspaceRootForGlobalPersist } from "../../../config/workspace-root";
 import type { GraphFlowConfig } from "../../../config/schema";
 import { resolveEnrichmentBackend } from "./env.js";
 import { readRawConfig } from "./helpers.js";
@@ -275,7 +277,9 @@ export function saveGraphFlowSettings(
   if (dir && dir !== ".") {
     mkdirSync(dir, { recursive: true });
   }
-  writeFileSync(actualPath, `${JSON.stringify(updated, null, 2)}\n`, "utf8");
+  const persisted =
+    actualPath === resolveGlobalConfigPath() ? stripWorkspaceRootForGlobalPersist(updated) : updated;
+  writeFileSync(actualPath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
   return getGraphFlowSettings(actualPath);
 }
 

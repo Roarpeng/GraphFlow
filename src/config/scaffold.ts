@@ -23,11 +23,16 @@ export function ensureGlobalGraphFlowConfig(options?: { configPath?: string }): 
   }
 
   const config = getDefaultConfig();
+  const { workspaceRoot: _ignored, ...graphPolicy } = config.graphPolicy;
   const parentDir = join(path, "..");
   if (!existsSync(parentDir)) {
     mkdirSync(parentDir, { recursive: true });
   }
-  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  writeFileSync(
+    path,
+    `${JSON.stringify({ ...config, graphPolicy }, null, 2)}\n`,
+    "utf8"
+  );
   return { path, status: "created" };
 }
 
