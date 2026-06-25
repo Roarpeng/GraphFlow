@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ensureGlobalGraphFlowConfig, resolveGlobalConfigPath } from "../../config/scaffold";
@@ -11,6 +11,105 @@ import {
 
 const CONFIG_DIR = ".graphflow";
 const README_FILE = join(CONFIG_DIR, "README.md");
+
+const isWindows = process.platform === "win32";
+
+function resolveHomePaths(): { home: string; appData: string; localAppData: string } {
+  const home = homedir();
+  const appData = process.env.APPDATA ?? (isWindows ? join(home, "AppData", "Roaming") : "");
+  const localAppData = process.env.LOCALAPPDATA ?? (isWindows ? join(home, "AppData", "Local") : "");
+  return { home, appData, localAppData };
+}
+
+function getTraeUserDirs(): Array<{ name: string; skillsDir: string }> {
+  const { home, appData } = resolveHomePaths();
+  const dirs: Array<{ name: string; skillsDir: string }> = [];
+
+  if (isWindows) {
+    if (existsSync(join(appData, "Trae"))) {
+      dirs.push({ name: "Trae", skillsDir: join(appData, "Trae", "User", "skills") });
+    }
+    if (existsSync(join(appData, "Trae CN"))) {
+      dirs.push({ name: "Trae CN", skillsDir: join(appData, "Trae CN", "User", "skills") });
+    }
+  } else {
+    if (existsSync(join(home, ".config", "Trae"))) {
+      dirs.push({ name: "Trae", skillsDir: join(home, ".config", "Trae", "User", "skills") });
+    }
+    if (existsSync(join(home, ".config", "Trae CN"))) {
+      dirs.push({ name: "Trae CN", skillsDir: join(home, ".config", "Trae CN", "User", "skills") });
+    }
+  }
+
+  return dirs;
+}
+
+function resolveSkillSourcePath(): string | undefined {
+  const candidates: string[] = [
+    join(__dirname, "..", "..", "surfaces", "trae-skill", "graphflow"),
+    join(__dirname, "..", "..", "..", "src", "surfaces", "trae-skill", "graphflow"),
+    join(process.cwd(), "src", "surfaces", "trae-skill", "graphflow"),
+  ];
+  for (const dir of candidates) {
+    if (existsSync(join(dir, "SKILL.md"))) {
+      return dir;
+    }
+  }
+  return undefined;
+}
+
+export interface SkillInstallResult {
+  agent: string;
+  status: "created" | "updated" | "skipped" | "error";
+  message?: string;
+}
+
+export function installTraeSkills(): SkillInstallResult[] {
+  const results: SkillInstallResult[] = [];
+  const skillSourceDir = resolveSkillSourcePath();
+
+  if (!skillSourceDir) {
+    results.push({ agent: "Trae", status: "skipped", message: "Skill source not found" });
+    return results;
+  }
+
+  const traeDirs = getTraeUserDirs();
+  if (traeDirs.length === 0) {
+    results.push({ agent: "Trae", status: "skipped", message: "No Trae installation detected" });
+    return results;
+  }
+
+  const sourceSkillFile = join(skillSourceDir, "SKILL.md");
+
+  for (const trae of traeDirs) {
+    try {
+      const destDir = join(trae.skillsDir, "graphflow");
+      const destFile = join(destDir, "SKILL.md");
+
+      const existed = existsSync(destFile);
+      if (existed) {
+        const existingContent = readFileSync(destFile, "utf8");
+        const newContent = readFileSync(sourceSkillFile, "utf8");
+        if (existingContent === newContent) {
+          results.push({ agent: trae.name, status: "skipped", message: "already up to date" });
+          continue;
+        }
+      }
+
+      mkdirSync(destDir, { recursive: true });
+      copyFileSync(sourceSkillFile, destFile);
+      results.push({ agent: trae.name, status: existed ? "updated" : "created" });
+    } catch (error) {
+      results.push({
+        agent: trae.name,
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return results;
+}
 
 function buildReadmeContent(installResults: McpInstallResult[]): string {
   const detectedAgents = detectInstalledAgents().map((agent) => agent.name).join(", ") || "未检测到";
@@ -59,15 +158,7 @@ ${formatModelConfigGuide()}
 `;
 }
 
-export function runInit() {
-  if (process.env.GRAPHFLOW_SKIP_POSTINSTALL === "1" || process.env.CI === "true") {
-    console.log("[SKIP] GraphFlow postinstall skipped in CI/automation.");
-    return;
-  }
-
-  const workspaceRoot = process.cwd();
-  console.log("[START] Initializing GraphFlow global config...");
-
+function runInstallation(workspaceRoot: string): { mcpResults: McpInstallResult[]; skillResults: SkillInstallResult[] } {
   const globalConfig = ensureGlobalGraphFlowConfig();
   if (globalConfig.status === "created") {
     console.log(`[CREATED] Global config: ${globalConfig.path}`);
@@ -94,6 +185,53 @@ export function runInit() {
     }
     console.log(`[SUCCESS] ${result.status === "created" ? "Created" : "Updated"} GraphFlow MCP for ${result.agentName}: ${result.configPath}`);
   }
+
+  const skillResults = installTraeSkills();
+  for (const result of skillResults) {
+    if (result.status === "error") {
+      console.error(`[ERROR] Skill ${result.agent}: ${result.message}`);
+      continue;
+    }
+    if (result.status === "skipped") {
+      console.log(`[SKIP] Skill ${result.agent}: ${result.message ?? "skipped"}`);
+      continue;
+    }
+    console.log(`[SUCCESS] ${result.status === "created" ? "Created" : "Updated"} GraphFlow Skill for ${result.agent}`);
+  }
+
+  return { mcpResults: installResults, skillResults };
+}
+
+export function runInstall() {
+  const workspaceRoot = process.cwd();
+  console.log("[START] Installing GraphFlow MCP + Skills to all detected agents...");
+
+  const { mcpResults } = runInstallation(workspaceRoot);
+
+  if (!existsSync(CONFIG_DIR)) {
+    mkdirSync(CONFIG_DIR, { recursive: true });
+  }
+  writeFileSync(README_FILE, buildReadmeContent(mcpResults), "utf8");
+  console.log(`[CREATED] Documentation: ${README_FILE}`);
+
+  void bootstrapGraphIndex(workspaceRoot).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[WARN] Bootstrap graph index skipped: ${message}`);
+  });
+
+  console.log(`[FINISH] Installation complete! Global config: ${join(homedir(), ".graphflow.config.json")}`);
+}
+
+export function runInit() {
+  if (process.env.GRAPHFLOW_SKIP_POSTINSTALL === "1" || process.env.CI === "true") {
+    console.log("[SKIP] GraphFlow postinstall skipped in CI/automation.");
+    return;
+  }
+
+  const workspaceRoot = process.cwd();
+  console.log("[START] Initializing GraphFlow global config...");
+
+  const { mcpResults: installResults } = runInstallation(workspaceRoot);
 
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true });
