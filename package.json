@@ -8,6 +8,7 @@
     "dist",
     "wasm",
     "scripts/safe-postinstall.cjs",
+    "src/surfaces/trae-skill",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
