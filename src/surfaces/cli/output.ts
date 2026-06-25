@@ -18,6 +18,7 @@ export function buildCliUsage(): string {
   return [
     "Usage: graphflow <command> [options]",
     "Commands:",
+    "  install                     Install MCP + Skill to all detected agents",
     "  config init [--global]",
     '  run "<task>" [--json] [--config <path>]',
     '  plan "<task>" [--json] [--config <path>]',

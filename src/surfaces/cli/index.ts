@@ -27,6 +27,16 @@ import {
 import { buildCliUsage, formatCliResult, getCliVersion, parseCliOptions, type CliCommandResult } from "./output";
 
 async function executeCommand(command: string, args: string[], configPath?: string): Promise<CliCommandResult | undefined> {
+  if (command === "install") {
+    const { runInstall } = require("./init");
+    runInstall();
+    return {
+      command: "install",
+      data: {},
+      legacyText: `Installation complete`,
+    };
+  }
+
   if (command === "init" || (command === "config" && args[0] === "init")) {
     const { runInit } = require("./init");
     runInit();
