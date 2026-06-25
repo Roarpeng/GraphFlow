@@ -1,20 +1,175 @@
-const { existsSync } = require("node:fs");
+#!/usr/bin/env node
+const { existsSync, mkdirSync, copyFileSync, readFileSync } = require("node:fs");
+const { join } = require("node:path");
+const { homedir } = require("node:os");
 const { spawnSync } = require("node:child_process");
 
-if (process.env.GRAPHFLOW_SKIP_POSTINSTALL === "1" || process.env.CI === "true") {
-  process.exit(0);
+const isWindows = process.platform === "win32";
+
+function resolveHomePaths() {
+  const home = homedir();
+  const appData = process.env.APPDATA || (isWindows ? join(home, "AppData", "Roaming") : "");
+  const localAppData = process.env.LOCALAPPDATA || (isWindows ? join(home, "AppData", "Local") : "");
+  return { home, appData, localAppData };
 }
 
-// Only run init when explicitly opted in. Avoid mutating global MCP/config when
-// GraphFlow is installed as a transitive dependency of another project.
-if (process.env.GRAPHFLOW_ENABLE_POSTINSTALL !== "1") {
-  process.exit(0);
+function detectTrae() {
+  const { home, appData } = resolveHomePaths();
+  const markers = [
+    join(home, ".trae"),
+    join(home, ".trae-cn"),
+    join(appData, "Trae"),
+    join(appData, "Trae CN"),
+  ];
+  return markers.some((m) => existsSync(m));
 }
 
-const initPath = "dist/surfaces/cli/init.js";
-if (!existsSync(initPath)) {
-  process.exit(0);
+function getTraeUserDirs() {
+  const { home, appData } = resolveHomePaths();
+  const dirs = [];
+
+  if (isWindows) {
+    if (existsSync(join(appData, "Trae"))) {
+      dirs.push({
+        name: "Trae",
+        userDir: join(appData, "Trae", "User"),
+        skillsDir: join(appData, "Trae", "User", "skills"),
+      });
+    }
+    if (existsSync(join(appData, "Trae CN"))) {
+      dirs.push({
+        name: "Trae CN",
+        userDir: join(appData, "Trae CN", "User"),
+        skillsDir: join(appData, "Trae CN", "User", "skills"),
+      });
+    }
+  } else {
+    if (existsSync(join(home, ".config", "Trae"))) {
+      dirs.push({
+        name: "Trae",
+        userDir: join(home, ".config", "Trae", "User"),
+        skillsDir: join(home, ".config", "Trae", "User", "skills"),
+      });
+    }
+    if (existsSync(join(home, ".config", "Trae CN"))) {
+      dirs.push({
+        name: "Trae CN",
+        userDir: join(home, ".config", "Trae CN", "User"),
+        skillsDir: join(home, ".config", "Trae CN", "User", "skills"),
+      });
+    }
+  }
+
+  return dirs;
 }
 
-const result = spawnSync(process.execPath, [initPath], { stdio: "inherit" });
-process.exit(result.status ?? 1);
+function installSkill(skillsDir, skillSourceDir) {
+  const skillDestDir = join(skillsDir, "graphflow");
+  const skillDestFile = join(skillDestDir, "SKILL.md");
+  const skillSourceFile = join(skillSourceDir, "SKILL.md");
+
+  if (!existsSync(skillSourceFile)) {
+    return { status: "skipped", reason: "skill source not found" };
+  }
+
+  const existed = existsSync(skillDestFile);
+
+  if (existed) {
+    const existingContent = readFileSync(skillDestFile, "utf8");
+    const newContent = readFileSync(skillSourceFile, "utf8");
+    if (existingContent === newContent) {
+      return { status: "skipped", reason: "already up to date" };
+    }
+  }
+
+  mkdirSync(skillDestDir, { recursive: true });
+  copyFileSync(skillSourceFile, skillDestFile);
+
+  return { status: existed ? "updated" : "created" };
+}
+
+function getSkillSourceDir() {
+  const candidates = [
+    join(__dirname, "..", "dist", "surfaces", "trae-skill", "graphflow"),
+    join(__dirname, "..", "src", "surfaces", "trae-skill", "graphflow"),
+  ];
+
+  for (const dir of candidates) {
+    if (existsSync(join(dir, "SKILL.md"))) {
+      return dir;
+    }
+  }
+  return null;
+}
+
+function runMcpInstaller() {
+  const installerPath = join(__dirname, "..", "dist", "integrations", "agent-mcp-installer.js");
+  if (!existsSync(installerPath)) {
+    return { status: "skipped", reason: "installer not built yet" };
+  }
+
+  try {
+    const result = spawnSync(
+      process.execPath,
+      ["-e", `
+        const { installMcpToDetectedAgents } = require(${JSON.stringify(installerPath)});
+        const results = installMcpToDetectedAgents({ strategy: "npx" });
+        console.log(JSON.stringify(results));
+      `],
+      { encoding: "utf8" }
+    );
+    if (result.status === 0 && result.stdout.trim()) {
+      try {
+        return { status: "installed", details: JSON.parse(result.stdout.trim()) };
+      } catch {
+        return { status: "unknown", output: result.stdout.trim() };
+      }
+    }
+    return { status: "error", error: result.stderr || result.stdout };
+  } catch (err) {
+    return { status: "error", error: err.message };
+  }
+}
+
+function main() {
+  if (process.env.GRAPHFLOW_SKIP_POSTINSTALL === "1" || process.env.CI === "true") {
+    process.exit(0);
+  }
+
+  if (process.env.GRAPHFLOW_ENABLE_POSTINSTALL !== "1") {
+    console.log("[GraphFlow] Post-install skipped. Set GRAPHFLOW_ENABLE_POSTINSTALL=1 to auto-install MCP + Skill.");
+    console.log("[GraphFlow] Run 'npx @roarpeng/graphflow install' to install manually.");
+    process.exit(0);
+  }
+
+  console.log("[GraphFlow] Running post-install setup...");
+
+  const skillSourceDir = getSkillSourceDir();
+  const traeDirs = getTraeUserDirs();
+
+  const skillResults = [];
+  if (skillSourceDir && traeDirs.length > 0) {
+    for (const trae of traeDirs) {
+      const result = installSkill(trae.skillsDir, skillSourceDir);
+      skillResults.push({ agent: trae.name, ...result });
+      console.log(`[GraphFlow] Skill for ${trae.name}: ${result.status}${result.reason ? ` (${result.reason})` : ""}`);
+    }
+  }
+
+  const mcpResult = runMcpInstaller();
+  if (mcpResult.status === "installed" && Array.isArray(mcpResult.details)) {
+    for (const item of mcpResult.details) {
+      console.log(`[GraphFlow] MCP for ${item.agentName} (${item.scope}): ${item.status}`);
+    }
+  } else if (mcpResult.status === "skipped") {
+    console.log(`[GraphFlow] MCP install skipped: ${mcpResult.reason}`);
+  }
+
+  console.log("[GraphFlow] Post-install complete.");
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = { installSkill, detectTrae, getTraeUserDirs, getSkillSourceDir };

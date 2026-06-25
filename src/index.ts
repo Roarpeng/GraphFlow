@@ -49,3 +49,25 @@ export {
   type GraphClient,
 } from "./graph/client-factory";
 export { validateConfig, loadConfig, loadConfigSafe, type LoadConfigResult } from "./config/loader";
+export {
+  graphflowSkills,
+  invokeSkill,
+  listSkills,
+  type GraphFlowSkillName,
+  type SkillInputByName,
+  type SkillOutputByName,
+  type CompressContextInput,
+  type CompressContextOutput,
+  type PlanTaskInput,
+  type PlanTaskOutput,
+  type PlanInsightInput,
+  type PlanInsightOutput,
+  type IndexGraphInput,
+  type IndexGraphOutput,
+  type InspectGraphInput,
+  type InspectGraphOutput,
+  type ExpandAnchorInput,
+  type ExpandAnchorOutput,
+  type RunTaskInput,
+  type RunTaskOutput,
+} from "./skills";
