@@ -131,18 +131,38 @@ function runMcpInstaller() {
   }
 }
 
+function isGlobalInstall() {
+  if (process.env.npm_config_global === "true") {
+    return true;
+  }
+  try {
+    const pkgRoot = join(__dirname, "..");
+    const globalPrefix = process.env.npm_config_prefix || "";
+    if (globalPrefix && pkgRoot.startsWith(globalPrefix)) {
+      return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
 function main() {
   if (process.env.GRAPHFLOW_SKIP_POSTINSTALL === "1" || process.env.CI === "true") {
     process.exit(0);
   }
 
-  if (process.env.GRAPHFLOW_ENABLE_POSTINSTALL !== "1") {
-    console.log("[GraphFlow] Post-install skipped. Set GRAPHFLOW_ENABLE_POSTINSTALL=1 to auto-install MCP + Skill.");
-    console.log("[GraphFlow] Run 'npx @roarpeng/graphflow install' to install manually.");
+  const globalInstall = isGlobalInstall();
+  const explicitlyEnabled = process.env.GRAPHFLOW_ENABLE_POSTINSTALL === "1";
+
+  if (!globalInstall && !explicitlyEnabled) {
+    console.log("[GraphFlow] Local install detected. Auto-setup skipped to avoid modifying your global config.");
+    console.log("[GraphFlow] To install GraphFlow MCP + Skill, run:");
+    console.log("[GraphFlow]   npx @roarpeng/graphflow install");
     process.exit(0);
   }
 
-  console.log("[GraphFlow] Running post-install setup...");
+  console.log(`[GraphFlow] Running post-install setup (${globalInstall ? "global install" : "explicitly enabled"})...`);
 
   const skillSourceDir = getSkillSourceDir();
   const traeDirs = getTraeUserDirs();
