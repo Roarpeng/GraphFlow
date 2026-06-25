@@ -68,7 +68,7 @@ GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，将 *
 
 ### 发布信息
 
-- 最新版本：**v1.0.7**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.0.7`
+- 最新版本：**v1.0.8**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.0.8`
 - **GitHub Release**：push 到 `main` 且 CI 通过后自动发布 VSIX（见 [Actions](https://github.com/Roarpeng/GraphFlow/actions)）
 - 变更日志：`CHANGELOG.md`
 
