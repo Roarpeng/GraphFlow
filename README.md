@@ -16,7 +16,7 @@ GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，将 *
 | **语义增强** | 可选 post-index LLM 语义 enrich；OpenBMB 本地 embedded 模式 |
 | **学习飞轮** | Episodic Memory、Reflection、Skill 节点、nightly 学习、技能提示注入规划 |
 | **可观测性** | `graphflow_stats` 累计 token 节省；`graphflow_metrics` Prometheus 指标；VS Code 知识图谱 Snapshot |
-| **Agent 接入** | CLI `--json`；MCP stdio（**16 工具**）；Cursor / Claude Code 规则与示例配置 |
+| **Agent 接入** | CLI `--json`；MCP stdio（**18 工具**）；Cursor / Claude Code 规则与示例配置 |
 | **VS Code 扩展** | Settings、建图、路由测试、Context Preview、**知识图谱可视化**、Skill Insights、Chat Agent、一键安装 MCP |
 | **存储后端** | `file`（JSON）/ `memory` / `sqlite`（FTS5）/ `mcp-http`（Graphify） |
 | **多项目隔离** | 全局配置共享 LLM/路由；**图谱路径按当前工作区解析**，不再串读其它项目的 `graphflow-out` |
@@ -44,11 +44,12 @@ GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，将 *
    - C/C++、Rust 索引器增强；WASM 语法包可随 npm 包离线分发（`npm run wasm:download`）
    - MCP 新增 `graphflow_index_file` 单文件增量索引
 
-3. **MCP 工具扩展（9 → 16）**
+3. **MCP 工具扩展（9 → 18）**
    - `graphflow_plan_insight`：六顶思考帽 + 5-Why 深度规划
    - `graphflow_export_artifact` / `graphflow_import_artifact`：图谱压缩包导入导出
    - `graphflow_stats`：累计 token 节省统计
    - `graphflow_metrics`：Prometheus 格式可观测性指标
+   - `graphflow_report_outcome` / `graphflow_expand_anchor`：结果回传与锚点扩展
 
 4. **知识图谱可视化（延续 v0.6.12+）**
    - 可读标签、代码层/学习层 Tab、目录聚类、缩放平移、跳转源码
@@ -67,7 +68,7 @@ GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，将 *
 
 ### 发布信息
 
-- 最新版本：**v1.0.4**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.0.4`
+- 最新版本：**v1.0.7**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.0.7`
 - **GitHub Release**：push 到 `main` 且 CI 通过后自动发布 VSIX（见 [Actions](https://github.com/Roarpeng/GraphFlow/actions)）
 - 变更日志：`CHANGELOG.md`
 
@@ -99,7 +100,7 @@ GraphFlow 支持两种对外接入方式：
 npm run start:mcp
 ```
 
-### MCP 工具一览（16 个）
+### MCP 工具一览（18 个）
 
 | 工具 | 用途 |
 | --- | --- |
@@ -107,6 +108,8 @@ npm run start:mcp
 | `graphflow_plan` | 多步任务分解与 DAG 规划 |
 | `graphflow_plan_insight` | 六顶思考帽 + 5-Why 深度分析后规划（复杂任务） |
 | `graphflow_run` | 规划 + 压缩上下文，输出 bridge 执行描述符 |
+| `graphflow_report_outcome` | 向 GraphFlow 汇报任务执行结果，用于学习飞轮 |
+| `graphflow_expand_anchor` | 扩展指定锚点的上下文详情 |
 | `graphflow_index` | 全工作区增量建图 |
 | `graphflow_index_file` | 单文件增量建图（适合 onSave / watcher） |
 | `graphflow_rebuild` | 清空缓存后全量重建 |
