@@ -26,10 +26,6 @@ function normalizeExtension(ext: string): string {
   return trimmed.startsWith(".") ? trimmed : `.${trimmed}`;
 }
 
-const LEGACY_WEB_ONLY_SET = new Set(
-  LEGACY_WEB_ONLY_EXTENSIONS.map((ext) => normalizeExtension(ext))
-);
-
 /** True when the configured list exactly matches the legacy 6-item web-only default. */
 export function isLegacyWebOnlyExtensions(extensions: string[]): boolean {
   const normalized = Array.from(new Set(extensions.map(normalizeExtension))).sort();
