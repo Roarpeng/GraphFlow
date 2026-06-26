@@ -597,27 +597,6 @@ export function deactivate(): void {
   // no-op
 }
 
-function parseCliResult(line: string): { status: string; attempts: number; feedback: string } {
-  const cleaned = line.split(/\r?\n/).filter(Boolean).at(-1) ?? line;
-  const parts = cleaned.split(";").map((part) => part.trim());
-  const map = new Map<string, string>();
-
-  for (const part of parts) {
-    const idx = part.indexOf("=");
-    if (idx > 0) {
-      const key = part.slice(0, idx).trim();
-      const value = part.slice(idx + 1).trim();
-      map.set(key, value);
-    }
-  }
-
-  return {
-    status: map.get("status") ?? "UNKNOWN",
-    attempts: Number(map.get("attempts") ?? "0"),
-    feedback: map.get("feedback") ?? cleaned,
-  };
-}
-
 async function runGraphFlow<T>(
   workspaceRoot: string | undefined,
   execute: (runtime: GraphFlowRuntime) => Promise<T>
