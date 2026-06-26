@@ -142,7 +142,10 @@ async function runOrchestration(
   const insightConfig = resolveConfig(options?.configPath);
   const autoPlanInsight =
     options?.enablePlanInsight === true ||
-    (options?.enablePlanInsight !== false && !hasUsableLlmProvider(insightConfig));
+    (options?.enablePlanInsight !== false &&
+      !hasUsableLlmProvider(insightConfig) &&
+      options?.enableLlmAgents !== true &&
+      (options?.executionMode === "bridge" || options?.executionMode === undefined));
 
   if (autoPlanInsight) {
     planInsightBundle = await maybeRunPlanInsightForComplex(input.task, options);
