@@ -125,8 +125,10 @@ function buildAgentProfiles(): AgentProfile[] {
       markerPaths: [
         join(home, ".trae"),
         join(home, ".trae-cn"),
+        join(home, ".trae-aicc"),
         join(appData, "Trae"),
         join(appData, "Trae CN"),
+        join(appData, "TRAE SOLO CN"),
       ],
       userTargets: [
         {
@@ -139,6 +141,12 @@ function buildAgentProfiles(): AgentProfile[] {
           configPath: isWindows()
             ? join(appData, "Trae CN", "User", "mcp.json")
             : join(home, ".config", "Trae CN", "User", "mcp.json"),
+          serversKey: "mcpServers",
+        },
+        {
+          configPath: isWindows()
+            ? join(appData, "TRAE SOLO CN", "User", "mcp.json")
+            : join(home, ".config", "TRAE SOLO CN", "User", "mcp.json"),
           serversKey: "mcpServers",
         },
       ],
