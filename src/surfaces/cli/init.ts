@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { ensureGlobalGraphFlowConfig, resolveGlobalConfigPath } from "../../config/scaffold";
 import {
   detectInstalledAgents,
@@ -32,12 +32,18 @@ function getTraeUserDirs(): Array<{ name: string; skillsDir: string }> {
     if (existsSync(join(appData, "Trae CN"))) {
       dirs.push({ name: "Trae CN", skillsDir: join(appData, "Trae CN", "User", "skills") });
     }
+    if (existsSync(join(appData, "TRAE SOLO CN"))) {
+      dirs.push({ name: "TRAE SOLO CN", skillsDir: join(appData, "TRAE SOLO CN", "User", "skills") });
+    }
   } else {
     if (existsSync(join(home, ".config", "Trae"))) {
       dirs.push({ name: "Trae", skillsDir: join(home, ".config", "Trae", "User", "skills") });
     }
     if (existsSync(join(home, ".config", "Trae CN"))) {
       dirs.push({ name: "Trae CN", skillsDir: join(home, ".config", "Trae CN", "User", "skills") });
+    }
+    if (existsSync(join(home, ".config", "TRAE SOLO CN"))) {
+      dirs.push({ name: "TRAE SOLO CN", skillsDir: join(home, ".config", "TRAE SOLO CN", "User", "skills") });
     }
   }
 
@@ -158,6 +164,24 @@ ${formatModelConfigGuide()}
 `;
 }
 
+function resolveBundledServerPath(): string | undefined {
+  const candidates = [
+    join(__dirname, "..", "mcp", "server.js"),
+    join(__dirname, "..", "..", "surfaces", "mcp", "server.js"),
+    join(__dirname, "..", "..", "..", "dist", "surfaces", "mcp", "server.js"),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) {
+      return resolve(p);
+    }
+  }
+  return undefined;
+}
+
+function isRunningFromNpmPackage(): boolean {
+  return resolve(__dirname).toLowerCase().includes("@roarpeng" + "/graphflow");
+}
+
 function runInstallation(workspaceRoot: string): { mcpResults: McpInstallResult[]; skillResults: SkillInstallResult[] } {
   const globalConfig = ensureGlobalGraphFlowConfig();
   if (globalConfig.status === "created") {
@@ -166,13 +190,36 @@ function runInstallation(workspaceRoot: string): { mcpResults: McpInstallResult[
     console.log(`[SKIP] Global config already exists: ${globalConfig.path}`);
   }
 
-  const installResults = installMcpToDetectedAgents({
-    strategy: existsSync(join(workspaceRoot, "package.json")) ? "npm-script" : "npx",
-    installScope: "user",
-    ...(existsSync(join(workspaceRoot, "package.json"))
-      ? { npmScriptCwd: workspaceRoot }
-      : {}),
-  });
+  const bundledServerPath = resolveBundledServerPath();
+  const fromPackage = isRunningFromNpmPackage();
+  const hasPackageJson = existsSync(join(workspaceRoot, "package.json"));
+
+  let mcpOptions: Parameters<typeof installMcpToDetectedAgents>[0];
+
+  if (bundledServerPath && fromPackage) {
+    mcpOptions = {
+      strategy: "node-bundled",
+      installScope: "user",
+      bundledServerPath,
+      bundledRuntimeRoot: join(bundledServerPath, "..", "..", "..", ".."),
+      workspaceRoot,
+    };
+    console.log(`[INFO] Running from npm package — using bundled server: ${bundledServerPath}`);
+  } else if (hasPackageJson) {
+    mcpOptions = {
+      strategy: "npm-script",
+      installScope: "user",
+      npmScriptCwd: workspaceRoot,
+    };
+  } else {
+    mcpOptions = {
+      strategy: "npx",
+      installScope: "user",
+      workspaceRoot,
+    };
+  }
+
+  const installResults = installMcpToDetectedAgents(mcpOptions);
 
   for (const result of installResults) {
     if (result.status === "error") {
