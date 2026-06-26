@@ -175,4 +175,44 @@ export class Derived extends Base {
     expect(DEFAULT_EDGE_WEIGHTS.calls).toBeGreaterThan(0);
     expect(DEFAULT_EDGE_WEIGHTS.inherits).toBeGreaterThan(0);
   });
+
+  // ── Task 5: line fallback for anonymous callback calls ─────────────
+  it("should create calls edge via line fallback when caller name is missing", async () => {
+    const tmpDir = join(tmpdir(), `graphflow-m49-line-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+
+    const code = `
+export function helper(): string { return "ok"; }
+
+export const runner = () => {
+  helper();
+};
+`;
+    writeFileSync(join(tmpDir, "callback.ts"), code);
+
+    try {
+      const client = new GraphifyClient();
+      await indexWorkspaceFiles(client, tmpDir);
+
+      const snapshot = client.snapshot();
+      const callsEdges = snapshot.edges.filter((e) => e.relation === "calls");
+      expect(callsEdges.length).toBeGreaterThan(0);
+
+      const runnerNode = snapshot.nodes.find(
+        (n) => n.type === "Symbol" && n.metadata?.name === "runner"
+      );
+      const helperNode = snapshot.nodes.find(
+        (n) => n.type === "Symbol" && n.metadata?.name === "helper"
+      );
+      expect(runnerNode).toBeDefined();
+      expect(helperNode).toBeDefined();
+
+      const callEdge = callsEdges.find(
+        (e) => e.from === runnerNode!.id && e.to === helperNode!.id
+      );
+      expect(callEdge).toBeDefined();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

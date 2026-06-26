@@ -40,6 +40,8 @@ describe("M16 agent integrations", () => {
     expect(toolNames).toEqual([
       "graphflow_run",
       "graphflow_report_outcome",
+      "graphflow_submit_insight",
+      "graphflow_merge_insight",
       "graphflow_plan",
       "graphflow_preview_context",
       "graphflow_expand_anchor",

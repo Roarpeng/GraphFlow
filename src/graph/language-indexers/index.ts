@@ -5,6 +5,8 @@ import { goIndexer } from "./go";
 import { cppIndexer } from "./c-cpp";
 import { javaIndexer } from "./java";
 import { rubyIndexer } from "./ruby";
+import { kotlinIndexer } from "./kotlin";
+import { swiftIndexer } from "./swift";
 
 export interface DeclaredSymbol {
   name: string;
@@ -66,6 +68,8 @@ const INDEXERS: LanguageIndexer[] = [
   cppIndexer,
   javaIndexer,
   rubyIndexer,
+  kotlinIndexer,
+  swiftIndexer,
 ];
 
 export function getIndexerForFile(filename: string): LanguageIndexer | undefined {

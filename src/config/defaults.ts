@@ -1,5 +1,6 @@
 import type { GraphFlowConfig } from "./schema";
 import { validateConfig } from "./loader";
+import { DEFAULT_INCLUDE_EXTENSIONS } from "./include-extensions.js";
 
 export const SCAFFOLD_TIERS = {
   smart: { provider: "openai", model: "gpt-4.1" },
@@ -35,11 +36,15 @@ export function getDefaultConfig(): GraphFlowConfig {
       autoIndexOnRun: true,
       autoIndexOnSave: true,
       workspaceRoot: process.cwd(),
-      includeExtensions: [".ts", ".tsx", ".js", ".jsx", ".md", ".json", ".py", ".rs", ".go", ".c", ".h", ".cpp", ".cc", ".hpp", ".java", ".rb"],
+      includeExtensions: [...DEFAULT_INCLUDE_EXTENSIONS],
       transport: "file",
       graphStorePath: `${DEFAULT_OUTPUT_DIR}/graphflow-graph.json`,
       maxContextTokens: 1500,
       layerQuota: { l1: 6, l2: 4, l3: 3 },
+      compression: {
+        enableGraphCompression: true,
+        enableAdaptiveBudget: true,
+      },
       semanticEnrichment: {
         enabled: true,
         mode: "post-index",

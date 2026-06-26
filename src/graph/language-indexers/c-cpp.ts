@@ -18,12 +18,20 @@ export const cppIndexer: LanguageIndexer = {
   language: "c-cpp",
   extensions: [".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hxx"],
   async extract(filePath: string, content: string): Promise<ExtractionResult> {
+    const lower = filePath.toLowerCase();
+    const useCppGrammar = [".cpp", ".cc", ".cxx", ".hpp", ".hxx"].some((ext) => lower.endsWith(ext));
+
     let tree;
     try {
-      const parser = await getTreeSitterParser("c");
+      const parser = await getTreeSitterParser(useCppGrammar ? "cpp" : "c");
       tree = parser.parse(content);
     } catch {
-      return cppRegexFallback(filePath, content);
+      try {
+        const parser = await getTreeSitterParser("c");
+        tree = parser.parse(content);
+      } catch {
+        return cppRegexFallback(filePath, content);
+      }
     }
 
     const symbols: DeclaredSymbol[] = [];

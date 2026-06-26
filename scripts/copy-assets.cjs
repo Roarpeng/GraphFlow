@@ -25,3 +25,7 @@ if (fs.existsSync(skillSrc)) {
 } else {
   console.warn("[build] trae-skill source not found, skipping");
 }
+
+if (!fs.existsSync(path.join(projectRoot, "wasm"))) {
+  console.warn("[build] wasm/ not found — run npm run wasm:bundle");
+}

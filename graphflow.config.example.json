@@ -58,7 +58,7 @@
       "enableGraphCompression": true,
       "enableHnsw": true,
       "enableRepoMapFallback": false,
-      "enableAdaptiveBudget": false,
+      "enableAdaptiveBudget": true,
       "autoDownloadEmbedded": true,
       "timeoutMs": 5000
     }

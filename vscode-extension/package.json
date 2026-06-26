@@ -4,7 +4,7 @@
   "displayName": "GraphFlow",
   "description": "GraphFlow orchestration panel and command runner",
   "icon": "media/graphflow.png",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"
@@ -19,6 +19,7 @@
     "onCommand:graphflow.runTask",
     "onCommand:graphflow.showRuns",
     "onCommand:graphflow.planTask",
+    "onCommand:graphflow.planInsight",
     "onCommand:graphflow.previewContext",
     "onCommand:graphflow.showSettings",
     "onCommand:graphflow.showGraph",
@@ -89,6 +90,10 @@
       {
         "command": "graphflow.planTask",
         "title": "GraphFlow: Plan & Brainstorm"
+      },
+      {
+        "command": "graphflow.planInsight",
+        "title": "GraphFlow: Plan Insight (Six Hats)"
       },
       {
         "command": "graphflow.previewContext",

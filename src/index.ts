@@ -4,6 +4,8 @@ export {
   runTask,
   runTaskResult,
   reportOutcome,
+  submitAgentInsightResult,
+  mergeAgentInsightResult,
   previewContext,
   expandAnchor,
   getGraphFlowSettings,
@@ -44,6 +46,16 @@ export {
   startStdioServer,
 } from "./surfaces/mcp/server";
 export type { TaskRunResult } from "./core/types";
+export { hasUsableLlmProvider } from "./config/llm-availability";
+export {
+  buildAgentDelegatedPlanInsight,
+  buildAgentInsightWorkItems,
+  summarizeInsightForContext,
+  type AgentDelegatedPlanInsight,
+  type AgentDelegationMode,
+  type AgentWorkItem,
+} from "./core/agent-delegation";
+export { planInsightResult, type PlanInsightResult } from "./surfaces/cli/runtime/routing";
 export {
   createGraphClient,
   type GraphClient,

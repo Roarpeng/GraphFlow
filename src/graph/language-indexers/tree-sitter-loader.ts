@@ -1,5 +1,5 @@
 const Parser = require("web-tree-sitter");
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 
@@ -27,67 +27,77 @@ export interface TreeSitterParser {
  * Now all four use tree-sitter for consistent AST-level extraction.
  * Phase 2: added java/ruby to broaden language coverage (toward codebase-memory-mcp's 158 languages).
  */
-export type TreeSitterLanguage = "python" | "go" | "rust" | "c" | "java" | "ruby";
+export type TreeSitterLanguage =
+  | "python"
+  | "go"
+  | "rust"
+  | "c"
+  | "cpp"
+  | "java"
+  | "ruby"
+  | "kotlin"
+  | "swift";
 
 const WASM_CACHE_DIR = join(process.cwd(), ".graphflow-cache", "wasm");
 
+function wasmFileName(language: TreeSitterLanguage): string {
+  return `tree-sitter-${language}.wasm`;
+}
+
+function uniquePaths(paths: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const resolved: string[] = [];
+  for (const candidate of paths) {
+    if (!candidate || seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+    resolved.push(candidate);
+  }
+  return resolved;
+}
+
 /**
- * Try to load a WASM grammar from the bundled location inside the npm package.
- * This avoids downloading from unpkg at runtime, enabling offline use.
- *
- * Lookup order:
- *   1. dist/wasm/ (bundled with @roarpeng/graphflow)
- *   2. node_modules/tree-sitter-wasms/out/ (if installed separately)
- *   3. .graphflow-cache/wasm/ (previously downloaded copy)
- *   4. Download from unpkg (last resort, online-only)
+ * Resolve a bundled WASM grammar path inside the installed GraphFlow package.
+ * No network access — grammars must ship in wasm/ or tree-sitter-wasms dependency.
  */
-function resolveBundledWasmPath(language: TreeSitterLanguage): string | null {
-  const wasmFileName = `tree-sitter-${language}.wasm`;
+export function resolveBundledWasmPath(language: TreeSitterLanguage): string | null {
+  const fileName = wasmFileName(language);
+  const candidates = uniquePaths([
+    join(__dirname, "..", "..", "..", "wasm", fileName),
+    resolvePackageWasmPath(fileName),
+    resolveTreeSitterWasmsPath(fileName),
+    join(WASM_CACHE_DIR, fileName),
+  ]);
 
-  // 1. dist/wasm/ — bundled with the package
-  try {
-    const distWasmDir = join(__dirname, "..", "..", "..", "wasm");
-    const distPath = join(distWasmDir, wasmFileName);
-    if (existsSync(distPath)) return distPath;
-  } catch {
-    // ignore
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
   }
-
-  // 2. node_modules/tree-sitter-wasms/out/
-  try {
-    const pkgPath = requireFn.resolve("tree-sitter-wasms/package.json");
-    const pkgDir = dirname(pkgPath);
-    const nmPath = join(pkgDir, "out", wasmFileName);
-    if (existsSync(nmPath)) return nmPath;
-  } catch {
-    // tree-sitter-wasms not installed as dependency
-  }
-
-  // 3. .graphflow-cache/wasm/ (previously downloaded)
-  const cachePath = join(WASM_CACHE_DIR, wasmFileName);
-  if (existsSync(cachePath)) return cachePath;
 
   return null;
 }
 
-/**
- * Download a WASM grammar from unpkg as a last resort.
- * Caches to .graphflow-cache/wasm/ for subsequent offline use.
- */
-async function downloadWasmGrammar(
-  language: TreeSitterLanguage,
-  targetPath: string
-): Promise<void> {
-  const url = `https://unpkg.com/tree-sitter-wasms@0.1.11/out/tree-sitter-${language}.wasm`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(
-      `Failed to download tree-sitter-${language}.wasm from ${url}: ${res.statusText}`
-    );
+function resolvePackageWasmPath(fileName: string): string | null {
+  const packageNames = ["@roarpeng/graphflow", "graphflow"];
+  for (const packageName of packageNames) {
+    try {
+      const pkgJson = requireFn.resolve(`${packageName}/package.json`);
+      return join(dirname(pkgJson), "wasm", fileName);
+    } catch {
+      // try next package name
+    }
   }
-  const buffer = Buffer.from(await res.arrayBuffer());
-  mkdirSync(dirname(targetPath), { recursive: true });
-  writeFileSync(targetPath, buffer);
+  return null;
+}
+
+function resolveTreeSitterWasmsPath(fileName: string): string | null {
+  try {
+    return requireFn.resolve(`tree-sitter-wasms/out/${fileName}`);
+  } catch {
+    return null;
+  }
 }
 
 export async function getTreeSitterParser(
@@ -98,18 +108,12 @@ export async function getTreeSitterParser(
     initialized = true;
   }
 
-  const wasmFileName = `tree-sitter-${language}.wasm`;
-  const cachePath = join(WASM_CACHE_DIR, wasmFileName);
-
-  // Try bundled / cached locations first (offline-capable)
-  let wasmPath = resolveBundledWasmPath(language);
-
-  // Last resort: download from unpkg (online-only)
+  const wasmPath = resolveBundledWasmPath(language);
   if (!wasmPath) {
-    if (!existsSync(cachePath)) {
-      await downloadWasmGrammar(language, cachePath);
-    }
-    wasmPath = cachePath;
+    throw new Error(
+      `Bundled tree-sitter grammar not found for "${language}". ` +
+        "Reinstall @roarpeng/graphflow or run `npm run wasm:bundle` in the GraphFlow source tree."
+    );
   }
 
   const parser = new Parser();

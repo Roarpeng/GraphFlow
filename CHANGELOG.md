@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.0.9] - 2026-06-26
+
+### Added
+
+- **Agent-delegated LLM（无 API 模式）**：未配置 provider API 时，`graphflow_plan_insight` / complex `graphflow_run` 返回 `agentWorkItems`，由连接的 coding agent 用自己的模型回答 Six Hats prompts。
+- **MCP 闭环工具**：`graphflow_submit_insight`（回传每条 work item 分析）、`graphflow_merge_insight`（合并为完整 insight + DAG plan）。
+- **Skill 质量**：`extractSkillAtoms` 过滤 stopwords / 路径噪声，保留短语与 head token。
+- **Adaptive budget**：complex 任务默认启用自适应 token 预算；配置默认 `enableAdaptiveBudget: true`。
+- **Calls 边增强**：caller 缺失时按行号回退解析；Snapshot 优先展示 `calls` / `defines` 边。
+- **L2/L3 锚点**：Module 父节点与架构类查询的 Skill/Decision 注入。
+- **Monorepo**：`discoverWorkspacePackages` + Snapshot `workspacePackage` 元数据。
+- **语言索引**：Kotlin（`.kt`/`.kts`）、Swift（`.swift`）tree-sitter 索引器。
+- **MCP 模块化**：拆分 `tool-definitions.ts` / `tool-handlers.ts` / `version.ts`。
+- **VS Code**：Agent Work Items 面板、`graphflow.planInsight` 命令；Chat `/insight` 与 agent-delegated 闭环指引。
+
+### Changed
+
+- Bridge 文档强化：`report_outcome` / `submit_insight` 为必做步骤（AGENTS.md、Cursor rules）。
+- `graphflow_inspect_graph` 支持 monorepo 包分组。
+
+### Fixed
+
+- `parseAgentInsightResponse` 优先解析 JSON 数组（plan-refinement）。
+- Skill 融合测试与 stopword 过滤的平衡（m20 回归）。
+
 ## [1.0.3] - 2026-06-24
 
 ### Fixed

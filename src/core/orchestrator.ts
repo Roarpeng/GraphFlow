@@ -1,5 +1,9 @@
 import { planTasks, planTasksLlm } from "../agents/planner";
+import { planInsight } from "../agents/insight";
 import { brainstormTaskLlm } from "../agents/brainstormer";
+import { resolveConfig } from "../config/resolve";
+import { hasUsableLlmProvider } from "../config/llm-availability";
+import { applyOpenBmbRuntimeEnv } from "../surfaces/cli/runtime/env";
 import type { GraphClient } from "../graph/client-factory";
 import { logger } from "../utils/logger";
 import {
@@ -21,6 +25,11 @@ import {
 } from "../routing/model-router";
 import { executeRolePrompt, type PromptContext } from "../routing/provider-executor";
 import { executeDag } from "./dag-engine";
+import {
+  buildAgentDelegatedPlanInsight,
+  summarizeInsightForContext,
+  type AgentDelegatedPlanInsight,
+} from "./agent-delegation";
 import { runSimpleTask } from "./state-machine";
 import { triageTask, triageTaskLlm } from "./triage";
 import type { OrchestrationInput, RouteDecision, TaskRunResult, TaskNode, TaskStatus } from "./types";
@@ -48,10 +57,12 @@ export interface OrchestrateOptions {
   executionMode?: "bridge" | "llm";
   /** Enable zero-cost graph-structure compression (edge weights + PageRank). Default true. */
   enableGraphCompression?: boolean;
-  /** Adaptively size the context token budget from task complexity. Default false. */
+  /** Adaptively size the context token budget from task complexity. Auto-enabled for complex tasks unless false. */
   enableAdaptiveBudget?: boolean;
   /** Return module-level RepoMap overview when budget is tight. Default false. */
   enableRepoMapFallback?: boolean;
+  /** Run Six Hats plan_insight before complex DAG planning. Default true for complex tasks. */
+  enablePlanInsight?: boolean;
 }
 
 export async function orchestrate(
@@ -123,16 +134,23 @@ async function runOrchestration(
   }
 
   const plannerSelection = decisionToSelection(routeDecisions.planner);
-  const plannerDraft = await executeRolePrompt(
-    "planner",
-    `plan task: ${input.task}`,
-    plannerSelection,
-    promptContext
-  );
 
   let brainstormIdeas: string[] | undefined;
   let plan: TaskNode[];
-  if (options?.enableLlmAgents) {
+  let planInsightBundle: AgentDelegatedPlanInsight | undefined;
+
+  const insightConfig = resolveConfig(options?.configPath);
+  const autoPlanInsight =
+    options?.enablePlanInsight === true ||
+    (options?.enablePlanInsight !== false && !hasUsableLlmProvider(insightConfig));
+
+  if (autoPlanInsight) {
+    planInsightBundle = await maybeRunPlanInsightForComplex(input.task, options);
+  }
+
+  if (planInsightBundle) {
+    plan = planInsightBundle.plan;
+  } else if (options?.enableLlmAgents) {
     brainstormIdeas = await brainstormTaskLlm(input.task, plannerSelection, promptContext);
     plan = await planTasksLlm(input.task, {
       selection: plannerSelection,
@@ -144,6 +162,15 @@ async function runOrchestration(
     plan = planTasks(input.task, skillHints);
   }
   currentPlan = plan;
+
+  const plannerDraft = planInsightBundle
+    ? `[plan-insight:${planInsightBundle.mode}] ${summarizeInsightForContext(planInsightBundle.insight)}`
+    : await executeRolePrompt(
+        "planner",
+        `plan task: ${input.task}`,
+        plannerSelection,
+        promptContext
+      );
 
   // Bridge mode: package the planned DAG for external agent execution instead of running it
   if (options?.executionMode === "bridge") {
@@ -157,16 +184,32 @@ async function runOrchestration(
           .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
           .join("; ")
       : "";
+    const insightSummary = planInsightBundle
+      ? summarizeInsightForContext(planInsightBundle.insight)
+      : undefined;
+    const delegatedExtras =
+      planInsightBundle?.mode === "agent-delegated" && planInsightBundle.agentWorkItems
+        ? {
+            agentMode: "delegated-llm" as const,
+            agentWorkItems: planInsightBundle.agentWorkItems,
+            ...(insightSummary ? { insightSummary } : {}),
+          }
+        : insightSummary
+          ? { insightSummary }
+          : {};
     const bridgeRun: TaskRunResult = {
       status: "DELEGATED",
       attempts: 0,
-      feedback: `[DELEGATED] Planned ${plan.length} task(s) for external agent execution; plannerDraft=${shorten(plannerDraft)}`,
+      feedback: planInsightBundle?.mode === "agent-delegated"
+        ? `[DELEGATED][AGENT-LLM] Planned ${plan.length} task(s); use agentWorkItems prompts with your model (no GraphFlow API). plannerDraft=${shorten(plannerDraft)}`
+        : `[DELEGATED] Planned ${plan.length} task(s) for external agent execution; plannerDraft=${shorten(plannerDraft)}`,
       ...(brainstormIdeas ? { brainstormIdeas } : {}),
       executionDescriptor: {
         action: "execute",
         task: input.task,
-        context: `plan=${JSON.stringify(planProjection)}${contextStr ? `; ${contextStr}` : ""}`,
+        context: `plan=${JSON.stringify(planProjection)}${insightSummary ? `; insight=${insightSummary}` : ""}${contextStr ? `; ${contextStr}` : ""}`,
         retryHints: [],
+        ...delegatedExtras,
       },
     };
     const finalRun = appendContextFeedback(bridgeRun, contextPackage, promptContextLines, options);
@@ -293,9 +336,14 @@ async function maybeBuildNearLosslessContext(
   };
 
   // Adaptive budget: derive task complexity from triage and let the package
-  // estimator resize the token budget.
-  if (options.enableAdaptiveBudget) {
-    packageOptions.taskMode = triageTask(input.task);
+  // estimator resize the token budget. Auto-enable for complex tasks unless
+  // explicitly disabled via enableAdaptiveBudget: false.
+  const taskMode = triageTask(input.task);
+  const enableAdaptiveBudget =
+    options.enableAdaptiveBudget !== false &&
+    (options.enableAdaptiveBudget === true || taskMode === "complex");
+  if (enableAdaptiveBudget) {
+    packageOptions.taskMode = taskMode;
   }
 
   // RepoMap overview fallback for tight budgets (opt-in).
@@ -567,4 +615,29 @@ async function finalizeEpisode(
     episodeId: episode.id,
     similarEpisodes: similarSummaries,
   };
+}
+
+async function maybeRunPlanInsightForComplex(
+  task: string,
+  options?: OrchestrateOptions
+): Promise<AgentDelegatedPlanInsight | undefined> {
+  try {
+    const config = resolveConfig(options?.configPath);
+
+    if (!hasUsableLlmProvider(config)) {
+      return buildAgentDelegatedPlanInsight(task);
+    }
+
+    applyOpenBmbRuntimeEnv(config);
+    const selection = resolveModelForRole("planner");
+    const { insight, plan } = await planInsight(task, { selection });
+    return {
+      mode: "llm",
+      insight,
+      plan,
+    };
+  } catch (error) {
+    logger.warn({ error, task }, "Plan insight failed, using agent-delegated heuristic");
+    return buildAgentDelegatedPlanInsight(task);
+  }
 }

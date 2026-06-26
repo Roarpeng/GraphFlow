@@ -18,6 +18,7 @@ graphflow.config.json
 .graphflow-cache/
 graphify-out/
 graphflow-out/
+wasm/
 stdout.txt
 stderr.txt
 runs.json

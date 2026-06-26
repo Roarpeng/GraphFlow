@@ -46,6 +46,8 @@ export {
   planAndBrainstormResult,
   planInsightResult,
   planInsight,
+  submitAgentInsightResult,
+  mergeAgentInsightResult,
 } from "./runtime/routing.js";
 export {
   getSettingsPanelStatus,

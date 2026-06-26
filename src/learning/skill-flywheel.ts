@@ -40,27 +40,88 @@ export type { SkillState, CompositeSkillState, EvolutionarySkillNode } from "./s
 export { composeSkillId, loadCompositeSkill, loadEvolutionSkill, parseEvolutionState } from "./skill-store";
 export { evolveCompositeSkillLlm, updateSkillCanary } from "./skill-evolution";
 
-export function extractSkillAtoms(task: string): string[] {
-  const phrases = task
-    .split(/\band\b|,|;/i)
-    .map((part) => part.trim().toLowerCase())
-    .filter((part) => part.length >= 3)
-    .slice(0, 8);
+const STOPWORDS = new Set([
+  "update", "readme", "add", "fix", "file", "files",
+  "module", "the", "and", "with", "in", "a", "an", "to", "for", "of",
+  "on", "at", "by", "from", "is", "are", "was", "were", "be", "been",
+  "or", "not", "but", "this", "that", "it", "as", "if", "do", "done",
+]);
 
-  const tokenSkills = task
-    .toLowerCase()
+const PATH_EXT_RE = /\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|py|go|rs|css|html)\b/i;
+
+function isPathLikeToken(token: string): boolean {
+  if (token.includes("/")) {
+    return true;
+  }
+  return PATH_EXT_RE.test(token);
+}
+
+function isPathLikePhrase(phrase: string): boolean {
+  return phrase.includes("/") || PATH_EXT_RE.test(phrase);
+}
+
+function extractTokens(part: string): string[] {
+  return part
     .split(/\s+/)
     .map((token) => token.replace(/[^a-z0-9_./-]/g, ""))
     .filter((token) => token.length >= 5)
-    .slice(0, 8);
+    .filter((token) => !STOPWORDS.has(token))
+    .filter((token) => !isPathLikeToken(token));
+}
 
-  const segmenter = new Intl.Segmenter('zh', { granularity: 'word' });
+/** Pull verb/noun tokens from multi-word phrases for composite skill co-occurrence. */
+function extractSignificantTokensFromPhrase(phrase: string): string[] {
+  return phrase
+    .split(/\s+/)
+    .map((token) => token.replace(/[^a-z0-9_./-]/g, ""))
+    .filter((token) => token.length >= 5)
+    .filter((token) => !STOPWORDS.has(token))
+    .filter((token) => !isPathLikeToken(token));
+}
+
+function isBareStopword(skill: string): boolean {
+  return STOPWORDS.has(skill);
+}
+
+export function extractSkillAtoms(task: string): string[] {
+  const normalized = task.trim().toLowerCase();
+
+  const phrases = normalized
+    .split(/\band\b|,|;/i)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 3);
+
+  const longPhrases = phrases.filter(
+    (part) => part.length >= 6 && !isPathLikePhrase(part)
+  );
+  const shortPhrases = phrases.filter(
+    (part) => part.length >= 3 && part.length < 6 && !isPathLikePhrase(part)
+  );
+
+  const tokenSkills: string[] = [];
+  const partsForTokens = phrases.length > 0 ? phrases : [normalized];
+  for (const part of partsForTokens) {
+    if (part.length >= 6 && !isPathLikePhrase(part)) {
+      continue;
+    }
+    tokenSkills.push(...extractTokens(part));
+  }
+
+  const segmenter = new Intl.Segmenter("zh", { granularity: "word" });
   const zhWords = Array.from(segmenter.segment(task))
-    .filter((seg) => seg.isWordLike && seg.segment.length >= 2 && /[\u4e00-\u9fa5]/.test(seg.segment))
-    .map((seg) => seg.segment.toLowerCase())
-    .slice(0, 8);
+    .filter(
+      (seg) =>
+        seg.isWordLike &&
+        seg.segment.length >= 2 &&
+        /[\u4e00-\u9fa5]/.test(seg.segment)
+    )
+    .map((seg) => seg.segment.toLowerCase());
 
-  return dedup([...phrases, ...tokenSkills, ...zhWords]);
+  const phraseHeadTokens = longPhrases.flatMap(extractSignificantTokensFromPhrase);
+
+  return dedup([...longPhrases, ...shortPhrases, ...phraseHeadTokens, ...tokenSkills, ...zhWords])
+    .filter((skill) => !isBareStopword(skill))
+    .slice(0, 8);
 }
 
 export async function applySkillLearning(

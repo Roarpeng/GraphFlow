@@ -157,7 +157,8 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   }
 
   if (command === "graph" && args[0] === "inspect") {
-    const data = await inspectGraph(configPath);
+    const pathArg = args[1]?.trim();
+    const data = await inspectGraph(configPath, pathArg ? { rootDir: pathArg } : undefined);
     return {
       command: "graph-inspect",
       data,

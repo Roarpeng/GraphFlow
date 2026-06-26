@@ -10,17 +10,17 @@ GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，将 *
 | --- | --- |
 | **任务规划与移交** | 按任务复杂度分流 simple / complex；DAG 规划；`graphflow_plan_insight` 六顶思考帽 + 5-Why 深度分析；默认 **bridge 模式**输出结构化任务描述符交给外部 coding agent 执行 |
 | **模型路由** | Smart / Economy 双 tier；多 provider 健康探测与 fallback（OpenAI、Anthropic、百炼、豆包、OpenBMB） |
-| **知识图谱** | 工作区 AST 索引（TS/JS/Python/Rust/Go/C/C++/Java/Ruby）；File / Module / Symbol 节点 + 依赖/引用/定义边；图谱 artifact 导入/导出 |
+| **知识图谱** | 工作区 AST 索引（TS/JS/Python/Rust/Go/C/C++/Java/Ruby/Kotlin/Swift）；File / Module / Symbol 节点 + 依赖/引用/定义边；图谱 artifact 导入/导出 |
 | **上下文压缩** | L1/L2/L3 分层锚点；近无损打包；图结构压缩（边权重+PageRank，零成本默认开启）；可选语义压缩（minicpm/economy LLM 聚类合并）；向量召回 + RRF + HNSW；RepoMap 概览；自适应预算 |
 | **持续建图** | 默认 `autoIndexOnSave`；preview / run 前按需增量索引（`hasPendingGraphIndexWork`）；MCP `graphflow_index_file` 单文件增量 |
 | **语义增强** | 可选 post-index LLM 语义 enrich；OpenBMB 本地 embedded 模式 |
 | **学习飞轮** | Episodic Memory、Reflection、Skill 节点、nightly 学习、技能提示注入规划 |
 | **可观测性** | `graphflow_stats` 累计 token 节省；`graphflow_metrics` Prometheus 指标；VS Code 知识图谱 Snapshot |
-| **Agent 接入** | CLI `--json`；MCP stdio（**18 工具**）；Cursor / Claude Code 规则与示例配置 |
+| **Agent 接入** | CLI `--json`；MCP stdio（**20 工具**）；Cursor / Claude Code 规则与示例配置 |
 | **VS Code 扩展** | Settings、建图、路由测试、Context Preview、**知识图谱可视化**、Skill Insights、Chat Agent、一键安装 MCP |
 | **存储后端** | `file`（JSON）/ `memory` / `sqlite`（FTS5）/ `mcp-http`（Graphify） |
 | **多项目隔离** | 全局配置共享 LLM/路由；**图谱路径按当前工作区解析**，不再串读其它项目的 `graphflow-out` |
-| **工程质量** | TypeScript strict；**49 测试文件 / 200+ tests**；`npm run ci` 含扩展 esbuild 打包与 bundled runtime smoke |
+| **工程质量** | TypeScript strict；**62 测试文件 / 280+ tests**；`npm run ci` 含扩展 esbuild 打包与 bundled runtime smoke |
 
 ### 一句话总结
 
@@ -41,7 +41,7 @@ GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，将 *
 
 2. **索引与语言扩展**
    - 新增 **Java**（`.java`）、**Ruby**（`.rb`）tree-sitter 索引器
-   - C/C++、Rust 索引器增强；WASM 语法包可随 npm 包离线分发（`npm run wasm:download`）
+   - C/C++、Rust 索引器增强；WASM 语法包随 npm 包离线分发（构建时 `npm run wasm:bundle` 打入 `wasm/`）
    - MCP 新增 `graphflow_index_file` 单文件增量索引
 
 3. **MCP 工具扩展（9 → 18）**
@@ -68,7 +68,7 @@ GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，将 *
 
 ### 发布信息
 
-- 最新版本：**v1.0.8**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.0.8`
+- 最新版本：**v1.0.9**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.0.9`
 - **GitHub Release**：push 到 `main` 且 CI 通过后自动发布 VSIX（见 [Actions](https://github.com/Roarpeng/GraphFlow/actions)）
 - 变更日志：`CHANGELOG.md`
 
@@ -85,7 +85,7 @@ npm install
 npm run ci
 ```
 
-预期：`lint` 无错误、`build` 成功、**200+ tests** 通过、扩展 bundle 与 runtime smoke 通过。
+预期：`lint` 无错误、`build` 成功、**280+ tests** 通过、扩展 bundle 与 runtime smoke 通过。
 
 ## Agent 工具接入
 
@@ -100,7 +100,7 @@ GraphFlow 支持两种对外接入方式：
 npm run start:mcp
 ```
 
-### MCP 工具一览（18 个）
+### MCP 工具一览（20 个）
 
 | 工具 | 用途 |
 | --- | --- |
@@ -109,6 +109,8 @@ npm run start:mcp
 | `graphflow_plan_insight` | 六顶思考帽 + 5-Why 深度分析后规划（复杂任务） |
 | `graphflow_run` | 规划 + 压缩上下文，输出 bridge 执行描述符 |
 | `graphflow_report_outcome` | 向 GraphFlow 汇报任务执行结果，用于学习飞轮 |
+| `graphflow_submit_insight` | 回传 `agentWorkItems` 中每条 prompt 的外部 agent 分析结果 |
+| `graphflow_merge_insight` | 合并已提交的 agent 分析为完整 Six Hats insight + DAG plan |
 | `graphflow_expand_anchor` | 扩展指定锚点的上下文详情 |
 | `graphflow_index` | 全工作区增量建图 |
 | `graphflow_index_file` | 单文件增量建图（适合 onSave / watcher） |
@@ -272,7 +274,7 @@ const run = await orchestrate(
 | Java | `.java` |
 | Ruby | `.rb` |
 
-通过 `graphPolicy.includeExtensions` 限制扫描范围。tree-sitter WASM 语法包随 npm 包分发；开发/发布前可执行 `npm run wasm:download` 预下载到 `wasm/`。
+通过 `graphPolicy.includeExtensions` 限制扫描范围。tree-sitter WASM 语法包在 `npm run build` 时打入 `wasm/` 并随 npm 包分发，安装后无需联网下载。
 
 ## 配置文件
 
@@ -375,7 +377,7 @@ code --install-extension artifacts/graphflow-vscode-*.vsix
 
 - `graphflow_index` 传入 `rootDir: "/你的项目绝对路径"`
 - 或在 MCP 配置中加 `"env": { "GRAPHFLOW_WORKSPACE_ROOT": "/你的项目绝对路径" }`
-- 离线环境首次索引多语言项目时，确保 `wasm/` 语法包存在或网络可访问 unpkg
+- 离线环境索引多语言项目时，WASM 语法包已随 `@roarpeng/graphflow` 安装包内置，无需联网下载
 
 **`context preview` 返回 0 anchors**
 
@@ -408,7 +410,7 @@ GraphFlow/
 │   └── surfaces/
 │       ├── cli/        # CLI + runtime 子模块
 │       └── mcp/        # MCP server
-├── tests/              # 49 文件 / 200+ tests
+├── tests/              # 62 文件 / 280+ tests
 ├── vscode-extension/   # VS Code 面板与命令
 ├── docs/
 └── CHANGELOG.md

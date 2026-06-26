@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "publishConfig": {
     "access": "public"
   },
@@ -28,10 +28,11 @@
   },
   "scripts": {
     "postinstall": "node scripts/safe-postinstall.cjs",
-    "prepublishOnly": "npm run build && npm run wasm:download",
-    "wasm:download": "node scripts/download-wasm-grammars.cjs",
+    "prepublishOnly": "npm run build",
+    "wasm:bundle": "node scripts/bundle-wasm-grammars.cjs",
+    "wasm:download": "node scripts/bundle-wasm-grammars.cjs",
     "test": "vitest run",
-    "build": "tsc -p tsconfig.json && node scripts/copy-assets.cjs",
+    "build": "npm run wasm:bundle && tsc -p tsconfig.json && node scripts/copy-assets.cjs",
     "test:watch": "vitest",
     "start": "tsx src/surfaces/cli/index.ts",
     "start:mcp": "tsx src/surfaces/mcp/server.ts",
@@ -75,6 +76,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "prettier": "^3.8.3",
+    "tree-sitter-wasms": "0.1.11",
     "tsx": "^4.22.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"

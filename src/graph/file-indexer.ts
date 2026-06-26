@@ -25,7 +25,11 @@ const DEFAULT_EXTENSIONS = Array.from(
   new Set([...ALL_LANGUAGE_EXTENSIONS, ...BASE_EXTENSIONS])
 );
 const DEFAULT_MAX_FILE_SIZE = 200_000;
-const IGNORED_DIRS = new Set([".git", "node_modules", "dist", "coverage", "tmp", "venv", ".venv", "env", ".env", "__pycache__", ".vscode", ".idea", ".next", "build"]);
+const IGNORED_DIRS = new Set([
+  ".git", "node_modules", "dist", "coverage", "tmp", "venv", ".venv", "env", ".env",
+  "__pycache__", ".vscode", ".idea", ".next", "build", "install", "log",
+  ".graphflow-cache", "graphflow-out", "graphify-out",
+]);
 
 const REFERENCE_SKIPLIST = new Set([
   "if", "for", "let", "const", "var", "this", "new", "return", "true", "false",
@@ -370,13 +374,15 @@ export async function indexWorkspaceFiles(
       if (!calleeDef) continue;
 
       // Resolve caller: prefer the caller name from extraction, then fall back
-      // to any local symbol whose body contains the call line.
+      // to the innermost local symbol at or before the call line.
       let callerNodeId: string | undefined;
       if (call.caller) {
         callerNodeId = localByName.get(call.caller);
       }
       if (!callerNodeId) {
-        // Skip if we can't attribute the call to a specific symbol
+        callerNodeId = resolveCallerAtLine(file.declared, call.line);
+      }
+      if (!callerNodeId) {
         continue;
       }
 
@@ -526,6 +532,20 @@ function normalizeImportTarget(target: string, importerRelPath: string): string 
 
 function moduleKey(relPath: string): string {
   return relPath.replace(/\.(ts|tsx|js|jsx|md|json|py|rs|go|hpp|hxx|cpp|cxx|cc|h|c|java|rb|rake|gemspec)$/i, "");
+}
+
+/** Innermost declared symbol at or before `line` (for call attribution when caller name is missing). */
+export function resolveCallerAtLine(
+  declared: Array<Pick<IndexedSymbol, "line" | "nodeId">>,
+  line: number
+): string | undefined {
+  const sorted = [...declared].sort((a, b) => b.line - a.line);
+  for (const sym of sorted) {
+    if (sym.line <= line) {
+      return sym.nodeId;
+    }
+  }
+  return undefined;
 }
 
 function dedupEdges(edges: GraphEdge[]): GraphEdge[] {
@@ -754,6 +774,9 @@ export async function indexSingleFile(
     let callerNodeId: string | undefined;
     if (call.caller) {
       callerNodeId = localByName.get(call.caller);
+    }
+    if (!callerNodeId) {
+      callerNodeId = resolveCallerAtLine(declared, call.line);
     }
     if (!callerNodeId) continue;
     edges.push({ from: callerNodeId, to: calleeDef.nodeId, relation: "calls" });
