@@ -74,4 +74,38 @@ describe("M42 snapshot view enrichment", () => {
     expect(sample.sampleEdges.length).toBeGreaterThan(0);
     expect(sample.sampleEdges.every((edge) => edge.relation.length > 0)).toBe(true);
   });
+
+  it("prioritizes calls and defines edges in snapshot sampling", () => {
+    const nodes: GraphNode[] = [
+      { id: "file:src/a.ts", type: "File", content: "src/a.ts" },
+      { id: "symbol:src/a.ts:run", type: "Symbol", content: "function run", metadata: { name: "run", file: "src/a.ts", line: 1 } },
+      { id: "symbol:src/a.ts:helper", type: "Symbol", content: "function helper", metadata: { name: "helper", file: "src/a.ts", line: 5 } },
+    ];
+    const edges: GraphEdge[] = [
+      { from: "file:src/a.ts", to: "symbol:src/a.ts:run", relation: "references" },
+      { from: "symbol:src/a.ts:run", to: "symbol:src/a.ts:helper", relation: "calls" },
+      { from: "file:src/a.ts", to: "symbol:src/a.ts:run", relation: "defines" },
+    ];
+
+    const sample = sampleGraphForSnapshot(nodes, edges, 3, 1);
+    expect(sample.sampleEdges[0]?.relation).toBe("calls");
+  });
+
+  it("falls back to meta files and modules when no non-meta file roots exist", () => {
+    const nodes: GraphNode[] = [
+      { id: "file:README.md", type: "File", content: "README.md" },
+      { id: "file:doc/guide.md", type: "File", content: "doc/guide.md" },
+      { id: "module:doc", type: "Module", content: "doc" },
+      { id: "module:.", type: "Module", content: "." },
+    ];
+    const edges: GraphEdge[] = [
+      { from: "file:README.md", to: "module:.", relation: "depends_on" },
+      { from: "file:doc/guide.md", to: "module:doc", relation: "depends_on" },
+    ];
+
+    const sample = sampleGraphForSnapshot(nodes, edges, 4, 4);
+
+    expect(sample.sampleNodes.length).toBeGreaterThan(0);
+    expect(sample.sampleEdges.length).toBeGreaterThan(0);
+  });
 });

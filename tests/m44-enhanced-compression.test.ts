@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { GraphifyClient } from "../src/graph/graphify-client";
 import type { GraphNode } from "../src/core/types";
+import { orchestrate } from "../src/core/orchestrator";
+import { triageTask } from "../src/core/triage";
+import { validateConfig } from "../src/config/loader";
+import { createGraphClient } from "../src/graph/client-factory";
 import {
   extractConnectedSubgraph,
   computePageRank,
@@ -197,6 +201,75 @@ describe("M44 Enhanced Context Compression", () => {
       );
 
       expect(huge.tokens).toBeLessThanOrEqual(4000);
+    });
+
+    it("auto-enables adaptive budget for complex orchestrator tasks", async () => {
+      const complexTask = "Refactor module A and update module B";
+      expect(triageTask(complexTask)).toBe("complex");
+
+      const config = validateConfig({
+        providers: {},
+        tiers: {
+          smart: { provider: "openai", model: "gpt-5.3-codex" },
+          economy: { provider: "openai", model: "gpt-4.1-mini" },
+        },
+        budgetPolicy: { runTokenCap: 4000 },
+        graphPolicy: {
+          enableAutoBuild: true,
+          enableNearLosslessMode: true,
+          transport: "memory",
+          maxContextTokens: 200,
+        },
+        learningPolicy: {
+          enableFlywheel: true,
+          trainingCadence: "nightly",
+          canaryRatio: 10,
+          exportPath: "graphflow-out/learning-dataset.jsonl",
+        },
+      });
+
+      const graphClient = createGraphClient(config);
+      const nodes: GraphNode[] = [];
+      for (let i = 0; i < 20; i += 1) {
+        nodes.push({
+          id: `symbol:mod${i}`,
+          type: "Symbol",
+          content: `function module${i}Handler(data: Data) processes module ${i} logic`,
+        });
+      }
+      await graphClient.upsertNodes(nodes);
+
+      let withAdaptive = 0;
+      await orchestrate(
+        { task: complexTask },
+        {
+          graphClient,
+          enableNearLosslessMode: true,
+          maxContextTokens: 200,
+          executionMode: "bridge",
+          onContextPackage: (pkg) => {
+            withAdaptive = pkg.tokenEstimate;
+          },
+        }
+      );
+
+      let withoutAdaptive = 0;
+      await orchestrate(
+        { task: complexTask },
+        {
+          graphClient,
+          enableNearLosslessMode: true,
+          maxContextTokens: 200,
+          enableAdaptiveBudget: false,
+          executionMode: "bridge",
+          onContextPackage: (pkg) => {
+            withoutAdaptive = pkg.tokenEstimate;
+          },
+        }
+      );
+
+      expect(withAdaptive).toBeGreaterThan(withoutAdaptive);
+      expect(withAdaptive).toBeGreaterThan(200);
     });
   });
 

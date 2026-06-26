@@ -70,6 +70,15 @@ mkdirSync(vendorRoot, { recursive: true });
 cpSync(sourceDist, vendorDist, { recursive: true });
 cpSync(join(repoRoot, "package.json"), join(vendorRoot, "package.json"));
 
+const wasmSrc = join(repoRoot, "wasm");
+const wasmDest = join(vendorRoot, "wasm");
+if (existsSync(wasmSrc)) {
+  cpSync(wasmSrc, wasmDest, { recursive: true });
+  console.log(`Synced wasm grammars: ${wasmSrc} -> ${wasmDest}`);
+} else {
+  console.warn("[sync-runtime] wasm/ not found — run root npm run build first");
+}
+
 rmSync(vendorNodeModules, { recursive: true, force: true });
 mkdirSync(vendorNodeModules, { recursive: true });
 

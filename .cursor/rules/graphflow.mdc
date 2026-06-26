@@ -36,6 +36,20 @@ Preferred MCP order:
 5. `graphflow_run` only when GraphFlow should execute its orchestration loop.
 6. `graphflow_diagnose` if provider routing or model configuration seems unhealthy.
 
+## Bridge-mode outcome reporting
+
+After `graphflow_run`, the external agent **must** call `graphflow_report_outcome` to close the skill flywheel loop:
+
+- Pass `episodeId` from the run result, a `success` boolean, and optional `lessons`.
+- Do this after executing the work described in the returned `executionDescriptor`, whether the task succeeded or failed.
+- When the run returns `agentWorkItems`, answer each prompt with your model and call `graphflow_submit_insight` once per item (before or with `graphflow_report_outcome`).
+
+CLI fallback:
+
+```bash
+graphflow --json outcome report <episodeId> <success>
+```
+
 If MCP is unavailable, use the CLI fallback and always request JSON output:
 
 ```bash

@@ -1,6 +1,12 @@
 import { brainstormTask } from "../../../agents/brainstormer";
 import { planTasks } from "../../../agents/planner";
 import { planInsight, type SixHatsInsight } from "../../../agents/insight";
+import { hasUsableLlmProvider } from "../../../config/llm-availability";
+import {
+  buildAgentDelegatedPlanInsight,
+  type AgentDelegationMode,
+  type AgentWorkItem,
+} from "../../../core/agent-delegation";
 import { resolveConfig } from "../../../config/resolve";
 import { resolveLearningPath } from "../../../config/paths";
 import { orchestrate, type OrchestrateOptions } from "../../../core/orchestrator";
@@ -21,6 +27,15 @@ import {
 import { buildFallbackChain, buildProviderHealthMap } from "../../../routing/provider-health";
 import { executeRolePrompt } from "../../../routing/provider-executor";
 import { describeCompressionBackend } from "../../../graph/compression-model";
+import {
+  mergeAgentInsightsFromGraph,
+  type MergeAgentInsightsResult,
+} from "../../../core/merge-agent-insight";
+import {
+  submitAgentInsight,
+  type SubmitAgentInsightResult,
+} from "../../../core/submit-agent-insight";
+import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
 import { applyOpenBmbRuntimeEnv, buildEmbeddingOptions } from "./env.js";
 import { extractTokenCost } from "./helpers.js";
 import type {
@@ -52,6 +67,11 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
     }
 
     const embeddingOptions = buildEmbeddingOptions(config);
+    const taskComplexity = triageTask(task);
+    const enableAdaptiveBudget =
+      config.graphPolicy.compression?.enableAdaptiveBudget !== false &&
+      (config.graphPolicy.compression?.enableAdaptiveBudget === true ||
+        taskComplexity === "complex");
     const orchestrateOptions: OrchestrateOptions = {
       graphClient,
       enableAutoGraphSync: config.graphPolicy.enableAutoBuild,
@@ -81,9 +101,7 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       ...(config.graphPolicy.compression?.enableGraphCompression !== undefined
         ? { enableGraphCompression: config.graphPolicy.compression.enableGraphCompression }
         : {}),
-      ...(config.graphPolicy.compression?.enableAdaptiveBudget
-        ? { enableAdaptiveBudget: true }
-        : {}),
+      ...(enableAdaptiveBudget ? { enableAdaptiveBudget: true } : {}),
       ...(config.graphPolicy.compression?.enableRepoMapFallback
         ? { enableRepoMapFallback: true }
         : {}),
@@ -283,22 +301,42 @@ export function planAndBrainstorm(task: string): string {
 }
 
 export interface PlanInsightResult {
+  mode: AgentDelegationMode;
   insight: SixHatsInsight;
   plan: Array<{
     id: string;
     description: string;
     dependencies: string[];
   }>;
+  agentWorkItems?: AgentWorkItem[];
+  agentInstructions?: string;
 }
 
 export async function planInsightResult(task: string, configPath?: string): Promise<PlanInsightResult> {
   const config = resolveConfig(configPath);
+
+  if (!hasUsableLlmProvider(config)) {
+    const delegated = buildAgentDelegatedPlanInsight(task);
+    return {
+      mode: delegated.mode,
+      insight: delegated.insight,
+      plan: delegated.plan.map((node) => ({
+        id: node.id,
+        description: node.description,
+        dependencies: node.dependencies,
+      })),
+      ...(delegated.agentWorkItems ? { agentWorkItems: delegated.agentWorkItems } : {}),
+      ...(delegated.agentInstructions ? { agentInstructions: delegated.agentInstructions } : {}),
+    };
+  }
+
   applyOpenBmbRuntimeEnv(config);
   const selection = resolveModelForRole("planner");
 
   const { insight, plan } = await planInsight(task, { selection });
 
   return {
+    mode: "llm",
     insight,
     plan: plan.map((node) => ({
       id: node.id,
@@ -357,3 +395,41 @@ export async function reportOutcome(
     outcome: success ? "pass" : "fail",
   };
 }
+
+export async function submitAgentInsightResult(
+  task: string,
+  workItemId: string,
+  response: string,
+  configPath?: string,
+  episodeId?: string,
+  rootDir?: string
+): Promise<SubmitAgentInsightResult> {
+  const config = bindRuntimeWorkspaceRoot(
+    resolveConfig(configPath),
+    rootDir ? { rootDir } : undefined
+  );
+  const graphClient = createGraphClient(config);
+
+  return submitAgentInsight(graphClient, {
+    task,
+    workItemId,
+    response,
+    ...(episodeId ? { episodeId } : {}),
+  });
+}
+
+export async function mergeAgentInsightResult(
+  task: string,
+  configPath?: string,
+  rootDir?: string
+): Promise<MergeAgentInsightsResult> {
+  const config = bindRuntimeWorkspaceRoot(
+    resolveConfig(configPath),
+    rootDir ? { rootDir } : undefined
+  );
+  const graphClient = createGraphClient(config);
+  return mergeAgentInsightsFromGraph(graphClient, task);
+}
+
+export type { SubmitAgentInsightResult } from "../../../core/submit-agent-insight";
+export type { MergeAgentInsightsResult } from "../../../core/merge-agent-insight";

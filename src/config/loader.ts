@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { extractEnvPlaceholderName } from "./secrets";
 import type { GraphFlowConfig } from "./schema";
 import { getDefaultConfig, resolveMaxContextTokens, DEFAULT_OUTPUT_DIR } from "./defaults";
+import { resolveIncludeExtensions } from "./include-extensions.js";
 import { logger } from "../utils/logger";
 
 export interface LoadConfigResult {
@@ -194,14 +195,7 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
         (input.graphPolicy.transport === "sqlite"
           ? `${DEFAULT_OUTPUT_DIR}/graphflow-graph.sqlite`
           : `${DEFAULT_OUTPUT_DIR}/graphflow-graph.json`),
-      includeExtensions: input.graphPolicy.includeExtensions ?? [
-        ".ts",
-        ".tsx",
-        ".js",
-        ".jsx",
-        ".md",
-        ".json",
-      ],
+      includeExtensions: resolveIncludeExtensions(input.graphPolicy.includeExtensions),
       layerQuota: input.graphPolicy.layerQuota ?? { l1: 6, l2: 4, l3: 3 },
       semanticEnrichment: {
         enabled: input.graphPolicy.semanticEnrichment?.enabled ?? true,

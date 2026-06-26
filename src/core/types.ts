@@ -46,6 +46,16 @@ export interface TaskRunResult {
     task: string;
     context: string;
     retryHints: string[];
+    /** When no external LLM API is configured, prompts for the connected coding agent. */
+    agentMode?: "delegated-llm";
+    agentWorkItems?: Array<{
+      id: string;
+      kind: string;
+      hat?: string;
+      prompt: string;
+      expectedFormat: string;
+    }>;
+    insightSummary?: string;
   };
 }
 

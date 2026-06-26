@@ -85,7 +85,7 @@ export interface GraphFlowConfig {
       enableGraphCompression?: boolean;
       /** Return module-level RepoMap overview when budget is tight (<1000 tokens). Default false. */
       enableRepoMapFallback?: boolean;
-      /** Adaptively size the token budget from task complexity. Default false. */
+      /** Adaptively size token budget from task complexity. Default true; complex tasks auto-enable even when unset. Set false to disable. */
       enableAdaptiveBudget?: boolean;
       /** Use HNSW ANN index for large candidate sets (>=200 nodes). Default true. */
       enableHnsw?: boolean;

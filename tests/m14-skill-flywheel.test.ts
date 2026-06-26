@@ -10,6 +10,19 @@ describe("M14 skill flywheel", () => {
     expect(skills.some((skill) => skill.includes("update readme"))).toBe(true);
   });
 
+  it("filters standalone stopword tokens while keeping meaningful phrases", () => {
+    const skills = extractSkillAtoms("fix bug in readme");
+    expect(skills).not.toContain("readme");
+    expect(skills).not.toContain("fix");
+    expect(skills.some((skill) => skill.includes("fix bug"))).toBe(true);
+  });
+
+  it("filters path-like tokens from raw token extraction", () => {
+    const skills = extractSkillAtoms("refactor src/learning/skill-flywheel.ts");
+    expect(skills.every((skill) => !skill.includes(".ts"))).toBe(true);
+    expect(skills.every((skill) => !skill.includes("/"))).toBe(true);
+  });
+
   it("learns skill nodes and co-occurrence edges from task outcomes", async () => {
     const client = new GraphifyClient();
     await applySkillLearning(client, "update readme and add tests", {

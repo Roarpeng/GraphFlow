@@ -195,6 +195,47 @@ export async function analyzeWithSixHats(
   };
 }
 
+/**
+ * Rule-based Six Hats analysis without LLM calls.
+ * Used when no API is configured — paired with agent work items for the connected agent.
+ */
+export function analyzeWithSixHatsHeuristic(task: string): SixHatsInsight {
+  const hatResults: WhyChainSection[] = SIX_HATS.map((hat) => {
+    const parsed = fallbackHatResponse(hat);
+    return {
+      hat,
+      observation: parsed.observation,
+      certainty: parsed.certainty,
+      whyChain: null,
+      criticalInsight: parsed.criticalInsight,
+    };
+  });
+
+  const blueSynthesis = hatResults.find((h) => h.hat.color === "blue")?.criticalInsight ?? "";
+  const rootCauses = hatResults
+    .filter((h) => h.whyChain !== null)
+    .map((h) => h.whyChain!.rootCause)
+    .filter((s) => s.length > 0);
+  const criticalRisks = hatResults
+    .filter((h) => h.hat.color === "black")
+    .map((h) => h.observation)
+    .filter((s) => s.length > 0);
+  const coreValue = hatResults
+    .filter((h) => h.hat.color === "yellow")
+    .map((h) => h.observation)
+    .join("; ");
+
+  return {
+    task,
+    hats: hatResults,
+    blueHatSynthesis: blueSynthesis,
+    rootCauses: [...new Set(rootCauses)],
+    criticalRisks,
+    coreValue,
+    refinedTaskStatement: buildRefinedStatement(task, hatResults),
+  };
+}
+
 const CERTAINTY_THRESHOLD = 0.6;
 
 async function analyzeSingleHat(
@@ -226,6 +267,11 @@ async function analyzeSingleHat(
 }
 
 function buildHatPrompt(task: string, hat: HatDefinition): string {
+  return buildHatAnalysisPrompt(task, hat);
+}
+
+/** Exported for agent-delegation work items (connected coding agent fills these prompts). */
+export function buildHatAnalysisPrompt(task: string, hat: HatDefinition): string {
   return [
     `Task: ${task}`,
     ``,

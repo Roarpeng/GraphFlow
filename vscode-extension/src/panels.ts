@@ -35,6 +35,33 @@ export interface SkillInsightsResult {
   }>;
 }
 
+export interface AgentWorkItemView {
+  id: string;
+  kind: "six-hats" | "five-whys" | "plan-refinement" | string;
+  hat?: string;
+  prompt: string;
+  expectedFormat: string;
+}
+
+export interface AgentDelegationPanelResult {
+  task: string;
+  mode: string;
+  agentInstructions?: string;
+  agentWorkItems: AgentWorkItemView[];
+  plan?: Array<{ id: string; description: string; dependencies: string[] }>;
+  executionDescriptor?: {
+    action: string;
+    task: string;
+    context: string;
+    retryHints: string[];
+    agentMode?: string;
+    agentWorkItems?: AgentWorkItemView[];
+    insightSummary?: string;
+  };
+  episodeId?: string;
+  tokenBudget?: ContextPreviewResult["tokenBudget"];
+}
+
 export interface ContextPreviewResult {
   query: string;
   summaryCount: number;
@@ -547,6 +574,139 @@ export function buildSkillInsightsHtml(insights: SkillInsightsResult, scriptUri:
         <tbody id="skill-table-body">${serverTableRows}</tbody>
       </table>
     </section>
+  </div>
+  <script src="${scriptUri}"></script>
+</body>
+</html>`;
+}
+
+export function buildAgentWorkItemsHtml(result: AgentDelegationPanelResult, scriptUri: string): string {
+  const modeLabel = result.mode === "agent-delegated" ? "agent-delegated" : escapeHtml(result.mode);
+  const workItemCards = result.agentWorkItems
+    .map((item, index) => {
+      const meta = [item.kind, item.hat ? `hat: ${item.hat}` : null, `format: ${item.expectedFormat}`]
+        .filter(Boolean)
+        .join(" · ");
+      return (
+        `<article class="work-item" data-item-id="${escapeHtml(item.id)}">` +
+        `<div class="work-item-head">` +
+        `<span class="work-item-index">${index + 1}</span>` +
+        `<div class="work-item-title">` +
+        `<strong>${escapeHtml(item.id)}</strong>` +
+        `<span class="work-item-meta">${escapeHtml(meta)}</span>` +
+        `</div>` +
+        `<button type="button" class="copy-btn" data-copy-target="prompt-${index}">Copy prompt</button>` +
+        `</div>` +
+        `<details class="prompt-details">` +
+        `<summary>Show prompt</summary>` +
+        `<pre id="prompt-${index}" class="prompt-block">${escapeHtml(item.prompt)}</pre>` +
+        `</details>` +
+        `</article>`
+      );
+    })
+    .join("");
+
+  const planSection =
+    result.plan && result.plan.length > 0
+      ? `<section class="panel">
+      <h2>Plan Tasks</h2>
+      <ol class="plan-list">${result.plan
+        .map(
+          (node) =>
+            `<li><strong>${escapeHtml(node.id)}</strong>: ${escapeHtml(node.description)}` +
+            (node.dependencies.length > 0
+              ? `<span class="deps">deps: ${escapeHtml(node.dependencies.join(", "))}</span>`
+              : "") +
+            `</li>`
+        )
+        .join("")}</ol>
+    </section>`
+      : "";
+
+  const instructionsSection = result.agentInstructions
+    ? `<section class="panel">
+      <h2>Agent Instructions</h2>
+      <pre class="instructions-block">${escapeHtml(result.agentInstructions)}</pre>
+    </section>`
+    : "";
+
+  const episodeLine = result.episodeId
+    ? `<p class="episode">Episode: <code>${escapeHtml(result.episodeId)}</code></p>`
+    : "";
+
+  const budgetSection = result.tokenBudget
+    ? `<section class="panel">
+      <h2>Token Budget</h2>
+      <div class="grid">
+        <div class="metric"><div class="label">Estimated Raw</div><div class="value">${result.tokenBudget.estimatedRawTokens}</div></div>
+        <div class="metric"><div class="label">Compressed</div><div class="value">${result.tokenBudget.compressedTokens}</div></div>
+        <div class="metric"><div class="label">Savings</div><div class="value">${result.tokenBudget.estimatedSavingsPercent}%</div></div>
+        <div class="metric"><div class="label">Budget Used</div><div class="value">${result.tokenBudget.budgetUsedPercent}%</div></div>
+      </div>
+    </section>`
+    : "";
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GraphFlow Agent Work Items</title>
+  <style>
+    body { margin: 0; padding: 16px; font-family: "Segoe UI", sans-serif; color: #1f2937; background: #f6f1eb; }
+    .shell { display: grid; gap: 14px; max-width: 960px; }
+    .panel { background: #fffdf8; border: 1px solid #decdbb; border-radius: 16px; padding: 14px; box-shadow: 0 14px 34px rgba(31,41,55,.08); }
+    .header-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .badge { background: #d8f1ee; color: #0f766e; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+    h1 { margin: 8px 0 0; font-size: 22px; line-height: 1.35; word-break: break-word; }
+    h2 { margin: 0 0 10px; font-size: 16px; }
+    .reminder { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 12px; padding: 12px 14px; font-size: 13px; line-height: 1.55; }
+    .reminder code { background: #fde68a; padding: 2px 6px; border-radius: 6px; }
+    .work-item { border: 1px solid #eadccc; border-radius: 12px; padding: 12px; background: #fff; display: grid; gap: 8px; }
+    .work-items { display: grid; gap: 10px; }
+    .work-item-head { display: flex; align-items: flex-start; gap: 10px; }
+    .work-item-index { min-width: 28px; height: 28px; border-radius: 999px; background: #0f766e; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
+    .work-item-title { flex: 1; min-width: 0; }
+    .work-item-meta { display: block; margin-top: 4px; font-size: 12px; color: #6b7280; }
+    .copy-btn { border: 1px solid #0f766e; background: #fff; color: #0f766e; border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+    .copy-btn.copied { background: #d8f1ee; }
+    .prompt-details summary { cursor: pointer; color: #0f766e; font-size: 13px; font-weight: 600; }
+    .prompt-block, .instructions-block { margin: 8px 0 0; padding: 10px; background: #f3eadf; border-radius: 10px; white-space: pre-wrap; word-break: break-word; font-family: Consolas, monospace; font-size: 12px; line-height: 1.5; }
+    .plan-list { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+    .plan-list .deps { display: block; font-size: 12px; color: #6b7280; margin-top: 2px; }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .metric { border: 1px solid #eadccc; border-radius: 12px; padding: 10px; background: #fff; }
+    .label { color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    .value { margin-top: 6px; font-size: 20px; font-weight: 700; color: #0f766e; }
+    .episode { margin: 8px 0 0; font-size: 13px; color: #6b7280; }
+    code { background: #f3eadf; padding: 2px 5px; border-radius: 6px; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="panel">
+      <div class="header-row">
+        <span class="badge">${modeLabel}</span>
+        <span class="badge" style="background:#ede9fe;color:#6d28d9;">${result.agentWorkItems.length} work items</span>
+      </div>
+      <h1>${escapeHtml(result.task)}</h1>
+      ${episodeLine}
+    </section>
+    <section class="reminder">
+      Complete the prompts below with your connected coding agent model, then close the loop:
+      <ul>
+        <li>Call <code>graphflow_submit_insight</code> with your Six Hats / plan-refinement JSON responses.</li>
+        <li>After executing the task, call <code>graphflow_report_outcome</code>${result.episodeId ? ` with episodeId <code>${escapeHtml(result.episodeId)}</code>` : ""}.</li>
+      </ul>
+    </section>
+    ${instructionsSection}
+    ${budgetSection}
+    <section class="panel">
+      <h2>Work Items</h2>
+      <div class="work-items">${workItemCards || '<p class="empty">No agent work items.</p>'}</div>
+    </section>
+    ${planSection}
   </div>
   <script src="${scriptUri}"></script>
 </body>

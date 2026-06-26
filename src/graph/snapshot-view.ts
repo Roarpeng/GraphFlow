@@ -1,6 +1,19 @@
 import type { GraphEdge, GraphNode } from "../core/types.js";
+import {
+  discoverWorkspacePackages,
+  findWorkspacePackageRoot,
+  packageLabelForPath,
+  workspacePackageForPath,
+} from "../config/workspace-packages.js";
 
 export type SnapshotViewLayer = "code" | "learning";
+
+export interface SnapshotWorkspaceContext {
+  rootDir: string;
+  packageRoots?: string[];
+}
+
+export { discoverWorkspacePackages };
 
 export interface GraphSnapshotSampleNode {
   id: string;
@@ -9,6 +22,7 @@ export interface GraphSnapshotSampleNode {
   displayLabel: string;
   displayPath?: string;
   folderGroup?: string;
+  workspacePackage?: string;
   sourcePath?: string;
   sourceLine?: number;
   viewLayer: SnapshotViewLayer;
@@ -18,6 +32,28 @@ export interface GraphSnapshotSampleEdge {
   from: string;
   relation: GraphEdge["relation"];
   to: string;
+}
+
+/** Relations shown first in snapshot edge sampling (call graph visibility). */
+const SNAPSHOT_EDGE_PRIORITY: GraphEdge["relation"][] = [
+  "calls",
+  "defines",
+  "imports",
+  "depends_on",
+  "references",
+  "inherits",
+  "co_occurs",
+  "improves",
+  "prerequisite",
+];
+
+function snapshotEdgeRank(relation: GraphEdge["relation"]): number {
+  const index = SNAPSHOT_EDGE_PRIORITY.indexOf(relation);
+  return index === -1 ? SNAPSHOT_EDGE_PRIORITY.length : index;
+}
+
+function sortSnapshotEdges(edges: GraphEdge[]): GraphEdge[] {
+  return [...edges].sort((a, b) => snapshotEdgeRank(a.relation) - snapshotEdgeRank(b.relation));
 }
 
 function compactPreview(content: string, maxLength: number): string {
@@ -33,7 +69,15 @@ function basename(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-export function folderGroupFromPath(relPath: string): string {
+export function folderGroupFromPath(relPath: string, workspace?: SnapshotWorkspaceContext): string {
+  if (workspace?.rootDir) {
+    const packageRoots = workspace.packageRoots ?? discoverWorkspacePackages(workspace.rootDir);
+    const pkgRoot = findWorkspacePackageRoot(relPath, packageRoots);
+    if (pkgRoot) {
+      return packageLabelForPath(workspace.rootDir, relPath);
+    }
+  }
+
   const parts = relPath.split(/[/\\]/).filter(Boolean);
   if (parts.length <= 1) {
     return ".";
@@ -69,7 +113,22 @@ function buildAdjacency(edges: GraphEdge[]): Map<string, string[]> {
   return adj;
 }
 
-export function enrichNodeForSnapshot(node: GraphNode, previewLength = 160): GraphSnapshotSampleNode {
+function applyPathSnapshotMetadata(
+  path: string,
+  workspace?: SnapshotWorkspaceContext
+): { folderGroup: string; workspacePackage?: string } {
+  const folderGroup = folderGroupFromPath(path, workspace);
+  const workspacePackage = workspace?.rootDir
+    ? workspacePackageForPath(workspace.rootDir, path, workspace.packageRoots)
+    : undefined;
+  return workspacePackage ? { folderGroup, workspacePackage } : { folderGroup };
+}
+
+export function enrichNodeForSnapshot(
+  node: GraphNode,
+  previewLength = 160,
+  workspace?: SnapshotWorkspaceContext
+): GraphSnapshotSampleNode {
   const contentPreview = compactPreview(node.content, previewLength);
   const meta = node.metadata ?? {};
 
@@ -78,6 +137,7 @@ export function enrichNodeForSnapshot(node: GraphNode, previewLength = 160): Gra
   let sourcePath: string | undefined;
   let sourceLine: number | undefined;
   let folderGroup: string | undefined;
+  let workspacePackage: string | undefined;
 
   if (node.type === "File") {
     const path = node.id.startsWith("file:")
@@ -86,12 +146,12 @@ export function enrichNodeForSnapshot(node: GraphNode, previewLength = 160): Gra
     displayLabel = basename(path);
     displayPath = path;
     sourcePath = path;
-    folderGroup = folderGroupFromPath(path);
+    ({ folderGroup, workspacePackage } = applyPathSnapshotMetadata(path, workspace));
   } else if (node.type === "Module") {
     const path = node.id.startsWith("module:") ? node.id.slice(7) : node.content;
     displayLabel = basename(path) || path;
     displayPath = path;
-    folderGroup = folderGroupFromPath(path);
+    ({ folderGroup, workspacePackage } = applyPathSnapshotMetadata(path, workspace));
   } else if (node.type === "Symbol") {
     const name = typeof meta.name === "string" ? meta.name : undefined;
     const file = typeof meta.file === "string" ? meta.file : undefined;
@@ -112,7 +172,9 @@ export function enrichNodeForSnapshot(node: GraphNode, previewLength = 160): Gra
     displayPath = file;
     sourcePath = file;
     sourceLine = line;
-    folderGroup = file ? folderGroupFromPath(file) : undefined;
+    if (file) {
+      ({ folderGroup, workspacePackage } = applyPathSnapshotMetadata(file, workspace));
+    }
   } else if (node.type === "Skill") {
     displayLabel =
       typeof meta.name === "string" ? meta.name : node.id.replace(/^skill:/, "") || "Skill";
@@ -131,6 +193,7 @@ export function enrichNodeForSnapshot(node: GraphNode, previewLength = 160): Gra
     viewLayer: viewLayerForType(node.type),
     ...(displayPath ? { displayPath } : {}),
     ...(folderGroup ? { folderGroup } : {}),
+    ...(workspacePackage ? { workspacePackage } : {}),
     ...(sourcePath ? { sourcePath } : {}),
     ...(sourceLine !== undefined ? { sourceLine } : {}),
   };
@@ -140,11 +203,16 @@ export function sampleGraphForSnapshot(
   nodes: GraphNode[],
   edges: GraphEdge[],
   nodeLimit: number,
-  edgeLimit: number
+  edgeLimit: number,
+  rootDir?: string
 ): { sampleNodes: GraphSnapshotSampleNode[]; sampleEdges: GraphSnapshotSampleEdge[] } {
   if (nodes.length === 0) {
     return { sampleNodes: [], sampleEdges: [] };
   }
+
+  const workspace = rootDir
+    ? { rootDir, packageRoots: discoverWorkspacePackages(rootDir) }
+    : undefined;
 
   const nodeMap = new Map(nodes.map((node) => [node.id, node]));
   const adj = buildAdjacency(edges);
@@ -167,7 +235,7 @@ export function sampleGraphForSnapshot(
   const byFolder = new Map<string, GraphNode[]>();
   for (const file of fileCandidates) {
     const path = file.id.startsWith("file:") ? file.id.slice(5) : file.content.split("#")[0]?.trim() ?? file.id;
-    const group = folderGroupFromPath(path);
+    const group = folderGroupFromPath(path, workspace);
     const bucket = byFolder.get(group) ?? [];
     bucket.push(file);
     byFolder.set(group, bucket);
@@ -250,14 +318,39 @@ export function sampleGraphForSnapshot(
     selected.push(node);
   }
 
+  if (selected.length === 0) {
+    const fallbackPool = [
+      ...nodes
+        .filter((node) => node.type === "File")
+        .sort((a, b) => degree(b.id) - degree(a.id)),
+      ...nodes
+        .filter((node) => node.type === "Module")
+        .sort((a, b) => degree(b.id) - degree(a.id)),
+      ...nodes
+        .filter((node) => viewLayerForType(node.type) === "code" && node.type !== "File" && node.type !== "Module")
+        .sort((a, b) => degree(b.id) - degree(a.id)),
+    ];
+    for (const node of fallbackPool) {
+      if (selected.length >= nodeLimit) {
+        break;
+      }
+      if (visited.has(node.id)) {
+        continue;
+      }
+      visited.add(node.id);
+      selected.push(node);
+    }
+  }
+
   const sampleNodeIds = new Set(selected.map((node) => node.id));
 
+  const visibleEdges = sortSnapshotEdges(
+    edges.filter((edge) => sampleNodeIds.has(edge.from) && sampleNodeIds.has(edge.to))
+  );
+
   return {
-    sampleNodes: selected.map((node) => enrichNodeForSnapshot(node)),
-    sampleEdges: edges
-      .filter((edge) => sampleNodeIds.has(edge.from) && sampleNodeIds.has(edge.to))
-      .slice(0, edgeLimit)
-      .map((edge) => ({
+    sampleNodes: selected.map((node) => enrichNodeForSnapshot(node, 160, workspace)),
+    sampleEdges: visibleEdges.slice(0, edgeLimit).map((edge) => ({
         from: edge.from,
         relation: edge.relation,
         to: edge.to,

@@ -3,10 +3,13 @@ import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { resolveRuntimeCwd, requireWorkspaceFolder } from "./workspace";
 import {
+  buildAgentWorkItemsHtml,
   buildContextPreviewHtml,
   buildGraphSnapshotHtml,
   buildSettingsHtml,
   buildSkillInsightsHtml,
+  type AgentDelegationPanelResult,
+  type AgentWorkItemView,
   type ContextPreviewResult,
   type GraphSnapshotResult,
   type GraphFlowSettings,
@@ -61,27 +64,62 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(task));
-    const output = await runGraphFlow(workspaceRoot, (runtime) => runtime.runTask(task));
-    const parsed = parseCliResult(output);
+    const result = await runGraphFlow(workspaceRoot, (runtime) => runtime.runTaskResult(task));
 
-    const runtimeRecord = {
-      task,
-      status: parsed.status,
-      attempts: parsed.attempts,
-      feedback: parsed.feedback,
-      timestamp: Date.now(),
-    };
     const record: RunRecord = {
-      task: runtimeRecord.task,
-      status: runtimeRecord.status,
-      attempts: runtimeRecord.attempts,
-      feedback: runtimeRecord.feedback,
-      timestamp: runtimeRecord.timestamp,
+      task,
+      status: result.status,
+      attempts: result.attempts,
+      feedback: result.feedback,
+      timestamp: Date.now(),
     };
 
     runs.push(record);
+
+    if (shouldShowAgentWorkItemsPanel(result)) {
+      showAgentWorkItemsPanel(context, buildPanelResultFromRun(task, result, preview));
+      return;
+    }
+
     vscode.window.showInformationMessage(
       `GraphFlow finished: ${record.status}; saved≈${preview.tokenBudget.estimatedSavingsPercent}% tokens`
+    );
+  });
+
+  const planInsightCommand = vscode.commands.registerCommand("graphflow.planInsight", async () => {
+    const task = await vscode.window.showInputBox({
+      title: "GraphFlow Plan Insight (Six Hats)",
+      prompt: "Enter task description for agent-delegated plan insight",
+      placeHolder: "refactor architecture and add tests",
+    });
+
+    if (!task) {
+      return;
+    }
+
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+      vscode.window.showErrorMessage("No workspace folder found.");
+      return;
+    }
+
+    const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(task));
+    const result = await runGraphFlow(workspaceRoot, (runtime) => runtime.planInsightResult(task));
+
+    if (shouldShowAgentWorkItemsPanel(result)) {
+      showAgentWorkItemsPanel(context, {
+        task,
+        mode: result.mode,
+        agentInstructions: result.agentInstructions,
+        agentWorkItems: (result.agentWorkItems ?? []) as AgentWorkItemView[],
+        plan: result.plan,
+        tokenBudget: preview.tokenBudget,
+      });
+      return;
+    }
+
+    vscode.window.showInformationMessage(
+      `GraphFlow plan insight (${result.mode}): ${result.plan.length} tasks; saved≈${preview.tokenBudget.estimatedSavingsPercent}% tokens`
     );
   });
 
@@ -351,24 +389,61 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
+      if (command === "plan-insight") {
+        const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(payload));
+        const result = await runGraphFlow(workspaceRoot, (runtime) => runtime.planInsightResult(payload));
+
+        if (shouldShowAgentWorkItemsPanel(result)) {
+          showAgentWorkItemsPanel(context, {
+            task: payload,
+            mode: result.mode,
+            agentInstructions: result.agentInstructions,
+            agentWorkItems: (result.agentWorkItems ?? []) as AgentWorkItemView[],
+            plan: result.plan,
+            tokenBudget: preview.tokenBudget,
+          });
+          stream.markdown(formatAgentDelegationChatMarkdown(payload, preview, result));
+          return;
+        }
+
+        const planLines = result.plan.map((node) => `- ${node.id}: ${node.description}`);
+        stream.markdown(
+          [
+            `Plan insight (${result.mode}):`,
+            formatContextBudgetBullets(preview),
+            "",
+            `Plan (${result.plan.length} tasks):`,
+            ...(planLines.length > 0 ? planLines : ["- empty"]),
+          ].join("\n")
+        );
+        return;
+      }
+
       const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(payload));
-      const runOutput = await runGraphFlow(workspaceRoot, (runtime) => runtime.runTask(payload));
-      const parsed = parseCliResult(runOutput);
+      const result = await runGraphFlow(workspaceRoot, (runtime) => runtime.runTaskResult(payload));
       runs.push({
         task: payload,
-        status: parsed.status,
-        attempts: parsed.attempts,
-        feedback: parsed.feedback,
+        status: result.status,
+        attempts: result.attempts,
+        feedback: result.feedback,
         timestamp: Date.now(),
       });
+
+      if (shouldShowAgentWorkItemsPanel(result)) {
+        showAgentWorkItemsPanel(context, buildPanelResultFromRun(payload, result, preview));
+        stream.markdown(formatAgentDelegationChatMarkdown(payload, preview, result));
+        return;
+      }
+
       stream.markdown(
-        `Token budget:\n${formatContextBudgetBullets(preview)}\n\nRun result:\n- status: ${parsed.status}\n- attempts: ${parsed.attempts}\n- feedback: ${parsed.feedback}`
+        `Token budget:\n${formatContextBudgetBullets(preview)}\n\nRun result:\n- status: ${result.status}\n- attempts: ${result.attempts}\n- feedback: ${result.feedback}`
       );
     }
   );
 
   context.subscriptions.push(
     runTask,
+    planInsightCommand,
     showRuns,
     planTask,
     previewContextCommand,
@@ -582,7 +657,11 @@ async function withWorkspaceCwd<T>(workspaceRoot: string, action: () => Promise<
 
 function detectInlineCommand(
   prompt: string
-): "run" | "plan" | "history" | "context" | "settings" | "diagnose" | "learn" | "graph" | "skills" | "enrich" {
+): "run" | "plan" | "plan-insight" | "history" | "context" | "settings" | "diagnose" | "learn" | "graph" | "skills" | "enrich" {
+  if (prompt.startsWith("/plan-insight") || prompt.startsWith("/insight")) {
+    return "plan-insight";
+  }
+
   if (prompt.startsWith("/plan")) {
     return "plan";
   }
@@ -623,7 +702,11 @@ function detectInlineCommand(
 }
 
 function stripInlineCommand(prompt: string): string {
-  return prompt.replace(/^\/(run|plan|history|context|settings|diagnose|learn|graph|skills|enrich)\s*/i, "").trim();
+  return prompt
+    .replace(/^\/plan-insight\s*/i, "")
+    .replace(/^\/insight\s*/i, "")
+    .replace(/^\/(run|plan|history|context|settings|diagnose|learn|graph|skills|enrich)\s*/i, "")
+    .trim();
 }
 
 function formatBytes(value: number): string {
@@ -746,6 +829,68 @@ function formatSettingsMarkdown(settings: GraphFlowSettings): string {
   ].join("\n");
 }
 
+function formatAgentDelegationChatMarkdown(
+  task: string,
+  preview: ContextPreviewResult,
+  result: {
+    mode?: string;
+    episodeId?: string;
+    agentWorkItems?: unknown[];
+    executionDescriptor?: {
+      agentMode?: string;
+      agentWorkItems?: unknown[];
+      context?: string;
+    };
+    plan?: Array<{ id: string; description: string; dependencies: string[] }>;
+  }
+): string {
+  const workItems = (result.agentWorkItems ??
+    result.executionDescriptor?.agentWorkItems ??
+    []) as AgentWorkItemView[];
+  const episodeSuffix = result.episodeId ? `, \`episodeId\`=\`${result.episodeId}\`` : "";
+  const plan =
+    result.plan ?? parsePlanFromExecutionContext(result.executionDescriptor?.context) ?? [];
+
+  const lines = [
+    "Agent-delegated mode (connected agent supplies LLM):",
+    `- task: ${task}`,
+    ...(result.mode ? [`- mode: ${result.mode}`] : []),
+    ...(result.episodeId ? [`- episodeId: \`${result.episodeId}\``] : []),
+    `- agentWorkItems: ${workItems.length}`,
+    "",
+    "Token budget:",
+    formatContextBudgetBullets(preview),
+  ];
+
+  if (workItems.length > 0) {
+    lines.push("", "Work items:");
+    for (const item of workItems) {
+      const previewText =
+        item.prompt.length > 100 ? `${item.prompt.slice(0, 100)}…` : item.prompt;
+      lines.push(`- **${item.id}** (${item.kind}): ${previewText}`);
+    }
+  }
+
+  lines.push(
+    "",
+    "Close the loop:",
+    "1. Answer each work-item prompt with your model.",
+    `2. Call \`graphflow_submit_insight\` per item (\`task\`, \`workItemId\`, \`response\`${episodeSuffix}).`,
+    "3. When all items are submitted, call `graphflow_merge_insight` to merge insights into the plan.",
+    "4. Execute the plan / `executionDescriptor`.",
+    `5. Call \`graphflow_report_outcome\` with \`success\`${result.episodeId ? ` and \`episodeId\`=\`${result.episodeId}\`` : ""}.`
+  );
+
+  if (plan.length > 0) {
+    lines.push("", `Plan preview (${plan.length} tasks):`);
+    for (const node of plan) {
+      lines.push(`- ${node.id}: ${node.description}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 function showContextPreviewPanel(context: vscode.ExtensionContext, preview: ContextPreviewResult): void {
   const panel = vscode.window.createWebviewPanel(
     "graphflow.contextPreview",
@@ -763,6 +908,94 @@ function showContextPreviewPanel(context: vscode.ExtensionContext, preview: Cont
   );
   panel.webview.html = buildContextPreviewHtml(preview, scriptUri.toString());
   context.subscriptions.push(panel);
+}
+
+function showAgentWorkItemsPanel(
+  context: vscode.ExtensionContext,
+  result: AgentDelegationPanelResult
+): void {
+  const panel = vscode.window.createWebviewPanel(
+    "graphflow.agentWorkItems",
+    "GraphFlow Agent Work Items",
+    vscode.ViewColumn.Active,
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [context.extensionUri],
+    }
+  );
+
+  const scriptUri = panel.webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, "media", "agent-work-items.js")
+  );
+  panel.webview.html = buildAgentWorkItemsHtml(result, scriptUri.toString());
+  context.subscriptions.push(panel);
+}
+
+function shouldShowAgentWorkItemsPanel(result: {
+  mode?: string;
+  executionDescriptor?: { agentMode?: string; agentWorkItems?: unknown[] };
+  agentWorkItems?: unknown[];
+}): boolean {
+  if (result.mode === "agent-delegated") {
+    return true;
+  }
+  if ((result.agentWorkItems?.length ?? 0) > 0) {
+    return true;
+  }
+  if (result.executionDescriptor?.agentMode === "delegated-llm") {
+    return true;
+  }
+  return (result.executionDescriptor?.agentWorkItems?.length ?? 0) > 0;
+}
+
+function buildPanelResultFromRun(
+  task: string,
+  result: {
+    episodeId?: string;
+    executionDescriptor?: AgentDelegationPanelResult["executionDescriptor"];
+  },
+  preview?: ContextPreviewResult
+): AgentDelegationPanelResult {
+  const executionDescriptor = result.executionDescriptor;
+  const agentWorkItems = (executionDescriptor?.agentWorkItems ?? []) as AgentWorkItemView[];
+
+  return {
+    task,
+    mode:
+      executionDescriptor?.agentMode === "delegated-llm" || agentWorkItems.length > 0
+        ? "agent-delegated"
+        : "llm",
+    agentWorkItems,
+    plan: parsePlanFromExecutionContext(executionDescriptor?.context),
+    executionDescriptor,
+    episodeId: result.episodeId,
+    tokenBudget: preview?.tokenBudget,
+  };
+}
+
+function parsePlanFromExecutionContext(
+  context?: string
+): AgentDelegationPanelResult["plan"] | undefined {
+  if (!context) {
+    return undefined;
+  }
+
+  const match = context.match(/plan=(\[[\s\S]*?\])(?:;|$)/);
+  if (!match) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(match[1]) as Array<{
+      id: string;
+      description: string;
+      dependencies: string[];
+    }>;
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function registerDebouncedIndexOnSave(context: vscode.ExtensionContext, workspaceRoot: string): void {

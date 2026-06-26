@@ -118,6 +118,16 @@ export async function previewContext(
     packageOptions.enableRepoMapFallback = true;
   }
 
+  // Adaptive budget: auto-enable for complex tasks unless explicitly disabled.
+  const { triageTask } = await import("../../../core/triage.js");
+  const taskMode = triageTask(query);
+  const enableAdaptiveBudget =
+    compressionPolicy?.enableAdaptiveBudget !== false &&
+    (compressionPolicy?.enableAdaptiveBudget === true || taskMode === "complex");
+  if (enableAdaptiveBudget) {
+    packageOptions.taskMode = taskMode;
+  }
+
   // Semantic compression (minicpm/economy LLM) is opt-in via config.
   const compressionEnabled = compressionPolicy?.enabled === true;
   if (compressionEnabled) {
@@ -568,7 +578,13 @@ export async function inspectGraph(
       .map(([relation, count]) => ({ relation, count }))
       .sort((a, b) => b.count - a.count || a.relation.localeCompare(b.relation))
       .slice(0, 8),
-    ...sampleGraphForSnapshot(store.nodes, store.edges, nodeLimit, edgeLimit),
+    ...sampleGraphForSnapshot(
+      store.nodes,
+      store.edges,
+      nodeLimit,
+      edgeLimit,
+      config.graphPolicy.workspaceRoot ?? process.cwd()
+    ),
   };
 }
 

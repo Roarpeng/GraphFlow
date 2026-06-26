@@ -114,7 +114,11 @@ const DEFAULT_EXPANSION_RELATIONS: GraphEdge["relation"][] = [
   "imports",
   "depends_on",
   "prerequisite",
+  "calls",
+  "defines",
 ];
+
+const ARCHITECTURE_QUERY = /architecture|refactor|module|design|架构|模块/i;
 
 export async function expandSubgraph(
   client: GraphClient,
@@ -208,8 +212,10 @@ export async function buildLayeredContextPackage(
   };
   const used = { l1: 0, l2: 0, l3: 0 };
   const added = new Set<string>();
+  const hitById = new Map<string, GraphNode>();
 
   for (const hit of hits) {
+    hitById.set(hit.id, hit);
     const layer = classifyLayer(hit);
     if (!canUseLayer(layer, quota, used)) {
       continue;
@@ -227,6 +233,75 @@ export async function buildLayeredContextPackage(
     added.add(hit.id);
     tokens += estimate;
     markLayerUsed(layer, used);
+  }
+
+  if (!truncated) {
+    const moduleIds = new Set<string>();
+    for (const anchor of anchorChannel) {
+      if (anchor.layer !== "L1" || (anchor.type !== "File" && anchor.type !== "Symbol")) {
+        continue;
+      }
+      const moduleId = deriveModuleId(anchor, hitById.get(anchor.id));
+      if (moduleId) {
+        moduleIds.add(moduleId);
+      }
+    }
+
+    let moduleNodes: GraphNode[] = [];
+    if (moduleIds.size > 0 && typeof client.getNodesByIds === "function") {
+      moduleNodes = await client.getNodesByIds(Array.from(moduleIds));
+    }
+
+    for (const moduleId of moduleIds) {
+      if (added.has(moduleId)) continue;
+      if (!canUseLayer("L2", quota, used)) break;
+
+      const node =
+        moduleNodes.find((n) => n.id === moduleId) ??
+        ({ id: moduleId, type: "Module" as const, content: moduleId.slice("module:".length) });
+
+      const summary = `${node.type}: ${node.content}`;
+      const estimate = estimateTokens(summary);
+      if (tokens + estimate > maxTokens) {
+        truncated = true;
+        break;
+      }
+
+      summaryChannel.push(summary);
+      anchorChannel.push({ id: node.id, type: node.type, layer: "L2" });
+      added.add(node.id);
+      tokens += estimate;
+      markLayerUsed("L2", used);
+    }
+  }
+
+  if (!truncated && ARCHITECTURE_QUERY.test(query)) {
+    const l3Candidates = rankNodesForContextQuery(
+      (await client.queryByKeyword(query)).filter(
+        (n) => n.type === "Skill" || n.type === "Decision"
+      ),
+      query
+    );
+    let l3Added = 0;
+    for (const node of l3Candidates) {
+      if (l3Added >= 2) break;
+      if (added.has(node.id)) continue;
+      if (!canUseLayer("L3", quota, used)) break;
+
+      const summary = `${node.type}: ${node.content}`;
+      const estimate = estimateTokens(summary);
+      if (tokens + estimate > maxTokens) {
+        truncated = true;
+        break;
+      }
+
+      summaryChannel.push(summary);
+      anchorChannel.push({ id: node.id, type: node.type, layer: "L3" });
+      added.add(node.id);
+      tokens += estimate;
+      markLayerUsed("L3", used);
+      l3Added += 1;
+    }
   }
 
   const enableExpansion = options?.enableEdgeExpansion !== false;
@@ -365,6 +440,40 @@ function markLayerUsed(layer: ContextLayer, used: { l1: number; l2: number; l3: 
   }
 
   used.l3 += 1;
+}
+
+function modulePathKey(relPath: string): string {
+  return relPath.replace(/\.(ts|tsx|js|jsx|md|json|py|rs|go|hpp|hxx|cpp|cxx|cc|h|c|java|rb|rake|gemspec)$/i, "");
+}
+
+function deriveModuleId(anchor: ContextAnchorItem, node?: GraphNode): string | undefined {
+  if (anchor.type === "File" && anchor.id.startsWith("file:")) {
+    return `module:${modulePathKey(anchor.id.slice("file:".length))}`;
+  }
+
+  if (anchor.type === "Symbol") {
+    const filePath =
+      typeof node?.metadata?.file === "string"
+        ? node.metadata.file
+        : extractFileFromSymbolId(anchor.id);
+    if (filePath) {
+      return `module:${modulePathKey(filePath)}`;
+    }
+  }
+
+  return undefined;
+}
+
+function extractFileFromSymbolId(id: string): string | undefined {
+  if (!id.startsWith("symbol:")) {
+    return undefined;
+  }
+  const body = id.slice("symbol:".length);
+  const hashIndex = body.lastIndexOf(":");
+  if (hashIndex > 0) {
+    return body.slice(0, hashIndex);
+  }
+  return undefined;
 }
 
 /**

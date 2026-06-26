@@ -15,6 +15,8 @@ import type {
   diagnoseRoutingResult,
   planAndBrainstorm,
   planAndBrainstormResult,
+  planInsight,
+  planInsightResult,
   runLearningNightly,
   runLearningNightlyResult,
   runTask,
@@ -34,6 +36,8 @@ export interface GraphFlowRuntimeModule {
   runTaskResult: typeof runTaskResult;
   planAndBrainstorm: typeof planAndBrainstorm;
   planAndBrainstormResult: typeof planAndBrainstormResult;
+  planInsightResult: typeof planInsightResult;
+  planInsight: typeof planInsight;
   previewContext: typeof previewContext;
   indexGraph: typeof indexGraph;
   rebuildGraph: typeof rebuildGraph;
