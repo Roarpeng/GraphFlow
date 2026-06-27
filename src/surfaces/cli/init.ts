@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
 import { ensureGlobalGraphFlowConfig, resolveGlobalConfigPath } from "../../config/scaffold";
 import {
   detectInstalledAgents,
@@ -64,8 +64,28 @@ function resolveSkillSourcePath(): string | undefined {
   return undefined;
 }
 
+function resolveCursorRulesSourcePath(): string | undefined {
+  const candidates: string[] = [
+    join(__dirname, "..", "..", "surfaces", "cursor-rules"),
+    join(__dirname, "..", "..", "..", "src", "surfaces", "cursor-rules"),
+    join(process.cwd(), "src", "surfaces", "cursor-rules"),
+  ];
+  for (const dir of candidates) {
+    if (existsSync(join(dir, "graphflow.mdc"))) {
+      return dir;
+    }
+  }
+  return undefined;
+}
+
 export interface SkillInstallResult {
   agent: string;
+  status: "created" | "updated" | "skipped" | "error";
+  message?: string;
+}
+
+export interface CursorRulesInstallResult {
+  target: string;
   status: "created" | "updated" | "skipped" | "error";
   message?: string;
 }
@@ -108,6 +128,67 @@ export function installTraeSkills(): SkillInstallResult[] {
     } catch (error) {
       results.push({
         agent: trae.name,
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return results;
+}
+
+export function installCursorRules(): CursorRulesInstallResult[] {
+  const results: CursorRulesInstallResult[] = [];
+  const rulesSourceDir = resolveCursorRulesSourcePath();
+
+  if (!rulesSourceDir) {
+    results.push({ target: "Cursor", status: "skipped", message: "Cursor rules source not found" });
+    return results;
+  }
+
+  const { home, appData } = resolveHomePaths();
+  const cursorRulesDirs: Array<{ name: string; path: string }> = [];
+
+  // User-level Cursor rules directory
+  const userRulesDir = join(home, ".cursor", "rules");
+  if (existsSync(join(home, ".cursor"))) {
+    cursorRulesDirs.push({ name: "Cursor (user)", path: userRulesDir });
+  }
+
+  // Also check AppData location (some Cursor versions)
+  const appDataCursorDir = join(appData, "Cursor", "User", "rules");
+  if (isWindows && existsSync(join(appData, "Cursor"))) {
+    cursorRulesDirs.push({ name: "Cursor (AppData)", path: appDataCursorDir });
+  }
+
+  if (cursorRulesDirs.length === 0) {
+    results.push({ target: "Cursor", status: "skipped", message: "No Cursor installation detected" });
+    return results;
+  }
+
+  const sourceRulesFile = join(rulesSourceDir, "graphflow.mdc");
+
+  for (const target of cursorRulesDirs) {
+    try {
+      const destDir = target.path;
+      const destFile = join(destDir, "graphflow.mdc");
+
+      const existed = existsSync(destFile);
+      if (existed) {
+        const existingContent = readFileSync(destFile, "utf8");
+        const newContent = readFileSync(sourceRulesFile, "utf8");
+        if (existingContent === newContent) {
+          results.push({ target: target.name, status: "skipped", message: "already up to date" });
+          continue;
+        }
+      }
+
+      mkdirSync(destDir, { recursive: true });
+      copyFileSync(sourceRulesFile, destFile);
+      results.push({ target: target.name, status: existed ? "updated" : "created" });
+    } catch (error) {
+      results.push({
+        target: target.name,
         status: "error",
         message: error instanceof Error ? error.message : String(error),
       });
@@ -165,6 +246,7 @@ ${formatModelConfigGuide()}
 }
 
 function resolveBundledServerPath(): string | undefined {
+  // Standard candidates based on __dirname (works for normal npm install -g)
   const candidates = [
     join(__dirname, "..", "mcp", "server.js"),
     join(__dirname, "..", "..", "surfaces", "mcp", "server.js"),
@@ -175,14 +257,38 @@ function resolveBundledServerPath(): string | undefined {
       return resolve(p);
     }
   }
+
+  // Fallback: derive from process.argv[1] when __dirname is resolved through
+  // a Windows junction (npm install -g . creates a junction to the source dir).
+  // process.argv[1] preserves the junction path containing @roarpeng/graphflow.
+  const argv1 = process.argv[1];
+  if (argv1) {
+    const argvDir = dirname(argv1);
+    const argvCandidates = [
+      join(argvDir, "..", "mcp", "server.js"),
+      join(argvDir, "..", "..", "surfaces", "mcp", "server.js"),
+    ];
+    for (const p of argvCandidates) {
+      if (existsSync(p)) {
+        return resolve(p);
+      }
+    }
+  }
+
   return undefined;
 }
 
 function isRunningFromNpmPackage(): boolean {
-  return resolve(__dirname).replace(/\\/g, "/").toLowerCase().includes("@roarpeng/graphflow");
+  // On Windows, npm install -g . creates a junction (symlink) from
+  // node_modules/@roarpeng/graphflow to the source directory.
+  // Node.js resolves __dirname through the junction to the real path,
+  // so __dirname won't contain "@roarpeng/graphflow".
+  // However, process.argv[1] preserves the junction path, so we check that.
+  const scriptPath = (process.argv[1] ?? "").replace(/\\/g, "/").toLowerCase();
+  return scriptPath.includes("@roarpeng/graphflow");
 }
 
-function runInstallation(workspaceRoot: string): { mcpResults: McpInstallResult[]; skillResults: SkillInstallResult[] } {
+function runInstallation(workspaceRoot: string): { mcpResults: McpInstallResult[]; skillResults: SkillInstallResult[]; cursorRulesResults: CursorRulesInstallResult[] } {
   const globalConfig = ensureGlobalGraphFlowConfig();
   if (globalConfig.status === "created") {
     console.log(`[CREATED] Global config: ${globalConfig.path}`);
@@ -197,11 +303,17 @@ function runInstallation(workspaceRoot: string): { mcpResults: McpInstallResult[
   let mcpOptions: Parameters<typeof installMcpToDetectedAgents>[0];
 
   if (bundledServerPath && fromPackage) {
+    // Derive bundledRuntimeRoot from process.argv[1] (preserves junction path on Windows)
+    // rather than from bundledServerPath (which resolves through junction to source dir).
+    const argv1 = process.argv[1];
+    const runtimeRoot = argv1
+      ? resolve(join(dirname(argv1), "..", "..", "..", ".."))
+      : join(bundledServerPath, "..", "..", "..", "..");
     mcpOptions = {
       strategy: "node-bundled",
       installScope: "user",
       bundledServerPath,
-      bundledRuntimeRoot: join(bundledServerPath, "..", "..", "..", ".."),
+      bundledRuntimeRoot: runtimeRoot,
       workspaceRoot,
     };
     console.log(`[INFO] Running from npm package — using bundled server: ${bundledServerPath}`);
@@ -246,7 +358,20 @@ function runInstallation(workspaceRoot: string): { mcpResults: McpInstallResult[
     console.log(`[SUCCESS] ${result.status === "created" ? "Created" : "Updated"} GraphFlow Skill for ${result.agent}`);
   }
 
-  return { mcpResults: installResults, skillResults };
+  const cursorRulesResults = installCursorRules();
+  for (const result of cursorRulesResults) {
+    if (result.status === "error") {
+      console.error(`[ERROR] Cursor Rules ${result.target}: ${result.message}`);
+      continue;
+    }
+    if (result.status === "skipped") {
+      console.log(`[SKIP] Cursor Rules ${result.target}: ${result.message ?? "skipped"}`);
+      continue;
+    }
+    console.log(`[SUCCESS] ${result.status === "created" ? "Created" : "Updated"} GraphFlow Cursor Rules for ${result.target}`);
+  }
+
+  return { mcpResults: installResults, skillResults, cursorRulesResults };
 }
 
 export function runInstall() {

@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "1.0.9",
+  "version": "1.1.0",
   "publishConfig": {
     "access": "public"
   },
@@ -9,6 +9,7 @@
     "wasm",
     "scripts/safe-postinstall.cjs",
     "src/surfaces/trae-skill",
+    "src/surfaces/cursor-rules",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",

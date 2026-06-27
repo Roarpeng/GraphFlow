@@ -669,11 +669,24 @@ function writeJsonConfig(path: string, json: Record<string, unknown>): void {
 }
 
 function removeCodexMcpSection(content: string, serverName: string): string {
+  // Remove [mcp_servers.serverName] and [mcp_servers.serverName.env] sections
   const blockPattern = new RegExp(
     `\\n?\\[mcp_servers\\.${escapeRegExp(serverName)}(?:\\.[^\\]]+)?\\][^\\[]*`,
     "g"
   );
-  return content.replace(blockPattern, "").trimEnd();
+  let cleaned = content.replace(blockPattern, "").trimEnd();
+
+  // Remove orphaned lines from previous buggy injections — any line that starts with
+  // an array value (["..."]) followed by "enabled = true" and "startup_timeout_sec = 120".
+  // These occur when the TOML args array was written without its section header.
+  // This handles npx entries, npm-script entries, and node-bundled entries.
+  const orphanPattern = new RegExp(
+    `\\n?\\["[^\\]]*\\]\\s*\\n\\s*enabled\\s*=\\s*true\\s*\\n\\s*startup_timeout_sec\\s*=\\s*\\d+`,
+    "g"
+  );
+  cleaned = cleaned.replace(orphanPattern, "").trimEnd();
+
+  return cleaned;
 }
 
 function formatCodexMcpTomlBlock(serverName: string, node: McpServerNode): string {
@@ -743,14 +756,20 @@ function injectIntoConfig(
   const previous = servers[serverName];
 
   // Merge env: start with previous user env, override with new env.
-  // Clean up stale ELECTRON_RUN_AS_NODE when the new command no longer needs it
-  // (e.g. switched from Electron fallback to system Node).
+  // Clean up stale env vars that should not persist across strategy changes.
   const mergedEnv: Record<string, string> = {
     ...(previous?.env ?? {}),
     ...(node.env ?? {}),
   };
+  // Clean up stale ELECTRON_RUN_AS_NODE when the new command no longer needs it
+  // (e.g. switched from Electron fallback to system Node).
   if (!node.env?.ELECTRON_RUN_AS_NODE) {
     delete mergedEnv.ELECTRON_RUN_AS_NODE;
+  }
+  // Clean up stale GRAPHFLOW_WORKSPACE_ROOT when the new config doesn't include it
+  // (e.g. switched from npx with ${workspaceFolder} to node-bundled without cwd).
+  if (!node.env?.GRAPHFLOW_WORKSPACE_ROOT) {
+    delete mergedEnv.GRAPHFLOW_WORKSPACE_ROOT;
   }
 
   servers[serverName] = {
