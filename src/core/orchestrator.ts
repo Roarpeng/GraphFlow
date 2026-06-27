@@ -11,7 +11,9 @@ import {
   type AgentDelegatedPlanInsight,
 } from "./agent-delegation.js";
 import { runSimpleTask } from "./state-machine.js";
-import { triageTask, triageTaskLlm } from "./triage.js";
+import { triageTaskExplain, triageTaskLlm } from "./triage.js";
+import { recordTriageDecision } from "../learning/triage-telemetry.js";
+import { assignAgentsToTasks, buildAgentAssignments } from "./agent-assignment.js";
 import type { OrchestrationInput, TaskRunResult, TaskNode, OrchestrateOptions } from "./types.js";
 
 // Re-export OrchestrateOptions from types.ts for backward compatibility
@@ -32,6 +34,7 @@ import {
   maybeSyncGraph,
   maybeSyncSkillGraph,
   finalizeEpisode,
+  maybeSeedInitialSkills,
 } from "./orchestrator-episode.js";
 
 // Route module
@@ -66,6 +69,9 @@ async function runOrchestration(
   options?: OrchestrateOptions
 ): Promise<TaskRunResult> {
   logger.info({ task: input.task }, "Orchestration task started");
+  // 预置种子技能（幂等）：在技能飞轮启用时为图写入常见工程技能基线，
+  // 须在构建技能提示之前执行，确保种子技能可被 suggestSkillHints 命中。
+  await maybeSeedInitialSkills(options);
   const retryOptions = input.maxRetries !== undefined ? { maxRetries: input.maxRetries } : {};
   const contextPackage = await maybeBuildNearLosslessContext(input, options);
   const routeDecisions = buildRouteDecisions(
@@ -79,9 +85,28 @@ async function runOrchestration(
   const promptContext = buildPromptContext(contextPackage, skillHints, episodeSummaries, options);
   const promptContextLines = promptContext?.summaryChannel?.length ?? 0;
 
-  let mode = triageTask(input.task);
+  let triageExplanation = triageTaskExplain(input.task);
+  let mode = triageExplanation.decision;
   if (options?.enableLlmTriage) {
-    mode = await triageTaskLlm(input.task, decisionToSelection(routeDecisions.planner), promptContext);
+    const llmDecision = await triageTaskLlm(input.task, decisionToSelection(routeDecisions.planner), promptContext);
+    mode = llmDecision;
+    // LLM triage 路径：保留启发式原因，并标记为 llmBased，用于准确率数据收集
+    triageExplanation = { decision: llmDecision, reason: { ...triageExplanation.reason, llmBased: true } };
+  }
+  // 记录 triage 决策 learning event（任务描述、决策、原因、时间戳），用于后续准确率分析。
+  // 仅在图客户端可用时记录；失败不阻断主流程。
+  let triageId: string | undefined;
+  if (options?.graphClient) {
+    try {
+      triageId = await recordTriageDecision(
+        options.graphClient,
+        input.task,
+        mode,
+        triageExplanation.reason
+      );
+    } catch (error) {
+      logger.warn({ error }, "Triage telemetry recording failed");
+    }
   }
   let currentPlan: TaskNode[] = [];
 
@@ -107,7 +132,7 @@ async function runOrchestration(
     await maybeSyncGraph(input.task, withRoute, options);
     await maybeSyncSkillGraph(input.task, withRoute, options);
     logger.info({ status: withRoute.status, task: input.task }, "Orchestration task finished (simple mode)");
-    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options);
+    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options, triageId);
   }
 
   const plannerSelection = decisionToSelection(routeDecisions.planner);
@@ -154,10 +179,14 @@ async function runOrchestration(
 
   // Bridge mode: package the planned DAG for external agent execution instead of running it
   if (options?.executionMode === "bridge") {
-    const planProjection = plan.map((node) => ({
+    // 多 Agent 协作编排：为每个任务节点标注建议的 agent 专业领域
+    const assignedPlan = assignAgentsToTasks(plan);
+    const agentAssignments = buildAgentAssignments(assignedPlan);
+    const planProjection = assignedPlan.map((node) => ({
       id: node.id,
       description: node.description,
       dependencies: node.dependencies,
+      ...(node.assignedAgent ? { assignedAgent: node.assignedAgent } : {}),
     }));
     const contextStr = promptContext
       ? Object.entries(promptContext)
@@ -189,6 +218,7 @@ async function runOrchestration(
         task: input.task,
         context: `plan=${JSON.stringify(planProjection)}${insightSummary ? `; insight=${insightSummary}` : ""}${contextStr ? `; ${contextStr}` : ""}`,
         retryHints: [],
+        ...(agentAssignments.length > 0 ? { agentAssignments } : {}),
         ...delegatedExtras,
       },
     };
@@ -196,7 +226,7 @@ async function runOrchestration(
     const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
     await maybeSyncSkillGraph(input.task, withRoute, options);
     logger.info({ status: withRoute.status, task: input.task }, "Orchestration task delegated (bridge mode)");
-    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options);
+    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options, triageId);
   }
 
   const runner = async (node: TaskNode): Promise<boolean> => {
@@ -285,7 +315,7 @@ async function runOrchestration(
   await maybeSyncGraph(input.task, withRoute, options);
   await maybeSyncSkillGraph(input.task, withRoute, options);
   logger.info({ status: withRoute.status, task: input.task, rounds: result.rounds }, "Orchestration task completed successfully");
-  return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options);
+  return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options, triageId);
 }
 
 function projectPlan(plan: TaskNode[]): string {

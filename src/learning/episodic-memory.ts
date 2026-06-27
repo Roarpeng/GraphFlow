@@ -1,6 +1,11 @@
 import type { GraphNode } from "../core/types";
 import type { GraphClient } from "../graph/client-factory";
 import { hashText } from "../utils/hash";
+import {
+  cosineSimilarity,
+  extractEmbedding,
+  type EmbeddingProvider,
+} from "./embeddings";
 
 export interface EpisodeRecord {
   id: string;
@@ -32,7 +37,8 @@ export function extractTaskTokens(task: string): string[] {
 
 export async function recordEpisode(
   client: GraphClient,
-  episode: Omit<EpisodeRecord, "id" | "createdAt" | "updatedAt">
+  episode: Omit<EpisodeRecord, "id" | "createdAt" | "updatedAt">,
+  embeddingProvider?: EmbeddingProvider
 ): Promise<EpisodeRecord> {
   const now = Date.now();
   idCounter += 1;
@@ -57,6 +63,20 @@ export async function recordEpisode(
     content: `${EPISODE_SENTINEL} ${truncate(episode.task, 160)}`,
     metadata: { record: serialize(record), kind: EPISODE_SENTINEL },
   };
+
+  // 若 embedding provider 可用，计算任务描述的 embedding 并附加到节点 metadata，
+  // 供后续 findSimilarEpisodes 做语义余弦检索；计算失败则优雅降级为无语义向量。
+  if (embeddingProvider) {
+    try {
+      const emb = await embeddingProvider.embed(episode.task);
+      if (Array.isArray(emb) && emb.length > 0) {
+        node.metadata = { ...node.metadata, embedding: emb };
+      }
+    } catch {
+      // embedding 计算失败不应阻断 episode 记录，降级为无语义向量
+    }
+  }
+
   await client.upsertNodes([node]);
   return record;
 }
@@ -102,29 +122,107 @@ export async function updateEpisodeOutcome(
 export async function findSimilarEpisodes(
   client: GraphClient,
   task: string,
-  limit = 3
+  limit = 3,
+  embeddingProvider?: EmbeddingProvider
 ): Promise<EpisodeRecord[]> {
   const queryTokens = new Set(extractTaskTokens(task));
   const candidateNodes = await collectEpisodeCandidates(client, task, Array.from(queryTokens));
-  const records = parseEpisodes(candidateNodes);
 
-  const scored = records.map((rec) => {
-    const recTokens = new Set(extractTaskTokens(rec.task));
+  // 解析候选节点为 (record, embedding) 对，过滤软删除与重复
+  const pairs: Array<{ rec: EpisodeRecord; embedding: number[] | null }> = [];
+  const seen = new Set<string>();
+  for (const node of candidateNodes) {
+    if (!isEpisodeNode(node) || seen.has(node.id)) continue;
+    if (node.metadata?.pruned === true) continue;
+    const rec = deserialize(node);
+    if (!rec) continue;
+    seen.add(node.id);
+    pairs.push({ rec, embedding: extractEmbedding(node) });
+  }
+
+  // 计算查询 embedding（若 provider 可用）
+  let queryEmbedding: number[] | null = null;
+  if (embeddingProvider) {
+    try {
+      const emb = await embeddingProvider.embed(task);
+      if (Array.isArray(emb) && emb.length > 0) {
+        queryEmbedding = emb;
+      }
+    } catch {
+      queryEmbedding = null;
+    }
+  }
+
+  // 仅当查询向量与至少一个 episode 向量都可用时，才启用语义检索
+  const hasEmbeddings = queryEmbedding !== null && pairs.some((p) => p.embedding !== null);
+
+  // Jaccard 排名（始终计算，作为基线与降级方案）
+  const jaccardScored = pairs.map((p) => {
+    const recTokens = new Set(extractTaskTokens(p.rec.task));
     let inter = 0;
     for (const t of recTokens) if (queryTokens.has(t)) inter += 1;
     const union = new Set([...recTokens, ...queryTokens]).size;
     let score = union === 0 ? 0 : inter / union;
-    if (rec.outcome === "pass") score += 0.1;
-    else if (rec.outcome === "fail") score -= 0.1;
-    return { rec, score };
+    if (p.rec.outcome === "pass") score += 0.1;
+    else if (p.rec.outcome === "fail") score -= 0.1;
+    return { rec: p.rec, score };
   });
-
-  scored.sort((a, b) => {
+  jaccardScored.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     return b.rec.updatedAt - a.rec.updatedAt;
   });
+  const jaccardRanking = jaccardScored.map((s) => s.rec);
 
-  return scored.slice(0, limit).map((s) => s.rec);
+  // 无可用 embedding 时，回退到纯 Jaccard 逻辑（保持原有行为）
+  if (!hasEmbeddings) {
+    return jaccardRanking.slice(0, limit);
+  }
+
+  // embedding 余弦相似度排名（无向量的 episode 得分为 0，排到后面）
+  const embScored = pairs.map((p) => {
+    let score = p.embedding ? cosineSimilarity(queryEmbedding!, p.embedding) : 0;
+    if (p.rec.outcome === "pass") score += 0.1;
+    else if (p.rec.outcome === "fail") score -= 0.1;
+    return { rec: p.rec, score };
+  });
+  embScored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return b.rec.updatedAt - a.rec.updatedAt;
+  });
+  const embRanking = embScored.map((s) => s.rec);
+
+  // 用 RRF 融合 Jaccard 与 embedding 两种排名，兼顾词面匹配与语义相似
+  return fuseEpisodeRankings([jaccardRanking, embRanking], limit);
+}
+
+/**
+ * 对多路 episode 排名做 Reciprocal Rank Fusion（RRF）。
+ * 与 embeddings.ts 中基于 GraphNode 的 reciprocalRankFusion 等价，但作用于 EpisodeRecord。
+ */
+function fuseEpisodeRankings(rankings: EpisodeRecord[][], limit: number, k = 60): EpisodeRecord[] {
+  const scores = new Map<string, number>();
+  const firstSeen = new Map<string, { rec: EpisodeRecord; order: number }>();
+  let order = 0;
+  for (const list of rankings) {
+    for (let rank = 0; rank < list.length; rank += 1) {
+      const rec = list[rank];
+      if (!rec) continue;
+      scores.set(rec.id, (scores.get(rec.id) ?? 0) + 1 / (k + rank + 1));
+      if (!firstSeen.has(rec.id)) {
+        firstSeen.set(rec.id, { rec, order: order++ });
+      }
+    }
+  }
+  const entries = Array.from(firstSeen.values()).map(({ rec, order: o }) => ({
+    rec,
+    score: scores.get(rec.id) ?? 0,
+    order: o,
+  }));
+  entries.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.order - b.order;
+  });
+  return entries.slice(0, limit).map((e) => e.rec);
 }
 
 export async function loadAllEpisodes(client: GraphClient): Promise<EpisodeRecord[]> {

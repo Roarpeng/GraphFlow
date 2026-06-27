@@ -1,11 +1,19 @@
 import { logger } from "../utils/logger";
 import type { TaskNode } from "./types";
+import type { GraphClient } from "../graph/client-factory";
+import { DagCheckpoint, computeDagId } from "./dag-checkpoint";
 
 export type TaskExecutor = (task: TaskNode) => Promise<boolean>;
 
 export interface DagExecutionOptions {
   concurrencyLimit?: number;
   nodeTimeoutMs?: number;
+  /** 图存储客户端，用于 DAG 执行状态持久化（checkpoint）。不提供时纯内存执行。 */
+  graphClient?: GraphClient;
+  /** DAG 检查点 ID，格式 dag:${taskHash}。不提供时根据 plan 自动计算。 */
+  dagId?: string;
+  /** 是否启用 checkpoint 持久化，默认当 graphClient 存在时启用。 */
+  enableCheckpoint?: boolean;
 }
 
 export interface DagExecutionResult {
@@ -13,6 +21,8 @@ export interface DagExecutionResult {
   failed: string[];
   blocked: string[];
   rounds: string[][];
+  /** 从 checkpoint 恢复（跳过）的节点 id 列表 */
+  restoredFromCheckpoint?: string[];
 }
 
 export async function executeDag(
@@ -26,6 +36,40 @@ export async function executeDag(
   const blocked = new Set<string>();
   const rounds: string[][] = [];
   const timeoutMs = options?.nodeTimeoutMs ?? 30_000;
+
+  // ── Checkpoint 恢复：尝试加载已完成的节点，跳过重复执行 ──
+  const graphClient = options?.graphClient;
+  const enableCheckpoint = options?.enableCheckpoint ?? Boolean(graphClient);
+  let checkpoint: DagCheckpoint | undefined;
+  let dagId: string | undefined;
+  const restoredFromCheckpoint: string[] = [];
+
+  if (enableCheckpoint && graphClient) {
+    try {
+      checkpoint = new DagCheckpoint(graphClient);
+      dagId = options?.dagId ?? computeDagId(plan);
+      const restored = await checkpoint.loadCheckpoint(dagId);
+      for (const [nodeId, state] of restored) {
+        if (state.status === "COMPLETED") {
+          completed.add(nodeId);
+          restoredFromCheckpoint.push(nodeId);
+        } else if (state.status === "FAILED") {
+          failed.add(nodeId);
+          restoredFromCheckpoint.push(nodeId);
+        }
+      }
+      if (restoredFromCheckpoint.length > 0) {
+        logger.info(
+          { dagId, restored: restoredFromCheckpoint.length },
+          "DAG checkpoint 命中，跳过已完成节点",
+        );
+      }
+    } catch (error) {
+      logger.warn({ error }, "DAG checkpoint 初始化失败，降级为纯内存执行");
+      checkpoint = undefined;
+      dagId = undefined;
+    }
+  }
 
   while (completed.size + failed.size + blocked.size < tasks.size) {
     const ready = Array.from(tasks.values()).filter((task) => {
@@ -116,6 +160,14 @@ export async function executeDag(
         } else {
           failed.add(result.task.id);
         }
+        // 持久化节点完成状态到 checkpoint（失败时优雅降级，不影响执行）
+        if (checkpoint && dagId) {
+          try {
+            await checkpoint.saveNodeCompletion(dagId, result.task, result.ok);
+          } catch (error) {
+            logger.warn({ error, taskId: result.task.id }, "DAG checkpoint 持久化失败");
+          }
+        }
       }
     }
   }
@@ -125,5 +177,6 @@ export async function executeDag(
     failed: Array.from(failed),
     blocked: Array.from(blocked),
     rounds,
+    ...(restoredFromCheckpoint.length > 0 ? { restoredFromCheckpoint } : {}),
   };
 }

@@ -30,6 +30,8 @@ export {
   getSkillInsights,
   exportArtifact,
   importArtifact,
+  exportSkillPackageRuntime,
+  importSkillPackageRuntime,
   getTokenSavingsStats,
   resetTokenSavingsStats,
   getMetrics,

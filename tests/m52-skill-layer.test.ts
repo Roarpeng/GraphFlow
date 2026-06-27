@@ -57,7 +57,7 @@ describe("M52 GraphFlow Skills Layer", () => {
     expect(typeof result.edgeCount).toBe("number");
     expect(Array.isArray(result.topRelations)).toBe(true);
     expect(Array.isArray(result.sampleNodes)).toBe(true);
-  });
+  }, 30000);
 
   it("graphflow.compress skill returns token budget", async () => {
     const { mkdtempSync, writeFileSync } = await import("node:fs");

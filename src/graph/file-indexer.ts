@@ -45,6 +45,105 @@ import {
 
 // ── Batch workspace indexing ─────────────────────────────────────────
 
+/** 单个文件并行索引的处理结果 */
+interface FileProcessResult {
+  relPath: string;
+  fileNodes: GraphNode[];
+  fileEdges: GraphEdge[];
+  parsedEntry: ParsedFile;
+  cacheEntry: { mtimeMs: number; hash: string; numNodes: number };
+}
+
+/**
+ * 处理单个文件：读取内容、检查缓存、调用语言索引器提取符号/边。
+ * 返回 null 表示该文件未变更、被跳过。
+ *
+ * 该函数是并行安全：不修改共享的 nodes/edges/parsed 数组，
+ * 只返回本文件的局部结果，由调用方顺序合并。
+ */
+async function processFile(
+  file: { absPath: string; relPath: string; size: number; mtimeMs: number },
+  cacheState: import("./file-indexer-cache.js").CacheState,
+  forceReindex: boolean,
+  client: GraphClient,
+): Promise<FileProcessResult | null> {
+  const relPath = file.relPath;
+  const mtimeMs = file.mtimeMs;
+  const prev = cacheState[relPath];
+
+  let content = "";
+  let currentHash = "";
+  let isChanged = forceReindex;
+
+  if (!prev || prev.mtimeMs !== mtimeMs) {
+    content = readFileSync(file.absPath, "utf8");
+    currentHash = createHash("md5").update(content).digest("hex");
+    if (!prev || prev.hash !== currentHash) {
+      isChanged = true;
+    }
+  }
+
+  if (!isChanged) {
+    return null;
+  }
+
+  // 清理该文件在图存储中的旧节点（不同 relPath 的节点互不重叠，并行安全）
+  if (client.deleteNode) {
+    await pruneFileFromGraph(client, relPath);
+  }
+
+  if (!content) {
+    content = readFileSync(file.absPath, "utf8");
+    currentHash = createHash("md5").update(content).digest("hex");
+  }
+
+  const fileNodeId = `file:${relPath}`;
+  const moduleNodeId = `module:${moduleKey(relPath)}`;
+  const indexer = getIndexerForFile(relPath);
+  const language = indexer?.language ?? (extOf(relPath).replace(/^\./, "") || "text");
+
+  let declared: IndexedSymbol[] = [];
+  let imports: string[] = [];
+  let fileCalls: CallRelation[] = [];
+  let fileInherits: InheritRelation[] = [];
+
+  if (indexer) {
+    const extracted = await indexer.extract(relPath, content);
+    declared = extracted.symbols.map((sym) => ({
+      ...sym,
+      nodeId: `symbol:${relPath}:${hashText(sym.name)}`,
+    }));
+    imports = extracted.imports.map((imp) => imp.module);
+    fileCalls = extracted.calls ?? [];
+    fileInherits = extracted.inherits ?? [];
+  }
+
+  const { nodes: fileNodes, edges: fileEdges } = buildFileNodesAndEdges(
+    relPath, file.size, language, declared, imports
+  );
+
+  return {
+    relPath,
+    fileNodes,
+    fileEdges,
+    parsedEntry: {
+      relPath,
+      fileNodeId,
+      moduleNodeId,
+      declared,
+      content,
+      scannable: Boolean(indexer),
+      calls: fileCalls,
+      inherits: fileInherits,
+    },
+    cacheEntry: {
+      mtimeMs,
+      hash: currentHash,
+      numNodes: fileNodes.length,
+    },
+  };
+}
+
 export async function indexWorkspaceFiles(
   client: GraphClient,
   rootDir: string,
@@ -53,6 +152,8 @@ export async function indexWorkspaceFiles(
   const includeExtensions = options?.includeExtensions ?? DEFAULT_EXTENSIONS;
   const maxFileSizeBytes = options?.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE;
   const forceReindex = options?.forceReindex ?? false;
+  // 并行索引并发数，默认每批 10 个文件
+  const concurrency = Math.max(1, options?.concurrency ?? 10);
 
   const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
   let cacheState = loadCacheState(cachePath, forceReindex);
@@ -78,81 +179,31 @@ export async function indexWorkspaceFiles(
   const edges: GraphEdge[] = [];
   const parsed: ParsedFile[] = [];
 
-  for (const file of scanned) {
-    const relPath = file.relPath;
-    const mtimeMs = file.mtimeMs;
-    const prev = cacheState[relPath];
+  // ── 并行分批索引：每批 concurrency 个文件并行处理 ──
+  let processedCount = 0;
+  for (let i = 0; i < scanned.length; i += concurrency) {
+    const batch = scanned.slice(i, i + concurrency);
+    const batchResults = await Promise.all(
+      batch.map((file) => processFile(file, cacheState, forceReindex, client))
+    );
 
-    let content = "";
-    let currentHash = "";
-    let isChanged = forceReindex;
-
-    if (!prev || prev.mtimeMs !== mtimeMs) {
-      content = readFileSync(file.absPath, "utf8");
-      currentHash = createHash("md5").update(content).digest("hex");
-      if (!prev || prev.hash !== currentHash) {
-        isChanged = true;
+    // 顺序合并本批结果到共享数组（避免并行写冲突）
+    for (const result of batchResults) {
+      if (result) {
+        nodes.push(...result.fileNodes);
+        edges.push(...result.fileEdges);
+        parsed.push(result.parsedEntry);
+        cacheState[result.relPath] = result.cacheEntry;
+      }
+      processedCount += 1;
+      // 每 100 个文件输出一次进度日志
+      if (processedCount > 0 && processedCount % 100 === 0) {
+        logger.info(
+          { processed: processedCount, total: scanned.length, percent: `${((processedCount / scanned.length) * 100).toFixed(1)}%` },
+          "工作区索引进度",
+        );
       }
     }
-
-    if (!isChanged) {
-      continue;
-    }
-
-    if (client.deleteNode) {
-      await pruneFileFromGraph(client, relPath);
-    }
-
-    if (!content) {
-      content = readFileSync(file.absPath, "utf8");
-      currentHash = createHash("md5").update(content).digest("hex");
-    }
-
-    const nodesStartLen = nodes.length;
-
-    const fileNodeId = `file:${relPath}`;
-    const moduleNodeId = `module:${moduleKey(relPath)}`;
-    const indexer = getIndexerForFile(relPath);
-    const language = indexer?.language ?? (extOf(relPath).replace(/^\./, "") || "text");
-
-    let declared: IndexedSymbol[] = [];
-    let imports: string[] = [];
-    let fileCalls: CallRelation[] = [];
-    let fileInherits: InheritRelation[] = [];
-
-    if (indexer) {
-      const extracted = await indexer.extract(relPath, content);
-      declared = extracted.symbols.map((sym) => ({
-        ...sym,
-        nodeId: `symbol:${relPath}:${hashText(sym.name)}`,
-      }));
-      imports = extracted.imports.map((imp) => imp.module);
-      fileCalls = extracted.calls ?? [];
-      fileInherits = extracted.inherits ?? [];
-    }
-
-    const { nodes: fileNodes, edges: fileEdges } = buildFileNodesAndEdges(
-      relPath, file.size, language, declared, imports
-    );
-    nodes.push(...fileNodes);
-    edges.push(...fileEdges);
-
-    parsed.push({
-      relPath,
-      fileNodeId,
-      moduleNodeId,
-      declared,
-      content,
-      scannable: Boolean(indexer),
-      calls: fileCalls,
-      inherits: fileInherits,
-    });
-
-    cacheState[relPath] = {
-      mtimeMs,
-      hash: currentHash,
-      numNodes: nodes.length - nodesStartLen,
-    };
   }
 
   const symbolIndex = new Map<string, IndexedSymbol[]>();
@@ -314,13 +365,28 @@ async function pruneFileFromGraph(client: GraphClient, relPath: string): Promise
   const moduleNodeId = `module:${moduleKey(relPath)}`;
   const symbolPrefix = `symbol:${relPath}:`;
 
+  // 先收集要删除的节点 ID 集合，便于后续 O(1) 查找悬空边
+  const deletedIds = new Set<string>();
   const toDelete = snapshot.nodes.filter(
     (node) =>
       node.id === fileNodeId || node.id === moduleNodeId || node.id.startsWith(symbolPrefix)
   );
 
   for (const node of toDelete) {
+    deletedIds.add(node.id);
     await client.deleteNode(node.id);
+  }
+
+  // 清理跨文件的悬空引用边：删除任何 from 或 to 指向已删除节点 ID 的边。
+  // 某些传输后端（如 MCP HTTP）的 deleteNode 不保证级联清理边，因此显式清理以确保一致。
+  if (client.deleteEdge && deletedIds.size > 0) {
+    // 重新读取快照以获取当前边状态（部分后端的 deleteNode 可能已级联删除相关边）
+    const currentEdges = client.readSnapshot().edges;
+    for (const edge of currentEdges) {
+      if (deletedIds.has(edge.from) || deletedIds.has(edge.to)) {
+        await client.deleteEdge(edge.from, edge.to, edge.relation);
+      }
+    }
   }
 }
 

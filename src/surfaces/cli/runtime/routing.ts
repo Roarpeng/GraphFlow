@@ -130,7 +130,14 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       tokenCost: 0,
       retries: 0,
     });
-    throw error;
+    // 与 orchestrator 顶层错误边界一致：将未捕获异常收敛为 HUMAN_REVIEW_REQUIRED 结构化结果，
+    // 不再裸抛给调用方（包括索引失败、图存储不可达等场景）
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      status: "HUMAN_REVIEW_REQUIRED" as const,
+      attempts: 0,
+      feedback: `Orchestration aborted due to unexpected error: ${message}`,
+    };
   }
 }
 

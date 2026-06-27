@@ -4,6 +4,27 @@ export const EMBEDDING_DIM = 256;
 
 export interface EmbeddingProvider {
   embed(text: string): Promise<number[]>;
+  /**
+   * 预热：用一段简短的 dummy 文本（如 "warmup"）做一次推理，
+   * 避免首个真实请求的冷启动延迟（尤其是本地模型懒加载场景）。
+   * 异步执行，不应阻塞主流程。可选实现。
+   */
+  warmup?(): Promise<void>;
+}
+
+/**
+ * 安全地预热 embedding provider。不会抛出异常，适合用 `void warmupEmbeddingProvider(p)` 非阻塞调用。
+ * 预热失败不影响主流程，首个真实请求会再次尝试加载/推理。
+ */
+export async function warmupEmbeddingProvider(provider: EmbeddingProvider): Promise<void> {
+  if (typeof provider.warmup !== "function") {
+    return;
+  }
+  try {
+    await provider.warmup();
+  } catch {
+    // 预热失败静默处理：不阻断 provider 创建与后续真实请求
+  }
 }
 
 export function cosineSimilarity(a: number[], b: number[]): number {
@@ -54,6 +75,10 @@ export function createHashEmbeddingProvider(dim: number = EMBEDDING_DIM): Embedd
     async embed(text: string): Promise<number[]> {
       return hashEmbedding(text, dim);
     },
+    // hash 嵌入无懒加载，预热仅做一次廉价推理以保持接口一致
+    async warmup(): Promise<void> {
+      await hashEmbedding("warmup", dim);
+    },
   };
 }
 
@@ -83,6 +108,10 @@ export function createOpenAiEmbeddingProvider(options: {
         throw new Error("OpenAI embeddings response missing data[0].embedding");
       }
       return emb;
+    },
+    // 远程 API 无本地冷启动，预热为空操作以避免初始化时产生不必要的网络请求与计费
+    async warmup(): Promise<void> {
+      /* no-op: 远程 provider 无需本地预热 */
     },
   };
 }
