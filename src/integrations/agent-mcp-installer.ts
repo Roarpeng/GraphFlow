@@ -462,11 +462,13 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
   const workspaceRootEnv =
     options.workspaceRoot?.trim() ||
     process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim() ||
-    "${workspaceFolder}";
+    "";
   const mcpEnv: Record<string, string> = {
     ...MCP_STDIO_ENV,
-    GRAPHFLOW_WORKSPACE_ROOT: workspaceRootEnv,
   };
+  if (workspaceRootEnv) {
+    mcpEnv.GRAPHFLOW_WORKSPACE_ROOT = workspaceRootEnv;
+  }
 
   if (options.strategy === "node-bundled") {
     if (!options.bundledServerPath) {

@@ -179,7 +179,7 @@ function resolveBundledServerPath(): string | undefined {
 }
 
 function isRunningFromNpmPackage(): boolean {
-  return resolve(__dirname).toLowerCase().includes("@roarpeng" + "/graphflow");
+  return resolve(__dirname).replace(/\\/g, "/").toLowerCase().includes("@roarpeng/graphflow");
 }
 
 function runInstallation(workspaceRoot: string): { mcpResults: McpInstallResult[]; skillResults: SkillInstallResult[] } {

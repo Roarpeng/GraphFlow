@@ -59,10 +59,12 @@ describe("M17 agent MCP installer", () => {
     expect(bundledNode.args).toEqual(["/tmp/server.js"]);
     expect(bundledNode.cwd).toBe("/tmp/runtime");
     expect(bundledNode.env).toMatchObject({
-      GRAPHFLOW_WORKSPACE_ROOT: "${workspaceFolder}",
       GRAPHFLOW_MCP_STDIO: "1",
       GRAPHFLOW_LOG_JSON: "1",
     });
+    // GRAPHFLOW_WORKSPACE_ROOT is omitted when no workspaceRoot is provided,
+    // allowing the MCP server to discover the workspace at runtime.
+    expect(bundledNode.env?.GRAPHFLOW_WORKSPACE_ROOT).toBeUndefined();
 
     const winLauncher = "C:\\ext\\mcp-launcher.cmd";
     const unixLauncher = "/ext/mcp-launcher.cjs";
