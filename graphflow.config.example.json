@@ -4,6 +4,10 @@
       "apiKey": "${OPENAI_API_KEY}",
       "baseUrl": "https://api.openai.com/v1"
     },
+    "deepseek": {
+      "apiKey": "${DEEPSEEK_API_KEY}",
+      "baseUrl": "https://api.deepseek.com"
+    },
     "anthropic": {
       "apiKey": "${ANTHROPIC_API_KEY}"
     },
@@ -37,7 +41,6 @@
     "autoIndexOnPreview": true,
     "autoIndexOnRun": true,
     "autoIndexOnSave": true,
-    "workspaceRoot": ".",
     "includeExtensions": [".ts", ".tsx", ".js", ".jsx", ".md", ".json", ".py", ".rs", ".go", ".c", ".h", ".cpp", ".cc", ".hpp", ".java", ".rb"],
     "transport": "file",
     "graphStorePath": "graphflow-out/graphflow-graph.json",

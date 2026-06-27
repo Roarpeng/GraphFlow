@@ -24,6 +24,7 @@ import {
   runTask,
   runTaskResult,
 } from "./runtime";
+import { validateConfigDetailed, type ConfigValidationResult } from "../../config/loader.js";
 import { buildCliUsage, formatCliResult, getCliVersion, parseCliOptions, type CliCommandResult } from "./output";
 
 async function executeCommand(command: string, args: string[], configPath?: string): Promise<CliCommandResult | undefined> {
@@ -44,6 +45,15 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       command: "init",
       data: {},
       legacyText: `Initialization complete`,
+    };
+  }
+
+  if (command === "config" && args[0] === "validate") {
+    const data = validateConfigDetailed(configPath);
+    return {
+      command: "config-validate",
+      data,
+      legacyText: formatValidationResult(data),
     };
   }
 
@@ -310,6 +320,18 @@ function formatBytes(value: number): string {
     unitIndex += 1;
   }
   return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function formatValidationResult(data: ConfigValidationResult): string {
+  const lines: string[] = [
+    `configPath=${data.configPath}`,
+    `valid=${data.valid}`,
+  ];
+  for (const issue of data.issues) {
+    const icon = issue.severity === "error" ? "ERROR" : "WARN";
+    lines.push(`[${icon}] ${issue.field}: ${issue.message}`);
+  }
+  return lines.join("\n");
 }
 
 async function main(): Promise<void> {

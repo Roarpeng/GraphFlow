@@ -1,3 +1,5 @@
+import type { GraphClient } from "../graph/client-factory.js";
+
 export type TaskStatus =
   | "PENDING"
   | "RUNNING"
@@ -71,6 +73,37 @@ export interface TaskNode {
 export interface OrchestrationInput {
   task: string;
   maxRetries?: number;
+}
+
+export interface OrchestrateOptions {
+  graphClient?: GraphClient;
+  enableAutoGraphSync?: boolean;
+  enableNearLosslessMode?: boolean;
+  nearLosslessQuery?: string;
+  maxContextTokens?: number;
+  layerQuota?: { l1: number; l2: number; l3: number };
+  onContextPackage?: (pkg: import("../graph/context-slicer").LayeredContextPackage) => void;
+  providerHealth?: import("../routing/model-router").ProviderHealthMap;
+  providerFallbackChain?: import("../routing/model-router").ProviderName[];
+  enableSkillFlywheel?: boolean;
+  skillHintsLimit?: number;
+  enableLlmAgents?: boolean;
+  enableDriftReplan?: boolean;
+  maxReplanRounds?: number;
+  enableGraphContextInPrompt?: boolean;
+  enableEpisodicMemory?: boolean;
+  enableLlmTriage?: boolean;
+  embeddingProvider?: import("../learning/embeddings").EmbeddingProvider;
+  configPath?: string;
+  executionMode?: "bridge" | "llm";
+  /** Enable zero-cost graph-structure compression (edge weights + PageRank). Default true. */
+  enableGraphCompression?: boolean;
+  /** Adaptively size the context token budget from task complexity. Auto-enabled for complex tasks unless false. */
+  enableAdaptiveBudget?: boolean;
+  /** Return module-level RepoMap overview when budget is tight. Default false. */
+  enableRepoMapFallback?: boolean;
+  /** Run Six Hats plan_insight before complex DAG planning. Default true for complex tasks. */
+  enablePlanInsight?: boolean;
 }
 
 export interface GraphNode {

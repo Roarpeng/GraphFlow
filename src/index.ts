@@ -60,7 +60,7 @@ export {
   createGraphClient,
   type GraphClient,
 } from "./graph/client-factory";
-export { validateConfig, loadConfig, loadConfigSafe, type LoadConfigResult } from "./config/loader";
+export { validateConfig, loadConfig, loadConfigSafe, type LoadConfigResult, validateConfigDetailed, type ConfigValidationResult, type ValidationIssue } from "./config/loader";
 export {
   graphflowSkills,
   invokeSkill,
