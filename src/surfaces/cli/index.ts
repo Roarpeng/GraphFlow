@@ -6,10 +6,12 @@ import {
   downloadOpenBmbModel,
   enrichSemanticsSilent,
   exportArtifact,
+  exportSkillPackageRuntime,
   getMetrics,
   getSkillInsights,
   getTokenSavingsStats,
   importArtifact,
+  importSkillPackageRuntime,
   indexFile,
   indexGraph,
   inspectGraph,
@@ -35,6 +37,35 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       command: "install",
       data: {},
       legacyText: `Installation complete`,
+    };
+  }
+
+  if (command === "uninstall") {
+    const { runUninstall } = require("./init");
+    runUninstall();
+    return {
+      command: "uninstall",
+      data: {},
+      legacyText: `Uninstall complete`,
+    };
+  }
+
+  if (command === "mcp" && args[0] === "remove") {
+    // 解析 --agent 参数
+    const remainingArgs = args.slice(1);
+    let agentId: string | undefined;
+    for (let i = 0; i < remainingArgs.length; i++) {
+      if (remainingArgs[i] === "--agent" && remainingArgs[i + 1]) {
+        agentId = remainingArgs[i + 1];
+        break;
+      }
+    }
+    const { runMcpRemove } = require("./init");
+    const results = runMcpRemove(agentId);
+    return {
+      command: "mcp-remove",
+      data: results ?? [],
+      legacyText: `MCP remove complete`,
     };
   }
 
@@ -203,6 +234,26 @@ async function executeCommand(command: string, args: string[], configPath?: stri
         `count=${data.skills.length}`,
         `top=${data.skills.map((skill) => `${skill.name}:${skill.score}/${skill.uses}`).join(",")}`,
       ].join("; "),
+    };
+  }
+
+  if (command === "skill" && args[0] === "export") {
+    const outputPath = args[1]?.trim() || undefined;
+    const data = await exportSkillPackageRuntime(configPath, outputPath);
+    return {
+      command: "skill-export",
+      data,
+      legacyText: `path=${data.path}; skillCount=${data.skillCount}; bytes=${data.bytes}`,
+    };
+  }
+
+  if (command === "skill" && args[0] === "import") {
+    const inputPath = args[1]?.trim() || undefined;
+    const data = await importSkillPackageRuntime(configPath, inputPath);
+    return {
+      command: "skill-import",
+      data,
+      legacyText: `path=${data.path}; imported=${data.imported}; skipped=${data.skipped}; total=${data.total}`,
     };
   }
 

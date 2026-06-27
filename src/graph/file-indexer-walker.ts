@@ -14,6 +14,8 @@ export interface FileIndexerOptions {
   maxFileSizeBytes?: number;
   /** When true, ignore index cache and re-process every file. */
   forceReindex?: boolean;
+  /** 并行索引文件时的并发数，默认 10。仅 indexWorkspaceFiles 使用。 */
+  concurrency?: number;
 }
 
 export interface ScannedFile {

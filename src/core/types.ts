@@ -11,6 +11,16 @@ export type TaskStatus =
 
 export type AgentRole = "planner" | "worker" | "validator" | "enricher" | "evolver" | "compressor";
 
+/**
+ * Agent 专业领域类型，用于多 Agent 协作编排时标注建议的执行角色。
+ * - frontend: 前端相关（ui/component/css/style）
+ * - backend: 后端相关（api/server/database/model）
+ * - testing: 测试相关（test/testing）
+ * - docs: 文档相关（doc/readme/changelog）
+ * - general: 通用任务（默认）
+ */
+export type AgentSpecialty = "frontend" | "backend" | "testing" | "docs" | "general";
+
 export interface ValidationResult {
   passed: boolean;
   feedback: string;
@@ -58,6 +68,8 @@ export interface TaskRunResult {
       expectedFormat: string;
     }>;
     insightSummary?: string;
+    /** 多 Agent 协作编排：每个任务节点建议的 agent 专业领域映射 */
+    agentAssignments?: Array<{ taskId: string; specialty: AgentSpecialty }>;
   };
 }
 
@@ -68,6 +80,8 @@ export interface TaskNode {
   status: TaskStatus;
   contextQuery: string;
   retryCount: number;
+  /** 指定执行该节点的 agent 角色（AgentSpecialty），用于多 Agent 协作编排 */
+  assignedAgent?: AgentSpecialty;
 }
 
 export interface OrchestrationInput {
@@ -87,6 +101,8 @@ export interface OrchestrateOptions {
   providerFallbackChain?: import("../routing/model-router").ProviderName[];
   enableSkillFlywheel?: boolean;
   skillHintsLimit?: number;
+  /** 预置种子技能：在技能飞轮启用时，于 orchestrator 首次运行时写入常见工程技能基线（幂等）。 */
+  enableSeedSkills?: boolean;
   enableLlmAgents?: boolean;
   enableDriftReplan?: boolean;
   maxReplanRounds?: number;

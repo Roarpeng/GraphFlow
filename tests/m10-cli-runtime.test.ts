@@ -35,8 +35,8 @@ describe("M10 CLI runtime", () => {
       const output = await runTask("update readme");
       expect(output).toContain("status=");
       expect(output).toContain("feedback=");
-    } catch (e: any) {
-      if (e?.name === "ProviderError") {
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name === "ProviderError") {
         // Expected on CI if real LLM times out
         expect(e.message).toBeDefined();
       } else {
