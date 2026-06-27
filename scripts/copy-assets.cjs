@@ -26,6 +26,16 @@ if (fs.existsSync(skillSrc)) {
   console.warn("[build] trae-skill source not found, skipping");
 }
 
+const rulesSrc = path.join(projectRoot, "src", "surfaces", "cursor-rules");
+const rulesDest = path.join(projectRoot, "dist", "surfaces", "cursor-rules");
+
+if (fs.existsSync(rulesSrc)) {
+  copyDir(rulesSrc, rulesDest);
+  console.log("[build] Copied cursor-rules assets to dist/");
+} else {
+  console.warn("[build] cursor-rules source not found, skipping");
+}
+
 if (!fs.existsSync(path.join(projectRoot, "wasm"))) {
   console.warn("[build] wasm/ not found — run npm run wasm:bundle");
 }
