@@ -420,3 +420,11 @@ GraphFlow/
 
 - 变更日志：`CHANGELOG.md`
 - License：Apache-2.0
+
+## 自动优化记录
+
+### 2026-06-27 11:55
+- **改进内容**：修复 Windows 上 GraphifyFileClient 文件重命名偶发 EPERM 错误（增加5次重试机制）；修复 m52 技能层测试超时问题（超时时间从15秒延长至30秒）；修复自动优化脚本的北京时间显示错误（使用 formatBeijingTime 替代 toISOString）
+- **涉及文件**：`src/graph/graphify-file-client.ts`、`tests/m52-skill-layer.test.ts`、`scripts/auto-optimize.js`
+- **分析来源**：GraphFlow + ESLint 自动化分析
+- **测试结果**：m10（9/9 通过）、m52（7/7 通过）

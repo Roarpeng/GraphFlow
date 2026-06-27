@@ -160,11 +160,21 @@ export class GraphifyFileClient {
       `.graphflow-graph-${process.pid}-${randomBytes(4).toString("hex")}.tmp`
     );
     writeFileSync(tempPath, payload, "utf8");
-    try {
-      renameSync(tempPath, this.storePath);
-    } catch (error) {
-      rmSync(tempPath, { force: true });
-      throw error;
+    // Windows 上 rename 可能因文件锁定而失败，添加重试机制
+    const maxRetries = 5;
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        renameSync(tempPath, this.storePath);
+        return;
+      } catch (error) {
+        const nodeError = error as NodeJS.ErrnoException;
+        if (nodeError.code === "EPERM" && i < maxRetries - 1) {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+          continue;
+        }
+        rmSync(tempPath, { force: true });
+        throw error;
+      }
     }
   }
 
