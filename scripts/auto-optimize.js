@@ -28,8 +28,11 @@ function run(cmd, options = {}) {
 
 function getNowBeijing() {
   const now = new Date();
-  const beijing = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
-  return beijing;
+  return new Date(now.toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
+}
+
+function formatBeijingTime(date) {
+  return date.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
 }
 
 function ensureDir(dir) {
@@ -55,7 +58,7 @@ async function main() {
 
   // 1. 时间检查（北京时间 >= 10:00 跳过）
   const now = getNowBeijing();
-  const timeStr = now.toISOString().replace("T", " ").slice(0, 16);
+  const timeStr = formatBeijingTime(now);
   console.log(`\n当前北京时间：${timeStr}`);
 
   if (now.getHours() >= 10) {
