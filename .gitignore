@@ -16,7 +16,6 @@ patch.ts
 patch-adapters.ts
 graphflow.config.json
 .graphflow-cache/
-graphify-out/
 graphflow-out/
 wasm/
 stdout.txt
@@ -26,3 +25,5 @@ runs.json
 .cursor/mcp.json
 .vscode/mcp.json
 vscode-extension/vendor/
+.joycode/
+tsc_output.txt

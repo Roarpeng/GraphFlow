@@ -1,124 +1,70 @@
-import { logger } from "../utils/logger";
-import type { GraphEdge, GraphNode } from "../core/types";
+import { logger } from "../utils/logger.js";
+import type { GraphNode } from "../core/types.js";
 import {
   cosineSimilarity,
   extractEmbedding,
   reciprocalRankFusion,
-  type EmbeddingProvider,
-} from "../learning/embeddings";
-import type { GraphClient } from "./client-factory";
-import { rankNodesForContextQuery } from "./graph-utils";
+} from "../learning/embeddings.js";
+import type { GraphClient } from "./client-factory.js";
+import { rankNodesForContextQuery } from "./graph-utils.js";
 import {
   extractConnectedSubgraph,
   computePageRank,
   blendWithCentrality,
-  type ConnectedSubgraphOptions,
-} from "./graph-compression";
-import { buildRepoMap, formatRepoMapString } from "./repo-map";
+} from "./graph-compression.js";
+import { buildRepoMap, formatRepoMapString } from "./repo-map.js";
 import {
   applySemanticCompression,
-  type ClusteringOptions,
-  type SummarizerOptions,
-  type DensifierOptions,
-} from "./semantic-compression";
-import { estimateContextBudget, type TaskMode } from "./adaptive-budget";
-import type { CompressionModelHandle } from "./compression-model";
+} from "./semantic-compression.js";
+import { estimateContextBudget } from "./adaptive-budget.js";
 
-let encoderFn: ((text: string) => number[]) | null = null;
-let encoderLoaded = false;
+// Re-export all public types and constants from sub-modules
+export type {
+  ContextSlice,
+  ContextLayer,
+  ContextAnchorItem,
+  LayeredContextPackage,
+  LayeredPackageOptions,
+  SubgraphExpansionOptions,
+  ContextRefillManager,
+} from "./context-slicer-types.js";
+export {
+  DEFAULT_EXPANSION_RELATIONS,
+  ARCHITECTURE_QUERY,
+} from "./context-slicer-types.js";
 
-function getEncoder(): ((text: string) => number[]) | null {
-  if (encoderLoaded) return encoderFn;
-  encoderLoaded = true;
-  try {
-    const mod = require("gpt-tokenizer/encoding/o200k_base") as { encode: (t: string) => number[] };
-    if (typeof mod.encode === "function") {
-      encoderFn = mod.encode.bind(mod);
-      return encoderFn;
-    }
-  } catch (error) {
-    logger.error({ error }, "Caught error");
-    // fall through
-  }
-  try {
-    const mod = require("gpt-tokenizer") as { encode: (t: string) => number[] };
-    if (typeof mod.encode === "function") {
-      encoderFn = mod.encode.bind(mod);
-      return encoderFn;
-    }
-  } catch (error) {
-    logger.error({ error }, "Caught error");
-    // fall through
-  }
-  encoderFn = null;
-  return null;
-}
+// Re-export utility functions that were previously exported
+export {
+  getEncoder,
+  estimateTokens,
+  summarizeNodes,
+  classifyLayer,
+  canUseLayer,
+  markLayerUsed,
+  modulePathKey,
+  deriveModuleId,
+  extractFileFromSymbolId,
+} from "./context-slicer-utils.js";
 
-export interface ContextSlice {
-  items: string[];
-  tokenEstimate: number;
-}
+// Import internal helpers (not re-exported)
+import {
+  estimateTokens,
+  classifyLayer,
+  canUseLayer,
+  markLayerUsed,
+  deriveModuleId,
+} from "./context-slicer-utils.js";
 
-export type ContextLayer = "L1" | "L2" | "L3";
-
-export interface ContextAnchorItem {
-  id: string;
-  type: GraphNode["type"];
-  layer: ContextLayer;
-}
-
-export interface LayeredContextPackage {
-  summaryChannel: string[];
-  anchorChannel: ContextAnchorItem[];
-  tokenEstimate: number;
-  truncated: boolean;
-}
-
-export interface LayeredPackageOptions {
-  layerQuota?: {
-    l1: number;
-    l2: number;
-    l3: number;
-  };
-  enableEdgeExpansion?: boolean;
-  enableVectorRecall?: boolean;
-  embeddingProvider?: EmbeddingProvider;
-  vectorTopK?: number;
-  vectorMinSimilarity?: number;
-  /** Use HNSW ANN index for large candidate sets (>=200 nodes). Default true. */
-  enableHnsw?: boolean;
-  /** Enable graph-structure compression (edge weights, PageRank, connected subgraph). */
-  enableGraphCompression?: boolean;
-  graphCompressionOptions?: ConnectedSubgraphOptions;
-  /** Enable semantic compression via minicpm-1b (clustering, summarization, densification). */
-  enableSemanticCompression?: boolean;
-  clusteringOptions?: ClusteringOptions;
-  summarizerOptions?: SummarizerOptions;
-  densifierOptions?: DensifierOptions;
-  /** Unified compression model handle (auto-selects external economy tier or embedded minicpm). */
-  compressionModel?: CompressionModelHandle;
-  /** Return RepoMap overview if token budget is low. */
-  enableRepoMapFallback?: boolean;
-  /** Adaptive budget estimation based on task complexity. */
-  taskMode?: TaskMode;
-}
-
-export interface SubgraphExpansionOptions {
-  hops?: number;
-  maxNodes?: number;
-  relations?: GraphEdge["relation"][];
-}
-
-const DEFAULT_EXPANSION_RELATIONS: GraphEdge["relation"][] = [
-  "references",
-  "imports",
-  "depends_on",
-  "prerequisite",
-  "calls",
-  "defines",
-];
-
-const ARCHITECTURE_QUERY = /architecture|refactor|module|design|架构|模块/i;
+// Import types for internal use
+import type {
+  ContextSlice,
+  ContextAnchorItem,
+  LayeredContextPackage,
+  LayeredPackageOptions,
+  SubgraphExpansionOptions,
+  ContextRefillManager,
+} from "./context-slicer-types.js";
+import { DEFAULT_EXPANSION_RELATIONS, ARCHITECTURE_QUERY } from "./context-slicer-types.js";
 
 export async function expandSubgraph(
   client: GraphClient,
@@ -333,11 +279,6 @@ export async function buildLayeredContextPackage(
   return { summaryChannel, anchorChannel, tokenEstimate: tokens, truncated };
 }
 
-export interface ContextRefillManager {
-  initialPackage(query: string): Promise<LayeredContextPackage>;
-  refill(evidenceHints: string[]): Promise<string[]>;
-}
-
 export function createContextRefillManager(
   client: GraphClient,
   maxTokens: number,
@@ -380,100 +321,6 @@ export function createContextRefillManager(
       return items;
     },
   };
-}
-
-function estimateTokens(text: string): number {
-  const enc = getEncoder();
-  if (enc) {
-    try {
-      const n = enc(text).length;
-      return Math.max(1, n);
-    } catch (error) {
-    logger.error({ error }, "Caught error");
-      // fall back below
-    }
-  }
-  return Math.max(1, Math.ceil(text.length / 4));
-}
-
-export function summarizeNodes(nodes: GraphNode[]): string[] {
-  return nodes.map((node) => `${node.type}(${node.id})`);
-}
-
-function classifyLayer(node: GraphNode): ContextLayer {
-  if (node.type === "File" || node.type === "Symbol") {
-    return "L1";
-  }
-
-  if (node.type === "Module") {
-    return "L2";
-  }
-
-  return "L3";
-}
-
-function canUseLayer(
-  layer: ContextLayer,
-  quota: { l1: number; l2: number; l3: number },
-  used: { l1: number; l2: number; l3: number }
-): boolean {
-  if (layer === "L1") {
-    return used.l1 < quota.l1;
-  }
-
-  if (layer === "L2") {
-    return used.l2 < quota.l2;
-  }
-
-  return used.l3 < quota.l3;
-}
-
-function markLayerUsed(layer: ContextLayer, used: { l1: number; l2: number; l3: number }): void {
-  if (layer === "L1") {
-    used.l1 += 1;
-    return;
-  }
-
-  if (layer === "L2") {
-    used.l2 += 1;
-    return;
-  }
-
-  used.l3 += 1;
-}
-
-function modulePathKey(relPath: string): string {
-  return relPath.replace(/\.(ts|tsx|js|jsx|md|json|py|rs|go|hpp|hxx|cpp|cxx|cc|h|c|java|rb|rake|gemspec)$/i, "");
-}
-
-function deriveModuleId(anchor: ContextAnchorItem, node?: GraphNode): string | undefined {
-  if (anchor.type === "File" && anchor.id.startsWith("file:")) {
-    return `module:${modulePathKey(anchor.id.slice("file:".length))}`;
-  }
-
-  if (anchor.type === "Symbol") {
-    const filePath =
-      typeof node?.metadata?.file === "string"
-        ? node.metadata.file
-        : extractFileFromSymbolId(anchor.id);
-    if (filePath) {
-      return `module:${modulePathKey(filePath)}`;
-    }
-  }
-
-  return undefined;
-}
-
-function extractFileFromSymbolId(id: string): string | undefined {
-  if (!id.startsWith("symbol:")) {
-    return undefined;
-  }
-  const body = id.slice("symbol:".length);
-  const hashIndex = body.lastIndexOf(":");
-  if (hashIndex > 0) {
-    return body.slice(0, hashIndex);
-  }
-  return undefined;
 }
 
 /**

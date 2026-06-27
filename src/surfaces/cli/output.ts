@@ -20,6 +20,7 @@ export function buildCliUsage(): string {
     "Commands:",
     "  install                     Install MCP + Skill to all detected agents",
     "  config init [--global]",
+    "  config validate [--json] [--config <path>]",
     '  run "<task>" [--json] [--config <path>]',
     '  plan "<task>" [--json] [--config <path>]',
     '  plan insight "<task>" [--json] [--config <path>]',

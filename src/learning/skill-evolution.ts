@@ -10,7 +10,7 @@ import { loadEvolutionSkill, sanitizeAtom, skillNodeId } from "./skill-store";
  * 调遣 MiniCPM-1B 模拟人类进行跨技能融会贯通与概念演进
  */
 export async function evolveCompositeSkillLlm(
-  client: GraphClient,
+  _client: GraphClient,
   n1: string,
   n2: string,
   previousComposite: CompositeSkillState | null

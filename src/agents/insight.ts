@@ -429,7 +429,7 @@ async function applyFiveWhys(
 }
 
 function buildCriticalInsight(
-  hat: HatDefinition,
+  _hat: HatDefinition,
   parsed: HatResponse,
   whyChain: FiveWhyResult | null
 ): string {
