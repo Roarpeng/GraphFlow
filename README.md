@@ -114,7 +114,7 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 
 ### 发布信息
 
-- 最新版本：**v1.2.0**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.2.0`
+- 最新版本：**v1.3.0**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.3.0`
 - **GitHub Release**：push 到 `main` 且 CI 通过后自动发布 VSIX（见 [Actions](https://github.com/Roarpeng/GraphFlow/actions)）
 - 变更日志：`CHANGELOG.md`
 
