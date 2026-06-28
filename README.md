@@ -1,8 +1,54 @@
 # GraphFlow
 
-A Context-Aware Multi-Agent Orchestration Engine.
+> **Local-first 代码知识图谱 + 跨会话学习记忆** —— 不只是压缩上下文，还记住项目的决策与教训。
 
-GraphFlow 是一个基于 TypeScript/Node.js 的多智能体编排引擎，将 **Graphify 式知识图谱** 与 **Superpowers 式任务编排** 整合为可本地运行的上下文层：自动建图、压缩检索、规划执行、经验沉淀，并通过 CLI、MCP 与 VS Code 扩展对外暴露。
+GraphFlow 把你的仓库变成一张**可查询的代码图谱**，在 agent 读全文之前先返回压缩摘要与锚点（入门钩子：**图谱 + 90%+ token 压缩**）；更进一步，它用 **Episodic / Skill / Decision 节点**把每次任务的决策与教训沉淀回图谱，形成跨会话的**学习飞轮**（差异化纵深）。
+
+纯 TypeScript/Node 本地运行，通过 CLI、MCP、VS Code 扩展对外暴露。**无需 API key、无需配置**即可起步：结构索引 + 离线压缩开箱即用。
+
+## 30 秒上手
+
+无需 API key、无需注册——结构图谱与离线压缩本地直接跑：
+
+```bash
+# 1. 建立结构图谱（纯 AST，零 LLM、零网络）
+npx @roarpeng/graphflow graph index .
+
+# 2. 压缩预览：读全文前先拿摘要 + 锚点（通常省 90%+ token）
+npx @roarpeng/graphflow context preview "orchestrator" --json
+```
+
+接入 MCP（Cursor / Claude Code 等），最小配置：
+
+```json
+{
+  "mcpServers": {
+    "graphflow": {
+      "command": "npx",
+      "args": ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"]
+    }
+  }
+}
+```
+
+接好后让 agent 优先调用 `graphflow_preview_context` 取压缩上下文；多步任务用 `graphflow_plan`。配置 provider API key 是**可选**的——只在需要语义压缩 / 规划增强时才用。
+
+> 可复现的 token 节省基准见 [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md)。
+
+## 为什么选 GraphFlow（与同类对比）
+
+这个赛道里有很多优秀的单点工具，GraphFlow 的定位不是"某一项最强"，而是**在代码图谱之上叠加了上下文压缩、规划编排与跨会话学习记忆**——尤其是"记忆型代码图谱"这一块目前少有人占据。诚实对比如下：
+
+| 维度 | **GraphFlow** | CodeGraph | Serena | Repomix |
+| --- | --- | --- | --- | --- |
+| 结构代码图谱 | ✅ 多语言 AST 图谱 | ✅ 更成熟（★ 更高） | ⚠️ LSP 符号（非全图谱） | ❌ |
+| 上下文压缩 | ✅ 三层渐进（结构+向量+语义） | ⚠️ 图查询为主 | ⚠️ 符号级精修 | ✅ 整库打包（无压缩） |
+| 规划编排 | ✅ DAG / 六顶思考帽 | ❌ | ❌ | ❌ |
+| **跨会话学习记忆** | ✅ Episodic / Skill / Decision 节点 | ❌ | ❌ | ❌ |
+| Local-first | ✅ | ✅ | ✅ | ✅ |
+| 许可 | Apache-2.0 | MIT | MIT | 宽松开源 |
+
+> 实话实说：论纯图谱的成熟度与社区规模，CodeGraph 更领先；论 LSP 符号编辑标准，Serena 更专精；论整库打包，Repomix 更简单。GraphFlow 的价值在于把"图谱 + 压缩 + 规划 + 学习记忆"合到一处，让 agent 不仅省 token，还能跨会话复用项目经验。
 
 ## 当前能力总览（v1.0.0+）
 

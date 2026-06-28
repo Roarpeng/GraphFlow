@@ -5,12 +5,17 @@ import { ensureGlobalGraphFlowConfig, resolveGlobalConfigPath } from "../../conf
 import {
   detectInstalledAgents,
   formatModelConfigGuide,
+  getMcpInstallStatus,
+  type McpAgentInstallStatus,
   installMcpToDetectedAgents,
   type McpInstallResult,
   uninstallMcpFromDetectedAgents,
   type McpRemoveResult,
 } from "../../integrations/agent-mcp-installer";
 import {
+  type AgentInstructionStatus,
+  getAgentInstructionStatus,
+  getAgentSkillStatus,
   installAllSkills,
 } from "../../integrations/skill-installer";
 
@@ -505,6 +510,72 @@ export function runMcpRemove(agentId?: string) {
 
   console.log("[FINISH] MCP 配置移除完成！");
   return results;
+}
+
+export interface DoctorReport {
+  detectedAgents: Array<{ id: string; name: string }>;
+  mcp: McpAgentInstallStatus[];
+  instructions: AgentInstructionStatus[];
+  /** 真正的 Agent Skill（Cursor/Claude/Codex 的 skills/graphflow/SKILL.md）状态。 */
+  skills: AgentInstructionStatus[];
+}
+
+/**
+ * 自检：汇总各 agent 的 MCP 注册与指令文件状态，便于用户验证"一次安装是否注册到所有 agent"。
+ * 返回结构化数据（供 --json）并打印可读报告。
+ */
+export function runDoctor(): DoctorReport {
+  const detectedAgents = detectInstalledAgents();
+  const mcp = getMcpInstallStatus();
+  const instructions = getAgentInstructionStatus();
+  const skills = getAgentSkillStatus();
+
+  console.log("[GraphFlow Doctor] 检测到的 Agent / AI IDE:");
+  if (detectedAgents.length === 0) {
+    console.log("  (未在本机检测到受支持的 agent)");
+  } else {
+    console.log(`  ${detectedAgents.map((agent) => agent.name).join(", ")}`);
+  }
+
+  console.log("");
+  console.log("[GraphFlow Doctor] MCP 注册状态:");
+  if (mcp.length === 0) {
+    console.log("  (无)");
+  } else {
+    for (const item of mcp) {
+      const mark = item.installed ? "OK " : "-- ";
+      console.log(`  [${mark}] ${item.agentName}: ${item.configPath}`);
+    }
+  }
+
+  console.log("");
+  console.log("[GraphFlow Doctor] 指令文件状态:");
+  for (const item of instructions) {
+    if (!item.detected) {
+      continue;
+    }
+    const mark = item.installed ? "OK " : "-- ";
+    console.log(`  [${mark}] ${item.agent}: ${item.configPath}`);
+  }
+
+  console.log("");
+  console.log("[GraphFlow Doctor] Agent Skill 状态:");
+  for (const item of skills) {
+    if (!item.detected) {
+      continue;
+    }
+    const mark = item.installed ? "OK " : "-- ";
+    console.log(`  [${mark}] ${item.agent}: ${item.configPath}`);
+  }
+
+  const pendingMcp = mcp.filter((item) => !item.installed);
+  const pendingSkills = skills.filter((item) => item.detected && !item.installed);
+  if (pendingMcp.length > 0 || pendingSkills.length > 0) {
+    console.log("");
+    console.log("[HINT] 部分 agent 尚未注册 MCP/Skill，运行 `graphflow install` 完成注册。");
+  }
+
+  return { detectedAgents, mcp, instructions, skills };
 }
 
 async function bootstrapGraphIndex(workspaceRoot: string): Promise<void> {

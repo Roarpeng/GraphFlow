@@ -27,3 +27,5 @@ runs.json
 vscode-extension/vendor/
 .joycode/
 tsc_output.txt
+benchmarks/.cache/
+graphify-out/

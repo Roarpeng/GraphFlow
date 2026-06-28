@@ -27,9 +27,12 @@ describe("M56 agent-delegated LLM (no API key)", () => {
 
   it("builds six-hats work items for the connected coding agent", () => {
     const items = buildAgentInsightWorkItems("refactor architecture module");
-    expect(items.length).toBe(7);
+    expect(items.length).toBe(13);
     expect(items.filter((item) => item.kind === "six-hats").length).toBe(6);
-    expect(items.some((item) => item.kind === "plan-refinement")).toBe(true);
+    const fiveWhys = items.filter((item) => item.kind === "five-whys");
+    expect(fiveWhys.length).toBe(6);
+    expect(fiveWhys.every((item) => item.optional === true)).toBe(true);
+    expect(items.filter((item) => item.kind === "plan-refinement").length).toBe(1);
     expect(items[0]?.prompt).toContain("Task:");
   });
 

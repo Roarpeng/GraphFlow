@@ -631,10 +631,14 @@ async function installSkillsFromExtension(
     });
 
     // 汇总日志
+    const changed = (list?: Array<{ status: string }>): number =>
+      (list ?? []).filter((r) => r.status === "created" || r.status === "updated").length;
     const totalCount =
-      summary.traeSkills.filter((r) => r.status === "created" || r.status === "updated").length +
-      summary.cursorRules.filter((r) => r.status === "created" || r.status === "updated").length +
-      summary.claudeMd.filter((r) => r.status === "created" || r.status === "updated").length;
+      changed(summary.traeSkills) +
+      changed(summary.cursorRules) +
+      changed(summary.claudeMd) +
+      changed(summary.agentInstructions) +
+      changed(summary.agentSkills);
 
     if (totalCount > 0) {
       output.appendLine(`[GraphFlow] Skill/Rules 安装完成：${totalCount} 个文件已创建或更新。`);
