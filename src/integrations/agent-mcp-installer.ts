@@ -154,18 +154,18 @@ function buildAgentProfiles(): AgentProfile[] {
     {
       id: "claude-code",
       name: "Claude Code",
+      // Claude Code stores user-scope MCP servers under the top-level `mcpServers`
+      // key of ~/.claude.json. Per official docs it does NOT read ~/.claude/mcp.json
+      // or %APPDATA%/Claude*/mcp.json, so those legacy paths are intentionally dropped.
       markerPaths: [
         join(home, ".claude"),
-        join(appData, "Claude"),
-        join(appData, "Claude Code"),
+        join(home, ".claude.json"),
       ],
       userTargets: [
-        { configPath: join(home, ".claude", "mcp.json"), serversKey: "mcpServers" },
-        {
-          configPath: isWindows() ? join(appData, "Claude Code", "mcp.json") : join(home, ".claude", "mcp.json"),
-          serversKey: "mcpServers",
-        },
+        { configPath: join(home, ".claude.json"), serversKey: "mcpServers" },
       ],
+      // Project scope is shared via <project>/.mcp.json (top-level `mcpServers`).
+      workspaceRelativePaths: [{ relativePath: ".mcp.json", serversKey: "mcpServers" }],
     },
     {
       id: "windsurf",
@@ -227,14 +227,19 @@ function buildAgentProfiles(): AgentProfile[] {
     {
       id: "gemini",
       name: "Gemini",
+      // Gemini CLI reads MCP servers from the `mcpServers` object in settings.json.
+      // User scope: ~/.gemini/settings.json; project scope: <project>/.gemini/settings.json.
       markerPaths: [
-        join(home, ".gemini", "antigravity"),
+        join(home, ".gemini"),
       ],
       userTargets: [
         {
-          configPath: join(home, ".gemini", "antigravity", "mcp.json"),
+          configPath: join(home, ".gemini", "settings.json"),
           serversKey: "mcpServers",
         },
+      ],
+      workspaceRelativePaths: [
+        { relativePath: join(".gemini", "settings.json"), serversKey: "mcpServers" },
       ],
     },
     {

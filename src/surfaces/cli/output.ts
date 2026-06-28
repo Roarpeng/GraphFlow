@@ -19,6 +19,7 @@ export function buildCliUsage(): string {
     "Usage: graphflow <command> [options]",
     "Commands:",
     "  install                     Install MCP + Skill to all detected agents",
+    "  doctor [--json]             自检：列出各 agent 的 MCP 与指令文件注册状态",
     "  uninstall                   从所有 agent 中移除 GraphFlow MCP 配置和 Skill 文件",
     "  mcp remove [--agent <name>] 从指定 agent 中移除 GraphFlow MCP 配置（支持 --agent 参数）",
     "  config init [--global]",

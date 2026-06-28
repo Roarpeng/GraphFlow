@@ -83,6 +83,61 @@ describe("M59 merge agent insight", () => {
     expect(merged.plan.length).toBeGreaterThan(0);
   });
 
+  it("five-whys submission populates root causes and refined statement", async () => {
+    const client = new GraphifyClient();
+    const whyTask = "diagnose flaky checkout pipeline and stabilize";
+    const workItems = buildAgentInsightWorkItems(whyTask);
+
+    for (const item of workItems) {
+      if (item.kind === "five-whys") {
+        continue;
+      }
+      if (item.id === "plan-refinement") {
+        await submitAgentInsight(client, {
+          task: whyTask,
+          workItemId: item.id,
+          response: JSON.stringify([
+            { id: "task-1", description: "Reproduce flaky failure", dependencies: [] },
+          ]),
+        });
+        continue;
+      }
+      const certainty = item.id === "hat-3-black" ? 0.4 : 0.7;
+      await submitAgentInsight(client, {
+        task: whyTask,
+        workItemId: item.id,
+        hat: item.hat,
+        response: JSON.stringify({
+          observation: `${item.hat} observation`,
+          certainty,
+          criticalInsight: `${item.hat} insight`,
+        }),
+      });
+    }
+
+    await submitAgentInsight(client, {
+      task: whyTask,
+      workItemId: "why-3-black",
+      hat: "Black Hat",
+      response: JSON.stringify({
+        steps: [
+          { question: "Why?", answer: "because X" },
+          { question: "Why X?", answer: "root Y" },
+        ],
+        rootCause: "root Y",
+      }),
+    });
+
+    const merged = await mergeAgentInsightsFromGraph(client, whyTask);
+    expect(merged.complete).toBe(true);
+    expect(merged.insight.rootCauses).toContain("root Y");
+    const blackHat = merged.insight.hats.find((h) => h.hat.color === "black");
+    expect(blackHat?.whyChain).not.toBeNull();
+    expect(blackHat?.whyChain?.rootCause).toBe("root Y");
+    expect(merged.insight.refinedTaskStatement).toContain("root Y");
+    expect(merged.insight.refinedTaskStatement).not.toContain("待探索");
+  });
+
   it("partial submit is incomplete with missing work items listed", async () => {
     const client = new GraphifyClient();
 

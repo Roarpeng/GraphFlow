@@ -40,6 +40,16 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
+  if (command === "doctor") {
+    const { runDoctor } = require("./init");
+    const data = runDoctor();
+    return {
+      command: "doctor",
+      data,
+      legacyText: `detectedAgents=${data.detectedAgents.length}; mcpInstalled=${data.mcp.filter((m: { installed: boolean }) => m.installed).length}/${data.mcp.length}`,
+    };
+  }
+
   if (command === "uninstall") {
     const { runUninstall } = require("./init");
     runUninstall();
