@@ -72,20 +72,24 @@ function installSkill(skillsDir, skillSourceDir) {
     return { status: "skipped", reason: "skill source not found" };
   }
 
-  const existed = existsSync(skillDestFile);
+  try {
+    const existed = existsSync(skillDestFile);
 
-  if (existed) {
-    const existingContent = readFileSync(skillDestFile, "utf8");
-    const newContent = readFileSync(skillSourceFile, "utf8");
-    if (existingContent === newContent) {
-      return { status: "skipped", reason: "already up to date" };
+    if (existed) {
+      const existingContent = readFileSync(skillDestFile, "utf8");
+      const newContent = readFileSync(skillSourceFile, "utf8");
+      if (existingContent === newContent) {
+        return { status: "skipped", reason: "already up to date" };
+      }
     }
+
+    mkdirSync(skillDestDir, { recursive: true });
+    copyFileSync(skillSourceFile, skillDestFile);
+
+    return { status: existed ? "updated" : "created" };
+  } catch (err) {
+    return { status: "error", reason: err.message || String(err) };
   }
-
-  mkdirSync(skillDestDir, { recursive: true });
-  copyFileSync(skillSourceFile, skillDestFile);
-
-  return { status: existed ? "updated" : "created" };
 }
 
 function getSkillSourceDir() {
@@ -162,30 +166,39 @@ function main() {
     process.exit(0);
   }
 
-  console.log(`[GraphFlow] Running post-install setup (${globalInstall ? "global install" : "explicitly enabled"})...`);
+  try {
+    console.log(`[GraphFlow] Running post-install setup (${globalInstall ? "global install" : "explicitly enabled"})...`);
 
-  const skillSourceDir = getSkillSourceDir();
-  const traeDirs = getTraeUserDirs();
+    const skillSourceDir = getSkillSourceDir();
+    const traeDirs = getTraeUserDirs();
 
-  const skillResults = [];
-  if (skillSourceDir && traeDirs.length > 0) {
-    for (const trae of traeDirs) {
-      const result = installSkill(trae.skillsDir, skillSourceDir);
-      skillResults.push({ agent: trae.name, ...result });
-      console.log(`[GraphFlow] Skill for ${trae.name}: ${result.status}${result.reason ? ` (${result.reason})` : ""}`);
+    const skillResults = [];
+    if (skillSourceDir && traeDirs.length > 0) {
+      for (const trae of traeDirs) {
+        const result = installSkill(trae.skillsDir, skillSourceDir);
+        skillResults.push({ agent: trae.name, ...result });
+        console.log(`[GraphFlow] Skill for ${trae.name}: ${result.status}${result.reason ? ` (${result.reason})` : ""}`);
+      }
     }
-  }
 
-  const mcpResult = runMcpInstaller();
-  if (mcpResult.status === "installed" && Array.isArray(mcpResult.details)) {
-    for (const item of mcpResult.details) {
-      console.log(`[GraphFlow] MCP for ${item.agentName} (${item.scope}): ${item.status}`);
+    const mcpResult = runMcpInstaller();
+    if (mcpResult.status === "installed" && Array.isArray(mcpResult.details)) {
+      for (const item of mcpResult.details) {
+        console.log(`[GraphFlow] MCP for ${item.agentName} (${item.scope}): ${item.status}`);
+      }
+    } else if (mcpResult.status === "skipped") {
+      console.log(`[GraphFlow] MCP install skipped: ${mcpResult.reason}`);
+    } else if (mcpResult.status === "error") {
+      console.log(`[GraphFlow] MCP install encountered errors: ${mcpResult.error || "unknown"}`);
+      console.log("[GraphFlow] You can manually run: npx @roarpeng/graphflow install");
     }
-  } else if (mcpResult.status === "skipped") {
-    console.log(`[GraphFlow] MCP install skipped: ${mcpResult.reason}`);
-  }
 
-  console.log("[GraphFlow] Post-install complete.");
+    console.log("[GraphFlow] Post-install complete.");
+  } catch (err) {
+    console.warn("[GraphFlow] Post-install setup encountered an error (non-fatal):", err.message || String(err));
+    console.warn("[GraphFlow] GraphFlow core is still installed. To complete setup manually, run:");
+    console.warn("[GraphFlow]   npx @roarpeng/graphflow install");
+  }
 }
 
 if (require.main === module) {

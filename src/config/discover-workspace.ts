@@ -1,5 +1,6 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { release } from "node:os";
 
 const RUNTIME_DIR_MARKERS = [
   "/vendor/graphflow",
@@ -14,9 +15,35 @@ const IDE_WORKSPACE_ENV_KEYS = [
   "GRAPHFLOW_WORKSPACE_ROOT",
   "CURSOR_PROJECT_DIR",
   "VSCODE_CWD",
+  "VSCODE_WORKSPACE_FOLDER",
   "INIT_CWD",
   "PWD",
 ] as const;
+
+function isWsl(): boolean {
+  if (process.platform !== "linux") {
+    return false;
+  }
+  try {
+    const rel = release() || "";
+    if (rel.toLowerCase().includes("microsoft") || rel.toLowerCase().includes("wsl")) {
+      return true;
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    if (existsSync("/proc/version")) {
+      const content = readFileSync("/proc/version", "utf8").toLowerCase();
+      if (content.includes("microsoft") || content.includes("wsl")) {
+        return true;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
 
 /** True when cwd looks like GraphFlow's bundled runtime (extension vendor / npm package), not a user repo. */
 export function isGraphFlowRuntimeDirectory(dir: string): boolean {
@@ -48,6 +75,7 @@ export function hasProjectWorkspaceMarkers(dir: string): boolean {
 }
 
 function resolveIdeWorkspaceHint(): string | undefined {
+  const wsl = isWsl();
   for (const key of IDE_WORKSPACE_ENV_KEYS) {
     if (key === "GRAPHFLOW_WORKSPACE_ROOT") {
       continue;
@@ -56,12 +84,28 @@ function resolveIdeWorkspaceHint(): string | undefined {
     if (!value) {
       continue;
     }
-    const resolved = resolve(value);
+    const normalized = wsl && value.startsWith("\\\\wsl$\\")
+      ? wslUncToPath(value)
+      : value;
+    const resolved = resolve(normalized);
     if (hasProjectWorkspaceMarkers(resolved)) {
+      return resolved;
+    }
+    if (wsl && existsSync(resolved)) {
       return resolved;
     }
   }
   return undefined;
+}
+
+function wslUncToPath(uncPath: string): string {
+  const match = uncPath.match(/^\\\\wsl\$\\([^\\]+)\\(.+)$/i);
+  if (match && match[1] && match[2]) {
+    const distro = match[1];
+    const rest = match[2].replace(/\\/g, "/");
+    return `/${distro}/${rest}`;
+  }
+  return uncPath.replace(/\\/g, "/");
 }
 
 /**
@@ -116,3 +160,5 @@ export function ensureMcpWorkspaceEnv(fromDir: string = process.cwd()): string |
 
   return undefined;
 }
+
+export { isWsl };

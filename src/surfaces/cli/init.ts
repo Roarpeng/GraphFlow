@@ -66,46 +66,55 @@ export interface SkillInstallResult {
 
 export function installTraeSkills(): SkillInstallResult[] {
   const results: SkillInstallResult[] = [];
-  const skillSourceDir = resolveSkillSourcePath();
 
-  if (!skillSourceDir) {
-    results.push({ agent: "Trae", status: "skipped", message: "Skill source not found" });
-    return results;
-  }
+  try {
+    const skillSourceDir = resolveSkillSourcePath();
 
-  const traeDirs = getTraeUserDirs();
-  if (traeDirs.length === 0) {
-    results.push({ agent: "Trae", status: "skipped", message: "No Trae installation detected" });
-    return results;
-  }
-
-  const sourceSkillFile = join(skillSourceDir, "SKILL.md");
-
-  for (const trae of traeDirs) {
-    try {
-      const destDir = join(trae.skillsDir, "graphflow");
-      const destFile = join(destDir, "SKILL.md");
-
-      const existed = existsSync(destFile);
-      if (existed) {
-        const existingContent = readFileSync(destFile, "utf8");
-        const newContent = readFileSync(sourceSkillFile, "utf8");
-        if (existingContent === newContent) {
-          results.push({ agent: trae.name, status: "skipped", message: "already up to date" });
-          continue;
-        }
-      }
-
-      mkdirSync(destDir, { recursive: true });
-      copyFileSync(sourceSkillFile, destFile);
-      results.push({ agent: trae.name, status: existed ? "updated" : "created" });
-    } catch (error) {
-      results.push({
-        agent: trae.name,
-        status: "error",
-        message: error instanceof Error ? error.message : String(error),
-      });
+    if (!skillSourceDir) {
+      results.push({ agent: "Trae", status: "skipped", message: "Skill source not found" });
+      return results;
     }
+
+    const traeDirs = getTraeUserDirs();
+    if (traeDirs.length === 0) {
+      results.push({ agent: "Trae", status: "skipped", message: "No Trae installation detected" });
+      return results;
+    }
+
+    const sourceSkillFile = join(skillSourceDir, "SKILL.md");
+
+    for (const trae of traeDirs) {
+      try {
+        const destDir = join(trae.skillsDir, "graphflow");
+        const destFile = join(destDir, "SKILL.md");
+
+        const existed = existsSync(destFile);
+        if (existed) {
+          const existingContent = readFileSync(destFile, "utf8");
+          const newContent = readFileSync(sourceSkillFile, "utf8");
+          if (existingContent === newContent) {
+            results.push({ agent: trae.name, status: "skipped", message: "already up to date" });
+            continue;
+          }
+        }
+
+        mkdirSync(destDir, { recursive: true });
+        copyFileSync(sourceSkillFile, destFile);
+        results.push({ agent: trae.name, status: existed ? "updated" : "created" });
+      } catch (error) {
+        results.push({
+          agent: trae.name,
+          status: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  } catch (error) {
+    results.push({
+      agent: "Trae",
+      status: "error",
+      message: `Skill install failed: ${error instanceof Error ? error.message : String(error)}`,
+    });
   }
 
   return results;
