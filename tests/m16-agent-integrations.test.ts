@@ -58,6 +58,7 @@ describe("M16 agent integrations", () => {
       "graphflow_stats",
       "graphflow_plan_insight",
       "graphflow_metrics",
+      "graphflow_skill_guide",
     ]);
   });
 
