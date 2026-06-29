@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, platform } from "node:os";
 
 export type McpServersKey = "mcpServers" | "servers";
 
@@ -72,15 +72,129 @@ function isWindows(): boolean {
   return process.platform === "win32";
 }
 
-function resolveHomePaths(): { home: string; appData: string; localAppData: string } {
+function isWsl(): boolean {
+  if (process.platform !== "linux") {
+    return false;
+  }
+  try {
+    const release = platform() ?? "";
+    if (release.toLowerCase().includes("microsoft") || release.toLowerCase().includes("wsl")) {
+      return true;
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    if (existsSync("/proc/version")) {
+      const content = readFileSync("/proc/version", "utf8").toLowerCase();
+      if (content.includes("microsoft") || content.includes("wsl")) {
+        return true;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
+function getWindowsHomeFromWsl(): string | undefined {
+  if (!isWsl()) {
+    return undefined;
+  }
+  try {
+    const output = execFileSync("cmd.exe", ["/c", "echo %USERPROFILE%"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 3000,
+    }).trim();
+    if (output && output !== "%USERPROFILE%" && !output.includes("is not recognized")) {
+      const windowsPath = output.replace(/\\/g, "/");
+      const match = windowsPath.match(/^([A-Z]):\/(.+)$/i);
+      if (match && match[1] && match[2]) {
+        return `/mnt/${match[1].toLowerCase()}/${match[2]}`;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return undefined;
+}
+
+function resolveHomePaths(): { home: string; appData: string; localAppData: string; wslWindowsHome?: string } {
   const home = homedir();
   const appData = process.env.APPDATA ?? (isWindows() ? join(home, "AppData", "Roaming") : "");
   const localAppData = process.env.LOCALAPPDATA ?? (isWindows() ? join(home, "AppData", "Local") : "");
-  return { home, appData, localAppData };
+  const result: { home: string; appData: string; localAppData: string; wslWindowsHome?: string } = { home, appData, localAppData };
+  if (isWsl()) {
+    const winHome = getWindowsHomeFromWsl();
+    if (winHome) {
+      result.wslWindowsHome = winHome;
+    }
+  }
+  return result;
+}
+
+function buildWindowsProfilesFromWsl(windowsHome: string): AgentProfile[] {
+  const winAppData = join(windowsHome, "AppData", "Roaming");
+  const winLocalAppData = join(windowsHome, "AppData", "Local");
+
+  return [
+    {
+      id: "cursor-windows",
+      name: "Cursor (Windows)",
+      markerPaths: [
+        join(windowsHome, ".cursor"),
+        join(winAppData, "Cursor"),
+        join(winLocalAppData, "Programs", "cursor"),
+        join(winLocalAppData, "cursor"),
+      ],
+      userTargets: [
+        { configPath: join(windowsHome, ".cursor", "mcp.json"), serversKey: "mcpServers" },
+        {
+          configPath: join(winAppData, "Cursor", "User", "globalStorage", "roval.cursor", "mcp.json"),
+          serversKey: "mcpServers",
+        },
+      ],
+      workspaceRelativePaths: [],
+    },
+    {
+      id: "vscode-windows",
+      name: "VS Code (Windows)",
+      markerPaths: [
+        join(winAppData, "Code"),
+        join(winLocalAppData, "Programs", "Microsoft VS Code"),
+      ],
+      userTargets: [
+        {
+          configPath: join(winAppData, "Code", "User", "mcp.json"),
+          serversKey: "servers",
+        },
+      ],
+      workspaceRelativePaths: [],
+    },
+    {
+      id: "trae-windows",
+      name: "Trae (Windows)",
+      markerPaths: [
+        join(winAppData, "Trae"),
+        join(winAppData, "Trae CN"),
+      ],
+      userTargets: [
+        {
+          configPath: join(winAppData, "Trae", "User", "mcp.json"),
+          serversKey: "mcpServers",
+        },
+        {
+          configPath: join(winAppData, "Trae CN", "User", "mcp.json"),
+          serversKey: "mcpServers",
+        },
+      ],
+    },
+  ];
 }
 
 function buildAgentProfiles(): AgentProfile[] {
-  const { home, appData, localAppData } = resolveHomePaths();
+  const { home, appData, localAppData, wslWindowsHome } = resolveHomePaths();
 
   const profiles: AgentProfile[] = [
     {
@@ -243,6 +357,10 @@ function buildAgentProfiles(): AgentProfile[] {
     },
   ];
 
+  if (wslWindowsHome) {
+    profiles.push(...buildWindowsProfilesFromWsl(wslWindowsHome));
+  }
+
   const customEnv = process.env.GRAPHFLOW_MCP_CUSTOM_TARGETS;
   if (customEnv) {
     const paths = customEnv.split(isWindows() ? ";" : ":").map((p) => p.trim()).filter(Boolean);
@@ -339,6 +457,8 @@ const MCP_STDIO_ENV: Record<string, string> = {
 };
 
 const EPHEMERAL_NODE_PATH_MARKERS = ["/fnm_multishells/", "\\fnm_multishells\\"];
+
+export { isWsl };
 
 /** fnm multishell paths are session-temporary and break MCP after shell restart. */
 export function isEphemeralNodePath(nodePath: string): boolean {

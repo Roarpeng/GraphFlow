@@ -4,13 +4,19 @@ import { join } from "node:path";
 import { getDefaultConfig, getDefaultOverlayConfig } from "./defaults";
 import { isLegacyWebOnlyExtensions, resolveIncludeExtensions } from "./include-extensions.js";
 import type { GraphFlowConfig } from "./schema";
+import { logger } from "../utils/logger";
 
 export interface ConfigScaffoldResult {
   path: string;
-  status: "created" | "skipped";
+  status: "created" | "skipped" | "error";
+  message?: string;
 }
 
 export function resolveGlobalConfigPath(): string {
+  const configHome = process.env.GRAPHFLOW_CONFIG_HOME?.trim();
+  if (configHome) {
+    return join(configHome, ".graphflow.config.json");
+  }
   return join(homedir(), ".graphflow.config.json");
 }
 
@@ -54,22 +60,35 @@ export function migrateGlobalGraphFlowConfig(options?: { configPath?: string }):
 export function ensureGlobalGraphFlowConfig(options?: { configPath?: string }): ConfigScaffoldResult {
   const path = options?.configPath ?? resolveGlobalConfigPath();
   if (existsSync(path)) {
-    migrateGlobalGraphFlowConfig({ configPath: path });
+    try {
+      migrateGlobalGraphFlowConfig({ configPath: path });
+    } catch {
+      // Migration failure is non-fatal — existing config is still usable.
+    }
     return { path, status: "skipped" };
   }
 
-  const config = getDefaultConfig();
-  const { workspaceRoot: _ignored, ...graphPolicy } = config.graphPolicy;
-  const parentDir = join(path, "..");
-  if (!existsSync(parentDir)) {
-    mkdirSync(parentDir, { recursive: true });
+  try {
+    const config = getDefaultConfig();
+    const { workspaceRoot: _ignored, ...graphPolicy } = config.graphPolicy;
+    const parentDir = join(path, "..");
+    if (!existsSync(parentDir)) {
+      mkdirSync(parentDir, { recursive: true });
+    }
+    writeFileSync(
+      path,
+      `${JSON.stringify({ ...config, graphPolicy }, null, 2)}\n`,
+      "utf8"
+    );
+    return { path, status: "created" };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn(
+      { path, error: message },
+      "Failed to create global config; will use in-memory defaults. Set GRAPHFLOW_CONFIG_HOME to use a custom directory."
+    );
+    return { path, status: "error", message };
   }
-  writeFileSync(
-    path,
-    `${JSON.stringify({ ...config, graphPolicy }, null, 2)}\n`,
-    "utf8"
-  );
-  return { path, status: "created" };
 }
 
 export function ensureWorkspaceGraphFlowConfig(workspaceRoot: string): ConfigScaffoldResult {
@@ -79,10 +98,16 @@ export function ensureWorkspaceGraphFlowConfig(workspaceRoot: string): ConfigSca
     return { path, status: "skipped" };
   }
 
-  if (!existsSync(configDir)) {
-    mkdirSync(configDir, { recursive: true });
-  }
+  try {
+    if (!existsSync(configDir)) {
+      mkdirSync(configDir, { recursive: true });
+    }
 
-  writeFileSync(path, `${JSON.stringify(getDefaultOverlayConfig(), null, 2)}\n`, "utf8");
-  return { path, status: "created" };
+    writeFileSync(path, `${JSON.stringify(getDefaultOverlayConfig(), null, 2)}\n`, "utf8");
+    return { path, status: "created" };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn({ path, error: message }, "Failed to create workspace config; will use global or defaults.");
+    return { path, status: "error", message };
+  }
 }
