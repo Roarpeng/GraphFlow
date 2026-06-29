@@ -1,149 +1,147 @@
-import { logger } from "../utils/logger";
-import { hashTextHex as hashText } from "../utils/hash";
-import { readdirSync, readFileSync, statSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
-import { join, relative, dirname, posix } from "node:path";
+/**
+ * file-indexer.ts — Main entry point for file indexing
+ *
+ * Re-exports public API and implements the two main indexing functions:
+ * - indexWorkspaceFiles: full workspace batch indexing
+ * - indexSingleFile: incremental single-file indexing
+ */
+
+import { readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 import { createHash } from "node:crypto";
-import type { GraphEdge, GraphNode } from "../core/types";
-import type { GraphClient } from "./client-factory";
+import { hashTextHex as hashText } from "../utils/hash.js";
+import { logger } from "../utils/logger.js";
+import type { GraphEdge, GraphNode } from "../core/types.js";
+import type { GraphClient } from "./client-factory.js";
+import { getIndexerForFile } from "./language-indexers/index.js";
+import type { CallRelation, InheritRelation } from "./language-indexers/index.js";
+
+// ── Re-exports from sub-modules ──────────────────────────────────────
+export type { FileIndexerOptions } from "./file-indexer-walker.js";
+export { DEFAULT_EXTENSIONS, DEFAULT_MAX_FILE_SIZE } from "./file-indexer-walker.js";
+export { clearGraphIndexArtifacts, hasPendingGraphIndexWork, hasIndexCache } from "./file-indexer-cache.js";
+export { resolveCallerAtLine } from "./file-indexer-nodes.js";
+
+// ── Internal imports ─────────────────────────────────────────────────
+import { DEFAULT_EXTENSIONS, DEFAULT_MAX_FILE_SIZE, normalizePath, extOf, walkScannableFiles } from "./file-indexer-walker.js";
+import type { FileIndexerOptions } from "./file-indexer-walker.js";
+import { CACHE_DIR, CACHE_FILE, loadCacheState, saveCacheState } from "./file-indexer-cache.js";
+import type {
+  IndexedSymbol,
+  ParsedFile,
+} from "./file-indexer-nodes.js";
 import {
-  ALL_LANGUAGE_EXTENSIONS,
-  getIndexerForFile,
-  type CallRelation,
-  type DeclaredSymbol as ExtractedSymbol,
-  type InheritRelation,
-} from "./language-indexers/index";
+  moduleKey,
+  buildFileNodesAndEdges,
+} from "./file-indexer-nodes.js";
+import {
+  dedupEdges,
+  buildBatchReferenceEdges,
+  buildBatchCallEdges,
+  buildBatchInheritEdges,
+  buildSingleFileReferenceEdges,
+  buildSingleFileCallAndInheritEdges,
+} from "./file-indexer-edges.js";
 
-export interface FileIndexerOptions {
-  includeExtensions?: string[];
-  maxFileSizeBytes?: number;
-  /** When true, ignore index cache and re-process every file. */
-  forceReindex?: boolean;
-}
+// ── Batch workspace indexing ─────────────────────────────────────────
 
-const BASE_EXTENSIONS = [".md", ".json"];
-const DEFAULT_EXTENSIONS = Array.from(
-  new Set([...ALL_LANGUAGE_EXTENSIONS, ...BASE_EXTENSIONS])
-);
-const DEFAULT_MAX_FILE_SIZE = 200_000;
-const IGNORED_DIRS = new Set([
-  ".git", "node_modules", "dist", "coverage", "tmp", "venv", ".venv", "env", ".env",
-  "__pycache__", ".vscode", ".idea", ".next", "build", "install", "log",
-  ".graphflow-cache", "graphflow-out", "graphify-out",
-]);
-
-const REFERENCE_SKIPLIST = new Set([
-  "if", "for", "let", "const", "var", "this", "new", "return", "true", "false",
-  "null", "undefined", "console", "process", "require", "module", "exports",
-  "import", "export", "default", "async", "await", "function", "class",
-  "interface", "type", "enum", "from", "as", "of", "in", "do", "while",
-  "switch", "case", "break", "continue", "throw", "try", "catch", "finally",
-  "void", "yield", "number", "string", "boolean", "object", "any", "unknown",
-  "never", "Array", "Promise", "Map", "Set", "Date", "Error", "JSON", "Math",
-  "Object", "String", "Number", "Boolean", "Symbol", "Function", "RegExp",
-  "def", "fn", "pub", "struct", "trait", "impl", "use", "mod", "func",
-  "package", "include", "namespace", "typedef", "define", "static", "inline",
-  "extern", "virtual", "nil", "None", "True", "False", "int", "char", "long",
-  "short", "float", "double", "bool", "auto", "sizeof", "self", "cls",
-  "and", "or", "not", "is", "lambda", "global", "nonlocal", "pass", "raise",
-  "with", "yield", "make", "len", "cap", "append", "range", "chan", "select",
-  "defer", "goto", "fallthrough", "size_t", "uint", "int8", "int16", "int32",
-  "int64", "uint8", "uint16", "uint32", "uint64", "byte", "rune", "string",
-]);
-
-interface IndexedSymbol extends ExtractedSymbol {
-  nodeId: string;
-}
-
-interface ParsedFile {
+/** 单个文件并行索引的处理结果 */
+interface FileProcessResult {
   relPath: string;
-  fileNodeId: string;
-  moduleNodeId: string;
-  declared: IndexedSymbol[];
-  content: string;
-  scannable: boolean;
-  calls: CallRelation[];
-  inherits: InheritRelation[];
+  fileNodes: GraphNode[];
+  fileEdges: GraphEdge[];
+  parsedEntry: ParsedFile;
+  cacheEntry: { mtimeMs: number; hash: string; numNodes: number };
 }
 
-interface CacheState {
-  [path: string]: {
-    mtimeMs: number;
-    hash: string;
-    numNodes: number;
+/**
+ * 处理单个文件：读取内容、检查缓存、调用语言索引器提取符号/边。
+ * 返回 null 表示该文件未变更、被跳过。
+ *
+ * 该函数是并行安全：不修改共享的 nodes/edges/parsed 数组，
+ * 只返回本文件的局部结果，由调用方顺序合并。
+ */
+async function processFile(
+  file: { absPath: string; relPath: string; size: number; mtimeMs: number },
+  cacheState: import("./file-indexer-cache.js").CacheState,
+  forceReindex: boolean,
+  client: GraphClient,
+): Promise<FileProcessResult | null> {
+  const relPath = file.relPath;
+  const mtimeMs = file.mtimeMs;
+  const prev = cacheState[relPath];
+
+  let content = "";
+  let currentHash = "";
+  let isChanged = forceReindex;
+
+  if (!prev || prev.mtimeMs !== mtimeMs) {
+    content = readFileSync(file.absPath, "utf8");
+    currentHash = createHash("md5").update(content).digest("hex");
+    if (!prev || prev.hash !== currentHash) {
+      isChanged = true;
+    }
+  }
+
+  if (!isChanged) {
+    return null;
+  }
+
+  // 清理该文件在图存储中的旧节点（不同 relPath 的节点互不重叠，并行安全）
+  if (client.deleteNode) {
+    await pruneFileFromGraph(client, relPath);
+  }
+
+  if (!content) {
+    content = readFileSync(file.absPath, "utf8");
+    currentHash = createHash("md5").update(content).digest("hex");
+  }
+
+  const fileNodeId = `file:${relPath}`;
+  const moduleNodeId = `module:${moduleKey(relPath)}`;
+  const indexer = getIndexerForFile(relPath);
+  const language = indexer?.language ?? (extOf(relPath).replace(/^\./, "") || "text");
+
+  let declared: IndexedSymbol[] = [];
+  let imports: string[] = [];
+  let fileCalls: CallRelation[] = [];
+  let fileInherits: InheritRelation[] = [];
+
+  if (indexer) {
+    const extracted = await indexer.extract(relPath, content);
+    declared = extracted.symbols.map((sym) => ({
+      ...sym,
+      nodeId: `symbol:${relPath}:${hashText(sym.name)}`,
+    }));
+    imports = extracted.imports.map((imp) => imp.module);
+    fileCalls = extracted.calls ?? [];
+    fileInherits = extracted.inherits ?? [];
+  }
+
+  const { nodes: fileNodes, edges: fileEdges } = buildFileNodesAndEdges(
+    relPath, file.size, language, declared, imports
+  );
+
+  return {
+    relPath,
+    fileNodes,
+    fileEdges,
+    parsedEntry: {
+      relPath,
+      fileNodeId,
+      moduleNodeId,
+      declared,
+      content,
+      scannable: Boolean(indexer),
+      calls: fileCalls,
+      inherits: fileInherits,
+    },
+    cacheEntry: {
+      mtimeMs,
+      hash: currentHash,
+      numNodes: fileNodes.length,
+    },
   };
-}
-
-const CACHE_DIR = ".graphflow-cache";
-const CACHE_FILE = "index-state.json";
-
-/** Remove graph store, index cache, and vector DB for a full rebuild. */
-export function clearGraphIndexArtifacts(rootDir: string, graphStorePath: string): void {
-  const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
-  const vectorsPath = join(rootDir, CACHE_DIR, "vectors.db");
-  rmSync(graphStorePath, { force: true });
-  rmSync(cachePath, { force: true });
-  rmSync(vectorsPath, { force: true });
-}
-
-interface ScannedFile {
-  absPath: string;
-  relPath: string;
-  size: number;
-  mtimeMs: number;
-}
-
-function loadCacheState(cachePath: string, forceReindex: boolean): CacheState {
-  if (forceReindex) {
-    return {};
-  }
-
-  try {
-    const raw = readFileSync(cachePath, "utf8");
-    const parsedCache = JSON.parse(raw);
-    if (parsedCache.version === 2 && parsedCache.state) {
-      return parsedCache.state as CacheState;
-    }
-  } catch (error) {
-    const err = error as NodeJS.ErrnoException;
-    if (err.code !== "ENOENT") {
-      logger.warn({ error: err.message }, "Failed to read index cache");
-    }
-  }
-
-  return {};
-}
-
-/** Returns true when workspace files changed since last index (or cache is empty). */
-export function hasPendingGraphIndexWork(
-  rootDir: string,
-  options?: Pick<FileIndexerOptions, "includeExtensions" | "maxFileSizeBytes" | "forceReindex">
-): boolean {
-  const includeExtensions = options?.includeExtensions ?? DEFAULT_EXTENSIONS;
-  const maxFileSizeBytes = options?.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE;
-  const forceReindex = options?.forceReindex ?? false;
-  if (forceReindex) {
-    return true;
-  }
-
-  const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
-  const cacheState = loadCacheState(cachePath, false);
-  const scanned = walkScannableFiles(rootDir, includeExtensions, maxFileSizeBytes);
-  const currentRelPaths = new Set(scanned.map((file) => file.relPath));
-
-  for (const relPath of Object.keys(cacheState)) {
-    if (!currentRelPaths.has(relPath)) {
-      return true;
-    }
-  }
-
-  for (const file of scanned) {
-    const prev = cacheState[file.relPath];
-    if (!prev || prev.mtimeMs !== file.mtimeMs) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 export async function indexWorkspaceFiles(
@@ -154,6 +152,8 @@ export async function indexWorkspaceFiles(
   const includeExtensions = options?.includeExtensions ?? DEFAULT_EXTENSIONS;
   const maxFileSizeBytes = options?.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE;
   const forceReindex = options?.forceReindex ?? false;
+  // 并行索引并发数，默认每批 10 个文件
+  const concurrency = Math.max(1, options?.concurrency ?? 10);
 
   const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
   let cacheState = loadCacheState(cachePath, forceReindex);
@@ -179,134 +179,31 @@ export async function indexWorkspaceFiles(
   const edges: GraphEdge[] = [];
   const parsed: ParsedFile[] = [];
 
-  for (const file of scanned) {
-    const relPath = file.relPath;
-    const mtimeMs = file.mtimeMs;
-    const prev = cacheState[relPath];
+  // ── 并行分批索引：每批 concurrency 个文件并行处理 ──
+  let processedCount = 0;
+  for (let i = 0; i < scanned.length; i += concurrency) {
+    const batch = scanned.slice(i, i + concurrency);
+    const batchResults = await Promise.all(
+      batch.map((file) => processFile(file, cacheState, forceReindex, client))
+    );
 
-    let content = "";
-    let currentHash = "";
-    let isChanged = forceReindex;
-
-    if (!prev || prev.mtimeMs !== mtimeMs) {
-      content = readFileSync(file.absPath, "utf8");
-      currentHash = createHash("md5").update(content).digest("hex");
-      if (!prev || prev.hash !== currentHash) {
-        isChanged = true;
+    // 顺序合并本批结果到共享数组（避免并行写冲突）
+    for (const result of batchResults) {
+      if (result) {
+        nodes.push(...result.fileNodes);
+        edges.push(...result.fileEdges);
+        parsed.push(result.parsedEntry);
+        cacheState[result.relPath] = result.cacheEntry;
+      }
+      processedCount += 1;
+      // 每 100 个文件输出一次进度日志
+      if (processedCount > 0 && processedCount % 100 === 0) {
+        logger.info(
+          { processed: processedCount, total: scanned.length, percent: `${((processedCount / scanned.length) * 100).toFixed(1)}%` },
+          "工作区索引进度",
+        );
       }
     }
-
-    if (!isChanged) {
-      continue;
-    }
-
-    if (client.deleteNode) {
-      await pruneFileFromGraph(client, relPath);
-    }
-
-    if (!content) {
-      content = readFileSync(file.absPath, "utf8");
-      currentHash = createHash("md5").update(content).digest("hex");
-    }
-
-    const nodesStartLen = nodes.length;
-
-    const fileNodeId = `file:${relPath}`;
-    const moduleNodeId = `module:${moduleKey(relPath)}`;
-    const indexer = getIndexerForFile(relPath);
-    const language = indexer?.language ?? (extOf(relPath).replace(/^\./, "") || "text");
-
-    let declared: IndexedSymbol[] = [];
-    let imports: string[] = [];
-    let fileCalls: CallRelation[] = [];
-    let fileInherits: InheritRelation[] = [];
-
-    if (indexer) {
-      const extracted = await indexer.extract(relPath, content);
-      declared = extracted.symbols.map((sym) => ({
-        ...sym,
-        nodeId: `symbol:${relPath}:${hashText(sym.name)}`,
-      }));
-      imports = extracted.imports.map((imp) => imp.module);
-      fileCalls = extracted.calls ?? [];
-      fileInherits = extracted.inherits ?? [];
-    }
-
-    const exportNames = declared
-      .filter((s) => s.exported && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(s.name))
-      .map((s) => s.name);
-    const uniqueExports = Array.from(new Set(exportNames));
-    const exportsSuffix = uniqueExports.length > 0
-      ? ` # exports: ${uniqueExports.slice(0, 8).join(", ")}`
-      : "";
-
-    nodes.push({
-      id: fileNodeId,
-      type: "File",
-      content: `${relPath}${exportsSuffix}`,
-      metadata: {
-        path: relPath,
-        language,
-        exports: uniqueExports,
-        symbolCount: declared.length,
-        sizeBytes: file.size,
-      },
-    });
-    nodes.push({ id: moduleNodeId, type: "Module", content: moduleKey(relPath) });
-    edges.push({ from: fileNodeId, to: moduleNodeId, relation: "depends_on" });
-
-    for (const symbol of declared) {
-      const compactSig = `${symbol.kind} ${symbol.name}${symbol.exported ? " (exported)" : ""} @${relPath}:${symbol.line}`;
-      const signature = symbol.signature ?? compactSig;
-      const signatureHash = hashText(`${signature}\n${symbol.jsdoc ?? ""}\n${symbol.returnType ?? ""}`);
-      nodes.push({
-        id: symbol.nodeId,
-        type: "Symbol",
-        content: compactSig,
-        metadata: {
-          name: symbol.name,
-          kind: symbol.kind,
-          exported: symbol.exported,
-          line: symbol.line,
-          file: relPath,
-          signature,
-          signatureHash,
-          ...(symbol.jsdoc ? { jsdoc: symbol.jsdoc } : {}),
-          ...(symbol.visibility ? { visibility: symbol.visibility } : {}),
-          ...(symbol.paramsCount !== undefined ? { paramsCount: symbol.paramsCount } : {}),
-          ...(symbol.returnType ? { returnType: symbol.returnType } : {}),
-          ...(symbol.complexity !== undefined ? { complexity: symbol.complexity } : {}),
-        },
-      });
-      edges.push({ from: fileNodeId, to: symbol.nodeId, relation: "defines" });
-    }
-
-    for (const target of imports) {
-      const targetModule = normalizeImportTarget(target, relPath);
-      if (!targetModule) {
-        continue;
-      }
-      const importNodeId = `module:${targetModule}`;
-      nodes.push({ id: importNodeId, type: "Module", content: targetModule });
-      edges.push({ from: moduleNodeId, to: importNodeId, relation: "imports" });
-    }
-
-    parsed.push({
-      relPath,
-      fileNodeId,
-      moduleNodeId,
-      declared,
-      content,
-      scannable: Boolean(indexer),
-      calls: fileCalls,
-      inherits: fileInherits,
-    });
-
-    cacheState[relPath] = {
-      mtimeMs,
-      hash: currentHash,
-      numNodes: nodes.length - nodesStartLen,
-    };
   }
 
   const symbolIndex = new Map<string, IndexedSymbol[]>();
@@ -318,121 +215,19 @@ export async function indexWorkspaceFiles(
     }
   }
 
-  const identifierRe = /\b\w{3,}\b/g;
-  let referenceCount = 0;
-  for (const file of parsed) {
-    if (!file.scannable) {
-      continue;
-    }
-    const ownNames = new Set(file.declared.map((s) => s.name));
-    const seenThisFile = new Set<string>();
-    const matches = file.content.match(identifierRe);
-    if (!matches) continue;
-    const seenIdent = new Set<string>();
-    for (const name of matches) {
-      if (seenIdent.has(name)) continue;
-      seenIdent.add(name);
-      if (name.length < 3 || REFERENCE_SKIPLIST.has(name)) {
-        continue;
-      }
-      const defs = symbolIndex.get(name);
-      if (!defs || defs.length === 0) {
-        continue;
-      }
-      for (const def of defs) {
-        if (ownNames.has(name) && def.nodeId.startsWith(`symbol:${file.relPath}:`)) {
-          continue;
-        }
-        const key = `${file.fileNodeId}|${def.nodeId}`;
-        if (seenThisFile.has(key)) {
-          continue;
-        }
-        seenThisFile.add(key);
-        edges.push({ from: file.fileNodeId, to: def.nodeId, relation: "references" });
-        referenceCount += 1;
-      }
-    }
-  }
+  const { edges: refEdges, referenceCount } = buildBatchReferenceEdges(parsed, symbolIndex);
+  edges.push(...refEdges);
 
-  // ── Build call graph edges (caller → callee) ──────────────────────
-  let callEdgeCount = 0;
-  for (const file of parsed) {
-    if (file.calls.length === 0) continue;
-    // Map symbol names to node ids within this file for caller resolution
-    const localByName = new Map<string, string>();
-    for (const sym of file.declared) {
-      localByName.set(sym.name, sym.nodeId);
-    }
-    const seenCalls = new Set<string>();
-    for (const call of file.calls) {
-      // Resolve callee via global symbol index (may be in another file)
-      const calleeDefs = symbolIndex.get(call.callee);
-      if (!calleeDefs || calleeDefs.length === 0) continue;
-      // Prefer same-file callee, then first match
-      const calleeDef =
-        calleeDefs.find((d) => d.nodeId.startsWith(`symbol:${file.relPath}:`)) ?? calleeDefs[0];
-      if (!calleeDef) continue;
+  const { edges: callEdges, callEdgeCount } = buildBatchCallEdges(parsed, symbolIndex);
+  edges.push(...callEdges);
 
-      // Resolve caller: prefer the caller name from extraction, then fall back
-      // to the innermost local symbol at or before the call line.
-      let callerNodeId: string | undefined;
-      if (call.caller) {
-        callerNodeId = localByName.get(call.caller);
-      }
-      if (!callerNodeId) {
-        callerNodeId = resolveCallerAtLine(file.declared, call.line);
-      }
-      if (!callerNodeId) {
-        continue;
-      }
-
-      const edgeKey = `${callerNodeId}|${calleeDef.nodeId}|calls`;
-      if (seenCalls.has(edgeKey)) continue;
-      seenCalls.add(edgeKey);
-
-      edges.push({ from: callerNodeId, to: calleeDef.nodeId, relation: "calls" });
-      callEdgeCount += 1;
-    }
-  }
-
-  // ── Build inheritance edges (child → parent) ──────────────────────
-  let inheritEdgeCount = 0;
-  for (const file of parsed) {
-    if (file.inherits.length === 0) continue;
-    const localByName = new Map<string, string>();
-    for (const sym of file.declared) {
-      localByName.set(sym.name, sym.nodeId);
-    }
-    const seenInherits = new Set<string>();
-    for (const rel of file.inherits) {
-      const childNodeId = localByName.get(rel.child);
-      if (!childNodeId) continue;
-      // Resolve parent via global symbol index
-      const parentDefs = symbolIndex.get(rel.parent);
-      if (!parentDefs || parentDefs.length === 0) continue;
-      const parentDef =
-        parentDefs.find((d) => d.nodeId.startsWith(`symbol:${file.relPath}:`)) ?? parentDefs[0];
-      if (!parentDef) continue;
-
-      const edgeKey = `${childNodeId}|${parentDef.nodeId}|inherits`;
-      if (seenInherits.has(edgeKey)) continue;
-      seenInherits.add(edgeKey);
-
-      edges.push({ from: childNodeId, to: parentDef.nodeId, relation: "inherits" });
-      inheritEdgeCount += 1;
-    }
-  }
+  const { edges: inheritEdges, inheritEdgeCount } = buildBatchInheritEdges(parsed, symbolIndex);
+  edges.push(...inheritEdges);
 
   await client.upsertNodes(nodes);
   await client.upsertEdges(dedupEdges(edges));
 
-  try {
-    const dir = dirname(cachePath);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(cachePath, JSON.stringify({ version: 2, state: cacheState }, null, 2), "utf8");
-  } catch (error) {
-    logger.warn({ error }, "Failed to write index cache");
-  }
+  saveCacheState(cachePath, cacheState);
 
   return {
     indexedFiles: nodes.filter((node) => node.type === "File").length,
@@ -441,146 +236,8 @@ export async function indexWorkspaceFiles(
   };
 }
 
-async function pruneFileFromGraph(client: GraphClient, relPath: string): Promise<void> {
-  if (!client.readSnapshot || !client.deleteNode) {
-    return;
-  }
+// ── Single-file incremental indexing ─────────────────────────────────
 
-  const snapshot = client.readSnapshot();
-  const fileNodeId = `file:${relPath}`;
-  const moduleNodeId = `module:${moduleKey(relPath)}`;
-  const symbolPrefix = `symbol:${relPath}:`;
-
-  const toDelete = snapshot.nodes.filter(
-    (node) =>
-      node.id === fileNodeId || node.id === moduleNodeId || node.id.startsWith(symbolPrefix)
-  );
-
-  for (const node of toDelete) {
-    await client.deleteNode(node.id);
-  }
-}
-
-function walkScannableFiles(
-  rootDir: string,
-  includeExtensions: string[],
-  maxFileSizeBytes: number
-): ScannedFile[] {
-  const files = walkFiles(rootDir, includeExtensions);
-  const scanned: ScannedFile[] = [];
-
-  for (const absPath of files) {
-    const stat = statSync(absPath);
-    if (stat.size > maxFileSizeBytes) {
-      continue;
-    }
-    scanned.push({
-      absPath,
-      relPath: normalizePath(relative(rootDir, absPath)),
-      size: stat.size,
-      mtimeMs: stat.mtimeMs,
-    });
-  }
-
-  return scanned;
-}
-
-function walkFiles(rootDir: string, includeExtensions: string[]): string[] {
-  const entries = readdirSync(rootDir, { withFileTypes: true });
-  const files: string[] = [];
-
-  for (const entry of entries) {
-    const full = join(rootDir, entry.name);
-    if (entry.isSymbolicLink()) {
-      continue;
-    }
-
-    if (entry.isDirectory()) {
-      if (IGNORED_DIRS.has(entry.name)) {
-        continue;
-      }
-      files.push(...walkFiles(full, includeExtensions));
-      continue;
-    }
-
-    if (includeExtensions.some((ext) => entry.name.endsWith(ext))) {
-      files.push(full);
-    }
-  }
-
-  return files;
-}
-
-function normalizeImportTarget(target: string, importerRelPath: string): string | undefined {
-  let cleaned = target
-    .replace(/\\/g, "/")
-    .replace(/\.(ts|tsx|js|jsx|py|rs|go|hpp|hxx|cpp|cxx|cc|h|c|java|rb|rake|gemspec)$/i, "");
-  if (!cleaned) {
-    return undefined;
-  }
-
-  if (cleaned.startsWith(".")) {
-    const dir = posix.dirname(importerRelPath.replace(/\\/g, "/"));
-    cleaned = posix.join(dir, cleaned);
-    if (cleaned.startsWith("./")) {
-      cleaned = cleaned.slice(2);
-    }
-  }
-
-  return cleaned;
-}
-
-function moduleKey(relPath: string): string {
-  return relPath.replace(/\.(ts|tsx|js|jsx|md|json|py|rs|go|hpp|hxx|cpp|cxx|cc|h|c|java|rb|rake|gemspec)$/i, "");
-}
-
-/** Innermost declared symbol at or before `line` (for call attribution when caller name is missing). */
-export function resolveCallerAtLine(
-  declared: Array<Pick<IndexedSymbol, "line" | "nodeId">>,
-  line: number
-): string | undefined {
-  const sorted = [...declared].sort((a, b) => b.line - a.line);
-  for (const sym of sorted) {
-    if (sym.line <= line) {
-      return sym.nodeId;
-    }
-  }
-  return undefined;
-}
-
-function dedupEdges(edges: GraphEdge[]): GraphEdge[] {
-  const seen = new Set<string>();
-  const result: GraphEdge[] = [];
-  for (const edge of edges) {
-    const key = `${edge.from}|${edge.relation}|${edge.to}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push(edge);
-    }
-  }
-  return result;
-}
-
-function normalizePath(pathText: string): string {
-  return pathText.replace(/\\/g, "/");
-}
-
-/**
- * Incremental single-file indexing — borrowed from codebase-memory-mcp's
- * file-watcher pattern. Allows VS Code onSave hooks (or any file watcher)
- * to update the graph for one changed file without walking the entire workspace.
- *
- * Steps:
- *   1. Prune existing nodes/edges for the file (if any)
- *   2. Extract symbols + imports via the language indexer
- *   3. Upsert new nodes/edges
- *   4. Update the index cache entry for this file
- *
- * @param client Graph client
- * @param rootDir Workspace root (for relative path + cache location)
- * @param absPath Absolute path to the file to index
- * @param options Optional config
- */
 export async function indexSingleFile(
   client: GraphClient,
   rootDir: string,
@@ -628,8 +285,6 @@ export async function indexSingleFile(
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
 
-  const fileNodeId = `file:${relPath}`;
-  const moduleNodeId = `module:${moduleKey(relPath)}`;
   const indexer = getIndexerForFile(relPath);
   const language = indexer?.language ?? (relPath.split(".").pop() ?? "text");
 
@@ -649,148 +304,32 @@ export async function indexSingleFile(
     fileInherits = extracted.inherits ?? [];
   }
 
-  const exportNames = declared
-    .filter((s) => s.exported && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(s.name))
-    .map((s) => s.name);
-  const uniqueExports = Array.from(new Set(exportNames));
-  const exportsSuffix = uniqueExports.length > 0
-    ? ` # exports: ${uniqueExports.slice(0, 8).join(", ")}`
-    : "";
+  const { nodes: fileNodes, edges: fileEdges } = buildFileNodesAndEdges(
+    relPath, stat.size, language, declared, imports
+  );
+  nodes.push(...fileNodes);
+  edges.push(...fileEdges);
 
-  nodes.push({
-    id: fileNodeId,
-    type: "File",
-    content: `${relPath}${exportsSuffix}`,
-    metadata: {
-      path: relPath,
-      language,
-      exports: uniqueExports,
-      symbolCount: declared.length,
-      sizeBytes: stat.size,
-    },
-  });
-  nodes.push({ id: moduleNodeId, type: "Module", content: moduleKey(relPath) });
-  edges.push({ from: fileNodeId, to: moduleNodeId, relation: "depends_on" });
-
-  for (const symbol of declared) {
-    const compactSig = `${symbol.kind} ${symbol.name}${symbol.exported ? " (exported)" : ""} @${relPath}:${symbol.line}`;
-    const signature = symbol.signature ?? compactSig;
-    const signatureHash = hashText(`${signature}\n${symbol.jsdoc ?? ""}\n${symbol.returnType ?? ""}`);
-    nodes.push({
-      id: symbol.nodeId,
-      type: "Symbol",
-      content: compactSig,
-      metadata: {
-        name: symbol.name,
-        kind: symbol.kind,
-        exported: symbol.exported,
-        line: symbol.line,
-        file: relPath,
-        signature,
-        signatureHash,
-        ...(symbol.jsdoc ? { jsdoc: symbol.jsdoc } : {}),
-        ...(symbol.visibility ? { visibility: symbol.visibility } : {}),
-        ...(symbol.paramsCount !== undefined ? { paramsCount: symbol.paramsCount } : {}),
-        ...(symbol.returnType ? { returnType: symbol.returnType } : {}),
-        ...(symbol.complexity !== undefined ? { complexity: symbol.complexity } : {}),
-      },
-    });
-    edges.push({ from: fileNodeId, to: symbol.nodeId, relation: "defines" });
-  }
-
-  for (const target of imports) {
-    const targetModule = normalizeImportTarget(target, relPath);
-    if (!targetModule) {
-      continue;
-    }
-    const importNodeId = `module:${targetModule}`;
-    nodes.push({ id: importNodeId, type: "Module", content: targetModule });
-    edges.push({ from: moduleNodeId, to: importNodeId, relation: "imports" });
-  }
+  const fileNodeId = `file:${relPath}`;
 
   // Cross-file references: scan content against existing graph symbols
   let referenceCount = 0;
   const snapshot = client.readSnapshot?.();
   if (snapshot && indexer) {
-    const ownNames = new Set(declared.map((s) => s.name));
-    const identifierRe = /\b\w{3,}\b/g;
-    const matches = content.match(identifierRe);
-    if (matches) {
-      const seenIdent = new Set<string>();
-      // Build symbol index from existing snapshot (excluding this file's own symbols)
-      const symbolIndex = new Map<string, { nodeId: string; file: string }[]>();
-      for (const node of snapshot.nodes) {
-        if (node.type !== "Symbol" || !node.metadata?.name) continue;
-        if (typeof node.metadata.file === "string" && node.metadata.file === relPath) continue;
-        const list = symbolIndex.get(node.metadata.name as string) ?? [];
-        list.push({ nodeId: node.id, file: node.metadata.file as string });
-        symbolIndex.set(node.metadata.name as string, list);
-      }
-      for (const name of matches) {
-        if (seenIdent.has(name)) continue;
-        seenIdent.add(name);
-        if (name.length < 3 || REFERENCE_SKIPLIST.has(name)) continue;
-        if (ownNames.has(name)) continue;
-        const defs = symbolIndex.get(name);
-        if (!defs || defs.length === 0) continue;
-        for (const def of defs) {
-          edges.push({ from: fileNodeId, to: def.nodeId, relation: "references" });
-          referenceCount += 1;
-        }
-      }
-    }
+    const { edges: refEdges, referenceCount: refCount } = buildSingleFileReferenceEdges(
+      fileNodeId, relPath, content, declared, snapshot.nodes
+    );
+    edges.push(...refEdges);
+    referenceCount = refCount;
   }
 
-  // ── Call graph + inheritance edges (single-file incremental) ───────
-  // Build a combined symbol index: local symbols + snapshot symbols
-  const combinedSymbolIndex = new Map<string, { nodeId: string; file: string }[]>();
-  for (const sym of declared) {
-    const list = combinedSymbolIndex.get(sym.name) ?? [];
-    list.push({ nodeId: sym.nodeId, file: relPath });
-    combinedSymbolIndex.set(sym.name, list);
-  }
+  // Call graph + inheritance edges
   if (snapshot) {
-    for (const node of snapshot.nodes) {
-      if (node.type !== "Symbol" || !node.metadata?.name) continue;
-      const name = node.metadata.name as string;
-      const file = typeof node.metadata.file === "string" ? node.metadata.file : "";
-      const list = combinedSymbolIndex.get(name) ?? [];
-      list.push({ nodeId: node.id, file });
-      combinedSymbolIndex.set(name, list);
-    }
-  }
-
-  const localByName = new Map<string, string>();
-  for (const sym of declared) {
-    localByName.set(sym.name, sym.nodeId);
-  }
-
-  // Call edges
-  for (const call of fileCalls) {
-    const calleeDefs = combinedSymbolIndex.get(call.callee);
-    if (!calleeDefs || calleeDefs.length === 0) continue;
-    const calleeDef = calleeDefs.find((d) => d.file === relPath) ?? calleeDefs[0];
-    if (!calleeDef) continue;
-    let callerNodeId: string | undefined;
-    if (call.caller) {
-      callerNodeId = localByName.get(call.caller);
-    }
-    if (!callerNodeId) {
-      callerNodeId = resolveCallerAtLine(declared, call.line);
-    }
-    if (!callerNodeId) continue;
-    edges.push({ from: callerNodeId, to: calleeDef.nodeId, relation: "calls" });
-  }
-
-  // Inheritance edges
-  for (const rel of fileInherits) {
-    const childNodeId = localByName.get(rel.child);
-    if (!childNodeId) continue;
-    const parentDefs = combinedSymbolIndex.get(rel.parent);
-    if (!parentDefs || parentDefs.length === 0) continue;
-    const parentDef = parentDefs.find((d) => d.file === relPath) ?? parentDefs[0];
-    if (!parentDef) continue;
-    edges.push({ from: childNodeId, to: parentDef.nodeId, relation: "inherits" });
+    const { edges: ciEdges, callCount, inheritCount } = buildSingleFileCallAndInheritEdges(
+      relPath, declared, fileCalls, fileInherits, snapshot.nodes
+    );
+    edges.push(...ciEdges);
+    referenceCount += callCount + inheritCount;
   }
 
   await client.upsertNodes(nodes);
@@ -802,13 +341,7 @@ export async function indexSingleFile(
     hash: currentHash,
     numNodes: nodes.length,
   };
-  try {
-    const dir = dirname(cachePath);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(cachePath, JSON.stringify({ version: 2, state: cacheState }, null, 2), "utf8");
-  } catch (error) {
-    logger.warn({ error }, "Failed to write index cache after single-file index");
-  }
+  saveCacheState(cachePath, cacheState);
 
   logger.info({ relPath, symbols: declared.length, references: referenceCount }, "Single file indexed");
 
@@ -820,26 +353,40 @@ export async function indexSingleFile(
   };
 }
 
-/**
- * Quick check whether the index cache exists and is non-empty.
- * Cheaper than hasPendingGraphIndexWork (no full workspace walk).
- */
-export function hasIndexCache(rootDir: string): boolean {
-  const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
-  if (!existsSync(cachePath)) return false;
-  try {
-    const cacheState = loadCacheState(cachePath, false);
-    return Object.keys(cacheState).length > 0;
-  } catch {
-    return false;
-  }
-}
+// ── Internal helpers ─────────────────────────────────────────────────
 
-function extOf(relPath: string): string {
-  const idx = relPath.lastIndexOf(".");
-  if (idx < 0) {
-    return "";
+async function pruneFileFromGraph(client: GraphClient, relPath: string): Promise<void> {
+  if (!client.readSnapshot || !client.deleteNode) {
+    return;
   }
-  return relPath.slice(idx).toLowerCase();
+
+  const snapshot = client.readSnapshot();
+  const fileNodeId = `file:${relPath}`;
+  const moduleNodeId = `module:${moduleKey(relPath)}`;
+  const symbolPrefix = `symbol:${relPath}:`;
+
+  // 先收集要删除的节点 ID 集合，便于后续 O(1) 查找悬空边
+  const deletedIds = new Set<string>();
+  const toDelete = snapshot.nodes.filter(
+    (node) =>
+      node.id === fileNodeId || node.id === moduleNodeId || node.id.startsWith(symbolPrefix)
+  );
+
+  for (const node of toDelete) {
+    deletedIds.add(node.id);
+    await client.deleteNode(node.id);
+  }
+
+  // 清理跨文件的悬空引用边：删除任何 from 或 to 指向已删除节点 ID 的边。
+  // 某些传输后端（如 MCP HTTP）的 deleteNode 不保证级联清理边，因此显式清理以确保一致。
+  if (client.deleteEdge && deletedIds.size > 0) {
+    // 重新读取快照以获取当前边状态（部分后端的 deleteNode 可能已级联删除相关边）
+    const currentEdges = client.readSnapshot().edges;
+    for (const edge of currentEdges) {
+      if (deletedIds.has(edge.from) || deletedIds.has(edge.to)) {
+        await client.deleteEdge(edge.from, edge.to, edge.relation);
+      }
+    }
+  }
 }
 

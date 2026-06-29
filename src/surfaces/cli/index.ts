@@ -6,10 +6,12 @@ import {
   downloadOpenBmbModel,
   enrichSemanticsSilent,
   exportArtifact,
+  exportSkillPackageRuntime,
   getMetrics,
   getSkillInsights,
   getTokenSavingsStats,
   importArtifact,
+  importSkillPackageRuntime,
   indexFile,
   indexGraph,
   inspectGraph,
@@ -24,6 +26,7 @@ import {
   runTask,
   runTaskResult,
 } from "./runtime";
+import { validateConfigDetailed, type ConfigValidationResult } from "../../config/loader.js";
 import { buildCliUsage, formatCliResult, getCliVersion, parseCliOptions, type CliCommandResult } from "./output";
 
 async function executeCommand(command: string, args: string[], configPath?: string): Promise<CliCommandResult | undefined> {
@@ -37,6 +40,45 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
+  if (command === "doctor") {
+    const { runDoctor } = require("./init");
+    const data = runDoctor();
+    return {
+      command: "doctor",
+      data,
+      legacyText: `detectedAgents=${data.detectedAgents.length}; mcpInstalled=${data.mcp.filter((m: { installed: boolean }) => m.installed).length}/${data.mcp.length}`,
+    };
+  }
+
+  if (command === "uninstall") {
+    const { runUninstall } = require("./init");
+    runUninstall();
+    return {
+      command: "uninstall",
+      data: {},
+      legacyText: `Uninstall complete`,
+    };
+  }
+
+  if (command === "mcp" && args[0] === "remove") {
+    // 解析 --agent 参数
+    const remainingArgs = args.slice(1);
+    let agentId: string | undefined;
+    for (let i = 0; i < remainingArgs.length; i++) {
+      if (remainingArgs[i] === "--agent" && remainingArgs[i + 1]) {
+        agentId = remainingArgs[i + 1];
+        break;
+      }
+    }
+    const { runMcpRemove } = require("./init");
+    const results = runMcpRemove(agentId);
+    return {
+      command: "mcp-remove",
+      data: results ?? [],
+      legacyText: `MCP remove complete`,
+    };
+  }
+
   if (command === "init" || (command === "config" && args[0] === "init")) {
     const { runInit } = require("./init");
     runInit();
@@ -44,6 +86,15 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       command: "init",
       data: {},
       legacyText: `Initialization complete`,
+    };
+  }
+
+  if (command === "config" && args[0] === "validate") {
+    const data = validateConfigDetailed(configPath);
+    return {
+      command: "config-validate",
+      data,
+      legacyText: formatValidationResult(data),
     };
   }
 
@@ -196,6 +247,26 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
+  if (command === "skill" && args[0] === "export") {
+    const outputPath = args[1]?.trim() || undefined;
+    const data = await exportSkillPackageRuntime(configPath, outputPath);
+    return {
+      command: "skill-export",
+      data,
+      legacyText: `path=${data.path}; skillCount=${data.skillCount}; bytes=${data.bytes}`,
+    };
+  }
+
+  if (command === "skill" && args[0] === "import") {
+    const inputPath = args[1]?.trim() || undefined;
+    const data = await importSkillPackageRuntime(configPath, inputPath);
+    return {
+      command: "skill-import",
+      data,
+      legacyText: `path=${data.path}; imported=${data.imported}; skipped=${data.skipped}; total=${data.total}`,
+    };
+  }
+
   if (command === "route" && args[0] === "diagnose") {
     const data = diagnoseRoutingResult(configPath);
     return {
@@ -310,6 +381,18 @@ function formatBytes(value: number): string {
     unitIndex += 1;
   }
   return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function formatValidationResult(data: ConfigValidationResult): string {
+  const lines: string[] = [
+    `configPath=${data.configPath}`,
+    `valid=${data.valid}`,
+  ];
+  for (const issue of data.issues) {
+    const icon = issue.severity === "error" ? "ERROR" : "WARN";
+    lines.push(`[${icon}] ${issue.field}: ${issue.message}`);
+  }
+  return lines.join("\n");
 }
 
 async function main(): Promise<void> {

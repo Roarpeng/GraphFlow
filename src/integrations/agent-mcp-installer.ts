@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir, platform } from "node:os";
 
-export type McpServersKey = "mcpServers" | "servers";
+export type McpServersKey = "mcpServers" | "servers" | "context_servers";
 
 export interface McpServerNode {
   command: string;
@@ -239,8 +239,10 @@ function buildAgentProfiles(): AgentProfile[] {
       markerPaths: [
         join(home, ".trae"),
         join(home, ".trae-cn"),
+        join(home, ".trae-aicc"),
         join(appData, "Trae"),
         join(appData, "Trae CN"),
+        join(appData, "TRAE SOLO CN"),
       ],
       userTargets: [
         {
@@ -255,23 +257,29 @@ function buildAgentProfiles(): AgentProfile[] {
             : join(home, ".config", "Trae CN", "User", "mcp.json"),
           serversKey: "mcpServers",
         },
+        {
+          configPath: isWindows()
+            ? join(appData, "TRAE SOLO CN", "User", "mcp.json")
+            : join(home, ".config", "TRAE SOLO CN", "User", "mcp.json"),
+          serversKey: "mcpServers",
+        },
       ],
     },
     {
       id: "claude-code",
       name: "Claude Code",
+      // Claude Code stores user-scope MCP servers under the top-level `mcpServers`
+      // key of ~/.claude.json. Per official docs it does NOT read ~/.claude/mcp.json
+      // or %APPDATA%/Claude*/mcp.json, so those legacy paths are intentionally dropped.
       markerPaths: [
         join(home, ".claude"),
-        join(appData, "Claude"),
-        join(appData, "Claude Code"),
+        join(home, ".claude.json"),
       ],
       userTargets: [
-        { configPath: join(home, ".claude", "mcp.json"), serversKey: "mcpServers" },
-        {
-          configPath: isWindows() ? join(appData, "Claude Code", "mcp.json") : join(home, ".claude", "mcp.json"),
-          serversKey: "mcpServers",
-        },
+        { configPath: join(home, ".claude.json"), serversKey: "mcpServers" },
       ],
+      // Project scope is shared via <project>/.mcp.json (top-level `mcpServers`).
+      workspaceRelativePaths: [{ relativePath: ".mcp.json", serversKey: "mcpServers" }],
     },
     {
       id: "windsurf",
@@ -333,14 +341,19 @@ function buildAgentProfiles(): AgentProfile[] {
     {
       id: "gemini",
       name: "Gemini",
+      // Gemini CLI reads MCP servers from the `mcpServers` object in settings.json.
+      // User scope: ~/.gemini/settings.json; project scope: <project>/.gemini/settings.json.
       markerPaths: [
-        join(home, ".gemini", "antigravity"),
+        join(home, ".gemini"),
       ],
       userTargets: [
         {
-          configPath: join(home, ".gemini", "antigravity", "mcp.json"),
+          configPath: join(home, ".gemini", "settings.json"),
           serversKey: "mcpServers",
         },
+      ],
+      workspaceRelativePaths: [
+        { relativePath: join(".gemini", "settings.json"), serversKey: "mcpServers" },
       ],
     },
     {
@@ -352,6 +365,42 @@ function buildAgentProfiles(): AgentProfile[] {
           configPath: join(home, ".codex", "config.toml"),
           serversKey: "mcpServers",
           configFormat: "codex-toml",
+        },
+      ],
+    },
+    // ─── 实验性支持 ───
+    {
+      id: "zed",
+      name: "Zed",
+      // Zed 已在 v0.165+ 支持 MCP（称为 "context servers"）
+      // 配置格式: settings.json 中的 "context_servers" 键
+      markerPaths: [
+        join(home, ".config", "zed"),
+        isWindows() ? join(appData, "Zed") : undefined,
+      ].filter(Boolean) as string[],
+      userTargets: [
+        {
+          configPath: isWindows()
+            ? join(appData, "Zed", "settings.json")
+            : join(home, ".config", "zed", "settings.json"),
+          serversKey: "context_servers",
+        },
+      ],
+    },
+    {
+      id: "continue",
+      name: "Continue",
+      // Continue 是 VS Code / JetBrains 的 AI 编程助手扩展
+      // MCP 配置写入 ~/.continue/config.yaml 中的 "mcpServers" 节
+      // 注意：Continue 的 config.yaml 格式为 YAML，当前实现仅支持 JSON
+      // 如需完整支持，需额外添加 YAML 读写逻辑
+      markerPaths: [
+        join(home, ".continue"),
+      ],
+      userTargets: [
+        {
+          configPath: join(home, ".continue", "config.json"),
+          serversKey: "mcpServers",
         },
       ],
     },
@@ -485,6 +534,27 @@ function isUsableNodeCommand(nodePath: string): boolean {
   return existsSync(trimmed);
 }
 
+/**
+  * 判断给定的 node 路径是否属于 IDE/编辑器内嵌的 Node 运行时。
+  * 在 TRAE、Cursor、VS Code 等进程环境中，PATH 最前面通常是 IDE 自带的 Node，
+  * 这些路径可能包含空格（如 "TRAE SOLO CN"）且版本不稳定，不适合作为 MCP 启动的运行时。
+  */
+ export function isIdeBundledNode(nodePath: string): boolean {
+  const normalized = nodePath.replace(/\\/g, "/").toLowerCase();
+  const ideMarkers = [
+    "appdata",        // Windows %APPDATA% 或 %LOCALAPPDATA% 下的内嵌 Node
+    "modulardata",    // TRAE 内嵌 Node 路径特征
+    "trae",
+    "cursor",
+    "vs code",
+    "vscode",
+    "electron",
+    "windsurf",
+    "cline",
+  ];
+  return ideMarkers.some((marker) => normalized.includes(marker.toLowerCase()));
+}
+
 export function resolveSystemNodeCommand(): string | undefined {
   const candidates: string[] = [];
 
@@ -504,6 +574,18 @@ export function resolveSystemNodeCommand(): string | undefined {
     candidates.push("/usr/local/bin/node", "/usr/bin/node");
   }
 
+  // 第一轮：优先选择非 IDE 内嵌的系统 Node
+  for (const candidate of candidates) {
+    if (
+      isUsableNodeCommand(candidate) &&
+      !isEphemeralNodePath(candidate) &&
+      !isIdeBundledNode(candidate)
+    ) {
+      return candidate;
+    }
+  }
+
+  // 第二轮：回退到原始行为（包括 IDE 内嵌 Node），确保在纯 IDE 环境下也能工作
   for (const candidate of candidates) {
     if (isUsableNodeCommand(candidate) && !isEphemeralNodePath(candidate)) {
       return candidate;
@@ -574,11 +656,13 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
   const workspaceRootEnv =
     options.workspaceRoot?.trim() ||
     process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim() ||
-    "${workspaceFolder}";
+    "";
   const mcpEnv: Record<string, string> = {
     ...MCP_STDIO_ENV,
-    GRAPHFLOW_WORKSPACE_ROOT: workspaceRootEnv,
   };
+  if (workspaceRootEnv) {
+    mcpEnv.GRAPHFLOW_WORKSPACE_ROOT = workspaceRootEnv;
+  }
 
   if (options.strategy === "node-bundled") {
     if (!options.bundledServerPath) {
@@ -628,14 +712,18 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
     };
   }
 
+  // npx 策略：不在 MCP 配置中硬编码 cwd 和 GRAPHFLOW_WORKSPACE_ROOT。
+  // MCP client 会使用自己的 cwd 启动进程，MCP server 启动后通过 discover-workspace.ts 自动检测工作区。
+  // 硬编码 Linux 风格的 /repo 占位符在 Windows 上无效，会导致启动失败。
+  const npxEnv: Record<string, string> = { ...MCP_STDIO_ENV };
+
   if (isWindows()) {
     const winNpx = resolveWindowsNpxLaunch();
     if (winNpx) {
       return {
         command: winNpx.command,
         args: winNpx.args,
-        ...(options.workspaceRoot ? { cwd: options.workspaceRoot } : {}),
-        env: { ...mcpEnv },
+        env: npxEnv,
       };
     }
   }
@@ -644,8 +732,7 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
   return {
     command: npxCmd,
     args: ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
-    ...(options.workspaceRoot ? { cwd: options.workspaceRoot } : {}),
-    env: { ...mcpEnv },
+    env: npxEnv,
   };
 }
 
@@ -779,11 +866,24 @@ function writeJsonConfig(path: string, json: Record<string, unknown>): void {
 }
 
 function removeCodexMcpSection(content: string, serverName: string): string {
+  // Remove [mcp_servers.serverName] and [mcp_servers.serverName.env] sections
   const blockPattern = new RegExp(
     `\\n?\\[mcp_servers\\.${escapeRegExp(serverName)}(?:\\.[^\\]]+)?\\][^\\[]*`,
     "g"
   );
-  return content.replace(blockPattern, "").trimEnd();
+  let cleaned = content.replace(blockPattern, "").trimEnd();
+
+  // Remove orphaned lines from previous buggy injections — any line that starts with
+  // an array value (["..."]) followed by "enabled = true" and "startup_timeout_sec = 120".
+  // These occur when the TOML args array was written without its section header.
+  // This handles npx entries, npm-script entries, and node-bundled entries.
+  const orphanPattern = new RegExp(
+    `\\n?\\["[^\\]]*\\]\\s*\\n\\s*enabled\\s*=\\s*true\\s*\\n\\s*startup_timeout_sec\\s*=\\s*\\d+`,
+    "g"
+  );
+  cleaned = cleaned.replace(orphanPattern, "").trimEnd();
+
+  return cleaned;
 }
 
 function formatCodexMcpTomlBlock(serverName: string, node: McpServerNode): string {
@@ -853,14 +953,20 @@ function injectIntoConfig(
   const previous = servers[serverName];
 
   // Merge env: start with previous user env, override with new env.
-  // Clean up stale ELECTRON_RUN_AS_NODE when the new command no longer needs it
-  // (e.g. switched from Electron fallback to system Node).
+  // Clean up stale env vars that should not persist across strategy changes.
   const mergedEnv: Record<string, string> = {
     ...(previous?.env ?? {}),
     ...(node.env ?? {}),
   };
+  // Clean up stale ELECTRON_RUN_AS_NODE when the new command no longer needs it
+  // (e.g. switched from Electron fallback to system Node).
   if (!node.env?.ELECTRON_RUN_AS_NODE) {
     delete mergedEnv.ELECTRON_RUN_AS_NODE;
+  }
+  // Clean up stale GRAPHFLOW_WORKSPACE_ROOT when the new config doesn't include it
+  // (e.g. switched from npx with ${workspaceFolder} to node-bundled without cwd).
+  if (!node.env?.GRAPHFLOW_WORKSPACE_ROOT) {
+    delete mergedEnv.GRAPHFLOW_WORKSPACE_ROOT;
   }
 
   servers[serverName] = {
@@ -879,6 +985,48 @@ function injectIntoConfig(
   if (!existed) return "created";
   if (!serverExisted) return "injected";
   return "updated";
+}
+
+/** 从 JSON 配置文件中移除指定 MCP 服务器的配置条目 */
+export function removeMcpEntry(
+  configPath: string,
+  serversKey: McpServersKey,
+  serverName: string
+): boolean {
+  if (!existsSync(configPath)) {
+    return false;
+  }
+  const json = readJsonConfig(configPath);
+  const servers = (json[serversKey] as Record<string, McpServerNode> | undefined) ?? {};
+  if (!servers[serverName]) {
+    return false;
+  }
+  delete servers[serverName];
+  if (Object.keys(servers).length === 0) {
+    delete json[serversKey];
+  } else {
+    json[serversKey] = servers;
+  }
+  writeJsonConfig(configPath, json);
+  return true;
+}
+
+/** 从 Codex TOML 配置文件中移除指定 MCP 服务器的配置条目 */
+export function removeCodexMcpEntry(
+  configPath: string,
+  serverName: string
+): boolean {
+  if (!existsSync(configPath)) {
+    return false;
+  }
+  const content = readFileSync(configPath, "utf8");
+  const existed = new RegExp(`^\\[mcp_servers\\.${escapeRegExp(serverName)}\\]`, "m").test(content);
+  if (!existed) {
+    return false;
+  }
+  const cleaned = removeCodexMcpSection(content, serverName);
+  writeFileSync(configPath, cleaned.length > 0 ? `${cleaned}\n` : "", "utf8");
+  return true;
 }
 
 export function installMcpToDetectedAgents(options: McpInstallOptions): McpInstallResult[] {
@@ -929,6 +1077,74 @@ export function installMcpToDetectedAgents(options: McpInstallOptions): McpInsta
         status: "error",
         message: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  return results;
+}
+
+export interface McpRemoveOptions {
+  /** 仅移除指定 agent 的 MCP 配置（不传则移除所有检测到的 agent） */
+  agentId?: string;
+  serverName?: string;
+}
+
+export interface McpRemoveResult {
+  agentId: string;
+  agentName: string;
+  configPath: string;
+  removed: boolean;
+  message?: string;
+}
+
+/** 从所有检测到的 agent 中移除 GraphFlow MCP 配置 */
+export function uninstallMcpFromDetectedAgents(options?: McpRemoveOptions): McpRemoveResult[] {
+  const profiles = buildAgentProfiles();
+  const detectedIds = new Set(detectInstalledAgents().map((agent) => agent.id));
+  const serverName = options?.serverName ?? "graphflow";
+  const targetAgentId = options?.agentId;
+  const results: McpRemoveResult[] = [];
+
+  for (const profile of profiles) {
+    // 如果指定了 agent，则仅处理该 agent
+    if (targetAgentId && profile.id !== targetAgentId) {
+      continue;
+    }
+    if (!detectedIds.has(profile.id)) {
+      continue;
+    }
+
+    const seen = new Set<string>();
+    for (const userTarget of profile.userTargets) {
+      const key = `${userTarget.configPath}::${userTarget.serversKey}::${userTarget.configFormat ?? "json"}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+
+      try {
+        let removed = false;
+        if (userTarget.configFormat === "codex-toml") {
+          removed = removeCodexMcpEntry(userTarget.configPath, serverName);
+        } else {
+          removed = removeMcpEntry(userTarget.configPath, userTarget.serversKey, serverName);
+        }
+        results.push({
+          agentId: profile.id,
+          agentName: profile.name,
+          configPath: userTarget.configPath,
+          removed,
+          message: removed ? "已移除" : "未找到配置（可能已移除）",
+        });
+      } catch (error) {
+        results.push({
+          agentId: profile.id,
+          agentName: profile.name,
+          configPath: userTarget.configPath,
+          removed: false,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 

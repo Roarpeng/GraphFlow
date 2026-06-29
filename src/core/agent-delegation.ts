@@ -14,6 +14,7 @@ export interface AgentWorkItem {
   prompt: string;
   expectedFormat: "json";
   responseSchema: Record<string, unknown>;
+  optional?: boolean;
 }
 
 export type AgentDelegationMode = "llm" | "agent-delegated" | "heuristic";
@@ -41,6 +42,36 @@ export function buildAgentInsightWorkItems(task: string): AgentWorkItem[] {
     expectedFormat: "json" as const,
     responseSchema: HAT_RESPONSE_SCHEMA,
   }));
+
+  SIX_HATS.forEach((hat, index) => {
+    items.push({
+      id: `why-${index + 1}-${hat.color}`,
+      kind: "five-whys",
+      hat: hat.name,
+      optional: true,
+      prompt: [
+        `Task: ${task}`,
+        "",
+        `[OPTIONAL — only answer if your ${hat.name} observation had certainty < 0.6]`,
+        `You are drilling into your ${hat.name} observation with a 5-Why chain.`,
+        `Focus per step: ${hat.whyFocus}`,
+        `Final convergence: ${hat.whyRootFocus}`,
+        "",
+        "Produce up to 5 Why steps, each a {question, answer}, then the converged rootCause.",
+        "Return ONLY a JSON object:",
+        "{",
+        '  "steps": [{"question": "Why ...?", "answer": "..."}],',
+        '  "rootCause": "the single root cause this chain converges to"',
+        "}",
+        "If the hat's certainty was >= 0.6, skip this item (do not submit).",
+      ].join("\n"),
+      expectedFormat: "json",
+      responseSchema: {
+        steps: "Array<{question:string, answer:string}>",
+        rootCause: "string — the converged root cause",
+      },
+    });
+  });
 
   items.push({
     id: "plan-refinement",
@@ -77,7 +108,9 @@ export function buildAgentDelegationInstructions(
   ];
 
   for (const item of workItems) {
-    lines.push(`- ${item.id} (${item.kind}${item.hat ? ` / ${item.hat}` : ""})`);
+    lines.push(
+      `- ${item.id} (${item.kind}${item.hat ? ` / ${item.hat}` : ""})${item.optional ? " [optional]" : ""}`
+    );
   }
 
   return lines.join("\n");

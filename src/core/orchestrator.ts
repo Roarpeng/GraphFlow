@@ -1,69 +1,49 @@
-import { planTasks, planTasksLlm } from "../agents/planner";
-import { planInsight } from "../agents/insight";
-import { brainstormTaskLlm } from "../agents/brainstormer";
-import { resolveConfig } from "../config/resolve";
-import { hasUsableLlmProvider } from "../config/llm-availability";
-import { applyOpenBmbRuntimeEnv } from "../surfaces/cli/runtime/env";
-import type { GraphClient } from "../graph/client-factory";
-import { logger } from "../utils/logger";
+import { planTasks, planTasksLlm } from "../agents/planner.js";
+import { brainstormTaskLlm } from "../agents/brainstormer.js";
+import { resolveConfig } from "../config/resolve.js";
+import { hasUsableLlmProvider } from "../config/llm-availability.js";
+import { logger } from "../utils/logger.js";
+import { summarizeEpisodeForPrompt } from "../learning/episodic-memory.js";
+import { executeRolePrompt } from "../routing/provider-executor.js";
+import { executeDag } from "./dag-engine.js";
 import {
-  type LayeredContextPackage,
-} from "../graph/context-slicer";
-import { syncGraphAfterRun } from "../hooks/post-run-sync";
-import {
-  findSimilarEpisodes,
-  recordEpisode,
-  summarizeEpisodeForPrompt,
-  type EpisodeRecord,
-} from "../learning/episodic-memory";
-import { applySkillLearning, suggestSkillHints } from "../learning/skill-flywheel";
-import {
-  resolveModelForRole,
-  resolveModelWithFallback,
-  type ProviderName,
-  type ProviderHealthMap,
-} from "../routing/model-router";
-import { executeRolePrompt, type PromptContext } from "../routing/provider-executor";
-import { executeDag } from "./dag-engine";
-import {
-  buildAgentDelegatedPlanInsight,
   summarizeInsightForContext,
   type AgentDelegatedPlanInsight,
-} from "./agent-delegation";
-import { runSimpleTask } from "./state-machine";
-import { triageTask, triageTaskLlm } from "./triage";
-import type { OrchestrationInput, RouteDecision, TaskRunResult, TaskNode, TaskStatus } from "./types";
+} from "./agent-delegation.js";
+import { runSimpleTask } from "./state-machine.js";
+import { triageTaskExplain, triageTaskLlm } from "./triage.js";
+import { recordTriageDecision } from "../learning/triage-telemetry.js";
+import { assignAgentsToTasks, buildAgentAssignments } from "./agent-assignment.js";
+import type { OrchestrationInput, TaskRunResult, TaskNode, OrchestrateOptions } from "./types.js";
 
-export interface OrchestrateOptions {
-  graphClient?: GraphClient;
-  enableAutoGraphSync?: boolean;
-  enableNearLosslessMode?: boolean;
-  nearLosslessQuery?: string;
-  maxContextTokens?: number;
-  layerQuota?: { l1: number; l2: number; l3: number };
-  onContextPackage?: (pkg: LayeredContextPackage) => void;
-  providerHealth?: ProviderHealthMap;
-  providerFallbackChain?: ProviderName[];
-  enableSkillFlywheel?: boolean;
-  skillHintsLimit?: number;
-  enableLlmAgents?: boolean;
-  enableDriftReplan?: boolean;
-  maxReplanRounds?: number;
-  enableGraphContextInPrompt?: boolean;
-  enableEpisodicMemory?: boolean;
-  enableLlmTriage?: boolean;
-  embeddingProvider?: import("../learning/embeddings").EmbeddingProvider;
-  configPath?: string;
-  executionMode?: "bridge" | "llm";
-  /** Enable zero-cost graph-structure compression (edge weights + PageRank). Default true. */
-  enableGraphCompression?: boolean;
-  /** Adaptively size the context token budget from task complexity. Auto-enabled for complex tasks unless false. */
-  enableAdaptiveBudget?: boolean;
-  /** Return module-level RepoMap overview when budget is tight. Default false. */
-  enableRepoMapFallback?: boolean;
-  /** Run Six Hats plan_insight before complex DAG planning. Default true for complex tasks. */
-  enablePlanInsight?: boolean;
-}
+// Re-export OrchestrateOptions from types.ts for backward compatibility
+export type { OrchestrateOptions } from "./types.js";
+
+// Context module
+import {
+  maybeBuildNearLosslessContext,
+  buildPromptContext,
+  appendContextFeedback,
+  maybeBuildSkillHints,
+  maybeRunPlanInsightForComplex,
+} from "./orchestrator-context.js";
+
+// Episode module
+import {
+  maybeFindSimilarEpisodes,
+  maybeSyncGraph,
+  maybeSyncSkillGraph,
+  finalizeEpisode,
+  maybeSeedInitialSkills,
+} from "./orchestrator-episode.js";
+
+// Route module
+import {
+  buildRouteDecisions,
+  decisionToSelection,
+  selectionIfHealthy,
+  appendRouteFeedback,
+} from "./orchestrator-route.js";
 
 export async function orchestrate(
   input: OrchestrationInput,
@@ -89,6 +69,9 @@ async function runOrchestration(
   options?: OrchestrateOptions
 ): Promise<TaskRunResult> {
   logger.info({ task: input.task }, "Orchestration task started");
+  // 预置种子技能（幂等）：在技能飞轮启用时为图写入常见工程技能基线，
+  // 须在构建技能提示之前执行，确保种子技能可被 suggestSkillHints 命中。
+  await maybeSeedInitialSkills(options);
   const retryOptions = input.maxRetries !== undefined ? { maxRetries: input.maxRetries } : {};
   const contextPackage = await maybeBuildNearLosslessContext(input, options);
   const routeDecisions = buildRouteDecisions(
@@ -102,9 +85,28 @@ async function runOrchestration(
   const promptContext = buildPromptContext(contextPackage, skillHints, episodeSummaries, options);
   const promptContextLines = promptContext?.summaryChannel?.length ?? 0;
 
-  let mode = triageTask(input.task);
+  let triageExplanation = triageTaskExplain(input.task);
+  let mode = triageExplanation.decision;
   if (options?.enableLlmTriage) {
-    mode = await triageTaskLlm(input.task, decisionToSelection(routeDecisions.planner), promptContext);
+    const llmDecision = await triageTaskLlm(input.task, decisionToSelection(routeDecisions.planner), promptContext);
+    mode = llmDecision;
+    // LLM triage 路径：保留启发式原因，并标记为 llmBased，用于准确率数据收集
+    triageExplanation = { decision: llmDecision, reason: { ...triageExplanation.reason, llmBased: true } };
+  }
+  // 记录 triage 决策 learning event（任务描述、决策、原因、时间戳），用于后续准确率分析。
+  // 仅在图客户端可用时记录；失败不阻断主流程。
+  let triageId: string | undefined;
+  if (options?.graphClient) {
+    try {
+      triageId = await recordTriageDecision(
+        options.graphClient,
+        input.task,
+        mode,
+        triageExplanation.reason
+      );
+    } catch (error) {
+      logger.warn({ error }, "Triage telemetry recording failed");
+    }
   }
   let currentPlan: TaskNode[] = [];
 
@@ -130,7 +132,7 @@ async function runOrchestration(
     await maybeSyncGraph(input.task, withRoute, options);
     await maybeSyncSkillGraph(input.task, withRoute, options);
     logger.info({ status: withRoute.status, task: input.task }, "Orchestration task finished (simple mode)");
-    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options);
+    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options, triageId);
   }
 
   const plannerSelection = decisionToSelection(routeDecisions.planner);
@@ -177,10 +179,14 @@ async function runOrchestration(
 
   // Bridge mode: package the planned DAG for external agent execution instead of running it
   if (options?.executionMode === "bridge") {
-    const planProjection = plan.map((node) => ({
+    // 多 Agent 协作编排：为每个任务节点标注建议的 agent 专业领域
+    const assignedPlan = assignAgentsToTasks(plan);
+    const agentAssignments = buildAgentAssignments(assignedPlan);
+    const planProjection = assignedPlan.map((node) => ({
       id: node.id,
       description: node.description,
       dependencies: node.dependencies,
+      ...(node.assignedAgent ? { assignedAgent: node.assignedAgent } : {}),
     }));
     const contextStr = promptContext
       ? Object.entries(promptContext)
@@ -212,6 +218,7 @@ async function runOrchestration(
         task: input.task,
         context: `plan=${JSON.stringify(planProjection)}${insightSummary ? `; insight=${insightSummary}` : ""}${contextStr ? `; ${contextStr}` : ""}`,
         retryHints: [],
+        ...(agentAssignments.length > 0 ? { agentAssignments } : {}),
         ...delegatedExtras,
       },
     };
@@ -219,7 +226,7 @@ async function runOrchestration(
     const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
     await maybeSyncSkillGraph(input.task, withRoute, options);
     logger.info({ status: withRoute.status, task: input.task }, "Orchestration task delegated (bridge mode)");
-    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options);
+    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options, triageId);
   }
 
   const runner = async (node: TaskNode): Promise<boolean> => {
@@ -308,7 +315,7 @@ async function runOrchestration(
   await maybeSyncGraph(input.task, withRoute, options);
   await maybeSyncSkillGraph(input.task, withRoute, options);
   logger.info({ status: withRoute.status, task: input.task, rounds: result.rounds }, "Orchestration task completed successfully");
-  return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options);
+  return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options, triageId);
 }
 
 function projectPlan(plan: TaskNode[]): string {
@@ -321,326 +328,10 @@ function projectPlan(plan: TaskNode[]): string {
   );
 }
 
-async function maybeBuildNearLosslessContext(
-  input: OrchestrationInput,
-  options?: OrchestrateOptions
-): Promise<LayeredContextPackage | undefined> {
-  if (!options?.enableNearLosslessMode || !options.graphClient) {
-    return undefined;
-  }
-
-  const query = options.nearLosslessQuery ?? input.task;
-  const maxTokens = options.maxContextTokens ?? 1200;
-  const packageOptions: import("../graph/context-slicer").LayeredPackageOptions = {
-    ...(options.layerQuota ? { layerQuota: options.layerQuota } : {}),
-    ...(options.embeddingProvider ? { embeddingProvider: options.embeddingProvider, enableVectorRecall: true } : {}),
-    // Graph-structure compression is zero-cost; enable by default unless explicitly disabled.
-    enableGraphCompression: options.enableGraphCompression !== false,
-  };
-
-  // Adaptive budget: derive task complexity from triage and let the package
-  // estimator resize the token budget. Auto-enable for complex tasks unless
-  // explicitly disabled via enableAdaptiveBudget: false.
-  const taskMode = triageTask(input.task);
-  const enableAdaptiveBudget =
-    options.enableAdaptiveBudget !== false &&
-    (options.enableAdaptiveBudget === true || taskMode === "complex");
-  if (enableAdaptiveBudget) {
-    packageOptions.taskMode = taskMode;
-  }
-
-  // RepoMap overview fallback for tight budgets (opt-in).
-  if (options.enableRepoMapFallback) {
-    packageOptions.enableRepoMapFallback = true;
-  }
-
-  const { buildEnhancedContextPackage } = await import("../graph/context-slicer.js");
-  const pkg = await buildEnhancedContextPackage(
-    options.graphClient,
-    query,
-    input.task,
-    maxTokens,
-    packageOptions
-  );
-
-  options.onContextPackage?.(pkg);
-  return pkg;
-}
-
-function appendContextFeedback(
-  run: TaskRunResult,
-  contextPackage?: LayeredContextPackage,
-  promptContextLines = 0,
-  options?: OrchestrateOptions
-): TaskRunResult {
-  let next = run;
-  if (contextPackage) {
-    next = {
-      ...next,
-      feedback:
-        `${next.feedback}; context(summary=${contextPackage.summaryChannel.length}, ` +
-        `anchors=${contextPackage.anchorChannel.length}, tokens=${contextPackage.tokenEstimate})`,
-    };
-  }
-  if (options?.enableGraphContextInPrompt) {
-    next = {
-      ...next,
-      feedback: `${next.feedback}; promptCtx(lines=${promptContextLines})`,
-      promptContextLines,
-    };
-  }
-  return next;
-}
-
-function buildPromptContext(
-  contextPackage: LayeredContextPackage | undefined,
-  skillHints: string[],
-  episodeSummaries: string[],
-  options?: OrchestrateOptions
-): PromptContext | undefined {
-  const includeGraph = options?.enableGraphContextInPrompt === true && contextPackage !== undefined;
-  const includeEpisodes = options?.enableEpisodicMemory === true && episodeSummaries.length > 0;
-  if (!includeGraph && !includeEpisodes) {
-    return undefined;
-  }
-  const ctx: PromptContext = {};
-  if (includeGraph && contextPackage && contextPackage.summaryChannel.length > 0) {
-    ctx.summaryChannel = contextPackage.summaryChannel;
-  }
-  if (includeGraph && skillHints.length > 0) {
-    ctx.skillHints = skillHints;
-  }
-  if (includeEpisodes) {
-    ctx.extraInstructions = [...episodeSummaries];
-  }
-  if (!ctx.summaryChannel && !ctx.skillHints && !ctx.extraInstructions) {
-    return undefined;
-  }
-  return ctx;
-}
-
-function appendRouteFeedback(
-  run: TaskRunResult,
-  routeDecisions: { planner: RouteDecision; worker: RouteDecision; validator: RouteDecision },
-  skillHints: string[]
-): TaskRunResult {
-  return {
-    ...run,
-    routeDecisions: [routeDecisions.planner, routeDecisions.worker, routeDecisions.validator],
-    feedback:
-      `${run.feedback}; routes(planner=${routeDecisions.planner.provider}/${routeDecisions.planner.model}` +
-      `,worker=${routeDecisions.worker.provider}/${routeDecisions.worker.model}` +
-      `,validator=${routeDecisions.validator.provider}/${routeDecisions.validator.model})` +
-      `${skillHints.length > 0 ? `; skills(hints=${skillHints.join("|")})` : ""}`,
-  };
-}
-
-function selectionIfHealthy(
-  selection: ReturnType<typeof decisionToSelection>,
-  providerHealth?: ProviderHealthMap
-): ReturnType<typeof decisionToSelection> | undefined {
-  if (!providerHealth) {
-    return selection;
-  }
-  return providerHealth[selection.provider as ProviderName] ? selection : undefined;
-}
-
-function buildRouteDecisions(
-  providerHealth?: ProviderHealthMap,
-  providerFallbackChain?: ProviderName[],
-  configPath?: string
-): {
-  planner: RouteDecision;
-  worker: RouteDecision;
-  validator: RouteDecision;
-} {
-  const resolve = (role: "planner" | "worker" | "validator") =>
-    providerHealth
-      ? resolveModelWithFallback(role, providerHealth, providerFallbackChain, configPath)
-      : resolveModelForRole(role, configPath);
-
-  return {
-    planner: selectionToDecision("planner", resolve("planner")),
-    worker: selectionToDecision("worker", resolve("worker")),
-    validator: selectionToDecision("validator", resolve("validator")),
-  };
-}
-
-function selectionToDecision(role: "planner" | "worker" | "validator", selection: {
-  provider: string;
-  model: string;
-  tier: "smart" | "economy";
-  fallbackApplied: boolean;
-}): RouteDecision {
-  return {
-    role,
-    provider: selection.provider,
-    model: selection.model,
-    tier: selection.tier,
-    fallbackApplied: selection.fallbackApplied,
-  };
-}
-
-function decisionToSelection(decision: RouteDecision): {
-  provider: "openai" | "anthropic" | "bailian" | "doubao";
-  model: string;
-  tier: "smart" | "economy";
-  fallbackApplied: boolean;
-} {
-  return {
-    provider: decision.provider as "openai" | "anthropic" | "bailian" | "doubao",
-    model: decision.model,
-    tier: decision.tier,
-    fallbackApplied: decision.fallbackApplied,
-  };
-}
-
 function shorten(text: string): string {
   if (text.length <= 60) {
     return text;
   }
 
   return `${text.slice(0, 57)}...`;
-}
-
-async function maybeSyncGraph(
-  task: string,
-  run: TaskRunResult,
-  options?: OrchestrateOptions
-): Promise<void> {
-  if (!options?.graphClient || !options.enableAutoGraphSync) {
-    return;
-  }
-
-  if (run.status !== "COMPLETED") {
-    return;
-  }
-
-  await syncGraphAfterRun(
-    options.graphClient,
-    [
-      {
-        filePath: "runtime:task",
-        summary: `Task completed: ${task}`,
-      },
-    ],
-    options.configPath
-  );
-}
-
-async function maybeBuildSkillHints(task: string, options?: OrchestrateOptions): Promise<string[]> {
-  if (!options?.enableSkillFlywheel || !options.graphClient) {
-    return [];
-  }
-
-  return suggestSkillHints(options.graphClient, task, options.skillHintsLimit ?? 3);
-}
-
-async function maybeSyncSkillGraph(
-  task: string,
-  run: TaskRunResult,
-  options?: OrchestrateOptions
-): Promise<void> {
-  if (!options?.enableSkillFlywheel || !options.graphClient) {
-    return;
-  }
-  // Bridge mode: task is delegated to an external agent whose outcome is unknown.
-  // Skip skill score updates until the external agent reports back via
-  // updateEpisodeOutcome + applySkillLearning. Otherwise every delegated task
-  // would be counted as a failure, permanently sinking skill scores to -20.
-  if (run.status === "DELEGATED") {
-    return;
-  }
-
-  await applySkillLearning(options.graphClient, task, run);
-}
-
-async function maybeFindSimilarEpisodes(
-  task: string,
-  options?: OrchestrateOptions
-): Promise<EpisodeRecord[]> {
-  if (!options?.enableEpisodicMemory || !options.graphClient) {
-    return [];
-  }
-  return findSimilarEpisodes(options.graphClient, task, 3);
-}
-
-function statusToOutcome(status: TaskStatus): "pass" | "fail" | "human_review" | "pending" {
-  if (status === "COMPLETED") return "pass";
-  if (status === "HUMAN_REVIEW_REQUIRED") return "human_review";
-  if (status === "DELEGATED") return "pending";
-  return "fail";
-}
-
-async function finalizeEpisode(
-  task: string,
-  plan: TaskNode[],
-  run: TaskRunResult,
-  similar: EpisodeRecord[],
-  skillHints: string[],
-  options?: OrchestrateOptions
-): Promise<TaskRunResult> {
-  if (!options?.enableEpisodicMemory || !options.graphClient) {
-    return run;
-  }
-
-  const decisions: string[] = [];
-  for (const rd of run.routeDecisions ?? []) {
-    decisions.push(`route ${rd.role}: ${rd.provider}/${rd.model}`);
-  }
-  for (const hint of skillHints.slice(0, 3)) {
-    decisions.push(`skill: ${hint}`);
-  }
-  const dedupedDecisions = Array.from(new Set(decisions)).slice(0, 6);
-
-  const planProjection = plan.map((node) => ({ id: node.id, description: node.description }));
-  const recordInput: Parameters<typeof recordEpisode>[1] = {
-    task,
-    plan: planProjection,
-    outcome: statusToOutcome(run.status),
-    keyDecisions: dedupedDecisions,
-    lessons: [],
-    attempts: run.attempts,
-    ...(run.executionRounds ? { executionRounds: run.executionRounds } : {}),
-    ...(run.feedback !== undefined ? { runFeedback: run.feedback } : {}),
-  };
-
-  const episode = await recordEpisode(options.graphClient, recordInput);
-
-  const similarSummaries = similar.map((ep) => ({
-    id: ep.id,
-    task: ep.task,
-    score: ep.outcome === "pass" ? 1 : ep.outcome === "fail" ? -1 : 0,
-  }));
-
-  return {
-    ...run,
-    episodeId: episode.id,
-    similarEpisodes: similarSummaries,
-  };
-}
-
-async function maybeRunPlanInsightForComplex(
-  task: string,
-  options?: OrchestrateOptions
-): Promise<AgentDelegatedPlanInsight | undefined> {
-  try {
-    const config = resolveConfig(options?.configPath);
-
-    if (!hasUsableLlmProvider(config)) {
-      return buildAgentDelegatedPlanInsight(task);
-    }
-
-    applyOpenBmbRuntimeEnv(config);
-    const selection = resolveModelForRole("planner");
-    const { insight, plan } = await planInsight(task, { selection });
-    return {
-      mode: "llm",
-      insight,
-      plan,
-    };
-  } catch (error) {
-    logger.warn({ error, task }, "Plan insight failed, using agent-delegated heuristic");
-    return buildAgentDelegatedPlanInsight(task);
-  }
 }

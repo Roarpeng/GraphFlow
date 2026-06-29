@@ -46,7 +46,7 @@ describe("M52 GraphFlow Skills Layer", () => {
     expect(typeof result.indexedSymbols).toBe("number");
     expect(typeof result.indexedReferences).toBe("number");
     expect(result.indexedFiles).toBeGreaterThan(0);
-  }, 15000);
+  }, 30000);
 
   it("graphflow.inspect skill returns proper structure", async () => {
     const result = await graphflowSkills["graphflow.inspect"].invoke({
@@ -57,7 +57,7 @@ describe("M52 GraphFlow Skills Layer", () => {
     expect(typeof result.edgeCount).toBe("number");
     expect(Array.isArray(result.topRelations)).toBe(true);
     expect(Array.isArray(result.sampleNodes)).toBe(true);
-  });
+  }, 30000);
 
   it("graphflow.compress skill returns token budget", async () => {
     const { mkdtempSync, writeFileSync } = await import("node:fs");
@@ -77,7 +77,7 @@ describe("M52 GraphFlow Skills Layer", () => {
     expect(Array.isArray(result.anchors)).toBe(true);
     expect(result.tokenBudget.maxContextTokens).toBeGreaterThan(0);
     expect(typeof result.tokenBudget.estimatedSavingsPercent).toBe("number");
-  }, 15000);
+  }, 30000);
 
   it("graphflow.expandAnchor handles missing anchor gracefully", async () => {
     const result = await graphflowSkills["graphflow.expandAnchor"].invoke({

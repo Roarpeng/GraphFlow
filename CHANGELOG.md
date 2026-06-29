@@ -4,6 +4,29 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-28
+
+### Added
+
+- **Agent Skill 安装**：`installAllSkills` 写入 Cursor / Claude Code / Codex 的 `skills/graphflow/SKILL.md`（非保留目录 `skills-cursor`）。
+- **`graphflow doctor`**：自检各 agent 的 MCP 注册、指令文件与 Agent Skill 状态。
+- **委托模式 5-Why**：`agentWorkItems` 新增 6 个可选 `five-whys` 项；merge 解析 `whyChain` 并填充 `rootCauses`。
+- **Token benchmark**：`benchmarks/run-token-benchmark.ts` 与 `npm run benchmark`。
+- **竞品分析**：`docs/comparison.md`。
+- **测试**：`tests/m17b-agent-instructions.test.ts`（Claude MCP 路径 + 指令块安装）。
+
+### Changed
+
+- **启发式 `planTasks`**：支持中文连词拆分；单句任务生成分析→实现→测试三阶段 DAG。
+- **`refinedTaskStatement`**：无 5-Why 根因时回退蓝帽综合，避免误显示「待探索」。
+- **MCP 安装路径**：Claude Code → `~/.claude.json`；Gemini → `~/.gemini/settings.json`。
+- **Windsurf / Codex / Gemini** 全局指令块（append-with-markers 安全写入）。
+- **README** 快速上手与竞品对比表更新。
+
+### Fixed
+
+- Cursor 用户此前只能看到 Rule、看不到 Skill 的问题（现同时安装 Rule + Skill）。
+
 ## [1.0.9] - 2026-06-26
 
 ### Added
