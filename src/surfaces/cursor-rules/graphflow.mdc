@@ -1,0 +1,131 @@
+---
+description: Use GraphFlow first for token-efficient repo context, planning, and orchestration.
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# GraphFlow Token-First Rule
+
+GraphFlow is a graph-based context and planning service backed by a persistent MCP server. It turns codebases into queryable knowledge graphs, delivering token-efficient compressed context, task planning, and orchestration.
+
+Before broad code exploration, implementation, debugging, review, planning, or architecture questions:
+
+1. Call `graphflow_preview_context` with the user's task/query.
+2. Use the returned `summary`, `anchors`, `refillPreview`, and `tokenBudget` as the first context source.
+3. Read full files only when:
+   - GraphFlow anchors point to that file/symbol,
+   - the compressed context is insufficient,
+   - or exact edits require the file body.
+4. For multi-step or ambiguous work, call `graphflow_plan` before implementation.
+5. For graph freshness after project changes, call `graphflow_index`.
+6. Report token budget when available:
+   - estimated raw tokens,
+   - compressed tokens,
+   - estimated savings percent,
+   - max context token budget.
+
+Do not scan the whole repository, recursively inspect many files, or read large files before trying GraphFlow context.
+
+## Tool Inventory (18 MCP Tools)
+
+### Core Context Tools (Highest Frequency)
+
+| Tool | Purpose | Call Frequency |
+|------|---------|---------------|
+| `graphflow_preview_context` | Compress task context with token budget | **Highest** - default first step |
+| `graphflow_expand_anchor` | Expand a single anchor to full content | **High** - dive deeper into specific items |
+
+### Planning Tools (High Frequency)
+
+| Tool | Purpose | Call Frequency |
+|------|---------|---------------|
+| `graphflow_plan` | Multi-step task decomposition & DAG | High - before complex work |
+| `graphflow_plan_insight` | Six Thinking Hats + 5-Why deep analysis | Medium - ambiguous/high-stakes tasks |
+| `graphflow_run` | Plan + context package (bridge mode) | Medium - full task packaging |
+| `graphflow_report_outcome` | Report bridge-mode execution outcome back | Medium - close the learning loop |
+
+### Graph Management Tools (Medium Frequency)
+
+| Tool | Purpose | Call Frequency |
+|------|---------|---------------|
+| `graphflow_index` | Incremental workspace re-index | Medium - after file changes |
+| `graphflow_index_file` | Single file incremental index | Medium-High - after saving a file |
+| `graphflow_rebuild` | Clear cache + full re-index | Low - when graph is stale/corrupted |
+| `graphflow_inspect_graph` | Graph stats & sample nodes/edges | Low - check graph health |
+| `graphflow_enrich_graph` | Semantic enrichment of symbols | Rare - LLM-powered enrichment |
+| `graphflow_model_download` | Download local compression model | Rare - offline setup |
+
+### Collaboration & Insights Tools (Low Frequency)
+
+| Tool | Purpose | Call Frequency |
+|------|---------|---------------|
+| `graphflow_export_artifact` | Export graph to portable artifact | Low - team sharing |
+| `graphflow_import_artifact` | Import graph artifact | Low - skip full index on new machine |
+| `graphflow_skill_insights` | Learned skill patterns | Low - leverage prior learning |
+| `graphflow_stats` | Cumulative token savings stats | Low - ROI tracking |
+| `graphflow_metrics` | Prometheus-compatible metrics | Low - observability |
+| `graphflow_diagnose` | Provider health & model routing | Rare - config issues |
+
+## Standard Workflows
+
+### Workflow 1: Context First (90% of tasks)
+
+**Use when:** Answering code questions, exploring codebase, understanding modules
+
+```
+Step 1: graphflow_preview_context(query: "<your question>")
+Step 2: Read summary + anchors as primary context
+Step 3: Expand specific anchors with graphflow_expand_anchor when needed
+Step 4: Read full files only when exact edits required
+```
+
+### Workflow 2: Plan Before Coding (complex tasks)
+
+**Use when:** Multi-step changes, refactors, features with unclear scope
+
+```
+Step 1: graphflow_preview_context(query: "<task>")
+Step 2: graphflow_plan(task: "<task description>")
+Step 3: Review plan steps and dependencies
+Step 4: Execute step by step, using GraphFlow context for each step
+Step 5: graphflow_index() after major changes
+```
+
+### Workflow 3: Deep Analysis (complex/ambiguous tasks)
+
+**Use when:** High-stakes changes, root-cause analysis, ambiguous requirements
+
+```
+Step 1: graphflow_preview_context(query: "<task>")
+Step 2: graphflow_plan_insight(task: "<task>")
+Step 3: Review analysis and apply findings
+```
+
+## Bridge-mode outcome reporting
+
+After `graphflow_run`, the external agent **must** call `graphflow_report_outcome` to close the skill flywheel loop:
+
+- Pass `episodeId` from the run result, a `success` boolean, and optional `lessons`.
+- Do this after executing the work described in the returned `executionDescriptor`, whether the task succeeded or failed.
+- When the run returns `agentWorkItems`, answer each prompt with your model and call `graphflow_submit_insight` once per item (before or with `graphflow_report_outcome`).
+
+CLI fallback:
+
+```bash
+graphflow --json outcome report <episodeId> <success>
+```
+
+If MCP is unavailable, use the CLI fallback and always request JSON output:
+
+```bash
+graphflow --json context preview "<query>"
+graphflow --json plan "<task>"
+graphflow --json graph inspect
+graphflow --json skill insights
+graphflow --json route diagnose
+```
+
+Treat GraphFlow outputs as structured machine-readable data, not prose.
+
+When the user asks about saving token usage, optimizing context, repo understanding, or learning from Graphify, prioritize GraphFlow context compression over ordinary file search.

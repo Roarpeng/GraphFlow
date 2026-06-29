@@ -16,12 +16,17 @@ function toNode(id: string, description: string, dependencies: string[]): TaskNo
 
 export function planTasks(task: string, skillHints?: string[]): TaskNode[] {
   const parts = task
-    .split(/\band\b|,|;/i)
+    .split(/\band\b|,|;|并且|以及|然后|接着|同时|再|、|，|；|。/i)
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
 
   if (parts.length <= 1) {
-    return [toNode("task-1", withSkillHints(task.trim(), skillHints), [])];
+    const baseTask = task.trim();
+    return [
+      toNode("task-1", withSkillHints(`分析与设计: ${baseTask}`, skillHints), []),
+      toNode("task-2", withSkillHints(`实现: ${baseTask}`, skillHints), ["task-1"]),
+      toNode("task-3", withSkillHints(`测试与验证: ${baseTask}`, skillHints), ["task-2"]),
+    ];
   }
 
   const parallelTasks = parts.map((part, index) =>

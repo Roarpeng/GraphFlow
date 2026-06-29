@@ -1,4 +1,10 @@
-import { SIX_HATS, type SixHatsInsight, type WhyChainSection } from "../agents/insight";
+import {
+  SIX_HATS,
+  type FiveWhyResult,
+  type SixHatsInsight,
+  type WhyChainSection,
+  type WhyStep,
+} from "../agents/insight";
 import {
   buildAgentInsightWorkItems,
   buildHeuristicPlanFromInsight,
@@ -95,16 +101,51 @@ function readHatFields(parsed: Record<string, unknown>): {
   return { observation, certainty, criticalInsight };
 }
 
+function parseWhyChain(
+  parsed: Record<string, unknown>,
+  observation: string
+): FiveWhyResult | null {
+  const rawSteps = parsed.steps;
+  if (!Array.isArray(rawSteps) || rawSteps.length === 0) {
+    return null;
+  }
+
+  const steps: WhyStep[] = rawSteps.slice(0, 5).map((raw, i) => {
+    const step = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    return {
+      level: (i + 1) as 1 | 2 | 3 | 4 | 5,
+      question: String(step.question ?? ""),
+      answer: String(step.answer ?? ""),
+      certainty: Math.min(0.95, 0.3 + (i + 1) * 0.13),
+    };
+  });
+
+  const lastAnswer = steps[steps.length - 1]?.answer ?? "";
+  const rootCause =
+    typeof parsed.rootCause === "string" && parsed.rootCause.trim()
+      ? parsed.rootCause.trim()
+      : lastAnswer || observation;
+
+  return {
+    initialObservation: observation,
+    certainty: steps[0]?.certainty ?? 0.5,
+    steps,
+    rootCause,
+  };
+}
+
 function buildRefinedStatement(task: string, hatResults: WhyChainSection[]): string {
   const rootCauses = hatResults
     .filter((hat) => hat.whyChain !== null)
     .map((hat) => hat.whyChain!.rootCause)
     .join("; ");
+  const blueSynthesis = hatResults.find((h) => h.hat.color === "blue")?.criticalInsight ?? "";
   const value = hatResults.find((hat) => hat.hat.color === "yellow")?.observation ?? "";
-  if (!rootCauses && !value) {
+  if (!rootCauses && !blueSynthesis && !value) {
     return task;
   }
-  return `核心问题: ${rootCauses || "待探索"} | 核心价值: ${value || "待发现"}`;
+  const coreProblem = rootCauses || blueSynthesis || "待探索";
+  return `核心问题: ${coreProblem} | 核心价值: ${value || "待发现"}`;
 }
 
 function parsePlanItems(parsed: Record<string, unknown>): TaskNode[] {
@@ -144,29 +185,33 @@ export function mergeAgentInsights(
   task: string,
   records: AgentInsightRecord[]
 ): MergeAgentInsightsResult {
-  const expectedIds = buildAgentInsightWorkItems(task).map((item) => item.id);
+  const allItems = buildAgentInsightWorkItems(task);
+  const requiredIds = allItems.filter((i) => !i.optional).map((i) => i.id);
   const byWorkItem = new Map<string, AgentInsightRecord>();
   for (const record of records) {
     byWorkItem.set(record.workItemId, record);
   }
 
-  const submittedIds = expectedIds.filter((id) => byWorkItem.has(id));
-  const missing = expectedIds.filter((id) => !byWorkItem.has(id));
+  const submittedIds = requiredIds.filter((id) => byWorkItem.has(id));
+  const missing = requiredIds.filter((id) => !byWorkItem.has(id));
   const complete = missing.length === 0;
 
   const hatResults: WhyChainSection[] = [];
-  for (const hat of SIX_HATS) {
-    const workItemId = `hat-${SIX_HATS.indexOf(hat) + 1}-${hat.color}`;
+  for (let index = 0; index < SIX_HATS.length; index++) {
+    const hat = SIX_HATS[index]!;
+    const workItemId = `hat-${index + 1}-${hat.color}`;
     const record = byWorkItem.get(workItemId);
     if (!record) {
       continue;
     }
     const fields = readHatFields(record.parsed);
+    const whyRecord = byWorkItem.get(`why-${index + 1}-${hat.color}`);
+    const whyChain = whyRecord ? parseWhyChain(whyRecord.parsed, fields.observation) : null;
     hatResults.push({
       hat,
       observation: fields.observation,
       certainty: fields.certainty,
-      whyChain: null,
+      whyChain,
       criticalInsight: fields.criticalInsight,
     });
   }

@@ -129,7 +129,10 @@ describe("M17 release readiness", () => {
         "utf8"
       );
 
-      await expect(runTask("force a failure", configPath)).rejects.toThrow();
+      // orchestrator 顶层错误边界现在将未捕获异常收敛为 HUMAN_REVIEW_REQUIRED 状态，
+      // 不再裸抛给调用方（见 CHANGELOG v1.0.0）
+      const output = await runTask("force a failure", configPath);
+      expect(output).toContain("HUMAN_REVIEW_REQUIRED");
 
       const lines = readFileSync(eventsPath, "utf8")
         .split(/\r?\n/)

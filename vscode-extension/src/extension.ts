@@ -471,6 +471,9 @@ async function bootstrapExtension(
 
   await runMcpBootstrap(context, workspaceRoot, output, { forceNotify: isFreshInstall, isFreshInstall });
 
+  // MCP 安装成功后，也安装 Trae Skill / Cursor Rules / Claude Code CLAUDE.md
+  await installSkillsFromExtension(context, output);
+
   if (isFreshInstall) {
     await context.globalState.update(MCP_INSTALL_VERSION_KEY, extensionVersion);
   }
@@ -590,6 +593,60 @@ async function runMcpBootstrap(
       vscode.window.showErrorMessage(`GraphFlow MCP 自动安装失败: ${text}`);
     }
     return undefined;
+  }
+}
+
+/**
+ * 在 VS Code 扩展激活时安装 Trae Skill / Cursor Rules / Claude Code CLAUDE.md。
+ * 通过 vendor 运行时动态加载 skill-installer 模块，所有失败静默处理。
+ */
+async function installSkillsFromExtension(
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel
+): Promise<void> {
+  try {
+    const extensionPath = context.extensionPath;
+    const bundledRuntimeRoot = join(extensionPath, "vendor", "graphflow");
+
+    // 动态加载 vendor 中的 skill-installer 模块
+    const installerPath = join(bundledRuntimeRoot, "dist", "integrations", "skill-installer.js");
+    let installer: typeof import("../../src/integrations/skill-installer") | undefined;
+
+    try {
+      const loaded = await import(pathToFileURL(installerPath).toString());
+      installer = loaded as typeof installer;
+    } catch {
+      // vendor 中没有 skill-installer（构建尚未包含），跳过
+      output.appendLine("[GraphFlow] Skill installer module not found in vendor, skipping skill installation.");
+      return;
+    }
+
+    if (typeof installer?.installAllSkills !== "function") {
+      output.appendLine("[GraphFlow] installAllSkills function not found in skill-installer module.");
+      return;
+    }
+
+    const summary = installer.installAllSkills(bundledRuntimeRoot, (msg) => {
+      output.appendLine(`[GraphFlow] ${msg}`);
+    });
+
+    // 汇总日志
+    const changed = (list?: Array<{ status: string }>): number =>
+      (list ?? []).filter((r) => r.status === "created" || r.status === "updated").length;
+    const totalCount =
+      changed(summary.traeSkills) +
+      changed(summary.cursorRules) +
+      changed(summary.claudeMd) +
+      changed(summary.agentInstructions) +
+      changed(summary.agentSkills);
+
+    if (totalCount > 0) {
+      output.appendLine(`[GraphFlow] Skill/Rules 安装完成：${totalCount} 个文件已创建或更新。`);
+    }
+  } catch (err) {
+    // 静默处理所有异常，不影响扩展正常使用
+    const text = err instanceof Error ? err.message : String(err);
+    output.appendLine(`[GraphFlow] Skill installation skipped: ${text}`);
   }
 }
 

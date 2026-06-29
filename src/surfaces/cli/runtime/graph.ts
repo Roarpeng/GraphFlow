@@ -664,6 +664,52 @@ export async function importArtifact(
   return importGraphArtifact(config, graphClient, inputPath);
 }
 
+/**
+ * 导出所有 Skill 类型节点为 JSON 技能包。
+ *
+ * @param configPath 可选配置路径
+ * @param outputPath 输出文件路径（默认 graphflow-out/skills.json）
+ */
+export async function exportSkillPackageRuntime(
+  configPath?: string,
+  outputPath?: string
+): Promise<{ path: string; skillCount: number; bytes: number }> {
+  const config = resolveConfig(configPath);
+  applyOpenBmbRuntimeEnv(config);
+  const graphClient = createGraphClient(config);
+  const { exportSkillPackage } = await import("../../../learning/skill-package.js");
+  const root = config.graphPolicy.workspaceRoot ?? process.cwd();
+  const targetPath = outputPath
+    ? (outputPath.startsWith("/") || /^[A-Za-z]:/.test(outputPath)
+      ? outputPath
+      : join(root, outputPath))
+    : join(root, "graphflow-out", "skills.json");
+  return exportSkillPackage(graphClient, targetPath);
+}
+
+/**
+ * 导入技能包，跳过已存在的技能。
+ *
+ * @param configPath 可选配置路径
+ * @param inputPath 输入文件路径（默认 graphflow-out/skills.json）
+ */
+export async function importSkillPackageRuntime(
+  configPath?: string,
+  inputPath?: string
+): Promise<{ path: string; imported: number; skipped: number; total: number }> {
+  const config = resolveConfig(configPath);
+  applyOpenBmbRuntimeEnv(config);
+  const graphClient = createGraphClient(config);
+  const { importSkillPackage } = await import("../../../learning/skill-package.js");
+  const root = config.graphPolicy.workspaceRoot ?? process.cwd();
+  const sourcePath = inputPath
+    ? (inputPath.startsWith("/") || /^[A-Za-z]:/.test(inputPath)
+      ? inputPath
+      : join(root, inputPath))
+    : join(root, "graphflow-out", "skills.json");
+  return importSkillPackage(graphClient, sourcePath);
+}
+
 export function getTokenSavingsStats(configPath?: string, rootDir?: string): {
   totalRuns: number;
   totalRawTokens: number;

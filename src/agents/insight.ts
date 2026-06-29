@@ -429,7 +429,7 @@ async function applyFiveWhys(
 }
 
 function buildCriticalInsight(
-  hat: HatDefinition,
+  _hat: HatDefinition,
   parsed: HatResponse,
   whyChain: FiveWhyResult | null
 ): string {
@@ -447,11 +447,13 @@ function buildRefinedStatement(task: string, hatResults: WhyChainSection[]): str
     .filter((h) => h.whyChain !== null)
     .map((h) => h.whyChain!.rootCause)
     .join("; ");
+  const blueSynthesis = hatResults.find((h) => h.hat.color === "blue")?.criticalInsight ?? "";
   const value = hatResults.find((h) => h.hat.color === "yellow")?.observation ?? "";
-  if (!rootCauses && !value) {
+  if (!rootCauses && !blueSynthesis && !value) {
     return task;
   }
-  return `核心问题: ${rootCauses || "待探索"} | 核心价值: ${value || "待发现"}`;
+  const coreProblem = rootCauses || blueSynthesis || "待探索";
+  return `核心问题: ${coreProblem} | 核心价值: ${value || "待发现"}`;
 }
 
 /** === Plan Generation from Insight === */

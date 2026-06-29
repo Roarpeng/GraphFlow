@@ -16,15 +16,48 @@ const COMPLEX_HINTS = [
   "and",
 ];
 
-export function triageTask(task: string): TaskComplexity {
+/** triage 决策的原因说明，用于准确率数据收集与启发式后续优化 */
+export interface TriageReason {
+  /** 命中的复杂度关键词（来自 COMPLEX_HINTS） */
+  matchedKeywords: string[];
+  /** 任务文本长度 */
+  taskLength: number;
+  /** 触发 complex 的判定来源 */
+  triggeredBy: "length" | "keywords" | "both" | "default";
+  /** 是否经由 LLM triage 得出（heuristic 路径为 false/undefined） */
+  llmBased?: boolean;
+}
+
+export interface TriageExplanation {
+  decision: TaskComplexity;
+  reason: TriageReason;
+}
+
+/**
+ * 带原因说明的 triage 启发式判定。
+ * 既返回 simple/complex 决策，也返回匹配到的关键词、任务长度与触发来源，
+ * 供 triage 准确率数据收集使用。
+ */
+export function triageTaskExplain(task: string): TriageExplanation {
   const normalized = task.toLowerCase();
-  const hitCount = COMPLEX_HINTS.filter((hint) => normalized.includes(hint)).length;
+  const matchedKeywords = COMPLEX_HINTS.filter((hint) => normalized.includes(hint));
+  const longEnough = task.length > 80;
+  const keywordHit = matchedKeywords.length >= 2;
+  const isComplex = longEnough || keywordHit;
 
-  if (task.length > 80 || hitCount >= 2) {
-    return "complex";
-  }
+  let triggeredBy: TriageReason["triggeredBy"] = "default";
+  if (longEnough && keywordHit) triggeredBy = "both";
+  else if (longEnough) triggeredBy = "length";
+  else if (keywordHit) triggeredBy = "keywords";
 
-  return "simple";
+  return {
+    decision: isComplex ? "complex" : "simple",
+    reason: { matchedKeywords, taskLength: task.length, triggeredBy },
+  };
+}
+
+export function triageTask(task: string): TaskComplexity {
+  return triageTaskExplain(task).decision;
 }
 
 export async function triageTaskLlm(
