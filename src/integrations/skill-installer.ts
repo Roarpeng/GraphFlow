@@ -451,7 +451,7 @@ function getAgentSkillTargets(): Array<{
  * （Cursor / Claude Code / Codex 的 `skills/graphflow/SKILL.md`）。
  * SKILL.md 已带合法的 `name: graphflow` frontmatter，可被 Cursor 直接识别。
  */
-export function installAgentSkills(vendorRuntimeRoot?: string): SkillInstallResult[] {
+export function installAgentSkills(vendorRuntimeRoot?: string, workspaceRoot?: string): SkillInstallResult[] {
   const results: SkillInstallResult[] = [];
   const skillSourceDir = resolveSkillSourcePath(vendorRuntimeRoot);
 
@@ -465,15 +465,19 @@ export function installAgentSkills(vendorRuntimeRoot?: string): SkillInstallResu
   }
 
   const sourceSkillFile = join(skillSourceDir, "SKILL.md");
+  let allFailed = true;
+  let hasDetected = false;
 
   for (const target of getAgentSkillTargets()) {
     if (!existsSync(target.markerDir)) {
-      continue; // 未检测到该 agent，跳过
+      continue;
     }
+    hasDetected = true;
     try {
       const destDir = join(target.skillsRoot, "graphflow");
       const result = installFile(sourceSkillFile, destDir, "SKILL.md");
       results.push({ target: target.agent, status: result.status, message: result.message });
+      allFailed = false;
     } catch (error) {
       results.push({
         target: target.agent,
@@ -483,7 +487,25 @@ export function installAgentSkills(vendorRuntimeRoot?: string): SkillInstallResu
     }
   }
 
-  if (results.length === 0) {
+  if (allFailed && workspaceRoot) {
+    try {
+      const workspaceSkillDir = join(workspaceRoot, ".graphflow", "skills", "graphflow");
+      const wsResult = installFile(sourceSkillFile, workspaceSkillDir, "SKILL.md");
+      results.push({
+        target: `Workspace (${workspaceRoot})`,
+        status: wsResult.status,
+        message: wsResult.message,
+      });
+    } catch (error) {
+      results.push({
+        target: `Workspace (${workspaceRoot})`,
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (results.length === 0 && !hasDetected) {
     results.push({
       target: "Agent skills",
       status: "skipped",
@@ -508,7 +530,7 @@ export function getAgentSkillStatus(): AgentInstructionStatus[] {
 /**
  * 安装 Trae Skill（SKILL.md）到所有检测到的 Trae 用户目录。
  */
-export function installTraeSkills(vendorRuntimeRoot?: string): SkillInstallResult[] {
+export function installTraeSkills(vendorRuntimeRoot?: string, workspaceRoot?: string): SkillInstallResult[] {
   const results: SkillInstallResult[] = [];
   const skillSourceDir = resolveSkillSourcePath(vendorRuntimeRoot);
 
@@ -522,29 +544,52 @@ export function installTraeSkills(vendorRuntimeRoot?: string): SkillInstallResul
   }
 
   const traeDirs = getTraeUserDirs();
-  if (traeDirs.length === 0) {
+  const sourceSkillFile = join(skillSourceDir, "SKILL.md");
+  let allFailed = false;
+
+  if (traeDirs.length > 0) {
+    for (const trae of traeDirs) {
+      try {
+        const destDir = join(trae.skillsDir, "graphflow");
+        const result = installFile(sourceSkillFile, destDir, "SKILL.md");
+        results.push({ target: trae.name, status: result.status, message: result.message });
+      } catch (error) {
+        results.push({
+          target: trae.name,
+          status: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
+        allFailed = true;
+      }
+    }
+  } else {
+    allFailed = true;
+  }
+
+  if (allFailed && workspaceRoot) {
+    try {
+      const workspaceSkillDir = join(workspaceRoot, ".graphflow", "skills", "graphflow");
+      const wsResult = installFile(sourceSkillFile, workspaceSkillDir, "SKILL.md");
+      results.push({
+        target: `Workspace (${workspaceRoot})`,
+        status: wsResult.status,
+        message: wsResult.message,
+      });
+    } catch (error) {
+      results.push({
+        target: `Workspace (${workspaceRoot})`,
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (results.length === 0) {
     results.push({
       target: "Trae",
       status: "skipped",
       message: "No Trae installation detected",
     });
-    return results;
-  }
-
-  const sourceSkillFile = join(skillSourceDir, "SKILL.md");
-
-  for (const trae of traeDirs) {
-    try {
-      const destDir = join(trae.skillsDir, "graphflow");
-      const result = installFile(sourceSkillFile, destDir, "SKILL.md");
-      results.push({ target: trae.name, status: result.status, message: result.message });
-    } catch (error) {
-      results.push({
-        target: trae.name,
-        status: "error",
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
   }
 
   return results;
@@ -647,11 +692,12 @@ export function installClaudeCodeMd(vendorRuntimeRoot?: string): SkillInstallRes
  */
 export function installAllSkills(
   vendorRuntimeRoot?: string,
-  log?: (message: string) => void
+  log?: (message: string) => void,
+  workspaceRoot?: string
 ): SkillInstallSummary {
   const logFn = log ?? ((msg: string) => console.log(msg));
 
-  const traeSkills = installTraeSkills(vendorRuntimeRoot);
+  const traeSkills = installTraeSkills(vendorRuntimeRoot, workspaceRoot);
   for (const result of traeSkills) {
     if (result.status === "error") {
       logFn(`[WARN] Trae Skill ${result.target}: ${result.message}`);
@@ -707,7 +753,7 @@ export function installAllSkills(
 
   // 安装"真正的 Agent Skill"（Cursor / Claude Code / Codex 的 skills/graphflow/SKILL.md），
   // 这样在 Cursor 的 Skills 列表中也能看到 graphflow，而不仅仅是 Rule。
-  const agentSkills = installAgentSkills(vendorRuntimeRoot);
+  const agentSkills = installAgentSkills(vendorRuntimeRoot, workspaceRoot);
   for (const result of agentSkills) {
     if (result.status === "error") {
       logFn(`[WARN] Agent Skill ${result.target}: ${result.message}`);

@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-06-29
+
+### Added
+
+- **`graphflow_skill_guide` MCP 工具**：通过 MCP 协议直接提供 Skill 指南内容，不依赖外部文件安装，解决 C 盘权限不足导致 Skill 无法使用的问题。
+
+### Changed
+
+- **工作区级 Skill 回退安装**：当用户级目录（如 `~/.trae/User/skills/`）写入失败时，自动回退安装到项目目录 `.graphflow/skills/graphflow/SKILL.md`。
+- **MCP 工具描述增强**：核心工具描述添加"Context First"原则：
+  - `graphflow_preview_context`：强调"ALWAYS CALL THIS FIRST"
+  - `graphflow_plan`：强调"USE AFTER graphflow_preview_context"
+  - `graphflow_expand_anchor`：强调"USE THIS AFTER graphflow_preview_context"
+  - `graphflow_index`：强调"CALL AFTER significant file changes"
+
+### Fixed
+
+- **C 盘权限不足导致 Skill 无法使用**：通过 `graphflow_skill_guide` 工具和工作区级回退安装双重保障，确保即使没有 C 盘编辑权限也能正常使用 GraphFlow。
+
 ## [1.3.0] - 2026-06-28
 
 ### Added

@@ -22,6 +22,8 @@ import {
   mergeAgentInsightResult,
 } from "../cli/runtime";
 import type { McpServer } from "./server.js";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 export interface ToolCall {
   name: string;
@@ -216,9 +218,118 @@ export async function executeToolCall(
       return textResponse(
         getMetrics(readOptionalString(args.configPath), readOptionalString(args.rootDir))
       );
+    case "graphflow_skill_guide": {
+      const section = readOptionalString(args.section) || "all";
+      const skillGuide = getSkillGuide(section);
+      return textResponse(skillGuide);
+    }
     default:
       throw new Error(`Unknown tool: ${call.name}`);
   }
+}
+
+function getSkillGuide(section: string): string {
+  const skillPath = resolveSkillPath();
+  if (!skillPath) {
+    return JSON.stringify({
+      error: "SKILL.md not found",
+      message: "The GraphFlow SKILL.md file could not be located. This is bundled in the dist/surfaces/trae-skill/graphflow/ directory.",
+      guide: getBuiltInSkillGuide(),
+    }, null, 2);
+  }
+
+  try {
+    const content = readFileSync(skillPath, "utf8");
+    return filterSkillSection(content, section);
+  } catch {
+    return JSON.stringify({
+      error: "Failed to read SKILL.md",
+      guide: getBuiltInSkillGuide(),
+    }, null, 2);
+  }
+}
+
+function resolveSkillPath(): string | undefined {
+  const candidates = [
+    join(__dirname, "..", "..", "surfaces", "trae-skill", "graphflow", "SKILL.md"),
+    join(__dirname, "..", "..", "..", "src", "surfaces", "trae-skill", "graphflow", "SKILL.md"),
+    join(process.cwd(), "src", "surfaces", "trae-skill", "graphflow", "SKILL.md"),
+    join(process.cwd(), "dist", "surfaces", "trae-skill", "graphflow", "SKILL.md"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function filterSkillSection(content: string, section: string): string {
+  if (section === "all") {
+    return content;
+  }
+
+  const sections: Record<string, { start: string; end?: string }> = {
+    "workflows": { start: "## Standard Workflows", end: "## Tool Selection" },
+    "tools": { start: "## Tool Inventory", end: "## Standard Workflows" },
+    "best-practices": { start: "## Best Practices", end: "## Troubleshooting" },
+    "decision-tree": { start: "## Tool Selection Decision Tree", end: "## Output Interpretation" },
+  };
+
+  const config = sections[section];
+  if (!config) {
+    return content;
+  }
+
+  const startIdx = content.indexOf(config.start);
+  if (startIdx === -1) {
+    return content;
+  }
+
+  if (config.end) {
+    const endIdx = content.indexOf(config.end, startIdx);
+    if (endIdx !== -1) {
+      return content.substring(startIdx, endIdx).trim();
+    }
+  }
+
+  return content.substring(startIdx).trim();
+}
+
+function getBuiltInSkillGuide(): string {
+  return `## GraphFlow Quick Skill Guide
+
+### Core Workflow: Context First
+ALWAYS call \`graphflow_preview_context(query)\` BEFORE:
+- Multi-step edits, refactors, or architecture changes
+- Large codebase-wide questions or exploration
+- Debugging across multiple files
+- Any task where you would otherwise read many files
+
+### Key Tools
+| Tool | Purpose |
+|------|---------|
+| \`graphflow_preview_context\` | Compress task context with token budget (90% of tasks start here) |
+| \`graphflow_expand_anchor\` | Expand a single anchor to full content |
+| \`graphflow_plan\` | Multi-step task decomposition & DAG |
+| \`graphflow_index\` | Incremental workspace re-index |
+| \`graphflow_inspect_graph\` | Check graph health |
+
+### Best Practices
+1. Start EVERY task with \`graphflow_preview_context\`
+2. Only read full files when compressed context is insufficient
+3. Use \`graphflow_plan\` for tasks beyond 2-3 files
+4. Call \`graphflow_index\` after significant changes
+5. Always report token savings to the user
+
+### Tool Selection Decision Tree
+- Code question/exploration? → \`graphflow_preview_context\`
+- Need more detail? → \`graphflow_expand_anchor\`
+- Multi-step coding task? → \`graphflow_preview_context\` → \`graphflow_plan\` → implement
+- File changes made? → \`graphflow_index_file\` (single) or \`graphflow_index\` (multiple)
+- Graph giving bad results? → \`graphflow_inspect_graph\` → \`graphflow_index\` → \`graphflow_rebuild\`
+
+Call \`graphflow_skill_guide(section: "all")\` for the complete guide.`;
 }
 
 function textResponse(data: unknown): ToolCallResponse {

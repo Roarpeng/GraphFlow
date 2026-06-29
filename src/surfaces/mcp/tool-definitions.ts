@@ -13,7 +13,7 @@ export function getToolDefinitions(): ToolDefinition[] {
   return [
     {
       name: "graphflow_run",
-      description: "[Core] Plan and package a task with compressed context, returning a structured execution descriptor for external coding agents (Cursor, Claude Code) to execute. Bridge mode by default.",
+      description: "[Core] Plan and package a task with compressed context, returning a structured execution descriptor for external coding agents (Cursor, Claude Code) to execute. Bridge mode by default. CALL graphflow_report_outcome AFTER executing the plan to close the learning loop.",
       inputSchema: {
         type: "object",
         properties: {
@@ -76,11 +76,11 @@ export function getToolDefinitions(): ToolDefinition[] {
     },
     {
       name: "graphflow_plan",
-      description: "[Core] Generate brainstorming ideas and a DAG-style task plan for a request.",
+      description: "[Core] Generate brainstorming ideas and a DAG-style task plan for a request. USE AFTER graphflow_preview_context for complex tasks (more than 2-3 files), refactors, or features with unclear scope. Returns steps with dependencies and estimated effort.",
       inputSchema: {
         type: "object",
         properties: {
-          task: { type: "string", description: "Task description to plan." },
+          task: { type: "string", description: "Task description to plan. Include what you need to accomplish." },
         },
         required: ["task"],
         additionalProperties: false,
@@ -88,11 +88,11 @@ export function getToolDefinitions(): ToolDefinition[] {
     },
     {
       name: "graphflow_preview_context",
-      description: "[Core] Preview GraphFlow near-lossless context packaging for a query.",
+      description: "[Core] Preview GraphFlow near-lossless context packaging for a query. ALWAYS CALL THIS FIRST for code exploration, multi-step edits, refactors, debugging, or codebase-wide questions. Returns compressed context with anchors (Symbol/File/Module pointers) and token budget showing 70-95% savings. Use graphflow_expand_anchor to get full content of specific anchors.",
       inputSchema: {
         type: "object",
         properties: {
-          query: { type: "string", description: "Query to preview." },
+          query: { type: "string", description: "Query to preview. Be specific about what you need to understand." },
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
           rootDir: { type: "string", description: "Optional workspace root override." },
         },
@@ -102,7 +102,7 @@ export function getToolDefinitions(): ToolDefinition[] {
     },
     {
       name: "graphflow_expand_anchor",
-      description: "[Advanced] Expand a context anchor to its full content. Anchors returned by graphflow_preview_context are lightweight pointers (id/type/layer). This tool resolves an anchor id back to its full GraphNode content and, for Symbol nodes, reads the surrounding source code lines from the original file.",
+      description: "[Advanced] Expand a context anchor to its full content. Anchors returned by graphflow_preview_context are lightweight pointers (id/type/layer). This tool resolves an anchor id back to its full GraphNode content and, for Symbol nodes, reads the surrounding source code lines from the original file. USE THIS AFTER graphflow_preview_context when you need deeper detail on specific symbols, files, or modules.",
       inputSchema: {
         type: "object",
         properties: {
@@ -116,7 +116,7 @@ export function getToolDefinitions(): ToolDefinition[] {
     },
     {
       name: "graphflow_index",
-      description: "[Core] Index a workspace path into the GraphFlow graph store.",
+      description: "[Core] Index a workspace path into the GraphFlow graph store. CALL AFTER significant file changes (multiple files) to keep the graph fresh. Uses incremental indexing - only indexes new/changed files.",
       inputSchema: {
         type: "object",
         properties: {
@@ -277,6 +277,17 @@ export function getToolDefinitions(): ToolDefinition[] {
         properties: {
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
           rootDir: { type: "string", description: "Optional workspace root override." },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: "graphflow_skill_guide",
+      description: "[Core] Return the full GraphFlow Skill guide, including tool inventory, standard workflows, and best practices. This guide helps you understand WHEN and HOW to use each GraphFlow tool. Call this when you need guidance on using GraphFlow effectively, especially when the SKILL.md file cannot be installed to your C: drive. ALWAYS call graphflow_preview_context BEFORE multi-step edits, large refactors, or codebase-wide questions.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          section: { type: "string", description: "Optional section filter: 'workflows', 'tools', 'best-practices', 'decision-tree', or 'all' (default)." },
         },
         additionalProperties: false,
       },
