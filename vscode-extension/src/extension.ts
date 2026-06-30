@@ -472,7 +472,7 @@ async function bootstrapExtension(
   await runMcpBootstrap(context, workspaceRoot, output, { forceNotify: isFreshInstall, isFreshInstall });
 
   // MCP 安装成功后，也安装 Trae Skill / Cursor Rules / Claude Code CLAUDE.md
-  await installSkillsFromExtension(context, output);
+  await installSkillsFromExtension(context, workspaceRoot, output);
 
   if (isFreshInstall) {
     await context.globalState.update(MCP_INSTALL_VERSION_KEY, extensionVersion);
@@ -602,6 +602,7 @@ async function runMcpBootstrap(
  */
 async function installSkillsFromExtension(
   context: vscode.ExtensionContext,
+  workspaceRoot: string | undefined,
   output: vscode.OutputChannel
 ): Promise<void> {
   try {
@@ -628,7 +629,7 @@ async function installSkillsFromExtension(
 
     const summary = installer.installAllSkills(bundledRuntimeRoot, (msg) => {
       output.appendLine(`[GraphFlow] ${msg}`);
-    });
+    }, workspaceRoot);
 
     // 汇总日志
     const changed = (list?: Array<{ status: string }>): number =>
