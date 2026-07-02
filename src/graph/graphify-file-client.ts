@@ -154,7 +154,7 @@ export class GraphifyFileClient {
   private writeStore(store: GraphStore): void {
     const dir = dirname(this.storePath);
     mkdirSync(dir, { recursive: true });
-    const payload = JSON.stringify(store, null, 2);
+    const payload = JSON.stringify(store);
     const tempPath = join(
       dir,
       `.graphflow-graph-${process.pid}-${randomBytes(4).toString("hex")}.tmp`

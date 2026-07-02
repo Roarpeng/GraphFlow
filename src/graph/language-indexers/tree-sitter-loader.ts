@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 
 const requireFn = createRequire(__filename);
 
-let initialized = false;
+let initPromise: Promise<void> | null = null;
 
 export interface TreeSitterSyntaxNode {
   type: string;
@@ -103,10 +103,10 @@ function resolveTreeSitterWasmsPath(fileName: string): string | null {
 export async function getTreeSitterParser(
   language: TreeSitterLanguage
 ): Promise<TreeSitterParser> {
-  if (!initialized) {
-    await Parser.init();
-    initialized = true;
+  if (!initPromise) {
+    initPromise = Parser.init();
   }
+  await initPromise;
 
   const wasmPath = resolveBundledWasmPath(language);
   if (!wasmPath) {

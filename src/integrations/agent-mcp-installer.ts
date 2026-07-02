@@ -60,7 +60,7 @@ export interface McpAgentInstallStatus {
 
 export type McpConfigFormat = "json" | "codex-toml";
 
-interface AgentProfile {
+export interface AgentProfile {
   id: string;
   name: string;
   markerPaths: string[];
@@ -190,10 +190,59 @@ function buildWindowsProfilesFromWsl(windowsHome: string): AgentProfile[] {
         },
       ],
     },
+    // Claude Code (Windows from WSL)
+    {
+      id: "claude-code-windows",
+      name: "Claude Code (Windows)",
+      markerPaths: [
+        join(windowsHome, ".claude"),
+        join(windowsHome, ".claude.json"),
+      ],
+      userTargets: [
+        { configPath: join(windowsHome, ".claude.json"), serversKey: "mcpServers" },
+      ],
+      workspaceRelativePaths: [{ relativePath: ".mcp.json", serversKey: "mcpServers" }],
+    },
+    // Codex (Windows from WSL)
+    {
+      id: "codex-windows",
+      name: "Codex (Windows)",
+      markerPaths: [join(windowsHome, ".codex")],
+      userTargets: [
+        { configPath: join(windowsHome, ".codex", "config.toml"), serversKey: "mcpServers", configFormat: "codex-toml" },
+      ],
+    },
+    // Windsurf (Windows from WSL)
+    {
+      id: "windsurf-windows",
+      name: "Windsurf (Windows)",
+      markerPaths: [join(windowsHome, ".codeium", "windsurf"), join(winAppData, "Windsurf")],
+      userTargets: [
+        { configPath: join(windowsHome, ".codeium", "windsurf", "mcp_config.json"), serversKey: "mcpServers" },
+      ],
+    },
+    // Gemini (Windows from WSL)
+    {
+      id: "gemini-windows",
+      name: "Gemini (Windows)",
+      markerPaths: [join(windowsHome, ".gemini")],
+      userTargets: [
+        { configPath: join(windowsHome, ".gemini", "settings.json"), serversKey: "mcpServers" },
+      ],
+    },
+    // Cline (Windows from WSL)
+    {
+      id: "cline-windows",
+      name: "Cline (Windows)",
+      markerPaths: [join(winAppData, "Code", "User", "globalStorage", "saoudrizwan.claude-dev")],
+      userTargets: [
+        { configPath: join(winAppData, "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"), serversKey: "mcpServers" },
+      ],
+    },
   ];
 }
 
-function buildAgentProfiles(): AgentProfile[] {
+export function buildAgentProfiles(): AgentProfile[] {
   const { home, appData, localAppData, wslWindowsHome } = resolveHomePaths();
 
   const profiles: AgentProfile[] = [
@@ -319,24 +368,60 @@ function buildAgentProfiles(): AgentProfile[] {
       id: "roo-code",
       name: "Roo Code",
       markerPaths: [
-        join(appData, "Code", "User", "globalStorage", "roval.vscode-roo-cline"),
-        join(appData, "Cursor", "User", "globalStorage", "roval.vscode-roo-cline"),
-        join(home, ".config", "Code", "User", "globalStorage", "roval.vscode-roo-cline"),
+        join(appData, "Code", "User", "globalStorage", "rooveterinaryinc.roo-cline"),
+        join(appData, "Cursor", "User", "globalStorage", "rooveterinaryinc.roo-cline"),
+        join(home, ".config", "Code", "User", "globalStorage", "rooveterinaryinc.roo-cline"),
       ],
       userTargets: [
         {
           configPath: isWindows()
-            ? join(appData, "Code", "User", "globalStorage", "roval.vscode-roo-cline", "settings", "cline_mcp_settings.json")
-            : join(home, ".config", "Code", "User", "globalStorage", "roval.vscode-roo-cline", "settings", "cline_mcp_settings.json"),
+            ? join(appData, "Code", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "cline_mcp_settings.json")
+            : join(home, ".config", "Code", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "cline_mcp_settings.json"),
           serversKey: "mcpServers",
         },
         {
           configPath: isWindows()
-            ? join(appData, "Cursor", "User", "globalStorage", "roval.vscode-roo-cline", "settings", "cline_mcp_settings.json")
-            : join(home, ".config", "Cursor", "User", "globalStorage", "roval.vscode-roo-cline", "settings", "cline_mcp_settings.json"),
+            ? join(appData, "Cursor", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "cline_mcp_settings.json")
+            : join(home, ".config", "Cursor", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "cline_mcp_settings.json"),
           serversKey: "mcpServers",
         },
       ],
+    },
+    {
+      id: "kilocode",
+      name: "Kilo Code",
+      markerPaths: [
+        join(appData, "Code", "User", "globalStorage", "kilocode.kilocode-ai"),
+        join(appData, "Cursor", "User", "globalStorage", "kilocode.kilocode-ai"),
+        join(home, ".config", "Code", "User", "globalStorage", "kilocode.kilocode-ai"),
+      ],
+      userTargets: [
+        {
+          configPath: isWindows()
+            ? join(appData, "Code", "User", "globalStorage", "kilocode.kilocode-ai", "settings", "cline_mcp_settings.json")
+            : join(home, ".config", "Code", "User", "globalStorage", "kilocode.kilocode-ai", "settings", "cline_mcp_settings.json"),
+          serversKey: "mcpServers",
+        },
+        {
+          configPath: isWindows()
+            ? join(appData, "Cursor", "User", "globalStorage", "kilocode.kilocode-ai", "settings", "cline_mcp_settings.json")
+            : join(home, ".config", "Cursor", "User", "globalStorage", "kilocode.kilocode-ai", "settings", "cline_mcp_settings.json"),
+          serversKey: "mcpServers",
+        },
+      ],
+    },
+    {
+      id: "pearai",
+      name: "PearAI",
+      markerPaths: [
+        join(home, ".pearai"),
+        join(appData, "PearAI"),
+      ],
+      userTargets: [
+        { configPath: join(home, ".pearai", "mcp.json"), serversKey: "mcpServers" },
+        { configPath: join(appData, "PearAI", "User", "mcp.json"), serversKey: "mcpServers" },
+      ],
+      workspaceRelativePaths: [{ relativePath: join(".pearai", "mcp.json"), serversKey: "mcpServers" }],
     },
     {
       id: "gemini",
@@ -369,6 +454,32 @@ function buildAgentProfiles(): AgentProfile[] {
       ],
     },
     // ─── 实验性支持 ───
+    {
+      id: "antigravity",
+      name: "Antigravity",
+      // Google Antigravity 是基于 VS Code 的 AI IDE
+      // MCP 配置共享 VS Code 的 .vscode/mcp.json 格式
+      markerPaths: [
+        join(appData, "Antigravity"),
+        join(localAppData, "Programs", "Antigravity"),
+      ],
+      userTargets: [
+        {
+          configPath: isWindows()
+            ? join(appData, "Code", "User", "mcp.json")
+            : join(home, ".config", "Code", "User", "mcp.json"),
+          serversKey: "servers",
+        },
+      ],
+    },
+    {
+      id: "amazon-q",
+      name: "Amazon Q",
+      markerPaths: [join(home, ".amazonq")],
+      userTargets: [
+        { configPath: join(home, ".amazonq", "mcp.json"), serversKey: "mcpServers" },
+      ],
+    },
     {
       id: "zed",
       name: "Zed",
