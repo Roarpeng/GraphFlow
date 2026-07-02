@@ -109,10 +109,12 @@ async function processFile(
 
   if (indexer) {
     const extracted = await indexer.extract(relPath, content);
-    declared = extracted.symbols.map((sym) => ({
-      ...sym,
-      nodeId: `symbol:${relPath}:${hashText(sym.name)}`,
-    }));
+    declared = extracted.symbols
+      .filter((sym) => sym && typeof sym.name === "string")
+      .map((sym) => ({
+        ...sym,
+        nodeId: `symbol:${relPath}:${hashText(sym.name)}`,
+      }));
     imports = extracted.imports.map((imp) => imp.module);
     fileCalls = extracted.calls ?? [];
     fileInherits = extracted.inherits ?? [];
@@ -216,13 +218,13 @@ export async function indexWorkspaceFiles(
   }
 
   const { edges: refEdges, referenceCount } = buildBatchReferenceEdges(parsed, symbolIndex);
-  edges.push(...refEdges);
+  for (const edge of refEdges) edges.push(edge);
 
   const { edges: callEdges, callEdgeCount } = buildBatchCallEdges(parsed, symbolIndex);
-  edges.push(...callEdges);
+  for (const edge of callEdges) edges.push(edge);
 
   const { edges: inheritEdges, inheritEdgeCount } = buildBatchInheritEdges(parsed, symbolIndex);
-  edges.push(...inheritEdges);
+  for (const edge of inheritEdges) edges.push(edge);
 
   await client.upsertNodes(nodes);
   await client.upsertEdges(dedupEdges(edges));
@@ -295,10 +297,12 @@ export async function indexSingleFile(
 
   if (indexer) {
     const extracted = await indexer.extract(relPath, content);
-    declared = extracted.symbols.map((sym) => ({
-      ...sym,
-      nodeId: `symbol:${relPath}:${hashText(sym.name)}`,
-    }));
+    declared = extracted.symbols
+      .filter((sym) => sym && typeof sym.name === "string")
+      .map((sym) => ({
+        ...sym,
+        nodeId: `symbol:${relPath}:${hashText(sym.name)}`,
+      }));
     imports = extracted.imports.map((imp) => imp.module);
     fileCalls = extracted.calls ?? [];
     fileInherits = extracted.inherits ?? [];

@@ -16,6 +16,10 @@ import {
   type AgentInstructionStatus,
   getAgentInstructionStatus,
   getAgentSkillStatus,
+  getAgentInstructionTargets,
+  getAgentSkillTargets,
+  removeManagedBlock,
+  removeAgentSkill,
   installAllSkills,
 } from "../../integrations/skill-installer";
 
@@ -475,6 +479,25 @@ export function runUninstall() {
         results.cursorRulesRemoved = true;
       } catch (error) {
         console.error(`[ERROR] 移除 Cursor Rules 失败: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  // 3b. 移除 Agent Instructions（Windsurf / Codex / Gemini / Roo Code / Kilo Code / Cline 的受管块）
+  for (const target of getAgentInstructionTargets()) {
+    if (existsSync(target.markerDir) && existsSync(target.filePath)) {
+      if (removeManagedBlock(target.filePath)) {
+        console.log(`[REMOVED] Agent instructions ${target.agent}: ${target.filePath}`);
+      }
+    }
+  }
+
+  // 3c. 移除 Agent Skills
+  for (const target of getAgentSkillTargets()) {
+    if (existsSync(target.markerDir)) {
+      const skillDir = join(target.skillsRoot, "graphflow");
+      if (removeAgentSkill(target.skillsRoot)) {
+        console.log(`[REMOVED] Agent Skill ${target.agent}: ${skillDir}`);
       }
     }
   }

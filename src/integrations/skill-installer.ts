@@ -4,9 +4,9 @@
  * 封装 Trae Skill、Cursor Rules、Claude Code CLAUDE.md 的安装逻辑，
  * 可被 CLI init 和 VS Code 扩展共用。所有安装失败静默处理（log warn）。
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 // ── 类型定义 ──────────────────────────────────────────────────────────
 
@@ -27,6 +27,8 @@ export interface SkillInstallSummary {
   agentInstructions: SkillInstallResult[];
   /** Real Agent Skill folders (Cursor / Claude Code / Codex `skills/<name>/SKILL.md`). */
   agentSkills: SkillInstallResult[];
+  /** Project-level rule files (.cursor/rules, .windsurfrules, etc.). */
+  projectRules: SkillInstallResult[];
 }
 
 /** Status of a GraphFlow instruction block in a per-agent rules/memory file. */
@@ -335,13 +337,13 @@ function upsertManagedBlock(
 }
 
 /** 各 agent 的全局指令/记忆文件目标（仅在检测到对应 marker 时写入）。 */
-function getAgentInstructionTargets(): Array<{
+export function getAgentInstructionTargets(): Array<{
   agent: string;
   markerDir: string;
   destDir: string;
   filePath: string;
 }> {
-  const { home } = resolveHomePaths();
+  const { home, appData } = resolveHomePaths();
   const targets: Array<{ agent: string; markerDir: string; destDir: string; filePath: string }> = [];
 
   // 注：Claude Code 的 ~/.claude/CLAUDE.md 由 installClaudeCodeMd 单独处理，
@@ -369,6 +371,44 @@ function getAgentInstructionTargets(): Array<{
     markerDir: join(home, ".gemini"),
     destDir: join(home, ".gemini"),
     filePath: join(home, ".gemini", "GEMINI.md"),
+  });
+
+  // Claude Code 项目/用户级规则：~/.claude/rules/graphflow.md
+  targets.push({
+    agent: "Claude Code rules",
+    markerDir: join(home, ".claude"),
+    destDir: join(home, ".claude", "rules"),
+    filePath: join(home, ".claude", "rules", "graphflow.md"),
+  });
+
+  // Roo Code 全局指令：~/.roo/rules/AGENTS.md
+  targets.push({
+    agent: "Roo Code",
+    markerDir: join(home, ".roo"),
+    destDir: join(home, ".roo", "rules"),
+    filePath: join(home, ".roo", "rules", "AGENTS.md"),
+  });
+
+  // Kilo Code 全局指令：~/.kilocode/AGENTS.md
+  targets.push({
+    agent: "Kilo Code",
+    markerDir: join(home, ".kilocode"),
+    destDir: join(home, ".kilocode"),
+    filePath: join(home, ".kilocode", "AGENTS.md"),
+  });
+
+  // Cline 全局指令：Documents/Cline/Rules/graphflow.md
+  const documentsDir = isWindows ? join(home, "Documents") : join(home, "Documents");
+  const clineMarkerCandidates = [
+    join(appData, "Code", "User", "globalStorage", "saoudrizwan.claude-dev"),
+    join(appData, "Cursor", "User", "globalStorage", "saoudrizwan.claude-dev"),
+  ];
+  const clineMarkerDir = (clineMarkerCandidates.find((d) => existsSync(d)) ?? clineMarkerCandidates[0])!;
+  targets.push({
+    agent: "Cline",
+    markerDir: clineMarkerDir,
+    destDir: join(documentsDir, "Cline", "Rules"),
+    filePath: join(documentsDir, "Cline", "Rules", "graphflow.md"),
   });
 
   return targets;
@@ -409,6 +449,58 @@ export function getAgentInstructionStatus(): AgentInstructionStatus[] {
   });
 }
 
+// ── 项目级规则/指令文件 ─────────────────────────────────────────────
+
+/**
+ * 返回项目级规则/指令文件的目标路径列表（相对于 workspace root）。
+ * 这些文件在 install --scope all 时写入项目目录，随 Git 共享给团队。
+ */
+export function getProjectLevelRuleTargets(workspaceRoot: string): Array<{
+  agent: string;
+  destDir: string;
+  filePath: string;
+  sourceType: "cursor-rules" | "windsurf-rules" | "copilot-instructions" | "claude-rules" | "agentic-md";
+}> {
+  if (!workspaceRoot) return [];
+  return [
+    // Cursor 项目级 rules: .cursor/rules/graphflow.mdc
+    {
+      agent: "Cursor (project rules)",
+      destDir: join(workspaceRoot, ".cursor", "rules"),
+      filePath: join(workspaceRoot, ".cursor", "rules", "graphflow.mdc"),
+      sourceType: "cursor-rules",
+    },
+    // Windsurf 项目级规则: .windsurfrules
+    {
+      agent: "Windsurf (project rules)",
+      destDir: workspaceRoot,
+      filePath: join(workspaceRoot, ".windsurfrules"),
+      sourceType: "windsurf-rules",
+    },
+    // Claude Code 项目级规则: .claude/rules/graphflow.md
+    {
+      agent: "Claude Code (project rules)",
+      destDir: join(workspaceRoot, ".claude", "rules"),
+      filePath: join(workspaceRoot, ".claude", "rules", "graphflow.md"),
+      sourceType: "claude-rules",
+    },
+    // GitHub Copilot 项目级指令: .github/copilot-instructions.md
+    {
+      agent: "GitHub Copilot (project instructions)",
+      destDir: join(workspaceRoot, ".github"),
+      filePath: join(workspaceRoot, ".github", "copilot-instructions.md"),
+      sourceType: "copilot-instructions",
+    },
+    // AGENTS.md — 多 Agent 兼容的项目级指令（Claude Code、Codex、Cursor 均可读取）
+    {
+      agent: "AGENTS.md (multi-agent)",
+      destDir: workspaceRoot,
+      filePath: join(workspaceRoot, "AGENTS.md"),
+      sourceType: "agentic-md",
+    },
+  ];
+}
+
 // ── Agent Skill 文件夹安装（真正的 Cursor / Claude / Codex Skill） ────────
 
 /**
@@ -418,7 +510,7 @@ export function getAgentInstructionStatus(): AgentInstructionStatus[] {
  * 绝不能写入 `~/.cursor/skills-cursor/`（那是 Cursor 内置 Skill 的保留目录）。
  * Claude Code / Codex 同样支持 `~/.claude/skills/`、`~/.codex/skills/` 约定。
  */
-function getAgentSkillTargets(): Array<{
+export function getAgentSkillTargets(): Array<{
   agent: string;
   markerDir: string;
   skillsRoot: string;
@@ -437,11 +529,30 @@ function getAgentSkillTargets(): Array<{
       markerDir: join(home, ".claude"),
       skillsRoot: join(home, ".claude", "skills"),
     },
-    // Codex 用户级 Skill（~/.codex/skills/graphflow/SKILL.md）
+    // Codex 用户级 Skill — 同时写入两个路径确保兼容
+    // ~/.codex/skills/graphflow/SKILL.md（旧路径，部分版本兼容）
     {
       agent: "Codex",
       markerDir: join(home, ".codex"),
       skillsRoot: join(home, ".codex", "skills"),
+    },
+    // ~/.agents/skills/graphflow/SKILL.md（Agent Skills 标准路径）
+    {
+      agent: "Codex (agents)",
+      markerDir: join(home, ".codex"),
+      skillsRoot: join(home, ".agents", "skills"),
+    },
+    // Roo Code 用户级 Skill（~/.roo/skills/graphflow/SKILL.md）
+    {
+      agent: "Roo Code",
+      markerDir: join(home, ".roo"),
+      skillsRoot: join(home, ".roo", "skills"),
+    },
+    // Kilo Code 用户级 Skill（~/.kilocode/skills/graphflow/SKILL.md）
+    {
+      agent: "Kilo Code",
+      markerDir: join(home, ".kilocode"),
+      skillsRoot: join(home, ".kilocode", "skills"),
     },
   ];
 }
@@ -684,6 +795,69 @@ export function installClaudeCodeMd(vendorRuntimeRoot?: string): SkillInstallRes
 // ── 一站式安装函数 ────────────────────────────────────────────────────
 
 /**
+ * 安装项目级规则文件（仅在 workspaceRoot 提供时生效）。
+ * 这些文件会写入项目目录，可通过 Git 共享给团队。
+ */
+export function installProjectLevelRules(
+  workspaceRoot: string,
+  vendorRuntimeRoot?: string,
+  log?: (message: string) => void
+): SkillInstallResult[] {
+  const results: SkillInstallResult[] = [];
+  if (!workspaceRoot) return results;
+
+  const logFn = log ?? ((msg: string) => console.log(msg));
+  const targets = getProjectLevelRuleTargets(workspaceRoot);
+
+  for (const target of targets) {
+    try {
+      let sourcePath: string | undefined;
+
+      switch (target.sourceType) {
+        case "cursor-rules": {
+          const rulesDir = resolveCursorRulesSourcePath(vendorRuntimeRoot);
+          if (rulesDir) sourcePath = join(rulesDir, "graphflow.mdc");
+          break;
+        }
+        case "copilot-instructions":
+        case "claude-rules":
+        case "agentic-md": {
+          const mdPath = resolveClaudeMdSourcePath(vendorRuntimeRoot);
+          if (mdPath) sourcePath = mdPath;
+          break;
+        }
+        case "windsurf-rules": {
+          // Windsurf 使用纯文本指令块
+          const mdPath = resolveClaudeMdSourcePath(vendorRuntimeRoot);
+          if (mdPath) sourcePath = mdPath;
+          break;
+        }
+      }
+
+      if (!sourcePath || !existsSync(sourcePath)) {
+        results.push({ target: target.agent, status: "skipped", message: "Source file not found" });
+        continue;
+      }
+
+      const result = installFile(sourcePath, target.destDir, basename(target.filePath));
+      results.push({ target: target.agent, status: result.status, message: result.message });
+
+      if (result.status === "created" || result.status === "updated") {
+        logFn(`[OK] ${result.status === "created" ? "Created" : "Updated"} ${target.agent}: ${target.filePath}`);
+      }
+    } catch (error) {
+      results.push({
+        target: target.agent,
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return results;
+}
+
+/**
  * 一键安装所有 Skill / Rules / CLAUDE.md。
  * 所有失败静默处理（catch + 返回 error 状态），不会抛出异常。
  *
@@ -766,5 +940,60 @@ export function installAllSkills(
     logFn(`[OK] ${result.status === "created" ? "Created" : "Updated"} GraphFlow Skill for ${result.target}`);
   }
 
-  return { traeSkills, cursorRules, claudeMd, agentInstructions, agentSkills };
+  // 安装项目级规则文件
+  const projectRules = installProjectLevelRules(workspaceRoot ?? "", vendorRuntimeRoot, logFn);
+
+  return { traeSkills, cursorRules, claudeMd, agentInstructions, agentSkills, projectRules };
+}
+
+// ── 卸载辅助函数 ──────────────────────────────────────────────────────
+
+/** 从文件中移除 GraphFlow 受管指令块（如果存在） */
+export function removeManagedBlock(filePath: string): boolean {
+  if (!existsSync(filePath)) return false;
+  const current = readFileSync(filePath, "utf8");
+  const beginIdx = current.indexOf(INSTRUCTION_BEGIN);
+  const endIdx = current.indexOf(INSTRUCTION_END);
+  if (beginIdx === -1 || endIdx === -1 || endIdx <= beginIdx) return false;
+  const before = current.slice(0, beginIdx);
+  const after = current.slice(endIdx + INSTRUCTION_END.length);
+  let cleaned = `${before}${after}`;
+  // 清理多余的空行
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trim();
+  if (cleaned === "") {
+    try { rmSync(filePath, { force: true }); } catch { /* ignore */ }
+    return true;
+  }
+  writeFileSync(filePath, `${cleaned}\n`, "utf8");
+  return true;
+}
+
+/** 移除指定 agent 的 GraphFlow Skill 目录 */
+export function removeAgentSkill(skillsRoot: string, skillName = "graphflow"): boolean {
+  const skillDir = join(skillsRoot, skillName);
+  if (!existsSync(skillDir)) return false;
+  try {
+    rmSync(skillDir, { recursive: true, force: true });
+    // On some Windows environments rmSync may silently succeed without removing files.
+    // Verify and retry if necessary: remove contents first, then the empty directory.
+    if (existsSync(skillDir)) {
+      _rimraf(skillDir);
+    }
+    return true;
+  } catch { return false; }
+}
+
+/** Cross-platform recursive directory removal fallback. */
+function _rimraf(dirPath: string): void {
+  if (!existsSync(dirPath)) return;
+  const entries = readdirSync(dirPath, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      _rimraf(full);
+    } else {
+      rmSync(full, { force: true });
+    }
+  }
+  try { rmdirSync(dirPath); } catch { /* ignore */ }
 }
