@@ -47,26 +47,20 @@ export function resolveRuntimeWorkspaceRoot(options?: {
     return cwd;
   }
 
-  if (isGraphFlowRuntimeDirectory(cwd)) {
+  if (isGraphFlowRuntimeDirectory(cwd) || isUnsafeWorkspaceFallback(cwd)) {
     const hinted = tryResolveIdeWorkspaceHint();
     if (hinted) {
       return hinted;
     }
-    return cwd;
+    if (isGraphFlowRuntimeDirectory(cwd)) {
+      return cwd;
+    }
+    throw new Error(
+      `Refusing to index unsafe workspace root: ${cwd}. Set GRAPHFLOW_WORKSPACE_ROOT to your project directory.`
+    );
   }
 
-  const hinted = tryResolveIdeWorkspaceHint();
-  if (hinted) {
-    return hinted;
-  }
-
-  if (!isUnsafeWorkspaceFallback(cwd)) {
-    return cwd;
-  }
-
-  throw new Error(
-    `Refusing to index unsafe workspace root: ${cwd}. Set GRAPHFLOW_WORKSPACE_ROOT to your project directory.`
-  );
+  return cwd;
 }
 
 export function bindRuntimeWorkspaceRoot(

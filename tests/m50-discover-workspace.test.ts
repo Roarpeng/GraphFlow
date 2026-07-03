@@ -112,13 +112,15 @@ describe("M50 discover workspace", () => {
   });
 
   it("treats AppData-style paths as unsafe implicit workspace roots", () => {
+    if (process.platform !== "win32" || !process.env.LOCALAPPDATA) {
+      return;
+    }
     clearIdeWorkspaceEnv();
     const localAppData = process.env.LOCALAPPDATA;
-    expect(localAppData).toBeTruthy();
-    expect(isUnsafeWorkspaceFallback(localAppData!)).toBe(true);
-    expect(ensureMcpWorkspaceEnv(localAppData!)).toBeUndefined();
+    expect(isUnsafeWorkspaceFallback(localAppData)).toBe(true);
+    expect(ensureMcpWorkspaceEnv(localAppData)).toBeUndefined();
 
-    const elevated = join(localAppData!, "ElevatedDiagnostics");
+    const elevated = join(localAppData, "ElevatedDiagnostics");
     expect(isUnsafeWorkspaceFallback(elevated)).toBe(true);
     expect(ensureMcpWorkspaceEnv(elevated)).toBeUndefined();
   });

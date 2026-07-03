@@ -92,6 +92,7 @@ describe("M49 runtime workspace root isolation", () => {
     const projectA = createTempRoot("graphflow-m49-project-a");
     const projectB = createTempRoot("graphflow-m49-project-b");
     useTempHome(fakeHome);
+    delete process.env.GRAPHFLOW_WORKSPACE_ROOT;
 
     const globalPath = join(fakeHome, ".graphflow.config.json");
     writeGlobalConfig(globalPath, projectA);

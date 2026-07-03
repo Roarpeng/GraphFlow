@@ -66,10 +66,12 @@ describe("M60 safe fs and unsafe workspace roots", () => {
   });
 
   it("flags Windows AppData Local as unsafe workspace fallback", () => {
+    if (process.platform !== "win32" || !process.env.LOCALAPPDATA) {
+      return;
+    }
     const localAppData = process.env.LOCALAPPDATA;
-    expect(localAppData).toBeTruthy();
-    expect(isUnsafeWorkspaceFallback(localAppData!)).toBe(true);
-    expect(isUnsafeWorkspaceFallback(join(localAppData!, "ElevatedDiagnostics"))).toBe(true);
+    expect(isUnsafeWorkspaceFallback(localAppData)).toBe(true);
+    expect(isUnsafeWorkspaceFallback(join(localAppData, "ElevatedDiagnostics"))).toBe(true);
   });
 
   it("does not flag normal project directories as unsafe", () => {
@@ -87,35 +89,41 @@ describe("M60 safe fs and unsafe workspace roots", () => {
   });
 
   it("ensureMcpWorkspaceEnv refuses AppData Local as implicit workspace", () => {
+    if (process.platform !== "win32" || !process.env.LOCALAPPDATA) {
+      return;
+    }
     clearIdeWorkspaceEnv();
     const localAppData = process.env.LOCALAPPDATA;
-    expect(localAppData).toBeTruthy();
 
-    const resolved = ensureMcpWorkspaceEnv(localAppData!);
+    const resolved = ensureMcpWorkspaceEnv(localAppData);
     expect(resolved).toBeUndefined();
     expect(process.env.GRAPHFLOW_WORKSPACE_ROOT).toBeUndefined();
   });
 
   it("ensureMcpWorkspaceEnv uses IDE hint when cwd is unsafe", () => {
+    if (process.platform !== "win32" || !process.env.LOCALAPPDATA) {
+      return;
+    }
     clearIdeWorkspaceEnv();
     const project = createTempRoot("graphflow-ide-hint");
     mkdirSync(join(project, ".git"));
     const localAppData = process.env.LOCALAPPDATA;
-    expect(localAppData).toBeTruthy();
     process.env.VSCODE_CWD = project;
 
-    const resolved = ensureMcpWorkspaceEnv(localAppData!);
+    const resolved = ensureMcpWorkspaceEnv(localAppData);
     expect(resolved).toBe(project);
     expect(process.env.GRAPHFLOW_WORKSPACE_ROOT).toBe(project);
   });
 
   it("resolveRuntimeWorkspaceRoot throws for unsafe cwd without discovery", () => {
+    if (process.platform !== "win32" || !process.env.LOCALAPPDATA) {
+      return;
+    }
     clearIdeWorkspaceEnv();
     const localAppData = process.env.LOCALAPPDATA;
-    expect(localAppData).toBeTruthy();
     const previousCwd = process.cwd();
     try {
-      process.chdir(localAppData!);
+      process.chdir(localAppData);
       expect(() => resolveRuntimeWorkspaceRoot()).toThrow(/unsafe workspace root/i);
     } finally {
       process.chdir(previousCwd);
