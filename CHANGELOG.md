@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.3.4] - 2026-07-03
+
+### Fixed
+
+- **MCP / Windows EPERM**：修复 MCP 在 `AppData\Local` 等系统目录启动时误将系统路径当作工作区并扫描 `ElevatedDiagnostics` 导致 `EPERM` 的问题。
+  - 目录遍历对 `EPERM`/`EACCES` 静默跳过（`safe-fs`）
+  - 忽略 `ElevatedDiagnostics` 等 Windows 受保护目录
+  - `ensureMcpWorkspaceEnv` 不再将 `LOCALAPPDATA` 根目录当作隐式工作区；优先使用 IDE 环境变量（`VSCODE_CWD` 等）
+
 ## [1.3.3] - 2026-07-03
 
 ### Fixed

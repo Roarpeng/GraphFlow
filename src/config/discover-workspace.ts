@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { release } from "node:os";
+import { homedir, release } from "node:os";
 
 const RUNTIME_DIR_MARKERS = [
   "/vendor/graphflow",
@@ -72,6 +72,65 @@ export function hasProjectWorkspaceMarkers(dir: string): boolean {
   } catch {
     return false;
   }
+}
+
+const DEV_PROJECT_MARKERS = [
+  "package.json",
+  "pyproject.toml",
+  "Cargo.toml",
+  "go.mod",
+  "pom.xml",
+  "build.gradle",
+  "build.gradle.kts",
+] as const;
+
+/** Common manifest files that indicate a dev project root (without .git). */
+export function hasDevProjectMarkers(dir: string): boolean {
+  const root = resolve(dir);
+  return DEV_PROJECT_MARKERS.some((marker) => existsSync(join(root, marker)));
+}
+
+/**
+ * Paths that must not be used as implicit workspace roots (e.g. MCP spawn cwd on Windows).
+ * Indexing here causes EPERM on protected folders like ElevatedDiagnostics.
+ */
+export function isUnsafeWorkspaceFallback(dir: string): boolean {
+  const normalized = resolve(dir).replace(/\\/g, "/").toLowerCase();
+  const home = homedir().replace(/\\/g, "/").toLowerCase();
+  if (normalized === home) {
+    return true;
+  }
+
+  const localAppData = process.env.LOCALAPPDATA?.replace(/\\/g, "/").toLowerCase();
+  if (localAppData && normalized === localAppData) {
+    return true;
+  }
+
+  const roamingAppData = process.env.APPDATA?.replace(/\\/g, "/").toLowerCase();
+  if (roamingAppData && normalized === roamingAppData) {
+    return true;
+  }
+
+  const protectedSegments = new Set([
+    "elevateddiagnostics",
+    "system volume information",
+    "$recycle.bin",
+  ]);
+  const segments = normalized.split("/").filter(Boolean);
+  if (segments.some((segment) => protectedSegments.has(segment))) {
+    return true;
+  }
+
+  const unsafeRoots = ["/program files/", "/program files (x86)/", "/windows/"];
+  return unsafeRoots.some((marker) => normalized.includes(marker));
+}
+
+export function isUsableWorkspaceFallback(dir: string): boolean {
+  const root = resolve(dir);
+  if (isGraphFlowRuntimeDirectory(root) || isUnsafeWorkspaceFallback(root)) {
+    return false;
+  }
+  return hasProjectWorkspaceMarkers(root) || hasDevProjectMarkers(root);
 }
 
 function resolveIdeWorkspaceHint(): string | undefined {
@@ -153,11 +212,35 @@ export function ensureMcpWorkspaceEnv(fromDir: string = process.cwd()): string |
   }
 
   const cwd = resolve(fromDir);
-  if (!isGraphFlowRuntimeDirectory(cwd)) {
+  if (isGraphFlowRuntimeDirectory(cwd)) {
+    const hinted = resolveIdeWorkspaceHint();
+    if (hinted && !isUnsafeWorkspaceFallback(hinted)) {
+      process.env.GRAPHFLOW_WORKSPACE_ROOT = hinted;
+      return hinted;
+    }
+    return undefined;
+  }
+
+  if (isUsableWorkspaceFallback(cwd)) {
     process.env.GRAPHFLOW_WORKSPACE_ROOT = cwd;
     return cwd;
   }
 
+  const hinted = resolveIdeWorkspaceHint();
+  if (hinted && !isUnsafeWorkspaceFallback(hinted)) {
+    process.env.GRAPHFLOW_WORKSPACE_ROOT = hinted;
+    return hinted;
+  }
+
+  return undefined;
+}
+
+/** IDE-provided workspace when process cwd is unsafe or a GraphFlow runtime directory. */
+export function tryResolveIdeWorkspaceHint(): string | undefined {
+  const hinted = resolveIdeWorkspaceHint();
+  if (hinted && !isUnsafeWorkspaceFallback(hinted)) {
+    return hinted;
+  }
   return undefined;
 }
 

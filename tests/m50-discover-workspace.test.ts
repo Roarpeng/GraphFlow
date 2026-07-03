@@ -7,6 +7,7 @@ import {
   ensureMcpWorkspaceEnv,
   hasProjectWorkspaceMarkers,
   isGraphFlowRuntimeDirectory,
+  isUnsafeWorkspaceFallback,
 } from "../src/config/discover-workspace";
 
 const tempRoots: string[] = [];
@@ -25,9 +26,30 @@ afterEach(() => {
       rmSync(root, { recursive: true, force: true });
     }
   }
-  delete process.env.GRAPHFLOW_WORKSPACE_ROOT;
-  delete process.env.CURSOR_PROJECT_DIR;
+  for (const key of [
+    "GRAPHFLOW_WORKSPACE_ROOT",
+    "CURSOR_PROJECT_DIR",
+    "VSCODE_CWD",
+    "VSCODE_WORKSPACE_FOLDER",
+    "INIT_CWD",
+    "PWD",
+  ]) {
+    delete process.env[key];
+  }
 });
+
+function clearIdeWorkspaceEnv(): void {
+  for (const key of [
+    "GRAPHFLOW_WORKSPACE_ROOT",
+    "CURSOR_PROJECT_DIR",
+    "VSCODE_CWD",
+    "VSCODE_WORKSPACE_FOLDER",
+    "INIT_CWD",
+    "PWD",
+  ]) {
+    delete process.env[key];
+  }
+}
 
 describe("M50 discover workspace", () => {
   it("detects GraphFlow runtime directories", () => {
@@ -87,5 +109,17 @@ describe("M50 discover workspace", () => {
     const resolved = ensureMcpWorkspaceEnv("/tmp/unrelated");
     expect(resolved).toBe(project);
     expect(process.env.GRAPHFLOW_WORKSPACE_ROOT).toBe(project);
+  });
+
+  it("treats AppData-style paths as unsafe implicit workspace roots", () => {
+    clearIdeWorkspaceEnv();
+    const localAppData = process.env.LOCALAPPDATA;
+    expect(localAppData).toBeTruthy();
+    expect(isUnsafeWorkspaceFallback(localAppData!)).toBe(true);
+    expect(ensureMcpWorkspaceEnv(localAppData!)).toBeUndefined();
+
+    const elevated = join(localAppData!, "ElevatedDiagnostics");
+    expect(isUnsafeWorkspaceFallback(elevated)).toBe(true);
+    expect(ensureMcpWorkspaceEnv(elevated)).toBeUndefined();
   });
 });

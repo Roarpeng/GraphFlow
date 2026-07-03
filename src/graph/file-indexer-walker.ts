@@ -5,9 +5,9 @@
  * applying extension filters, and respecting ignore lists.
  */
 
-import { readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { ALL_LANGUAGE_EXTENSIONS } from "./language-indexers/index.js";
+import { safeReaddirSync, safeStatSync } from "../utils/safe-fs.js";
 
 export interface FileIndexerOptions {
   includeExtensions?: string[];
@@ -35,6 +35,9 @@ export const IGNORED_DIRS = new Set([
   ".git", "node_modules", "dist", "coverage", "tmp", "venv", ".venv", "env", ".env",
   "__pycache__", ".vscode", ".idea", ".next", "build", "install", "log",
   ".graphflow-cache", "graphflow-out",
+  // Windows protected / system-heavy directories (EPERM when scanned)
+  "ElevatedDiagnostics", "Application Data", "Packages", "Microsoft", "Temp", "Temporary Internet Files",
+  "System Volume Information", "$Recycle.Bin",
 ]);
 
 /**
@@ -49,15 +52,15 @@ export function walkScannableFiles(
   const scanned: ScannedFile[] = [];
 
   for (const absPath of files) {
-    const stat = statSync(absPath);
-    if (stat.size > maxFileSizeBytes) {
+    const stat = safeStatSync(absPath);
+    if (!stat || stat.size > maxFileSizeBytes) {
       continue;
     }
     scanned.push({
       absPath,
       relPath: normalizePath(relative(rootDir, absPath)),
-      size: stat.size,
-      mtimeMs: stat.mtimeMs,
+      size: Number(stat.size),
+      mtimeMs: Number(stat.mtimeMs),
     });
   }
 
@@ -69,7 +72,7 @@ export function walkScannableFiles(
  * whose extension matches `includeExtensions`.
  */
 export function walkFiles(rootDir: string, includeExtensions: string[]): string[] {
-  const entries = readdirSync(rootDir, { withFileTypes: true });
+  const entries = safeReaddirSync(rootDir);
   const files: string[] = [];
 
   for (const entry of entries) {

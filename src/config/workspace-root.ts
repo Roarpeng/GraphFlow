@@ -1,6 +1,12 @@
 import { resolve } from "node:path";
 import type { GraphFlowConfig } from "./schema";
-import { discoverWorkspaceRoot, isGraphFlowRuntimeDirectory } from "./discover-workspace";
+import {
+  discoverWorkspaceRoot,
+  isGraphFlowRuntimeDirectory,
+  isUnsafeWorkspaceFallback,
+  isUsableWorkspaceFallback,
+  tryResolveIdeWorkspaceHint,
+} from "./discover-workspace";
 
 /**
  * Resolve the workspace root used for graph store paths and indexing.
@@ -37,11 +43,30 @@ export function resolveRuntimeWorkspaceRoot(options?: {
   }
 
   const cwd = resolve(process.cwd());
-  if (!isGraphFlowRuntimeDirectory(cwd)) {
+  if (isUsableWorkspaceFallback(cwd)) {
     return cwd;
   }
 
-  return cwd;
+  if (isGraphFlowRuntimeDirectory(cwd)) {
+    const hinted = tryResolveIdeWorkspaceHint();
+    if (hinted) {
+      return hinted;
+    }
+    return cwd;
+  }
+
+  const hinted = tryResolveIdeWorkspaceHint();
+  if (hinted) {
+    return hinted;
+  }
+
+  if (!isUnsafeWorkspaceFallback(cwd)) {
+    return cwd;
+  }
+
+  throw new Error(
+    `Refusing to index unsafe workspace root: ${cwd}. Set GRAPHFLOW_WORKSPACE_ROOT to your project directory.`
+  );
 }
 
 export function bindRuntimeWorkspaceRoot(

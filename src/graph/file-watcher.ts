@@ -8,10 +8,11 @@
  * - Ignores build artifacts, dependency dirs, and hidden caches
  */
 
-import { watch, type FSWatcher, statSync, readdirSync } from "node:fs";
+import { watch, type FSWatcher, statSync } from "node:fs";
 import { join, sep, extname } from "node:path";
 import { resolveConfig } from "../config/resolve.js";
 import { resolveIncludeExtensions } from "../config/include-extensions.js";
+import { safeReaddirSync } from "../utils/safe-fs.js";
 import { logger } from "../utils/logger.js";
 
 const DEFAULT_DEBOUNCE_MS = 2000;
@@ -135,7 +136,7 @@ export class GraphFileWatcher {
     }
 
     try {
-      const entries = readdirSync(dir, { withFileTypes: true });
+      const entries = safeReaddirSync(dir);
       for (const entry of entries) {
         if (!entry.isDirectory() || entry.isSymbolicLink()) {
           continue;
