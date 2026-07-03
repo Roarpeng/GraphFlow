@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-07-03
+
+### Fixed
+
+- **VS Code 扩展（WSL）**：激活时默认仅写入用户级 MCP（`~/.config/Code/User/mcp.json`），不再自动创建项目级 `.vscode/mcp.json` 与项目 Rules，避免 WSL 下 GUI 提交触发 git hook 时与 pyenv 环境冲突。项目级安装改为显式执行 **GraphFlow: Install MCP to Agents**。
+- **MCP 启动**：仅在原生 Windows 传入 `electronExecPath`，Linux/WSL 不再写入 IDE 可执行路径。
+
 ## [1.3.1] - 2026-06-29
 
 ### Added

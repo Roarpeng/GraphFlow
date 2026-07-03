@@ -226,7 +226,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const installMcp = vscode.commands.registerCommand("graphflow.installMcp", async () => {
     const root = getWorkspaceRoot();
     await runConfigBootstrap(root, output);
-    await runMcpBootstrap(context, root, output, { forceNotify: true });
+    await runMcpBootstrap(context, root, output, { forceNotify: true, installScope: "all" });
+    await installSkillsFromExtension(context, root, output, { includeProjectLevel: true });
   });
 
   const showSetupGuide = vscode.commands.registerCommand("graphflow.showSetupGuide", async () => {
@@ -471,7 +472,7 @@ async function bootstrapExtension(
 
   await runMcpBootstrap(context, workspaceRoot, output, { forceNotify: isFreshInstall, isFreshInstall });
 
-  // MCP 安装成功后，也安装 Trae Skill / Cursor Rules / Claude Code CLAUDE.md
+  // MCP 安装成功后，安装用户级 Skill / Rules（项目级文件仅在显式 "Install MCP" 时写入）
   await installSkillsFromExtension(context, workspaceRoot, output);
 
   if (isFreshInstall) {
@@ -502,7 +503,7 @@ async function runMcpBootstrap(
   context: vscode.ExtensionContext,
   workspaceRoot: string | undefined,
   output: vscode.OutputChannel,
-  options: { forceNotify: boolean; isFreshInstall?: boolean }
+  options: { forceNotify: boolean; isFreshInstall?: boolean; installScope?: "user" | "all" }
 ): Promise<{
   results: Awaited<ReturnType<GraphFlowRuntime["installMcpToDetectedAgents"]>>;
   mcpAgents: Awaited<ReturnType<GraphFlowRuntime["getSettingsPanelStatus"]>>["mcpAgents"];
@@ -521,12 +522,13 @@ async function runMcpBootstrap(
       Promise.resolve(
         runtime.installMcpToDetectedAgents({
           strategy: "node-bundled",
-          installScope: workspaceRoot ? "all" : "user",
+          // Default user-scope only (matches CLI init). Workspace .cursor/mcp.json is opt-in via Install MCP.
+          installScope: options.installScope ?? "user",
           ...(workspaceRoot ? { workspaceRoot } : {}),
           bundledServerPath,
           bundledRuntimeRoot,
           launcherPath,
-          electronExecPath: process.execPath,
+          ...(process.platform === "win32" ? { electronExecPath: process.execPath } : {}),
         })
       )
     );
@@ -603,7 +605,8 @@ async function runMcpBootstrap(
 async function installSkillsFromExtension(
   context: vscode.ExtensionContext,
   workspaceRoot: string | undefined,
-  output: vscode.OutputChannel
+  output: vscode.OutputChannel,
+  options?: { includeProjectLevel?: boolean }
 ): Promise<void> {
   try {
     const extensionPath = context.extensionPath;
@@ -627,9 +630,10 @@ async function installSkillsFromExtension(
       return;
     }
 
+    const projectRoot = options?.includeProjectLevel ? workspaceRoot : undefined;
     const summary = installer.installAllSkills(bundledRuntimeRoot, (msg) => {
       output.appendLine(`[GraphFlow] ${msg}`);
-    }, workspaceRoot);
+    }, projectRoot);
 
     // 汇总日志
     const changed = (list?: Array<{ status: string }>): number =>
