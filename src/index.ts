@@ -1,5 +1,4 @@
 export { orchestrate, type OrchestrateOptions } from "./core/orchestrator";
-export { createVsCodeRuntime } from "./surfaces/vscode/extension";
 export {
   runTask,
   runTaskResult,
@@ -21,23 +20,17 @@ export {
   resolveConfig,
   diagnoseRouting,
   diagnoseRoutingResult,
-  runLearningNightly,
-  runLearningNightlyResult,
   planAndBrainstorm,
   planAndBrainstormResult,
-  buildMcpServerNode,
+  assertGraphFlowRuntime,
   detectInstalledAgents,
   formatModelConfigGuide,
   installMcpToDetectedAgents,
-  assertGraphFlowRuntime,
+  runLearningNightly,
+  runLearningNightlyResult,
+  startFileWatcherIfEnabled,
 } from "./surfaces/cli/runtime";
-export type { GraphFlowRuntime, GraphFlowRuntimeModule } from "./surfaces/cli/runtime";
-export type {
-  DetectedAgent,
-  McpInstallOptions,
-  McpInstallResult,
-  McpInstallStrategy,
-} from "./integrations/agent-mcp-installer";
+export type { GraphFlowRuntime, GraphFlowRuntimeModule, LearningNightlyResult } from "./surfaces/cli/runtime";
 export { parseCliOptions, formatCliResult, type CliCommandResult } from "./surfaces/cli/output";
 export {
   createMcpServer,

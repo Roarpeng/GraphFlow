@@ -1,30 +1,15 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve, dirname } from "node:path";
-import { ensureGlobalGraphFlowConfig, resolveGlobalConfigPath } from "../../config/scaffold";
+import { join } from "node:path";
+import { ensureGlobalGraphFlowConfig } from "../../config/scaffold";
+import { installAllSkills } from "../../integrations/skill-installer";
 import {
   detectInstalledAgents,
   formatModelConfigGuide,
   getMcpInstallStatus,
-  type McpAgentInstallStatus,
   installMcpToDetectedAgents,
-  type McpInstallResult,
   uninstallMcpFromDetectedAgents,
-  type McpRemoveResult,
 } from "../../integrations/agent-mcp-installer";
-import {
-  type AgentInstructionStatus,
-  getAgentInstructionStatus,
-  getAgentSkillStatus,
-  getAgentInstructionTargets,
-  getAgentSkillTargets,
-  removeManagedBlock,
-  removeAgentSkill,
-  installAllSkills,
-} from "../../integrations/skill-installer";
-
-const CONFIG_DIR = ".graphflow";
-const README_FILE = join(CONFIG_DIR, "README.md");
 
 const isWindows = process.platform === "win32";
 
@@ -221,97 +206,11 @@ export function installCursorRules(): CursorRulesInstallResult[] {
   return results;
 }
 
-function buildReadmeContent(installResults: McpInstallResult[]): string {
-  const detectedAgents = detectInstalledAgents().map((agent) => agent.name).join(", ") || "未检测到";
-  const installedLines =
-    installResults.length > 0
-      ? installResults
-          .filter((result) => result.status === "injected" || result.status === "created" || result.status === "updated")
-          .map((result) => `- ${result.agentName} (${result.scope}): ${result.configPath}`)
-          .join("\n")
-      : "- 无";
-  const globalConfigPath = resolveGlobalConfigPath();
+export function runInstall() {
+  const workspaceRoot = process.cwd();
+  console.log("[START] Installing GraphFlow — global config + skills/rules + MCP...");
 
-  return `# GraphFlow 配置文件说明
-
-欢迎使用 GraphFlow！模型与路由配置默认保存在用户全局文件中，新开项目无需重复配置。
-
-## 1. 全局配置文件
-- 路径：\`${globalConfigPath}\`
-- **\`providers\`**: 配置各个大模型厂商的 API Key 和 Base URL。例如，如果你使用 DeepSeek，可以在 \`openai\` 字段中配置 Base URL 为 \`https://api.deepseek.com\` 并填入 \`apiKey\`。
-- **\`tiers\`**:
-  - \`smart\`: 核心大脑模型（用于规划器 Planner 和验证器 Validator）。建议配置为能力最强的模型（如 \`deepseek-v4-pro\`）。
-  - \`economy\`: 经济型干活模型（用于执行器 Worker）。建议配置为速度快、成本低的模型（如 \`deepseek-v4-flash\`）。
-- **\`embeddingPolicy\`**: 嵌入式向量模型，用于语义召回。默认使用本地 \`Xenova/bge-base-zh-v1.5\`；也可改为 \`openai\` 或轻量 \`hash\` 模式。
-- **\`graphPolicy\`**: 控制图谱的生成和索引行为。
-  - \`autoIndexOnPreview\` / \`autoIndexOnRun\`: 在预览上下文或执行任务前自动索引（默认开启）。
-  - \`semanticEnrichment\`: 知识图谱 Symbol 节点的 LLM 语义摘要；\`provider\`/\`model\` 可留空以继承 Economy 层；\`autoRunOnIndex\` 在索引后静默小批量富化。
-
-如需仅对某个项目覆盖配置，可在项目根目录创建 \`graphflow.config.json\` 或 \`.graphflow/config.json\`。
-
-## 2. MCP (Model Context Protocol) 自动注入
-安装时已自动嗅探本机 Agent 工具，并将 GraphFlow MCP 写入**用户级**配置（所有项目共享）。
-
-**已嗅探到的 Agent：** ${detectedAgents}
-
-**已写入的配置：**
-${installedLines}
-
-**如何验证 MCP 是否可用？**
-在你的 AI Agent（或 IDE 的对话框）中直接说：
-> "检查你现在是否加载了 graphflow 的工具"
-或者
-> "使用 graphflow 为我输出当前项目架构的预览上下文"
-
-## 3. 模型配置
-${formatModelConfigGuide()}
-`;
-}
-
-function resolveBundledServerPath(): string | undefined {
-  // Standard candidates based on __dirname (works for normal npm install -g)
-  const candidates = [
-    join(__dirname, "..", "mcp", "server.js"),
-    join(__dirname, "..", "..", "surfaces", "mcp", "server.js"),
-    join(__dirname, "..", "..", "..", "dist", "surfaces", "mcp", "server.js"),
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) {
-      return resolve(p);
-    }
-  }
-
-  // Fallback: derive from process.argv[1] when __dirname is resolved through
-  // a Windows junction (npm install -g . creates a junction to the source dir).
-  // process.argv[1] preserves the junction path containing @roarpeng/graphflow.
-  const argv1 = process.argv[1];
-  if (argv1) {
-    const argvDir = dirname(argv1);
-    const argvCandidates = [
-      join(argvDir, "..", "mcp", "server.js"),
-      join(argvDir, "..", "..", "surfaces", "mcp", "server.js"),
-    ];
-    for (const p of argvCandidates) {
-      if (existsSync(p)) {
-        return resolve(p);
-      }
-    }
-  }
-
-  return undefined;
-}
-
-function isRunningFromNpmPackage(): boolean {
-  // On Windows, npm install -g . creates a junction (symlink) from
-  // node_modules/@roarpeng/graphflow to the source directory.
-  // Node.js resolves __dirname through the junction to the real path,
-  // so __dirname won't contain "@roarpeng/graphflow".
-  // However, process.argv[1] preserves the junction path, so we check that.
-  const scriptPath = (process.argv[1] ?? "").replace(/\\/g, "/").toLowerCase();
-  return scriptPath.includes("@roarpeng/graphflow");
-}
-
-function runInstallation(workspaceRoot: string): { mcpResults: McpInstallResult[]; skillResults: SkillInstallResult[]; cursorRulesResults: SkillInstallResult[]; claudeMdResults: SkillInstallResult[] } {
+  // 1. Create global config
   const globalConfig = ensureGlobalGraphFlowConfig();
   if (globalConfig.status === "created") {
     console.log(`[CREATED] Global config: ${globalConfig.path}`);
@@ -319,78 +218,23 @@ function runInstallation(workspaceRoot: string): { mcpResults: McpInstallResult[
     console.log(`[SKIP] Global config already exists: ${globalConfig.path}`);
   }
 
-  const bundledServerPath = resolveBundledServerPath();
-  const fromPackage = isRunningFromNpmPackage();
-  const hasPackageJson = existsSync(join(workspaceRoot, "package.json"));
+  // 2. Install all skills/rules via skill-installer
+  installAllSkills(undefined, (message: string) => console.log(message), workspaceRoot);
 
-  let mcpOptions: Parameters<typeof installMcpToDetectedAgents>[0];
-
-  if (bundledServerPath && fromPackage) {
-    // Derive bundledRuntimeRoot from process.argv[1] (preserves junction path on Windows)
-    // rather than from bundledServerPath (which resolves through junction to source dir).
-    const argv1 = process.argv[1];
-    const runtimeRoot = argv1
-      ? resolve(join(dirname(argv1), "..", "..", "..", ".."))
-      : join(bundledServerPath, "..", "..", "..", "..");
-    mcpOptions = {
-      strategy: "node-bundled",
-      installScope: "user",
-      bundledServerPath,
-      bundledRuntimeRoot: runtimeRoot,
-      workspaceRoot,
-    };
-    console.log(`[INFO] Running from npm package — using bundled server: ${bundledServerPath}`);
-  } else if (hasPackageJson) {
-    mcpOptions = {
-      strategy: "npm-script",
-      installScope: "user",
-      npmScriptCwd: workspaceRoot,
-    };
-  } else {
-    mcpOptions = {
-      strategy: "npx",
-      installScope: "user",
-      workspaceRoot,
-    };
+  // 3. Install MCP to detected agents
+  const mcpResults = installMcpToDetectedAgents({
+    strategy: "npx",
+    installScope: "user",
+    workspaceRoot,
+  });
+  for (const result of mcpResults) {
+    const icon = result.status === "error" ? "[ERROR]" : result.status === "skipped" ? "[SKIP]" : "[OK]";
+    console.log(
+      `${icon} MCP ${result.agentName} (${result.scope}): ${result.status} -> ${result.configPath}${result.message ? ` (${result.message})` : ""}`
+    );
   }
 
-  const installResults = installMcpToDetectedAgents(mcpOptions);
-
-  for (const result of installResults) {
-    if (result.status === "error") {
-      console.error(`[ERROR] ${result.agentName} (${result.configPath}): ${result.message}`);
-      continue;
-    }
-    if (result.status === "skipped") {
-      console.log(`[SKIP] ${result.message ?? "MCP install skipped"}`);
-      continue;
-    }
-    console.log(`[SUCCESS] ${result.status === "created" ? "Created" : "Updated"} GraphFlow MCP for ${result.agentName}: ${result.configPath}`);
-  }
-
-  // 使用共享的 skill-installer 模块安装所有 Skill / Rules / CLAUDE.md
-  const skillSummary = installAllSkills();
-
-  return {
-    mcpResults: installResults,
-    skillResults: skillSummary.traeSkills,
-    cursorRulesResults: skillSummary.cursorRules,
-    claudeMdResults: skillSummary.claudeMd,
-  };
-}
-
-export function runInstall() {
-  const workspaceRoot = process.cwd();
-  console.log("[START] Installing GraphFlow MCP + Skills to all detected agents...");
-
-  const { mcpResults } = runInstallation(workspaceRoot);
-
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true });
-  }
-  writeFileSync(README_FILE, buildReadmeContent(mcpResults), "utf8");
-  console.log(`[CREATED] Documentation: ${README_FILE}`);
-
+  // 4. Bootstrap graph index
   void bootstrapGraphIndex(workspaceRoot).catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`[WARN] Bootstrap graph index skipped: ${message}`);
@@ -408,14 +252,18 @@ export function runInit() {
   const workspaceRoot = process.cwd();
   console.log("[START] Initializing GraphFlow global config...");
 
-  const { mcpResults: installResults } = runInstallation(workspaceRoot);
-
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true });
+  // 1. Create global config
+  const globalConfig = ensureGlobalGraphFlowConfig();
+  if (globalConfig.status === "created") {
+    console.log(`[CREATED] Global config: ${globalConfig.path}`);
+  } else {
+    console.log(`[SKIP] Global config already exists: ${globalConfig.path}`);
   }
-  writeFileSync(README_FILE, buildReadmeContent(installResults), "utf8");
-  console.log(`[CREATED] Documentation: ${README_FILE}`);
 
+  // 2. Install all skills/rules via skill-installer
+  installAllSkills(undefined, (message: string) => console.log(message), workspaceRoot);
+
+  // 3. Bootstrap graph index
   void bootstrapGraphIndex(workspaceRoot).catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`[WARN] Bootstrap graph index skipped: ${message}`);
@@ -425,189 +273,49 @@ export function runInit() {
   console.log("[HINT] To run init on npm install, set GRAPHFLOW_ENABLE_POSTINSTALL=1");
 }
 
-/**
- * 卸载 GraphFlow：移除所有 agent 的 MCP 配置、Skill 文件、Cursor Rules、版本标记文件
- */
 export function runUninstall() {
-  console.log("[START] 卸载 GraphFlow — 移除所有 MCP 配置和 Skill 文件...");
+  console.log("[START] Uninstalling GraphFlow...");
 
-  const results: { mcpResults: McpRemoveResult[]; skillRemoved: boolean; cursorRulesRemoved: boolean; versionFileRemoved: boolean } = {
-    mcpResults: [],
-    skillRemoved: false,
-    cursorRulesRemoved: false,
-    versionFileRemoved: false,
-  };
-
-  // 1. 移除所有 agent 的 MCP 配置
-  results.mcpResults = uninstallMcpFromDetectedAgents();
-  for (const result of results.mcpResults) {
-    if (result.removed) {
-      console.log(`[REMOVED] MCP ${result.agentName}: ${result.configPath}`);
-    } else {
-      console.log(`[SKIP] MCP ${result.agentName}: ${result.message}`);
-    }
+  // 1. Remove MCP configs from detected agents
+  const mcpResults = uninstallMcpFromDetectedAgents();
+  for (const result of mcpResults) {
+    const icon = result.removed ? "[REMOVED]" : "[SKIP]";
+    console.log(`${icon} MCP ${result.agentName}: ${result.message}`);
   }
 
-  // 2. 移除 Trae Skill 文件
-  const traeDirs = getTraeUserDirs();
-  for (const trae of traeDirs) {
-    const skillDir = join(trae.skillsDir, "graphflow");
-    if (existsSync(skillDir)) {
-      try {
-        rmSync(skillDir, { recursive: true, force: true });
-        console.log(`[REMOVED] Skill ${trae.name}: ${skillDir}`);
-        results.skillRemoved = true;
-      } catch (error) {
-        console.error(`[ERROR] 移除 Skill ${trae.name} 失败: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-  }
-
-  // 3. 移除 Cursor Rules 文件
-  const { home, appData } = resolveHomePaths();
-  const cursorRulesPaths = [
-    join(home, ".cursor", "rules", "graphflow.mdc"),
-  ];
-  if (isWindows && existsSync(join(appData, "Cursor"))) {
-    cursorRulesPaths.push(join(appData, "Cursor", "User", "rules", "graphflow.mdc"));
-  }
-  for (const rulesPath of cursorRulesPaths) {
-    if (existsSync(rulesPath)) {
-      try {
-        rmSync(rulesPath, { force: true });
-        console.log(`[REMOVED] Cursor Rules: ${rulesPath}`);
-        results.cursorRulesRemoved = true;
-      } catch (error) {
-        console.error(`[ERROR] 移除 Cursor Rules 失败: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-  }
-
-  // 3b. 移除 Agent Instructions（Windsurf / Codex / Gemini / Roo Code / Kilo Code / Cline 的受管块）
-  for (const target of getAgentInstructionTargets()) {
-    if (existsSync(target.markerDir) && existsSync(target.filePath)) {
-      if (removeManagedBlock(target.filePath)) {
-        console.log(`[REMOVED] Agent instructions ${target.agent}: ${target.filePath}`);
-      }
-    }
-  }
-
-  // 3c. 移除 Agent Skills
-  for (const target of getAgentSkillTargets()) {
-    if (existsSync(target.markerDir)) {
-      const skillDir = join(target.skillsRoot, "graphflow");
-      if (removeAgentSkill(target.skillsRoot)) {
-        console.log(`[REMOVED] Agent Skill ${target.agent}: ${skillDir}`);
-      }
-    }
-  }
-
-  // 4. 移除版本标记文件
-  const versionFile = join(homedir(), ".graphflow-install-version");
-  if (existsSync(versionFile)) {
-    try {
-      rmSync(versionFile, { force: true });
-      console.log(`[REMOVED] 版本标记文件: ${versionFile}`);
-      results.versionFileRemoved = true;
-    } catch (error) {
-      console.error(`[ERROR] 移除版本标记文件失败: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  console.log("[FINISH] 卸载完成！");
+  console.log("[FINISH] Uninstall complete.");
 }
 
-/**
- * 移除指定 agent（或所有 agent）的 MCP 配置（不移除 Skill/Rules）
- * @param agentId 可选：指定移除某个 agent 的 MCP 配置（如 "cursor"、"trae"）
- */
+export function runDoctor() {
+  console.log("[DOCTOR] GraphFlow self-diagnosis...");
+
+  // 1. Detect agents
+  const agents = detectInstalledAgents();
+  console.log(`Detected agents: ${agents.map((a) => a.name).join(", ") || "none"}`);
+
+  // 2. MCP install status
+  const mcpStatus = getMcpInstallStatus();
+  for (const status of mcpStatus) {
+    const icon = status.installed ? "[INSTALLED]" : "[MISSING]";
+    console.log(`${icon} ${status.agentName} (${status.scope}): ${status.configPath}`);
+  }
+
+  // 3. Config status
+  const globalConfigPath = join(homedir(), ".graphflow.config.json");
+  console.log(`Global config: ${existsSync(globalConfigPath) ? "exists" : "missing"} at ${globalConfigPath}`);
+
+  // 4. Model config guide
+  console.log("\n" + formatModelConfigGuide());
+}
+
 export function runMcpRemove(agentId?: string) {
-  const target = agentId ?? "所有检测到的 agent";
-  console.log(`[START] 移除 GraphFlow MCP 配置 — 目标: ${target}`);
-
+  console.log(`[START] Removing GraphFlow MCP${agentId ? ` from ${agentId}` : " from all agents"}...`);
   const results = uninstallMcpFromDetectedAgents(agentId ? { agentId } : undefined);
-
-  if (results.length === 0) {
-    console.log("[SKIP] 未检测到需要移除的 MCP 配置");
-    return results;
-  }
-
   for (const result of results) {
-    if (result.removed) {
-      console.log(`[REMOVED] MCP ${result.agentName}: ${result.configPath}`);
-    } else {
-      console.log(`[SKIP] MCP ${result.agentName}: ${result.message}`);
-    }
+    const icon = result.removed ? "[REMOVED]" : "[SKIP]";
+    console.log(`${icon} ${result.agentName}: ${result.message}`);
   }
-
-  console.log("[FINISH] MCP 配置移除完成！");
-  return results;
-}
-
-export interface DoctorReport {
-  detectedAgents: Array<{ id: string; name: string }>;
-  mcp: McpAgentInstallStatus[];
-  instructions: AgentInstructionStatus[];
-  /** 真正的 Agent Skill（Cursor/Claude/Codex 的 skills/graphflow/SKILL.md）状态。 */
-  skills: AgentInstructionStatus[];
-}
-
-/**
- * 自检：汇总各 agent 的 MCP 注册与指令文件状态，便于用户验证"一次安装是否注册到所有 agent"。
- * 返回结构化数据（供 --json）并打印可读报告。
- */
-export function runDoctor(): DoctorReport {
-  const detectedAgents = detectInstalledAgents();
-  const mcp = getMcpInstallStatus();
-  const instructions = getAgentInstructionStatus();
-  const skills = getAgentSkillStatus();
-
-  console.log("[GraphFlow Doctor] 检测到的 Agent / AI IDE:");
-  if (detectedAgents.length === 0) {
-    console.log("  (未在本机检测到受支持的 agent)");
-  } else {
-    console.log(`  ${detectedAgents.map((agent) => agent.name).join(", ")}`);
-  }
-
-  console.log("");
-  console.log("[GraphFlow Doctor] MCP 注册状态:");
-  if (mcp.length === 0) {
-    console.log("  (无)");
-  } else {
-    for (const item of mcp) {
-      const mark = item.installed ? "OK " : "-- ";
-      console.log(`  [${mark}] ${item.agentName}: ${item.configPath}`);
-    }
-  }
-
-  console.log("");
-  console.log("[GraphFlow Doctor] 指令文件状态:");
-  for (const item of instructions) {
-    if (!item.detected) {
-      continue;
-    }
-    const mark = item.installed ? "OK " : "-- ";
-    console.log(`  [${mark}] ${item.agent}: ${item.configPath}`);
-  }
-
-  console.log("");
-  console.log("[GraphFlow Doctor] Agent Skill 状态:");
-  for (const item of skills) {
-    if (!item.detected) {
-      continue;
-    }
-    const mark = item.installed ? "OK " : "-- ";
-    console.log(`  [${mark}] ${item.agent}: ${item.configPath}`);
-  }
-
-  const pendingMcp = mcp.filter((item) => !item.installed);
-  const pendingSkills = skills.filter((item) => item.detected && !item.installed);
-  if (pendingMcp.length > 0 || pendingSkills.length > 0) {
-    console.log("");
-    console.log("[HINT] 部分 agent 尚未注册 MCP/Skill，运行 `graphflow install` 完成注册。");
-  }
-
-  return { detectedAgents, mcp, instructions, skills };
+  console.log("[FINISH] MCP removal complete.");
 }
 
 async function bootstrapGraphIndex(workspaceRoot: string): Promise<void> {

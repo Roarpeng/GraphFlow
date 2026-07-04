@@ -19,7 +19,6 @@ import {
   recordEpisode,
   summarizeEpisodeForPrompt,
 } from "../src/learning/episodic-memory";
-import { reflectOnEpisodes } from "../src/learning/reflector";
 import { orchestrate } from "../src/core/orchestrator";
 import {
   executeRolePrompt,
@@ -76,7 +75,7 @@ describe("M26 episodic memory", () => {
     expect(found?.keyDecisions).toEqual(["split into 3 subtasks", "preserve public api"]);
     expect(found?.outcome).toBe("pass");
 
-    const summary = summarizeEpisodeForPrompt(episode);
+    const summary = await summarizeEpisodeForPrompt(episode);
     expect(summary).toContain("Past episode");
     expect(summary.length).toBeLessThanOrEqual(200);
   });
@@ -106,45 +105,6 @@ describe("M26 episodic memory", () => {
     expect(passIdx).toBeGreaterThanOrEqual(0);
     expect(failIdx).toBeGreaterThanOrEqual(0);
     expect(passIdx).toBeLessThan(failIdx);
-  });
-
-  it("C: reflectOnEpisodes synthesizes Lesson nodes with improves edges", async () => {
-    const client = makeClient();
-    const ep1 = await recordEpisode(client, {
-      task: "refactor planner module and add tests",
-      plan: [],
-      outcome: "pass",
-      keyDecisions: ["split into subtasks", "write fixtures first"],
-      lessons: [],
-      attempts: 1,
-    });
-    const ep2 = await recordEpisode(client, {
-      task: "refactor planner orchestrator and add tests",
-      plan: [],
-      outcome: "pass",
-      keyDecisions: ["split into subtasks", "mock provider executor"],
-      lessons: [],
-      attempts: 1,
-    });
-
-    const lessons = await reflectOnEpisodes(client);
-    expect(lessons.length).toBeGreaterThan(0);
-    const topLesson = lessons.find((l) => l.lesson === "split into subtasks");
-    expect(topLesson).toBeDefined();
-    expect(topLesson?.episodeIds.sort()).toEqual([ep1.id, ep2.id].sort());
-    expect(topLesson?.outcomes.pass).toBe(2);
-
-    const persisted = await client.queryByKeyword("lesson");
-    expect(persisted.some((n) => n.id === topLesson!.id && n.id.startsWith("lesson:"))).toBe(true);
-
-    const neighbors = await client.getNeighbors!(
-      [topLesson!.id],
-      ["improves"],
-      "out"
-    );
-    const neighborIds = new Set(neighbors.map((n) => n.node.id));
-    expect(neighborIds.has(ep1.id)).toBe(true);
-    expect(neighborIds.has(ep2.id)).toBe(true);
   });
 
   it("D: orchestrate with enableEpisodicMemory records and recalls episodes", async () => {

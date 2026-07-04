@@ -1,19 +1,5 @@
 import type { GraphEdge } from "../core/types";
 
-export interface EvolutionarySkillNode {
-  id: string;
-  name: string; // MiniCPM 生成的复合中文名
-  parents: [string, string];
-  domain: string; // 解决的 C 领域
-  description: string; // 合成方法论描述
-  score: number;
-  uses: number;
-  updatedAt: number;
-  canaryUses: number;
-  canaryPasses: number;
-  canaryStatus: 'probation' | 'verified' | 'demoted';
-}
-
 export interface SkillState {
   id: string;
   name: string;

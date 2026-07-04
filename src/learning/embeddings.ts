@@ -173,5 +173,3 @@ export function reciprocalRankFusion(rankings: GraphNode[][], k: number = 60): G
   });
   return entries.map((e) => e.node);
 }
-
-export * from "./local-embedding";

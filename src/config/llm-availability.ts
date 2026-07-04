@@ -8,17 +8,6 @@ function providerHasCredentials(provider: ProviderName, config: GraphFlowConfig)
     return false;
   }
 
-  if (provider === "openbmb") {
-    const mode = details.mode ?? "embedded";
-    if (mode === "ollama" || mode === "openai-compat") {
-      return Boolean(details.baseUrl?.trim());
-    }
-    // Embedded counts only when explicitly configured (not assumed available).
-    return Boolean(
-      resolveConfigSecret(details.apiKey) || resolveConfigSecret(details.modelPath)
-    );
-  }
-
   const apiKey = resolveConfigSecret(details.apiKey);
   return Boolean(apiKey && apiKey.length > 0 && !apiKey.startsWith("${"));
 }

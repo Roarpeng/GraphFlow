@@ -1,14 +1,13 @@
 import type {
-  buildMcpServerNode,
+  ensureGlobalGraphFlowConfig,
+  ensureWorkspaceGraphFlowConfig,
+} from "../../../config/scaffold";
+import type {
   detectInstalledAgents,
   formatModelConfigGuide,
   installMcpToDetectedAgents,
 } from "../../../integrations/agent-mcp-installer";
-import type {
-  ensureGlobalGraphFlowConfig,
-  ensureWorkspaceGraphFlowConfig,
-} from "../../../config/scaffold";
-import type { downloadOpenBmbModel, enrichSemanticsSilent, getSkillInsights, indexGraph, inspectGraph, previewContext, rebuildGraph } from "./graph.js";
+import type { getSkillInsights, indexGraph, inspectGraph, previewContext, rebuildGraph, startFileWatcherIfEnabled } from "./graph.js";
 import type { getSettingsPanelStatus, indexGraphFromSettings, testRoutingAndIndexGraph } from "./panel.js";
 import type {
   diagnoseRouting,
@@ -17,18 +16,11 @@ import type {
   planAndBrainstormResult,
   planInsight,
   planInsightResult,
-  runLearningNightly,
-  runLearningNightlyResult,
   runTask,
   runTaskResult,
 } from "./routing.js";
-import type { applyEnrichmentProviderEnv, applyOpenBmbRuntimeEnv, prepareSemanticEnrichmentRuntime } from "./env.js";
-import type {
-  getGraphFlowSettings,
-  saveGraphFlowSettings,
-  validateSettingsForGraphIndex,
-  validateSettingsForRouting,
-} from "./settings.js";
+import type { getGraphFlowSettings, saveGraphFlowSettings } from "./settings.js";
+import type { runLearningNightly, runLearningNightlyResult } from "./learning.js";
 
 /** Bundled runtime module shape used by VS Code extension and other dynamic importers. */
 export interface GraphFlowRuntimeModule {
@@ -41,30 +33,23 @@ export interface GraphFlowRuntimeModule {
   previewContext: typeof previewContext;
   indexGraph: typeof indexGraph;
   rebuildGraph: typeof rebuildGraph;
-  enrichSemanticsSilent: typeof enrichSemanticsSilent;
   diagnoseRouting: typeof diagnoseRouting;
   diagnoseRoutingResult: typeof diagnoseRoutingResult;
-  runLearningNightly: typeof runLearningNightly;
-  runLearningNightlyResult: typeof runLearningNightlyResult;
   inspectGraph: typeof inspectGraph;
   getSkillInsights: typeof getSkillInsights;
+  startFileWatcherIfEnabled: typeof startFileWatcherIfEnabled;
   getGraphFlowSettings: typeof getGraphFlowSettings;
   getSettingsPanelStatus: typeof getSettingsPanelStatus;
   saveGraphFlowSettings: typeof saveGraphFlowSettings;
   indexGraphFromSettings: typeof indexGraphFromSettings;
   testRoutingAndIndexGraph: typeof testRoutingAndIndexGraph;
-  validateSettingsForGraphIndex: typeof validateSettingsForGraphIndex;
-  validateSettingsForRouting: typeof validateSettingsForRouting;
-  detectInstalledAgents: typeof detectInstalledAgents;
   ensureGlobalGraphFlowConfig: typeof ensureGlobalGraphFlowConfig;
   ensureWorkspaceGraphFlowConfig: typeof ensureWorkspaceGraphFlowConfig;
-  installMcpToDetectedAgents: typeof installMcpToDetectedAgents;
+  detectInstalledAgents: typeof detectInstalledAgents;
   formatModelConfigGuide: typeof formatModelConfigGuide;
-  downloadOpenBmbModel: typeof downloadOpenBmbModel;
-  prepareSemanticEnrichmentRuntime: typeof prepareSemanticEnrichmentRuntime;
-  applyEnrichmentProviderEnv: typeof applyEnrichmentProviderEnv;
-  applyOpenBmbRuntimeEnv: typeof applyOpenBmbRuntimeEnv;
-  buildMcpServerNode: typeof buildMcpServerNode;
+  installMcpToDetectedAgents: typeof installMcpToDetectedAgents;
+  runLearningNightly: typeof runLearningNightly;
+  runLearningNightlyResult: typeof runLearningNightlyResult;
 }
 
 const REQUIRED_EXPORTS: Array<keyof GraphFlowRuntimeModule> = [
@@ -72,22 +57,22 @@ const REQUIRED_EXPORTS: Array<keyof GraphFlowRuntimeModule> = [
   "planAndBrainstorm",
   "previewContext",
   "indexGraph",
-  "enrichSemanticsSilent",
   "diagnoseRouting",
-  "runLearningNightly",
   "inspectGraph",
   "getSkillInsights",
+  "startFileWatcherIfEnabled",
   "getGraphFlowSettings",
   "getSettingsPanelStatus",
   "indexGraphFromSettings",
   "testRoutingAndIndexGraph",
   "saveGraphFlowSettings",
-  "detectInstalledAgents",
   "ensureGlobalGraphFlowConfig",
   "ensureWorkspaceGraphFlowConfig",
-  "installMcpToDetectedAgents",
+  "detectInstalledAgents",
   "formatModelConfigGuide",
-  "downloadOpenBmbModel",
+  "installMcpToDetectedAgents",
+  "runLearningNightly",
+  "runLearningNightlyResult",
 ];
 
 export function assertGraphFlowRuntime(module: unknown): GraphFlowRuntimeModule {

@@ -3,7 +3,7 @@ import { validateConfig } from "../src/config/loader";
 import { createGraphClient } from "../src/graph/client-factory";
 import { indexWorkspaceFiles } from "../src/graph/file-indexer";
 import { buildLayeredContextPackage, buildEnhancedContextPackage } from "../src/graph/context-slicer";
-import { createLocalEmbeddingProvider } from "../src/learning/local-embedding";
+import { createHashEmbeddingProvider } from "../src/learning/embeddings";
 import { join } from "node:path";
 
 /**
@@ -37,7 +37,6 @@ const BENCH_CONFIG = validateConfig({
   learningPolicy: {
     enableFlywheel: false,
     trainingCadence: "nightly",
-    canaryRatio: 10,
     exportPath: "graphflow-out/learning-dataset.jsonl",
   },
 });
@@ -104,7 +103,6 @@ describe("M45 Real-World Compression Benchmark (GraphFlow codebase)", () => {
       const pkg = await buildEnhancedContextPackage(client, query, query, 3000, {
         layerQuota: { l1: 30, l2: 15, l3: 10 },
         enableGraphCompression: true,
-        enableSemanticCompression: false, // graph-only
       });
       const elapsed = Date.now() - start;
       results.push({
@@ -122,12 +120,12 @@ describe("M45 Real-World Compression Benchmark (GraphFlow codebase)", () => {
     console.log(`Average: ${avgTokens.toFixed(0)} tokens, ${avgTime.toFixed(0)}ms\n`);
   }, 120000);
 
-  it("benchmarks full enhanced compression (graph + semantic)", async () => {
+  it("benchmarks full enhanced compression (graph + vector + HNSW)", async () => {
     const config = BENCH_CONFIG;
     const client = createGraphClient(config);
 
     console.log("[benchmark] Indexing GraphFlow codebase with embeddings...");
-    const embeddingProvider = createLocalEmbeddingProvider();
+    const embeddingProvider = createHashEmbeddingProvider();
     const indexed = await indexWorkspaceFiles(client, SRC_DIR, {
       includeExtensions: [".ts"],
     });
@@ -140,7 +138,6 @@ describe("M45 Real-World Compression Benchmark (GraphFlow codebase)", () => {
       const pkg = await buildEnhancedContextPackage(client, query, query, 3000, {
         layerQuota: { l1: 30, l2: 15, l3: 10 },
         enableGraphCompression: true,
-        enableSemanticCompression: false, // Skip LLM in CI (no minicpm)
         embeddingProvider,
         enableVectorRecall: true,
         enableHnsw: true,
@@ -159,6 +156,5 @@ describe("M45 Real-World Compression Benchmark (GraphFlow codebase)", () => {
     const avgTokens = results.reduce((sum, r) => sum + r.tokens, 0) / results.length;
     const avgTime = results.reduce((sum, r) => sum + r.time, 0) / results.length;
     console.log(`Average: ${avgTokens.toFixed(0)} tokens, ${avgTime.toFixed(0)}ms\n`);
-    console.log("Note: Semantic compression (minicpm) skipped in CI. Enable with real LLM for 20-40% further reduction.\n");
   }, 180000);
 });

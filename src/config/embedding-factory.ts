@@ -1,13 +1,11 @@
 import { resolveConfigSecret } from "./secrets";
 import type { GraphFlowConfig } from "./schema";
-import { DEFAULT_EMBEDDING_MODEL } from "./defaults";
 import type { EmbeddingProvider } from "../learning/embeddings";
 import {
   createHashEmbeddingProvider,
   createOpenAiEmbeddingProvider,
   warmupEmbeddingProvider,
 } from "../learning/embeddings";
-import { createLocalEmbeddingProvider } from "../learning/local-embedding";
 
 export function createEmbeddingProviderFromConfig(
   config: GraphFlowConfig
@@ -17,7 +15,7 @@ export function createEmbeddingProviderFromConfig(
     return undefined;
   }
 
-  const provider = policy?.provider ?? "local";
+  const provider = policy?.provider ?? "hash";
 
   let embeddingProvider: EmbeddingProvider | undefined;
 
@@ -47,10 +45,11 @@ export function createEmbeddingProviderFromConfig(
       embeddingProvider = createOpenAiEmbeddingProvider(openAiOptions);
     }
   } else {
-    embeddingProvider = createLocalEmbeddingProvider(policy?.model ?? DEFAULT_EMBEDDING_MODEL);
+    // Unknown provider fallback to hash
+    embeddingProvider = createHashEmbeddingProvider();
   }
 
-  // 创建后异步预热：避免首个真实请求的冷启动延迟（尤其是本地模型懒加载）。
+  // 创建后异步预热：避免首个真实请求的冷启动延迟。
   // 非阻塞：用 void 触发，预热失败由 warmupEmbeddingProvider 内部静默处理。
   if (embeddingProvider) {
     void warmupEmbeddingProvider(embeddingProvider);

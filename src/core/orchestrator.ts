@@ -81,7 +81,9 @@ async function runOrchestration(
   );
   const skillHints = await maybeBuildSkillHints(input.task, options);
   const similarEpisodes = await maybeFindSimilarEpisodes(input.task, options);
-  const episodeSummaries = similarEpisodes.map((ep) => summarizeEpisodeForPrompt(ep));
+  const episodeSummaries = await Promise.all(
+    similarEpisodes.map((ep) => summarizeEpisodeForPrompt(ep, options?.graphClient))
+  );
   const promptContext = buildPromptContext(contextPackage, skillHints, episodeSummaries, options);
   const promptContextLines = promptContext?.summaryChannel?.length ?? 0;
 
@@ -154,7 +156,12 @@ async function runOrchestration(
   }
 
   if (planInsightBundle) {
-    plan = planInsightBundle.plan;
+    if (!planInsightBundle.plan || planInsightBundle.plan.length === 0) {
+      logger.warn({ task: input.task }, "Plan insight returned empty or null plan, falling back to heuristic planning");
+      plan = planTasks(input.task, skillHints);
+    } else {
+      plan = planInsightBundle.plan;
+    }
   } else if (options?.enableLlmAgents) {
     brainstormIdeas = await brainstormTaskLlm(input.task, plannerSelection, promptContext);
     plan = await planTasksLlm(input.task, {

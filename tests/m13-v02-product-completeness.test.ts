@@ -1,10 +1,10 @@
-﻿import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+﻿import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { GraphifyClient } from "../src/graph/graphify-client";
 import { indexWorkspaceFiles } from "../src/graph/file-indexer";
-import { diagnoseRouting, runLearningNightly, runTask } from "../src/surfaces/cli/runtime";
+import { diagnoseRouting } from "../src/surfaces/cli/runtime";
 
 describe("M13 v0.2 product completeness", () => {
   it("indexes module and import relations for higher graph quality", async () => {
@@ -75,62 +75,6 @@ describe("M13 v0.2 product completeness", () => {
       expect(output).toContain("openai:false");
       expect(output).toContain("anthropic:true");
       expect(output).toContain("planner=anthropic/");
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it("runs nightly learning cycle from persisted feedback events", async () => {
-    const root = mkdtempSync(join(tmpdir(), "graphflow-m13-learn-"));
-    const configPath = join(root, "graphflow.config.json");
-    const eventsPath = join(root, "events.jsonl");
-    const exportPath = join(root, "dataset.jsonl");
-    const summaryPath = join(root, "summary.json");
-
-    try {
-      writeFileSync(
-        configPath,
-        JSON.stringify(
-          {
-            providers: {},
-            tiers: {
-              smart: { provider: "openai", model: "gpt-5.3-codex" },
-              economy: { provider: "openai", model: "gpt-4.1-mini" },
-            },
-            budgetPolicy: { runTokenCap: 2000 },
-            graphPolicy: {
-              enableAutoBuild: true,
-              autoIndexOnRun: false,
-              transport: "memory",
-              maxContextTokens: 200,
-            },
-            learningPolicy: {
-              enableFlywheel: true,
-              trainingCadence: "nightly",
-              canaryRatio: 10,
-              exportPath,
-              eventsPath,
-              summaryPath,
-            },
-            routingPolicy: {
-              enableDynamicRouting: false,
-            },
-          },
-          null,
-          2
-        ),
-        "utf8"
-      );
-
-      await runTask("health check", configPath);
-      await runTask("update readme and add tests", configPath);
-
-      const output = runLearningNightly(configPath);
-      expect(output).toContain("events=2");
-      expect(output).toContain("dataset=");
-      expect(existsSync(exportPath)).toBe(true);
-      expect(existsSync(summaryPath)).toBe(true);
-      expect(readFileSync(exportPath, "utf8")).toContain("#metrics");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

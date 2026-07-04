@@ -48,8 +48,6 @@ describe("M16 agent integrations", () => {
       "graphflow_index",
       "graphflow_index_file",
       "graphflow_rebuild",
-      "graphflow_enrich_graph",
-      "graphflow_model_download",
       "graphflow_inspect_graph",
       "graphflow_skill_insights",
       "graphflow_diagnose",
@@ -57,7 +55,6 @@ describe("M16 agent integrations", () => {
       "graphflow_import_artifact",
       "graphflow_stats",
       "graphflow_plan_insight",
-      "graphflow_metrics",
       "graphflow_skill_guide",
     ]);
   });

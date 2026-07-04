@@ -152,36 +152,6 @@ export function getToolDefinitions(): ToolDefinition[] {
       },
     },
     {
-      name: "graphflow_enrich_graph",
-      description: "[Advanced] Run semantic enrichment for pending Symbol nodes using configured network (cloud API) or local OpenBMB backend.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-          batchSize: { type: "number", description: "Optional enrichment batch size." },
-          sleepMs: { type: "number", description: "Optional delay between node enrichments." },
-          timeoutMs: { type: "number", description: "Optional provider timeout per enrichment call." },
-        },
-        additionalProperties: false,
-      },
-    },
-    {
-      name: "graphflow_model_download",
-      description: "[Maintenance] Download MiniCPM/OpenBMB model file to local path with optional checksum verification.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-          model: { type: "string", description: "Model name, default minicpm5-1b." },
-          url: { type: "string", description: "Optional model URL override." },
-          sha256: { type: "string", description: "Optional expected sha256 checksum." },
-          targetPath: { type: "string", description: "Optional target file path." },
-          force: { type: "boolean", description: "Force re-download even if file exists." },
-        },
-        additionalProperties: false,
-      },
-    },
-    {
       name: "graphflow_inspect_graph",
       description: "[Maintenance] Inspect current graph snapshot statistics and sample nodes/edges.",
       inputSchema: {
@@ -266,18 +236,6 @@ export function getToolDefinitions(): ToolDefinition[] {
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
         },
         required: ["task"],
-        additionalProperties: false,
-      },
-    },
-    {
-      name: "graphflow_metrics",
-      description: "[Maintenance] Return Prometheus-compatible metrics for GraphFlow observability: token savings, graph size, compression ratio, index cache stats. Output is Prometheus text exposition format.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-          rootDir: { type: "string", description: "Optional workspace root override." },
-        },
         additionalProperties: false,
       },
     },

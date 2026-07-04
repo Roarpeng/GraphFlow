@@ -1,15 +1,6 @@
-export type OpenBmbMode = "embedded" | "ollama" | "openai-compat";
-
 export interface ProviderConfig {
   apiKey?: string;
   baseUrl?: string;
-  mode?: OpenBmbMode;
-  engine?: "command" | "node-llama-cpp";
-  modelPath?: string;
-  commandPath?: string;
-  modelUrl?: string;
-  modelSha256?: string;
-  autoDownloadModel?: boolean;
   timeoutMs?: number;
   maxTokens?: number;
   temperature?: number;
@@ -32,6 +23,7 @@ export interface GraphFlowConfig {
     autoIndexOnSave?: boolean;
     workspaceRoot?: string;
     includeExtensions?: string[];
+    enableHnsw?: boolean;
     transport: "memory" | "mcp-http" | "file" | "sqlite";
     mcpEndpoint?: string;
     mcpApiKey?: string;
@@ -42,23 +34,6 @@ export interface GraphFlowConfig {
       l2: number;
       l3: number;
     };
-    semanticEnrichment?: {
-      enabled?: boolean;
-      mode?: "streaming" | "post-index" | "off";
-      /** network=cloud API, local=OpenBMB, inherit=economy tier (default). */
-      backend?: "network" | "local" | "inherit";
-      /** When set, overrides economy tier provider for graph semantic enrichment. */
-      provider?: string;
-      /** When set, overrides economy tier model; leave unset to inherit economy/default routing. */
-      model?: string;
-      /** Optional enrichment-only API key / base URL (network backend). */
-      apiKey?: string;
-      baseUrl?: string;
-      batchSize?: number;
-      sleepMs?: number;
-      timeoutMs?: number;
-      autoRunOnIndex?: boolean;
-    };
     /**
      * Context compression model selection. Compression (cluster summarization,
      * node densification) reuses the economy tier by default ("inherit"), so
@@ -68,18 +43,14 @@ export interface GraphFlowConfig {
      */
     compression?: {
       enabled?: boolean;
-      /** inherit=reuse economy tier (default), network=external API, local=embedded minicpm. */
-      backend?: "inherit" | "network" | "local";
+      /** inherit=reuse economy tier (default), network=external API. */
+      backend?: "inherit" | "network";
       /** Override provider (network backend only). */
       provider?: string;
       /** Override model; leave unset to inherit economy/default routing. */
       model?: string;
       apiKey?: string;
       baseUrl?: string;
-      /** Auto-download embedded model on first use when falling back to local. Default true. */
-      autoDownloadEmbedded?: boolean;
-      /** Override embedded model path; defaults to ~/.graphflow/models/minicpm-1b.gguf. */
-      embeddedModelPath?: string;
       timeoutMs?: number;
       /** Zero-cost graph-structure compression (edge weights + PageRank). Default true. */
       enableGraphCompression?: boolean;
@@ -87,29 +58,19 @@ export interface GraphFlowConfig {
       enableRepoMapFallback?: boolean;
       /** Adaptively size token budget from task complexity. Default true; complex tasks auto-enable even when unset. Set false to disable. */
       enableAdaptiveBudget?: boolean;
-      /** Use HNSW ANN index for large candidate sets (>=200 nodes). Default true. */
-      enableHnsw?: boolean;
     };
   };
   learningPolicy: {
     enableFlywheel: boolean;
     trainingCadence: "nightly" | "weekly";
-    canaryRatio: number;
     exportPath: string;
     eventsPath?: string;
     summaryPath?: string;
-    skillEvolution?: {
-      enabled?: boolean;
-      model?: string;
-      minCoOccur?: number;
-      minSuccess?: number;
-      enableTripleFusion?: boolean;
-    };
   };
   routingPolicy?: {
     enableDynamicRouting?: boolean;
     requireApiKeyForHealthy?: boolean;
-    providerPriority?: Array<"openai" | "anthropic" | "bailian" | "doubao" | "openbmb">;
+    providerPriority?: Array<"openai" | "anthropic" | "bailian" | "doubao">;
   };
   skillPolicy?: {
     enableSkillFlywheel?: boolean;
@@ -117,7 +78,7 @@ export interface GraphFlowConfig {
   };
   embeddingPolicy?: {
     enabled?: boolean;
-    provider?: "local" | "openai" | "hash";
+    provider?: "openai" | "hash";
     model?: string;
     baseUrl?: string;
     apiKey?: string;

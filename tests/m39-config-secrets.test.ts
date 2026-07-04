@@ -88,11 +88,9 @@ describe("M39 config secrets", () => {
       const envPersisted = JSON.parse(readFileSync(configPath, "utf8")) as {
         providers?: { openai?: { apiKey?: string } };
         tiers?: { smart?: { model?: string }; economy?: { model?: string } };
-        graphPolicy?: { semanticEnrichment?: { model?: string } };
       };
       expect(envPersisted.providers?.openai?.apiKey).toBe("${DEEPSEEK_API_KEY}");
       expect(envPersisted.tiers?.smart?.model).toBe("deepseek-v4-pro");
-      expect(envPersisted.graphPolicy?.semanticEnrichment?.model).toBe("deepseek-v4-flash");
 
       const loaded = getGraphFlowSettings(configPath);
       expect(loaded.apiKeyEnvVar).toBe("DEEPSEEK_API_KEY");

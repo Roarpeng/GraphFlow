@@ -1,9 +1,7 @@
 import type { GraphEdge, GraphNode } from "../core/types.js";
-import type { EmbeddingProvider } from "../learning/embeddings.js";
 import type { ConnectedSubgraphOptions } from "./graph-compression.js";
-import type { ClusteringOptions, SummarizerOptions, DensifierOptions } from "./semantic-compression.js";
 import type { TaskMode } from "./adaptive-budget.js";
-import type { CompressionModelHandle } from "./compression-model.js";
+import type { EmbeddingProvider } from "../learning/embeddings.js";
 
 export interface ContextSlice {
   items: string[];
@@ -32,26 +30,25 @@ export interface LayeredPackageOptions {
     l3: number;
   };
   enableEdgeExpansion?: boolean;
-  enableVectorRecall?: boolean;
-  embeddingProvider?: EmbeddingProvider;
-  vectorTopK?: number;
-  vectorMinSimilarity?: number;
-  /** Use HNSW ANN index for large candidate sets (>=200 nodes). Default true. */
-  enableHnsw?: boolean;
   /** Enable graph-structure compression (edge weights, PageRank, connected subgraph). */
   enableGraphCompression?: boolean;
   graphCompressionOptions?: ConnectedSubgraphOptions;
-  /** Enable semantic compression via minicpm-1b (clustering, summarization, densification). */
-  enableSemanticCompression?: boolean;
-  clusteringOptions?: ClusteringOptions;
-  summarizerOptions?: SummarizerOptions;
-  densifierOptions?: DensifierOptions;
-  /** Unified compression model handle (auto-selects external economy tier or embedded minicpm). */
-  compressionModel?: CompressionModelHandle;
   /** Return RepoMap overview if token budget is low. */
   enableRepoMapFallback?: boolean;
   /** Adaptive budget estimation based on task complexity. */
   taskMode?: TaskMode;
+  /** Enable vector recall via embedding similarity search. */
+  enableVectorRecall?: boolean;
+  /** Embedding provider for vector recall. Required when enableVectorRecall is true. */
+  embeddingProvider?: EmbeddingProvider;
+  /** Top-K results for vector recall. Default 8. */
+  vectorTopK?: number;
+  /** Minimum cosine similarity for vector recall. Default 0.05. */
+  vectorMinSimilarity?: number;
+  /** Enable HNSW ANN index for vector recall (falls back to linear scan if unavailable). */
+  enableHnsw?: boolean;
+  /** Optional path to persist the HNSW index for faster startup on large repos. */
+  hnswIndexPath?: string;
 }
 
 export interface SubgraphExpansionOptions {

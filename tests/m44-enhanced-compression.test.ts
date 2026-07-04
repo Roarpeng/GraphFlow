@@ -11,11 +11,6 @@ import {
   blendWithCentrality,
 } from "../src/graph/graph-compression";
 import { buildRepoMap, formatRepoMapString } from "../src/graph/repo-map";
-import {
-  clusterSimilarNodes,
-  summarizeCluster,
-  densifyNodeContent,
-} from "../src/graph/semantic-compression";
 import { estimateContextBudget } from "../src/graph/adaptive-budget";
 import { buildEnhancedContextPackage } from "../src/graph/context-slicer";
 import { attachEmbedding, hashEmbedding } from "../src/learning/embeddings";
@@ -114,68 +109,6 @@ describe("M44 Enhanced Context Compression", () => {
     });
   });
 
-  // ── Semantic Compression Tests ────────────────────────────────────
-  describe("Semantic compression (minicpm-1b)", () => {
-    it("should cluster similar nodes by embedding", async () => {
-      const nodes: GraphNode[] = [
-        attachEmbedding(
-          { id: "login1", type: "Symbol", content: "function login(email: string)" },
-          hashEmbedding("login user authentication email password")
-        ),
-        attachEmbedding(
-          { id: "login2", type: "Symbol", content: "function login(phone: string)" },
-          hashEmbedding("login user authentication phone password")
-        ),
-        attachEmbedding(
-          { id: "logout", type: "Symbol", content: "function logout()" },
-          hashEmbedding("logout session terminate exit close")
-        ),
-      ];
-
-      const clusters = await clusterSimilarNodes(nodes, { similarityThreshold: 0.5 });
-
-      // login1 and login2 should cluster together (similar embeddings).
-      expect(clusters.length).toBeGreaterThan(0);
-      const loginCluster = clusters.find((c) => c.representative.id.startsWith("login"));
-      expect(loginCluster).toBeDefined();
-      expect(loginCluster!.members.length).toBeGreaterThanOrEqual(2);
-    });
-
-    it("should summarize cluster with minicpm-1b (mocked)", async () => {
-      // In real scenario, this calls minicpm-1b. We test the interface.
-      const cluster = {
-        representative: { id: "login1", type: "Symbol" as const, content: "function login(email)" },
-        members: [
-          { id: "login1", type: "Symbol" as const, content: "function login(email)" },
-          { id: "login2", type: "Symbol" as const, content: "function login(phone)" },
-        ],
-        avgSimilarity: 0.85,
-      };
-
-      // Mock mode: openbmb will return fallback if no GRAPHFLOW_OPENBMB_MODEL_PATH.
-      const summary = await summarizeCluster(cluster, { timeoutMs: 1000 });
-
-      expect(summary).toBeDefined();
-      expect(typeof summary).toBe("string");
-      // Fallback mode returns prompt echo, which contains the input.
-      expect(summary.length).toBeGreaterThan(0);
-    });
-
-    it("should densify verbose node content (mocked)", async () => {
-      const node: GraphNode = {
-        id: "verbose",
-        type: "Symbol",
-        content: "function calculateUserProfileCompletionPercentageBasedOnMultipleFactors(user: User, config: Config, options: Options): number { /* 200 lines of code */ }",
-      };
-
-      const dense = await densifyNodeContent(node, { minInputTokens: 20, timeoutMs: 1000 });
-
-      expect(dense).toBeDefined();
-      // In mock mode (no minicpm), returns fallback which is still defined.
-      expect(typeof dense).toBe("string");
-    });
-  });
-
   // ── Adaptive Budget Tests ────────────────────────────────────
   describe("Adaptive budget estimation", () => {
     it("should estimate higher budget for refactor tasks", () => {
@@ -223,7 +156,6 @@ describe("M44 Enhanced Context Compression", () => {
         learningPolicy: {
           enableFlywheel: true,
           trainingCadence: "nightly",
-          canaryRatio: 10,
           exportPath: "graphflow-out/learning-dataset.jsonl",
         },
       });
@@ -284,7 +216,7 @@ describe("M44 Enhanced Context Compression", () => {
         { id: "config.ts", type: "File", content: "configuration loader" },
       ];
 
-      // Add embeddings for semantic compression.
+      // Add embeddings for graph compression.
       const withEmbeddings = nodes.map((n) => attachEmbedding(n, hashEmbedding(n.content)));
       await client.upsertNodes(withEmbeddings);
       await client.upsertEdges([
@@ -299,7 +231,6 @@ describe("M44 Enhanced Context Compression", () => {
         2000,
         {
           enableGraphCompression: true,
-          enableSemanticCompression: false, // Skip LLM in test (no minicpm)
           enableRepoMapFallback: false,
           taskMode: "complex",
         }
@@ -353,13 +284,11 @@ describe("M44 Enhanced Context Compression", () => {
       // Baseline: no compression.
       const baseline = await buildEnhancedContextPackage(client, "process", "process data", 3000, {
         enableGraphCompression: false,
-        enableSemanticCompression: false,
       });
 
       // Enhanced: with graph compression.
       const compressed = await buildEnhancedContextPackage(client, "process", "process data", 3000, {
         enableGraphCompression: true,
-        enableSemanticCompression: false, // Skip LLM
       });
 
       // Graph compression should reduce nodes via centrality pruning.

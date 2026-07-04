@@ -5,7 +5,6 @@ import { anthropicGenerateText } from "./provider-adapters/anthropic";
 import { bailianGenerateText } from "./provider-adapters/bailian";
 import { doubaoGenerateText } from "./provider-adapters/doubao";
 import { openaiGenerateText } from "./provider-adapters/openai";
-import { openbmbGenerateText } from "./provider-adapters/openbmb";
 
 export class ProviderError extends Error {
   provider: ModelSelection["provider"];
@@ -167,52 +166,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-class TokenBucket {
-  private tokens: number;
-  private lastRefill: number;
-  private readonly capacity: number;
-  private readonly fillPerSecond: number;
-
-  constructor(capacity: number, fillPerSecond: number) {
-    this.capacity = capacity;
-    this.fillPerSecond = fillPerSecond;
-    this.tokens = capacity;
-    this.lastRefill = Date.now();
-  }
-
-  async acquire(timeoutMs: number): Promise<void> {
-    const start = Date.now();
-    while (true) {
-      this.refill();
-      if (this.tokens >= 1) {
-        this.tokens -= 1;
-        return;
-      }
-      if (Date.now() - start > timeoutMs) {
-        throw new Error("Rate limit timeout (429)");
-      }
-      await new Promise(r => setTimeout(r, 100));
-    }
-  }
-
-  private refill() {
-    const now = Date.now();
-    const delta = (now - this.lastRefill) * this.fillPerSecond / 1000;
-    this.tokens = Math.min(this.capacity, this.tokens + delta);
-    this.lastRefill = now;
-  }
-}
-
-const providerRateLimiters = new Map<string, TokenBucket>();
-
-function getRateLimiter(provider: string): TokenBucket {
-  let limiter = providerRateLimiters.get(provider);
-  if (!limiter) {
-    limiter = new TokenBucket(60, 1);
-    providerRateLimiters.set(provider, limiter);
-  }
-  return limiter;
-}
 
 export async function executeRolePrompt(
   role: AgentRole,
@@ -252,10 +205,6 @@ export async function executeRolePrompt(
       return doubaoGenerateText(request);
     }
 
-    if (selection.provider === "openbmb") {
-      return openbmbGenerateText(request);
-    }
-
     return openaiGenerateText(request);
   };
 
@@ -266,9 +215,6 @@ export async function executeRolePrompt(
   let attempt = 0;
   while (attempt <= retryBudget) {
     try {
-      if (selection.provider !== "openbmb") {
-        await getRateLimiter(selection.provider).acquire(timeoutMs);
-      }
       const value = await withTimeout(execute(), timeoutMs, `${selection.provider}/${selection.model}`);
       circuitState.failures = 0;
       delete circuitState.openedUntil;

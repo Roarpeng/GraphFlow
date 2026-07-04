@@ -37,6 +37,7 @@ export function getDefaultConfig(): GraphFlowConfig {
       autoIndexOnSave: true,
       workspaceRoot: process.cwd(),
       includeExtensions: [...DEFAULT_INCLUDE_EXTENSIONS],
+      enableHnsw: true,
       // 默认使用 file 后端，将知识图谱持久化到磁盘 JSON 文件，避免进程退出后图谱丢失
       transport: "file",
       graphStorePath: `${DEFAULT_OUTPUT_DIR}/graphflow-graph.json`,
@@ -46,33 +47,18 @@ export function getDefaultConfig(): GraphFlowConfig {
         enableGraphCompression: true,
         enableAdaptiveBudget: true,
       },
-      semanticEnrichment: {
-        enabled: true,
-        mode: "post-index",
-        batchSize: 5,
-        sleepMs: 0,
-        timeoutMs: 5000,
-        autoRunOnIndex: true,
-      },
     },
     learningPolicy: {
       enableFlywheel: true,
       trainingCadence: "nightly",
-      canaryRatio: 10,
       exportPath: `${DEFAULT_OUTPUT_DIR}/learning-dataset.jsonl`,
       eventsPath: `${DEFAULT_OUTPUT_DIR}/learning-events.jsonl`,
       summaryPath: `${DEFAULT_OUTPUT_DIR}/learning-summary.json`,
-      skillEvolution: {
-        enabled: true,
-        minCoOccur: 2,
-        minSuccess: 2,
-        enableTripleFusion: true,
-      },
     },
     routingPolicy: {
       enableDynamicRouting: true,
       requireApiKeyForHealthy: false,
-      providerPriority: ["openai", "anthropic", "bailian", "doubao", "openbmb"],
+      providerPriority: ["openai", "anthropic", "bailian", "doubao"],
     },
     skillPolicy: {
       enableSkillFlywheel: true,
@@ -80,7 +66,7 @@ export function getDefaultConfig(): GraphFlowConfig {
     },
     embeddingPolicy: {
       enabled: true,
-      provider: "local",
+      provider: "hash",
       model: DEFAULT_EMBEDDING_MODEL,
       vectorStorePath: `${DEFAULT_OUTPUT_DIR}/vectors.db`,
       topK: 8,

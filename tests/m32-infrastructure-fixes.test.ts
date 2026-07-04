@@ -83,7 +83,7 @@ describe("Provider health", () => {
 
   it("includes openbmb in ALL_PROVIDERS", async () => {
     const { ALL_PROVIDERS } = await import("../src/routing/provider-health");
-    expect(ALL_PROVIDERS).toContain("openbmb");
+    expect(ALL_PROVIDERS).not.toContain("openbmb");
   });
 
   it("marks provider unhealthy after 3 consecutive failures", async () => {

@@ -230,7 +230,38 @@ export async function loadAllEpisodes(client: GraphClient): Promise<EpisodeRecor
   return parseEpisodes(nodes);
 }
 
-export function summarizeEpisodeForPrompt(episode: EpisodeRecord): string {
+const LESSON_PREFIX = "lesson:";
+
+async function getLessonsForEpisode(
+  client: GraphClient,
+  episodeId: string
+): Promise<Array<{ lesson: string }>> {
+  if (typeof client.getNeighbors !== "function") return [];
+  const neighbors = await client.getNeighbors([episodeId], ["improves"], "in");
+  const lessons: Array<{ lesson: string }> = [];
+  for (const { node } of neighbors) {
+    if (!node.id.startsWith(LESSON_PREFIX)) continue;
+    const raw =
+      typeof node.metadata?.record === "string"
+        ? (node.metadata.record as string)
+        : undefined;
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw) as { lesson?: string };
+      if (parsed.lesson) {
+        lessons.push({ lesson: parsed.lesson });
+      }
+    } catch {
+      // ignore malformed lesson record
+    }
+  }
+  return lessons;
+}
+
+export async function summarizeEpisodeForPrompt(
+  episode: EpisodeRecord,
+  client?: GraphClient
+): Promise<string> {
   const header = `Past episode (outcome=${episode.outcome}): ${truncate(episode.task, 80)}`;
   const lines: string[] = [header];
   for (const d of episode.keyDecisions.slice(0, 3)) {
@@ -239,6 +270,18 @@ export function summarizeEpisodeForPrompt(episode: EpisodeRecord): string {
   for (const l of episode.lessons.slice(0, 2)) {
     lines.push(`- lesson: ${truncate(l, 80)}`);
   }
+
+  if (client) {
+    try {
+      const lessons = await getLessonsForEpisode(client, episode.id);
+      for (const { lesson } of lessons) {
+        lines.push(`- lesson: ${truncate(lesson, 80)}`);
+      }
+    } catch {
+      // ignore graph query failures
+    }
+  }
+
   let result = lines.join("\n");
   if (result.length > 200) {
     result = `${result.slice(0, 197)}...`;
