@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { homedir, platform } from "node:os";
+import { homedir, release } from "node:os";
 
 export type McpServersKey = "mcpServers" | "servers" | "context_servers";
 
@@ -77,8 +77,8 @@ function isWsl(): boolean {
     return false;
   }
   try {
-    const release = platform() ?? "";
-    if (release.toLowerCase().includes("microsoft") || release.toLowerCase().includes("wsl")) {
+    const rel = release() ?? "";
+    if (rel.toLowerCase().includes("microsoft") || rel.toLowerCase().includes("wsl")) {
       return true;
     }
   } catch {
@@ -1276,32 +1276,21 @@ export function formatModelConfigGuide(workspaceRoot?: string): string {
     "- Base URL：每层卡片内直接填写（如 DeepSeek 使用 `https://api.deepseek.com`）",
     "- Smart / Economy 模型均可选；留空则使用 provider 默认路由",
     "",
-    "## 3. 知识图谱语义提取（可选）",
-    "- Settings → **Graph Semantic Enrichment** → 语义提取后端：",
-    "  - **继承 Economy（网络）**：使用 Economy 的云端模型（如 DeepSeek）",
-    "  - **自定义网络模型**：单独指定 Provider / Model / API Key / Base URL",
-    "  - **本地 OpenBMB**：使用本地 MiniCPM",
-    "",
-    "## 4. 知识图谱何时更新？",
+    "## 3. 知识图谱何时更新？",
     "- **结构索引**（Symbol/File/边）：在 MCP `preview`、任务 `run`（`autoIndexOnPreview` / `autoIndexOnRun`）、`index`/`rebuild` 命令时触发，非常驻后台守护进程",
-    "- **语义富化**（Symbol 中文摘要）：索引后若 `semanticEnrichment.autoRunOnIndex=true` 则静默小批量执行；任务编排改文件后也会增量富化；也可手动 `Enrich Graph Semantics`",
     "",
-    "## 5. 配置文件位置",
+    "## 4. 配置文件位置",
     "- 全局默认（推荐，一次配置所有项目可用）：`~/.graphflow.config.json`",
     `- 项目根目录（可选覆盖）：\`${join(root, "graphflow.config.json")}\``,
     `- 项目覆盖层（可选）：\`${join(root, ".graphflow", "config.json")}\``,
     "",
-    "## 6. OpenBMB 本地模型（可选）",
-    "- 在设置面板启用 OpenBMB auto-download，或运行 `GraphFlow: Download MiniCPM Model`",
-    "- 然后运行 `GraphFlow: Enrich Graph Semantics` 验证本地推理路径",
-    "",
-    "## 7. 验证 MCP",
+    "## 5. 验证 MCP",
     "在 Cursor / Claude Code / VS Code / Trae / Codex 对话框中说：",
     '> "使用 graphflow 预览当前项目的 orchestrator 相关上下文"',
     "",
     "Codex 配置写入 `~/.codex/config.toml` 的 `[mcp_servers.graphflow]`；Trae 写入 `User/mcp.json`。",
     "",
-    "## 8. 验证路由",
+    "## 6. 验证路由",
     "运行 `GraphFlow: Settings` 保存后，在 Chat 输入 `@graphflow /diagnose` 查看 provider 健康状态。",
   ].join("\n");
 }

@@ -1,7 +1,6 @@
 import { planInsight } from "../agents/insight.js";
 import { resolveConfig } from "../config/resolve.js";
 import { hasUsableLlmProvider } from "../config/llm-availability.js";
-import { applyOpenBmbRuntimeEnv } from "../surfaces/cli/runtime/env.js";
 import type { LayeredContextPackage } from "../graph/context-slicer.js";
 import { suggestSkillHints } from "../learning/skill-flywheel.js";
 import { resolveModelForRole } from "../routing/model-router.js";
@@ -23,9 +22,15 @@ export async function maybeBuildNearLosslessContext(
   const maxTokens = options.maxContextTokens ?? 1200;
   const packageOptions: import("../graph/context-slicer.js").LayeredPackageOptions = {
     ...(options.layerQuota ? { layerQuota: options.layerQuota } : {}),
-    ...(options.embeddingProvider ? { embeddingProvider: options.embeddingProvider, enableVectorRecall: true } : {}),
     // Graph-structure compression is zero-cost; enable by default unless explicitly disabled.
     enableGraphCompression: options.enableGraphCompression !== false,
+    // Pass through embedding/vector recall options so HNSW + vector recall are activated.
+    ...(options.embeddingProvider
+      ? {
+          embeddingProvider: options.embeddingProvider,
+          enableVectorRecall: true as const,
+        }
+      : {}),
   };
 
   // Adaptive budget: derive task complexity from triage and let the package
@@ -90,14 +95,17 @@ export function buildPromptContext(
 ): PromptContext | undefined {
   const includeGraph = options?.enableGraphContextInPrompt === true && contextPackage !== undefined;
   const includeEpisodes = options?.enableEpisodicMemory === true && episodeSummaries.length > 0;
-  if (!includeGraph && !includeEpisodes) {
+  // Skill hints should be injected independently of graph context,
+  // so that skill flywheel works even without near-lossless context.
+  const includeSkillHints = skillHints.length > 0;
+  if (!includeGraph && !includeEpisodes && !includeSkillHints) {
     return undefined;
   }
   const ctx: PromptContext = {};
   if (includeGraph && contextPackage && contextPackage.summaryChannel.length > 0) {
     ctx.summaryChannel = contextPackage.summaryChannel;
   }
-  if (includeGraph && skillHints.length > 0) {
+  if (includeSkillHints) {
     ctx.skillHints = skillHints;
   }
   if (includeEpisodes) {
@@ -128,7 +136,6 @@ export async function maybeRunPlanInsightForComplex(
       return buildAgentDelegatedPlanInsight(task);
     }
 
-    applyOpenBmbRuntimeEnv(config);
     const selection = resolveModelForRole("planner");
     const { insight, plan } = await planInsight(task, { selection });
     return {

@@ -81,10 +81,6 @@ describe("M10 CLI runtime", () => {
           enrichmentBackend: "network",
           enrichmentProvider: "",
           enrichmentModel: "",
-          openbmbMode: "embedded",
-          openbmbEngine: "command",
-          openbmbModel: "",
-          openbmbAutoDownload: false,
         },
         configPath
       );
@@ -141,16 +137,10 @@ describe("M10 CLI runtime", () => {
               includeExtensions: [".ts"],
               transport: "memory",
               maxContextTokens: 200,
-              semanticEnrichment: {
-                enabled: false,
-                mode: "off",
-                autoRunOnIndex: false,
-              },
             },
             learningPolicy: {
               enableFlywheel: false,
               trainingCadence: "nightly",
-              canaryRatio: 10,
               exportPath: join(root, "learning.jsonl"),
             },
           },
@@ -208,7 +198,6 @@ describe("M10 CLI runtime", () => {
             learningPolicy: {
               enableFlywheel: true,
               trainingCadence: "nightly",
-              canaryRatio: 10,
               exportPath: join(root, "learning.jsonl"),
             },
           },
@@ -262,7 +251,6 @@ describe("M10 CLI runtime", () => {
             learningPolicy: {
               enableFlywheel: true,
               trainingCadence: "nightly",
-              canaryRatio: 10,
               exportPath: join(root, "learning.jsonl"),
             },
           },
@@ -317,7 +305,6 @@ describe("M10 CLI runtime", () => {
             learningPolicy: {
               enableFlywheel: true,
               trainingCadence: "nightly",
-              canaryRatio: 10,
               exportPath: join(root, "learning.jsonl"),
             },
           },
@@ -368,15 +355,10 @@ describe("M10 CLI runtime", () => {
               transport: "file",
               graphStorePath: storePath,
               maxContextTokens: 200,
-              semanticEnrichment: {
-                enabled: false,
-                mode: "off",
-              },
             },
             learningPolicy: {
               enableFlywheel: true,
               trainingCadence: "nightly",
-              canaryRatio: 10,
               exportPath: join(root, "learning.jsonl"),
             },
             skillPolicy: {

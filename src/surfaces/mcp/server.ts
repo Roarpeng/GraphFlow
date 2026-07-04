@@ -7,25 +7,21 @@ import { ensureMcpWorkspaceEnv } from "../../config/discover-workspace.js";
 import { getToolDefinitions, type ToolDefinition } from "./tool-definitions.js";
 import {
   executeToolCall as executeToolCallImpl,
-  formatProgressMessage,
   isRecord,
-  readProgressToken,
   readRequiredString,
-  type ExecutionHooks,
   type ToolCall,
   type ToolCallResponse,
 } from "./tool-handlers.js";
 import { PACKAGE_VERSION } from "./version.js";
 
 export { getToolDefinitions } from "./tool-definitions.js";
-export type { ExecutionHooks, ToolCall, ToolCallResponse } from "./tool-handlers.js";
+export type { ToolCall, ToolCallResponse } from "./tool-handlers.js";
 
 export async function executeToolCall(
   call: ToolCall,
-  server: McpServer = createMcpServer(),
-  hooks?: ExecutionHooks
+  server: McpServer = createMcpServer()
 ): Promise<ToolCallResponse> {
-  return executeToolCallImpl(call, server, hooks);
+  return executeToolCallImpl(call, server);
 }
 
 interface JsonRpcRequest {
@@ -61,7 +57,7 @@ export interface McpServer {
 }
 
 export function createMcpServer(
-  emitNotification?: (notification: JsonRpcNotification) => void
+  _emitNotification?: (notification: JsonRpcNotification) => void
 ): McpServer {
   const tools = getToolDefinitions();
 
@@ -106,27 +102,10 @@ export function createMcpServer(
       if (request.method === "tools/call") {
         try {
           const params = request.params ?? {};
-          const progressToken = readProgressToken(params);
           const result = await executeToolCallImpl({
             name: readRequiredString(params.name, "name"),
             arguments: isRecord(params.arguments) ? params.arguments : {},
-          }, undefined, progressToken && emitNotification
-            ? {
-                onModelDownloadProgress: (progress) => {
-                  emitNotification({
-                    jsonrpc: "2.0",
-                    method: "notifications/progress",
-                    params: {
-                      progressToken,
-                      progress: progress.percent ?? 0,
-                      total: 100,
-                      message: `${progress.stage} ${progress.model} ${formatProgressMessage(progress)}`,
-                      data: progress,
-                    },
-                  });
-                },
-              }
-            : undefined);
+          }, undefined);
           return {
             jsonrpc: "2.0",
             id: request.id ?? null,
@@ -224,5 +203,20 @@ function installMcpProcessGuards(): void {
 if (require.main === module) {
   installMcpProcessGuards();
   ensureMcpWorkspaceEnv();
+
+  // Start file watcher for auto-indexing on save (best-effort, non-blocking).
+  // This enables incremental re-indexing when files change, keeping the knowledge
+  // graph fresh without requiring manual `graphflow index` calls.
+  void (async () => {
+    try {
+      const { resolveConfig } = await import("../../config/resolve.js");
+      const { startFileWatcherIfEnabled } = await import("../cli/runtime/graph.js");
+      const config = resolveConfig();
+      startFileWatcherIfEnabled(config);
+    } catch {
+      // File watcher is best-effort; don't fail MCP startup
+    }
+  })();
+
   startStdioServer();
 }

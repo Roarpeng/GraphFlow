@@ -3,7 +3,7 @@ import type { GraphFlowConfig } from "../config/schema";
 import { resolveConfig } from "../config/resolve";
 
 export type ModelTier = "smart" | "economy";
-export type ProviderName = "openai" | "anthropic" | "bailian" | "doubao" | "openbmb";
+export type ProviderName = "openai" | "anthropic" | "bailian" | "doubao";
 
 export type ProviderHealthMap = Record<ProviderName, boolean>;
 
@@ -18,8 +18,6 @@ const roleTierMap: Record<AgentRole, ModelTier> = {
   planner: "smart",
   validator: "smart",
   worker: "economy",
-  enricher: "economy",
-  evolver: "economy",
   compressor: "economy",
 };
 
@@ -40,10 +38,6 @@ const DEFAULT_MODELS: Record<ProviderName, Record<ModelTier, string>> = {
     smart: "doubao-pro-32k",
     economy: "doubao-lite-32k",
   },
-  openbmb: {
-    smart: "minicpm5-1b",
-    economy: "minicpm5-1b",
-  },
 };
 
 /**
@@ -55,16 +49,6 @@ export function resolveCompressorSelection(config: GraphFlowConfig): ModelSelect
   const tier: ModelTier = "economy";
   const compressionPolicy = config.graphPolicy.compression;
   const backend = compressionPolicy?.backend ?? "inherit";
-
-  // local backend → force embedded minicpm
-  if (backend === "local" || compressionPolicy?.provider === "openbmb") {
-    return {
-      provider: "openbmb",
-      model: compressionPolicy?.model ?? DEFAULT_MODELS.openbmb.economy,
-      tier,
-      fallbackApplied: false,
-    };
-  }
 
   // network backend with explicit provider override, else inherit economy tier
   const provider = (
@@ -88,51 +72,6 @@ export function resolveModelForRole(role: AgentRole, configPath?: string): Model
 
   try {
     const config = resolveConfig(configPath ?? "graphflow.config.json");
-
-    if (role === "enricher") {
-      const enrichPolicy = config.graphPolicy.semanticEnrichment;
-      const backend = enrichPolicy?.backend ?? "inherit";
-
-      if (backend === "local" || enrichPolicy?.provider === "openbmb") {
-        return {
-          provider: "openbmb",
-          model:
-            enrichPolicy?.model ??
-            config.learningPolicy.skillEvolution?.model ??
-            DEFAULT_MODELS.openbmb.economy,
-          tier,
-          fallbackApplied: false,
-        };
-      }
-
-      const provider = (
-        backend === "network" && enrichPolicy?.provider
-          ? enrichPolicy.provider
-          : enrichPolicy?.provider ?? config.tiers.economy.provider
-      ) as ProviderName;
-      return {
-        provider,
-        model:
-          enrichPolicy?.model ??
-          config.tiers.economy.model ??
-          DEFAULT_MODELS[provider].economy,
-        tier,
-        fallbackApplied: false,
-      };
-    }
-
-    if (role === "evolver") {
-      const provider = config.tiers.economy.provider as ProviderName;
-      return {
-        provider,
-        model:
-          config.learningPolicy.skillEvolution?.model ??
-          config.tiers.economy.model ??
-          DEFAULT_MODELS[provider].economy,
-        tier: "economy",
-        fallbackApplied: false,
-      };
-    }
 
     if (role === "compressor") {
       return resolveCompressorSelection(config);
@@ -168,7 +107,7 @@ export function resolveModelWithFallback(
     return base;
   }
 
-  const chain = fallbackChain ?? ["anthropic", "bailian", "doubao", "openbmb"];
+  const chain = fallbackChain ?? ["anthropic", "bailian", "doubao"];
   const available = chain.find((provider) => provider !== base.provider && providerHealth[provider]);
 
   if (!available) {

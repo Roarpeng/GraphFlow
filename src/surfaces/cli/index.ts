@@ -3,11 +3,8 @@
 import {
   diagnoseRouting,
   diagnoseRoutingResult,
-  downloadOpenBmbModel,
-  enrichSemanticsSilent,
   exportArtifact,
   exportSkillPackageRuntime,
-  getMetrics,
   getSkillInsights,
   getTokenSavingsStats,
   importArtifact,
@@ -40,13 +37,23 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
+  if (command === "init" || (command === "config" && args[0] === "init")) {
+    const { runInit } = require("./init");
+    runInit();
+    return {
+      command: "init",
+      data: {},
+      legacyText: `Initialization complete`,
+    };
+  }
+
   if (command === "doctor") {
     const { runDoctor } = require("./init");
-    const data = runDoctor();
+    runDoctor();
     return {
       command: "doctor",
-      data,
-      legacyText: `detectedAgents=${data.detectedAgents.length}; mcpInstalled=${data.mcp.filter((m: { installed: boolean }) => m.installed).length}/${data.mcp.length}`,
+      data: {},
+      legacyText: `Doctor complete`,
     };
   }
 
@@ -61,31 +68,13 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   }
 
   if (command === "mcp" && args[0] === "remove") {
-    // 解析 --agent 参数
-    const remainingArgs = args.slice(1);
-    let agentId: string | undefined;
-    for (let i = 0; i < remainingArgs.length; i++) {
-      if (remainingArgs[i] === "--agent" && remainingArgs[i + 1]) {
-        agentId = remainingArgs[i + 1];
-        break;
-      }
-    }
+    const agentId = args.includes("--agent") ? args[args.indexOf("--agent") + 1] : undefined;
     const { runMcpRemove } = require("./init");
-    const results = runMcpRemove(agentId);
+    runMcpRemove(agentId);
     return {
       command: "mcp-remove",
-      data: results ?? [],
-      legacyText: `MCP remove complete`,
-    };
-  }
-
-  if (command === "init" || (command === "config" && args[0] === "init")) {
-    const { runInit } = require("./init");
-    runInit();
-    return {
-      command: "init",
       data: {},
-      legacyText: `Initialization complete`,
+      legacyText: `MCP removal complete`,
     };
   }
 
@@ -224,15 +213,6 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
-  if (command === "graph" && args[0] === "enrich") {
-    const data = await enrichSemanticsSilent(configPath);
-    return {
-      command: "graph-enrich",
-      data,
-      legacyText: `enrichedCount=${data.enrichedCount}`,
-    };
-  }
-
   if (command === "skill" && args[0] === "insights") {
     const data = await getSkillInsights(configPath);
     return {
@@ -273,37 +253,6 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       command: "route-diagnose",
       data,
       legacyText: diagnoseRouting(configPath),
-    };
-  }
-
-  if (command === "learn" && args[0] === "nightly") {
-    const data = runLearningNightlyResult(configPath);
-    return {
-      command: "learn-nightly",
-      data,
-      legacyText: runLearningNightly(configPath),
-    };
-  }
-
-  if (command === "model" && args[0] === "download") {
-    const model = args[1]?.trim() || "minicpm5-1b";
-    let lastLine = "";
-    const data = await downloadOpenBmbModel(configPath, {
-      model,
-      onProgress: (progress) => {
-        const total = progress.totalBytes ? formatBytes(progress.totalBytes) : "unknown";
-        const percent = progress.percent !== undefined ? `${progress.percent.toFixed(1)}%` : "...";
-        const line = `${progress.stage} ${percent} ${formatBytes(progress.downloadedBytes)}/${total}`;
-        if (line !== lastLine) {
-          lastLine = line;
-          console.error(`[graphflow:model-download] ${line}`);
-        }
-      },
-    });
-    return {
-      command: "model-download",
-      data,
-      legacyText: `model=${data.model}; target=${data.targetPath}; bytes=${data.bytes}; skipped=${data.skipped}; verified=${data.verified}`,
     };
   }
 
@@ -355,32 +304,18 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
-  if (command === "metrics") {
-    const data = getMetrics(configPath);
+  if (command === "learn" && args[0] === "nightly") {
+    const data = await runLearningNightlyResult(configPath);
     return {
-      command: "metrics",
+      command: "learn-nightly",
       data,
-      legacyText: data.text,
+      legacyText: await runLearningNightly(configPath),
     };
   }
 
   console.log(buildCliUsage());
   process.exitCode = 1;
   return undefined;
-}
-
-function formatBytes(value: number): string {
-  if (!Number.isFinite(value) || value < 0) {
-    return "0 B";
-  }
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let size = value;
-  let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex += 1;
-  }
-  return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
 function formatValidationResult(data: ConfigValidationResult): string {

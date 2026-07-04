@@ -4,7 +4,6 @@ import type { GraphClient } from "../graph/client-factory";
 import type {
   SkillState,
   CompositeSkillState,
-  EvolutionarySkillNode,
   SkillEdge,
 } from "./skill-types";
 import {
@@ -80,35 +79,6 @@ export function parseCompositeState(content: string): CompositeSkillState | unde
   }
 }
 
-export function parseEvolutionState(content: string): EvolutionarySkillNode | undefined {
-  try {
-    const parsed = JSON.parse(content) as Partial<EvolutionarySkillNode> & { kind?: string };
-    if (parsed.kind !== "evolution" || !parsed.id || !parsed.name || !parsed.parents) {
-      return undefined;
-    }
-    const parents = parsed.parents;
-    if (!Array.isArray(parents) || parents.length !== 2) {
-      return undefined;
-    }
-    return {
-      id: parsed.id,
-      name: parsed.name,
-      parents: [parents[0]!, parents[1]!],
-      domain: parsed.domain || "",
-      description: parsed.description || "",
-      score: parsed.score ?? 0,
-      uses: parsed.uses ?? 0,
-      updatedAt: parsed.updatedAt ?? 0,
-      canaryUses: parsed.canaryUses ?? 0,
-      canaryPasses: parsed.canaryPasses ?? 0,
-      canaryStatus: parsed.canaryStatus ?? 'probation',
-    };
-  } catch (error) {
-    logger.error({ error }, "Caught error");
-    return undefined;
-  }
-}
-
 export async function readSkillState(client: GraphClient, id: string): Promise<SkillState | undefined> {
   const hits = await client.queryByKeyword(id);
   const direct = hits.find((node) => node.id === id && node.type === "Skill");
@@ -122,15 +92,6 @@ export async function loadCompositeSkill(
   const hits = await client.queryByKeyword(id);
   const direct = hits.find((node) => node.id === id && node.type === "Skill");
   return direct ? parseCompositeState(direct.content) : undefined;
-}
-
-export async function loadEvolutionSkill(
-  client: GraphClient,
-  id: string
-): Promise<EvolutionarySkillNode | undefined> {
-  const hits = await client.queryByKeyword(id);
-  const direct = hits.find((node) => node.id === id && node.type === "Skill");
-  return direct ? parseEvolutionState(direct.content) : undefined;
 }
 
 export function composeSkillId(atomA: string, atomB: string): string {

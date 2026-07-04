@@ -13,9 +13,6 @@ import {
   blendWithCentrality,
 } from "./graph-compression.js";
 import { buildRepoMap, formatRepoMapString } from "./repo-map.js";
-import {
-  applySemanticCompression,
-} from "./semantic-compression.js";
 import { estimateContextBudget } from "./adaptive-budget.js";
 
 // Re-export all public types and constants from sub-modules
@@ -141,7 +138,7 @@ export async function buildLayeredContextPackage(
       const vectorHits = vectorRecall(keywordHits, queryEmbedding, topK, minSim);
       hits = reciprocalRankFusion([keywordHits, vectorHits]);
     } catch (error) {
-    logger.error({ error }, "Caught error");
+      logger.warn({ error }, "Vector recall failed in buildLayeredContextPackage");
       hits = keywordHits;
     }
   }
@@ -324,15 +321,14 @@ export function createContextRefillManager(
 }
 
 /**
- * Enhanced context packaging with graph-structure compression, semantic
- * compression (minicpm-1b), and adaptive budgeting.
+ * Enhanced context packaging with graph-structure compression and adaptive budgeting.
  *
  * Compression pipeline:
  *   1. [Optional] RepoMap fallback for low budgets
- *   2. Keyword + vector retrieval (existing)
+ *   2. Keyword retrieval
  *   3. Graph compression: connected subgraph + PageRank re-ranking
- *   4. Semantic compression: cluster similar nodes, summarize, densify
- *   5. Layer quotas + token budgeting (existing)
+ *   4. Layer quotas + token budgeting
+ *   5. Edge expansion
  */
 export async function buildEnhancedContextPackage(
   client: GraphClient,
@@ -367,7 +363,7 @@ export async function buildEnhancedContextPackage(
     }
   }
 
-  // Step 2: Keyword + vector retrieval (existing logic).
+  // Step 2: Keyword retrieval.
   const keywordHits = rankNodesForContextQuery(await client.queryByKeyword(query), query);
   let hits: GraphNode[] = keywordHits;
 
@@ -378,10 +374,12 @@ export async function buildEnhancedContextPackage(
       const minSim = options.vectorMinSimilarity ?? 0.05;
 
       let vectorHits: GraphNode[];
-      // For large candidate sets, use HNSW ANN index (10-100x faster).
-      if (options.enableHnsw !== false && keywordHits.length >= 200) {
+      if (options.enableHnsw !== false) {
         const { HnswVectorIndex } = await import("../learning/hnsw-index.js");
-        const index = new HnswVectorIndex({ space: "cosine" });
+        const index = new HnswVectorIndex({
+          space: "cosine",
+          ...(options.hnswIndexPath ? { indexPath: options.hnswIndexPath } : {}),
+        });
         index.load(keywordHits);
         const results = await index.search(queryEmbedding, topK, minSim);
         vectorHits = results.map((r) => r.node);
@@ -391,10 +389,11 @@ export async function buildEnhancedContextPackage(
       }
       hits = reciprocalRankFusion([keywordHits, vectorHits]);
     } catch (error) {
-      logger.error({ error }, "Vector recall failed");
+      logger.warn({ error }, "Vector recall failed in buildEnhancedContextPackage");
       hits = keywordHits;
     }
   }
+
   if (options?.enableGraphCompression && hits.length > 0) {
     try {
       const ranked = await extractConnectedSubgraph(client, hits, options.graphCompressionOptions);
@@ -417,21 +416,7 @@ export async function buildEnhancedContextPackage(
     }
   }
 
-  // Step 4: Semantic compression - cluster + summarize + densify.
-  if (options?.enableSemanticCompression) {
-    try {
-      hits = await applySemanticCompression(hits, {
-        ...(options.clusteringOptions ? { clusteringOptions: options.clusteringOptions } : {}),
-        ...(options.summarizerOptions ? { summarizerOptions: options.summarizerOptions } : {}),
-        ...(options.densifierOptions ? { densifierOptions: options.densifierOptions } : {}),
-        ...(options.compressionModel ? { modelHandle: options.compressionModel } : {}),
-      });
-    } catch (error) {
-      logger.warn({ error }, "Semantic compression failed, using uncompressed hits");
-    }
-  }
-
-  // Step 5: Build layered package (existing logic).
+  // Step 4: Build layered package (existing logic).
   const summaryChannel: string[] = [];
   const anchorChannel: ContextAnchorItem[] = [];
   let tokens = 0;
@@ -465,7 +450,7 @@ export async function buildEnhancedContextPackage(
     markLayerUsed(layer, used);
   }
 
-  // Step 6: Edge expansion (existing logic).
+  // Step 5: Edge expansion (existing logic).
   const enableExpansion = options?.enableEdgeExpansion !== false;
   if (enableExpansion && !truncated && typeof client.getNeighbors === "function") {
     const seedIds = anchorChannel.slice(0, 5).map((a) => a.id);

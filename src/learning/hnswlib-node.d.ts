@@ -1,6 +1,5 @@
 /**
- * Type declarations for optional hnswlib-node dependency.
- * When not installed, the HNSW index gracefully falls back to linear scan.
+ * Type declarations for hnswlib-node.
  */
 declare module "hnswlib-node" {
   export class HierarchicalNSW {
@@ -13,5 +12,8 @@ declare module "hnswlib-node" {
     };
     getCurrentCount(): number;
     getMaxElements(): number;
+    setEf(ef: number): void;
+    writeIndexSync(path: string): void;
+    readIndexSync(path: string): void;
   }
 }

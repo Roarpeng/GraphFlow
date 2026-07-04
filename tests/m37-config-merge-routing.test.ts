@@ -113,7 +113,7 @@ describe("M37 config merge and routing", () => {
     }
   });
 
-  it("defaults embeddingPolicy to local Xenova model", () => {
+  it("defaults embeddingPolicy to hash provider", () => {
     const merged = mergeGraphFlowConfig(baseConfig, validateConfig({
       providers: {},
       tiers: {
@@ -135,7 +135,7 @@ describe("M37 config merge and routing", () => {
       },
     }));
 
-    expect(merged.embeddingPolicy?.provider).toBe("local");
+    expect(merged.embeddingPolicy?.provider).toBe("hash");
     expect(merged.embeddingPolicy?.model).toBe("Xenova/bge-base-zh-v1.5");
     expect(merged.embeddingPolicy?.enabled).toBe(true);
   });

@@ -7,7 +7,6 @@ import { resolveConfig, resolveConfigPath, resolveWritableConfigPath } from "../
 import { resolveGlobalConfigPath } from "../../../config/scaffold";
 import { stripWorkspaceRootForGlobalPersist } from "../../../config/workspace-root";
 import type { GraphFlowConfig } from "../../../config/schema";
-import { resolveEnrichmentBackend } from "./env.js";
 import { readRawConfig } from "./helpers.js";
 import type { GraphFlowSettings, GraphFlowSettingsInput, SettingsValidationIssue } from "./types.js";
 
@@ -83,16 +82,6 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
   const rawConfig = readRawConfig(actualPath);
   const smart = readTierFromConfig(config, rawConfig, "smart");
   const economy = readTierFromConfig(config, rawConfig, "economy");
-  const rawOpenBmbConfig = rawConfig?.providers?.openbmb ?? {};
-  const openbmbConfig = config.providers.openbmb ?? {};
-  const openbmbModelUrl = rawOpenBmbConfig.modelUrl ?? openbmbConfig.modelUrl ?? process.env.GRAPHFLOW_MINICPM_MODEL_URL;
-  const openbmbModelSha256 =
-    rawOpenBmbConfig.modelSha256 ?? openbmbConfig.modelSha256 ?? process.env.GRAPHFLOW_MINICPM_MODEL_SHA256;
-  const openbmbAutoDownloadRaw = rawOpenBmbConfig.autoDownloadModel ?? openbmbConfig.autoDownloadModel;
-  const openbmbAutoDownload =
-    typeof openbmbAutoDownloadRaw === "boolean"
-      ? openbmbAutoDownloadRaw
-      : String(process.env.GRAPHFLOW_OPENBMB_AUTO_DOWNLOAD ?? "0") === "1";
 
   return {
     configPath: actualPath,
@@ -113,47 +102,13 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
     autoIndexOnPreview: config.graphPolicy.autoIndexOnPreview ?? true,
     autoIndexOnRun: config.graphPolicy.autoIndexOnRun ?? true,
     autoIndexOnSave: config.graphPolicy.autoIndexOnSave ?? true,
-    autoRunOnIndex: config.graphPolicy.semanticEnrichment?.autoRunOnIndex ?? true,
+    enableHnsw: config.graphPolicy.enableHnsw ?? true,
     transport: config.graphPolicy.transport,
     graphStorePath: config.graphPolicy.graphStorePath ?? `${DEFAULT_OUTPUT_DIR}/graphflow-graph.json`,
-    enrichmentBackend: resolveEnrichmentBackend(config.graphPolicy.semanticEnrichment),
-    enrichmentProvider: config.graphPolicy.semanticEnrichment?.provider ?? "",
-    enrichmentModel: config.graphPolicy.semanticEnrichment?.model ?? "",
-    ...((): Record<string, string> => {
-      const enrichPolicy = config.graphPolicy.semanticEnrichment;
-      const enrichProvider = enrichPolicy?.provider ?? config.tiers.economy.provider;
-      const rawEnrichPolicy = rawConfig?.graphPolicy?.semanticEnrichment ?? {};
-      const rawEnrichProvider = rawConfig?.providers?.[enrichProvider] ?? {};
-      const apiKey = formatApiKeyForSettings(rawEnrichPolicy.apiKey ?? rawEnrichProvider.apiKey);
-      const baseUrl = rawEnrichPolicy.baseUrl ?? rawEnrichProvider.baseUrl;
-      return {
-        ...(apiKey ? { enrichmentApiKey: apiKey } : {}),
-        ...(typeof baseUrl === "string" && baseUrl.trim() ? { enrichmentBaseUrl: baseUrl.trim() } : {}),
-      };
-    })(),
-    openbmbMode: (openbmbConfig.mode ?? "embedded") as "embedded" | "ollama" | "openai-compat",
-    openbmbEngine: (openbmbConfig.engine ?? "command") as "command" | "node-llama-cpp",
-    openbmbModel:
-      config.learningPolicy.skillEvolution?.model ??
-      (smart.provider === "openbmb"
-        ? config.tiers.economy.model ?? config.tiers.smart.model ?? ""
-        : ""),
-    ...(rawOpenBmbConfig.baseUrl || openbmbConfig.baseUrl
-      ? { openbmbBaseUrl: rawOpenBmbConfig.baseUrl ?? openbmbConfig.baseUrl }
-      : {}),
-    ...(rawOpenBmbConfig.modelPath || openbmbConfig.modelPath
-      ? { openbmbModelPath: rawOpenBmbConfig.modelPath ?? openbmbConfig.modelPath }
-      : {}),
-    ...(rawOpenBmbConfig.commandPath || openbmbConfig.commandPath
-      ? { openbmbCommandPath: rawOpenBmbConfig.commandPath ?? openbmbConfig.commandPath }
-      : {}),
-    openbmbAutoDownload,
-    ...(typeof openbmbModelUrl === "string" && openbmbModelUrl.trim().length > 0
-      ? { openbmbModelUrl }
-      : {}),
-    ...(typeof openbmbModelSha256 === "string" && openbmbModelSha256.trim().length > 0
-      ? { openbmbModelSha256 }
-      : {}),
+    autoRunOnIndex: true,
+    enrichmentBackend: "inherit" as const,
+    enrichmentProvider: "",
+    enrichmentModel: "",
   };
 }
 
@@ -166,28 +121,8 @@ export function saveGraphFlowSettings(
   const smart = resolveTier(settings, "smart");
   const economy = resolveTier(settings, "economy");
 
-  const openbmbProviderConfig = {
-    ...(settings.openbmbBaseUrl ? { baseUrl: settings.openbmbBaseUrl } : {}),
-    ...(settings.openbmbModelPath ? { modelPath: settings.openbmbModelPath } : {}),
-    ...(settings.openbmbCommandPath ? { commandPath: settings.openbmbCommandPath } : {}),
-    ...(settings.openbmbModelUrl ? { modelUrl: settings.openbmbModelUrl } : {}),
-    ...(settings.openbmbModelSha256 ? { modelSha256: settings.openbmbModelSha256 } : {}),
-    mode: settings.openbmbMode,
-    engine: settings.openbmbEngine,
-    autoDownloadModel: settings.openbmbAutoDownload,
-  };
-
-  const nextSmartModel =
-    smart.provider === "openbmb" ? settings.openbmbModel : smart.model;
-  const nextEconomyModel =
-    economy.provider === "openbmb" ? settings.openbmbModel : economy.model;
-
   const providers: GraphFlowConfig["providers"] = {
     ...current.providers,
-    openbmb: {
-      ...(current.providers.openbmb ?? {}),
-      ...openbmbProviderConfig,
-    } as GraphFlowConfig["providers"][string],
   };
 
   mergeProviderConfig(providers, smart.provider, smart);
@@ -201,16 +136,16 @@ export function saveGraphFlowSettings(
     tiers: {
       smart: {
         provider: smart.provider || current.tiers.smart.provider,
-        ...(nextSmartModel?.trim()
-          ? { model: nextSmartModel.trim() }
+        ...(smart.model?.trim()
+          ? { model: smart.model.trim() }
           : current.tiers.smart.model
             ? { model: current.tiers.smart.model }
             : {}),
       },
       economy: {
         provider: economy.provider || current.tiers.economy.provider,
-        ...(nextEconomyModel?.trim()
-          ? { model: nextEconomyModel.trim() }
+        ...(economy.model?.trim()
+          ? { model: economy.model.trim() }
           : current.tiers.economy.model
             ? { model: current.tiers.economy.model }
             : {}),
@@ -222,6 +157,7 @@ export function saveGraphFlowSettings(
       autoIndexOnPreview: settings.autoIndexOnPreview,
       autoIndexOnRun: settings.autoIndexOnRun,
       autoIndexOnSave: settings.autoIndexOnSave,
+      enableHnsw: settings.enableHnsw,
       transport: settings.transport,
       graphStorePath: settings.graphStorePath,
       maxContextTokens: Math.max(1, Math.floor(settings.maxContextTokens)),
@@ -230,48 +166,11 @@ export function saveGraphFlowSettings(
         l2: Math.max(0, Math.floor(settings.layerQuota.l2)),
         l3: Math.max(0, Math.floor(settings.layerQuota.l3)),
       },
-      semanticEnrichment: {
-        ...(current.graphPolicy.semanticEnrichment ?? {}),
-        backend: settings.autoRunOnIndex ? "inherit" : settings.enrichmentBackend,
-        autoRunOnIndex: settings.autoRunOnIndex,
-        ...(settings.enrichmentBackend === "local"
-          ? { provider: "openbmb" }
-          : settings.enrichmentProvider?.trim()
-            ? { provider: settings.enrichmentProvider.trim() }
-            : settings.enrichmentBackend === "inherit"
-              ? {}
-              : current.graphPolicy.semanticEnrichment?.provider
-                ? { provider: current.graphPolicy.semanticEnrichment.provider }
-                : {}),
-        ...(settings.enrichmentModel?.trim()
-          ? { model: settings.enrichmentModel.trim() }
-          : current.graphPolicy.semanticEnrichment?.model
-            ? { model: current.graphPolicy.semanticEnrichment.model }
-            : {}),
-        ...(settings.enrichmentBackend !== "local" && settings.enrichmentApiKey?.trim()
-          ? { apiKey: formatApiKeyForConfig(settings.enrichmentApiKey) }
-          : {}),
-        ...(settings.enrichmentBackend !== "local" && settings.enrichmentBaseUrl?.trim()
-          ? { baseUrl: settings.enrichmentBaseUrl.trim() }
-          : {}),
-      },
     },
     learningPolicy: {
       ...current.learningPolicy,
-      skillEvolution: {
-        ...(current.learningPolicy.skillEvolution ?? {}),
-        ...(settings.openbmbModel?.trim() ? { model: settings.openbmbModel.trim() } : {}),
-      },
     },
   });
-
-  if (settings.openbmbModelUrl) {
-    process.env.GRAPHFLOW_MINICPM_MODEL_URL = settings.openbmbModelUrl;
-  }
-  if (settings.openbmbModelSha256) {
-    process.env.GRAPHFLOW_MINICPM_MODEL_SHA256 = settings.openbmbModelSha256;
-  }
-  process.env.GRAPHFLOW_OPENBMB_AUTO_DOWNLOAD = settings.openbmbAutoDownload ? "1" : "0";
 
   const dir = dirname(actualPath);
   if (dir && dir !== ".") {
@@ -297,7 +196,7 @@ function tierIsConfigured(tier: ResolvedTier): boolean {
 function validateTierRouting(
   tierName: TierName,
   tier: ResolvedTier,
-  settings: GraphFlowSettingsInput
+  _settings: GraphFlowSettingsInput
 ): SettingsValidationIssue[] {
   const issues: SettingsValidationIssue[] = [];
   const prefix = tierName === "smart" ? "smart" : "economy";
@@ -317,22 +216,6 @@ function validateTierRouting(
   }
 
   if (!tierIsConfigured(tier)) {
-    return issues;
-  }
-
-  if (tier.provider === "openbmb") {
-    if (settings.openbmbMode === "embedded" && !settings.openbmbModelPath?.trim() && !settings.openbmbAutoDownload) {
-      issues.push({
-        field: "openbmbModelPath",
-        message: `${label} 层使用 OpenBMB 时需填写模型路径或勾选自动下载`,
-      });
-    }
-    if (
-      (settings.openbmbMode === "ollama" || settings.openbmbMode === "openai-compat") &&
-      !settings.openbmbBaseUrl?.trim()
-    ) {
-      issues.push({ field: "openbmbBaseUrl", message: `${label} 层 OpenBMB 手动模式需填写 Base URL` });
-    }
     return issues;
   }
 

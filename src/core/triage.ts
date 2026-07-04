@@ -82,8 +82,8 @@ export async function triageTaskLlm(
     const cleaned = raw.trim().toLowerCase();
 
     if (
-      cleaned.includes("[openbmb:") ||
       cleaned.includes("[openai:") ||
+      cleaned.includes("[anthropic:") ||
       (cleaned.includes("simple") && cleaned.includes("complex"))
     ) {
       return triageTask(task);

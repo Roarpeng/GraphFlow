@@ -50,6 +50,7 @@ export interface GraphFlowSettings {
   autoIndexOnRun: boolean;
   autoIndexOnSave: boolean;
   autoRunOnIndex: boolean;
+  enableHnsw: boolean;
   transport: GraphFlowConfig["graphPolicy"]["transport"];
   graphStorePath: string;
   enrichmentBackend: "network" | "local" | "inherit";
@@ -57,15 +58,6 @@ export interface GraphFlowSettings {
   enrichmentModel: string;
   enrichmentApiKey?: string;
   enrichmentBaseUrl?: string;
-  openbmbMode: "embedded" | "ollama" | "openai-compat";
-  openbmbEngine: "command" | "node-llama-cpp";
-  openbmbModel: string;
-  openbmbBaseUrl?: string;
-  openbmbModelPath?: string;
-  openbmbCommandPath?: string;
-  openbmbAutoDownload: boolean;
-  openbmbModelUrl?: string;
-  openbmbModelSha256?: string;
 }
 
 export type GraphFlowSettingsInput = Omit<GraphFlowSettings, "configPath">;
@@ -123,7 +115,7 @@ export interface RunTaskSummary {
 
 export interface RoutingDiagnosisResult {
   dynamicRouting: boolean;
-  health: Record<"openai" | "anthropic" | "bailian" | "doubao" | "openbmb", boolean>;
+  health: Record<"openai" | "anthropic" | "bailian" | "doubao", boolean>;
   priority: string[];
   planner: {
     provider: string;
@@ -146,34 +138,6 @@ export interface RoutingDiagnosisResult {
     model: string;
     embedded: boolean;
   };
-}
-
-export interface LearningNightlyResult {
-  events: number;
-  passRate: number;
-  avgTokens: number;
-  canary: "allow" | "block";
-  reason: string;
-  dataset: string;
-}
-
-export interface ModelDownloadResult {
-  model: string;
-  targetPath: string;
-  bytes: number;
-  skipped: boolean;
-  verified: boolean;
-  resumed?: boolean;
-}
-
-export interface ModelDownloadProgress {
-  model: string;
-  targetPath: string;
-  downloadedBytes: number;
-  totalBytes?: number;
-  resumed: boolean;
-  percent?: number;
-  stage: "starting" | "downloading" | "verifying" | "completed" | "skipped";
 }
 
 export interface SettingsValidationIssue {
@@ -245,4 +209,14 @@ export interface ExpandAnchorResult {
   sourceLine?: number;
   sourceSnippet?: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface LearningNightlyResult {
+  totalEvents: number;
+  passRate: number;
+  averageTokenCost: number;
+  canaryAllowed: boolean;
+  canaryReason: string;
+  exportedPath: string;
+  lessonsSynthesized?: number;
 }

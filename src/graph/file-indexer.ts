@@ -15,6 +15,21 @@ import type { GraphEdge, GraphNode } from "../core/types.js";
 import type { GraphClient } from "./client-factory.js";
 import { getIndexerForFile } from "./language-indexers/index.js";
 import type { CallRelation, InheritRelation } from "./language-indexers/index.js";
+import { hashEmbedding, attachEmbedding } from "../learning/embeddings.js";
+
+/**
+ * Attach hash embeddings to nodes in-place.
+ * Hash embedding is zero-cost (FNV-1a hash, no model inference) and enables
+ * vector recall + HNSW ANN search for context compression.
+ */
+function attachHashEmbeddings(nodes: GraphNode[]): void {
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (node && node.content) {
+      nodes[i] = attachEmbedding(node, hashEmbedding(node.content));
+    }
+  }
+}
 
 // ── Re-exports from sub-modules ──────────────────────────────────────
 export type { FileIndexerOptions } from "./file-indexer-walker.js";
@@ -226,6 +241,10 @@ export async function indexWorkspaceFiles(
   const { edges: inheritEdges, inheritEdgeCount } = buildBatchInheritEdges(parsed, symbolIndex);
   for (const edge of inheritEdges) edges.push(edge);
 
+  // Attach hash embeddings to all nodes for vector recall / HNSW ANN search.
+  // Zero-cost: uses FNV-1a hash, no model inference required.
+  attachHashEmbeddings(nodes);
+
   await client.upsertNodes(nodes);
   await client.upsertEdges(dedupEdges(edges));
 
@@ -335,6 +354,9 @@ export async function indexSingleFile(
     edges.push(...ciEdges);
     referenceCount += callCount + inheritCount;
   }
+
+  // Attach hash embeddings for vector recall / HNSW ANN search.
+  attachHashEmbeddings(nodes);
 
   await client.upsertNodes(nodes);
   await client.upsertEdges(dedupEdges(edges));

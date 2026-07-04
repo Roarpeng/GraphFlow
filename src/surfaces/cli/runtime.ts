@@ -8,11 +8,6 @@ export {
 export { resolveConfig, resolveConfigPath, resolveWritableConfigPath } from "../../config/resolve";
 export * from "./runtime/types.js";
 export {
-  prepareSemanticEnrichmentRuntime,
-  applyEnrichmentProviderEnv,
-  applyOpenBmbRuntimeEnv,
-} from "./runtime/env.js";
-export {
   getGraphFlowSettings,
   saveGraphFlowSettings,
   validateSettingsForGraphIndex,
@@ -24,8 +19,6 @@ export {
   indexGraph,
   indexFile,
   rebuildGraph,
-  enrichSemanticsSilent,
-  downloadOpenBmbModel,
   inspectGraph,
   getSkillInsights,
   exportArtifact,
@@ -34,7 +27,7 @@ export {
   importSkillPackageRuntime,
   getTokenSavingsStats,
   resetTokenSavingsStats,
-  getMetrics,
+  startFileWatcherIfEnabled,
 } from "./runtime/graph.js";
 export {
   runTask,
@@ -42,8 +35,6 @@ export {
   reportOutcome,
   diagnoseRouting,
   diagnoseRoutingResult,
-  runLearningNightly,
-  runLearningNightlyResult,
   planAndBrainstorm,
   planAndBrainstormResult,
   planInsightResult,
@@ -58,12 +49,11 @@ export {
 } from "./runtime/panel.js";
 export { assertGraphFlowRuntime, type GraphFlowRuntime, type GraphFlowRuntimeModule } from "./runtime/facade.js";
 export {
-  buildMcpServerNode,
+  runLearningNightly,
+  runLearningNightlyResult,
+} from "./runtime/learning.js";
+export {
   detectInstalledAgents,
   formatModelConfigGuide,
   installMcpToDetectedAgents,
-  type DetectedAgent,
-  type McpInstallOptions,
-  type McpInstallResult,
-  type McpInstallStrategy,
 } from "../../integrations/agent-mcp-installer";

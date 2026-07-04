@@ -31,18 +31,16 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 }
 ```
 
-接好后让 agent 优先调用 `graphflow_preview_context` 取压缩上下文；多步任务用 `graphflow_plan`。配置 provider API key 是**可选**的——只在需要语义压缩 / 规划增强时才用。
-
-> 可复现的 token 节省基准见 [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md)。
+接好后让 agent 优先调用 `graphflow_preview_context` 取压缩上下文；多步任务用 `graphflow_plan`。配置 provider API key 是**可选**的——只在需要 LLM 规划增强时才用。
 
 ## 为什么选 GraphFlow（与同类对比）
 
-这个赛道里有很多优秀的单点工具，GraphFlow 的定位不是"某一项最强"，而是**在代码图谱之上叠加了上下文压缩、规划编排与跨会话学习记忆**——尤其是"记忆型代码图谱"这一块目前少有人占据。诚实对比如下：
+这个赛道里有许多优秀的单点工具，GraphFlow 的定位不是"某一项最强"，而是**在代码图谱之上叠加了上下文压缩、规划编排与跨会话学习记忆**——尤其是"记忆型代码图谱"这一块目前少有人占据。诚实对比如下：
 
 | 维度 | **GraphFlow** | CodeGraph | Serena | Repomix |
 | --- | --- | --- | --- | --- |
 | 结构代码图谱 | ✅ 多语言 AST 图谱 | ✅ 更成熟（★ 更高） | ⚠️ LSP 符号（非全图谱） | ❌ |
-| 上下文压缩 | ✅ 三层渐进（结构+向量+语义） | ⚠️ 图查询为主 | ⚠️ 符号级精修 | ✅ 整库打包（无压缩） |
+| 上下文压缩 | ✅ 两层渐进（结构+向量） | ⚠️ 图查询为主 | ⚠️ 符号级精修 | ✅ 整库打包（无压缩） |
 | 规划编排 | ✅ DAG / 六顶思考帽 | ❌ | ❌ | ❌ |
 | **跨会话学习记忆** | ✅ Episodic / Skill / Decision 节点 | ❌ | ❌ | ❌ |
 | Local-first | ✅ | ✅ | ✅ | ✅ |
@@ -50,72 +48,58 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 
 > 实话实说：论纯图谱的成熟度与社区规模，CodeGraph 更领先；论 LSP 符号编辑标准，Serena 更专精；论整库打包，Repomix 更简单。GraphFlow 的价值在于把"图谱 + 压缩 + 规划 + 学习记忆"合到一处，让 agent 不仅省 token，还能跨会话复用项目经验。
 
-## 当前能力总览（v1.0.0+）
+## 当前能力总览（v1.4.0+）
 
 | 能力域 | 说明 |
 | --- | --- |
-| **任务规划与移交** | 按任务复杂度分流 simple / complex；DAG 规划；`graphflow_plan_insight` 六顶思考帽 + 5-Why 深度分析；默认 **bridge 模式**输出结构化任务描述符交给外部 coding agent 执行 |
-| **模型路由** | Smart / Economy 双 tier；多 provider 健康探测与 fallback（OpenAI、Anthropic、百炼、豆包、OpenBMB） |
-| **知识图谱** | 工作区 AST 索引（TS/JS/Python/Rust/Go/C/C++/Java/Ruby/Kotlin/Swift）；File / Module / Symbol 节点 + 依赖/引用/定义边；图谱 artifact 导入/导出 |
-| **上下文压缩** | L1/L2/L3 分层锚点；近无损打包；图结构压缩（边权重+PageRank，零成本默认开启）；可选语义压缩（minicpm/economy LLM 聚类合并）；向量召回 + RRF + HNSW；RepoMap 概览；自适应预算 |
-| **持续建图** | 默认 `autoIndexOnSave`；preview / run 前按需增量索引（`hasPendingGraphIndexWork`）；MCP `graphflow_index_file` 单文件增量 |
-| **语义增强** | 可选 post-index LLM 语义 enrich；OpenBMB 本地 embedded 模式 |
-| **学习飞轮** | Episodic Memory、Reflection、Skill 节点、nightly 学习、技能提示注入规划 |
-| **可观测性** | `graphflow_stats` 累计 token 节省；`graphflow_metrics` Prometheus 指标；VS Code 知识图谱 Snapshot |
-| **Agent 接入** | CLI `--json`；MCP stdio（**20 工具**）；Cursor / Claude Code 规则与示例配置 |
+| **任务规划与移交** | 按任务复杂度分流 simple / complex / insight；DAG 规划；`graphflow_plan_insight` 六顶思考帽 + 5-Why 深度分析；默认 **bridge 模式**输出结构化任务描述符交给外部 coding agent 执行 |
+| **模型路由** | Smart / Economy 双 tier；多 provider 健康探测与 fallback（OpenAI、Anthropic、百炼、豆包） |
+| **知识图谱** | 工作区 AST 索引（TS/JS/Python/Rust/Go/C/C++/Java/Ruby/Kotlin/Swift）；File / Module / Symbol 节点 + 依赖/引用/定义/调用/继承边；图谱 artifact 导入/导出 |
+| **上下文压缩** | L1/L2/L3 分层锚点；近无损打包；图结构压缩（边权重+PageRank，零成本默认开启）；向量召回 + RRF + HNSW ANN；RepoMap 概览；自适应预算 |
+| **持续建图** | 默认 `autoIndexOnSave`；MCP 启动时自动启动 FileWatcher；preview / run 前按需增量索引；MCP `graphflow_index_file` 单文件增量 |
+| **学习飞轮** | Episodic Memory（Jaccard + embedding RRF 语义检索）、Reflection（聚类 + Lesson 提取）、Skill 节点（score ±1，bounded [-20,20]）、nightly 学习、技能提示注入规划 |
+| **可观测性** | `graphflow_stats` 累计 token 节省；VS Code 知识图谱 Snapshot |
+| **Agent 接入** | CLI `--json`；MCP stdio（**18 工具**）；自动安装 MCP 到 15+ Agent（Cursor / Claude Code / Windsurf / Cline / Codex / Gemini 等） |
 | **VS Code 扩展** | Settings、建图、路由测试、Context Preview、**知识图谱可视化**、Skill Insights、Chat Agent、一键安装 MCP |
 | **存储后端** | `file`（JSON）/ `memory` / `sqlite`（FTS5）/ `mcp-http`（Graphify） |
 | **多项目隔离** | 全局配置共享 LLM/路由；**图谱路径按当前工作区解析**，不再串读其它项目的 `graphflow-out` |
-| **工程质量** | TypeScript strict；**62 测试文件 / 280+ tests**；`npm run ci` 含扩展 esbuild 打包与 bundled runtime smoke |
+| **工程质量** | TypeScript strict；**56 测试文件 / 249+ tests**；`npm run ci` 含扩展 esbuild 打包与 bundled runtime smoke |
 
 ### 一句话总结
 
 > 从 task 描述出发，自动规划 → 路由模型 → 压缩图谱上下文（含向量召回）→ **输出结构化执行描述符交给外部 coding agent**，并把经验沉淀回知识图谱；定位为 **上下文与规划服务（context service）**，而非独立执行器。
 
-### v1.0.0 核心（2026-06）
+### v1.4.0 核心（2026-07）
 
-- **诚实执行语义（bridge 模式）**：`graphflow_run` 规划 + 压缩上下文后输出 `executionDescriptor`，交给 Cursor / Claude Code 等外部 agent 执行，不再伪造 `COMPLETED`。
-- **三层渐进压缩**：图结构压缩（默认零成本）→ 向量召回 + HNSW → 可选语义压缩（economy / minicpm）。
-- **混合压缩模型**：`compressor` 角色默认继承 economy tier；纯离线时首次按需下载 minicpm GGUF。
+**奥卡姆剃刀精简**：移除 OpenBMB 本地部署、语义压缩模型、语义增强器、技能进化、金丝雀门控、本地嵌入模型、向量存储等未产生真实价值的模块。留下的是三条经过验证的闭环链路。
 
-### 最新更新（v1.0.x / main）
+**三大核心功能验证修复**：
 
-1. **多项目图谱隔离**
-   - 全局配置（`~/.graphflow.config.json`）只保存 LLM、路由等**机器级**设置，**不再持久化 `workspaceRoot`**
-   - 运行时按 `process.cwd()` 或 `GRAPHFLOW_WORKSPACE_ROOT` 解析 `graphflow-out/graphflow-graph.json`
-   - 修复：切换项目后 Snapshot / MCP 仍显示旧项目图谱的问题
+1. **HNSW 向量召回完全打通**（P0 修复）
+   - `file-indexer` 现在为所有 File/Symbol/Module 节点附加 hash embedding（零成本 FNV-1a，256 维）
+   - `orchestrator-context` 现在传递 `embeddingProvider` + `enableVectorRecall` 到压缩管道
+   - HNSW 索引持久化路径接通（`vectorStorePath` → `.hnsw` 文件）
+   - 大仓库（≥200 节点）自动使用 HNSW ANN（10-100x 提速），小仓库线性扫描
 
-2. **索引与语言扩展**
-   - 新增 **Java**（`.java`）、**Ruby**（`.rb`）tree-sitter 索引器
-   - C/C++、Rust 索引器增强；WASM 语法包随 npm 包离线分发（构建时 `npm run wasm:bundle` 打入 `wasm/`）
-   - MCP 新增 `graphflow_index_file` 单文件增量索引
+2. **FileWatcher 接入 MCP 启动**（P0 修复）
+   - `startFileWatcherIfEnabled` 此前是死代码，现已接入 MCP 服务器启动路径
+   - 当 `autoIndexOnSave: true` 时自动监听文件变化并增量索引
 
-3. **MCP 工具扩展（9 → 18）**
-   - `graphflow_plan_insight`：六顶思考帽 + 5-Why 深度规划
-   - `graphflow_export_artifact` / `graphflow_import_artifact`：图谱压缩包导入导出
-   - `graphflow_stats`：累计 token 节省统计
-   - `graphflow_metrics`：Prometheus 格式可观测性指标
-   - `graphflow_report_outcome` / `graphflow_expand_anchor`：结果回传与锚点扩展
+3. **技能飞轮闭环修复**（P1 修复）
+   - `skillHints` 解耦：不再依赖 `enableGraphContextInPrompt`，独立注入 worker prompt
+   - Dangling edges 修复：`applySkillLearning` 现在先创建 Decision 节点再连 `improves` 边
 
-4. **知识图谱可视化（延续 v0.6.12+）**
-   - 可读标签、代码层/学习层 Tab、目录聚类、缩放平移、跳转源码
-   - Snapshot 为**采样视图**（默认约 120 节点 / 200 边），顶栏显示全库真实规模
+### 历史演进
 
-5. **配置与工程**
-   - 全局配置优先；损坏 JSON 容错；CI 全链路 validate + VSIX 打包
-   - Settings「建立图谱（无需 LLM）」或 `graph index` 即可生成结构图谱
-
-### 历史演进（v0.6.7 – v0.6.13 摘要）
-
-- v0.6.12–0.6.13：知识图谱面板、布局归一化、Snapshot 可读标签
-- v0.6.11：`autoIndexOnSave` 默认开启；`maxContextTokens` 400 → 1500 自动升级
-- v0.6.10：runtime 模块化、VS Code esbuild bundle
-- v0.6.7–0.6.9：全局配置脚手架、无工作区也可打开 Settings
+- **v1.3.x**：多项目图谱隔离、Java/Ruby 索引器、MCP 工具扩展、知识图谱可视化
+- **v1.0.x**：诚实执行语义（bridge 模式）、三层渐进压缩、混合压缩模型
+- **v0.6.x**：全局配置脚手架、autoIndexOnSave、runtime 模块化、VS Code esbuild bundle
 
 ### 发布信息
 
-- 最新版本：**v1.3.4**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.3.4`
-- **GitHub Release**：push 到 `main` 且 CI 通过后自动发布 VSIX（见 [Actions](https://github.com/Roarpeng/GraphFlow/actions)）
+- 最新版本：**v1.4.0**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.4.0`
+- **GitHub Release**：push 到 `main` 后 CI 自动构建 VSIX 并发布到 GitHub Releases
+- **npm 发布**：push tag `v*` 触发 npm publish
 - 变更日志：`CHANGELOG.md`
 
 ## 环境要求
@@ -131,7 +115,7 @@ npm install
 npm run ci
 ```
 
-预期：`lint` 无错误、`build` 成功、**280+ tests** 通过、扩展 bundle 与 runtime smoke 通过。
+预期：`lint` 无错误、`build` 成功、**249+ tests** 通过、扩展 bundle 与 runtime smoke 通过。
 
 ## Agent 工具接入
 
@@ -146,7 +130,7 @@ GraphFlow 支持两种对外接入方式：
 npm run start:mcp
 ```
 
-### MCP 工具一览（20 个）
+### MCP 工具一览（18 个）
 
 | 工具 | 用途 |
 | --- | --- |
@@ -162,14 +146,12 @@ npm run start:mcp
 | `graphflow_index_file` | 单文件增量建图（适合 onSave / watcher） |
 | `graphflow_rebuild` | 清空缓存后全量重建 |
 | `graphflow_inspect_graph` | 图谱快照统计与样本节点 |
-| `graphflow_enrich_graph` | 符号节点语义增强 |
 | `graphflow_skill_insights` | 技能学习洞察 |
-| `graphflow_diagnose` | 路由与压缩模型健康诊断 |
-| `graphflow_model_download` | OpenBMB / minicpm 模型下载 |
+| `graphflow_diagnose` | 路由与模型健康诊断 |
 | `graphflow_export_artifact` | 导出压缩图谱 artifact |
 | `graphflow_import_artifact` | 导入图谱 artifact |
 | `graphflow_stats` | 累计 token 节省 ROI 统计 |
-| `graphflow_metrics` | Prometheus 格式运行指标 |
+| `graphflow_skill_guide` | 获取 GraphFlow Skill 使用指南 |
 
 **MCP 建图提示**：用户级 MCP 进程的 `cwd` 不一定是当前项目。请任选其一：
 
@@ -185,7 +167,7 @@ npm run start -- context preview "orchestrator" --json
 npm run start -- graph inspect --json
 ```
 
-外部 agent 约定文件：`AGENTS.md`、`CLAUDE.md`、`.cursor/rules/graphflow.mdc`、`docs/integrations/*.json`
+外部 agent 约定文件：`AGENTS.md`、`CLAUDE.md`、`.cursor/rules/graphflow.mdc`
 
 ## 本地功能验证（CLI）
 
@@ -223,52 +205,49 @@ npm run start -- skill insights
 
 ## 进阶能力
 
-### 上下文压缩（v1.0 核心）
+### 上下文压缩
 
-GraphFlow 的压缩采用「三层渐进」策略，先用零成本图结构压缩砍掉冗余节点，再按需用 LLM 做语义合并：
+GraphFlow 的压缩采用「两层渐进」策略，先用零成本图结构压缩砍掉冗余节点，再用向量召回补充语义相关节点：
 
 | 层 | 机制 | 成本 | 默认 |
 | --- | --- | --- | --- |
 | 图结构压缩 | 边权重连通子图 + PageRank 中心性重排 | 零 LLM | **开启** |
-| 向量召回 | embedding + RRF 融合；候选 ≥200 自动用 HNSW ANN | 零 LLM | 配 embedding 时开启 |
-| 语义压缩 | minicpm/economy LLM 聚类合并相似节点 + 长节点改写 | LLM | opt-in |
+| 向量召回 | hash embedding + RRF 融合；候选 ≥200 自动用 HNSW ANN | 零 LLM | **开启** |
 | RepoMap 概览 | 预算紧张时返回模块级地图 | 零 LLM | opt-in |
 | 自适应预算 | 按任务复杂度动态调整 token 预算 | 零 LLM | opt-in |
 
-**压缩模型策略（零额外配置）**：压缩复用 economy tier——
+**向量召回设计**：
 
-- 配了外部 provider（OpenAI/Anthropic/百炼）→ 自动用其 economy 模型（如 `gpt-4.1-mini`）
-- 纯离线无外部 LLM → 自动回退内嵌 minicpm，**首次使用按需下载** GGUF 到 `~/.graphflow/models/`（约 650MB，仅一次）
+- 索引时：`file-indexer` 为每个节点生成 256 维 hash embedding（FNV-1a，零成本，无模型推理）
+- 查询时：对 query 生成同样维度的 embedding，与图中节点做 cosine similarity
+- 大仓库（≥200 候选节点）自动启用 HNSW ANN（hnswlib-node），10-100x 提速
+- 小仓库使用线性扫描，避免 HNSW 构建开销
+- 关键词检索 + 向量召回结果通过 RRF（Reciprocal Rank Fusion, k=60）融合
 
 配置示例：
 
 ```json
 {
   "graphPolicy": {
+    "enableHnsw": true,
     "compression": {
-      "enabled": true,
-      "backend": "inherit",
       "enableGraphCompression": true,
-      "enableHnsw": true,
-      "enableRepoMapFallback": false,
-      "enableAdaptiveBudget": false,
-      "autoDownloadEmbedded": true
+      "enableAdaptiveBudget": true
     }
+  },
+  "embeddingPolicy": {
+    "enabled": true,
+    "provider": "hash",
+    "topK": 8,
+    "minSimilarity": 0.05
   }
 }
 ```
 
-查看当前压缩模型来源：
+查看当前压缩与路由状态：
 
 ```bash
 npm run start -- route diagnose
-# 输出含：compression=inherit:openai/gpt-4.1-mini
-```
-
-**HNSW 加速（可选依赖）**：大仓库（候选 ≥200 节点）向量召回自动使用 HNSW ANN（10~100x 提速）。需安装可选依赖：
-
-```bash
-npm install hnswlib-node   # 未安装时自动降级线性扫描，不影响功能
 ```
 
 ### SQLite / FTS5 后端
@@ -285,18 +264,6 @@ npm install hnswlib-node   # 未安装时自动降级线性扫描，不影响功
 
 WAL + FTS5 全文索引；与 `file` / `memory` 接口一致。
 
-### 向量召回 + RRF 融合
-
-```ts
-import { createHashEmbeddingProvider } from "graphflow/dist/learning/embeddings";
-
-const pkg = await buildLayeredContextPackage(client, query, {
-  enableVectorRecall: true,
-  embeddingProvider: createHashEmbeddingProvider(),
-  vectorTopK: 8,
-});
-```
-
 ### Episodic Memory + Reflection
 
 ```ts
@@ -306,7 +273,14 @@ const run = await orchestrate(
 );
 ```
 
-每次 task 写入 Episode；相似 task 注入历史决策；`learn nightly` 合成 Lesson 节点。
+每次 task 写入 Episode（附带 embedding）；相似 task 注入历史决策（Jaccard + embedding RRF 融合检索）；`learn nightly` 合成 Lesson 节点；Lesson 自动注入后续任务的 planner prompt。
+
+### 技能学习飞轮
+
+- `applySkillLearning`：每次任务结束后提取技能原子，更新 Skill 节点 score（pass +1 / fail -1，bounded [-20,20]）
+- `suggestSkillHints`：查询 Skill 节点，按 score/uses 排序，返回 top-N 技能提示
+- 技能提示独立注入 worker prompt，不依赖图谱上下文是否启用
+- 复合技能：技能对共现次数达阈值后自动创建 composite skill 节点
 
 ### 跨语言 AST 索引
 
@@ -319,8 +293,24 @@ const run = await orchestrate(
 | C / C++ | `.c .h .cc .cpp .cxx .hpp .hxx` |
 | Java | `.java` |
 | Ruby | `.rb` |
+| Kotlin | `.kt` |
+| Swift | `.swift` |
 
 通过 `graphPolicy.includeExtensions` 限制扫描范围。tree-sitter WASM 语法包在 `npm run build` 时打入 `wasm/` 并随 npm 包分发，安装后无需联网下载。
+
+### Agent MCP 自动安装
+
+GraphFlow CLI 可自动检测并安装 MCP 配置到 15+ 编码 Agent：
+
+```bash
+# 检测已安装的 Agent
+npx @roarpeng/graphflow doctor
+
+# 自动安装 MCP 配置到所有检测到的 Agent
+npx @roarpeng/graphflow init
+```
+
+支持的 Agent：Cursor、VS Code、Trae、Claude Code、Windsurf、Cline、Roo Code、Kilo Code、PearAI、Gemini、Codex、Antigravity、Amazon Q、Zed、Continue。
 
 ## 配置文件
 
@@ -354,9 +344,11 @@ cp graphflow.config.example.json graphflow.config.json
 | `graphPolicy.autoIndexOnSave` | 保存后增量索引（默认 **true**） |
 | `graphPolicy.autoIndexOnPreview` / `autoIndexOnRun` | preview / run 前自动索引 |
 | `graphPolicy.enableNearLosslessMode` | 近无损上下文打包 |
+| `graphPolicy.enableHnsw` | HNSW ANN 加速（默认 **true**） |
 | `graphPolicy.layerQuota` | L1/L2/L3 锚点配额 |
 | `routingPolicy.enableDynamicRouting` | provider 健康路由 |
 | `skillPolicy.enableSkillFlywheel` | 技能飞轮 |
+| `embeddingPolicy.provider` | embedding 提供者（`hash` 零成本 / `openai`） |
 
 ## VS Code 扩展
 
@@ -370,7 +362,6 @@ cp graphflow.config.example.json graphflow.config.json
 | GraphFlow: Plan & Brainstorm | 任务规划 |
 | GraphFlow: Run Task | 执行任务 |
 | GraphFlow: Skill Insights | 技能学习面板 |
-| GraphFlow: Enrich Graph | 语义增强 |
 | GraphFlow: Install MCP | 注入 MCP 配置 |
 
 Chat Agent（`@graphflow`）：`/run`、`/plan`、`/graph`、`/skills`、`/diagnose`、`/learn`、`/history`
@@ -379,7 +370,7 @@ Chat Agent（`@graphflow`）：`/run`、`/plan`、`/graph`、`/skills`、`/diagn
 
 1. 填写 Graph Store Path → **Save Settings**
 2. **建立图谱（无需 LLM）** → 生成结构图谱
-3. （可选）配置 Provider → **测试路由并建立图谱** → 语义 enrich
+3. （可选）配置 Provider → **测试路由并建立图谱**
 
 其它建图入口：`graph index` CLI、MCP `graphflow_index`、`autoIndexOnPreview` / `autoIndexOnRun` / `autoIndexOnSave`
 
@@ -409,7 +400,7 @@ code --install-extension artifacts/graphflow-vscode-*.vsix
 3. `context preview` → `summary > 0` 且 `anchors > 0`
 4. VS Code **Show Graph** → 画布正常显示节点聚类（非角落小点）
 5. `plan` / `run` 返回正常输出
-6. `route diagnose` → 显示 `compression=<backend>:<provider>/<model>`
+6. `route diagnose` → 显示 provider 路由状态
 
 ## 常见问题
 
@@ -417,7 +408,6 @@ code --install-extension artifacts/graphflow-vscode-*.vsix
 
 - 检查 `~/.graphflow.config.json` 是否含有旧的 `workspaceRoot`，**删除该字段**后重载窗口
 - 在当前项目重新「建立图谱」，确认顶栏 `store` 路径指向本项目的 `graphflow-out/`
-- 使用 v1.0.x 最新版（已修复全局 `workspaceRoot` 串项目问题）
 
 **MCP 建图失败或索引到错误目录**
 
@@ -432,7 +422,6 @@ code --install-extension artifacts/graphflow-vscode-*.vsix
 
 **知识图谱面板空白或只有小点**
 
-- 升级到 **v1.0.0+** 并重载窗口
 - 点击画布工具栏 **「适应」**
 - 注意：画布展示的是**采样子图**（约 120 节点），全库规模请看顶栏统计
 
@@ -442,21 +431,22 @@ code --install-extension artifacts/graphflow-vscode-*.vsix
 
 **无 LLM 时能用吗**
 
-- 可以：结构索引、图谱可视化、context preview（基于结构图谱）、MCP `graphflow_inspect_graph` 均不强制 LLM
+- 可以：结构索引、图谱可视化、context preview（基于结构图谱 + hash embedding 向量召回）、MCP `graphflow_inspect_graph` 均不强制 LLM
+- 只有 Six Hats 深度规划和 LLM 语义压缩需要配置 provider
 
 ## 项目结构
 
 ```text
 GraphFlow/
 ├── src/
-│   ├── core/           # 编排核心类型
-│   ├── graph/          # 索引、上下文切片、snapshot-view
-│   ├── routing/        # 模型路由与健康探测
-│   ├── learning/       # 向量、episode、skill
+│   ├── core/           # 编排核心：orchestrator, triage, dag-engine, types
+│   ├── graph/          # 索引、上下文切片、图压缩、snapshot
+│   ├── routing/        # 模型路由与健康探测（openai/anthropic/bailian/doubao）
+│   ├── learning/       # embeddings, episode, skill-flywheel, reflector, hnsw
 │   └── surfaces/
 │       ├── cli/        # CLI + runtime 子模块
-│       └── mcp/        # MCP server
-├── tests/              # 62 文件 / 280+ tests
+│       └── mcp/        # MCP server (18 tools)
+├── tests/              # 56 文件 / 249+ tests
 ├── vscode-extension/   # VS Code 面板与命令
 ├── docs/
 └── CHANGELOG.md
@@ -466,11 +456,3 @@ GraphFlow/
 
 - 变更日志：`CHANGELOG.md`
 - License：Apache-2.0
-
-## 自动优化记录
-
-### 2026-06-27 11:55
-- **改进内容**：修复 Windows 上 GraphifyFileClient 文件重命名偶发 EPERM 错误（增加5次重试机制）；修复 m52 技能层测试超时问题（超时时间从15秒延长至30秒）；修复自动优化脚本的北京时间显示错误（使用 formatBeijingTime 替代 toISOString）
-- **涉及文件**：`src/graph/graphify-file-client.ts`、`tests/m52-skill-layer.test.ts`、`scripts/auto-optimize.js`
-- **分析来源**：GraphFlow + ESLint 自动化分析
-- **测试结果**：m10（9/9 通过）、m52（7/7 通过）

@@ -65,38 +65,8 @@ function mergeTier(
   return { ...base.tiers[tier], ...overlay.tiers[tier] };
 }
 
-function mergedEnrichmentField(
-  overlayValue: string | undefined,
-  baseValue: string | undefined
-): string | undefined {
-  return overlayValue ?? baseValue;
-}
-
 /** Merge project overlay onto root config; overlay wins for defined fields. */
 export function mergeGraphFlowConfig(base: GraphFlowConfig, overlay: GraphFlowConfig): GraphFlowConfig {
-  const enrichProvider = mergedEnrichmentField(
-    overlay.graphPolicy.semanticEnrichment?.provider,
-    base.graphPolicy.semanticEnrichment?.provider
-  );
-  const enrichModel = mergedEnrichmentField(
-    overlay.graphPolicy.semanticEnrichment?.model,
-    base.graphPolicy.semanticEnrichment?.model
-  );
-  const enrichBackendRaw =
-    overlay.graphPolicy.semanticEnrichment?.backend ?? base.graphPolicy.semanticEnrichment?.backend;
-  const enrichBackend =
-    enrichBackendRaw === "network" || enrichBackendRaw === "local" || enrichBackendRaw === "inherit"
-      ? enrichBackendRaw
-      : undefined;
-  const enrichApiKey = mergedEnrichmentField(
-    overlay.graphPolicy.semanticEnrichment?.apiKey,
-    base.graphPolicy.semanticEnrichment?.apiKey
-  );
-  const enrichBaseUrl = mergedEnrichmentField(
-    overlay.graphPolicy.semanticEnrichment?.baseUrl,
-    base.graphPolicy.semanticEnrichment?.baseUrl
-  );
-
   return validateConfig({
     providers: { ...base.providers, ...overlay.providers },
     tiers: {
@@ -112,45 +82,10 @@ export function mergeGraphFlowConfig(base: GraphFlowConfig, overlay: GraphFlowCo
         l2: overlay.graphPolicy.layerQuota?.l2 ?? base.graphPolicy.layerQuota?.l2 ?? 4,
         l3: overlay.graphPolicy.layerQuota?.l3 ?? base.graphPolicy.layerQuota?.l3 ?? 3,
       },
-      semanticEnrichment: {
-        enabled:
-          overlay.graphPolicy.semanticEnrichment?.enabled ??
-          base.graphPolicy.semanticEnrichment?.enabled ??
-          true,
-        mode:
-          overlay.graphPolicy.semanticEnrichment?.mode ??
-          base.graphPolicy.semanticEnrichment?.mode ??
-          "post-index",
-        ...(enrichBackend ? { backend: enrichBackend } : {}),
-        ...(enrichProvider ? { provider: enrichProvider } : {}),
-        ...(enrichModel ? { model: enrichModel } : {}),
-        ...(enrichApiKey ? { apiKey: enrichApiKey } : {}),
-        ...(enrichBaseUrl ? { baseUrl: enrichBaseUrl } : {}),
-        batchSize:
-          overlay.graphPolicy.semanticEnrichment?.batchSize ??
-          base.graphPolicy.semanticEnrichment?.batchSize ??
-          5,
-        sleepMs:
-          overlay.graphPolicy.semanticEnrichment?.sleepMs ??
-          base.graphPolicy.semanticEnrichment?.sleepMs ??
-          0,
-        timeoutMs:
-          overlay.graphPolicy.semanticEnrichment?.timeoutMs ??
-          base.graphPolicy.semanticEnrichment?.timeoutMs ??
-          5000,
-        autoRunOnIndex:
-          overlay.graphPolicy.semanticEnrichment?.autoRunOnIndex ??
-          base.graphPolicy.semanticEnrichment?.autoRunOnIndex ??
-          true,
-      },
     },
     learningPolicy: {
       ...base.learningPolicy,
       ...overlay.learningPolicy,
-      skillEvolution: {
-        ...base.learningPolicy.skillEvolution,
-        ...overlay.learningPolicy.skillEvolution,
-      },
     },
     routingPolicy: {
       ...base.routingPolicy,

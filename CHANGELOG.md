@@ -4,6 +4,53 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-07-04
+
+### Changed
+
+- **奥卡姆剃刀精简**：移除未产生真实价值的模块，保留三条经过验证的闭环链路。
+  - 移除 OpenBMB 本地部署（`provider-adapters/openbmb.ts`）
+  - 移除语义压缩模型（`compression-model.ts`、`semantic-compression.ts`）
+  - 移除语义增强器（`semantic-enricher.ts`）
+  - 移除技能进化（`skill-evolution.ts`）
+  - 移除金丝雀门控（`canary-gate.ts`）
+  - 移除本地嵌入模型（`local-embedding.ts`，改为零成本 hash embedding）
+  - 移除向量存储（`vector-store.ts`，HNSW 直接内嵌）
+  - 移除 `@xenova/transformers` 和 `node-llama-cpp` 依赖
+  - `hnswlib-node` 从 optionalDependencies 移到 dependencies
+  - embedding 默认 provider 从 `"local"` 改为 `"hash"`
+
+### Fixed
+
+- **HNSW 向量召回完全打通**（P0）：`file-indexer` 现在为所有 File/Symbol/Module 节点附加 256 维 hash embedding（FNV-1a，零成本），HNSW 索引不再为空。
+- **Orchestrator 向量召回激活**（P0）：`orchestrator-context.ts:maybeBuildNearLosslessContext` 现在传递 `embeddingProvider` + `enableVectorRecall` 到压缩管道，`graphflow_run` 路径的向量召回不再被跳过。
+- **HNSW 索引持久化**（P1）：`buildEnhancedContextPackage` 现在从 `vectorStorePath` 派生 `.hnsw` 路径并传入 `HnswVectorIndex`，`save()`/`loadIndex()` 不再是空操作。
+- **FileWatcher 接入 MCP 启动**（P0）：`startFileWatcherIfEnabled` 此前是死代码，现已接入 MCP 服务器启动路径，`autoIndexOnSave: true` 时自动监听文件变化并增量索引。
+- **skillHints 解耦**（P1）：`buildPromptContext` 中 `skillHints` 不再依赖 `enableGraphContextInPrompt === true`，独立注入 worker prompt。
+- **Dangling edges 修复**（P1）：`applySkillLearning` 现在先创建 Decision 节点再连 `improves` 边，不再产生指向不存在节点的悬空边。
+- **buildPlanFromInsight null 安全**（P0）：`insight.ts` 异常时返回 `null` 而非 `[]`，orchestrator 正确检测并回退到 `planTasks`。
+
+### Added
+
+- **Agent MCP Installer 恢复并优化**：支持 15+ Agent 自动检测安装（Cursor、VS Code、Trae、Claude Code、Windsurf、Cline、Roo Code、Kilo Code、PearAI、Gemini、Codex、Antigravity、Amazon Q、Zed、Continue）；WSL 检测修复（`platform()` → `release()`）。
+- **Reflector 恢复并优化**：`reflectOnEpisodes` 贪心聚类 + Lesson 提取；`getLessonsForEpisode` 提取到 `episodic-memory.ts`；Lesson 自动注入 planner prompt。
+- **HNSW 恢复并优化**：`HnswVectorIndex` 支持持久化加载/保存；大仓库自动 ANN，小仓库线性扫描。
+- **Kotlin / Swift 索引器**：新增 `.kt` 和 `.swift` tree-sitter 索引器。
+- **hash embedding**：零成本 FNV-1a 256 维向量，无需模型推理，作为 embedding 默认 provider。
+
+### Removed
+
+- `src/graph/compression-model.ts`
+- `src/graph/semantic-compression.ts`
+- `src/graph/semantic-enricher.ts`
+- `src/learning/canary-gate.ts`
+- `src/learning/local-embedding.ts`
+- `src/learning/skill-evolution.ts`
+- `src/learning/vector-store.ts`
+- `src/routing/provider-adapters/openbmb.ts`
+- `src/types/node-llama-cpp.d.ts`
+- 相关测试文件：m17、m17b、m17c、m20、m28、m29、m30、m31、m38、m47、m4m5
+
 ## [1.3.4] - 2026-07-03
 
 ### Fixed

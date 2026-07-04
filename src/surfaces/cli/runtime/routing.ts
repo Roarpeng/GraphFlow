@@ -17,7 +17,6 @@ import { indexWorkspaceFiles, hasPendingGraphIndexWork } from "../../../graph/fi
 import { appendFeedbackEvent } from "../../../learning/learning-events";
 import { updateEpisodeOutcome } from "../../../learning/episodic-memory";
 import { applySkillLearning } from "../../../learning/skill-flywheel";
-import { runNightlyLearning } from "../../../learning/nightly-trainer";
 import {
   resolveModelForRole,
   resolveModelWithFallback,
@@ -26,7 +25,6 @@ import {
 } from "../../../routing/model-router";
 import { buildFallbackChain, buildProviderHealthMap } from "../../../routing/provider-health";
 import { executeRolePrompt } from "../../../routing/provider-executor";
-import { describeCompressionBackend } from "../../../graph/compression-model";
 import {
   mergeAgentInsightsFromGraph,
   type MergeAgentInsightsResult,
@@ -36,10 +34,9 @@ import {
   type SubmitAgentInsightResult,
 } from "../../../core/submit-agent-insight";
 import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
-import { applyOpenBmbRuntimeEnv, buildEmbeddingOptions } from "./env.js";
+import { buildEmbeddingOptions } from "./env.js";
 import { extractTokenCost } from "./helpers.js";
 import type {
-  LearningNightlyResult,
   PlanPreviewResult,
   ReportOutcomeResult,
   RoutingConnectivityProbe,
@@ -49,7 +46,6 @@ import type {
 
 export async function runTaskResult(task: string, configPath?: string): Promise<RunTaskSummary> {
   const config = resolveConfig(configPath);
-  applyOpenBmbRuntimeEnv(config);
   const eventsPath = resolveLearningPath(config, "eventsPath");
 
   try {
@@ -77,8 +73,8 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       enableAutoGraphSync: config.graphPolicy.enableAutoBuild,
       maxContextTokens: config.graphPolicy.maxContextTokens,
       enableEpisodicMemory: config.learningPolicy.enableFlywheel,
-      enableLlmAgents: config.tiers.smart.provider === "openbmb" || config.tiers.economy.provider === "openbmb",
-      enableLlmTriage: config.tiers.smart.provider === "openbmb" || config.tiers.economy.provider === "openbmb",
+      enableLlmAgents: false,
+      enableLlmTriage: false,
       executionMode: "bridge", // Default to bridge mode: delegate execution to external agents
       ...(configPath ? { configPath } : {}),
       ...embeddingOptions,
@@ -163,7 +159,12 @@ export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResu
   const worker = resolve("worker");
   const validator = resolve("validator");
 
-  const compression = describeCompressionBackend(config, configPath);
+  const compression = {
+    backend: "off" as const,
+    provider: "none",
+    model: "none",
+    embedded: false,
+  };
 
   return {
     dynamicRouting: config.routingPolicy?.enableDynamicRouting ?? false,
@@ -192,7 +193,7 @@ export function diagnoseRouting(configPath?: string): string {
   const result = diagnoseRoutingResult(configPath);
   return [
     `dynamicRouting=${result.dynamicRouting ? "on" : "off"}`,
-    `health=openai:${result.health.openai},anthropic:${result.health.anthropic},bailian:${result.health.bailian},doubao:${result.health.doubao},openbmb:${result.health.openbmb}`,
+    `health=openai:${result.health.openai},anthropic:${result.health.anthropic},bailian:${result.health.bailian},doubao:${result.health.doubao}`,
     `priority=${result.priority.join(",")}`,
     `planner=${result.planner.provider}/${result.planner.model}${result.planner.fallbackApplied ? ":fallback" : ""}`,
     `worker=${result.worker.provider}/${result.worker.model}${result.worker.fallbackApplied ? ":fallback" : ""}`,
@@ -222,7 +223,7 @@ async function probeRoleConnectivity(
   try {
     const sample = await executeRolePrompt(role, "Reply with exactly: ok", selection);
     const cleaned = sample.trim().slice(0, 120);
-    const ok = cleaned.length > 0 && !/^\[(openai|anthropic|openbmb|bailian|doubao):/i.test(cleaned);
+    const ok = cleaned.length > 0 && !/^\[(openai|anthropic|bailian|doubao):/i.test(cleaned);
     return {
       role,
       provider: selection.provider,
@@ -252,32 +253,6 @@ export async function probeRoutingConnectivity(
     probeRoleConnectivity("planner", diagnosisRoleToSelection("planner", diagnosis)),
     probeRoleConnectivity("worker", diagnosisRoleToSelection("worker", diagnosis)),
   ]);
-}
-
-export function runLearningNightlyResult(configPath?: string): LearningNightlyResult {
-  const config = resolveConfig(configPath);
-  const summary = runNightlyLearning(config);
-
-  return {
-    events: summary.totalEvents,
-    passRate: summary.passRate,
-    avgTokens: summary.averageTokenCost,
-    canary: summary.canaryAllowed ? "allow" : "block",
-    reason: summary.canaryReason,
-    dataset: summary.exportedPath,
-  };
-}
-
-export function runLearningNightly(configPath?: string): string {
-  const result = runLearningNightlyResult(configPath);
-  return [
-    `events=${result.events}`,
-    `passRate=${result.passRate.toFixed(3)}`,
-    `avgTokens=${result.avgTokens.toFixed(1)}`,
-    `canary=${result.canary}`,
-    `reason=${result.reason}`,
-    `dataset=${result.dataset}`,
-  ].join("; ");
 }
 
 export function planAndBrainstormResult(task: string): PlanPreviewResult {
@@ -327,7 +302,7 @@ export async function planInsightResult(task: string, configPath?: string): Prom
     return {
       mode: delegated.mode,
       insight: delegated.insight,
-      plan: delegated.plan.map((node) => ({
+      plan: (delegated.plan ?? []).map((node) => ({
         id: node.id,
         description: node.description,
         dependencies: node.dependencies,
@@ -337,7 +312,6 @@ export async function planInsightResult(task: string, configPath?: string): Prom
     };
   }
 
-  applyOpenBmbRuntimeEnv(config);
   const selection = resolveModelForRole("planner");
 
   const { insight, plan } = await planInsight(task, { selection });
@@ -345,7 +319,7 @@ export async function planInsightResult(task: string, configPath?: string): Prom
   return {
     mode: "llm",
     insight,
-    plan: plan.map((node) => ({
+    plan: (plan ?? []).map((node) => ({
       id: node.id,
       description: node.description,
       dependencies: node.dependencies,

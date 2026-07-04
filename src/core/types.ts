@@ -9,7 +9,7 @@ export type TaskStatus =
   | "HUMAN_REVIEW_REQUIRED"
   | "DELEGATED";
 
-export type AgentRole = "planner" | "worker" | "validator" | "enricher" | "evolver" | "compressor";
+export type AgentRole = "planner" | "worker" | "validator" | "compressor";
 
 /**
  * Agent 专业领域类型，用于多 Agent 协作编排时标注建议的执行角色。

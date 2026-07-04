@@ -4,7 +4,6 @@ import type { GraphClient } from "../graph/client-factory";
 
 // 导入提取出去的类型与常量
 import type {
-  EvolutionarySkillNode,
   SkillState,
   CompositeSkillState,
   SkillEdge,
@@ -17,7 +16,6 @@ import {
   serializeComposite,
   parseSkillState,
   parseCompositeState,
-  parseEvolutionState,
   readSkillState,
   loadCompositeSkill,
   composeSkillId,
@@ -28,17 +26,9 @@ import {
   dedupEdges,
 } from "./skill-store";
 
-// 导入提取出去的演进方法
-import {
-  evolveCompositeSkillLlm,
-  getTripleAtomNames,
-  buildTripleFusionNode,
-} from "./skill-evolution";
-
 // 兼容性重新导出，确保外部消费者完全兼容
-export type { SkillState, CompositeSkillState, EvolutionarySkillNode } from "./skill-types";
-export { composeSkillId, loadCompositeSkill, loadEvolutionSkill, parseEvolutionState } from "./skill-store";
-export { evolveCompositeSkillLlm, updateSkillCanary } from "./skill-evolution";
+export type { SkillState, CompositeSkillState } from "./skill-types";
+export { composeSkillId, loadCompositeSkill } from "./skill-store";
 
 const STOPWORDS = new Set([
   "update", "readme", "add", "fix", "file", "files",
@@ -139,6 +129,15 @@ export async function applySkillLearning(
   const nodes: GraphNode[] = [];
   const edges: SkillEdge[] = [];
 
+  // Create the Decision node so `improves` edges don't dangle.
+  const decisionId = `decision:task:${hashText(task)}`;
+  nodes.push({
+    id: decisionId,
+    type: "Decision",
+    content: task.slice(0, 200),
+    metadata: { outcome: passed ? "pass" : "fail", timestamp: now },
+  });
+
   for (const skill of skills) {
     const id = skillNodeId(skill);
     const previous = await readSkillState(client, id);
@@ -154,7 +153,7 @@ export async function applySkillLearning(
     nodes.push({ id, type: "Skill", content: serializeAtomic(next) });
     edges.push({
       from: id,
-      to: `decision:task:${hashText(task)}`,
+      to: decisionId,
       relation: "improves",
     });
   }
@@ -191,25 +190,6 @@ export async function applySkillLearning(
       if (compositeGateMet(composite)) {
         edges.push({ from: skillNodeId(n1!), to: compositeId, relation: "prerequisite" });
         edges.push({ from: skillNodeId(n2!), to: compositeId, relation: "prerequisite" });
-
-        // 异步调度 evolveCompositeSkillLlm 进行脑暴合成
-        const evolutionNode = await evolveCompositeSkillLlm(client, n1!, n2!, composite);
-        if (evolutionNode) {
-          nodes.push(evolutionNode);
-          edges.push({ from: skillNodeId(n1!), to: evolutionNode.id, relation: "prerequisite" });
-          edges.push({ from: skillNodeId(n2!), to: evolutionNode.id, relation: "prerequisite" });
-        }
-      }
-    }
-  }
-
-  if (passed) {
-    const tripleAtomNames = getTripleAtomNames(skills);
-    const tripleNode = tripleAtomNames ? buildTripleFusionNode(tripleAtomNames, now) : undefined;
-    if (tripleNode && tripleAtomNames) {
-      nodes.push(tripleNode);
-      for (const atom of tripleAtomNames) {
-        edges.push({ from: skillNodeId(atom), to: tripleNode.id, relation: "prerequisite" });
       }
     }
   }
@@ -231,13 +211,7 @@ export async function suggestSkillHints(
 
   const atomicStates: SkillState[] = [];
   const compositeStates: CompositeSkillState[] = [];
-  const evolutionStates: EvolutionarySkillNode[] = [];
   for (const node of skillNodes) {
-    const evolution = parseEvolutionState(node.content);
-    if (evolution) {
-      evolutionStates.push(evolution);
-      continue;
-    }
     const composite = parseCompositeState(node.content);
     if (composite) {
       compositeStates.push(composite);
@@ -258,36 +232,14 @@ export async function suggestSkillHints(
     return Boolean(n1 && n2 && atomSet.has(n1) && atomSet.has(n2));
   });
 
-  const eligibleEvolutions = evolutionStates.filter((evo) => {
-    // 排除已被 demoted 的合成技能
-    if (evo.canaryStatus === 'demoted') {
-      return false;
-    }
-    if (evo.score <= 0) {
-      return false;
-    }
-    const [p1, p2] = evo.parents;
-    const n1 = p1?.replace(/^skill:/, "");
-    const n2 = p2?.replace(/^skill:/, "");
-    return Boolean(n1 && n2 && atomSet.has(n1) && atomSet.has(n2));
-  });
-
   type Ranked = {
     name: string;
     score: number;
     uses: number;
     isComposite: boolean;
-    state?: ({ kind: "evolution" } & EvolutionarySkillNode) | ({ kind: "composite" } & CompositeSkillState);
+    state?: { kind: "composite" } & CompositeSkillState;
   };
   const ranked: Ranked[] = [
-    ...eligibleEvolutions.map((e) => ({
-      name: e.name,
-      // probation 状态权重降低为 0.5 倍用于排序
-      score: e.canaryStatus === 'probation' ? e.score * 0.5 : e.score,
-      uses: e.uses,
-      isComposite: true,
-      state: { kind: "evolution", ...e },
-    })),
     ...eligibleComposites.map((c) => ({
       name: c.name,
       score: c.score,
@@ -321,36 +273,19 @@ export async function suggestSkillHints(
   const updates: GraphNode[] = [];
   for (const item of chosen) {
     if (item.isComposite && item.state) {
-      if (item.state.kind === "evolution") {
-        const updated: EvolutionarySkillNode = {
-          id: item.state.id,
-          name: item.state.name,
-          parents: item.state.parents,
-          domain: item.state.domain,
-          description: item.state.description,
-          score: item.state.score,
-          uses: item.state.uses + 1,
-          updatedAt: Date.now(),
-          canaryUses: item.state.canaryUses ?? 0,
-          canaryPasses: item.state.canaryPasses ?? 0,
-          canaryStatus: item.state.canaryStatus ?? 'probation',
-        };
-        updates.push({ id: updated.id, type: "Skill", content: JSON.stringify({ kind: "evolution", ...updated }) });
-      } else {
-        const updated: CompositeSkillState = {
-          id: item.state.id,
-          name: item.state.name,
-          parents: item.state.parents,
-          coOccurCount: item.state.coOccurCount,
-          successCount: item.state.successCount,
-          failureCount: item.state.failureCount,
-          score: item.state.score,
-          uses: item.state.uses + 1,
-          lastOutcome: item.state.lastOutcome,
-          updatedAt: Date.now(),
-        };
-        updates.push({ id: updated.id, type: "Skill", content: serializeComposite(updated) });
-      }
+      const updated: CompositeSkillState = {
+        id: item.state.id,
+        name: item.state.name,
+        parents: item.state.parents,
+        coOccurCount: item.state.coOccurCount,
+        successCount: item.state.successCount,
+        failureCount: item.state.failureCount,
+        score: item.state.score,
+        uses: item.state.uses + 1,
+        lastOutcome: item.state.lastOutcome,
+        updatedAt: Date.now(),
+      };
+      updates.push({ id: updated.id, type: "Skill", content: serializeComposite(updated) });
     }
   }
   if (updates.length > 0) {

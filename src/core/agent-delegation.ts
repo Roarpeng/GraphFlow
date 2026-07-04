@@ -22,7 +22,7 @@ export type AgentDelegationMode = "llm" | "agent-delegated" | "heuristic";
 export interface AgentDelegatedPlanInsight {
   mode: AgentDelegationMode;
   insight: SixHatsInsight;
-  plan: TaskNode[];
+  plan: TaskNode[] | null;
   agentWorkItems?: AgentWorkItem[];
   agentInstructions?: string;
 }

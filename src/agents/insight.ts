@@ -143,7 +143,7 @@ export async function planInsight(
   options: PlanInsightOptions
 ): Promise<{
   insight: SixHatsInsight;
-  plan: TaskNode[];
+  plan: TaskNode[] | null;
 }> {
   const insight = await analyzeWithSixHats(task, options);
   const plan = await buildPlanFromInsight(task, insight, options);
@@ -462,7 +462,7 @@ async function buildPlanFromInsight(
   task: string,
   insight: SixHatsInsight,
   options: PlanInsightOptions
-): Promise<TaskNode[]> {
+): Promise<TaskNode[] | null> {
   const criticalRisks = insight.criticalRisks
     .map((r) => `- Risk: ${r}`)
     .join("\n");
@@ -502,7 +502,7 @@ async function buildPlanFromInsight(
     raw = await executeRolePrompt("planner", prompt, options.selection, options.context);
   } catch (error) {
     logger.error({ error }, "Insight-based planning failed");
-    return [];
+    return null;
   }
 
   return parsePlannerJson(raw, []);

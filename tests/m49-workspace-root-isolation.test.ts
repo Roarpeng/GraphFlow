@@ -48,7 +48,6 @@ function writeGlobalConfig(globalPath: string, workspaceRoot: string): void {
         learningPolicy: {
           enableFlywheel: true,
           trainingCadence: "nightly",
-          canaryRatio: 10,
           exportPath: "graphflow-out/learning-dataset.jsonl",
         },
       }),
@@ -132,10 +131,6 @@ describe("M49 runtime workspace root isolation", () => {
       enrichmentBackend: "inherit",
       enrichmentProvider: "",
       enrichmentModel: "",
-      openbmbMode: "embedded",
-      openbmbEngine: "command",
-      openbmbModel: "",
-      openbmbAutoDownload: false,
     });
 
     const saved = JSON.parse(readFileSync(globalPath, "utf8")) as {

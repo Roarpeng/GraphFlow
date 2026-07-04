@@ -1,39 +1,27 @@
-import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { resolveConfig } from "../../../config/resolve";
 import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
 import { resolveGraphStorePath } from "../../../config/paths";
-import type { GraphFlowConfig } from "../../../config/schema";
 import type { GraphEdge, GraphNode } from "../../../core/types";
 import { createGraphClient, type GraphClient } from "../../../graph/client-factory";
 import {
   createContextRefillManager,
 } from "../../../graph/context-slicer";
 import { indexWorkspaceFiles, clearGraphIndexArtifacts, hasPendingGraphIndexWork, indexSingleFile } from "../../../graph/file-indexer";
+import { GraphFileWatcher } from "../../../graph/file-watcher.js";
 import { extractNodeSourcePath } from "../../../graph/graph-utils";
-import { enrichGraphSemanticsSilent, type EnricherOptions } from "../../../graph/semantic-enricher";
 import { sampleGraphForSnapshot } from "../../../graph/snapshot-view.js";
 import { getSavingsStats, resetSavingsStats, recordSavings } from "../../../graph/token-savings.js";
-import { collectMetrics } from "../../../graph/metrics.js";
-import { resolveModelForRole } from "../../../routing/model-router";
-import { buildProviderHealthMap } from "../../../routing/provider-health";
-import { withFileLock } from "../../../utils/file-lock";
-import { logger } from "../../../utils/logger";
-import {
-  applyEnrichmentProviderEnv,
-  applyOpenBmbRuntimeEnv,
-  buildEmbeddingOptions,
+import { buildEmbeddingOptions,
 } from "./env.js";
 import {
   calculateBudgetUsedPercent,
   calculateSavingsPercent,
   estimateRawContextTokens,
-  getFileSize,
   loadGraphStore,
   parseSkillInsight,
   resolveGraphStoreAfterIndex,
-  sha256File,
 } from "./helpers.js";
 import type {
   ContextPreviewResult,
@@ -41,43 +29,10 @@ import type {
   GraphIndexResult,
   GraphRebuildResult,
   GraphSnapshotResult,
-  ModelDownloadProgress,
-  ModelDownloadResult,
   SkillInsightItem,
   SkillInsightsResult,
 } from "./types.js";
-
-async function maybeRunSemanticEnrichment(
-  config: GraphFlowConfig,
-  graphClient: GraphClient
-): Promise<void> {
-  const enrichPolicy = config.graphPolicy.semanticEnrichment;
-  if (!enrichPolicy?.enabled || !enrichPolicy.autoRunOnIndex || enrichPolicy.mode === "off") {
-    return;
-  }
-
-  const selection = resolveModelForRole("enricher");
-  const health = buildProviderHealthMap(config);
-  if (!health[selection.provider]) {
-    logger.warn(
-      `Skipping semantic enrichment: ${selection.provider} provider is not configured or healthy`
-    );
-    return;
-  }
-
-  applyEnrichmentProviderEnv(config);
-
-  try {
-    await enrichGraphSemanticsSilent(graphClient, {
-      ...(enrichPolicy.batchSize !== undefined ? { batchSize: enrichPolicy.batchSize } : {}),
-      ...(enrichPolicy.sleepMs !== undefined ? { sleepMs: enrichPolicy.sleepMs } : {}),
-      ...(enrichPolicy.model ? { model: enrichPolicy.model } : {}),
-      ...(enrichPolicy.timeoutMs !== undefined ? { timeoutMs: enrichPolicy.timeoutMs } : {}),
-    });
-  } catch (error) {
-    logger.warn({ error }, "Semantic enrichment skipped after provider failure");
-  }
-}
+import type { GraphFlowConfig } from "../../../config/schema";
 
 export async function previewContext(
   query: string,
@@ -85,7 +40,6 @@ export async function previewContext(
   rootDir?: string
 ): Promise<ContextPreviewResult> {
   const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
-  applyOpenBmbRuntimeEnv(config);
   const graphClient = createGraphClient(config);
 
   if (config.graphPolicy.autoIndexOnPreview) {
@@ -103,15 +57,17 @@ export async function previewContext(
   const packageOptions: import("../../../graph/context-slicer").LayeredPackageOptions = {
     ...(config.graphPolicy.layerQuota ? { layerQuota: config.graphPolicy.layerQuota } : {}),
     ...buildEmbeddingOptions(config),
+    enableHnsw: config.graphPolicy.enableHnsw ?? true,
+    // Persist HNSW index to disk for faster startup on large repos.
+    ...(config.embeddingPolicy?.vectorStorePath
+      ? { hnswIndexPath: config.embeddingPolicy.vectorStorePath.replace(/\.\w+$/, ".hnsw") }
+      : {}),
   };
 
   const compressionPolicy = config.graphPolicy.compression;
 
   // Graph-structure compression is zero-cost; enabled by default unless explicitly disabled.
   packageOptions.enableGraphCompression = compressionPolicy?.enableGraphCompression !== false;
-
-  // HNSW ANN for large candidate sets; enabled by default unless explicitly disabled.
-  packageOptions.enableHnsw = compressionPolicy?.enableHnsw !== false;
 
   // RepoMap overview fallback for tight budgets (opt-in).
   if (compressionPolicy?.enableRepoMapFallback === true) {
@@ -129,22 +85,7 @@ export async function previewContext(
   }
 
   // Semantic compression (minicpm/economy LLM) is opt-in via config.
-  const compressionEnabled = compressionPolicy?.enabled === true;
-  if (compressionEnabled) {
-    try {
-      const { resolveCompressionModel } = await import("../../../graph/compression-model.js");
-      const model = await resolveCompressionModel(config, configPath);
-      if (model.available) {
-        packageOptions.enableSemanticCompression = true;
-        packageOptions.compressionModel = model;
-      } else {
-        // No usable model → degrade gracefully to graph-structure-only compression.
-        logger.info("Semantic compression skipped: no usable model (graph-structure compression still active)");
-      }
-    } catch (error) {
-      logger.warn({ error }, "Compression model unavailable; using structure-only compression");
-    }
-  }
+  // Note: compression-model module removed; semantic compression disabled.
 
   const { buildEnhancedContextPackage } = await import("../../../graph/context-slicer.js");
   const pkg = await buildEnhancedContextPackage(
@@ -209,7 +150,6 @@ export async function previewContext(
 
 export async function indexGraph(rootDir?: string, configPath?: string): Promise<GraphIndexResult> {
   const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
-  applyOpenBmbRuntimeEnv(config);
   const graphClient = createGraphClient(config);
   const targetDir = config.graphPolicy.workspaceRoot ?? process.cwd();
 
@@ -220,8 +160,6 @@ export async function indexGraph(rootDir?: string, configPath?: string): Promise
   const indexed = await indexWorkspaceFiles(graphClient, targetDir, {
     ...indexOptions,
   });
-
-  await maybeRunSemanticEnrichment(config, graphClient);
 
   return indexed;
 }
@@ -244,7 +182,6 @@ export async function indexFile(
   path: string;
 }> {
   const config = resolveConfig(configPath);
-  applyOpenBmbRuntimeEnv(config);
   const graphClient = createGraphClient(config);
   const root = config.graphPolicy.workspaceRoot ?? process.cwd();
 
@@ -262,7 +199,6 @@ export async function indexFile(
 
 export async function rebuildGraph(rootDir?: string, configPath?: string): Promise<GraphRebuildResult> {
   const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
-  applyOpenBmbRuntimeEnv(config);
   const graphClient = createGraphClient(config);
   const targetDir = config.graphPolicy.workspaceRoot ?? process.cwd();
   const storePath = resolveGraphStorePath(config);
@@ -278,240 +214,11 @@ export async function rebuildGraph(rootDir?: string, configPath?: string): Promi
     forceReindex: true,
   });
 
-  await maybeRunSemanticEnrichment(config, graphClient);
-
   return {
     ...indexed,
     cleared: true,
     storePath,
   };
-}
-
-export async function enrichSemanticsSilent(
-  configPath?: string,
-  options?: { batchSize?: number; sleepMs?: number; timeoutMs?: number }
-): Promise<{ enrichedCount: number }> {
-  const config = resolveConfig(configPath);
-  applyOpenBmbRuntimeEnv(config);
-  applyEnrichmentProviderEnv(config);
-  const graphClient = createGraphClient(config);
-  const enrichPolicy = config.graphPolicy.semanticEnrichment;
-  const enricherOptions: EnricherOptions = {};
-  const batchSize = options?.batchSize ?? enrichPolicy?.batchSize;
-  if (batchSize !== undefined) {
-    enricherOptions.batchSize = batchSize;
-  }
-  const sleepMs = options?.sleepMs ?? enrichPolicy?.sleepMs;
-  if (sleepMs !== undefined) {
-    enricherOptions.sleepMs = sleepMs;
-  }
-  const timeoutMs = options?.timeoutMs ?? enrichPolicy?.timeoutMs;
-  if (timeoutMs !== undefined) {
-    enricherOptions.timeoutMs = timeoutMs;
-  }
-  if (enrichPolicy?.model) {
-    enricherOptions.model = enrichPolicy.model;
-  }
-
-  return enrichGraphSemanticsSilent(graphClient, enricherOptions);
-}
-
-export async function downloadOpenBmbModel(
-  configPath?: string,
-  options?: {
-    model?: string;
-    url?: string;
-    sha256?: string;
-    targetPath?: string;
-    force?: boolean;
-    onProgress?: (progress: ModelDownloadProgress) => void;
-  }
-): Promise<ModelDownloadResult> {
-  const config = resolveConfig(configPath);
-  applyOpenBmbRuntimeEnv(config);
-
-  const model = options?.model ?? "minicpm5-1b";
-  const defaultUrl = process.env.GRAPHFLOW_MINICPM_MODEL_URL;
-  const url = options?.url ?? defaultUrl;
-
-  const configuredPath = options?.targetPath ?? config.providers.openbmb?.modelPath;
-  const fallbackPath = join(tmpdir(), "graphflow-models", `${model}.gguf`);
-  const targetPath = configuredPath ?? fallbackPath;
-  const force = options?.force ?? false;
-  const expectedSha = options?.sha256 ?? process.env.GRAPHFLOW_MINICPM_MODEL_SHA256;
-  const partialPath = `${targetPath}.part`;
-  const lockPath = `${targetPath}.lock`;
-
-  return withFileLock(lockPath, async () => {
-    if (existsSync(targetPath) && !force) {
-      const bytes = getFileSize(targetPath);
-      const verified = expectedSha ? (await sha256File(targetPath)) === expectedSha.toLowerCase() : true;
-      options?.onProgress?.({
-        model,
-        targetPath,
-        downloadedBytes: bytes,
-        totalBytes: bytes,
-        resumed: false,
-        percent: 100,
-        stage: "skipped",
-      });
-      return {
-        model,
-        targetPath,
-        bytes,
-        skipped: true,
-        verified,
-      };
-    }
-
-    if (!url) {
-      throw new Error("Model download URL is required. Set GRAPHFLOW_MINICPM_MODEL_URL or pass --url.");
-    }
-
-    mkdirSync(dirname(targetPath), { recursive: true });
-
-    let partialSize = 0;
-    if (existsSync(partialPath) && !force) {
-      try {
-        partialSize = getFileSize(partialPath);
-      } catch {
-        partialSize = 0;
-      }
-    }
-
-    if (force) {
-      rmSync(partialPath, { force: true });
-      partialSize = 0;
-    }
-
-    options?.onProgress?.({
-      model,
-      targetPath,
-      downloadedBytes: partialSize,
-      resumed: partialSize > 0,
-      stage: "starting",
-    });
-
-    const fetchInit: RequestInit = {};
-    if (partialSize > 0) {
-      fetchInit.headers = { range: `bytes=${partialSize}-` };
-    }
-    const response = await fetch(url, fetchInit);
-    if (!response.ok) {
-      throw new Error(`Model download failed: ${response.status} ${response.statusText}`);
-    }
-
-    const acceptsRange = response.status === 206;
-    if (!acceptsRange && partialSize > 0) {
-      rmSync(partialPath, { force: true });
-      partialSize = 0;
-    }
-
-    const contentLength = Number(response.headers.get("content-length") ?? "0");
-    const totalBytes = Number.isFinite(contentLength) && contentLength > 0
-      ? partialSize + contentLength
-      : undefined;
-
-    const stream = response.body;
-    if (!stream) {
-      throw new Error("Model download failed: empty response body");
-    }
-
-    const reader = stream.getReader();
-    const resumed = partialSize > 0 && acceptsRange;
-    const writer = createWriteStream(partialPath, { flags: resumed ? "a" : "w" });
-    let downloadedBytes = partialSize;
-    let lastReportedBytes = -1;
-
-    const emitProgress = (stage: ModelDownloadProgress["stage"]) => {
-      if (downloadedBytes === lastReportedBytes && stage === "downloading") {
-        return;
-      }
-      lastReportedBytes = downloadedBytes;
-      const percent = totalBytes && totalBytes > 0
-        ? Math.min(100, Number(((downloadedBytes / totalBytes) * 100).toFixed(1)))
-        : undefined;
-      options?.onProgress?.({
-        model,
-        targetPath,
-        downloadedBytes,
-        ...(totalBytes ? { totalBytes } : {}),
-        resumed,
-        ...(percent !== undefined ? { percent } : {}),
-        stage,
-      });
-    };
-
-    emitProgress("downloading");
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      if (value) {
-        const chunk = Buffer.from(value);
-        await new Promise<void>((resolve, reject) => {
-          writer.write(chunk, (error) => {
-            if (error) {
-              reject(error);
-              return;
-            }
-            resolve();
-          });
-        });
-        downloadedBytes += chunk.length;
-        emitProgress("downloading");
-      }
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      writer.end((error?: Error | null) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
-    });
-
-    renameSync(partialPath, targetPath);
-
-    if (expectedSha) {
-      options?.onProgress?.({
-        model,
-        targetPath,
-        downloadedBytes,
-        ...(totalBytes ? { totalBytes } : {}),
-        resumed,
-        percent: 100,
-        stage: "verifying",
-      });
-      const actual = await sha256File(targetPath);
-      if (actual !== expectedSha.toLowerCase()) {
-        rmSync(targetPath, { force: true });
-        throw new Error(`Model sha256 mismatch. expected=${expectedSha.toLowerCase()} actual=${actual}`);
-      }
-    }
-
-    const finalBytes = getFileSize(targetPath);
-    options?.onProgress?.({
-      model,
-      targetPath,
-      downloadedBytes: finalBytes,
-      totalBytes: finalBytes,
-      resumed,
-      percent: 100,
-      stage: "completed",
-    });
-    return {
-      model,
-      targetPath,
-      bytes: finalBytes,
-      skipped: false,
-      verified: Boolean(expectedSha),
-      ...(resumed ? { resumed: true } : {}),
-    };
-  });
 }
 
 export async function inspectGraph(
@@ -647,7 +354,6 @@ export async function exportArtifact(
   compression: "none" | "gzip";
 }> {
   const config = resolveConfig(configPath);
-  applyOpenBmbRuntimeEnv(config);
   const graphClient = client ?? createGraphClient(config);
   const { exportGraphArtifact } = await import("../../../graph/artifact-manager.js");
   return exportGraphArtifact(config, outputPath, graphClient, options);
@@ -658,7 +364,6 @@ export async function importArtifact(
   inputPath?: string
 ): Promise<{ path: string; nodeCount: number; edgeCount: number; imported: boolean; skipped: boolean; reason?: string }> {
   const config = resolveConfig(configPath);
-  applyOpenBmbRuntimeEnv(config);
   const graphClient = createGraphClient(config);
   const { importGraphArtifact } = await import("../../../graph/artifact-manager.js");
   return importGraphArtifact(config, graphClient, inputPath);
@@ -675,7 +380,6 @@ export async function exportSkillPackageRuntime(
   outputPath?: string
 ): Promise<{ path: string; skillCount: number; bytes: number }> {
   const config = resolveConfig(configPath);
-  applyOpenBmbRuntimeEnv(config);
   const graphClient = createGraphClient(config);
   const { exportSkillPackage } = await import("../../../learning/skill-package.js");
   const root = config.graphPolicy.workspaceRoot ?? process.cwd();
@@ -698,7 +402,6 @@ export async function importSkillPackageRuntime(
   inputPath?: string
 ): Promise<{ path: string; imported: number; skipped: number; total: number }> {
   const config = resolveConfig(configPath);
-  applyOpenBmbRuntimeEnv(config);
   const graphClient = createGraphClient(config);
   const { importSkillPackage } = await import("../../../learning/skill-package.js");
   const root = config.graphPolicy.workspaceRoot ?? process.cwd();
@@ -734,15 +437,6 @@ export function getTokenSavingsStats(configPath?: string, rootDir?: string): {
 export function resetTokenSavingsStats(configPath?: string): { path: string; reset: boolean } {
   const config = resolveConfig(configPath);
   return resetSavingsStats(config);
-}
-
-export function getMetrics(configPath?: string, rootDir?: string): {
-  metrics: Record<string, number>;
-  labels: Record<string, string>;
-  text: string;
-} {
-  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
-  return collectMetrics(config);
 }
 
 /**
@@ -811,4 +505,34 @@ export async function expandAnchor(
     ...(sourceSnippet ? { sourceSnippet } : {}),
     ...(node.metadata ? { metadata: node.metadata } : {}),
   };
+}
+
+/**
+ * Start a file watcher for auto-indexing on save when `autoIndexOnSave` is enabled.
+ *
+ * @param config Resolved GraphFlow configuration
+ * @param configPath Optional config path to pass through to incremental indexing
+ * @returns The started watcher instance, or `null` if disabled
+ */
+export function startFileWatcherIfEnabled(
+  config: GraphFlowConfig,
+  configPath?: string
+): GraphFileWatcher | null {
+  if (!config.graphPolicy.autoIndexOnSave) {
+    return null;
+  }
+
+  const rootDir = config.graphPolicy.workspaceRoot ?? process.cwd();
+  const watcher = new GraphFileWatcher(rootDir, configPath);
+
+  watcher.onChange((files) => {
+    for (const file of files) {
+      void indexFile(file, configPath).catch(() => {
+        // Incremental index failures are best-effort; don’t crash the watcher
+      });
+    }
+  });
+
+  watcher.start();
+  return watcher;
 }
