@@ -97,9 +97,9 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 
 ### 发布信息
 
-- 最新版本：**v1.4.0**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.4.0`
-- **GitHub Release**：push 到 `main` 后 CI 自动构建 VSIX 并发布到 GitHub Releases
-- **npm 发布**：push tag `v*` 触发 npm publish
+- 最新版本：**v1.4.1**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.4.1`
+- **GitHub Release**：push 到 `main` 后 CI 在 `windows-2022` 上自动构建 VSIX 并发布到 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
+- **npm 发布**：push tag `v*`（如 `v1.4.1`）触发 [Publish npm](https://github.com/Roarpeng/GraphFlow/actions/workflows/publish-npm.yml) 工作流
 - 变更日志：`CHANGELOG.md`
 
 ## 环境要求
@@ -107,6 +107,9 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 1. Node.js >= 20
 2. npm >= 10
 3. Windows / macOS / Linux 均可
+4. **npm 安装 `@roarpeng/graphflow` 时**：`hnswlib-node` 为**强制依赖**（HNSW 向量召回），首次安装会编译原生模块
+   - **Linux / macOS**：通常自带 C++ 工具链即可
+   - **Windows**：需安装 [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) 并勾选 **「使用 C++ 的桌面开发」**；或使用 WSL / Linux 环境安装
 
 ## 5 分钟本地试跑
 
@@ -303,12 +306,17 @@ const run = await orchestrate(
 GraphFlow CLI 可自动检测并安装 MCP 配置到 15+ 编码 Agent：
 
 ```bash
-# 检测已安装的 Agent
+# 检测已安装的 Agent 与 MCP 配置状态
 npx @roarpeng/graphflow doctor
 
-# 自动安装 MCP 配置到所有检测到的 Agent
+# 一键安装 MCP + Skill + Cursor Rules（推荐）
+npx @roarpeng/graphflow install
+
+# 或仅初始化项目级配置（.graphflow/config.json 等）
 npx @roarpeng/graphflow init
 ```
+
+**本地 `npm install` 后**：若项目已有 `.cursor/mcp.json` 或 `.vscode/mcp.json`，postinstall 会自动注入 workspace 级 GraphFlow MCP 与 Skill；完整用户级安装请运行 `npx @roarpeng/graphflow install`。
 
 支持的 Agent：Cursor、VS Code、Trae、Claude Code、Windsurf、Cline、Roo Code、Kilo Code、PearAI、Gemini、Codex、Antigravity、Amazon Q、Zed、Continue。
 
@@ -350,7 +358,25 @@ cp graphflow.config.example.json graphflow.config.json
 | `skillPolicy.enableSkillFlywheel` | 技能飞轮 |
 | `embeddingPolicy.provider` | embedding 提供者（`hash` 零成本 / `openai`） |
 
-## VS Code 扩展
+## VS Code / Cursor 扩展
+
+扩展内置 GraphFlow runtime，**安装 VSIX 后无需再 clone 本仓库或配置 `npm run start`**。
+
+### 安装 VSIX（推荐）
+
+1. 打开 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)，下载最新 `graphflow-vscode-<version>.vsix`（CI 在每次 push `main` / tag 后自动构建）
+2. **VS Code**：扩展视图 → `…` → **从 VSIX 安装…** → 选择下载的文件
+3. **Cursor**：扩展视图 → 右上角 `…` → **Install from VSIX** → 选择下载的文件
+4. 重启编辑器；首次激活会自动尝试安装 GraphFlow MCP 到本机 Agent 配置
+5. 命令面板运行 **GraphFlow: Show Settings** → **建立图谱（无需 LLM）** → 即可使用 Context Preview / 知识图谱
+
+CLI 安装（若已安装 `code` / `cursor` 命令）：
+
+```bash
+code --install-extension graphflow-vscode-1.4.1.vsix
+# 或
+cursor --install-extension graphflow-vscode-1.4.1.vsix
+```
 
 ### 命令面板
 
@@ -374,7 +400,7 @@ Chat Agent（`@graphflow`）：`/run`、`/plan`、`/graph`、`/skills`、`/diagn
 
 其它建图入口：`graph index` CLI、MCP `graphflow_index`、`autoIndexOnPreview` / `autoIndexOnRun` / `autoIndexOnSave`
 
-### 开发模式
+### 开发模式（贡献者）
 
 ```bash
 cd vscode-extension
@@ -384,13 +410,11 @@ npm run build
 
 在 VS Code 中 `F5` 启动 Extension Development Host。
 
-### 安装 VSIX
-
-从 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases) 下载最新 VSIX，或本地：
+### 本地打包 VSIX
 
 ```bash
-cd vscode-extension && npm run package
-code --install-extension artifacts/graphflow-vscode-*.vsix
+npm run package:extension
+# 输出：artifacts/graphflow-vscode-<version>.vsix
 ```
 
 ## 本地验收清单
