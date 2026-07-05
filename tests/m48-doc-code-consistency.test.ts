@@ -30,6 +30,7 @@ const DOC_FILES = [
   "README.md",
   ".cursor/rules/graphflow.mdc",
   "src/surfaces/cursor-rules/graphflow.mdc",
+  "src/surfaces/trae-rules/graphflow.md",
   "src/surfaces/trae-skill/graphflow/SKILL.md",
   "CLAUDE.md",
 ];

@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-07-05
+
+### Added
+
+- **Antigravity IDE 安装**：MCP 写入 `~/.gemini/antigravity/mcp_config.json`；全局 Skill、项目 `.agent/rules` / `.agent/skills`；项目 `GEMINI.md` 受管块
+- **Gemini CLI**：共享 MCP 路径 `~/.gemini/config/mcp_config.json`
+- **GitHub Copilot**：专用 `.github/copilot-instructions.md` 源文件（token-first，非 CLAUDE.md 副本）
+- **Trae CN 项目安装**：`.trae/rules/graphflow.md`（alwaysApply）与项目 Skill；doctor 自检
+- **测试**：`m62-trae-cn-install`、`m63-agents-install`
+
+### Fixed
+
+- **Antigravity MCP 路径错误**：不再写入 VS Code `Code/User/mcp.json`
+- **用户级 MCP 污染**：`install` 不再向用户配置注入 `GRAPHFLOW_WORKSPACE_ROOT`；切换策略时自动清除 stale env
+
 ## [1.4.3] - 2026-07-05
 
 ### Added

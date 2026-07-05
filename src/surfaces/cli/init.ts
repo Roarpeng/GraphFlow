@@ -2,7 +2,14 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ensureGlobalGraphFlowConfig } from "../../config/scaffold";
-import { installAllSkills } from "../../integrations/skill-installer";
+import {
+  installAllSkills,
+  getTraeInstallStatus,
+  getAntigravityInstallStatus,
+  getCopilotInstallStatus,
+  getAgentInstructionStatus,
+  getAgentSkillStatus,
+} from "../../integrations/skill-installer";
 import {
   detectInstalledAgents,
   formatModelConfigGuide,
@@ -304,7 +311,33 @@ export function runDoctor() {
   const globalConfigPath = join(homedir(), ".graphflow.config.json");
   console.log(`Global config: ${existsSync(globalConfigPath) ? "exists" : "missing"} at ${globalConfigPath}`);
 
-  // 4. Model config guide
+  // 4. Trae CN Rules / Skills (project + user)
+  const traeStatus = getTraeInstallStatus(process.cwd());
+  for (const status of traeStatus) {
+    const icon = status.installed ? "[INSTALLED]" : status.detected ? "[MISSING]" : "[N/A]";
+    console.log(`${icon} ${status.agent}: ${status.configPath}`);
+  }
+
+  // 4b. Antigravity / Gemini project assets
+  for (const status of getAntigravityInstallStatus(process.cwd())) {
+    const icon = status.installed ? "[INSTALLED]" : status.detected ? "[MISSING]" : "[N/A]";
+    console.log(`${icon} ${status.agent}: ${status.configPath}`);
+  }
+
+  // 4c. GitHub Copilot project instructions
+  for (const status of getCopilotInstallStatus(process.cwd())) {
+    const icon = status.installed ? "[INSTALLED]" : "[MISSING]";
+    console.log(`${icon} ${status.agent}: ${status.configPath}`);
+  }
+
+  // 5. Other agent skills / instructions
+  for (const status of [...getAgentSkillStatus(), ...getAgentInstructionStatus()]) {
+    if (!status.detected) continue;
+    const icon = status.installed ? "[INSTALLED]" : "[MISSING]";
+    console.log(`${icon} ${status.agent}: ${status.configPath}`);
+  }
+
+  // 6. Model config guide
   console.log("\n" + formatModelConfigGuide());
 }
 

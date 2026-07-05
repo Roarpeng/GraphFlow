@@ -27,7 +27,7 @@ export interface SkillInstallSummary {
   agentInstructions: SkillInstallResult[];
   /** Real Agent Skill folders (Cursor / Claude Code / Codex `skills/<name>/SKILL.md`). */
   agentSkills: SkillInstallResult[];
-  /** Project-level rule files (.cursor/rules, .windsurfrules, etc.). */
+  /** Project-level rule files (.cursor/rules, .trae/rules, .windsurfrules, etc.). */
   projectRules: SkillInstallResult[];
 }
 
@@ -180,6 +180,69 @@ export function resolveSkillSourcePath(vendorRuntimeRoot?: string): string | und
     if (existsSync(join(dir, "SKILL.md"))) {
       return dir;
     }
+  }
+  return undefined;
+}
+
+/**
+ * 解析 Trae Rules 源文件路径（`.trae/rules/graphflow.md`）。
+ */
+export function resolveTraeRulesSourcePath(vendorRuntimeRoot?: string): string | undefined {
+  const candidates: string[] = [
+    ...(vendorRuntimeRoot
+      ? [
+          join(vendorRuntimeRoot, "src", "surfaces", "trae-rules"),
+          join(vendorRuntimeRoot, "dist", "surfaces", "trae-rules"),
+        ]
+      : []),
+    join(__dirname, "..", "..", "surfaces", "trae-rules"),
+    join(__dirname, "..", "..", "..", "src", "surfaces", "trae-rules"),
+    join(process.cwd(), "src", "surfaces", "trae-rules"),
+    join(process.cwd(), "dist", "surfaces", "trae-rules"),
+  ];
+  for (const dir of candidates) {
+    if (existsSync(join(dir, "graphflow.md"))) {
+      return dir;
+    }
+  }
+  return undefined;
+}
+
+function surfaceDirCandidates(
+  surfaceName: string,
+  markerFile: string,
+  vendorRuntimeRoot?: string
+): string[] {
+  return [
+    ...(vendorRuntimeRoot
+      ? [
+          join(vendorRuntimeRoot, "src", "surfaces", surfaceName),
+          join(vendorRuntimeRoot, "dist", "surfaces", surfaceName),
+        ]
+      : []),
+    join(__dirname, "..", "..", "surfaces", surfaceName),
+    join(__dirname, "..", "..", "..", "src", "surfaces", surfaceName),
+    join(process.cwd(), "src", "surfaces", surfaceName),
+    join(process.cwd(), "dist", "surfaces", surfaceName),
+  ].filter((dir) => existsSync(join(dir, markerFile)));
+}
+
+/**
+ * 解析 Antigravity 项目 Rules 源文件路径（`.agent/rules/graphflow.md`）。
+ */
+export function resolveAntigravityRulesSourcePath(vendorRuntimeRoot?: string): string | undefined {
+  for (const dir of surfaceDirCandidates("antigravity-rules", "graphflow.md", vendorRuntimeRoot)) {
+    return dir;
+  }
+  return undefined;
+}
+
+/**
+ * 解析 GitHub Copilot 项目指令源文件路径（`.github/copilot-instructions.md`）。
+ */
+export function resolveCopilotInstructionsSourcePath(vendorRuntimeRoot?: string): string | undefined {
+  for (const dir of surfaceDirCandidates("copilot-instructions", "graphflow.md", vendorRuntimeRoot)) {
+    return dir;
   }
   return undefined;
 }
@@ -459,10 +522,33 @@ export function getProjectLevelRuleTargets(workspaceRoot: string): Array<{
   agent: string;
   destDir: string;
   filePath: string;
-  sourceType: "cursor-rules" | "windsurf-rules" | "copilot-instructions" | "claude-rules" | "agentic-md";
+  sourceType:
+    | "cursor-rules"
+    | "trae-rules"
+    | "trae-skill-file"
+    | "antigravity-rules"
+    | "antigravity-skill-file"
+    | "windsurf-rules"
+    | "copilot-instructions"
+    | "claude-rules"
+    | "agentic-md";
 }> {
   if (!workspaceRoot) return [];
   return [
+    // Trae CN / Trae SOLO 项目级 Rules（alwaysApply，每轮注入）
+    {
+      agent: "Trae CN (project rules)",
+      destDir: join(workspaceRoot, ".trae", "rules"),
+      filePath: join(workspaceRoot, ".trae", "rules", "graphflow.md"),
+      sourceType: "trae-rules",
+    },
+    // Trae 项目级 Skill（`#graphflow` / 语义匹配）
+    {
+      agent: "Trae CN (project skills)",
+      destDir: join(workspaceRoot, ".trae", "skills", "graphflow"),
+      filePath: join(workspaceRoot, ".trae", "skills", "graphflow", "SKILL.md"),
+      sourceType: "trae-skill-file",
+    },
     // Cursor 项目级 rules: .cursor/rules/graphflow.mdc
     {
       agent: "Cursor (project rules)",
@@ -483,6 +569,20 @@ export function getProjectLevelRuleTargets(workspaceRoot: string): Array<{
       destDir: join(workspaceRoot, ".claude", "rules"),
       filePath: join(workspaceRoot, ".claude", "rules", "graphflow.md"),
       sourceType: "claude-rules",
+    },
+    // Antigravity 项目级 Rules: .agent/rules/graphflow.md
+    {
+      agent: "Antigravity (project rules)",
+      destDir: join(workspaceRoot, ".agent", "rules"),
+      filePath: join(workspaceRoot, ".agent", "rules", "graphflow.md"),
+      sourceType: "antigravity-rules",
+    },
+    // Antigravity 项目级 Skill: .agent/skills/graphflow/SKILL.md
+    {
+      agent: "Antigravity (project skills)",
+      destDir: join(workspaceRoot, ".agent", "skills", "graphflow"),
+      filePath: join(workspaceRoot, ".agent", "skills", "graphflow", "SKILL.md"),
+      sourceType: "antigravity-skill-file",
     },
     // GitHub Copilot 项目级指令: .github/copilot-instructions.md
     {
@@ -553,6 +653,12 @@ export function getAgentSkillTargets(): Array<{
       agent: "Kilo Code",
       markerDir: join(home, ".kilocode"),
       skillsRoot: join(home, ".kilocode", "skills"),
+    },
+    // Antigravity 全局 Skill（~/.gemini/antigravity/skills/graphflow/SKILL.md）
+    {
+      agent: "Antigravity",
+      markerDir: join(home, ".gemini", "antigravity"),
+      skillsRoot: join(home, ".gemini", "antigravity", "skills"),
     },
   ];
 }
@@ -627,6 +733,109 @@ export function installAgentSkills(vendorRuntimeRoot?: string, workspaceRoot?: s
   return results;
 }
 
+/** 检查 Trae 用户 Skill 与项目级 Rules/Skill 安装状态（doctor 用）。 */
+export function getTraeInstallStatus(workspaceRoot?: string): AgentInstructionStatus[] {
+  const out: AgentInstructionStatus[] = [];
+
+  for (const trae of getTraeUserDirs()) {
+    const filePath = join(trae.skillsDir, "graphflow", "SKILL.md");
+    out.push({
+      agent: `${trae.name} skill`,
+      configPath: filePath,
+      detected: true,
+      installed: existsSync(filePath),
+    });
+  }
+
+  if (workspaceRoot) {
+    const rulePath = join(workspaceRoot, ".trae", "rules", "graphflow.md");
+    out.push({
+      agent: "Trae CN project rules",
+      configPath: rulePath,
+      detected: existsSync(join(workspaceRoot, ".trae")),
+      installed: existsSync(rulePath),
+    });
+    const projectSkillPath = join(workspaceRoot, ".trae", "skills", "graphflow", "SKILL.md");
+    out.push({
+      agent: "Trae CN project skill",
+      configPath: projectSkillPath,
+      detected: existsSync(join(workspaceRoot, ".trae", "skills")),
+      installed: existsSync(projectSkillPath),
+    });
+  }
+
+  return out;
+}
+
+/** 检查 Antigravity 用户 Skill 与项目级 Rules/Skill 安装状态（doctor 用）。 */
+export function getAntigravityInstallStatus(workspaceRoot?: string): AgentInstructionStatus[] {
+  const { home } = resolveHomePaths();
+  const out: AgentInstructionStatus[] = [];
+  const markerDir = join(home, ".gemini", "antigravity");
+  const globalSkillPath = join(markerDir, "skills", "graphflow", "SKILL.md");
+
+  if (existsSync(markerDir)) {
+    out.push({
+      agent: "Antigravity global skill",
+      configPath: globalSkillPath,
+      detected: true,
+      installed: existsSync(globalSkillPath),
+    });
+    const mcpPath = join(markerDir, "mcp_config.json");
+    out.push({
+      agent: "Antigravity MCP config",
+      configPath: mcpPath,
+      detected: true,
+      installed: existsSync(mcpPath),
+    });
+  }
+
+  if (workspaceRoot) {
+    const rulePath = join(workspaceRoot, ".agent", "rules", "graphflow.md");
+    out.push({
+      agent: "Antigravity project rules",
+      configPath: rulePath,
+      detected: existsSync(join(workspaceRoot, ".agent")) || existsSync(join(workspaceRoot, ".agents")),
+      installed: existsSync(rulePath),
+    });
+    const projectSkillPath = join(workspaceRoot, ".agent", "skills", "graphflow", "SKILL.md");
+    out.push({
+      agent: "Antigravity project skill",
+      configPath: projectSkillPath,
+      detected: existsSync(join(workspaceRoot, ".agent", "skills")),
+      installed: existsSync(projectSkillPath),
+    });
+    const geminiMdPath = join(workspaceRoot, "GEMINI.md");
+    let geminiInstalled = false;
+    if (existsSync(geminiMdPath)) {
+      const content = readFileSync(geminiMdPath, "utf8");
+      geminiInstalled = content.includes(INSTRUCTION_BEGIN) && content.includes(INSTRUCTION_END);
+    }
+    out.push({
+      agent: "Antigravity/Gemini project GEMINI.md",
+      configPath: geminiMdPath,
+      detected: true,
+      installed: geminiInstalled,
+    });
+  }
+
+  return out;
+}
+
+/** 检查 GitHub Copilot 项目指令安装状态（doctor 用）。 */
+export function getCopilotInstallStatus(workspaceRoot?: string): AgentInstructionStatus[] {
+  if (!workspaceRoot) return [];
+  const filePath = join(workspaceRoot, ".github", "copilot-instructions.md");
+  return [
+    {
+      agent: "GitHub Copilot project instructions",
+      configPath: filePath,
+      detected: true,
+      installed: existsSync(filePath),
+    },
+  ];
+}
+
 /** 检查每个 agent 的 Skill 文件是否已安装（用于 doctor 自检）。 */
 export function getAgentSkillStatus(): AgentInstructionStatus[] {
   return getAgentSkillTargets().map((target) => {
@@ -677,22 +886,32 @@ export function installTraeSkills(vendorRuntimeRoot?: string, workspaceRoot?: st
     allFailed = true;
   }
 
-  if (allFailed && workspaceRoot) {
-    try {
-      const workspaceSkillDir = join(workspaceRoot, ".graphflow", "skills", "graphflow");
-      const wsResult = installFile(sourceSkillFile, workspaceSkillDir, "SKILL.md");
-      results.push({
-        target: `Workspace (${workspaceRoot})`,
-        status: wsResult.status,
-        message: wsResult.message,
-      });
-    } catch (error) {
-      results.push({
-        target: `Workspace (${workspaceRoot})`,
-        status: "error",
-        message: error instanceof Error ? error.message : String(error),
-      });
+  if (workspaceRoot) {
+    for (const destDir of [
+      join(workspaceRoot, ".trae", "skills", "graphflow"),
+      join(workspaceRoot, ".graphflow", "skills", "graphflow"),
+    ]) {
+      try {
+        const wsResult = installFile(sourceSkillFile, destDir, "SKILL.md");
+        results.push({
+          target: `Trae project skill (${basename(destDir)})`,
+          status: wsResult.status,
+          message: wsResult.message,
+        });
+      } catch (error) {
+        results.push({
+          target: `Trae project skill (${basename(destDir)})`,
+          status: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
+  } else if (allFailed) {
+    results.push({
+      target: "Trae",
+      status: "skipped",
+      message: "No Trae installation detected (pass workspaceRoot for project-level .trae/skills)",
+    });
   }
 
   if (results.length === 0) {
@@ -819,7 +1038,31 @@ export function installProjectLevelRules(
           if (rulesDir) sourcePath = join(rulesDir, "graphflow.mdc");
           break;
         }
-        case "copilot-instructions":
+        case "trae-rules": {
+          const traeRulesDir = resolveTraeRulesSourcePath(vendorRuntimeRoot);
+          if (traeRulesDir) sourcePath = join(traeRulesDir, "graphflow.md");
+          break;
+        }
+        case "trae-skill-file": {
+          const skillDir = resolveSkillSourcePath(vendorRuntimeRoot);
+          if (skillDir) sourcePath = join(skillDir, "SKILL.md");
+          break;
+        }
+        case "antigravity-rules": {
+          const rulesDir = resolveAntigravityRulesSourcePath(vendorRuntimeRoot);
+          if (rulesDir) sourcePath = join(rulesDir, "graphflow.md");
+          break;
+        }
+        case "antigravity-skill-file": {
+          const skillDir = resolveSkillSourcePath(vendorRuntimeRoot);
+          if (skillDir) sourcePath = join(skillDir, "SKILL.md");
+          break;
+        }
+        case "copilot-instructions": {
+          const copilotDir = resolveCopilotInstructionsSourcePath(vendorRuntimeRoot);
+          if (copilotDir) sourcePath = join(copilotDir, "graphflow.md");
+          break;
+        }
         case "claude-rules":
         case "agentic-md": {
           const mdPath = resolveClaudeMdSourcePath(vendorRuntimeRoot);
@@ -855,6 +1098,16 @@ export function installProjectLevelRules(
   }
 
   return results;
+}
+
+/**
+ * 向项目根目录 GEMINI.md 写入 GraphFlow 受管指令块（Antigravity / Gemini CLI 项目级规则）。
+ */
+export function installProjectGeminiInstructions(workspaceRoot: string): SkillInstallResult[] {
+  if (!workspaceRoot) return [];
+  const filePath = join(workspaceRoot, "GEMINI.md");
+  const result = upsertManagedBlock(filePath, workspaceRoot);
+  return [{ target: "Antigravity/Gemini project GEMINI.md", status: result.status, message: result.message }];
 }
 
 /**
@@ -941,7 +1194,10 @@ export function installAllSkills(
   }
 
   // 安装项目级规则文件
-  const projectRules = installProjectLevelRules(workspaceRoot ?? "", vendorRuntimeRoot, logFn);
+  const projectRules = [
+    ...installProjectLevelRules(workspaceRoot ?? "", vendorRuntimeRoot, logFn),
+    ...(workspaceRoot ? installProjectGeminiInstructions(workspaceRoot) : []),
+  ];
 
   return { traeSkills, cursorRules, claudeMd, agentInstructions, agentSkills, projectRules };
 }

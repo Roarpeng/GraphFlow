@@ -1,6 +1,6 @@
 ---
 name: "graphflow"
-description: "Graph-based code context compression, task planning, and knowledge graph orchestration. Backed by GraphFlow MCP server with 18 tools. Invoke before multi-step edits, large refactors, codebase-wide questions, or when you need to understand project structure efficiently to save tokens."
+description: "Graph-based code context compression, task planning, and knowledge graph orchestration (18 MCP tools). Invoke before ANY code question, bug fix, debugging, file reading, Chinese/CJK query, refactor, or multi-step edit — ALWAYS call graphflow_preview_context MCP first when GraphFlow is connected."
 ---
 
 # GraphFlow Skill
@@ -52,6 +52,46 @@ GraphFlow is a graph-based context and planning service backed by a persistent M
 - Read large files before checking GraphFlow anchors
 - Skip GraphFlow for complex tasks
 - Use grep for codebase exploration before `graphflow_preview_context`
+
+### Trae / Trae CN setup (Rules + Skill + MCP)
+
+Trae loads **Rules every turn** and **Skills on demand**. GraphFlow `install` writes:
+
+| Path | Role |
+|------|------|
+| `.trae/rules/graphflow.md` | `alwaysApply: true` — **must** call `graphflow_preview_context` first |
+| `.trae/skills/graphflow/SKILL.md` | Full workflows; trigger with `#graphflow` |
+| `User/mcp.json` | GraphFlow MCP server |
+
+If Rules are missing, type `#graphflow` at the start of a chat. Pass `rootDir` = current project absolute path on every preview call.
+
+### Antigravity IDE setup (Rules + Skill + MCP)
+
+| Path | Role |
+|------|------|
+| `~/.gemini/antigravity/mcp_config.json` | Global MCP (`mcpServers.graphflow`) |
+| `~/.gemini/antigravity/skills/graphflow/SKILL.md` | Global Skill |
+| `.agent/rules/graphflow.md` | Project rules (always loaded in workspace) |
+| `.agent/skills/graphflow/SKILL.md` | Project Skill |
+| `GEMINI.md` (project root) | Managed token-first block |
+
+Run `npx @roarpeng/graphflow install` from the project root. Do **not** hardcode `GRAPHFLOW_WORKSPACE_ROOT` in MCP env.
+
+### Gemini CLI setup
+
+| Path | Role |
+|------|------|
+| `~/.gemini/settings.json` | MCP (`mcpServers.graphflow`) |
+| `~/.gemini/GEMINI.md` | Global managed instruction block |
+| `GEMINI.md` (project root) | Project managed block (with `install --scope all`) |
+
+### GitHub Copilot (VS Code) setup
+
+| Path | Role |
+|------|------|
+| `~/.config/Code/User/mcp.json` | User MCP (`servers.graphflow`) |
+| `.vscode/mcp.json` | Project MCP (optional, team-shared) |
+| `.github/copilot-instructions.md` | Repo-level Copilot instructions |
 
 ---
 

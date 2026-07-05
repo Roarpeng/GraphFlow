@@ -428,12 +428,17 @@ export function buildAgentProfiles(): AgentProfile[] {
       name: "Gemini",
       // Gemini CLI reads MCP servers from the `mcpServers` object in settings.json.
       // User scope: ~/.gemini/settings.json; project scope: <project>/.gemini/settings.json.
+      // Shared Antigravity toolchain: ~/.gemini/config/mcp_config.json (optional).
       markerPaths: [
         join(home, ".gemini"),
       ],
       userTargets: [
         {
           configPath: join(home, ".gemini", "settings.json"),
+          serversKey: "mcpServers",
+        },
+        {
+          configPath: join(home, ".gemini", "config", "mcp_config.json"),
           serversKey: "mcpServers",
         },
       ],
@@ -457,19 +462,27 @@ export function buildAgentProfiles(): AgentProfile[] {
     {
       id: "antigravity",
       name: "Antigravity",
-      // Google Antigravity 是基于 VS Code 的 AI IDE
-      // MCP 配置共享 VS Code 的 .vscode/mcp.json 格式
+      // Google Antigravity MCP: ~/.gemini/antigravity/mcp_config.json (mcpServers key).
+      // Shared config across Antigravity products: ~/.gemini/config/mcp_config.json.
+      // Project scope: .agents/mcp_config.json
       markerPaths: [
+        join(home, ".gemini", "antigravity"),
+        join(home, ".antigravity"),
         join(appData, "Antigravity"),
         join(localAppData, "Programs", "Antigravity"),
       ],
       userTargets: [
         {
-          configPath: isWindows()
-            ? join(appData, "Code", "User", "mcp.json")
-            : join(home, ".config", "Code", "User", "mcp.json"),
-          serversKey: "servers",
+          configPath: join(home, ".gemini", "antigravity", "mcp_config.json"),
+          serversKey: "mcpServers",
         },
+        {
+          configPath: join(home, ".gemini", "config", "mcp_config.json"),
+          serversKey: "mcpServers",
+        },
+      ],
+      workspaceRelativePaths: [
+        { relativePath: join(".agents", "mcp_config.json"), serversKey: "mcpServers" },
       ],
     },
     {
@@ -764,10 +777,9 @@ function resolveWindowsNpxLaunch(): { command: string; args: string[] } | undefi
 
 export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
   const cwd = options.workspaceRoot ?? options.npmScriptCwd ?? process.cwd();
-  const workspaceRootEnv =
-    options.workspaceRoot?.trim() ||
-    process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim() ||
-    "";
+  // Only inject workspace root when explicitly passed (workspace-scope installs).
+  // Never fall back to process.env — that pollutes user-level agent configs.
+  const workspaceRootEnv = options.workspaceRoot?.trim() ?? "";
   const mcpEnv: Record<string, string> = {
     ...MCP_STDIO_ENV,
   };
@@ -1145,7 +1157,6 @@ export function installMcpToDetectedAgents(options: McpInstallOptions): McpInsta
     options.agentIdsOverride ?? detectInstalledAgents().map((agent) => agent.id)
   );
   const serverName = options.serverName ?? "graphflow";
-  const node = buildMcpServerNode(options);
   const results: McpInstallResult[] = [];
 
   if (agentIds.size === 0) {
@@ -1165,6 +1176,12 @@ export function installMcpToDetectedAgents(options: McpInstallOptions): McpInsta
   const targets = resolveTargetsForAgents(agentIds, options.workspaceRoot, installScope);
   for (const target of targets) {
     try {
+      const { workspaceRoot, ...restOptions } = options;
+      const node = buildMcpServerNode(
+        target.scope === "workspace" && workspaceRoot
+          ? { ...restOptions, workspaceRoot }
+          : restOptions
+      );
       const status = injectIntoAgentConfig(
         target.configPath,
         target.serversKey,
