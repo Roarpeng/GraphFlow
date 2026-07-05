@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveConfig } from "../../../config/resolve";
-import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
 import { resolveGraphStorePath } from "../../../config/paths";
+import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
 import type { GraphEdge, GraphNode } from "../../../core/types";
 import { createGraphClient, type GraphClient } from "../../../graph/client-factory";
 import {
@@ -33,11 +33,33 @@ import type {
   SkillInsightsResult,
 } from "./types.js";
 import type { GraphFlowConfig } from "../../../config/schema";
+import {
+  buildQueryTranslateInstructions,
+  buildQueryTranslateWorkItem,
+  shouldDelegateQueryTranslation,
+} from "../../../graph/query-translate.js";
+
+function graphStoreNeedsIndexing(config: GraphFlowConfig): boolean {
+  const storePath = resolveGraphStorePath(config);
+  if (!existsSync(storePath)) {
+    return true;
+  }
+  if (config.graphPolicy.transport === "sqlite") {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(storePath, "utf8")) as { nodes?: unknown[] };
+    return !Array.isArray(parsed.nodes) || parsed.nodes.length === 0;
+  } catch {
+    return true;
+  }
+}
 
 export async function previewContext(
   query: string,
   configPath?: string,
-  rootDir?: string
+  rootDir?: string,
+  englishQuery?: string
 ): Promise<ContextPreviewResult> {
   const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
   const graphClient = createGraphClient(config);
@@ -47,7 +69,7 @@ export async function previewContext(
     const indexOptions = config.graphPolicy.includeExtensions
       ? { includeExtensions: config.graphPolicy.includeExtensions }
       : undefined;
-    if (hasPendingGraphIndexWork(root, indexOptions)) {
+    if (hasPendingGraphIndexWork(root, indexOptions) || graphStoreNeedsIndexing(config)) {
       await indexWorkspaceFiles(graphClient, root, {
         ...indexOptions,
       });
@@ -58,6 +80,8 @@ export async function previewContext(
     ...(config.graphPolicy.layerQuota ? { layerQuota: config.graphPolicy.layerQuota } : {}),
     ...buildEmbeddingOptions(config),
     enableHnsw: config.graphPolicy.enableHnsw ?? true,
+    workspaceRoot: config.graphPolicy.workspaceRoot ?? process.cwd(),
+    ...(englishQuery?.trim() ? { englishQuery: englishQuery.trim() } : {}),
     // Persist HNSW index to disk for faster startup on large repos.
     ...(config.embeddingPolicy?.vectorStorePath
       ? { hnswIndexPath: config.embeddingPolicy.vectorStorePath.replace(/\.\w+$/, ".hnsw") }
@@ -124,10 +148,21 @@ export async function previewContext(
     // Savings tracking is best-effort; don't fail the preview if it errors
   }
 
+  const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
+  const anchorCount = pkg.anchorChannel.length;
+  const queryTranslationDelegation = shouldDelegateQueryTranslation(query, anchorCount, englishQuery)
+    ? {
+        agentWorkItems: [buildQueryTranslateWorkItem(query, workspaceRoot)],
+        agentInstructions: buildQueryTranslateInstructions(query),
+        agentMode: "delegated-llm" as const,
+      }
+    : undefined;
+
   return {
     query,
+    ...(englishQuery?.trim() ? { englishQuery: englishQuery.trim() } : {}),
     summaryCount: pkg.summaryChannel.length,
-    anchorCount: pkg.anchorChannel.length,
+    anchorCount,
     tokenEstimate: pkg.tokenEstimate,
     truncated: pkg.truncated,
     anchorsByLayer: {
@@ -145,6 +180,7 @@ export async function previewContext(
       estimatedSavingsPercent: calculateSavingsPercent(rawTokenEstimate, pkg.tokenEstimate),
       budgetUsedPercent: calculateBudgetUsedPercent(pkg.tokenEstimate, config.graphPolicy.maxContextTokens),
     },
+    ...(queryTranslationDelegation ?? {}),
   };
 }
 

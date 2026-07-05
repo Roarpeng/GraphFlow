@@ -94,7 +94,8 @@ export async function executeToolCall(
         await previewContext(
           readRequiredString(args.query, "query"),
           readOptionalString(args.configPath),
-          readOptionalString(args.rootDir)
+          readOptionalString(args.rootDir),
+          readOptionalString(args.englishQuery)
         )
       );
     case "graphflow_expand_anchor":

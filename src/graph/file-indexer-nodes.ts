@@ -136,10 +136,13 @@ export function buildFileNodesAndEdges(
     const compactSig = `${symbol.kind} ${symbol.name}${symbol.exported ? " (exported)" : ""} @${relPath}:${symbol.line}`;
     const signature = symbol.signature ?? compactSig;
     const signatureHash = hashText(`${signature}\n${symbol.jsdoc ?? ""}\n${symbol.returnType ?? ""}`);
+    const docHint = symbol.jsdoc
+      ? ` # ${symbol.jsdoc.replace(/\s+/g, " ").trim().slice(0, 160)}`
+      : "";
     nodes.push({
       id: symbol.nodeId,
       type: "Symbol",
-      content: compactSig,
+      content: compactSig + docHint,
       metadata: {
         name: symbol.name,
         kind: symbol.kind,

@@ -88,11 +88,15 @@ export function getToolDefinitions(): ToolDefinition[] {
     },
     {
       name: "graphflow_preview_context",
-      description: "[Core] Preview GraphFlow near-lossless context packaging for a query. ALWAYS CALL THIS FIRST for code exploration, multi-step edits, refactors, debugging, or codebase-wide questions. Returns compressed context with anchors (Symbol/File/Module pointers) and token budget showing 70-95% savings. Use graphflow_expand_anchor to get full content of specific anchors.",
+      description: "[Core] Preview GraphFlow near-lossless context packaging for a query. ALWAYS CALL THIS FIRST for code exploration, multi-step edits, refactors, debugging, or codebase-wide questions. Returns compressed context with anchors (Symbol/File/Module pointers) and token budget showing 70-95% savings. For Chinese/CJK queries, pass englishQuery (agent-translated English code keywords) or answer agentWorkItems when anchorCount is low.",
       inputSchema: {
         type: "object",
         properties: {
           query: { type: "string", description: "Query to preview. Be specific about what you need to understand." },
+          englishQuery: {
+            type: "string",
+            description: "Optional English code-search keywords when query is Chinese/CJK. The connected agent should translate user intent to English file/symbol terms before or after the first preview call.",
+          },
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
           rootDir: { type: "string", description: "Optional workspace root override." },
         },

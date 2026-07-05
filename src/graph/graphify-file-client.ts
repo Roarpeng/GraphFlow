@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { dirname, join } from "node:path";
 import type { GraphEdge, GraphNode } from "../core/types";
 import { logger } from "../utils/logger";
-import { tokenizeForIndex } from "./graph-utils";
+import { tokenizeForIndex, nodeSearchableText } from "./graph-utils";
 
 interface GraphStore {
   nodes: GraphNode[];
@@ -51,8 +51,7 @@ export class GraphifyFileClient {
     const tokens = tokenizeForIndex(query);
     if (tokens.length === 0) {
       const normalized = query.toLowerCase();
-      const hits = store.nodes.filter((node) => node.content.toLowerCase().includes(normalized));
-      return hits;
+      return store.nodes.filter((node) => nodeSearchableText(node).toLowerCase().includes(normalized));
     }
 
     const index = this.buildIndex(store.nodes);
@@ -111,7 +110,7 @@ export class GraphifyFileClient {
   private buildIndex(nodes: GraphNode[]): Map<string, Set<string>> {
     const index = new Map<string, Set<string>>();
     for (const node of nodes) {
-      for (const tok of tokenizeForIndex(node.content)) {
+      for (const tok of tokenizeForIndex(nodeSearchableText(node))) {
         let set = index.get(tok);
         if (!set) {
           set = new Set();
