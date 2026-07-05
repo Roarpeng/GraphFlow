@@ -1,6 +1,6 @@
 ---
 name: "graphflow"
-description: "Graph-based code context compression, task planning, and knowledge graph orchestration. Backed by GraphFlow MCP server with 18 tools. Invoke before multi-step edits, large refactors, codebase-wide questions, or when you need to understand project structure efficiently to save tokens."
+description: "Graph-based code context compression, task planning, and knowledge graph orchestration (18 MCP tools). Invoke before ANY code question, bug fix, debugging, file reading, Chinese/CJK query, refactor, or multi-step edit — ALWAYS call graphflow_preview_context MCP first when GraphFlow is connected."
 ---
 
 # GraphFlow Skill
@@ -21,10 +21,10 @@ GraphFlow is a graph-based context and planning service backed by a persistent M
 ┌─────────────────────────────────────────────────┐
 │  GraphFlow MCP Server (persistent backend)      │
 │  18 tools: preview, expand, plan, plan_insight,  │
-│  run, report_outcome, index, index_file, rebuild,│
-│  enrich, model_download, inspect, skill_insights,│
-│  diagnose, export_artifact, import_artifact,     │
-│  stats, metrics                                  │
+│  run, report_outcome, submit_insight, merge_insight,│
+│  index, index_file, rebuild, inspect, skill_insights,│
+│  skill_guide, diagnose, export_artifact, import_artifact,│
+│  stats                                              │
 └──────────────────┬──────────────────────────────┘
                    │
                    ▼
@@ -53,6 +53,46 @@ GraphFlow is a graph-based context and planning service backed by a persistent M
 - Skip GraphFlow for complex tasks
 - Use grep for codebase exploration before `graphflow_preview_context`
 
+### Trae / Trae CN setup (Rules + Skill + MCP)
+
+Trae loads **Rules every turn** and **Skills on demand**. GraphFlow `install` writes:
+
+| Path | Role |
+|------|------|
+| `.trae/rules/graphflow.md` | `alwaysApply: true` — **must** call `graphflow_preview_context` first |
+| `.trae/skills/graphflow/SKILL.md` | Full workflows; trigger with `#graphflow` |
+| `User/mcp.json` | GraphFlow MCP server |
+
+If Rules are missing, type `#graphflow` at the start of a chat. Pass `rootDir` = current project absolute path on every preview call.
+
+### Antigravity IDE setup (Rules + Skill + MCP)
+
+| Path | Role |
+|------|------|
+| `~/.gemini/antigravity/mcp_config.json` | Global MCP (`mcpServers.graphflow`) |
+| `~/.gemini/antigravity/skills/graphflow/SKILL.md` | Global Skill |
+| `.agent/rules/graphflow.md` | Project rules (always loaded in workspace) |
+| `.agent/skills/graphflow/SKILL.md` | Project Skill |
+| `GEMINI.md` (project root) | Managed token-first block |
+
+Run `npx @roarpeng/graphflow install` from the project root. Do **not** hardcode `GRAPHFLOW_WORKSPACE_ROOT` in MCP env.
+
+### Gemini CLI setup
+
+| Path | Role |
+|------|------|
+| `~/.gemini/settings.json` | MCP (`mcpServers.graphflow`) |
+| `~/.gemini/GEMINI.md` | Global managed instruction block |
+| `GEMINI.md` (project root) | Project managed block (with `install --scope all`) |
+
+### GitHub Copilot (VS Code) setup
+
+| Path | Role |
+|------|------|
+| `~/.config/Code/User/mcp.json` | User MCP (`servers.graphflow`) |
+| `.vscode/mcp.json` | Project MCP (optional, team-shared) |
+| `.github/copilot-instructions.md` | Repo-level Copilot instructions |
+
 ---
 
 ## Tool Inventory (18 MCP Tools)
@@ -72,6 +112,8 @@ GraphFlow is a graph-based context and planning service backed by a persistent M
 | `graphflow_plan_insight` | Six Thinking Hats + 5-Why deep analysis | Medium - ambiguous/high-stakes tasks |
 | `graphflow_run` | Plan + context package (bridge mode) | Medium - full task packaging |
 | `graphflow_report_outcome` | Report bridge-mode execution outcome back | Medium - close the learning loop |
+| `graphflow_submit_insight` | Submit agent answers to Six Hats / plan prompts | Medium - no external LLM API |
+| `graphflow_merge_insight` | Merge submitted insights into unified plan | Medium - after submit_insight |
 
 ### Graph Management Tools (Medium Frequency)
 
@@ -81,8 +123,6 @@ GraphFlow is a graph-based context and planning service backed by a persistent M
 | `graphflow_index_file` | Single file incremental index | Medium-High - after saving a file |
 | `graphflow_rebuild` | Clear cache + full re-index | Low - when graph is stale/corrupted |
 | `graphflow_inspect_graph` | Graph stats & sample nodes/edges | Low - check graph health |
-| `graphflow_enrich_graph` | Semantic enrichment of symbols | Rare - LLM-powered enrichment |
-| `graphflow_model_download` | Download local compression model | Rare - offline setup |
 
 ### Collaboration & Insights Tools (Low Frequency)
 
@@ -91,8 +131,8 @@ GraphFlow is a graph-based context and planning service backed by a persistent M
 | `graphflow_export_artifact` | Export graph to portable artifact | Low - team sharing |
 | `graphflow_import_artifact` | Import graph artifact | Low - skip full index on new machine |
 | `graphflow_skill_insights` | Learned skill patterns | Low - leverage prior learning |
+| `graphflow_skill_guide` | Skill usage guide for connected agents | Low - onboarding |
 | `graphflow_stats` | Cumulative token savings stats | Low - ROI tracking |
-| `graphflow_metrics` | Prometheus-compatible metrics | Low - observability |
 | `graphflow_diagnose` | Provider health & model routing | Rare - config issues |
 
 ---
@@ -113,9 +153,10 @@ Step 4: Read full files only when exact edits required
 **Input - preview_context:**
 ```typescript
 {
-  query: string;           // Required - your search/understanding query
-  configPath?: string;     // Optional - path to graphflow.config.json
-  rootDir?: string;        // Optional - workspace root override
+  query: string;           // Required - user question (Chinese OK)
+  englishQuery?: string;   // Agent-translated English code search terms (recommended for CJK)
+  configPath?: string;
+  rootDir?: string;
 }
 ```
 
@@ -123,35 +164,46 @@ Step 4: Read full files only when exact edits required
 ```typescript
 {
   anchorId: string;        // Required - anchor id from preview_context
-  configPath?: string;     // Optional - path to graphflow.config.json
-  rootDir?: string;        // Optional - workspace root override
+  configPath?: string;
+  rootDir?: string;
 }
 ```
 
 **Output structure (preview_context):**
 ```typescript
 {
-  summary: string[];           // Compressed context lines
-  anchors: Array<{             // File/symbol anchors you can expand
-    id: string;
-    type: "Module" | "File" | "Symbol";
-    layer: "L1" | "L2" | "L3";
-  }>;
+  summary: string[];
+  anchors: Array<{ id: string; type: string; layer: "L1" | "L2" | "L3" }>;
   tokenBudget: {
-    maxContextTokens: number;     // Configured budget
-    estimatedRawTokens: number;   // What full files would cost
-    compressedTokens: number;     // What this returns
-    estimatedSavingsPercent: number; // 0-100
-    budgetUsedPercent: number;    // 0-100
+    maxContextTokens: number;
+    estimatedRawTokens: number;
+    compressedTokens: number;
+    estimatedSavingsPercent: number;
+    budgetUsedPercent: number;
   };
-  refillPreview: string[];     // Hints for getting more context
+  agentWorkItems?: Array<{ id: string; kind: string; prompt: string }>; // CJK low-match delegation
+  englishQuery?: string;
 }
 ```
 
-**Always report to user:**
-- Token savings percentage
-- Number of anchors found
-- Key findings from summary
+**Always report to user:** token savings %, anchor count, key summary findings
+
+### Workflow 1b: Chinese / CJK queries (agent translates → English search)
+
+**Use when:** User asks in Chinese but the codebase uses English symbols
+
+GraphFlow tokenizes CJK and expands workspace path hints. When that is not enough, **YOU must translate** to English code keywords.
+
+**Preferred (proactive):**
+```
+Step 1: Translate user intent to English file/symbol terms with YOUR model
+Step 2: graphflow_preview_context({ query: "<Chinese>", englishQuery: "PoseDetectionPage avatarMode BattlePage shieldEffect", rootDir })
+Step 3: Use summary + anchors
+```
+
+Use **exact file/class/component names** (PascalCase stems). Avoid generic words like `exercise` when the user means camera/pose UI — that word often hits data/types layers instead of pages.
+
+**Fallback:** If `anchorCount < 3` and `agentWorkItems` includes `query-translate-en`, answer JSON prompt and retry with `englishQuery`.
 
 ---
 
@@ -300,14 +352,6 @@ graphflow_import_artifact(inputPath?)
 
 ### Workflow 7: Advanced Capabilities
 
-#### Semantic Enrichment (LLM required)
-```
-graphflow_enrich_graph(batchSize?, sleepMs?, timeoutMs?)
-```
-- Adds semantic descriptions to symbol nodes
-- Improves context quality for complex queries
-- Requires configured LLM provider
-
 #### Skill Insights (learning flywheel)
 ```
 graphflow_skill_insights(limit?, rootDir?)
@@ -323,14 +367,6 @@ graphflow_stats(configPath?, rootDir?)
 - Cumulative token savings across all runs
 - ROI tracking
 - See how much GraphFlow has saved
-
-#### Prometheus Metrics
-```
-graphflow_metrics(configPath?, rootDir?)
-```
-- Prometheus text exposition format
-- Token savings, graph size, compression ratio
-- For observability dashboards
 
 #### Diagnostics
 ```
@@ -377,9 +413,8 @@ Start
   ├─ Do you want to leverage prior learning?
   │   └─ YES → graphflow_skill_insights
   │
-  ├─ Tracking ROI / observability?
-  │   ├─ Quick stats → graphflow_stats
-  │   └─ Prometheus → graphflow_metrics
+  ├─ Tracking ROI?
+  │   └─ graphflow_stats
   │
   └─ Is routing/models misbehaving?
       └─ YES → graphflow_diagnose
@@ -456,9 +491,10 @@ Always pay attention to `tokenBudget`:
 ## Troubleshooting
 
 ### "0 anchors found" or empty results
-1. Check if graph exists: `graphflow_inspect_graph`
-2. If empty: run `graphflow_index`
-3. If still empty: verify `rootDir` points to correct project
+1. **Chinese/CJK:** translate to English keywords; pass `englishQuery` or answer `agentWorkItems` id `query-translate-en`
+2. Check if graph exists: `graphflow_inspect_graph`
+3. If empty: run `graphflow_index`
+4. If still empty: verify `rootDir` points to correct project
 
 ### Results seem stale
 1. Run `graphflow_index` (incremental, fast)
@@ -467,7 +503,7 @@ Always pay attention to `tokenBudget`:
 ### Context quality is poor
 1. Try more specific query terms
 2. Check if symbols are indexed (inspect graph)
-3. Run `graphflow_enrich_graph` for semantic enhancement (LLM required)
+3. Run `graphflow_rebuild` if the graph may be stale
 
 ### Tool errors / configuration issues
 1. Run `graphflow_diagnose` to check provider health
@@ -526,9 +562,6 @@ await graphflow_skill_insights({ limit: 5 });
 
 // Token savings stats
 await graphflow_stats();
-
-// Prometheus metrics
-await graphflow_metrics();
 
 // Diagnose issues
 await graphflow_diagnose();

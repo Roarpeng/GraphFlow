@@ -97,7 +97,7 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 
 ### 发布信息
 
-- 最新版本：**v1.4.3**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.4.3`
+- 最新版本：**v1.4.4**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.4.4`
 - **GitHub Release**：push 到 `main` 后 CI 在 `windows-2022` 上自动构建 VSIX 并发布到 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
 - **npm 发布**：push tag `v*`（如 `v1.4.1`）触发 [Publish npm](https://github.com/Roarpeng/GraphFlow/actions/workflows/publish-npm.yml) 工作流
 - 变更日志：`CHANGELOG.md`
@@ -318,6 +318,56 @@ npx @roarpeng/graphflow init
 
 **本地 `npm install` 后**：若项目已有 `.cursor/mcp.json` 或 `.vscode/mcp.json`，postinstall 会自动注入 workspace 级 GraphFlow MCP 与 Skill；完整用户级安装请运行 `npx @roarpeng/graphflow install`。
 
+### Trae / Trae CN 推荐配置
+
+Trae 区分 **Rules**（每轮自动加载）与 **Skill**（按需匹配）。仅装 Skill 时 GraphFlow 触发频率偏低；`install` / `init` 会在项目内写入：
+
+| 路径 | 作用 |
+|------|------|
+| `.trae/rules/graphflow.md` | `alwaysApply: true` — 每轮强制先调 `graphflow_preview_context` |
+| `.trae/skills/graphflow/SKILL.md` | 详细 18 工具工作流；可用 `#graphflow` 手动触发 |
+| `~/.config/Trae CN/User/skills/graphflow/SKILL.md` | 用户级 Skill（跨项目） |
+| `User/mcp.json` | GraphFlow MCP 服务器 |
+
+```bash
+# 在项目根目录执行（fat-battle/web、GraphFlow 等）
+npx @roarpeng/graphflow install
+npx @roarpeng/graphflow doctor   # 检查 Trae CN rules/skill/MCP 是否就绪
+```
+
+**注意**：MCP 配置中不要硬编码 `GRAPHFLOW_WORKSPACE_ROOT` 到其他项目；在 Trae 打开哪个仓库，就让 Agent 在 `graphflow_preview_context` 里传该仓库的 `rootDir`。
+
+### Antigravity IDE 推荐配置
+
+| 路径 | 作用 |
+|------|------|
+| `~/.gemini/antigravity/mcp_config.json` | 全局 MCP（`mcpServers` 键） |
+| `~/.gemini/antigravity/skills/graphflow/SKILL.md` | 全局 Skill |
+| `.agent/rules/graphflow.md` | 项目级 Rules |
+| `.agent/skills/graphflow/SKILL.md` | 项目级 Skill |
+| `GEMINI.md` | 项目级受管指令块 |
+
+### Gemini CLI 推荐配置
+
+| 路径 | 作用 |
+|------|------|
+| `~/.gemini/settings.json` | MCP 服务器 |
+| `~/.gemini/GEMINI.md` | 全局受管指令块 |
+
+### VS Code / GitHub Copilot 推荐配置
+
+| 路径 | 作用 |
+|------|------|
+| `~/.config/Code/User/mcp.json` | 用户级 MCP（`servers` 键） |
+| `.github/copilot-instructions.md` | 仓库级 Copilot 指令（token-first） |
+| `.vscode/mcp.json` | 可选项目级 MCP |
+
+```bash
+npx @roarpeng/graphflow install          # 用户级 MCP + Skills
+npx @roarpeng/graphflow install --scope all   # 含项目级 Rules / Copilot 指令
+npx @roarpeng/graphflow doctor
+```
+
 支持的 Agent：Cursor、VS Code、Trae、Claude Code、Windsurf、Cline、Roo Code、Kilo Code、PearAI、Gemini、Codex、Antigravity、Amazon Q、Zed、Continue。
 
 ## 配置文件
@@ -373,9 +423,9 @@ cp graphflow.config.example.json graphflow.config.json
 CLI 安装（若已安装 `code` / `cursor` 命令）：
 
 ```bash
-code --install-extension graphflow-vscode-1.4.3.vsix
+code --install-extension graphflow-vscode-1.4.4.vsix
 # 或
-cursor --install-extension graphflow-vscode-1.4.3.vsix
+cursor --install-extension graphflow-vscode-1.4.4.vsix
 ```
 
 ### 命令面板

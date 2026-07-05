@@ -88,9 +88,24 @@ const skillAssets = [
     name: "Trae Skill",
   },
   {
+    src: join(repoRoot, "src", "surfaces", "trae-rules"),
+    dst: join(vendorRoot, "src", "surfaces", "trae-rules"),
+    name: "Trae Rules",
+  },
+  {
     src: join(repoRoot, "src", "surfaces", "cursor-rules"),
     dst: join(vendorRoot, "src", "surfaces", "cursor-rules"),
     name: "Cursor Rules",
+  },
+  {
+    src: join(repoRoot, "src", "surfaces", "antigravity-rules"),
+    dst: join(vendorRoot, "src", "surfaces", "antigravity-rules"),
+    name: "Antigravity Rules",
+  },
+  {
+    src: join(repoRoot, "src", "surfaces", "copilot-instructions"),
+    dst: join(vendorRoot, "src", "surfaces", "copilot-instructions"),
+    name: "Copilot Instructions",
   },
 ];
 

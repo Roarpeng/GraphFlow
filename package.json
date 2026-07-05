@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "publishConfig": {
     "access": "public"
   },
@@ -9,7 +9,10 @@
     "wasm",
     "scripts/safe-postinstall.cjs",
     "src/surfaces/trae-skill",
+    "src/surfaces/trae-rules",
     "src/surfaces/cursor-rules",
+    "src/surfaces/antigravity-rules",
+    "src/surfaces/copilot-instructions",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
