@@ -17,7 +17,9 @@ jobs:
   package-windows:
     needs: validate
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    runs-on: windows-latest
+    # windows-latest now ships VS 2026 (v18); npm 10's node-gyp cannot detect it.
+    # Pin to windows-2022 (VS 2022 / v17) until node-gyp >=12.1 is bundled in our Node line.
+    runs-on: windows-2022
 
     steps:
       - name: Checkout

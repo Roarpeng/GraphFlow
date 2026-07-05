@@ -44,6 +44,8 @@ Do not scan the whole repository, recursively inspect many files, or read large 
 | `graphflow_plan_insight` | Six Thinking Hats + 5-Why deep analysis | Medium - ambiguous/high-stakes tasks |
 | `graphflow_run` | Plan + context package (bridge mode) | Medium - full task packaging |
 | `graphflow_report_outcome` | Report bridge-mode execution outcome back | Medium - close the learning loop |
+| `graphflow_submit_insight` | Submit agent answers to Six Hats / plan prompts | Medium - no external LLM API |
+| `graphflow_merge_insight` | Merge submitted insights into unified plan | Medium - after submit_insight |
 
 ### Graph Management Tools (Medium Frequency)
 
@@ -53,8 +55,6 @@ Do not scan the whole repository, recursively inspect many files, or read large 
 | `graphflow_index_file` | Single file incremental index | Medium-High - after saving a file |
 | `graphflow_rebuild` | Clear cache + full re-index | Low - when graph is stale/corrupted |
 | `graphflow_inspect_graph` | Graph stats & sample nodes/edges | Low - check graph health |
-| `graphflow_enrich_graph` | Semantic enrichment of symbols | Rare - LLM-powered enrichment |
-| `graphflow_model_download` | Download local compression model | Rare - offline setup |
 
 ### Collaboration & Insights Tools (Low Frequency)
 
@@ -63,8 +63,8 @@ Do not scan the whole repository, recursively inspect many files, or read large 
 | `graphflow_export_artifact` | Export graph to portable artifact | Low - team sharing |
 | `graphflow_import_artifact` | Import graph artifact | Low - skip full index on new machine |
 | `graphflow_skill_insights` | Learned skill patterns | Low - leverage prior learning |
+| `graphflow_skill_guide` | Skill usage guide for connected agents | Low - onboarding |
 | `graphflow_stats` | Cumulative token savings stats | Low - ROI tracking |
-| `graphflow_metrics` | Prometheus-compatible metrics | Low - observability |
 | `graphflow_diagnose` | Provider health & model routing | Rare - config issues |
 
 ## Standard Workflows

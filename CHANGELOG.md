@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-07-05
+
+### Fixed
+
+- **CI Windows 构建**：`package-windows` 固定 `windows-2022`，修复 `windows-latest`（VS 2026）上 node-gyp 无法识别 VS 18 导致 `hnswlib-node` 编译失败
+- **validate**：Linux CI 增加 `npm rebuild hnswlib-node`，确保 HNSW 原生模块在测试前就绪
+- **文档一致性**：同步 MCP 工具列表（移除 v1.4 已删除的 `enrich_graph` / `model_download` / `metrics`；补充 `submit_insight` / `merge_insight` / `skill_guide`）
+
+### Changed
+
+- **README / 扩展 README**：补充 VSIX 安装步骤（VS Code / Cursor）、MCP `install` 命令、`hnswlib-node` 原生编译环境说明
+
 ## [1.4.0] - 2026-07-04
 
 ### Changed

@@ -31,8 +31,8 @@ jobs:
       - name: Install extension dependencies
         run: npm ci --prefix vscode-extension
 
-      - name: Rebuild better-sqlite3
-        run: npm rebuild better-sqlite3
+      - name: Rebuild native modules
+        run: npm rebuild better-sqlite3 hnswlib-node
 
       - name: Lint
         run: npm run lint

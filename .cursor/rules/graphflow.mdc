@@ -7,7 +7,7 @@ alwaysApply: true
 
 # GraphFlow Token-First Rule
 
-GraphFlow is the local Graphify-inspired context layer for this repository. Its purpose is to save context by turning the project into a queryable graph, returning compressed summaries and anchors before an agent reads full files.
+GraphFlow is a graph-based context and planning service backed by a persistent MCP server. It turns codebases into queryable knowledge graphs, delivering token-efficient compressed context, task planning, and orchestration.
 
 Before broad code exploration, implementation, debugging, review, planning, or architecture questions:
 
@@ -27,14 +27,80 @@ Before broad code exploration, implementation, debugging, review, planning, or a
 
 Do not scan the whole repository, recursively inspect many files, or read large files before trying GraphFlow context.
 
-Preferred MCP order:
+## Tool Inventory (18 MCP Tools)
 
-1. `graphflow_preview_context` for compressed task context and token savings.
-2. `graphflow_plan` for decomposing multi-step work.
-3. `graphflow_inspect_graph` when graph state or coverage matters.
-4. `graphflow_skill_insights` when prior learning/skills may guide work.
-5. `graphflow_run` only when GraphFlow should execute its orchestration loop.
-6. `graphflow_diagnose` if provider routing or model configuration seems unhealthy.
+### Core Context Tools (Highest Frequency)
+
+| Tool | Purpose | Call Frequency |
+|------|---------|---------------|
+| `graphflow_preview_context` | Compress task context with token budget | **Highest** - default first step |
+| `graphflow_expand_anchor` | Expand a single anchor to full content | **High** - dive deeper into specific items |
+
+### Planning Tools (High Frequency)
+
+| Tool | Purpose | Call Frequency |
+|------|---------|---------------|
+| `graphflow_plan` | Multi-step task decomposition & DAG | High - before complex work |
+| `graphflow_plan_insight` | Six Thinking Hats + 5-Why deep analysis | Medium - ambiguous/high-stakes tasks |
+| `graphflow_run` | Plan + context package (bridge mode) | Medium - full task packaging |
+| `graphflow_report_outcome` | Report bridge-mode execution outcome back | Medium - close the learning loop |
+| `graphflow_submit_insight` | Submit agent answers to Six Hats / plan prompts | Medium - no external LLM API |
+| `graphflow_merge_insight` | Merge submitted insights into unified plan | Medium - after submit_insight |
+
+### Graph Management Tools (Medium Frequency)
+
+| Tool | Purpose | Call Frequency |
+|------|---------|---------------|
+| `graphflow_index` | Incremental workspace re-index | Medium - after file changes |
+| `graphflow_index_file` | Single file incremental index | Medium-High - after saving a file |
+| `graphflow_rebuild` | Clear cache + full re-index | Low - when graph is stale/corrupted |
+| `graphflow_inspect_graph` | Graph stats & sample nodes/edges | Low - check graph health |
+
+### Collaboration & Insights Tools (Low Frequency)
+
+| Tool | Purpose | Call Frequency |
+|------|---------|---------------|
+| `graphflow_export_artifact` | Export graph to portable artifact | Low - team sharing |
+| `graphflow_import_artifact` | Import graph artifact | Low - skip full index on new machine |
+| `graphflow_skill_insights` | Learned skill patterns | Low - leverage prior learning |
+| `graphflow_skill_guide` | Skill usage guide for connected agents | Low - onboarding |
+| `graphflow_stats` | Cumulative token savings stats | Low - ROI tracking |
+| `graphflow_diagnose` | Provider health & model routing | Rare - config issues |
+
+## Standard Workflows
+
+### Workflow 1: Context First (90% of tasks)
+
+**Use when:** Answering code questions, exploring codebase, understanding modules
+
+```
+Step 1: graphflow_preview_context(query: "<your question>")
+Step 2: Read summary + anchors as primary context
+Step 3: Expand specific anchors with graphflow_expand_anchor when needed
+Step 4: Read full files only when exact edits required
+```
+
+### Workflow 2: Plan Before Coding (complex tasks)
+
+**Use when:** Multi-step changes, refactors, features with unclear scope
+
+```
+Step 1: graphflow_preview_context(query: "<task>")
+Step 2: graphflow_plan(task: "<task description>")
+Step 3: Review plan steps and dependencies
+Step 4: Execute step by step, using GraphFlow context for each step
+Step 5: graphflow_index() after major changes
+```
+
+### Workflow 3: Deep Analysis (complex/ambiguous tasks)
+
+**Use when:** High-stakes changes, root-cause analysis, ambiguous requirements
+
+```
+Step 1: graphflow_preview_context(query: "<task>")
+Step 2: graphflow_plan_insight(task: "<task>")
+Step 3: Review analysis and apply findings
+```
 
 ## Bridge-mode outcome reporting
 

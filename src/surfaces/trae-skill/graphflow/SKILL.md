@@ -21,10 +21,10 @@ GraphFlow is a graph-based context and planning service backed by a persistent M
 ┌─────────────────────────────────────────────────┐
 │  GraphFlow MCP Server (persistent backend)      │
 │  18 tools: preview, expand, plan, plan_insight,  │
-│  run, report_outcome, index, index_file, rebuild,│
-│  enrich, model_download, inspect, skill_insights,│
-│  diagnose, export_artifact, import_artifact,     │
-│  stats, metrics                                  │
+│  run, report_outcome, submit_insight, merge_insight,│
+│  index, index_file, rebuild, inspect, skill_insights,│
+│  skill_guide, diagnose, export_artifact, import_artifact,│
+│  stats                                              │
 └──────────────────┬──────────────────────────────┘
                    │
                    ▼
@@ -72,6 +72,8 @@ GraphFlow is a graph-based context and planning service backed by a persistent M
 | `graphflow_plan_insight` | Six Thinking Hats + 5-Why deep analysis | Medium - ambiguous/high-stakes tasks |
 | `graphflow_run` | Plan + context package (bridge mode) | Medium - full task packaging |
 | `graphflow_report_outcome` | Report bridge-mode execution outcome back | Medium - close the learning loop |
+| `graphflow_submit_insight` | Submit agent answers to Six Hats / plan prompts | Medium - no external LLM API |
+| `graphflow_merge_insight` | Merge submitted insights into unified plan | Medium - after submit_insight |
 
 ### Graph Management Tools (Medium Frequency)
 
@@ -81,8 +83,6 @@ GraphFlow is a graph-based context and planning service backed by a persistent M
 | `graphflow_index_file` | Single file incremental index | Medium-High - after saving a file |
 | `graphflow_rebuild` | Clear cache + full re-index | Low - when graph is stale/corrupted |
 | `graphflow_inspect_graph` | Graph stats & sample nodes/edges | Low - check graph health |
-| `graphflow_enrich_graph` | Semantic enrichment of symbols | Rare - LLM-powered enrichment |
-| `graphflow_model_download` | Download local compression model | Rare - offline setup |
 
 ### Collaboration & Insights Tools (Low Frequency)
 
@@ -91,8 +91,8 @@ GraphFlow is a graph-based context and planning service backed by a persistent M
 | `graphflow_export_artifact` | Export graph to portable artifact | Low - team sharing |
 | `graphflow_import_artifact` | Import graph artifact | Low - skip full index on new machine |
 | `graphflow_skill_insights` | Learned skill patterns | Low - leverage prior learning |
+| `graphflow_skill_guide` | Skill usage guide for connected agents | Low - onboarding |
 | `graphflow_stats` | Cumulative token savings stats | Low - ROI tracking |
-| `graphflow_metrics` | Prometheus-compatible metrics | Low - observability |
 | `graphflow_diagnose` | Provider health & model routing | Rare - config issues |
 
 ---
@@ -300,14 +300,6 @@ graphflow_import_artifact(inputPath?)
 
 ### Workflow 7: Advanced Capabilities
 
-#### Semantic Enrichment (LLM required)
-```
-graphflow_enrich_graph(batchSize?, sleepMs?, timeoutMs?)
-```
-- Adds semantic descriptions to symbol nodes
-- Improves context quality for complex queries
-- Requires configured LLM provider
-
 #### Skill Insights (learning flywheel)
 ```
 graphflow_skill_insights(limit?, rootDir?)
@@ -323,14 +315,6 @@ graphflow_stats(configPath?, rootDir?)
 - Cumulative token savings across all runs
 - ROI tracking
 - See how much GraphFlow has saved
-
-#### Prometheus Metrics
-```
-graphflow_metrics(configPath?, rootDir?)
-```
-- Prometheus text exposition format
-- Token savings, graph size, compression ratio
-- For observability dashboards
 
 #### Diagnostics
 ```
@@ -377,9 +361,8 @@ Start
   ├─ Do you want to leverage prior learning?
   │   └─ YES → graphflow_skill_insights
   │
-  ├─ Tracking ROI / observability?
-  │   ├─ Quick stats → graphflow_stats
-  │   └─ Prometheus → graphflow_metrics
+  ├─ Tracking ROI?
+  │   └─ graphflow_stats
   │
   └─ Is routing/models misbehaving?
       └─ YES → graphflow_diagnose
@@ -467,7 +450,7 @@ Always pay attention to `tokenBudget`:
 ### Context quality is poor
 1. Try more specific query terms
 2. Check if symbols are indexed (inspect graph)
-3. Run `graphflow_enrich_graph` for semantic enhancement (LLM required)
+3. Run `graphflow_rebuild` if the graph may be stale
 
 ### Tool errors / configuration issues
 1. Run `graphflow_diagnose` to check provider health
@@ -526,9 +509,6 @@ await graphflow_skill_insights({ limit: 5 });
 
 // Token savings stats
 await graphflow_stats();
-
-// Prometheus metrics
-await graphflow_metrics();
 
 // Diagnose issues
 await graphflow_diagnose();
