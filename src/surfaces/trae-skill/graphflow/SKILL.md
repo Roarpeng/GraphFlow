@@ -157,9 +157,11 @@ GraphFlow tokenizes CJK and expands workspace path hints. When that is not enoug
 **Preferred (proactive):**
 ```
 Step 1: Translate user intent to English file/symbol terms with YOUR model
-Step 2: graphflow_preview_context({ query: "<Chinese>", englishQuery: "battle combat ...", rootDir })
+Step 2: graphflow_preview_context({ query: "<Chinese>", englishQuery: "PoseDetectionPage avatarMode BattlePage shieldEffect", rootDir })
 Step 3: Use summary + anchors
 ```
+
+Use **exact file/class/component names** (PascalCase stems). Avoid generic words like `exercise` when the user means camera/pose UI — that word often hits data/types layers instead of pages.
 
 **Fallback:** If `anchorCount < 3` and `agentWorkItems` includes `query-translate-en`, answer JSON prompt and retry with `englishQuery`.
 

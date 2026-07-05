@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-07-05
+
+### Added
+
+- **PascalCase/camelCase 拆词**：`BattlePage` → `battle` + `page`，`EnergyShield` → `shield` 等，英文子词可命中代码符号
+- **合并 englishQuery 重排**：RRF 子查询使用中文 + englishQuery + 子查询共同打分
+- **UI 路径加权**：含 avatar/shield/battle/camera 等 UI 意图时优先 `src/pages/`、`src/components/`
+
+### Fixed
+
+- **TOKEN_SPLIT**：不再把大写字母误当分隔符（修复 `oldFunctionName` 等标识符被错误切碎）
+- **SQLite FTS**：ASCII 单词前缀匹配（`battle*` → `BattlePage`），多词短语仍用 AND
+
+### Changed
+
+- **Agent 翻译提示 / Skill**：优先精确文件/类/组件名，避免泛化 `exercise` 误命中数据层
+
 ## [1.4.2] - 2026-07-05
 
 ### Added

@@ -1,6 +1,6 @@
 import type { GraphEdge, GraphNode } from "../core/types";
 
-const TOKEN_SPLIT = /[^a-z0-9_\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]+/g;
+const TOKEN_SPLIT = /[^a-zA-Z0-9_\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]+/g;
 const CJK_RE = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/;
 
 const DEPRIORITIZED_PATH_PATTERNS = [
@@ -16,6 +16,28 @@ const PRIORITIZED_PATH_PATTERNS = [
   /(?:^|\/)vscode-extension\/src\//,
   /(?:^|\/)tests\//,
 ];
+
+const UI_PAGE_PATH_PATTERN = /(?:^|\/)src\/pages\//;
+const UI_COMPONENT_PATH_PATTERN = /(?:^|\/)src\/components\//;
+const DATA_LAYER_PATH_PATTERN = /(?:^|\/)src\/(?:data|types)\//;
+
+/** Tokens that suggest UI/page behavior rather than shared data types. */
+const UI_INTERACTION_TOKENS = new Set([
+  "avatar",
+  "shield",
+  "battle",
+  "pose",
+  "camera",
+  "effect",
+  "attack",
+  "selection",
+  "detection",
+  "page",
+  "modal",
+  "button",
+  "animation",
+  "render",
+]);
 
 export function containsCJK(text: string): boolean {
   return CJK_RE.test(text);
@@ -34,19 +56,54 @@ export function tokenizeCJK(text: string): string[] {
   return [...out];
 }
 
+/** Split camelCase, PascalCase, and snake_case identifiers into searchable tokens. */
+export function splitIdentifierTokens(part: string): string[] {
+  if (!part) return [];
+  const out = new Set<string>();
+  const lower = part.toLowerCase();
+  if (lower.length >= 2) out.add(lower);
+
+  const spaced = part.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+
+  for (const piece of spaced.split(/[^a-zA-Z0-9]+/).filter(Boolean)) {
+    const token = piece.toLowerCase();
+    if (token.length >= 2) out.add(token);
+  }
+
+  return [...out];
+}
+
 export function tokenizeForIndex(text: string): string[] {
   if (!text) return [];
   const out = new Set<string>();
 
-  const asciiParts = text.toLowerCase().split(TOKEN_SPLIT);
-  for (const t of asciiParts) {
-    if (t.length >= 2) out.add(t);
+  for (const part of text.split(TOKEN_SPLIT)) {
+    if (!part || CJK_RE.test(part)) continue;
+    for (const token of splitIdentifierTokens(part)) {
+      out.add(token);
+    }
   }
 
   for (const t of tokenizeCJK(text)) {
     out.add(t);
   }
 
+  return [...out];
+}
+
+/** Tokens used for re-ranking: original query + agent English + active sub-query. */
+export function buildSearchScoreTokens(
+  query: string,
+  englishQuery?: string,
+  subQuery?: string
+): string[] {
+  const out = new Set<string>();
+  for (const text of [query, englishQuery, subQuery]) {
+    if (!text?.trim()) continue;
+    for (const token of tokenizeForIndex(text)) {
+      out.add(token);
+    }
+  }
   return [...out];
 }
 
@@ -176,42 +233,71 @@ export function extractNodeSourcePath(node: GraphNode): string {
   return node.content.split(/\s+/)[0] ?? "";
 }
 
-function queryMatchesNode(node: GraphNode, query: string): boolean {
+function queryMatchesNode(node: GraphNode, queries: string[]): boolean {
   const searchable = nodeSearchableText(node).toLowerCase();
-  const normalizedQuery = query.trim().toLowerCase();
-  if (normalizedQuery && searchable.includes(normalizedQuery)) {
-    return true;
-  }
-
-  for (const phrase of tokenizeCJK(query)) {
-    if (phrase.length >= 2 && searchable.includes(phrase)) {
+  for (const query of queries) {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (normalizedQuery && searchable.includes(normalizedQuery)) {
       return true;
+    }
+
+    for (const phrase of tokenizeCJK(query)) {
+      if (phrase.length >= 2 && searchable.includes(phrase)) {
+        return true;
+      }
     }
   }
 
   return false;
 }
 
+export interface RankNodesOptions {
+  scoreTokens?: Iterable<string>;
+  matchQueries?: string[];
+}
+
 /** Re-rank keyword hits so integration/config noise does not dominate architecture queries. */
-export function rankNodesForContextQuery(nodes: GraphNode[], query: string): GraphNode[] {
-  const queryTokens = new Set(tokenizeForIndex(query));
+export function rankNodesForContextQuery(
+  nodes: GraphNode[],
+  query: string,
+  options?: RankNodesOptions
+): GraphNode[] {
+  const queryTokens = new Set(options?.scoreTokens ?? tokenizeForIndex(query));
+  const matchQueries = options?.matchQueries ?? [query];
+  const uiIntent = [...queryTokens].some((token) => UI_INTERACTION_TOKENS.has(token));
+
   const scored = nodes.map((node) => {
     let score = 0;
     const path = extractNodeSourcePath(node);
     const searchable = nodeSearchableText(node);
+    let tokenHits = 0;
 
     for (const token of tokenizeForIndex(searchable)) {
       if (queryTokens.has(token)) {
         score += 2;
+        tokenHits += 1;
       }
     }
 
-    if (queryMatchesNode(node, query)) {
+    if (tokenHits >= 2) {
+      score += tokenHits;
+    }
+
+    if (queryMatchesNode(node, matchQueries)) {
       score += 6;
     }
 
     if (PRIORITIZED_PATH_PATTERNS.some((pattern) => pattern.test(path))) {
       score += 8;
+    }
+    if (uiIntent) {
+      if (UI_PAGE_PATH_PATTERN.test(path)) {
+        score += 12;
+      } else if (UI_COMPONENT_PATH_PATTERN.test(path)) {
+        score += 10;
+      } else if (DATA_LAYER_PATH_PATTERN.test(path)) {
+        score -= 6;
+      }
     }
     if (DEPRIORITIZED_PATH_PATTERNS.some((pattern) => pattern.test(path))) {
       score -= 12;

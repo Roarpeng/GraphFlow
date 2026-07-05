@@ -7,6 +7,7 @@ import {
   expandSearchQueries,
   extractPathTokens,
   nodeSearchableText,
+  splitIdentifierTokens,
   tokenizeForIndex,
 } from "../src/graph/graph-utils";
 import { collectExpandedKeywordHits } from "../src/graph/query-expand";
@@ -30,6 +31,93 @@ describe("M61 CJK query expansion", () => {
     expect(tokens).toContain("游戏");
     expect(tokens).toContain("戏战");
     expect(tokens).toContain("战斗");
+  });
+
+  it("splits PascalCase and camelCase identifiers", () => {
+    expect(splitIdentifierTokens("BattlePage")).toEqual(
+      expect.arrayContaining(["battlepage", "battle", "page"])
+    );
+    expect(splitIdentifierTokens("avatarMode")).toEqual(
+      expect.arrayContaining(["avatarmode", "avatar", "mode"])
+    );
+    expect(splitIdentifierTokens("EnergyShield")).toEqual(
+      expect.arrayContaining(["energyshield", "energy", "shield"])
+    );
+    expect(tokenizeForIndex("src/pages/PoseDetectionPage.tsx")).toEqual(
+      expect.arrayContaining(["pose", "detection", "page", "posedetectionpage"])
+    );
+  });
+
+  it("matches partial english tokens against PascalCase symbols (fat-battle scenario)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gf-cjk-ui-"));
+    const storePath = join(dir, "graph.json");
+    const client = new GraphifyFileClient(storePath);
+
+    await client.upsertNodes([
+      {
+        id: "file:src/pages/BattlePage.tsx",
+        type: "File",
+        content: "src/pages/BattlePage.tsx # exports: BattlePage",
+      },
+      {
+        id: "symbol:src/pages/BattlePage.tsx:f138e787",
+        type: "Symbol",
+        content: "function BattlePage (exported) @src/pages/BattlePage.tsx:20",
+        metadata: { name: "BattlePage", file: "src/pages/BattlePage.tsx" },
+      },
+      {
+        id: "file:src/pages/PoseDetectionPage.tsx",
+        type: "File",
+        content: "src/pages/PoseDetectionPage.tsx # exports: PoseDetectionPage",
+      },
+      {
+        id: "file:src/components/BattleEffects.tsx",
+        type: "File",
+        content:
+          "src/components/BattleEffects.tsx # exports: AttackEffect, EnergyShield",
+      },
+      {
+        id: "symbol:src/types/game.ts:7e6b65f8",
+        type: "Symbol",
+        content: "interface Exercise (exported) @src/types/game.ts:93",
+        metadata: { name: "Exercise", file: "src/types/game.ts" },
+      },
+      {
+        id: "file:src/data/exercises.ts",
+        type: "File",
+        content: "src/data/exercises.ts # exports: exercises",
+      },
+    ]);
+
+    const englishQuery =
+      "camera exercise avatar selection attack shield effects battle page";
+    const hits = await collectExpandedKeywordHits(
+      client,
+      "摄像头锻炼人物角色选择和攻击护盾特效",
+      join(dir, "fat-battle", "web"),
+      englishQuery
+    );
+
+    const topIds = hits.slice(0, 5).map((n) => n.id);
+    expect(topIds.some((id) => id.includes("BattlePage"))).toBe(true);
+    expect(topIds.some((id) => id.includes("PoseDetectionPage") || id.includes("BattleEffects"))).toBe(
+      true
+    );
+    expect(topIds[0]).not.toContain("src/data/exercises.ts");
+
+    const pkg = await buildLayeredContextPackage(
+      client,
+      "摄像头锻炼人物角色选择和攻击护盾特效",
+      1500,
+      {
+        workspaceRoot: join(dir, "fat-battle", "web"),
+        englishQuery,
+      }
+    );
+    const summary = pkg.summaryChannel.join("\n");
+    expect(summary).toMatch(/BattlePage|BattleEffects|PoseDetectionPage/);
+
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it("extracts path tokens from workspace root", () => {
