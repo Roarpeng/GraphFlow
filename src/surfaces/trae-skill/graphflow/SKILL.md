@@ -113,9 +113,10 @@ Step 4: Read full files only when exact edits required
 **Input - preview_context:**
 ```typescript
 {
-  query: string;           // Required - your search/understanding query
-  configPath?: string;     // Optional - path to graphflow.config.json
-  rootDir?: string;        // Optional - workspace root override
+  query: string;           // Required - user question (Chinese OK)
+  englishQuery?: string;   // Agent-translated English code search terms (recommended for CJK)
+  configPath?: string;
+  rootDir?: string;
 }
 ```
 
@@ -123,35 +124,44 @@ Step 4: Read full files only when exact edits required
 ```typescript
 {
   anchorId: string;        // Required - anchor id from preview_context
-  configPath?: string;     // Optional - path to graphflow.config.json
-  rootDir?: string;        // Optional - workspace root override
+  configPath?: string;
+  rootDir?: string;
 }
 ```
 
 **Output structure (preview_context):**
 ```typescript
 {
-  summary: string[];           // Compressed context lines
-  anchors: Array<{             // File/symbol anchors you can expand
-    id: string;
-    type: "Module" | "File" | "Symbol";
-    layer: "L1" | "L2" | "L3";
-  }>;
+  summary: string[];
+  anchors: Array<{ id: string; type: string; layer: "L1" | "L2" | "L3" }>;
   tokenBudget: {
-    maxContextTokens: number;     // Configured budget
-    estimatedRawTokens: number;   // What full files would cost
-    compressedTokens: number;     // What this returns
-    estimatedSavingsPercent: number; // 0-100
-    budgetUsedPercent: number;    // 0-100
+    maxContextTokens: number;
+    estimatedRawTokens: number;
+    compressedTokens: number;
+    estimatedSavingsPercent: number;
+    budgetUsedPercent: number;
   };
-  refillPreview: string[];     // Hints for getting more context
+  agentWorkItems?: Array<{ id: string; kind: string; prompt: string }>; // CJK low-match delegation
+  englishQuery?: string;
 }
 ```
 
-**Always report to user:**
-- Token savings percentage
-- Number of anchors found
-- Key findings from summary
+**Always report to user:** token savings %, anchor count, key summary findings
+
+### Workflow 1b: Chinese / CJK queries (agent translates → English search)
+
+**Use when:** User asks in Chinese but the codebase uses English symbols
+
+GraphFlow tokenizes CJK and expands workspace path hints. When that is not enough, **YOU must translate** to English code keywords.
+
+**Preferred (proactive):**
+```
+Step 1: Translate user intent to English file/symbol terms with YOUR model
+Step 2: graphflow_preview_context({ query: "<Chinese>", englishQuery: "battle combat ...", rootDir })
+Step 3: Use summary + anchors
+```
+
+**Fallback:** If `anchorCount < 3` and `agentWorkItems` includes `query-translate-en`, answer JSON prompt and retry with `englishQuery`.
 
 ---
 
@@ -439,9 +449,10 @@ Always pay attention to `tokenBudget`:
 ## Troubleshooting
 
 ### "0 anchors found" or empty results
-1. Check if graph exists: `graphflow_inspect_graph`
-2. If empty: run `graphflow_index`
-3. If still empty: verify `rootDir` points to correct project
+1. **Chinese/CJK:** translate to English keywords; pass `englishQuery` or answer `agentWorkItems` id `query-translate-en`
+2. Check if graph exists: `graphflow_inspect_graph`
+3. If empty: run `graphflow_index`
+4. If still empty: verify `rootDir` points to correct project
 
 ### Results seem stale
 1. Run `graphflow_index` (incremental, fast)

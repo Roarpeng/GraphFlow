@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-07-05
+
+### Added
+
+- **CJK 查询支持**：中文/日文/韩文分词与双字切分；FTS 对 CJK 查询使用 OR 匹配
+- **Agent 委托翻译**：`graphflow_preview_context` 新增 `englishQuery`；当 CJK 查询锚点不足时返回 `agentWorkItems`（`query-translate-en`），由连接的 Agent 翻译为英文符号关键词后重试
+- **多查询 RRF**：`expandSearchQueries` 合并原始查询、Agent 英文翻译与工作区路径提示进行检索
+- **索引增强**：Symbol 节点 content 附加 JSDoc 摘要（≤160 字符），提升中文意图对英文符号的命中
+
+### Fixed
+
+- **自动索引**：`preview_context` 在图存储为空时即使 workspace 缓存已 warm 也会触发索引
+
 ## [1.4.1] - 2026-07-05
 
 ### Fixed

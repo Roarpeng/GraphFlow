@@ -49,6 +49,10 @@ export interface LayeredPackageOptions {
   enableHnsw?: boolean;
   /** Optional path to persist the HNSW index for faster startup on large repos. */
   hnswIndexPath?: string;
+  /** Workspace root for CJK query expansion (path token hints). */
+  workspaceRoot?: string;
+  /** Agent-translated English search terms (see Skill CJK workflow). */
+  englishQuery?: string;
 }
 
 export interface SubgraphExpansionOptions {

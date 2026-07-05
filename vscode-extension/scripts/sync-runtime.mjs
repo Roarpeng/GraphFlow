@@ -124,7 +124,6 @@ const runtimeRoots = [
   "gpt-tokenizer",
   "web-tree-sitter",
   "pino",
-  "@xenova/transformers",
 ];
 
 const visited = new Set();

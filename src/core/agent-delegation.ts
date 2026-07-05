@@ -9,7 +9,7 @@ import type { TaskNode } from "./types";
 
 export interface AgentWorkItem {
   id: string;
-  kind: "six-hats" | "five-whys" | "plan-refinement";
+  kind: "six-hats" | "five-whys" | "plan-refinement" | "query-translate";
   hat?: string;
   prompt: string;
   expectedFormat: "json";

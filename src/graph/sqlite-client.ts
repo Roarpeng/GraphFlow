@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { createRequire } from "node:module";
 import type { GraphEdge, GraphNode } from "../core/types";
 import type { GraphClient } from "./client-factory";
+import { tokenizeForIndex, containsCJK } from "./graph-utils";
 
 const requireFn = createRequire(__filename);
 
@@ -149,10 +150,7 @@ export class GraphifySqliteClient implements GraphClient {
   }
 
   async queryByKeyword(query: string): Promise<GraphNode[]> {
-    const tokens = query
-      .toLowerCase()
-      .split(/[^a-z0-9_]+/g)
-      .filter((t) => t.length >= 2);
+    const tokens = tokenizeForIndex(query);
 
     if (tokens.length === 0) {
       const rows = this.db
@@ -161,7 +159,9 @@ export class GraphifySqliteClient implements GraphClient {
       return rows.map(rowToNode);
     }
 
-    const match = tokens.map(escapeFtsToken).join(" ");
+    const match = containsCJK(query)
+      ? tokens.map(escapeFtsToken).join(" OR ")
+      : tokens.map(escapeFtsToken).join(" ");
     const rows = this.db
       .prepare(
         `SELECT n.id AS id, n.type AS type, n.content AS content, n.metadata AS metadata

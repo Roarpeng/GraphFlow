@@ -25,6 +25,18 @@ export interface ContextPreviewResult {
     estimatedSavingsPercent: number;
     budgetUsedPercent: number;
   };
+  /** Agent-translated English query used for symbol search (if provided). */
+  englishQuery?: string;
+  /** When CJK query yields few anchors, prompts the connected agent to translate to English. */
+  agentMode?: "delegated-llm";
+  agentWorkItems?: Array<{
+    id: string;
+    kind: string;
+    prompt: string;
+    expectedFormat: string;
+    responseSchema?: Record<string, unknown>;
+  }>;
+  agentInstructions?: string;
 }
 
 export interface GraphFlowSettings {

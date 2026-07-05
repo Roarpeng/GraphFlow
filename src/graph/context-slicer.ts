@@ -7,6 +7,7 @@ import {
 } from "../learning/embeddings.js";
 import type { GraphClient } from "./client-factory.js";
 import { rankNodesForContextQuery } from "./graph-utils.js";
+import { collectExpandedKeywordHits } from "./query-expand.js";
 import {
   extractConnectedSubgraph,
   computePageRank,
@@ -127,7 +128,12 @@ export async function buildLayeredContextPackage(
   maxTokens: number,
   options?: LayeredPackageOptions
 ): Promise<LayeredContextPackage> {
-  const keywordHits = rankNodesForContextQuery(await client.queryByKeyword(query), query);
+  const keywordHits = await collectExpandedKeywordHits(
+    client,
+    query,
+    options?.workspaceRoot,
+    options?.englishQuery
+  );
   let hits: GraphNode[] = keywordHits;
 
   if (options?.enableVectorRecall === true && options.embeddingProvider) {
@@ -363,8 +369,13 @@ export async function buildEnhancedContextPackage(
     }
   }
 
-  // Step 2: Keyword retrieval.
-  const keywordHits = rankNodesForContextQuery(await client.queryByKeyword(query), query);
+  // Step 2: Keyword retrieval (CJK-aware multi-query RRF when workspaceRoot is set).
+  const keywordHits = await collectExpandedKeywordHits(
+    client,
+    query,
+    options?.workspaceRoot,
+    options?.englishQuery
+  );
   let hits: GraphNode[] = keywordHits;
 
   if (options?.enableVectorRecall === true && options.embeddingProvider) {
