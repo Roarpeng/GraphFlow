@@ -85,6 +85,19 @@ function escapeFtsToken(token: string): string {
   return `"${token.replace(/"/g, '""')}"`;
 }
 
+/** OR for CJK; AND with optional prefix for ASCII multi-token phrase queries. */
+function buildFtsMatch(tokens: string[], query: string): string {
+  if (tokens.length === 0) return "";
+  if (containsCJK(query)) {
+    return tokens.map(escapeFtsToken).join(" OR ");
+  }
+  const parts = tokens.map((token) => {
+    const escaped = escapeFtsToken(token);
+    return token.length >= 3 ? `${escaped}*` : escaped;
+  });
+  return parts.join(tokens.length === 1 ? "" : " AND ");
+}
+
 export class GraphifySqliteClient implements GraphClient {
   private readonly db: import("better-sqlite3").Database;
 
@@ -159,9 +172,7 @@ export class GraphifySqliteClient implements GraphClient {
       return rows.map(rowToNode);
     }
 
-    const match = containsCJK(query)
-      ? tokens.map(escapeFtsToken).join(" OR ")
-      : tokens.map(escapeFtsToken).join(" ");
+    const match = buildFtsMatch(tokens, query);
     const rows = this.db
       .prepare(
         `SELECT n.id AS id, n.type AS type, n.content AS content, n.metadata AS metadata

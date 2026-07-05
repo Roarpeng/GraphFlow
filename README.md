@@ -97,7 +97,7 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 
 ### 发布信息
 
-- 最新版本：**v1.4.2**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.4.2`
+- 最新版本：**v1.4.3**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.4.3`
 - **GitHub Release**：push 到 `main` 后 CI 在 `windows-2022` 上自动构建 VSIX 并发布到 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
 - **npm 发布**：push tag `v*`（如 `v1.4.1`）触发 [Publish npm](https://github.com/Roarpeng/GraphFlow/actions/workflows/publish-npm.yml) 工作流
 - 变更日志：`CHANGELOG.md`
@@ -373,9 +373,9 @@ cp graphflow.config.example.json graphflow.config.json
 CLI 安装（若已安装 `code` / `cursor` 命令）：
 
 ```bash
-code --install-extension graphflow-vscode-1.4.2.vsix
+code --install-extension graphflow-vscode-1.4.3.vsix
 # 或
-cursor --install-extension graphflow-vscode-1.4.2.vsix
+cursor --install-extension graphflow-vscode-1.4.3.vsix
 ```
 
 ### 命令面板
