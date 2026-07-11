@@ -48,11 +48,12 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 
 > 实话实说：论纯图谱的成熟度与社区规模，CodeGraph 更领先；论 LSP 符号编辑标准，Serena 更专精；论整库打包，Repomix 更简单。GraphFlow 的价值在于把"图谱 + 压缩 + 规划 + 学习记忆"合到一处，让 agent 不仅省 token，还能跨会话复用项目经验。
 
-## 当前能力总览（v1.4.0+）
+## 当前能力总览（v1.5.0+）
 
 | 能力域 | 说明 |
 | --- | --- |
-| **任务规划与移交** | 按任务复杂度分流 simple / complex / insight；DAG 规划；`graphflow_plan_insight` 六顶思考帽 + 5-Why 深度分析；默认 **bridge 模式**输出结构化任务描述符交给外部 coding agent 执行 |
+| **任务规划与移交** | 按任务复杂度分流 simple / complex / insight；DAG 规划；**ATP v1.0 Agent Thinking Protocol**：Intent → Requirement → Six Hats → 5-Why → First Principles → Decision Matrix → Planning → Reflection（`planInsight(task, opts, true)` 开启完整 8 阶段分析）；Agent 委托模式生成 18 个 work items；默认 **bridge 模式**输出结构化任务描述符交给外部 coding agent 执行 |
+
 | **模型路由** | Smart / Economy 双 tier；多 provider 健康探测与 fallback（OpenAI、Anthropic、百炼、豆包） |
 | **知识图谱** | 工作区 AST 索引（TS/JS/Python/Rust/Go/C/C++/Java/Ruby/Kotlin/Swift）；File / Module / Symbol 节点 + 依赖/引用/定义/调用/继承边；图谱 artifact 导入/导出 |
 | **上下文压缩** | L1/L2/L3 分层锚点；近无损打包；图结构压缩（边权重+PageRank，零成本默认开启）；向量召回 + RRF + HNSW ANN；RepoMap 概览；自适应预算 |
@@ -63,11 +64,33 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 | **VS Code 扩展** | Settings、建图、路由测试、Context Preview、**知识图谱可视化**、Skill Insights、Chat Agent、一键安装 MCP |
 | **存储后端** | `file`（JSON）/ `memory` / `sqlite`（FTS5）/ `mcp-http`（Graphify） |
 | **多项目隔离** | 全局配置共享 LLM/路由；**图谱路径按当前工作区解析**，不再串读其它项目的 `graphflow-out` |
-| **工程质量** | TypeScript strict；**56 测试文件 / 249+ tests**；`npm run ci` 含扩展 esbuild 打包与 bundled runtime smoke |
+| **工程质量** | TypeScript strict；**59 测试文件 / 280+ tests**；`npm run ci` 含扩展 esbuild 打包与 bundled runtime smoke |
 
 ### 一句话总结
 
 > 从 task 描述出发，自动规划 → 路由模型 → 压缩图谱上下文（含向量召回）→ **输出结构化执行描述符交给外部 coding agent**，并把经验沉淀回知识图谱；定位为 **上下文与规划服务（context service）**，而非独立执行器。
+
+### v1.5.0 核心（2026-07）
+
+**ATP v1.0 Agent Thinking Protocol**：以文档驱动的全链路思考协议增强深度分析流程。
+
+**新增 5 个分析阶段**（在 Six Hats + 5-Why 基础上补齐）：
+
+1. **Intent Analysis** — 区分显式/隐式意图、核心问题、非目标、成功标准
+2. **Requirement Analysis** — 结构化功能/非功能需求、优先级、范围（included/excluded）
+3. **First Principles** — 拆解到不可再分事实、挑战假设
+4. **Decision Matrix** — 多方案按 5 维度打分（complexity/cost/risk/maintainability/impact）比较后推荐
+5. **Plan Reflection** — 规划阶段自评置信度、不确定性、缺失信息、改进方向
+
+**ATP 类型 IR**：`atp-schema.ts` 导出 `AgentThinkingProtocol` 完整接口，作为 Multi-Agent 共享中间表示。
+
+**TaskNode 丰富**：新增 `priority`、`complexity`、`verification`、`inputs`、`outputs`、`risks` 6 个可选字段。
+
+**Agent 委托扩展**：work items 从 13 个扩展到 18 个（+intent +requirement +first-principles +decision-matrix +reflection），submit/merge 闭环不变。
+
+**向后兼容**：`planInsight(task, options)` 不传第三参数时行为不变；`runFullAtp=true` 启用完整 ATP 8 阶段。
+
+**P0 残留清理**：移除 VS Code 扩展中对已删除 runtime 方法的调用（`enrichGraph`/`downloadModel`/`showSetupGuide` 命令 + `/enrich` 聊天命令）；清理 87 处 OpenBMB/enrichment 残留代码；移除 `canaryAllowed`/`canaryReason` 和 5 个 enrichment 类型字段。
 
 ### v1.4.0 核心（2026-07）
 
@@ -97,7 +120,7 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 
 ### 发布信息
 
-- 最新版本：**v1.4.4**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.4.4`
+- 最新版本：**v1.5.0**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.5.0`
 - **GitHub Release**：push 到 `main` 后 CI 在 `windows-2022` 上自动构建 VSIX 并发布到 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
 - **npm 发布**：push tag `v*`（如 `v1.4.1`）触发 [Publish npm](https://github.com/Roarpeng/GraphFlow/actions/workflows/publish-npm.yml) 工作流
 - 变更日志：`CHANGELOG.md`
@@ -118,7 +141,7 @@ npm install
 npm run ci
 ```
 
-预期：`lint` 无错误、`build` 成功、**249+ tests** 通过、扩展 bundle 与 runtime smoke 通过。
+预期：`lint` 无错误、`build` 成功、**280+ tests** 通过、扩展 bundle 与 runtime smoke 通过。
 
 ## Agent 工具接入
 
@@ -423,9 +446,9 @@ cp graphflow.config.example.json graphflow.config.json
 CLI 安装（若已安装 `code` / `cursor` 命令）：
 
 ```bash
-code --install-extension graphflow-vscode-1.4.4.vsix
+code --install-extension graphflow-vscode-1.5.0.vsix
 # 或
-cursor --install-extension graphflow-vscode-1.4.4.vsix
+cursor --install-extension graphflow-vscode-1.5.0.vsix
 ```
 
 ### 命令面板
@@ -520,7 +543,7 @@ GraphFlow/
 │   └── surfaces/
 │       ├── cli/        # CLI + runtime 子模块
 │       └── mcp/        # MCP server (18 tools)
-├── tests/              # 56 文件 / 249+ tests
+├── tests/              # 59 文件 / 280+ tests
 ├── vscode-extension/   # VS Code 面板与命令
 ├── docs/
 └── CHANGELOG.md
