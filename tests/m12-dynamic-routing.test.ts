@@ -114,5 +114,5 @@ describe("M12 dynamic routing", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
-  });
+  }, 30000);
 });

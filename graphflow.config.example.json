@@ -59,7 +59,6 @@
       "enabled": false,
       "backend": "inherit",
       "enableGraphCompression": true,
-      "enableHnsw": true,
       "enableRepoMapFallback": false,
       "enableAdaptiveBudget": true,
       "autoDownloadEmbedded": true,
@@ -92,7 +91,7 @@
   },
   "embeddingPolicy": {
     "enabled": true,
-    "provider": "local",
+    "provider": "transformers",
     "model": "Xenova/bge-base-zh-v1.5",
     "vectorStorePath": "graphflow-out/vectors.db",
     "topK": 8,

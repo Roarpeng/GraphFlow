@@ -45,10 +45,6 @@ export interface LayeredPackageOptions {
   vectorTopK?: number;
   /** Minimum cosine similarity for vector recall. Default 0.05. */
   vectorMinSimilarity?: number;
-  /** Enable HNSW ANN index for vector recall (falls back to linear scan if unavailable). */
-  enableHnsw?: boolean;
-  /** Optional path to persist the HNSW index for faster startup on large repos. */
-  hnswIndexPath?: string;
   /** Workspace root for CJK query expansion (path token hints). */
   workspaceRoot?: string;
   /** Agent-translated English search terms (see Skill CJK workflow). */

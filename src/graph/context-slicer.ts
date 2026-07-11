@@ -384,20 +384,11 @@ export async function buildEnhancedContextPackage(
       const topK = options.vectorTopK ?? 8;
       const minSim = options.vectorMinSimilarity ?? 0.05;
 
-      let vectorHits: GraphNode[];
-      if (options.enableHnsw !== false) {
-        const { HnswVectorIndex } = await import("../learning/hnsw-index.js");
-        const index = new HnswVectorIndex({
-          space: "cosine",
-          ...(options.hnswIndexPath ? { indexPath: options.hnswIndexPath } : {}),
-        });
-        index.load(keywordHits);
-        const results = await index.search(queryEmbedding, topK, minSim);
-        vectorHits = results.map((r) => r.node);
-        logger.info({ backend: index.backend, candidates: keywordHits.length }, "Vector recall via HNSW");
-      } else {
-        vectorHits = vectorRecall(keywordHits, queryEmbedding, topK, minSim);
-      }
+      const { HnswVectorIndex } = await import("../learning/hnsw-index.js");
+      const index = new HnswVectorIndex();
+      index.load(keywordHits);
+      const results = await index.search(queryEmbedding, topK, minSim);
+      const vectorHits = results.map((r) => r.node);
       hits = reciprocalRankFusion([keywordHits, vectorHits]);
     } catch (error) {
       logger.warn({ error }, "Vector recall failed in buildEnhancedContextPackage");

@@ -62,7 +62,6 @@ export interface GraphFlowSettings {
   autoIndexOnRun: boolean;
   autoIndexOnSave: boolean;
   autoRunOnIndex: boolean;
-  enableHnsw: boolean;
   transport: GraphFlowConfig["graphPolicy"]["transport"];
   graphStorePath: string;
 }

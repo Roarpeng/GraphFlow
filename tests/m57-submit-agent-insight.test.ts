@@ -89,8 +89,9 @@ describe("M57 submit agent insight", () => {
     try {
       const response = await executeToolCall(
         {
-          name: "graphflow_submit_insight",
+          name: "graphflow_insight",
           arguments: {
+            mode: "submit",
             task: "refactor planner module",
             workItemId: "hat-2-red",
             response: JSON.stringify({

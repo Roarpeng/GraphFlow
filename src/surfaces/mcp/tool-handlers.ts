@@ -64,64 +64,94 @@ export async function executeToolCall(
         )
       );
     }
-    case "graphflow_submit_insight":
-      return textResponse(
-        await submitAgentInsightResult(
-          readRequiredString(args.task, "task"),
-          readRequiredString(args.workItemId, "workItemId"),
-          readRequiredString(args.response, "response"),
-          readOptionalString(args.configPath),
-          readOptionalString(args.episodeId),
-          readOptionalString(args.rootDir)
-        )
-      );
-    case "graphflow_merge_insight":
-      return textResponse(
-        await mergeAgentInsightResult(
-          readRequiredString(args.task, "task"),
-          readOptionalString(args.configPath),
-          readOptionalString(args.rootDir)
-        )
-      );
-    case "graphflow_plan":
-      return textResponse(planAndBrainstormResult(readRequiredString(args.task, "task")));
-    case "graphflow_plan_insight":
-      return textResponse(
-        await planInsightResult(readRequiredString(args.task, "task"), readOptionalString(args.configPath))
-      );
-    case "graphflow_preview_context":
-      return textResponse(
-        await previewContext(
-          readRequiredString(args.query, "query"),
-          readOptionalString(args.configPath),
-          readOptionalString(args.rootDir),
-          readOptionalString(args.englishQuery)
-        )
-      );
-    case "graphflow_expand_anchor":
-      return textResponse(
-        await expandAnchor(
-          readRequiredString(args.anchorId, "anchorId"),
-          readOptionalString(args.configPath),
-          readOptionalString(args.rootDir)
-        )
-      );
-    case "graphflow_index":
+    case "graphflow_context": {
+      const query = readOptionalString(args.query);
+      const anchorId = readOptionalString(args.anchorId);
+      if (anchorId && !query) {
+        return textResponse(
+          await expandAnchor(
+            anchorId,
+            readOptionalString(args.configPath),
+            readOptionalString(args.rootDir)
+          )
+        );
+      }
+      if (query && !anchorId) {
+        return textResponse(
+          await previewContext(
+            query,
+            readOptionalString(args.configPath),
+            readOptionalString(args.rootDir),
+            readOptionalString(args.englishQuery)
+          )
+        );
+      }
+      if (query && anchorId) {
+        // Both provided: default to preview behavior for backward compatibility
+        return textResponse(
+          await previewContext(
+            query,
+            readOptionalString(args.configPath),
+            readOptionalString(args.rootDir),
+            readOptionalString(args.englishQuery)
+          )
+        );
+      }
+      throw new Error("Either 'query' or 'anchorId' must be provided for graphflow_context.");
+    }
+    case "graphflow_plan": {
+      const mode = readOptionalString(args.mode) || "simple";
+      const task = readRequiredString(args.task, "task");
+      if (mode === "insight") {
+        return textResponse(
+          await planInsightResult(task, readOptionalString(args.configPath))
+        );
+      }
+      return textResponse(planAndBrainstormResult(task));
+    }
+    case "graphflow_index": {
+      const filePath = readOptionalString(args.filePath);
+      const mode = readOptionalString(args.mode) || "incremental";
+      if (filePath) {
+        return textResponse(
+          await indexFile(filePath, readOptionalString(args.configPath))
+        );
+      }
+      if (mode === "full") {
+        return textResponse(
+          await rebuildGraph(readOptionalString(args.rootDir), readOptionalString(args.configPath))
+        );
+      }
       return textResponse(
         await indexGraph(readOptionalString(args.rootDir), readOptionalString(args.configPath))
       );
-    case "graphflow_index_file":
-      return textResponse(
-        await indexFile(readRequiredString(args.filePath, "filePath"), readOptionalString(args.configPath))
-      );
-    case "graphflow_rebuild":
-      return textResponse(
-        await rebuildGraph(readOptionalString(args.rootDir), readOptionalString(args.configPath))
-      );
-    case "graphflow_inspect_graph":
-      return textResponse(
-        await inspectGraph(readOptionalString(args.configPath), buildInspectOptions(args))
-      );
+    }
+    case "graphflow_insight": {
+      const mode = readRequiredString(args.mode, "mode");
+      const task = readRequiredString(args.task, "task");
+      if (mode === "submit") {
+        return textResponse(
+          await submitAgentInsightResult(
+            task,
+            readRequiredString(args.workItemId, "workItemId"),
+            readRequiredString(args.response, "response"),
+            readOptionalString(args.configPath),
+            readOptionalString(args.episodeId),
+            readOptionalString(args.rootDir)
+          )
+        );
+      }
+      if (mode === "merge") {
+        return textResponse(
+          await mergeAgentInsightResult(
+            task,
+            readOptionalString(args.configPath),
+            readOptionalString(args.rootDir)
+          )
+        );
+      }
+      throw new Error(`Invalid mode '${mode}' for graphflow_insight. Use 'submit' or 'merge'.`);
+    }
     case "graphflow_skill_insights":
       return textResponse(
         await getSkillInsights(
@@ -130,30 +160,40 @@ export async function executeToolCall(
           readOptionalString(args.rootDir)
         )
       );
-    case "graphflow_diagnose":
-      return textResponse(diagnoseRoutingResult(readOptionalString(args.configPath)));
-    case "graphflow_export_artifact": {
-      const compressionRaw = readOptionalString(args.compression);
-      const compression = compressionRaw === "none" || compressionRaw === "gzip"
-        ? compressionRaw
-        : undefined;
-      return textResponse(
-        await exportArtifact(
-          readOptionalString(args.configPath),
-          readOptionalString(args.outputPath),
-          undefined,
-          compression ? { compression } : undefined
-        )
-      );
+    case "graphflow_diagnose": {
+      const configPath = readOptionalString(args.configPath);
+      const health = diagnoseRoutingResult(configPath);
+      const graph = await inspectGraph(configPath, buildInspectOptions(args));
+      const stats = getTokenSavingsStats(configPath, readOptionalString(args.rootDir));
+      return textResponse({
+        health,
+        graph,
+        stats,
+      });
     }
-    case "graphflow_import_artifact":
-      return textResponse(
-        await importArtifact(readOptionalString(args.configPath), readOptionalString(args.inputPath))
-      );
-    case "graphflow_stats":
-      return textResponse(
-        getTokenSavingsStats(readOptionalString(args.configPath), readOptionalString(args.rootDir))
-      );
+    case "graphflow_artifact": {
+      const mode = readRequiredString(args.mode, "mode");
+      if (mode === "export") {
+        const compressionRaw = readOptionalString(args.compression);
+        const compression = compressionRaw === "none" || compressionRaw === "gzip"
+          ? compressionRaw
+          : undefined;
+        return textResponse(
+          await exportArtifact(
+            readOptionalString(args.configPath),
+            readOptionalString(args.outputPath),
+            undefined,
+            compression ? { compression } : undefined
+          )
+        );
+      }
+      if (mode === "import") {
+        return textResponse(
+          await importArtifact(readOptionalString(args.configPath), readOptionalString(args.inputPath))
+        );
+      }
+      throw new Error(`Invalid mode '${mode}' for graphflow_artifact. Use 'export' or 'import'.`);
+    }
     case "graphflow_skill_guide": {
       const section = readOptionalString(args.section) || "all";
       const skillGuide = getSkillGuide(section);
@@ -236,7 +276,7 @@ function getBuiltInSkillGuide(): string {
   return `## GraphFlow Quick Skill Guide
 
 ### Core Workflow: Context First
-ALWAYS call \`graphflow_preview_context(query)\` BEFORE:
+ALWAYS call \`graphflow_context(query)\` BEFORE:
 - Multi-step edits, refactors, or architecture changes
 - Large codebase-wide questions or exploration
 - Debugging across multiple files
@@ -245,25 +285,24 @@ ALWAYS call \`graphflow_preview_context(query)\` BEFORE:
 ### Key Tools
 | Tool | Purpose |
 |------|---------|
-| \`graphflow_preview_context\` | Compress task context with token budget (90% of tasks start here) |
-| \`graphflow_expand_anchor\` | Expand a single anchor to full content |
+| \`graphflow_context\` | Preview compressed context or expand an anchor |
 | \`graphflow_plan\` | Multi-step task decomposition & DAG |
-| \`graphflow_index\` | Incremental workspace re-index |
-| \`graphflow_inspect_graph\` | Check graph health |
+| \`graphflow_index\` | Incremental workspace re-index or full rebuild |
+| \`graphflow_diagnose\` | Check provider health, graph stats, and token savings |
 
 ### Best Practices
-1. Start EVERY task with \`graphflow_preview_context\`
+1. Start EVERY task with \`graphflow_context\`
 2. Only read full files when compressed context is insufficient
 3. Use \`graphflow_plan\` for tasks beyond 2-3 files
 4. Call \`graphflow_index\` after significant changes
 5. Always report token savings to the user
 
 ### Tool Selection Decision Tree
-- Code question/exploration? → \`graphflow_preview_context\`
-- Need more detail? → \`graphflow_expand_anchor\`
-- Multi-step coding task? → \`graphflow_preview_context\` → \`graphflow_plan\` → implement
-- File changes made? → \`graphflow_index_file\` (single) or \`graphflow_index\` (multiple)
-- Graph giving bad results? → \`graphflow_inspect_graph\` → \`graphflow_index\` → \`graphflow_rebuild\`
+- Code question/exploration? -> \`graphflow_context\`
+- Need more detail? -> \`graphflow_context\` with anchorId
+- Multi-step coding task? -> \`graphflow_context\` -> \`graphflow_plan\` -> implement
+- File changes made? -> \`graphflow_index\` (single file via filePath, or incremental)
+- Graph giving bad results? -> \`graphflow_diagnose\` -> \`graphflow_index\` with mode='full'
 
 Call \`graphflow_skill_guide(section: "all")\` for the complete guide.`;
 }
@@ -332,5 +371,3 @@ export function readProgressToken(params: Record<string, unknown>): string | num
   const token = meta.progressToken;
   return typeof token === "string" || typeof token === "number" ? token : undefined;
 }
-
-

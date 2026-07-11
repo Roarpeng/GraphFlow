@@ -79,7 +79,6 @@ export async function previewContext(
   const packageOptions: import("../../../graph/context-slicer").LayeredPackageOptions = {
     ...(config.graphPolicy.layerQuota ? { layerQuota: config.graphPolicy.layerQuota } : {}),
     ...buildEmbeddingOptions(config),
-    enableHnsw: config.graphPolicy.enableHnsw ?? true,
     workspaceRoot: config.graphPolicy.workspaceRoot ?? process.cwd(),
     ...(englishQuery?.trim() ? { englishQuery: englishQuery.trim() } : {}),
     // Persist HNSW index to disk for faster startup on large repos.

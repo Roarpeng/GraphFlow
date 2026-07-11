@@ -23,7 +23,6 @@ export interface GraphFlowConfig {
     autoIndexOnSave?: boolean;
     workspaceRoot?: string;
     includeExtensions?: string[];
-    enableHnsw?: boolean;
     transport: "memory" | "mcp-http" | "file" | "sqlite";
     mcpEndpoint?: string;
     mcpApiKey?: string;
@@ -78,7 +77,7 @@ export interface GraphFlowConfig {
   };
   embeddingPolicy?: {
     enabled?: boolean;
-    provider?: "openai" | "hash";
+    provider?: "openai" | "transformers";
     model?: string;
     baseUrl?: string;
     apiKey?: string;

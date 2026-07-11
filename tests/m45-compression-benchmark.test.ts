@@ -3,8 +3,30 @@ import { validateConfig } from "../src/config/loader";
 import { createGraphClient } from "../src/graph/client-factory";
 import { indexWorkspaceFiles } from "../src/graph/file-indexer";
 import { buildLayeredContextPackage, buildEnhancedContextPackage } from "../src/graph/context-slicer";
-import { createHashEmbeddingProvider } from "../src/learning/embeddings";
+import type { EmbeddingProvider } from "../src/learning/embeddings";
 import { join } from "node:path";
+
+function simpleEmbedding(text: string, dim = 384): number[] {
+  const vec = new Array(dim).fill(0);
+  for (let i = 0; i < text.length; i++) {
+    vec[i % dim] = (vec[i % dim] ?? 0) + text.charCodeAt(i);
+  }
+  let norm = 0;
+  for (let i = 0; i < dim; i++) norm += (vec[i] ?? 0) * (vec[i] ?? 0);
+  if (norm === 0) return vec;
+  const inv = 1 / Math.sqrt(norm);
+  for (let i = 0; i < dim; i++) vec[i] = (vec[i] ?? 0) * inv;
+  return vec;
+}
+
+function createMockEmbeddingProvider(): EmbeddingProvider {
+  return {
+    async embed(text: string): Promise<number[]> {
+      return simpleEmbedding(text);
+    },
+    async warmup(): Promise<void> {},
+  };
+}
 
 /**
  * Real-world compression benchmark on GraphFlow's own codebase.
@@ -15,7 +37,7 @@ import { join } from "node:path";
  * Scenarios:
  *   1. Baseline: keyword + layer quotas only
  *   2. Graph compression: + edge weights + PageRank + connected subgraph
- *   3. Full enhanced: + vector recall + HNSW
+ *   3. Full enhanced: + vector recall
  *
  * Expected improvements:
  *   - Graph compression: fewer nodes via centrality, ~7% token reduction, faster
@@ -120,14 +142,15 @@ describe("M45 Real-World Compression Benchmark (GraphFlow codebase)", () => {
     console.log(`Average: ${avgTokens.toFixed(0)} tokens, ${avgTime.toFixed(0)}ms\n`);
   }, 120000);
 
-  it("benchmarks full enhanced compression (graph + vector + HNSW)", async () => {
+  it("benchmarks full enhanced compression (graph + vector)", async () => {
     const config = BENCH_CONFIG;
     const client = createGraphClient(config);
 
     console.log("[benchmark] Indexing GraphFlow codebase with embeddings...");
-    const embeddingProvider = createHashEmbeddingProvider();
+    const embeddingProvider = createMockEmbeddingProvider();
     const indexed = await indexWorkspaceFiles(client, SRC_DIR, {
       includeExtensions: [".ts"],
+      embeddingProvider,
     });
     console.log(`[benchmark] Indexed: ${indexed.indexedFiles} files, ${indexed.indexedSymbols} symbols\n`);
 
@@ -140,7 +163,6 @@ describe("M45 Real-World Compression Benchmark (GraphFlow codebase)", () => {
         enableGraphCompression: true,
         embeddingProvider,
         enableVectorRecall: true,
-        enableHnsw: true,
       });
       const elapsed = Date.now() - start;
       results.push({
@@ -151,7 +173,7 @@ describe("M45 Real-World Compression Benchmark (GraphFlow codebase)", () => {
       });
     }
 
-    console.log("=== Full Enhanced (graph + vector + HNSW) ===");
+    console.log("=== Full Enhanced (graph + vector) ===");
     console.table(results);
     const avgTokens = results.reduce((sum, r) => sum + r.tokens, 0) / results.length;
     const avgTime = results.reduce((sum, r) => sum + r.time, 0) / results.length;

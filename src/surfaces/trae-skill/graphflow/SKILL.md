@@ -1,6 +1,6 @@
 ---
 name: "graphflow"
-description: "Graph-based code context compression, task planning, and knowledge graph orchestration (18 MCP tools). Invoke before ANY code question, bug fix, debugging, file reading, Chinese/CJK query, refactor, or multi-step edit — ALWAYS call graphflow_preview_context MCP first when GraphFlow is connected."
+description: "Graph-based code context compression, task planning, and knowledge graph orchestration (10 MCP tools). Invoke before ANY code question, bug fix, debugging, file reading, Chinese/CJK query, refactor, or multi-step edit — ALWAYS call graphflow_context MCP first when GraphFlow is connected."
 ---
 
 # GraphFlow Skill
@@ -20,11 +20,9 @@ GraphFlow is a graph-based context and planning service backed by a persistent M
                    ▼
 ┌─────────────────────────────────────────────────┐
 │  GraphFlow MCP Server (persistent backend)      │
-│  18 tools: preview, expand, plan, plan_insight,  │
-│  run, report_outcome, submit_insight, merge_insight,│
-│  index, index_file, rebuild, inspect, skill_insights,│
-│  skill_guide, diagnose, export_artifact, import_artifact,│
-│  stats                                              │
+│  10 tools: context, plan, index, insight, run,  │
+│  report_outcome, skill_insights, diagnose,      │
+│  artifact, skill_guide                          │
 └──────────────────┬──────────────────────────────┘
                    │
                    ▼
@@ -51,7 +49,7 @@ GraphFlow is a graph-based context and planning service backed by a persistent M
 - Scan the whole repository recursively before trying GraphFlow
 - Read large files before checking GraphFlow anchors
 - Skip GraphFlow for complex tasks
-- Use grep for codebase exploration before `graphflow_preview_context`
+- Use grep for codebase exploration before `graphflow_context`
 
 ### Trae / Trae CN setup (Rules + Skill + MCP)
 
@@ -59,11 +57,11 @@ Trae loads **Rules every turn** and **Skills on demand**. GraphFlow `install` wr
 
 | Path | Role |
 |------|------|
-| `.trae/rules/graphflow.md` | `alwaysApply: true` — **must** call `graphflow_preview_context` first |
+| `.trae/rules/graphflow.md` | `alwaysApply: true` — **must** call `graphflow_context` first |
 | `.trae/skills/graphflow/SKILL.md` | Full workflows; trigger with `#graphflow` |
 | `User/mcp.json` | GraphFlow MCP server |
 
-If Rules are missing, type `#graphflow` at the start of a chat. Pass `rootDir` = current project absolute path on every preview call.
+If Rules are missing, type `#graphflow` at the start of a chat. Pass `rootDir` = current project absolute path on every context call.
 
 ### Antigravity IDE setup (Rules + Skill + MCP)
 
@@ -95,45 +93,37 @@ Run `npx @roarpeng/graphflow install` from the project root. Do **not** hardcode
 
 ---
 
-## Tool Inventory (18 MCP Tools)
+## Tool Inventory (10 MCP Tools)
 
 ### Core Context Tools (Highest Frequency)
 
 | Tool | Purpose | Call Frequency |
 |------|---------|---------------|
-| `graphflow_preview_context` | Compress task context with token budget | **Highest** - default first step |
-| `graphflow_expand_anchor` | Expand a single anchor to full content | **High** - dive deeper into specific items |
+| `graphflow_context` | Preview compressed context (query) or expand anchor (anchorId) | **Highest** - default first step |
 
 ### Planning Tools (High Frequency)
 
 | Tool | Purpose | Call Frequency |
 |------|---------|---------------|
-| `graphflow_plan` | Multi-step task decomposition & DAG | High - before complex work |
-| `graphflow_plan_insight` | Six Thinking Hats + 5-Why deep analysis | Medium - ambiguous/high-stakes tasks |
+| `graphflow_plan` | Multi-step task decomposition & DAG (mode='simple' or 'insight') | High - before complex work |
 | `graphflow_run` | Plan + context package (bridge mode) | Medium - full task packaging |
 | `graphflow_report_outcome` | Report bridge-mode execution outcome back | Medium - close the learning loop |
-| `graphflow_submit_insight` | Submit agent answers to Six Hats / plan prompts | Medium - no external LLM API |
-| `graphflow_merge_insight` | Merge submitted insights into unified plan | Medium - after submit_insight |
+| `graphflow_insight` | Submit or merge agent insights | Medium - no external LLM API |
 
 ### Graph Management Tools (Medium Frequency)
 
 | Tool | Purpose | Call Frequency |
 |------|---------|---------------|
-| `graphflow_index` | Incremental workspace re-index | Medium - after file changes |
-| `graphflow_index_file` | Single file incremental index | Medium-High - after saving a file |
-| `graphflow_rebuild` | Clear cache + full re-index | Low - when graph is stale/corrupted |
-| `graphflow_inspect_graph` | Graph stats & sample nodes/edges | Low - check graph health |
+| `graphflow_index` | Incremental workspace re-index, single-file, or full rebuild | Medium - after file changes |
 
 ### Collaboration & Insights Tools (Low Frequency)
 
 | Tool | Purpose | Call Frequency |
 |------|---------|---------------|
-| `graphflow_export_artifact` | Export graph to portable artifact | Low - team sharing |
-| `graphflow_import_artifact` | Import graph artifact | Low - skip full index on new machine |
+| `graphflow_artifact` | Export or import graph artifact | Low - team sharing |
 | `graphflow_skill_insights` | Learned skill patterns | Low - leverage prior learning |
 | `graphflow_skill_guide` | Skill usage guide for connected agents | Low - onboarding |
-| `graphflow_stats` | Cumulative token savings stats | Low - ROI tracking |
-| `graphflow_diagnose` | Provider health & model routing | Rare - config issues |
+| `graphflow_diagnose` | Provider health, graph stats, and token savings | Low - ROI tracking / config issues |
 
 ---
 
@@ -144,32 +134,32 @@ Run `npx @roarpeng/graphflow install` from the project root. Do **not** hardcode
 **Use when:** Answering code questions, exploring codebase, understanding modules
 
 ```
-Step 1: graphflow_preview_context(query: "<your question>")
+Step 1: graphflow_context(query: "<your question>")
 Step 2: Read summary + anchors as primary context
-Step 3: Expand specific anchors with graphflow_expand_anchor when needed
+Step 3: Expand specific anchors with graphflow_context(anchorId: "...") when needed
 Step 4: Read full files only when exact edits required
 ```
 
-**Input - preview_context:**
+**Input - context (preview):**
 ```typescript
 {
-  query: string;           // Required - user question (Chinese OK)
+  query: string;           // Required for preview - user question (Chinese OK)
   englishQuery?: string;   // Agent-translated English code search terms (recommended for CJK)
   configPath?: string;
   rootDir?: string;
 }
 ```
 
-**Input - expand_anchor:**
+**Input - context (expand):**
 ```typescript
 {
-  anchorId: string;        // Required - anchor id from preview_context
+  anchorId: string;        // Required for expand - anchor id from preview
   configPath?: string;
   rootDir?: string;
 }
 ```
 
-**Output structure (preview_context):**
+**Output structure (preview):**
 ```typescript
 {
   summary: string[];
@@ -197,7 +187,7 @@ GraphFlow tokenizes CJK and expands workspace path hints. When that is not enoug
 **Preferred (proactive):**
 ```
 Step 1: Translate user intent to English file/symbol terms with YOUR model
-Step 2: graphflow_preview_context({ query: "<Chinese>", englishQuery: "PoseDetectionPage avatarMode BattlePage shieldEffect", rootDir })
+Step 2: graphflow_context({ query: "<Chinese>", englishQuery: "PoseDetectionPage avatarMode BattlePage shieldEffect", rootDir })
 Step 3: Use summary + anchors
 ```
 
@@ -212,7 +202,7 @@ Use **exact file/class/component names** (PascalCase stems). Avoid generic words
 **Use when:** Multi-step changes, refactors, features with unclear scope
 
 ```
-Step 1: graphflow_preview_context(query: "<task>")
+Step 1: graphflow_context(query: "<task>")
 Step 2: graphflow_plan(task: "<task description>")
 Step 3: Review plan steps and dependencies
 Step 4: Execute step by step, using GraphFlow context for each step
@@ -223,6 +213,8 @@ Step 5: graphflow_index() after major changes
 ```typescript
 {
   task: string;   // Required - task description to plan
+  mode?: "simple" | "insight"; // 'simple' (default) for quick planning, 'insight' for Six Hats + 5-Why
+  configPath?: string;
 }
 ```
 
@@ -250,8 +242,8 @@ Step 5: graphflow_index() after major changes
 **Use when:** High-stakes changes, root-cause analysis, ambiguous requirements
 
 ```
-Step 1: graphflow_preview_context(query: "<task>")
-Step 2: graphflow_plan_insight(task: "<task description>")
+Step 1: graphflow_context(query: "<task>")
+Step 2: graphflow_plan(task: "<task description>", mode: "insight")
 Step 3: Review Six Hats analysis and 5-Why chains
 Step 4: Use insights to inform implementation plan
 Step 5: Execute with regular context previews
@@ -304,7 +296,7 @@ graphflow_index(rootDir?: string, configPath?: string)
 
 #### Single File Index (fastest)
 ```
-graphflow_index_file(filePath: string, configPath?: string)
+graphflow_index(filePath: string, configPath?: string)
 ```
 - Index just one file
 - Perfect for onSave hooks
@@ -312,7 +304,7 @@ graphflow_index_file(filePath: string, configPath?: string)
 
 #### Full Rebuild (slow but clean)
 ```
-graphflow_rebuild(rootDir?: string, configPath?: string)
+graphflow_index(mode: "full", rootDir?: string, configPath?: string)
 ```
 - Clears ALL cached data
 - Full re-index from scratch
@@ -320,11 +312,12 @@ graphflow_rebuild(rootDir?: string, configPath?: string)
 
 #### Inspect Graph State
 ```
-graphflow_inspect_graph(nodeLimit?, edgeLimit?, rootDir?)
+graphflow_diagnose(nodeLimit?, edgeLimit?, rootDir?)
 ```
 - Check graph size, file count, symbol count
 - Verify indexing worked correctly
 - Sample nodes to verify quality
+- Also shows provider health and token savings
 
 ---
 
@@ -334,7 +327,7 @@ graphflow_inspect_graph(nodeLimit?, edgeLimit?, rootDir?)
 
 #### Export Artifact
 ```
-graphflow_export_artifact(outputPath?, compression?)
+graphflow_artifact(mode: "export", outputPath?, compression?)
 ```
 - Export graph to portable gzip artifact
 - Share with team to skip full indexing
@@ -342,7 +335,7 @@ graphflow_export_artifact(outputPath?, compression?)
 
 #### Import Artifact
 ```
-graphflow_import_artifact(inputPath?)
+graphflow_artifact(mode: "import", inputPath?)
 ```
 - Import teammate's graph artifact
 - Skip initial full workspace index
@@ -362,9 +355,9 @@ graphflow_skill_insights(limit?, rootDir?)
 
 #### Token Savings Stats
 ```
-graphflow_stats(configPath?, rootDir?)
+graphflow_diagnose(configPath?, rootDir?)
 ```
-- Cumulative token savings across all runs
+- Check the `stats` field for cumulative token savings across all runs
 - ROI tracking
 - See how much GraphFlow has saved
 
@@ -375,6 +368,7 @@ graphflow_diagnose(configPath?)
 - Check provider health
 - Verify model routing
 - Debug configuration issues
+- Also returns graph stats and token savings
 
 ---
 
@@ -384,37 +378,37 @@ graphflow_diagnose(configPath?)
 Start
   │
   ├─ Is this a codebase question/exploration?
-  │   └─ YES → graphflow_preview_context ← START HERE
+  │   └─ YES → graphflow_context ← START HERE
   │        │
   │        └─ Need more detail on specific item?
-  │             └─ YES → graphflow_expand_anchor
+  │             └─ YES → graphflow_context(anchorId)
   │
   ├─ Is this a multi-step coding task?
-  │   ├─ Simple (2-3 files) → preview_context + implement
-  │   ├─ Complex → preview_context → graphflow_plan → implement
-  │   └─ Ambiguous/high-stakes → preview_context → graphflow_plan_insight → implement
+  │   ├─ Simple (2-3 files) → context + implement
+  │   ├─ Complex → context → graphflow_plan → implement
+  │   └─ Ambiguous/high-stakes → context → graphflow_plan(mode="insight") → implement
   │
   ├─ Do you need a complete packaged task?
   │   └─ YES → graphflow_run (bridge mode) → execute → report_outcome
   │
   ├─ Did you just make file changes?
-  │   ├─ Single file → graphflow_index_file
+  │   ├─ Single file → graphflow_index(filePath)
   │   └─ Multiple files → graphflow_index (incremental)
   │
   ├─ Is the graph giving bad results?
-  │   ├─ First → graphflow_inspect_graph (check state)
+  │   ├─ First → graphflow_diagnose (check state)
   │   ├─ Then → graphflow_index (try incremental)
-  │   └─ Last resort → graphflow_rebuild (full rebuild)
+  │   └─ Last resort → graphflow_index(mode="full") (full rebuild)
   │
   ├─ Sharing with teammates?
-  │   ├─ Export → graphflow_export_artifact
-  │   └─ Import → graphflow_import_artifact
+  │   ├─ Export → graphflow_artifact(mode="export")
+  │   └─ Import → graphflow_artifact(mode="import")
   │
   ├─ Do you want to leverage prior learning?
   │   └─ YES → graphflow_skill_insights
   │
   ├─ Tracking ROI?
-  │   └─ graphflow_stats
+  │   └─ graphflow_diagnose (check stats field)
   │
   └─ Is routing/models misbehaving?
       └─ YES → graphflow_diagnose
@@ -455,21 +449,21 @@ Always pay attention to `tokenBudget`:
 ## Best Practices
 
 ### 1. Context First, Always
-- Start EVERY coding task with `graphflow_preview_context`
+- Start EVERY coding task with `graphflow_context`
 - Only read full files when compressed context is insufficient
 - Never grep the whole repo before trying GraphFlow
 
 ### 2. Plan Before Complex Work
 - Use `graphflow_plan` for anything beyond 2-3 files
-- Use `graphflow_plan_insight` for ambiguous tasks
+- Use `graphflow_plan(mode="insight")` for ambiguous tasks
 - Follow the DAG order (respect dependencies)
 - Use context from GraphFlow at each step
 
 ### 3. Keep Graph Fresh
-- Call `graphflow_index_file` after saving individual files
+- Call `graphflow_index(filePath)` after saving individual files
 - Call `graphflow_index` after significant changes
 - Prefer incremental index over full rebuild
-- Check `graphflow_inspect_graph` if results seem off
+- Check `graphflow_diagnose` if results seem off
 
 ### 4. Close the Learning Loop
 - After bridge-mode runs, call `graphflow_report_outcome`
@@ -492,18 +486,18 @@ Always pay attention to `tokenBudget`:
 
 ### "0 anchors found" or empty results
 1. **Chinese/CJK:** translate to English keywords; pass `englishQuery` or answer `agentWorkItems` id `query-translate-en`
-2. Check if graph exists: `graphflow_inspect_graph`
+2. Check if graph exists: `graphflow_diagnose`
 3. If empty: run `graphflow_index`
 4. If still empty: verify `rootDir` points to correct project
 
 ### Results seem stale
 1. Run `graphflow_index` (incremental, fast)
-2. If still stale: `graphflow_rebuild` (full, slow)
+2. If still stale: `graphflow_index(mode="full")` (full, slow)
 
 ### Context quality is poor
 1. Try more specific query terms
-2. Check if symbols are indexed (inspect graph)
-3. Run `graphflow_rebuild` if the graph may be stale
+2. Check if symbols are indexed (diagnose)
+3. Run `graphflow_index(mode="full")` if the graph may be stale
 
 ### Tool errors / configuration issues
 1. Run `graphflow_diagnose` to check provider health
@@ -511,9 +505,9 @@ Always pay attention to `tokenBudget`:
 3. Check workspace root is correct
 
 ### Want to share graph with teammates
-1. Export: `graphflow_export_artifact`
+1. Export: `graphflow_artifact(mode="export")`
 2. Send the artifact file
-3. Teammate imports: `graphflow_import_artifact`
+3. Teammate imports: `graphflow_artifact(mode="import")`
 
 ---
 
@@ -521,16 +515,16 @@ Always pay attention to `tokenBudget`:
 
 ```typescript
 // 90% of the time - start here
-await graphflow_preview_context({ query: "what you're looking for" });
+await graphflow_context({ query: "what you're looking for" });
 
 // Need more detail on a specific anchor?
-await graphflow_expand_anchor({ anchorId: "symbol:src/foo.ts:abc123" });
+await graphflow_context({ anchorId: "symbol:src/foo.ts:abc123" });
 
 // Before complex tasks
 await graphflow_plan({ task: "describe the task" });
 
 // Deep analysis with Six Thinking Hats + 5-Why
-await graphflow_plan_insight({ task: "complex ambiguous task" });
+await graphflow_plan({ task: "complex ambiguous task", mode: "insight" });
 
 // Full packaged task (bridge mode)
 const result = await graphflow_run({ task: "full task description" });
@@ -542,26 +536,23 @@ await graphflow_report_outcome({
 });
 
 // After making changes - single file
-await graphflow_index_file({ filePath: "src/foo.ts" });
+await graphflow_index({ filePath: "src/foo.ts" });
 
 // After making changes - workspace
 await graphflow_index({ rootDir: "/path/to/project" });
 
-// Check graph health
-await graphflow_inspect_graph({ nodeLimit: 20 });
+// Check graph health + stats + savings
+await graphflow_diagnose({ nodeLimit: 20 });
 
 // When graph is broken
-await graphflow_rebuild({ rootDir: "/path/to/project" });
+await graphflow_index({ mode: "full", rootDir: "/path/to/project" });
 
 // Team collaboration
-await graphflow_export_artifact({ outputPath: "graph-artifact.gz" });
-await graphflow_import_artifact({ inputPath: "graph-artifact.gz" });
+await graphflow_artifact({ mode: "export", outputPath: "graph-artifact.gz" });
+await graphflow_artifact({ mode: "import", inputPath: "graph-artifact.gz" });
 
 // Leverage prior learning
 await graphflow_skill_insights({ limit: 5 });
-
-// Token savings stats
-await graphflow_stats();
 
 // Diagnose issues
 await graphflow_diagnose();

@@ -39,13 +39,13 @@ function createIsolatedConfig(): { configPath: string; cleanup: () => void } {
 }
 
 describe("M55 MCP integration flows", () => {
-  it("preview_context → expand_anchor chain", async () => {
+  it("context preview -> expand chain", async () => {
     const { configPath, cleanup } = createIsolatedConfig();
     try {
       const server = createMcpServer();
       const preview = await executeToolCall(
         {
-          name: "graphflow_preview_context",
+          name: "graphflow_context",
           arguments: { query: "orchestrator bridge mode", configPath },
         },
         server
@@ -59,7 +59,7 @@ describe("M55 MCP integration flows", () => {
       const anchorId = pkg.anchors![0]!.id;
       const expanded = await executeToolCall(
         {
-          name: "graphflow_expand_anchor",
+          name: "graphflow_context",
           arguments: { anchorId, configPath },
         },
         server
@@ -72,15 +72,16 @@ describe("M55 MCP integration flows", () => {
     }
   }, 60000);
 
-  it("plan_insight returns agent-delegated mode without API credentials", async () => {
+  it("plan with mode=insight returns agent-delegated mode without API credentials", async () => {
     const configPath = join(tmpdir(), `gf-m55-${Date.now()}.json`);
     writeFileSync(configPath, JSON.stringify({ ...getDefaultConfig(), providers: {} }), "utf8");
     try {
       const response = await executeToolCall(
         {
-          name: "graphflow_plan_insight",
+          name: "graphflow_plan",
           arguments: {
             task: "refactor architecture module across graph layer",
+            mode: "insight",
             configPath,
           },
         },
@@ -100,13 +101,13 @@ describe("M55 MCP integration flows", () => {
     }
   });
 
-  it("inspect_graph returns node and edge counts", async () => {
+  it("diagnose returns graph node and edge counts", async () => {
     const { configPath, cleanup } = createIsolatedConfig();
     try {
       // 先触发 preview 以确保图谱已索引到 file 后端
       await executeToolCall(
         {
-          name: "graphflow_preview_context",
+          name: "graphflow_context",
           arguments: { query: "orchestrator", configPath },
         },
         createMcpServer()
@@ -114,15 +115,17 @@ describe("M55 MCP integration flows", () => {
 
       const response = await executeToolCall(
         {
-          name: "graphflow_inspect_graph",
+          name: "graphflow_diagnose",
           arguments: { nodeLimit: 5, edgeLimit: 5, configPath },
         },
         createMcpServer()
       );
 
-      const graph = parseToolText(response) as { nodeCount: number; edgeCount: number };
-      expect(graph.nodeCount).toBeGreaterThan(0);
-      expect(graph.edgeCount).toBeGreaterThan(0);
+      const result = parseToolText(response) as {
+        graph: { nodeCount: number; edgeCount: number };
+      };
+      expect(result.graph.nodeCount).toBeGreaterThan(0);
+      expect(result.graph.edgeCount).toBeGreaterThan(0);
     } finally {
       cleanup();
     }

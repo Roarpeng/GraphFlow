@@ -161,7 +161,8 @@ export async function analyzeIntent(
     `  "implicitIntent": "the underlying need the user may not have stated",`,
     `  "coreProblem": "the core problem to solve",`,
     `  "nonGoals": ["things explicitly or implicitly out of scope"],`,
-    `  "successDefinition": "how to know the task is successfully completed"`,
+    `  "successDefinition": "how to know the task is successfully completed",`,
+    `  "complexity": "simple" | "moderate" | "complex"`,
     `}`,
   ].join("\n");
 
@@ -192,6 +193,7 @@ export function analyzeIntentHeuristic(task: string): IntentAnalysis {
     coreProblem: task,
     nonGoals: [],
     successDefinition: "Task is completed when all planned steps pass verification",
+    complexity: task.length < 60 ? "simple" : "moderate",
   };
 }
 
@@ -371,13 +373,30 @@ function parseIntentResponse(raw: string): IntentAnalysis | null {
 
   if (!explicitIntent && !coreProblem) return null;
 
-  return {
+  const complexityRaw =
+    typeof parsed.complexity === "string" ? parsed.complexity.trim() : "";
+  const complexity:
+    | "simple"
+    | "moderate"
+    | "complex"
+    | undefined =
+    complexityRaw === "simple" || complexityRaw === "moderate" || complexityRaw === "complex"
+      ? complexityRaw
+      : undefined;
+
+  const result: IntentAnalysis = {
     explicitIntent,
     implicitIntent: implicitIntent || explicitIntent,
     coreProblem: coreProblem || explicitIntent,
     nonGoals: extractStringArray(parsed, "nonGoals"),
     successDefinition: successDefinition || "Task completed when all steps pass verification",
   };
+
+  if (complexity !== undefined) {
+    result.complexity = complexity;
+  }
+
+  return result;
 }
 
 function parseRequirementResponse(raw: string): RequirementAnalysis | null {
@@ -468,12 +487,35 @@ function extractStringArray(obj: Record<string, unknown>, key: string): string[]
 /** === Main Entry Point === */
 
 /**
+ * Determine whether the full ATP pipeline should be short-circuited
+ * based on intent analysis and task characteristics.
+ */
+export function shouldShortCircuitAtp(
+  intent: IntentAnalysis,
+  requirements: RequirementAnalysis,
+  task: string
+): boolean {
+  if (requirements.priority === "Low" && intent.nonGoals.length === 0 && requirements.constraints.length === 0) {
+    return true;
+  }
+  if (task.length < 60) {
+    return true;
+  }
+  if (intent.complexity === "simple") {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Run the full Six Thinking Hats + Five Whys analysis on a task,
  * then generate a DAG-style plan that incorporates the insights.
  *
  * When `runFullAtp` is true, the complete ATP v1.0 pipeline is executed:
  * Intent -> Requirement -> SixHats -> 5Why -> FirstPrinciples
  * -> DecisionMatrix -> Planning -> Reflection.
+ *
+ * Adaptive short-circuit: simple tasks skip FirstPrinciples, DecisionMatrix, and Reflection.
  *
  * @param task The task to analyze
  * @param options Model selection and context options
@@ -498,6 +540,36 @@ export async function planInsight(
   // ATP v1.0 full pipeline
   const intent = await analyzeIntent(task, options);
   const requirements = await extractRequirements(task, intent, options);
+
+  if (shouldShortCircuitAtp(intent, requirements, task)) {
+    logger.info({ task }, "ATP short-circuited: simple task detected");
+    const atp: AgentThinkingProtocol = {
+      task,
+      intent,
+      requirements,
+      sixHatsInsight: insight,
+      firstPrinciples: {
+        assumptions: [],
+        facts: [],
+        deconstructedTo: [],
+        challenges: [],
+      },
+      decisionMatrix: {
+        options: [],
+        recommendedOption: "",
+        rationale: "Short-circuited: simple task detected",
+      },
+      plan: plan ?? [],
+      reflection: {
+        confidence: 0.8,
+        uncertainties: [],
+        missingInformation: [],
+        improvementDirections: [],
+      },
+    };
+    return { insight, plan, atp };
+  }
+
   const firstPrinciples = await applyFirstPrinciples(task, insight, options);
   const decisionMatrix = await evaluateOptions(task, insight, firstPrinciples, options);
   const reflection = await reflectOnPlan(insight, plan, options);

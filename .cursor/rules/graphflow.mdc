@@ -11,7 +11,7 @@ GraphFlow is a graph-based context and planning service backed by a persistent M
 
 Before broad code exploration, implementation, debugging, review, planning, or architecture questions:
 
-1. Call `graphflow_preview_context` with the user's task/query.
+1. Call `graphflow_context` with the user's task/query.
 2. Use the returned `summary`, `anchors`, `refillPreview`, and `tokenBudget` as the first context source.
 3. Read full files only when:
    - GraphFlow anchors point to that file/symbol,
@@ -31,57 +31,49 @@ Do not scan the whole repository, recursively inspect many files, or read large 
 
 Code symbols are mostly English. For Chinese user questions:
 
-1. **Proactive:** Before or with `graphflow_preview_context`, translate intent to English **file/class/component names** (e.g. `PoseDetectionPage`, `BattlePage`, `shieldEffect`) and pass `englishQuery`. Avoid generic terms like `exercise` when the user means UI/camera — they often match data/types layers.
+1. **Proactive:** Before or with `graphflow_context`, translate intent to English **file/class/component names** (e.g. `PoseDetectionPage`, `BattlePage`, `shieldEffect`) and pass `englishQuery`. Avoid generic terms like `exercise` when the user means UI/camera — they often match data/types layers.
 2. **Reactive:** If preview returns `agentWorkItems` with `query-translate-en` (low `anchorCount`), answer the JSON prompt with your model, then retry preview with `englishQuery`.
 3. Keep `query` as the original Chinese text; use `englishQuery` for search terms only.
 
 ```typescript
-graphflow_preview_context({
+graphflow_context({
   query: "游戏战斗系统怎么实现的",
   englishQuery: "battle combat fight damage scene system",
   rootDir: "/absolute/path/to/project"
 })
 ```
 
-## Tool Inventory (18 MCP Tools)
+## Tool Inventory (10 MCP Tools)
 
 ### Core Context Tools (Highest Frequency)
 
 | Tool | Purpose | Call Frequency |
 |------|---------|---------------|
-| `graphflow_preview_context` | Compress task context with token budget | **Highest** - default first step |
-| `graphflow_expand_anchor` | Expand a single anchor to full content | **High** - dive deeper into specific items |
+| `graphflow_context` | Preview compressed context (query) or expand anchor (anchorId) | **Highest** - default first step |
 
 ### Planning Tools (High Frequency)
 
 | Tool | Purpose | Call Frequency |
 |------|---------|---------------|
-| `graphflow_plan` | Multi-step task decomposition & DAG | High - before complex work |
-| `graphflow_plan_insight` | Six Thinking Hats + 5-Why deep analysis | Medium - ambiguous/high-stakes tasks |
+| `graphflow_plan` | Multi-step task decomposition & DAG (mode='simple' or 'insight') | High - before complex work |
 | `graphflow_run` | Plan + context package (bridge mode) | Medium - full task packaging |
 | `graphflow_report_outcome` | Report bridge-mode execution outcome back | Medium - close the learning loop |
-| `graphflow_submit_insight` | Submit agent answers to Six Hats / plan prompts | Medium - no external LLM API |
-| `graphflow_merge_insight` | Merge submitted insights into unified plan | Medium - after submit_insight |
+| `graphflow_insight` | Submit or merge agent insights | Medium - no external LLM API |
 
 ### Graph Management Tools (Medium Frequency)
 
 | Tool | Purpose | Call Frequency |
 |------|---------|---------------|
-| `graphflow_index` | Incremental workspace re-index | Medium - after file changes |
-| `graphflow_index_file` | Single file incremental index | Medium-High - after saving a file |
-| `graphflow_rebuild` | Clear cache + full re-index | Low - when graph is stale/corrupted |
-| `graphflow_inspect_graph` | Graph stats & sample nodes/edges | Low - check graph health |
+| `graphflow_index` | Incremental workspace re-index, single-file, or full rebuild | Medium - after file changes |
 
 ### Collaboration & Insights Tools (Low Frequency)
 
 | Tool | Purpose | Call Frequency |
 |------|---------|---------------|
-| `graphflow_export_artifact` | Export graph to portable artifact | Low - team sharing |
-| `graphflow_import_artifact` | Import graph artifact | Low - skip full index on new machine |
+| `graphflow_artifact` | Export or import graph artifact | Low - team sharing |
 | `graphflow_skill_insights` | Learned skill patterns | Low - leverage prior learning |
 | `graphflow_skill_guide` | Skill usage guide for connected agents | Low - onboarding |
-| `graphflow_stats` | Cumulative token savings stats | Low - ROI tracking |
-| `graphflow_diagnose` | Provider health & model routing | Rare - config issues |
+| `graphflow_diagnose` | Provider health, graph stats, and token savings | Rare - config issues |
 
 ## Standard Workflows
 
@@ -90,9 +82,9 @@ graphflow_preview_context({
 **Use when:** Answering code questions, exploring codebase, understanding modules
 
 ```
-Step 1: graphflow_preview_context(query: "<your question>")
+Step 1: graphflow_context(query: "<your question>")
 Step 2: Read summary + anchors as primary context
-Step 3: Expand specific anchors with graphflow_expand_anchor when needed
+Step 3: Expand specific anchors with graphflow_context(anchorId: "...") when needed
 Step 4: Read full files only when exact edits required
 ```
 
@@ -101,7 +93,7 @@ Step 4: Read full files only when exact edits required
 **Use when:** Multi-step changes, refactors, features with unclear scope
 
 ```
-Step 1: graphflow_preview_context(query: "<task>")
+Step 1: graphflow_context(query: "<task>")
 Step 2: graphflow_plan(task: "<task description>")
 Step 3: Review plan steps and dependencies
 Step 4: Execute step by step, using GraphFlow context for each step
@@ -113,8 +105,8 @@ Step 5: graphflow_index() after major changes
 **Use when:** High-stakes changes, root-cause analysis, ambiguous requirements
 
 ```
-Step 1: graphflow_preview_context(query: "<task>")
-Step 2: graphflow_plan_insight(task: "<task>")
+Step 1: graphflow_context(query: "<task>")
+Step 2: graphflow_plan(task: "<task>", mode: "insight")
 Step 3: Review analysis and apply findings
 ```
 
@@ -124,7 +116,7 @@ After `graphflow_run`, the external agent **must** call `graphflow_report_outcom
 
 - Pass `episodeId` from the run result, a `success` boolean, and optional `lessons`.
 - Do this after executing the work described in the returned `executionDescriptor`, whether the task succeeded or failed.
-- When the run returns `agentWorkItems`, answer each prompt with your model and call `graphflow_submit_insight` once per item (before or with `graphflow_report_outcome`).
+- When the run returns `agentWorkItems`, answer each prompt with your model and call `graphflow_insight(mode: "submit")` once per item (before or with `graphflow_report_outcome`).
 
 CLI fallback:
 

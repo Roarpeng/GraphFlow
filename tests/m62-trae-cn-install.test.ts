@@ -32,7 +32,7 @@ describe("M62 Trae CN project install", () => {
 
     const rule = readFileSync(join(dir, ".trae", "rules", "graphflow.md"), "utf8");
     expect(rule).toContain("alwaysApply: true");
-    expect(rule).toContain("graphflow_preview_context");
+    expect(rule).toContain("graphflow_context");
 
     const status = getTraeInstallStatus(dir);
     expect(status.every((s) => s.installed)).toBe(true);

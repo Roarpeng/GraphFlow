@@ -4,7 +4,7 @@ GraphFlow is a graph-based context and planning service backed by a persistent M
 
 Before broad code exploration, implementation, debugging, review, planning, or architecture questions:
 
-1. Call `graphflow_preview_context` with the user's task/query.
+1. Call `graphflow_context` with the user's task/query.
 2. Use the returned `summary`, `anchors`, `refillPreview`, and `tokenBudget` as the first context source.
 3. Read full files only when:
    - GraphFlow anchors point to that file/symbol,
@@ -45,7 +45,7 @@ Do **not** hardcode `GRAPHFLOW_WORKSPACE_ROOT` — let the MCP server detect the
 
 Code symbols are mostly English. For Chinese user questions:
 
-1. **Proactive:** Before or with `graphflow_preview_context`, translate intent to English **file/class/component names** (e.g. `PoseDetectionPage`, `BattlePage`, `shieldEffect`) and pass `englishQuery`. Avoid generic terms like `exercise` when the user means UI/camera — they often match data/types layers.
+1. **Proactive:** Before or with `graphflow_context`, translate intent to English **file/class/component names** (e.g. `PoseDetectionPage`, `BattlePage`, `shieldEffect`) and pass `englishQuery`. Avoid generic terms like `exercise` when the user means UI/camera — they often match data/types layers.
 2. **Reactive:** If preview returns `agentWorkItems` with `query-translate-en` (low `anchorCount`), answer the JSON prompt with your model, then retry preview with `englishQuery`.
 3. Keep `query` as the original Chinese text; use `englishQuery` for search terms only.
 
@@ -53,8 +53,7 @@ Code symbols are mostly English. For Chinese user questions:
 
 | Tool | When |
 |------|------|
-| `graphflow_preview_context` | **Always first** for code questions |
-| `graphflow_expand_anchor` | Need full content of one anchor |
+| `graphflow_context` | **Always first** for code questions (use `query`); expand anchor with `anchorId` |
 | `graphflow_plan` | Multi-step tasks |
 | `graphflow_run` | Full task packaging (bridge mode) |
 | `graphflow_report_outcome` | After executing a `graphflow_run` descriptor |

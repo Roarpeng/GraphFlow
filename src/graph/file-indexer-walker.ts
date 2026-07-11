@@ -9,6 +9,8 @@ import { join, relative } from "node:path";
 import { ALL_LANGUAGE_EXTENSIONS } from "./language-indexers/index.js";
 import { safeReaddirSync, safeStatSync } from "../utils/safe-fs.js";
 
+import type { EmbeddingProvider } from "../learning/embeddings.js";
+
 export interface FileIndexerOptions {
   includeExtensions?: string[];
   maxFileSizeBytes?: number;
@@ -16,6 +18,8 @@ export interface FileIndexerOptions {
   forceReindex?: boolean;
   /** 并行索引文件时的并发数，默认 10。仅 indexWorkspaceFiles 使用。 */
   concurrency?: number;
+  /** Optional embedding provider for attaching vector embeddings to nodes. */
+  embeddingProvider?: EmbeddingProvider;
 }
 
 export interface ScannedFile {

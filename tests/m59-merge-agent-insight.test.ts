@@ -163,15 +163,16 @@ describe("M59 merge agent insight", () => {
     expect(merged.submittedCount).toBe(2);
   });
 
-  it("MCP graphflow_merge_insight works", async () => {
+  it("MCP graphflow_insight merge works", async () => {
     const storePath = join(tmpdir(), `graphflow-m59-store-${Date.now()}.json`);
     const configPath = writeFileConfig(storePath);
 
     try {
       await executeToolCall(
         {
-          name: "graphflow_submit_insight",
+          name: "graphflow_insight",
           arguments: {
+            mode: "submit",
             task: "merge via mcp",
             workItemId: "hat-1-white",
             response: hatResponse("context available", "index is fresh"),
@@ -183,8 +184,9 @@ describe("M59 merge agent insight", () => {
 
       const response = await executeToolCall(
         {
-          name: "graphflow_merge_insight",
+          name: "graphflow_insight",
           arguments: {
+            mode: "merge",
             task: "merge via mcp",
             configPath,
           },

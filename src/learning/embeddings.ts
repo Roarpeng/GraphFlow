@@ -1,6 +1,6 @@
 import type { GraphNode } from "../core/types";
 
-export const EMBEDDING_DIM = 256;
+export const EMBEDDING_DIM = 384;
 
 export interface EmbeddingProvider {
   embed(text: string): Promise<number[]>;
@@ -45,39 +45,28 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-function fnv1a(str: string): number {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < str.length; i += 1) {
-    hash ^= str.charCodeAt(i);
-    hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0;
-  }
-  return hash >>> 0;
-}
+export function createTransformersEmbeddingProvider(): EmbeddingProvider {
+  let extractor: ((texts: string | string[], options: { pooling: "mean"; normalize: boolean }) => Promise<unknown>) | null = null;
 
-export function hashEmbedding(text: string, dim: number = EMBEDDING_DIM): number[] {
-  const vec = new Array<number>(dim).fill(0);
-  if (!text) return vec;
-  const tokens = text.toLowerCase().split(/[^a-z0-9_]+/g).filter((t) => t.length > 0);
-  for (const tok of tokens) {
-    const idx = fnv1a(tok) % dim;
-    vec[idx] = (vec[idx] ?? 0) + 1;
+  async function getExtractor() {
+    if (extractor) return extractor;
+    const { pipeline } = await import("@xenova/transformers");
+    extractor = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+    return extractor;
   }
-  let norm = 0;
-  for (let i = 0; i < dim; i += 1) norm += (vec[i] ?? 0) * (vec[i] ?? 0);
-  if (norm === 0) return vec;
-  const inv = 1 / Math.sqrt(norm);
-  for (let i = 0; i < dim; i += 1) vec[i] = (vec[i] ?? 0) * inv;
-  return vec;
-}
 
-export function createHashEmbeddingProvider(dim: number = EMBEDDING_DIM): EmbeddingProvider {
   return {
     async embed(text: string): Promise<number[]> {
-      return hashEmbedding(text, dim);
+      const ext = await getExtractor();
+      const output = await ext!(text, { pooling: "mean", normalize: true });
+      const data = (output as { data: Float32Array | number[] }).data;
+      if (data instanceof Float32Array) {
+        return Array.from(data);
+      }
+      return Array.from(data as number[]);
     },
-    // hash 嵌入无懒加载，预热仅做一次廉价推理以保持接口一致
     async warmup(): Promise<void> {
-      await hashEmbedding("warmup", dim);
+      await this.embed("warmup");
     },
   };
 }

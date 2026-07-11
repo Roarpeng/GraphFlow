@@ -180,6 +180,10 @@ export function discoverWorkspaceRoot(fromDir: string = process.cwd()): string |
 
   let current = resolvedFrom;
   for (let depth = 0; depth < MAX_WALK_DEPTH; depth += 1) {
+    if (isUnsafeWorkspaceFallback(current)) {
+      // Stop walking upward at unsafe boundaries (e.g. Windows AppData, home dir).
+      break;
+    }
     if (hasProjectWorkspaceMarkers(current) && !isGraphFlowRuntimeDirectory(current)) {
       return current;
     }
