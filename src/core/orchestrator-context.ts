@@ -125,6 +125,16 @@ export async function maybeBuildSkillHints(task: string, options?: OrchestrateOp
   return suggestSkillHints(options.graphClient, task, options.skillHintsLimit ?? 3);
 }
 
+const COMPLEX_KEYWORDS = [
+  "refactor",
+  "architecture",
+  "redesign",
+  "migrate",
+  "restructure",
+  "orchestration",
+  "runtime",
+];
+
 export async function maybeRunPlanInsightForComplex(
   task: string,
   options?: OrchestrateOptions
@@ -134,6 +144,18 @@ export async function maybeRunPlanInsightForComplex(
 
     if (!hasUsableLlmProvider(config)) {
       return buildAgentDelegatedPlanInsight(task);
+    }
+
+    const taskLower = task.toLowerCase();
+    const hasComplexKeyword = COMPLEX_KEYWORDS.some((kw) => taskLower.includes(kw));
+    if (task.length < 50 && !hasComplexKeyword) {
+      logger.info({ task }, "Skipping full ATP for short simple task");
+      const result = await planInsight(task, { selection: resolveModelForRole("planner") }, false);
+      return {
+        mode: "llm",
+        insight: result.insight,
+        plan: result.plan,
+      };
     }
 
     const selection = resolveModelForRole("planner");

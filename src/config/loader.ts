@@ -248,7 +248,6 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     graphPolicy: {
       ...input.graphPolicy,
       enableNearLosslessMode: input.graphPolicy.enableNearLosslessMode ?? false,
-      enableHnsw: input.graphPolicy.enableHnsw ?? true,
       autoIndexOnPreview: input.graphPolicy.autoIndexOnPreview ?? true,
       autoIndexOnRun: input.graphPolicy.autoIndexOnRun ?? true,
       autoIndexOnSave: input.graphPolicy.autoIndexOnSave ?? true,
@@ -284,7 +283,7 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     },
     embeddingPolicy: {
       enabled: input.embeddingPolicy?.enabled ?? true,
-      provider: input.embeddingPolicy?.provider ?? "hash",
+      provider: input.embeddingPolicy?.provider ?? "transformers",
       model: input.embeddingPolicy?.model ?? "Xenova/bge-base-zh-v1.5",
       ...(input.embeddingPolicy?.baseUrl ? { baseUrl: input.embeddingPolicy.baseUrl } : {}),
       ...(input.embeddingPolicy?.apiKey ? { apiKey: input.embeddingPolicy.apiKey } : {}),

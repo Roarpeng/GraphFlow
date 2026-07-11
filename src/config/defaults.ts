@@ -37,7 +37,6 @@ export function getDefaultConfig(): GraphFlowConfig {
       autoIndexOnSave: true,
       workspaceRoot: process.cwd(),
       includeExtensions: [...DEFAULT_INCLUDE_EXTENSIONS],
-      enableHnsw: true,
       // 默认使用 file 后端，将知识图谱持久化到磁盘 JSON 文件，避免进程退出后图谱丢失
       transport: "file",
       graphStorePath: `${DEFAULT_OUTPUT_DIR}/graphflow-graph.json`,
@@ -66,7 +65,7 @@ export function getDefaultConfig(): GraphFlowConfig {
     },
     embeddingPolicy: {
       enabled: true,
-      provider: "hash",
+      provider: "transformers",
       model: DEFAULT_EMBEDDING_MODEL,
       vectorStorePath: `${DEFAULT_OUTPUT_DIR}/vectors.db`,
       topK: 8,

@@ -80,7 +80,7 @@ describe("M63 Antigravity / Gemini / Copilot install", () => {
     expect(existsSync(join(dir, "GEMINI.md"))).toBe(true);
 
     const copilot = readFileSync(join(dir, ".github", "copilot-instructions.md"), "utf8");
-    expect(copilot).toContain("graphflow_preview_context");
+    expect(copilot).toContain("graphflow_context");
     expect(copilot).not.toContain("GraphFlow for Claude Code");
 
     const antigravityStatus = getAntigravityInstallStatus(dir);

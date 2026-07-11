@@ -5,6 +5,7 @@ export interface IntentAnalysis {
   coreProblem: string;          // 核心问题定义
   nonGoals: string[];           // 非目标（不做什么）
   successDefinition: string;    // 成功标准定义
+  complexity?: "simple" | "moderate" | "complex"; // 任务复杂度评估
 }
 
 // 阶段2: 需求分析

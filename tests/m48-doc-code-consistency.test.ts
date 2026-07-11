@@ -54,9 +54,9 @@ describe("Doc/code consistency", () => {
     }
   });
 
-  it("AGENTS.md lists the core preview/plan/run tools (agent entrypoints)", () => {
+  it("AGENTS.md lists the core context/plan/run tools (agent entrypoints)", () => {
     const agents = read("AGENTS.md");
-    for (const required of ["graphflow_preview_context", "graphflow_plan", "graphflow_run"]) {
+    for (const required of ["graphflow_context", "graphflow_plan", "graphflow_run"]) {
       expect(agents, `AGENTS.md must document ${required}`).toContain(required);
     }
   });

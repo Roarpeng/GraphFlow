@@ -11,6 +11,7 @@ const tempRoots: string[] = [];
 let previousCwd = process.cwd();
 let previousHome = process.env.USERPROFILE ?? process.env.HOME;
 let previousWorkspaceEnv = process.env.GRAPHFLOW_WORKSPACE_ROOT;
+let previousConfigHome = process.env.GRAPHFLOW_CONFIG_HOME;
 
 function createTempRoot(prefix: string): string {
   const root = join(tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -20,6 +21,7 @@ function createTempRoot(prefix: string): string {
 }
 
 function useTempHome(home: string): void {
+  process.env.GRAPHFLOW_CONFIG_HOME = home;
   if (process.platform === "win32") {
     process.env.USERPROFILE = home;
   } else {
@@ -64,6 +66,11 @@ afterEach(() => {
     process.env.GRAPHFLOW_WORKSPACE_ROOT = previousWorkspaceEnv;
   } else {
     delete process.env.GRAPHFLOW_WORKSPACE_ROOT;
+  }
+  if (previousConfigHome) {
+    process.env.GRAPHFLOW_CONFIG_HOME = previousConfigHome;
+  } else {
+    delete process.env.GRAPHFLOW_CONFIG_HOME;
   }
   if (process.platform === "win32") {
     if (previousHome) {

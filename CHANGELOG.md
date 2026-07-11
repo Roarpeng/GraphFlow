@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-07-11
+
+### Added
+
+- **P0 向量召回修正**：引入 `@xenova/transformers` + `all-MiniLM-L6-v2`（384 维，约 22MB），实现真正的本地语义 embedding 召回
+- **P2 ATP 自适应截断**：简单任务（低优先级、无约束、短描述）自动 short-circuit，跳过 First Principles / Decision Matrix / Reflection，节省 4-6 次 LLM 调用
+- **P2 MCP 工具精简**：18 个工具合并为 10 个核心工具，降低 LLM 工具调用认知负荷
+
+### Changed
+
+- **embedding provider 默认改为 `transformers`**：替代原有的 FNV-1a hash embedding（伪语义）
+- **MCP 工具合并**：
+  - `graphflow_context` = `preview_context` + `expand_anchor`
+  - `graphflow_plan` = `plan` + `plan_insight`（mode 参数区分）
+  - `graphflow_index` = `index` + `index_file` + `rebuild`
+  - `graphflow_insight` = `submit_insight` + `merge_insight`
+  - `graphflow_diagnose` = `diagnose` + `inspect_graph` + `stats`
+  - `graphflow_artifact` = `export_artifact` + `import_artifact`
+
+### Removed
+
+- **P1 移除 `hnswlib-node`**：彻底移除 C++ 编译依赖，向量召回统一使用纯线性扫描
+- 移除 `graphPolicy.enableHnsw` 配置项及相关代码
+- 移除 `hash` embedding provider 及相关函数
+
 ## [1.4.4] - 2026-07-05
 
 ### Added

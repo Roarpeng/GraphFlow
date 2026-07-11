@@ -44,128 +44,66 @@ export function getToolDefinitions(): ToolDefinition[] {
       },
     },
     {
-      name: "graphflow_submit_insight",
-      description: "[Advanced] Submit a connected coding agent's answer to an agentWorkItems prompt back into the GraphFlow graph as a Decision node. Use after completing Six Hats or plan-refinement prompts from graphflow_run or graphflow_plan_insight when no external LLM API is configured.",
+      name: "graphflow_context",
+      description: "[Core] Preview near-lossless context packaging OR expand a context anchor to full content. Pass 'query' to preview context for a question; pass 'anchorId' (and no query) to expand a specific anchor returned by a previous preview call.",
       inputSchema: {
         type: "object",
         properties: {
-          task: { type: "string", description: "The task associated with the work item." },
-          workItemId: { type: "string", description: "The agentWorkItems id (e.g. hat-1-white, plan-refinement)." },
-          response: { type: "string", description: "JSON response string from the agent (fenced code blocks accepted)." },
-          episodeId: { type: "string", description: "Optional episodeId from graphflow_run for traceability." },
+          query: { type: "string", description: "Query to preview. Be specific about what you need to understand." },
+          anchorId: { type: "string", description: "The anchor id returned by graphflow_context preview (e.g. 'symbol:src/foo.ts:abc123'). Use this instead of query to expand an anchor." },
+          englishQuery: {
+            type: "string",
+            description: "Optional English code-search keywords when query is Chinese/CJK.",
+          },
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
           rootDir: { type: "string", description: "Optional workspace root override." },
         },
-        required: ["task", "workItemId", "response"],
-        additionalProperties: false,
-      },
-    },
-    {
-      name: "graphflow_merge_insight",
-      description: "[Advanced] Merge submitted agent-insight Decision nodes for a task into a unified Six Hats insight and DAG plan. Use after submitting hat and plan-refinement responses via graphflow_submit_insight.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          task: { type: "string", description: "The task associated with the submitted insights." },
-          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-          rootDir: { type: "string", description: "Optional workspace root override." },
-        },
-        required: ["task"],
         additionalProperties: false,
       },
     },
     {
       name: "graphflow_plan",
-      description: "[Core] Generate brainstorming ideas and a DAG-style task plan for a request. USE AFTER graphflow_preview_context for complex tasks (more than 2-3 files), refactors, or features with unclear scope. Returns steps with dependencies and estimated effort.",
+      description: "[Core] Generate a DAG-style task plan. Use mode='simple' for quick planning, mode='insight' for deep Six Hats + 5-Why analysis.",
       inputSchema: {
         type: "object",
         properties: {
           task: { type: "string", description: "Task description to plan. Include what you need to accomplish." },
+          mode: { type: "string", enum: ["simple", "insight"], description: "Planning mode: 'simple' (default) for quick planning, 'insight' for Six Thinking Hats + 5-Why deep analysis." },
+          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
         },
         required: ["task"],
         additionalProperties: false,
       },
     },
     {
-      name: "graphflow_preview_context",
-      description: "[Core] Preview GraphFlow near-lossless context packaging for a query. ALWAYS CALL THIS FIRST for code exploration, multi-step edits, refactors, debugging, or codebase-wide questions. Returns compressed context with anchors (Symbol/File/Module pointers) and token budget showing 70-95% savings. For Chinese/CJK queries, pass englishQuery (agent-translated English code keywords) or answer agentWorkItems when anchorCount is low.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "Query to preview. Be specific about what you need to understand." },
-          englishQuery: {
-            type: "string",
-            description: "Optional English code-search keywords when query is Chinese/CJK. The connected agent should translate user intent to English file/symbol terms before or after the first preview call.",
-          },
-          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-          rootDir: { type: "string", description: "Optional workspace root override." },
-        },
-        required: ["query"],
-        additionalProperties: false,
-      },
-    },
-    {
-      name: "graphflow_expand_anchor",
-      description: "[Advanced] Expand a context anchor to its full content. Anchors returned by graphflow_preview_context are lightweight pointers (id/type/layer). This tool resolves an anchor id back to its full GraphNode content and, for Symbol nodes, reads the surrounding source code lines from the original file. USE THIS AFTER graphflow_preview_context when you need deeper detail on specific symbols, files, or modules.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          anchorId: { type: "string", description: "The anchor id returned by graphflow_preview_context (e.g. \"symbol:src/foo.ts:abc123\")." },
-          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-          rootDir: { type: "string", description: "Optional workspace root override." },
-        },
-        required: ["anchorId"],
-        additionalProperties: false,
-      },
-    },
-    {
       name: "graphflow_index",
-      description: "[Core] Index a workspace path into the GraphFlow graph store. CALL AFTER significant file changes (multiple files) to keep the graph fresh. Uses incremental indexing - only indexes new/changed files.",
+      description: "[Core] Index workspace into graph store. Use filePath for single-file, mode='full' for rebuild.",
       inputSchema: {
         type: "object",
         properties: {
           rootDir: { type: "string", description: "Optional workspace path to index." },
+          filePath: { type: "string", description: "Absolute or workspace-relative path to a single file to index. When provided, only this file is indexed." },
+          mode: { type: "string", enum: ["incremental", "full"], description: "Indexing mode: 'incremental' (default) for incremental re-index, 'full' for full rebuild (clear cache and re-index everything)." },
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
         },
         additionalProperties: false,
       },
     },
     {
-      name: "graphflow_index_file",
-      description: "[Advanced] Incrementally index a single file into the graph store. Use this for file-watcher / onSave hooks to avoid full workspace re-walks. Skips unchanged files automatically.",
+      name: "graphflow_insight",
+      description: "[Advanced] Submit or merge agent insights. Mode 'submit' for individual work items, 'merge' to consolidate all submitted insights.",
       inputSchema: {
         type: "object",
         properties: {
-          filePath: { type: "string", description: "Absolute or workspace-relative path to the file to index." },
+          task: { type: "string", description: "The task associated with the insight operation." },
+          mode: { type: "string", enum: ["submit", "merge"], description: "Operation mode: 'submit' to submit an agent response, 'merge' to merge all submitted insights." },
+          workItemId: { type: "string", description: "Required for mode='submit'. The agentWorkItems id (e.g. hat-1-white, plan-refinement)." },
+          response: { type: "string", description: "Required for mode='submit'. JSON response string from the agent (fenced code blocks accepted)." },
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-        },
-        required: ["filePath"],
-        additionalProperties: false,
-      },
-    },
-    {
-      name: "graphflow_rebuild",
-      description: "[Maintenance] Clear graph store and index cache, then perform a full workspace re-index.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          rootDir: { type: "string", description: "Optional workspace path to index." },
-          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-        },
-        additionalProperties: false,
-      },
-    },
-    {
-      name: "graphflow_inspect_graph",
-      description: "[Maintenance] Inspect current graph snapshot statistics and sample nodes/edges.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-          nodeLimit: { type: "number", description: "Max sample nodes." },
-          edgeLimit: { type: "number", description: "Max sample edges." },
           rootDir: { type: "string", description: "Optional workspace root override." },
+          episodeId: { type: "string", description: "Optional episodeId from graphflow_run for traceability." },
         },
+        required: ["task", "mode"],
         additionalProperties: false,
       },
     },
@@ -184,68 +122,37 @@ export function getToolDefinitions(): ToolDefinition[] {
     },
     {
       name: "graphflow_diagnose",
-      description: "[Maintenance] Return provider health, routing priority, and resolved planner/worker/validator models.",
+      description: "[Maintenance] Return provider health, graph statistics, and token savings.",
       inputSchema: {
         type: "object",
         properties: {
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-        },
-        additionalProperties: false,
-      },
-    },
-    {
-      name: "graphflow_export_artifact",
-      description: "[Maintenance] Export the current graph store to a portable gzip-compressed artifact file (analogous to codebase-memory-mcp's graph.db.zst) for team sharing. The artifact can be committed to git and imported by teammates to skip full workspace indexing. Supports --no-compress for plain JSON output.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-          outputPath: { type: "string", description: "Optional output path for the artifact file." },
-          compression: { type: "string", description: "Compression mode: 'gzip' (default) or 'none'." },
-        },
-        additionalProperties: false,
-      },
-    },
-    {
-      name: "graphflow_import_artifact",
-      description: "[Maintenance] Import a graph artifact file into the current graph store. Teammates can use this after cloning a repo to skip the initial full workspace index.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-          inputPath: { type: "string", description: "Optional input path for the artifact file." },
-        },
-        additionalProperties: false,
-      },
-    },
-    {
-      name: "graphflow_stats",
-      description: "[Maintenance] Return cumulative token savings statistics, showing how much GraphFlow has reduced token consumption across all context preview and task runs.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+          nodeLimit: { type: "number", description: "Max sample nodes for graph inspection." },
+          edgeLimit: { type: "number", description: "Max sample edges for graph inspection." },
           rootDir: { type: "string", description: "Optional workspace root override." },
         },
         additionalProperties: false,
       },
     },
     {
-      name: "graphflow_plan_insight",
-      description: "[Advanced] Analyze a task through Six Thinking Hats (White/Red/Black/Yellow/Green/Blue) with automatic 5-Why chains on low-certainty observations, then generate a DAG-style plan informed by the insights. This runs a deeper analysis than graphflow_plan — use this for complex or ambiguous tasks where root-cause analysis is needed.",
+      name: "graphflow_artifact",
+      description: "[Maintenance] Export or import graph artifact files for team sharing.",
       inputSchema: {
         type: "object",
         properties: {
-          task: { type: "string", description: "Task description to analyze and plan." },
+          mode: { type: "string", enum: ["export", "import"], description: "Operation mode: 'export' to save graph artifact, 'import' to load graph artifact." },
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+          outputPath: { type: "string", description: "Required for mode='export'. Output path for the artifact file." },
+          inputPath: { type: "string", description: "Required for mode='import'. Input path for the artifact file." },
+          compression: { type: "string", description: "Compression mode for export: 'gzip' (default) or 'none'." },
         },
-        required: ["task"],
+        required: ["mode"],
         additionalProperties: false,
       },
     },
     {
       name: "graphflow_skill_guide",
-      description: "[Core] Return the full GraphFlow Skill guide, including tool inventory, standard workflows, and best practices. This guide helps you understand WHEN and HOW to use each GraphFlow tool. Call this when you need guidance on using GraphFlow effectively, especially when the SKILL.md file cannot be installed to your C: drive. ALWAYS call graphflow_preview_context BEFORE multi-step edits, large refactors, or codebase-wide questions.",
+      description: "[Core] Return the full GraphFlow Skill guide, including tool inventory, standard workflows, and best practices. This guide helps you understand WHEN and HOW to use each GraphFlow tool. Call this when you need guidance on using GraphFlow effectively, especially when the SKILL.md file cannot be installed to your C: drive. ALWAYS call graphflow_context BEFORE multi-step edits, large refactors, or codebase-wide questions.",
       inputSchema: {
         type: "object",
         properties: {

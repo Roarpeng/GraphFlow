@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { GraphifyClient } from "../src/graph/graphify-client";
 import {
-  createHashEmbeddingProvider,
   warmupEmbeddingProvider,
   cosineSimilarity,
+  type EmbeddingProvider,
 } from "../src/learning/embeddings";
 import {
   recordEpisode,
@@ -18,9 +18,31 @@ import {
 } from "../src/learning/triage-telemetry";
 import { triageTaskExplain } from "../src/core/triage";
 
+function simpleEmbedding(text: string, dim = 384): number[] {
+  const vec = new Array(dim).fill(0);
+  for (let i = 0; i < text.length; i++) {
+    vec[i % dim] = (vec[i % dim] ?? 0) + text.charCodeAt(i);
+  }
+  let norm = 0;
+  for (let i = 0; i < dim; i++) norm += (vec[i] ?? 0) * (vec[i] ?? 0);
+  if (norm === 0) return vec;
+  const inv = 1 / Math.sqrt(norm);
+  for (let i = 0; i < dim; i++) vec[i] = (vec[i] ?? 0) * inv;
+  return vec;
+}
+
+function createMockEmbeddingProvider(): EmbeddingProvider {
+  return {
+    async embed(text: string): Promise<number[]> {
+      return simpleEmbedding(text);
+    },
+    async warmup(): Promise<void> {},
+  };
+}
+
 describe("学习层增强：Embedding 预热", () => {
   it("warmupEmbeddingProvider 不抛异常且 provider 仍可正常 embed", async () => {
-    const provider = createHashEmbeddingProvider();
+    const provider = createMockEmbeddingProvider();
     await warmupEmbeddingProvider(provider); // 不应抛出
     const vec = await provider.embed("warmup text");
     expect(Array.isArray(vec)).toBe(true);
@@ -28,7 +50,7 @@ describe("学习层增强：Embedding 预热", () => {
   });
 
   it("重复调用 warmupEmbeddingProvider 安全（幂等）", async () => {
-    const provider = createHashEmbeddingProvider();
+    const provider = createMockEmbeddingProvider();
     await Promise.all([
       warmupEmbeddingProvider(provider),
       warmupEmbeddingProvider(provider),
@@ -41,7 +63,7 @@ describe("学习层增强：Embedding 预热", () => {
 describe("学习层增强：Episode 语义检索", () => {
   it("recordEpisode 携带 provider 时将 embedding 附加到节点 metadata", async () => {
     const client = new GraphifyClient();
-    const provider = createHashEmbeddingProvider();
+    const provider = createMockEmbeddingProvider();
     const ep = await recordEpisode(
       client,
       {
@@ -62,7 +84,7 @@ describe("学习层增强：Episode 语义检索", () => {
 
   it("findSimilarEpisodes 携带 provider 时按语义检索命中同任务 episode", async () => {
     const client = new GraphifyClient();
-    const provider = createHashEmbeddingProvider();
+    const provider = createMockEmbeddingProvider();
     await recordEpisode(
       client,
       {
@@ -102,7 +124,7 @@ describe("学习层增强：Episode 语义检索", () => {
 
   it("RRF 融合：pass episode 排名高于 fail（语义路径）", async () => {
     const client = new GraphifyClient();
-    const provider = createHashEmbeddingProvider();
+    const provider = createMockEmbeddingProvider();
     const fail = await recordEpisode(
       client,
       { task: "refactor planner module", plan: [], outcome: "fail", keyDecisions: [], lessons: [], attempts: 2 },

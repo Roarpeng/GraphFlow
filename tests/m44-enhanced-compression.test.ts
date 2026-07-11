@@ -13,7 +13,20 @@ import {
 import { buildRepoMap, formatRepoMapString } from "../src/graph/repo-map";
 import { estimateContextBudget } from "../src/graph/adaptive-budget";
 import { buildEnhancedContextPackage } from "../src/graph/context-slicer";
-import { attachEmbedding, hashEmbedding } from "../src/learning/embeddings";
+import { attachEmbedding } from "../src/learning/embeddings";
+
+function simpleEmbedding(text: string, dim = 384): number[] {
+  const vec = new Array(dim).fill(0);
+  for (let i = 0; i < text.length; i++) {
+    vec[i % dim] = (vec[i % dim] ?? 0) + text.charCodeAt(i);
+  }
+  let norm = 0;
+  for (let i = 0; i < dim; i++) norm += (vec[i] ?? 0) * (vec[i] ?? 0);
+  if (norm === 0) return vec;
+  const inv = 1 / Math.sqrt(norm);
+  for (let i = 0; i < dim; i++) vec[i] = (vec[i] ?? 0) * inv;
+  return vec;
+}
 
 describe("M44 Enhanced Context Compression", () => {
   // ── Graph Compression Tests ────────────────────────────────────
@@ -217,7 +230,7 @@ describe("M44 Enhanced Context Compression", () => {
       ];
 
       // Add embeddings for graph compression.
-      const withEmbeddings = nodes.map((n) => attachEmbedding(n, hashEmbedding(n.content)));
+      const withEmbeddings = nodes.map((n) => attachEmbedding(n, simpleEmbedding(n.content)));
       await client.upsertNodes(withEmbeddings);
       await client.upsertEdges([
         { from: "auth.ts", to: "login()", relation: "defines" },
@@ -275,7 +288,7 @@ describe("M44 Enhanced Context Compression", () => {
               type: "Symbol",
               content: `function process${i % 10}(data: Data) -> Result`,
             },
-            hashEmbedding(`process data function ${i % 10}`)
+            simpleEmbedding(`process data function ${i % 10}`)
           )
         );
       }
