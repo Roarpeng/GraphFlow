@@ -24,10 +24,7 @@
     "onCommand:graphflow.showSettings",
     "onCommand:graphflow.showGraph",
     "onCommand:graphflow.showSkills",
-    "onCommand:graphflow.enrichGraph",
     "onCommand:graphflow.installMcp",
-    "onCommand:graphflow.showSetupGuide",
-    "onCommand:graphflow.downloadModel",
     "onStartupFinished",
     "onChatParticipant:roarpeng.graphflow-vscode.graphflowAgent"
   ],
@@ -36,41 +33,6 @@
     "configuration": {
       "title": "GraphFlow",
       "properties": {
-        "graphflow.openbmb.mode": {
-          "type": "string",
-          "default": "embedded",
-          "enum": [
-            "embedded",
-            "ollama",
-            "openai-compat"
-          ],
-          "description": "OpenBMB runtime mode. embedded=local model, ollama/openai-compat=require manual baseUrl."
-        },
-        "graphflow.openbmb.model": {
-          "type": "string",
-          "default": "minicpm-1b",
-          "description": "OpenBMB model name used for enricher/evolver and OpenBMB provider routes."
-        },
-        "graphflow.openbmb.baseUrl": {
-          "type": "string",
-          "default": "",
-          "description": "Manual provider base URL for ollama/openai-compat mode, e.g. http://localhost:11434."
-        },
-        "graphflow.openbmb.autoDownloadModel": {
-          "type": "boolean",
-          "default": false,
-          "description": "Automatically download and apply MiniCPM model when saving GraphFlow settings panel."
-        },
-        "graphflow.openbmb.modelUrl": {
-          "type": "string",
-          "default": "",
-          "description": "Model download URL used by auto-download workflow."
-        },
-        "graphflow.openbmb.modelSha256": {
-          "type": "string",
-          "default": "",
-          "description": "Optional SHA256 checksum for model file verification."
-        },
         "graphflow.settings.openCommand": {
           "type": "string",
           "default": "GraphFlow: Settings",
@@ -112,20 +74,8 @@
         "title": "GraphFlow: Skill Insights"
       },
       {
-        "command": "graphflow.enrichGraph",
-        "title": "GraphFlow: Enrich Graph Semantics"
-      },
-      {
         "command": "graphflow.installMcp",
         "title": "GraphFlow: Install MCP to Agents"
-      },
-      {
-        "command": "graphflow.showSetupGuide",
-        "title": "GraphFlow: Model Setup Guide"
-      },
-      {
-        "command": "graphflow.downloadModel",
-        "title": "GraphFlow: Download MiniCPM Model"
       }
     ],
     "chatParticipants": [

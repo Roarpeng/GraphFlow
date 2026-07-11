@@ -106,9 +106,6 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
     transport: config.graphPolicy.transport,
     graphStorePath: config.graphPolicy.graphStorePath ?? `${DEFAULT_OUTPUT_DIR}/graphflow-graph.json`,
     autoRunOnIndex: true,
-    enrichmentBackend: "inherit" as const,
-    enrichmentProvider: "",
-    enrichmentModel: "",
   };
 }
 

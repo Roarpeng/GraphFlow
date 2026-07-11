@@ -65,11 +65,6 @@ export interface GraphFlowSettings {
   enableHnsw: boolean;
   transport: GraphFlowConfig["graphPolicy"]["transport"];
   graphStorePath: string;
-  enrichmentBackend: "network" | "local" | "inherit";
-  enrichmentProvider: string;
-  enrichmentModel: string;
-  enrichmentApiKey?: string;
-  enrichmentBaseUrl?: string;
 }
 
 export type GraphFlowSettingsInput = Omit<GraphFlowSettings, "configPath">;
@@ -227,8 +222,6 @@ export interface LearningNightlyResult {
   totalEvents: number;
   passRate: number;
   averageTokenCost: number;
-  canaryAllowed: boolean;
-  canaryReason: string;
   exportedPath: string;
   lessonsSynthesized?: number;
 }

@@ -212,81 +212,11 @@ export function activate(context: vscode.ExtensionContext): void {
     showSkillInsightsPanel(context, insights);
   });
 
-  const enrichGraph = vscode.commands.registerCommand("graphflow.enrichGraph", async () => {
-    const workspaceRoot = getWorkspaceRoot();
-    if (!workspaceRoot) {
-      vscode.window.showErrorMessage("No workspace folder found.");
-      return;
-    }
-
-    const result = await runGraphFlow(workspaceRoot, (runtime) => runtime.enrichSemanticsSilent());
-    vscode.window.showInformationMessage(`GraphFlow enriched ${result.enrichedCount} symbol nodes.`);
-  });
-
   const installMcp = vscode.commands.registerCommand("graphflow.installMcp", async () => {
     const root = getWorkspaceRoot();
     await runConfigBootstrap(root, output);
     await runMcpBootstrap(context, root, output, { forceNotify: true, installScope: "all" });
     await installSkillsFromExtension(context, root, output, { includeProjectLevel: true });
-  });
-
-  const showSetupGuide = vscode.commands.registerCommand("graphflow.showSetupGuide", async () => {
-    const root = getWorkspaceRoot();
-    const guide = await runGraphFlow(root, (runtime) =>
-      Promise.resolve(runtime.formatModelConfigGuide(root))
-    );
-    output.clear();
-    output.appendLine(guide);
-    output.show(true);
-  });
-
-  const downloadModel = vscode.commands.registerCommand("graphflow.downloadModel", async () => {
-    const workspaceRoot = getWorkspaceRoot();
-    if (!workspaceRoot) {
-      vscode.window.showErrorMessage("No workspace folder found.");
-      return;
-    }
-
-    const model = (await vscode.window.showInputBox({
-      title: "GraphFlow Download Model",
-      prompt: "Enter model name",
-      value: "minicpm-1b",
-      placeHolder: "minicpm-1b",
-    }))?.trim();
-
-    if (!model) {
-      return;
-    }
-
-    const result = await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: `GraphFlow downloading ${model}`,
-        cancellable: false,
-      },
-      async (progress) => {
-        let lastPercent = 0;
-        return runGraphFlow(workspaceRoot, (runtime) =>
-          runtime.downloadOpenBmbModel(undefined, {
-            model,
-            onProgress: (update) => {
-              const nextPercent = update.percent ?? lastPercent;
-              const increment = Math.max(0, Math.min(100, nextPercent - lastPercent));
-              lastPercent = nextPercent;
-              const total = update.totalBytes !== undefined ? formatBytes(update.totalBytes) : "unknown";
-              progress.report({
-                increment,
-                message: `${update.stage} ${formatBytes(update.downloadedBytes)}/${total}`,
-              });
-            },
-          })
-        );
-      }
-    );
-
-    vscode.window.showInformationMessage(
-      `GraphFlow model ready: ${result.model} -> ${result.targetPath}`
-    );
   });
 
   const participant = vscode.chat.createChatParticipant(
@@ -369,12 +299,6 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
-      if (command === "enrich") {
-        const result = await runGraphFlow(workspaceRoot, (runtime) => runtime.enrichSemanticsSilent());
-        stream.markdown(`Graph enrichment result:\n- enrichedCount: ${result.enrichedCount}`);
-        return;
-      }
-
       if (!payload) {
         stream.markdown("Please provide a task description. Example: `/run update readme and add tests`");
         return;
@@ -451,10 +375,7 @@ export function activate(context: vscode.ExtensionContext): void {
     showSettings,
     showGraph,
     showSkills,
-    enrichGraph,
     installMcp,
-    showSetupGuide,
-    downloadModel,
     participant
   );
 }
@@ -560,13 +481,10 @@ async function runMcpBootstrap(
     if (successes.length === 0 && updated.length === 0) {
       vscode.window.showWarningMessage(
         `GraphFlow 未写入 MCP（嗅探到: ${agentNames}）。可运行 "GraphFlow: Install MCP to Agents" 重试。`,
-        "打开设置",
-        "查看说明"
+        "打开设置"
       ).then((choice) => {
         if (choice === "打开设置") {
           void vscode.commands.executeCommand("graphflow.showSettings");
-        } else if (choice === "查看说明") {
-          void vscode.commands.executeCommand("graphflow.showSetupGuide");
         }
       });
       return { results, mcpAgents: panelStatus.mcpAgents };
@@ -577,14 +495,11 @@ async function runMcpBootstrap(
     vscode.window
       .showInformationMessage(
         `GraphFlow MCP 已安装到: ${installedNames}。请配置模型 API Key 后重启对应 Agent 工具。`,
-        "配置模型",
-        "查看说明"
+        "配置模型"
       )
       .then((choice) => {
         if (choice === "配置模型") {
           void vscode.commands.executeCommand("graphflow.showSettings");
-        } else if (choice === "查看说明") {
-          void vscode.commands.executeCommand("graphflow.showSetupGuide");
         }
       });
     return { results, mcpAgents: panelStatus.mcpAgents };
@@ -698,7 +613,7 @@ async function withWorkspaceCwd<T>(workspaceRoot: string, action: () => Promise<
 
 function detectInlineCommand(
   prompt: string
-): "run" | "plan" | "plan-insight" | "history" | "context" | "settings" | "diagnose" | "learn" | "graph" | "skills" | "enrich" {
+): "run" | "plan" | "plan-insight" | "history" | "context" | "settings" | "diagnose" | "learn" | "graph" | "skills" {
   if (prompt.startsWith("/plan-insight") || prompt.startsWith("/insight")) {
     return "plan-insight";
   }
@@ -735,10 +650,6 @@ function detectInlineCommand(
     return "skills";
   }
 
-  if (prompt.startsWith("/enrich")) {
-    return "enrich";
-  }
-
   return "run";
 }
 
@@ -746,19 +657,8 @@ function stripInlineCommand(prompt: string): string {
   return prompt
     .replace(/^\/plan-insight\s*/i, "")
     .replace(/^\/insight\s*/i, "")
-    .replace(/^\/(run|plan|history|context|settings|diagnose|learn|graph|skills|enrich)\s*/i, "")
+    .replace(/^\/(run|plan|history|context|settings|diagnose|learn|graph|skills)\s*/i, "")
     .trim();
-}
-
-function formatBytes(value: number): string {
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let size = value;
-  let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex += 1;
-  }
-  return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
 function formatAsBullet(output: string): string {
@@ -1233,31 +1133,6 @@ function showSettingsPanel(
 
     try {
       const payload = message.payload as Omit<GraphFlowSettings, "configPath">;
-      if (payload.openbmbAutoDownload) {
-        output.appendLine("[GraphFlow] Auto download enabled. Starting MiniCPM model setup...");
-        output.appendLine("[GraphFlow] Guide: Auto mode applies OpenBMB embedded modelPath after download.");
-        output.show(true);
-
-        const result = await runGraphFlow(workspaceRoot, (runtime) =>
-          runtime.downloadOpenBmbModel(undefined, {
-            model: payload.openbmbModel,
-            ...(payload.openbmbModelUrl ? { url: payload.openbmbModelUrl } : {}),
-            ...(payload.openbmbModelSha256 ? { sha256: payload.openbmbModelSha256 } : {}),
-            ...(payload.openbmbModelPath ? { targetPath: payload.openbmbModelPath } : {}),
-            onProgress: (progress) => {
-              const current = formatBytes(progress.downloadedBytes);
-              const total = progress.totalBytes !== undefined ? formatBytes(progress.totalBytes) : "unknown";
-              const percent = progress.percent !== undefined ? `${progress.percent.toFixed(1)}%` : "...";
-              output.appendLine(`[GraphFlow][Download] ${progress.stage} ${percent} ${current}/${total}`);
-            },
-          })
-        );
-
-        payload.openbmbMode = "embedded";
-        payload.openbmbModelPath = result.targetPath;
-        output.appendLine(`[GraphFlow] Model downloaded and applied: ${result.targetPath}`);
-        output.appendLine("[GraphFlow] Next: run 'GraphFlow: Enrich Graph Semantics' to verify MiniCPM inference path.");
-      }
 
       const saved = await runGraphFlow(workspaceRoot, (runtime) =>
         Promise.resolve(runtime.saveGraphFlowSettings(payload))

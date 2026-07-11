@@ -15,6 +15,13 @@ import type { TaskNode } from "../core/types";
 import type { ModelSelection } from "../routing/model-router";
 import { executeRolePrompt, type PromptContext } from "../routing/provider-executor";
 import { logger } from "../utils/logger";
+import type {
+  IntentAnalysis,
+  RequirementAnalysis,
+  PlanReflection,
+  AgentThinkingProtocol,
+} from "./atp-schema";
+import { applyFirstPrinciples, evaluateOptions } from "./decision-engine";
 
 /** === Hat Definitions === */
 
@@ -131,23 +138,382 @@ export interface PlanInsightOptions {
   context?: PromptContext;
 }
 
+/** === ATP Stage 1: Intent Analysis === */
+
+/**
+ * Analyze the intent behind a task using LLM.
+ *
+ * Identifies explicit intent, implicit intent, core problem,
+ * non-goals, and success definition.
+ *
+ * Falls back to heuristic on LLM failure or unparseable response.
+ */
+export async function analyzeIntent(
+  task: string,
+  options: PlanInsightOptions
+): Promise<IntentAnalysis> {
+  const prompt = [
+    `Analyze the intent behind this task: "${task}"`,
+    ``,
+    `Return ONLY a JSON object:`,
+    `{`,
+    `  "explicitIntent": "what the user explicitly asked for",`,
+    `  "implicitIntent": "the underlying need the user may not have stated",`,
+    `  "coreProblem": "the core problem to solve",`,
+    `  "nonGoals": ["things explicitly or implicitly out of scope"],`,
+    `  "successDefinition": "how to know the task is successfully completed"`,
+    `}`,
+  ].join("\n");
+
+  let raw = "";
+  try {
+    raw = await executeRolePrompt("planner", prompt, options.selection, options.context);
+  } catch (error) {
+    logger.warn({ error }, "Intent analysis LLM call failed, using heuristic fallback");
+    return analyzeIntentHeuristic(task);
+  }
+
+  const parsed = parseIntentResponse(raw);
+  if (parsed === null) {
+    logger.warn({ raw }, "Intent analysis response unparseable, using heuristic fallback");
+    return analyzeIntentHeuristic(task);
+  }
+
+  return parsed;
+}
+
+/**
+ * Heuristic intent analysis — no LLM calls.
+ */
+export function analyzeIntentHeuristic(task: string): IntentAnalysis {
+  return {
+    explicitIntent: task,
+    implicitIntent: `Underlying need: resolve the task "${task}" effectively`,
+    coreProblem: task,
+    nonGoals: [],
+    successDefinition: "Task is completed when all planned steps pass verification",
+  };
+}
+
+/** === ATP Stage 2: Requirement Analysis === */
+
+/**
+ * Extract requirements from the task and intent using LLM.
+ *
+ * Identifies functional, non-functional, constraints, priority, and scope.
+ *
+ * Falls back to heuristic on LLM failure or unparseable response.
+ */
+export async function extractRequirements(
+  task: string,
+  intent: IntentAnalysis,
+  options: PlanInsightOptions
+): Promise<RequirementAnalysis> {
+  const prompt = [
+    `Extract requirements for the following task.`,
+    ``,
+    `Task: "${task}"`,
+    `Explicit intent: ${intent.explicitIntent}`,
+    `Implicit intent: ${intent.implicitIntent}`,
+    `Core problem: ${intent.coreProblem}`,
+    `Non-goals: ${intent.nonGoals.join("; ") || "(none)"}`,
+    `Success definition: ${intent.successDefinition}`,
+    ``,
+    `Return ONLY a JSON object:`,
+    `{`,
+    `  "functional": ["functional requirement 1", "requirement 2", ...],`,
+    `  "nonFunctional": ["non-functional requirement 1", ...],`,
+    `  "constraints": ["constraint 1", "constraint 2", ...],`,
+    `  "priority": "Low" | "Medium" | "High",`,
+    `  "scope": {`,
+    `    "included": ["what is in scope 1", ...],`,
+    `    "excluded": ["what is out of scope 1", ...]`,
+    `  }`,
+    `}`,
+  ].join("\n");
+
+  let raw = "";
+  try {
+    raw = await executeRolePrompt("planner", prompt, options.selection, options.context);
+  } catch (error) {
+    logger.warn({ error }, "Requirement analysis LLM call failed, using heuristic fallback");
+    return extractRequirementsHeuristic(task, intent);
+  }
+
+  const parsed = parseRequirementResponse(raw);
+  if (parsed === null) {
+    logger.warn({ raw }, "Requirement analysis response unparseable, using heuristic fallback");
+    return extractRequirementsHeuristic(task, intent);
+  }
+
+  return parsed;
+}
+
+/**
+ * Heuristic requirement extraction — no LLM calls.
+ */
+export function extractRequirementsHeuristic(
+  _task: string,
+  intent: IntentAnalysis
+): RequirementAnalysis {
+  return {
+    functional: [intent.coreProblem],
+    nonFunctional: ["Maintainability", "Code quality"],
+    constraints: intent.nonGoals,
+    priority: "Medium",
+    scope: { included: [intent.coreProblem], excluded: intent.nonGoals },
+  };
+}
+
+/** === ATP Stage 8: Plan Reflection === */
+
+/**
+ * Reflect on the generated plan using LLM.
+ *
+ * Evaluates confidence, uncertainties, missing information,
+ * and improvement directions.
+ *
+ * Falls back to heuristic on LLM failure or unparseable response.
+ */
+export async function reflectOnPlan(
+  insight: SixHatsInsight,
+  plan: TaskNode[] | null,
+  options: PlanInsightOptions
+): Promise<PlanReflection> {
+  const planSummary =
+    plan && plan.length > 0
+      ? plan.map((t) => `- ${t.id}: ${t.description}`).join("\n")
+      : "(no plan generated)";
+
+  const prompt = [
+    `You are reflecting on a generated task plan. Evaluate its quality and identify gaps.`,
+    ``,
+    `Task: "${insight.task}"`,
+    ``,
+    `Six Hats Insight:`,
+    `- Root causes: ${insight.rootCauses.join("; ") || "(none)"}`,
+    `- Critical risks: ${insight.criticalRisks.join("; ") || "(none)"}`,
+    `- Core value: ${insight.coreValue || "(not identified)"}`,
+    ``,
+    `Generated Plan:`,
+    planSummary,
+    ``,
+    `Return ONLY a JSON object:`,
+    `{`,
+    `  "confidence": 0.0-1.0,`,
+    `  "uncertainties": ["uncertainty 1", "uncertainty 2", ...],`,
+    `  "missingInformation": ["missing info 1", "missing info 2", ...],`,
+    `  "improvementDirections": ["improvement direction 1", "direction 2", ...]`,
+    `}`,
+  ].join("\n");
+
+  let raw = "";
+  try {
+    raw = await executeRolePrompt("planner", prompt, options.selection, options.context);
+  } catch (error) {
+    logger.warn({ error }, "Plan reflection LLM call failed, using heuristic fallback");
+    return reflectOnPlanHeuristic(insight, plan);
+  }
+
+  const parsed = parseReflectionResponse(raw);
+  if (parsed === null) {
+    logger.warn({ raw }, "Plan reflection response unparseable, using heuristic fallback");
+    return reflectOnPlanHeuristic(insight, plan);
+  }
+
+  return parsed;
+}
+
+/**
+ * Heuristic plan reflection — no LLM calls.
+ */
+export function reflectOnPlanHeuristic(
+  insight: SixHatsInsight,
+  plan: TaskNode[] | null
+): PlanReflection {
+  const hasPlan = plan && plan.length > 0;
+  return {
+    confidence: hasPlan ? 0.7 : 0.3,
+    uncertainties:
+      insight.criticalRisks.length > 0
+        ? [`Risks not fully addressed: ${insight.criticalRisks.join(", ")}`]
+        : [],
+    missingInformation: [],
+    improvementDirections: hasPlan
+      ? ["Consider adding verification criteria to each task"]
+      : ["Plan generation failed — manual planning required"],
+  };
+}
+
+/** === ATP JSON Parsing Helpers === */
+
+function parseIntentResponse(raw: string): IntentAnalysis | null {
+  const text = stripJsonFence(raw).trim();
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1) return null;
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const explicitIntent =
+    typeof parsed.explicitIntent === "string" ? parsed.explicitIntent.trim() : "";
+  const implicitIntent =
+    typeof parsed.implicitIntent === "string" ? parsed.implicitIntent.trim() : "";
+  const coreProblem =
+    typeof parsed.coreProblem === "string" ? parsed.coreProblem.trim() : "";
+  const successDefinition =
+    typeof parsed.successDefinition === "string" ? parsed.successDefinition.trim() : "";
+
+  if (!explicitIntent && !coreProblem) return null;
+
+  return {
+    explicitIntent,
+    implicitIntent: implicitIntent || explicitIntent,
+    coreProblem: coreProblem || explicitIntent,
+    nonGoals: extractStringArray(parsed, "nonGoals"),
+    successDefinition: successDefinition || "Task completed when all steps pass verification",
+  };
+}
+
+function parseRequirementResponse(raw: string): RequirementAnalysis | null {
+  const text = stripJsonFence(raw).trim();
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1) return null;
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const functional = extractStringArray(parsed, "functional");
+  const nonFunctional = extractStringArray(parsed, "nonFunctional");
+  const constraints = extractStringArray(parsed, "constraints");
+
+  const priorityRaw =
+    typeof parsed.priority === "string" ? parsed.priority.trim() : "Medium";
+  const priority: "Low" | "Medium" | "High" | "Critical" =
+    priorityRaw === "Low" || priorityRaw === "High" || priorityRaw === "Critical"
+      ? priorityRaw
+      : "Medium";
+
+  const scopeRaw =
+    parsed.scope && typeof parsed.scope === "object"
+      ? (parsed.scope as Record<string, unknown>)
+      : {};
+
+  return {
+    functional,
+    nonFunctional,
+    constraints,
+    priority,
+    scope: {
+      included: extractStringArray(scopeRaw, "included"),
+      excluded: extractStringArray(scopeRaw, "excluded"),
+    },
+  };
+}
+
+function parseReflectionResponse(raw: string): PlanReflection | null {
+  const text = stripJsonFence(raw).trim();
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1) return null;
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const confidence =
+    typeof parsed.confidence === "number" && Number.isFinite(parsed.confidence)
+      ? Math.max(0, Math.min(1, parsed.confidence))
+      : 0.5;
+
+  return {
+    confidence,
+    uncertainties: extractStringArray(parsed, "uncertainties"),
+    missingInformation: extractStringArray(parsed, "missingInformation"),
+    improvementDirections: extractStringArray(parsed, "improvementDirections"),
+  };
+}
+
+function stripJsonFence(raw: string): string {
+  const text = raw.trim();
+  const fenceMatch = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (fenceMatch && fenceMatch[1]) {
+    return fenceMatch[1].trim();
+  }
+  return text;
+}
+
+function extractStringArray(obj: Record<string, unknown>, key: string): string[] {
+  const value = obj[key];
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+/** === Main Entry Point === */
+
 /**
  * Run the full Six Thinking Hats + Five Whys analysis on a task,
  * then generate a DAG-style plan that incorporates the insights.
  *
+ * When `runFullAtp` is true, the complete ATP v1.0 pipeline is executed:
+ * Intent -> Requirement -> SixHats -> 5Why -> FirstPrinciples
+ * -> DecisionMatrix -> Planning -> Reflection.
+ *
  * @param task The task to analyze
  * @param options Model selection and context options
+ * @param runFullAtp Whether to run the full ATP pipeline (default: false for backward compatibility)
  */
 export async function planInsight(
   task: string,
-  options: PlanInsightOptions
+  options: PlanInsightOptions,
+  runFullAtp: boolean = false
 ): Promise<{
   insight: SixHatsInsight;
   plan: TaskNode[] | null;
+  atp?: AgentThinkingProtocol;
 }> {
   const insight = await analyzeWithSixHats(task, options);
   const plan = await buildPlanFromInsight(task, insight, options);
-  return { insight, plan };
+
+  if (!runFullAtp) {
+    return { insight, plan };
+  }
+
+  // ATP v1.0 full pipeline
+  const intent = await analyzeIntent(task, options);
+  const requirements = await extractRequirements(task, intent, options);
+  const firstPrinciples = await applyFirstPrinciples(task, insight, options);
+  const decisionMatrix = await evaluateOptions(task, insight, firstPrinciples, options);
+  const reflection = await reflectOnPlan(insight, plan, options);
+
+  const atp: AgentThinkingProtocol = {
+    task,
+    intent,
+    requirements,
+    sixHatsInsight: insight,
+    firstPrinciples,
+    decisionMatrix,
+    plan: plan ?? [],
+    reflection,
+  };
+
+  return { insight, plan, atp };
 }
 
 /**

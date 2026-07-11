@@ -78,7 +78,7 @@ describe("M59 merge agent insight", () => {
     const merged = await mergeAgentInsightsFromGraph(client, task);
     expect(merged.complete).toBe(true);
     expect(merged.missing).toEqual([]);
-    expect(merged.submittedCount).toBe(7);
+    expect(merged.submittedCount).toBe(11);
     expect(merged.insight.hats.length).toBe(6);
     expect(merged.plan.length).toBeGreaterThan(0);
   });
