@@ -9,7 +9,7 @@ import type { TaskNode } from "./types";
 
 export interface AgentWorkItem {
   id: string;
-  kind: "six-hats" | "five-whys" | "plan-refinement" | "query-translate";
+  kind: "six-hats" | "five-whys" | "plan-refinement" | "query-translate" | "intent" | "requirement" | "first-principles" | "decision-matrix" | "reflection";
   hat?: string;
   prompt: string;
   expectedFormat: "json";
@@ -25,6 +25,8 @@ export interface AgentDelegatedPlanInsight {
   plan: TaskNode[] | null;
   agentWorkItems?: AgentWorkItem[];
   agentInstructions?: string;
+  /** ATP (Advanced Task Protocol) analysis result, when full ATP flow is enabled. */
+  atp?: unknown;
 }
 
 const HAT_RESPONSE_SCHEMA = {
@@ -42,6 +44,58 @@ export function buildAgentInsightWorkItems(task: string): AgentWorkItem[] {
     expectedFormat: "json" as const,
     responseSchema: HAT_RESPONSE_SCHEMA,
   }));
+
+  items.unshift({
+    id: "intent-analysis",
+    kind: "intent",
+    prompt: [
+      `Task: ${task}`,
+      "",
+      "Analyze the intent behind this task.",
+      "Return ONLY a JSON object:",
+      "{",
+      '  "explicitIntent": "what the user explicitly asked for",',
+      '  "implicitIntent": "the underlying need",',
+      '  "coreProblem": "the core problem to solve",',
+      '  "nonGoals": ["things out of scope"],',
+      '  "successDefinition": "how to know the task is done"',
+      "}",
+    ].join("\n"),
+    expectedFormat: "json",
+    responseSchema: {
+      explicitIntent: "string",
+      implicitIntent: "string",
+      coreProblem: "string",
+      nonGoals: "string[]",
+      successDefinition: "string",
+    },
+  });
+
+  items.splice(1, 0, {
+    id: "requirement-analysis",
+    kind: "requirement",
+    prompt: [
+      `Task: ${task}`,
+      "",
+      "Extract structured requirements.",
+      "Return ONLY a JSON object:",
+      "{",
+      '  "functional": ["functional requirements"],',
+      '  "nonFunctional": ["non-functional requirements"],',
+      '  "constraints": ["known constraints"],',
+      '  "priority": "Low|Medium|High|Critical",',
+      '  "scope": {"included": ["in scope"], "excluded": ["out of scope"]}',
+      "}",
+    ].join("\n"),
+    expectedFormat: "json",
+    responseSchema: {
+      functional: "string[]",
+      nonFunctional: "string[]",
+      constraints: "string[]",
+      priority: "string",
+      scope: "object",
+    },
+  });
 
   SIX_HATS.forEach((hat, index) => {
     items.push({
@@ -74,6 +128,54 @@ export function buildAgentInsightWorkItems(task: string): AgentWorkItem[] {
   });
 
   items.push({
+    id: "first-principles",
+    kind: "first-principles",
+    optional: true,
+    prompt: [
+      `Task: ${task}`,
+      "",
+      "[OPTIONAL — answer if you completed the Six Hats analysis]",
+      "Apply First Principles thinking to this task.",
+      "Return ONLY a JSON object:",
+      "{",
+      '  "assumptions": ["current assumptions"],',
+      '  "facts": ["irreducible facts"],',
+      '  "deconstructedTo": ["basic elements the problem breaks down to"],',
+      '  "challenges": ["challenges to assumptions"]',
+      "}",
+    ].join("\n"),
+    expectedFormat: "json",
+    responseSchema: {
+      assumptions: "string[]",
+      facts: "string[]",
+      deconstructedTo: "string[]",
+      challenges: "string[]",
+    },
+  });
+
+  items.push({
+    id: "decision-matrix",
+    kind: "decision-matrix",
+    prompt: [
+      `Task: ${task}`,
+      "",
+      "Generate 2-3 solution options and score each.",
+      "Return ONLY a JSON object:",
+      "{",
+      '  "options": [{"name":"...","description":"...","scores":{"complexity":1-10,"cost":1-10,"risk":1-10,"maintainability":1-10,"impact":1-10},"pros":["..."],"cons":["..."]}],',
+      '  "recommendedOption": "name of recommended option",',
+      '  "rationale": "why this option is recommended"',
+      "}",
+    ].join("\n"),
+    expectedFormat: "json",
+    responseSchema: {
+      options: "Array<object>",
+      recommendedOption: "string",
+      rationale: "string",
+    },
+  });
+
+  items.push({
     id: "plan-refinement",
     kind: "plan-refinement",
     prompt: [
@@ -90,6 +192,30 @@ export function buildAgentInsightWorkItems(task: string): AgentWorkItem[] {
     },
   });
 
+  items.push({
+    id: "plan-reflection",
+    kind: "reflection",
+    prompt: [
+      `Task: ${task}`,
+      "",
+      "Reflect on the quality of the plan you produced.",
+      "Return ONLY a JSON object:",
+      "{",
+      '  "confidence": 0.0-1.0,',
+      '  "uncertainties": ["things you are unsure about"],',
+      '  "missingInformation": ["information that would improve the plan"],',
+      '  "improvementDirections": ["how the plan could be improved"]',
+      "}",
+    ].join("\n"),
+    expectedFormat: "json",
+    responseSchema: {
+      confidence: "number",
+      uncertainties: "string[]",
+      missingInformation: "string[]",
+      improvementDirections: "string[]",
+    },
+  });
+
   return items;
 }
 
@@ -103,6 +229,8 @@ export function buildAgentDelegationInstructions(
     "Optional: incorporate your answers into implementation; call graphflow_report_outcome when done.",
     "",
     `Task: ${task}`,
+    "",
+    "Complete the work items in order: (1) intent-analysis, (2) requirement-analysis, (3-8) six-hats, (9-14) five-whys [optional], (15) first-principles [optional], (16) decision-matrix, (17) plan-refinement, (18) plan-reflection. Submit each via graphflow_submit_insight.",
     "",
     "Work items:",
   ];

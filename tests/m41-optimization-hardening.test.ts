@@ -1,5 +1,5 @@
 ﻿import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadConfigSafe, validateConfig } from "../src/config/loader";
@@ -12,7 +12,7 @@ import * as runtime from "../src/surfaces/cli/runtime";
 const tempRoots: string[] = [];
 
 function createTempRoot(prefix: string): string {
-  const root = join(tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const root = path.join(tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   mkdirSync(root, { recursive: true });
   tempRoots.push(root);
   return root;
@@ -30,7 +30,7 @@ afterEach(() => {
 describe("M41 optimization hardening", () => {
   it("loadConfigSafe falls back when JSON is invalid", () => {
     const root = createTempRoot("graphflow-bad-config");
-    const configPath = join(root, "graphflow.config.json");
+    const configPath = path.join(root, "graphflow.config.json");
     writeFileSync(configPath, "{ not-json", "utf8");
 
     const result = loadConfigSafe(configPath);
@@ -41,13 +41,15 @@ describe("M41 optimization hardening", () => {
 
   it("hasPendingGraphIndexWork detects new files", () => {
     const root = createTempRoot("graphflow-pending-index");
-    writeFileSync(join(root, "sample.ts"), "export const x = 1;\n", "utf8");
+    writeFileSync(path.join(root, "sample.ts"), "export const x = 1;\n", "utf8");
     expect(hasPendingGraphIndexWork(root)).toBe(true);
   });
 
   it("resolveRuntimeCwd prefers workspace over home", () => {
-    expect(resolveRuntimeCwd("/repo", "/home/user")).toBe("/repo");
-    expect(resolveRuntimeCwd(undefined, "/home/user")).toBe("/home/user");
+    const repo = path.join("/", "repo");
+    const homeUser = path.join("/", "home", "user");
+    expect(resolveRuntimeCwd(repo, homeUser)).toBe(path.resolve(repo));
+    expect(resolveRuntimeCwd(undefined, homeUser)).toBe(path.resolve(homeUser));
   });
 
   it("requireWorkspaceFolder guards graph-only actions", () => {

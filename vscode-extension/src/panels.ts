@@ -103,20 +103,6 @@ export interface GraphFlowSettings {
   autoRunOnIndex: boolean;
   transport: "memory" | "mcp-http" | "file" | "sqlite";
   graphStorePath: string;
-  enrichmentBackend: "network" | "local" | "inherit";
-  enrichmentProvider: string;
-  enrichmentModel: string;
-  enrichmentApiKey?: string;
-  enrichmentBaseUrl?: string;
-  openbmbMode: "embedded" | "ollama" | "openai-compat";
-  openbmbEngine: "command" | "node-llama-cpp";
-  openbmbModel: string;
-  openbmbBaseUrl?: string;
-  openbmbModelPath?: string;
-  openbmbCommandPath?: string;
-  openbmbAutoDownload: boolean;
-  openbmbModelUrl?: string;
-  openbmbModelSha256?: string;
 }
 
 export interface SettingsPanelStatus {
@@ -949,20 +935,6 @@ export function buildSettingsHtml(
       <input id="settings-enable-near-lossless" name="enableNearLosslessMode" type="checkbox" ${settings.enableNearLosslessMode ? "checked" : ""} />
       <input id="settings-auto-index-preview" name="autoIndexOnPreview" type="checkbox" ${settings.autoIndexOnPreview ? "checked" : ""} />
       <input id="settings-auto-index-run" name="autoIndexOnRun" type="checkbox" ${settings.autoIndexOnRun ? "checked" : ""} />
-      <input id="settings-enrichment-backend" name="enrichmentBackend" value="${escapeHtml(settings.enrichmentBackend)}" />
-      <input id="settings-enrichment-provider" name="enrichmentProvider" value="${escapeHtml(settings.enrichmentProvider)}" />
-      <input id="settings-enrichment-model" name="enrichmentModel" value="${escapeHtml(settings.enrichmentModel)}" />
-      <input id="settings-enrichment-api-key" name="enrichmentApiKey" value="${escapeHtml(settings.enrichmentApiKey ?? "")}" />
-      <input id="settings-enrichment-base-url" name="enrichmentBaseUrl" value="${escapeHtml(settings.enrichmentBaseUrl ?? "")}" />
-      <input id="settings-openbmb-mode" name="openbmbMode" value="${escapeHtml(settings.openbmbMode)}" />
-      <input id="settings-openbmb-engine" name="openbmbEngine" value="${escapeHtml(settings.openbmbEngine)}" />
-      <input id="settings-openbmb-model" name="openbmbModel" value="${escapeHtml(settings.openbmbModel)}" />
-      <input id="settings-openbmb-base-url" name="openbmbBaseUrl" value="${escapeHtml(settings.openbmbBaseUrl ?? "")}" />
-      <input id="settings-openbmb-model-path" name="openbmbModelPath" value="${escapeHtml(settings.openbmbModelPath ?? "")}" />
-      <input id="settings-openbmb-command-path" name="openbmbCommandPath" value="${escapeHtml(settings.openbmbCommandPath ?? "")}" />
-      <input id="settings-openbmb-auto-download" name="openbmbAutoDownload" type="checkbox" ${settings.openbmbAutoDownload ? "checked" : ""} />
-      <input id="settings-openbmb-model-url" name="openbmbModelUrl" value="${escapeHtml(settings.openbmbModelUrl ?? "")}" />
-      <input id="settings-openbmb-model-sha256" name="openbmbModelSha256" value="${escapeHtml(settings.openbmbModelSha256 ?? "")}" />
     </div>
   </form>
   <script src="${scriptUri}"></script>
@@ -1274,7 +1246,6 @@ function renderSettingsTierCard(
         ${renderProviderOption("anthropic", provider)}
         ${renderProviderOption("bailian", provider)}
         ${renderProviderOption("doubao", provider)}
-        ${renderProviderOption("openbmb", provider)}
       </select>
     </label>
     <label>API Key

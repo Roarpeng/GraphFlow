@@ -137,11 +137,13 @@ export async function maybeRunPlanInsightForComplex(
     }
 
     const selection = resolveModelForRole("planner");
-    const { insight, plan } = await planInsight(task, { selection });
+    const result = await planInsight(task, { selection }, true);
+    const atp = (result as { atp?: unknown }).atp;
     return {
       mode: "llm",
-      insight,
-      plan,
+      insight: result.insight,
+      plan: result.plan,
+      ...(atp !== undefined ? { atp } : {}),
     };
   } catch (error) {
     logger.warn({ error, task }, "Plan insight failed, using agent-delegated heuristic");

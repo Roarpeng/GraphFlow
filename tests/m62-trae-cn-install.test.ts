@@ -15,8 +15,8 @@ describe("M62 Trae CN project install", () => {
     const agents = targets.map((t) => t.agent);
     expect(agents).toContain("Trae CN (project rules)");
     expect(agents).toContain("Trae CN (project skills)");
-    expect(targets.find((t) => t.agent.includes("Trae CN (project rules)"))?.filePath).toContain(
-      ".trae/rules/graphflow.md"
+    expect(targets.find((t) => t.agent.includes("Trae CN (project rules)"))?.filePath).toMatch(
+      /\.trae[\/\\]rules[\/\\]graphflow\.md/
     );
   });
 

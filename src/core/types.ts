@@ -82,6 +82,18 @@ export interface TaskNode {
   retryCount: number;
   /** 指定执行该节点的 agent 角色（AgentSpecialty），用于多 Agent 协作编排 */
   assignedAgent?: AgentSpecialty;
+  /** ATP v1.0: 任务优先级 (1=最高) */
+  priority?: number;
+  /** ATP v1.0: 任务复杂度 */
+  complexity?: "Low" | "Medium" | "High";
+  /** ATP v1.0: 验收标准 */
+  verification?: string[];
+  /** ATP v1.0: 输入依赖 */
+  inputs?: string[];
+  /** ATP v1.0: 预期产出 */
+  outputs?: string[];
+  /** ATP v1.0: 风险标签 */
+  risks?: string[];
 }
 
 export interface OrchestrationInput {

@@ -54,20 +54,6 @@
       provider: smartProvider,
       apiKeyEnvVar: smartApiKey,
       baseUrl: smartBaseUrl,
-      enrichmentBackend: getString("settings-enrichment-backend") || "inherit",
-      enrichmentProvider: getString("settings-enrichment-provider"),
-      enrichmentModel: getString("settings-enrichment-model"),
-      enrichmentApiKey: getString("settings-enrichment-api-key"),
-      enrichmentBaseUrl: getString("settings-enrichment-base-url"),
-      openbmbMode: getString("settings-openbmb-mode") || "embedded",
-      openbmbEngine: getString("settings-openbmb-engine") || "command",
-      openbmbModel: getString("settings-openbmb-model"),
-      openbmbBaseUrl: getString("settings-openbmb-base-url"),
-      openbmbModelPath: getString("settings-openbmb-model-path"),
-      openbmbCommandPath: getString("settings-openbmb-command-path"),
-      openbmbAutoDownload: getChecked("settings-openbmb-auto-download"),
-      openbmbModelUrl: getString("settings-openbmb-model-url"),
-      openbmbModelSha256: getString("settings-openbmb-model-sha256"),
       maxContextTokens: getNumber("settings-max-context-tokens"),
       layerQuota: {
         l1: getNumber("settings-layer-l1"),
@@ -133,19 +119,6 @@
     if (!snapshot.model) {
       if (snapshot.provider || snapshot.apiKey) {
         issues.push({ field: `${prefix}Model`, message: `请填写 ${label} 层模型` });
-      }
-      return issues;
-    }
-
-    if (snapshot.provider === "openbmb") {
-      if (payload.openbmbMode === "embedded" && !payload.openbmbModelPath && !payload.openbmbAutoDownload) {
-        issues.push({ field: "openbmbModelPath", message: `${label} 层使用 OpenBMB 时需填写模型路径或勾选自动下载` });
-      }
-      if (
-        (payload.openbmbMode === "ollama" || payload.openbmbMode === "openai-compat") &&
-        !payload.openbmbBaseUrl
-      ) {
-        issues.push({ field: "openbmbBaseUrl", message: `${label} 层 OpenBMB 手动模式需填写 Base URL` });
       }
       return issues;
     }
