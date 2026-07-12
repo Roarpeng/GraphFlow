@@ -7,7 +7,6 @@ import {
   hasModuleFamilyIntent,
 } from "../src/graph/hit-diversify";
 import { rankNodesForContextQuery } from "../src/graph/graph-utils";
-import { logger } from "../src/utils/logger";
 
 vi.mock("../src/utils/logger", () => ({
   logger: {
