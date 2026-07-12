@@ -109,21 +109,46 @@ function resolveNodeCommand() {
   return "node";
 }
 
-function resolveChildWorkspaceCwd() {
+function isUnsafeWorkspacePath(dir) {
+  const normalized = path.resolve(dir).replace(/\\/g, "/").toLowerCase();
+  const home = os.homedir().replace(/\\/g, "/").toLowerCase();
+  if (normalized === home) {
+    return true;
+  }
+  const localAppData = process.env.LOCALAPPDATA?.replace(/\\/g, "/").toLowerCase();
+  if (localAppData && normalized === localAppData) {
+    return true;
+  }
+  const roamingAppData = process.env.APPDATA?.replace(/\\/g, "/").toLowerCase();
+  if (roamingAppData && normalized === roamingAppData) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Resolve a safe workspace root for the MCP child.
+ * Returns undefined when no safe project root is available — never home/AppData.
+ */
+function resolveChildWorkspaceRoot() {
   const explicit = process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim();
   if (explicit && explicit !== "${workspaceFolder}") {
-    return path.resolve(explicit);
+    const resolved = path.resolve(explicit);
+    if (!isUnsafeWorkspacePath(resolved)) {
+      return resolved;
+    }
+    delete process.env.GRAPHFLOW_WORKSPACE_ROOT;
   }
 
   try {
-    const { ensureMcpWorkspaceEnv } = require(path.join(
+    const { ensureMcpWorkspaceEnv, isUnsafeWorkspaceFallback } = require(path.join(
       runtimeRoot,
       "dist",
       "config",
       "discover-workspace.js"
     ));
     const discovered = ensureMcpWorkspaceEnv(process.cwd());
-    if (discovered) {
+    if (discovered && !isUnsafeWorkspaceFallback(discovered)) {
       return discovered;
     }
   } catch {
@@ -138,17 +163,26 @@ function resolveChildWorkspaceCwd() {
     normalized.includes("graphflow-vscode-") ||
     normalized.includes("/.cursor/extensions/");
 
-  return isRuntime ? runtimeRoot : cwd;
+  if (isRuntime || isUnsafeWorkspacePath(cwd)) {
+    return undefined;
+  }
+  return cwd;
 }
 
 const nodeCommand = resolveNodeCommand();
-const childCwd = resolveChildWorkspaceCwd();
+const workspaceRoot = resolveChildWorkspaceRoot();
+// Always give the child a writable cwd; prefer the discovered project, else vendor runtime.
+const childCwd = workspaceRoot ?? runtimeRoot;
 const env = {
   ...process.env,
   GRAPHFLOW_MCP_STDIO: "1",
   GRAPHFLOW_LOG_JSON: "1",
-  GRAPHFLOW_WORKSPACE_ROOT: childCwd,
 };
+if (workspaceRoot) {
+  env.GRAPHFLOW_WORKSPACE_ROOT = workspaceRoot;
+} else {
+  delete env.GRAPHFLOW_WORKSPACE_ROOT;
+}
 
 if (nodeCommand === process.execPath && process.env.ELECTRON_RUN_AS_NODE !== "1") {
   const execBase = path.basename(process.execPath).toLowerCase();
@@ -161,6 +195,7 @@ if (process.env.GRAPHFLOW_LAUNCHER_DEBUG === "1") {
   console.error(`[GraphFlow MCP launcher] nodeCommand: ${nodeCommand}`);
   console.error(`[GraphFlow MCP launcher] serverPath: ${serverPath}`);
   console.error(`[GraphFlow MCP launcher] childCwd: ${childCwd}`);
+  console.error(`[GraphFlow MCP launcher] workspaceRoot: ${workspaceRoot ?? "(unset)"}`);
   console.error(`[GraphFlow MCP launcher] isWsl: ${isWsl()}`);
   console.error(`[GraphFlow MCP launcher] platform: ${process.platform}`);
 }

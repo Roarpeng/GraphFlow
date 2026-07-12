@@ -27,6 +27,10 @@ export interface AgentDelegatedPlanInsight {
   agentInstructions?: string;
   /** ATP (Advanced Task Protocol) analysis result, when full ATP flow is enabled. */
   atp?: unknown;
+  /** Agent-bridge lifecycle: incomplete until work items are submitted + merged. */
+  status?: "awaiting-agent" | "complete";
+  complete?: boolean;
+  requiresAgentBridge?: boolean;
 }
 
 const HAT_RESPONSE_SCHEMA = {
@@ -223,14 +227,22 @@ export function buildAgentDelegationInstructions(
   task: string,
   workItems: AgentWorkItem[]
 ): string {
+  const required = workItems.filter((item) => !item.optional);
   const lines = [
-    "[AGENT-DELEGATED LLM] No external GraphFlow API key is configured.",
-    "Use your own model to complete the analysis prompts below, then execute the heuristic plan.",
-    "Optional: incorporate your answers into implementation; call graphflow_report_outcome when done.",
+    "[AGENT-BRIDGE REQUIRED] No GraphFlow LLM API key is configured.",
+    "YOU (the connected coding agent) must complete the insight analysis with your own model.",
+    "The insight/plan fields in this response are PLACEHOLDERS — not a finished analysis. Do not execute them as the final plan.",
+    "",
+    "Protocol:",
+    '1. Answer each required work item prompt with your model (JSON only).',
+    '2. Submit each via graphflow_insight({ mode: "submit", task, workItemId, response }).',
+    '3. After all required items are submitted, call graphflow_insight({ mode: "merge", task }).',
+    "4. Use the merged insight + plan as the real result, then implement / report_outcome as needed.",
     "",
     `Task: ${task}`,
     "",
-    "Complete the work items in order: (1) intent-analysis, (2) requirement-analysis, (3-8) six-hats, (9-14) five-whys [optional], (15) first-principles [optional], (16) decision-matrix, (17) plan-refinement, (18) plan-reflection. Submit each via graphflow_submit_insight.",
+    `Required work items (${required.length}): ${required.map((item) => item.id).join(", ")}`,
+    "Suggested order: (1) intent-analysis, (2) requirement-analysis, (3-8) six-hats, (9-14) five-whys [optional if hat certainty>=0.6], (15) first-principles [optional], (16) decision-matrix, (17) plan-refinement, (18) plan-reflection.",
     "",
     "Work items:",
   ];
@@ -273,7 +285,8 @@ export function buildHeuristicPlanFromInsight(task: string, insight: SixHatsInsi
 export function buildAgentDelegatedPlanInsight(task: string): AgentDelegatedPlanInsight {
   const insight = analyzeWithSixHatsHeuristic(task);
   const agentWorkItems = buildAgentInsightWorkItems(task);
-  const plan = buildHeuristicPlanFromInsight(task, insight);
+  // Do not invent a DAG from placeholders — agent must submit plan-refinement then merge.
+  const plan: TaskNode[] = [];
 
   return {
     mode: "agent-delegated",
@@ -281,6 +294,9 @@ export function buildAgentDelegatedPlanInsight(task: string): AgentDelegatedPlan
     plan,
     agentWorkItems,
     agentInstructions: buildAgentDelegationInstructions(task, agentWorkItems),
+    status: "awaiting-agent",
+    complete: false,
+    requiresAgentBridge: true,
   };
 }
 

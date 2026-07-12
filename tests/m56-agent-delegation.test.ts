@@ -44,9 +44,19 @@ describe("M56 agent-delegated LLM (no API key)", () => {
         configPath
       );
       expect(result.mode).toBe("agent-delegated");
+      expect(result.requiresAgentBridge).toBe(true);
+      expect(result.complete).toBe(false);
+      expect(result.status).toBe("awaiting-agent");
+      expect(result.insight.placeholder).toBe(true);
+      expect(result.plan).toEqual([]);
       expect(result.agentWorkItems?.length).toBeGreaterThan(0);
-      expect(result.agentInstructions).toContain("AGENT-DELEGATED LLM");
-      expect(result.plan.length).toBeGreaterThan(0);
+      expect(result.agentInstructions).toContain("AGENT-BRIDGE REQUIRED");
+      expect(result.agentInstructions).toContain('graphflow_insight({ mode: "submit"');
+      expect(result.agentInstructions).toContain('graphflow_insight({ mode: "merge"');
+      expect(result.agentInstructions).not.toContain("graphflow_submit_insight");
+      expect(result.insight.hats.every((hat) => hat.observation.includes("PLACEHOLDER"))).toBe(
+        true
+      );
     } finally {
       unlinkSync(configPath);
     }
@@ -70,8 +80,10 @@ describe("M56 agent-delegated LLM (no API key)", () => {
 
       expect(run.status).toBe("DELEGATED");
       expect(run.executionDescriptor?.agentMode).toBe("delegated-llm");
+      expect(run.executionDescriptor?.requiresAgentBridge).toBe(true);
       expect(run.executionDescriptor?.agentWorkItems?.length).toBeGreaterThan(0);
-      expect(run.feedback).toContain("[AGENT-LLM]");
+      expect(run.executionDescriptor?.agentInstructions).toContain("graphflow_insight");
+      expect(run.feedback).toContain("[AGENT-BRIDGE]");
     } finally {
       unlinkSync(configPath);
     }

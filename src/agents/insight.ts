@@ -129,6 +129,8 @@ export interface SixHatsInsight {
   criticalRisks: string[];
   coreValue: string;
   refinedTaskStatement: string;
+  /** True when hats are stubs awaiting the connected coding agent (no GraphFlow LLM). */
+  placeholder?: boolean;
 }
 
 /** === Main Entry Points === */
@@ -639,7 +641,7 @@ export async function analyzeWithSixHats(
  */
 export function analyzeWithSixHatsHeuristic(task: string): SixHatsInsight {
   const hatResults: WhyChainSection[] = SIX_HATS.map((hat) => {
-    const parsed = fallbackHatResponse(hat);
+    const parsed = placeholderHatResponse(hat);
     return {
       hat,
       observation: parsed.observation,
@@ -649,28 +651,16 @@ export function analyzeWithSixHatsHeuristic(task: string): SixHatsInsight {
     };
   });
 
-  const blueSynthesis = hatResults.find((h) => h.hat.color === "blue")?.criticalInsight ?? "";
-  const rootCauses = hatResults
-    .filter((h) => h.whyChain !== null)
-    .map((h) => h.whyChain!.rootCause)
-    .filter((s) => s.length > 0);
-  const criticalRisks = hatResults
-    .filter((h) => h.hat.color === "black")
-    .map((h) => h.observation)
-    .filter((s) => s.length > 0);
-  const coreValue = hatResults
-    .filter((h) => h.hat.color === "yellow")
-    .map((h) => h.observation)
-    .join("; ");
-
   return {
     task,
     hats: hatResults,
-    blueHatSynthesis: blueSynthesis,
-    rootCauses: [...new Set(rootCauses)],
-    criticalRisks,
-    coreValue,
-    refinedTaskStatement: buildRefinedStatement(task, hatResults),
+    blueHatSynthesis:
+      "[PLACEHOLDER] Awaiting connected agent Six Hats analysis — do not treat as final.",
+    rootCauses: [],
+    criticalRisks: [],
+    coreValue: "",
+    refinedTaskStatement: `[PLACEHOLDER — awaiting agent bridge] ${task}`,
+    placeholder: true,
   };
 }
 
@@ -778,6 +768,15 @@ function fallbackHatResponse(hat: HatDefinition): HatResponse {
     observation: fallbackObs(hat),
     certainty: 0.5,
     criticalInsight: fallbackInsight(hat),
+  };
+}
+
+/** Explicit stubs for agent-bridge mode — must never look like a finished analysis. */
+function placeholderHatResponse(hat: HatDefinition): HatResponse {
+  return {
+    observation: `[PLACEHOLDER/${hat.name}] No GraphFlow LLM configured. Connected agent must answer agentWorkItems.`,
+    certainty: 0,
+    criticalInsight: `[PLACEHOLDER] Submit hat analysis via graphflow_insight(mode="submit").`,
   };
 }
 
