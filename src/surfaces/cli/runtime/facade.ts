@@ -6,6 +6,7 @@ import type {
   detectInstalledAgents,
   formatModelConfigGuide,
   installMcpToDetectedAgents,
+  repairUnsafeWindowsMcpCommands,
 } from "../../../integrations/agent-mcp-installer";
 import type { getSkillInsights, indexGraph, inspectGraph, previewContext, rebuildGraph, startFileWatcherIfEnabled } from "./graph.js";
 import type { getSettingsPanelStatus, indexGraphFromSettings, testRoutingAndIndexGraph } from "./panel.js";
@@ -48,6 +49,7 @@ export interface GraphFlowRuntimeModule {
   detectInstalledAgents: typeof detectInstalledAgents;
   formatModelConfigGuide: typeof formatModelConfigGuide;
   installMcpToDetectedAgents: typeof installMcpToDetectedAgents;
+  repairUnsafeWindowsMcpCommands: typeof repairUnsafeWindowsMcpCommands;
   runLearningNightly: typeof runLearningNightly;
   runLearningNightlyResult: typeof runLearningNightlyResult;
 }
@@ -71,6 +73,7 @@ const REQUIRED_EXPORTS: Array<keyof GraphFlowRuntimeModule> = [
   "detectInstalledAgents",
   "formatModelConfigGuide",
   "installMcpToDetectedAgents",
+  "repairUnsafeWindowsMcpCommands",
   "runLearningNightly",
   "runLearningNightlyResult",
 ];

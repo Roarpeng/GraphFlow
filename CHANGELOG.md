@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.7.3] - 2026-07-12
+
+### Fixed
+
+- **无痛 Windows MCP**：扩展激活时调用 `repairUnsafeWindowsMcpCommands`，自动扫描 Trae / Trae CN / TRAE SOLO 等已有 `mcp.json`，把含空格的 `command` 就地改成短路径或 `node`（无需手动 Install）
+- **CI Test 挂死**：禁用 vitest/CI 下 embedding 后台预热（HuggingFace MiniLM 下载无超时可卡 30m+）；`validate.yml` 设置 `GRAPHFLOW_SKIP_EMBEDDING_WARMUP=1`
+
 ## [1.7.2] - 2026-07-12
 
 ### Fixed

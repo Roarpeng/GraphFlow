@@ -42,6 +42,9 @@ jobs:
 
       - name: Test
         run: npm test
+        env:
+          # Prevent background MiniLM/HF download from hanging the vitest process.
+          GRAPHFLOW_SKIP_EMBEDDING_WARMUP: "1"
 
       - name: Build extension
         run: npm run build:extension

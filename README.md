@@ -48,7 +48,7 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 
 > 实话实说：论纯图谱的成熟度与社区规模，CodeGraph 更领先；论 LSP 符号编辑标准，Serena 更专精；论整库打包，Repomix 更简单。GraphFlow 的价值在于把"图谱 + 压缩 + 规划 + 学习记忆"合到一处，让 agent 不仅省 token，还能跨会话复用项目经验。
 
-## 当前能力总览（v1.7.2+）
+## 当前能力总览（v1.7.3+）
 
 | 能力域 | 说明 |
 | --- | --- |
@@ -131,7 +131,7 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 
 ### 发布信息
 
-- 最新版本：**v1.7.2**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.7.2`
+- 最新版本：**v1.7.3**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.7.3`
 - **GitHub Release**：push 到 `main` 后 CI 在 `windows-2022` 上自动构建 VSIX 并发布到 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
 - **npm 发布**：push tag `v*`（如 `v1.4.1`）触发 [Publish npm](https://github.com/Roarpeng/GraphFlow/actions/workflows/publish-npm.yml) 工作流
 - 变更日志：`CHANGELOG.md`
@@ -448,9 +448,9 @@ cp graphflow.config.example.json graphflow.config.json
 CLI 安装（若已安装 `code` / `cursor` 命令）：
 
 ```bash
-code --install-extension graphflow-vscode-1.7.2.vsix
+code --install-extension graphflow-vscode-1.7.3.vsix
 # 或
-cursor --install-extension graphflow-vscode-1.7.2.vsix
+cursor --install-extension graphflow-vscode-1.7.3.vsix
 ```
 
 ### 命令面板

@@ -26,6 +26,7 @@ export {
   detectInstalledAgents,
   formatModelConfigGuide,
   installMcpToDetectedAgents,
+  repairUnsafeWindowsMcpCommands,
   runLearningNightly,
   runLearningNightlyResult,
   startFileWatcherIfEnabled,

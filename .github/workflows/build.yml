@@ -76,6 +76,7 @@ jobs:
           NOTES="GraphFlow VS Code/Cursor extension **v${VERSION}**.
 
           ## Highlights
+          - Painless Trae/Windows MCP: auto-repair spaced Program Files commands on extension activate
           - Trae/Windows: MCP install writes space-free node paths (fixes 'C:\\Program' is not recognized)
           - Resilient embedding: hash fallback when Xenova is unavailable
           - Retrieval denoise + optional full-graph vector recall
@@ -84,7 +85,7 @@ jobs:
 
           ## Install
           Download \`graphflow-vscode-${VERSION}.vsix\` → **Extensions → Install from VSIX** → reload.
-          Then run **GraphFlow: Install MCP to Agents** so Trae configs are rewritten with the fixed command.
+          MCP path repair runs automatically on activate (no manual Install required for the Program Files fix).
 
           Built on Windows from commit ${GITHUB_SHA::7}."
 
