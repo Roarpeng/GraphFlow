@@ -1,5 +1,6 @@
 import type { GraphEdge, GraphNode, TaskStatus } from "../../../core/types";
 import type { GraphSnapshotSampleEdge, GraphSnapshotSampleNode } from "../../../graph/snapshot-view.js";
+import type { RuntimeTimelineSummary } from "../../../core/cancellation";
 
 export type { GraphSnapshotSampleEdge, GraphSnapshotSampleNode };
 import type { GraphFlowConfig } from "../../../config/schema";
@@ -144,6 +145,7 @@ export interface RoutingDiagnosisResult {
     model: string;
     embedded: boolean;
   };
+  runtimeTimeline: RuntimeTimelineSummary;
 }
 
 export interface SettingsValidationIssue {

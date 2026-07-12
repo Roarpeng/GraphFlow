@@ -3,6 +3,7 @@ import type { TaskNode } from "./types";
 import type { GraphClient } from "../graph/client-factory";
 import { DagCheckpoint, computeDagId } from "./dag-checkpoint";
 import { createTimeoutSignal, emitRuntimeTimeline } from "./cancellation";
+import type { RuntimeController } from "./runtime-controller";
 
 export type TaskExecutor = (task: TaskNode, signal?: AbortSignal) => Promise<boolean>;
 
@@ -11,6 +12,8 @@ export interface DagExecutionOptions {
   nodeTimeoutMs?: number;
   /** Parent cancel signal for the whole DAG run. */
   signal?: AbortSignal;
+  /** Unified cancel/pause/resume controller (preferred over bare signal). */
+  runtime?: RuntimeController;
   /** 图存储客户端，用于 DAG 执行状态持久化（checkpoint）。不提供时纯内存执行。 */
   graphClient?: GraphClient;
   /** DAG 检查点 ID，格式 dag:${taskHash}。不提供时根据 plan 自动计算。 */
@@ -136,8 +139,21 @@ export async function executeDag(
     for (const batch of batches) {
       const results = await Promise.all(
         batch.map(async (task) => {
+          try {
+            await options?.runtime?.waitIfPaused();
+          } catch (error) {
+            emitRuntimeTimeline({
+              phase: "dag.node",
+              status: "aborted",
+              id: task.id,
+              detail: error instanceof Error ? error.message : String(error),
+            });
+            return { task, ok: false };
+          }
+
+          const parentSignal = options?.runtime?.signal ?? options?.signal;
           const startedAt = Date.now();
-          const { signal, abort, dispose } = createTimeoutSignal(timeoutMs, options?.signal);
+          const { signal, abort, dispose } = createTimeoutSignal(timeoutMs, parentSignal);
           emitRuntimeTimeline({ phase: "dag.node", status: "started", id: task.id });
 
           // Signal-aware executors cancel in-flight work (e.g. provider fetch).

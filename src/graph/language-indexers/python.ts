@@ -1,5 +1,6 @@
 import type { CallRelation, DeclaredSymbol, ExtractionResult, ImportTarget, InheritRelation, LanguageIndexer } from "./index.js";
-import { getTreeSitterParser, type TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
+import { parseFileIncremental } from "./incremental-parse.js";
+import type { TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
 
 export const pythonIndexer: LanguageIndexer = {
   language: "python",
@@ -9,8 +10,7 @@ export const pythonIndexer: LanguageIndexer = {
     const imports: ImportTarget[] = [];
     const calls: CallRelation[] = [];
     const inherits: InheritRelation[] = [];
-    const parser = await getTreeSitterParser("python");
-    const tree = parser.parse(content);
+    const tree = await parseFileIncremental(filePath, "python", content);
 
     const traverse = (node: TreeSitterSyntaxNode, caller?: string) => {
       const lineNo = node.startPosition.row + 1;

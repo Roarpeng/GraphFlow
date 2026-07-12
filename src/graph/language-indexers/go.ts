@@ -1,5 +1,6 @@
 import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index.js";
-import { getTreeSitterParser, type TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
+import { parseFileIncremental } from "./incremental-parse.js";
+import type { TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
 
 function isExported(name: string): boolean {
   if (!name) return false;
@@ -13,8 +14,7 @@ export const goIndexer: LanguageIndexer = {
   async extract(filePath: string, content: string): Promise<ExtractionResult> {
     const symbols: DeclaredSymbol[] = [];
     const imports: ImportTarget[] = [];
-    const parser = await getTreeSitterParser("go");
-    const tree = parser.parse(content);
+    const tree = await parseFileIncremental(filePath, "go", content);
 
     const traverse = (node: TreeSitterSyntaxNode) => {
       const lineNo = node.startPosition.row + 1;
