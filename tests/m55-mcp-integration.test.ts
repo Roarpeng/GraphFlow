@@ -91,11 +91,22 @@ describe("M55 MCP integration flows", () => {
       const result = parseToolText(response) as {
         mode: string;
         agentWorkItems?: unknown[];
+        agentInstructions?: string;
         plan: unknown[];
+        requiresAgentBridge?: boolean;
+        complete?: boolean;
+        status?: string;
+        insight?: { placeholder?: boolean };
       };
       expect(result.mode).toBe("agent-delegated");
+      expect(result.requiresAgentBridge).toBe(true);
+      expect(result.complete).toBe(false);
+      expect(result.status).toBe("awaiting-agent");
+      expect(result.insight?.placeholder).toBe(true);
       expect(result.agentWorkItems?.length).toBeGreaterThan(0);
-      expect(result.plan.length).toBeGreaterThan(0);
+      expect(result.agentInstructions).toContain("graphflow_insight");
+      // Placeholder response must not invent a DAG; agent completes plan via merge.
+      expect(result.plan).toEqual([]);
     } finally {
       unlinkSync(configPath);
     }
