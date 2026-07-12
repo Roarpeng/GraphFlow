@@ -867,6 +867,115 @@ export function sanitizeMcpServerNodeForWindowsClients(node: McpServerNode): Mcp
   return sanitized;
 }
 
+/** True when command/cwd/path-like args still contain spaces (unsafe for unquoted cmd spawn). */
+export function mcpNodeNeedsWindowsSpaceRepair(node: McpServerNode): boolean {
+  if (node.command.includes(" ")) {
+    return true;
+  }
+  if (node.cwd?.includes(" ")) {
+    return true;
+  }
+  return node.args.some((arg) => {
+    if (!arg.includes(" ")) {
+      return false;
+    }
+    return /^[A-Za-z]:[\\/]/.test(arg) || arg.startsWith("\\\\") || arg.includes("/") || arg.includes("\\");
+  });
+}
+
+export interface McpWindowsSpaceRepairResult {
+  agentId: string;
+  agentName: string;
+  configPath: string;
+  repaired: boolean;
+  beforeCommand?: string;
+  afterCommand?: string;
+}
+
+/**
+ * Painless migrate: rewrite existing GraphFlow MCP entries that still use spaced
+ * absolute paths (e.g. Program Files). Scans every known agent config path that
+ * exists — not only currently "detected" markers — so Trae / Trae CN / TRAE SOLO
+ * variants are all fixed on extension activate without a manual Install click.
+ */
+export function repairUnsafeWindowsMcpCommands(
+  serverName = "graphflow",
+  options?: {
+    /** Test/injection hook — override scanned targets. */
+    targets?: Array<{
+      agentId: string;
+      agentName: string;
+      configPath: string;
+      serversKey: McpServersKey;
+    }>;
+  }
+): McpWindowsSpaceRepairResult[] {
+  if (!isWindows()) {
+    return [];
+  }
+
+  const results: McpWindowsSpaceRepairResult[] = [];
+  const seen = new Set<string>();
+
+  const targets =
+    options?.targets ??
+    buildAgentProfiles().flatMap((profile) =>
+      profile.userTargets
+        .filter((t) => (t.configFormat ?? "json") !== "codex-toml")
+        .map((t) => ({
+          agentId: profile.id,
+          agentName: profile.name,
+          configPath: t.configPath,
+          serversKey: t.serversKey,
+        }))
+    );
+
+  for (const target of targets) {
+    const key = `${target.configPath}::${target.serversKey}`;
+    if (seen.has(key) || !existsSync(target.configPath)) {
+      continue;
+    }
+    seen.add(key);
+
+    try {
+      const json = readJsonConfig(target.configPath);
+      const servers = (json[target.serversKey] as Record<string, McpServerNode> | undefined) ?? {};
+      const previous = servers[serverName];
+      if (!previous || typeof previous.command !== "string" || !Array.isArray(previous.args)) {
+        continue;
+      }
+      if (!mcpNodeNeedsWindowsSpaceRepair(previous)) {
+        results.push({
+          agentId: target.agentId,
+          agentName: target.agentName,
+          configPath: target.configPath,
+          repaired: false,
+          beforeCommand: previous.command,
+          afterCommand: previous.command,
+        });
+        continue;
+      }
+
+      const sanitized = sanitizeMcpServerNodeForWindowsClients(previous);
+      servers[serverName] = sanitized;
+      json[target.serversKey] = servers;
+      writeJsonConfig(target.configPath, json);
+      results.push({
+        agentId: target.agentId,
+        agentName: target.agentName,
+        configPath: target.configPath,
+        repaired: true,
+        beforeCommand: previous.command,
+        afterCommand: sanitized.command,
+      });
+    } catch {
+      // Config may be malformed; skip — install path will recreate.
+    }
+  }
+
+  return results;
+}
+
 function resolveWindowsNpxLaunch(): { command: string; args: string[] } | undefined {
   const node = resolveSystemNodeCommand();
   if (!node) {

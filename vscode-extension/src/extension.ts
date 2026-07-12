@@ -391,6 +391,10 @@ async function bootstrapExtension(
   const lastInstalledVersion = context.globalState.get<string>(MCP_INSTALL_VERSION_KEY);
   const isFreshInstall = lastInstalledVersion !== extensionVersion;
 
+  // Painless Windows migrate: rewrite any existing spaced Program Files commands
+  // before (re)install, so Trae Solo works without a manual "Install MCP" click.
+  await runMcpWindowsSpaceRepair(workspaceRoot, output);
+
   await runMcpBootstrap(context, workspaceRoot, output, { forceNotify: isFreshInstall, isFreshInstall });
 
   // MCP 安装成功后，安装用户级 Skill / Rules（项目级文件仅在显式 "Install MCP" 时写入）
@@ -417,6 +421,34 @@ async function runConfigBootstrap(
   } catch (err) {
     const text = err instanceof Error ? err.message : String(err);
     output.appendLine(`[GraphFlow] Config scaffold failed: ${text}`);
+  }
+}
+
+async function runMcpWindowsSpaceRepair(
+  workspaceRoot: string | undefined,
+  output: vscode.OutputChannel
+): Promise<void> {
+  if (process.platform !== "win32") {
+    return;
+  }
+  const cwdRoot = workspaceRoot ?? process.cwd();
+  try {
+    const repairs = await runGraphFlow(cwdRoot, (runtime) =>
+      Promise.resolve(runtime.repairUnsafeWindowsMcpCommands())
+    );
+    const fixed = repairs.filter((r) => r.repaired);
+    if (fixed.length === 0) {
+      return;
+    }
+    output.appendLine("[GraphFlow] Auto-repaired Windows MCP spaced paths:");
+    for (const item of fixed) {
+      output.appendLine(
+        `- ${item.agentName}: ${item.beforeCommand} → ${item.afterCommand} (${item.configPath})`
+      );
+    }
+  } catch (err) {
+    const text = err instanceof Error ? err.message : String(err);
+    output.appendLine(`[GraphFlow] MCP path auto-repair skipped: ${text}`);
   }
 }
 

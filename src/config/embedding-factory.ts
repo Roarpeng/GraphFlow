@@ -127,10 +127,19 @@ export function createEmbeddingProviderFromConfig(
       model,
       dimensions,
     });
-    // 创建后异步预热：避免首个真实请求的冷启动延迟。
-    // 非阻塞：用 void 触发，预热失败由 warmupEmbeddingProvider 内部静默处理。
-    // Resilient local provider will settle to hash on MODULE_NOT_FOUND without throwing.
-    void warmupEmbeddingProvider(embeddingProvider);
+    // Skip warmup in vitest / explicit CI flag. Background MiniLM download from
+    // HuggingFace has no hard timeout and can keep the test process alive for 30m+.
+    const skipWarmup =
+      process.env.GRAPHFLOW_SKIP_EMBEDDING_WARMUP === "1" ||
+      process.env.VITEST === "true" ||
+      process.env.VITEST === "1" ||
+      typeof process.env.VITEST_WORKER_ID === "string";
+    if (!skipWarmup) {
+      // 创建后异步预热：避免首个真实请求的冷启动延迟。
+      // 非阻塞：用 void 触发，预热失败由 warmupEmbeddingProvider 内部静默处理。
+      // Resilient local provider will settle to hash on MODULE_NOT_FOUND without throwing.
+      void warmupEmbeddingProvider(embeddingProvider);
+    }
   }
 
   return embeddingProvider;

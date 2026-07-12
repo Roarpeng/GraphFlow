@@ -101,6 +101,60 @@ describe("M63 Antigravity / Gemini / Copilot install", () => {
     expect(sanitized.command === "node" || existsSync(sanitized.command)).toBe(true);
   });
 
+  it("repairUnsafeWindowsMcpCommands rewrites existing Trae-style mcp.json in place", async () => {
+    if (process.platform !== "win32") {
+      return;
+    }
+    const spacedNode = "C:\\Program Files\\nodejs\\node.exe";
+    if (!existsSync(spacedNode)) {
+      return;
+    }
+    const dir = mkdtempSync(join(tmpdir(), "gf-mcp-repair-"));
+    const configPath = join(dir, "mcp.json");
+    const launcher = join(dir, "mcp-launcher.cjs");
+    writeFileSync(launcher, "console.log('ok')\n", "utf8");
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          mcpServers: {
+            graphflow: {
+              command: spacedNode,
+              args: [launcher],
+            },
+          },
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+    try {
+      const { repairUnsafeWindowsMcpCommands } = await import(
+        "../src/integrations/agent-mcp-installer"
+      );
+      const results = repairUnsafeWindowsMcpCommands("graphflow", {
+        targets: [
+          {
+            agentId: "trae-solo-cn",
+            agentName: "TRAE SOLO CN",
+            configPath,
+            serversKey: "mcpServers",
+          },
+        ],
+      });
+      expect(results).toHaveLength(1);
+      expect(results[0]?.repaired).toBe(true);
+      expect(results[0]?.afterCommand).not.toMatch(/\s/);
+
+      const after = JSON.parse(readFileSync(configPath, "utf8")).mcpServers.graphflow;
+      expect(after.command).not.toMatch(/\s/);
+      expect(after.command === "node" || existsSync(after.command)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("installs Antigravity rules, skills, Copilot instructions, and project GEMINI.md", () => {
     const dir = mkdtempSync(join(tmpdir(), "gf-agents-"));
     const targets = getProjectLevelRuleTargets(dir);

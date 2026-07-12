@@ -56,4 +56,5 @@ export {
   detectInstalledAgents,
   formatModelConfigGuide,
   installMcpToDetectedAgents,
+  repairUnsafeWindowsMcpCommands,
 } from "../../integrations/agent-mcp-installer";
