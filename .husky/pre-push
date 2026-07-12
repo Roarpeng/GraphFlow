@@ -1,1 +1,3 @@
 npm run lint
+# Catch version/doc drift before CI (m48-doc-code-consistency)
+npx vitest run tests/m48-doc-code-consistency.test.ts
