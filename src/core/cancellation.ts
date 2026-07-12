@@ -8,6 +8,7 @@
 import { logger } from "../utils/logger.js";
 
 export type RuntimeTimelinePhase =
+  | "runtime.controller"
   | "dag.node"
   | "provider.fetch"
   | "provider.execute"
@@ -32,8 +33,23 @@ export interface RuntimeTimelineEvent {
   durationMs?: number;
 }
 
+export interface RuntimeTimelineQuery {
+  limit?: number;
+  phase?: RuntimeTimelinePhase;
+  status?: RuntimeTimelineStatus;
+  id?: string;
+}
+
+export interface RuntimeTimelineSummary {
+  totalBuffered: number;
+  byStatus: Partial<Record<RuntimeTimelineStatus, number>>;
+  byPhase: Partial<Record<RuntimeTimelinePhase, number>>;
+  recent: RuntimeTimelineEvent[];
+}
+
 const timelineBuffer: RuntimeTimelineEvent[] = [];
 const MAX_TIMELINE_EVENTS = 200;
+const DEFAULT_TIMELINE_RECENT_LIMIT = 30;
 
 export function emitRuntimeTimeline(event: Omit<RuntimeTimelineEvent, "ts"> & { ts?: number }): void {
   const full: RuntimeTimelineEvent = {
@@ -52,6 +68,45 @@ export function getRuntimeTimeline(limit = 50): RuntimeTimelineEvent[] {
   return timelineBuffer.slice(-n);
 }
 
+export function queryRuntimeTimeline(query: RuntimeTimelineQuery = {}): RuntimeTimelineEvent[] {
+  const filtered = timelineBuffer.filter((event) => {
+    if (query.phase !== undefined && event.phase !== query.phase) {
+      return false;
+    }
+    if (query.status !== undefined && event.status !== query.status) {
+      return false;
+    }
+    if (query.id !== undefined && event.id !== query.id) {
+      return false;
+    }
+    return true;
+  });
+
+  if (query.limit === undefined) {
+    return filtered;
+  }
+
+  const n = Math.max(0, Math.min(query.limit, MAX_TIMELINE_EVENTS));
+  return filtered.slice(-n);
+}
+
+export function getRuntimeTimelineSummary(): RuntimeTimelineSummary {
+  const byStatus: RuntimeTimelineSummary["byStatus"] = {};
+  const byPhase: RuntimeTimelineSummary["byPhase"] = {};
+
+  for (const event of timelineBuffer) {
+    byStatus[event.status] = (byStatus[event.status] ?? 0) + 1;
+    byPhase[event.phase] = (byPhase[event.phase] ?? 0) + 1;
+  }
+
+  return {
+    totalBuffered: timelineBuffer.length,
+    byStatus,
+    byPhase,
+    recent: queryRuntimeTimeline({ limit: DEFAULT_TIMELINE_RECENT_LIMIT }),
+  };
+}
+
 export function clearRuntimeTimeline(): void {
   timelineBuffer.length = 0;
 }
@@ -63,6 +118,50 @@ export function isAbortError(error: unknown): boolean {
   const name = "name" in error ? String((error as { name?: unknown }).name) : "";
   const message = "message" in error ? String((error as { message?: unknown }).message) : "";
   return name === "AbortError" || /aborted|abort/i.test(message);
+}
+
+export interface PauseAwareRuntimeController {
+  waitIfPaused(): Promise<void>;
+}
+
+export async function waitWhilePaused(controller?: PauseAwareRuntimeController): Promise<void> {
+  await controller?.waitIfPaused();
+}
+
+/** Merge any number of external signals into one disposable child signal. */
+export function createMergedAbortSignal(
+  externals: Array<AbortSignal | undefined>
+): { signal?: AbortSignal; dispose: () => void } {
+  const signals = externals.filter((signal): signal is AbortSignal => signal !== undefined);
+  if (signals.length === 0) {
+    return { dispose: () => undefined };
+  }
+
+  const controller = new AbortController();
+  const listeners: Array<{ signal: AbortSignal; listener: () => void }> = [];
+  const abortFrom = (source: AbortSignal): void => {
+    if (!controller.signal.aborted) {
+      controller.abort(source.reason ?? new Error("Aborted"));
+    }
+  };
+
+  for (const signal of signals) {
+    if (signal.aborted) {
+      abortFrom(signal);
+      continue;
+    }
+    const listener = (): void => abortFrom(signal);
+    listeners.push({ signal, listener });
+    signal.addEventListener("abort", listener, { once: true });
+  }
+
+  const dispose = (): void => {
+    for (const { signal, listener } of listeners) {
+      signal.removeEventListener("abort", listener);
+    }
+  };
+
+  return { signal: controller.signal, dispose };
 }
 
 /** Merge an optional external signal with a timeout into one AbortSignal. */

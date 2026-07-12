@@ -10,15 +10,35 @@ let initPromise: Promise<void> | null = null;
 export interface TreeSitterSyntaxNode {
   type: string;
   text: string;
-  startPosition: { row: number };
+  startPosition: { row: number; column?: number };
   parent?: TreeSitterSyntaxNode;
   namedChildren: TreeSitterSyntaxNode[];
   children?: TreeSitterSyntaxNode[];
   childForFieldName(name: string): TreeSitterSyntaxNode | null;
 }
 
+export interface TreeSitterPoint {
+  row: number;
+  column: number;
+}
+
+export interface TreeSitterEdit {
+  startIndex: number;
+  oldEndIndex: number;
+  newEndIndex: number;
+  startPosition: TreeSitterPoint;
+  oldEndPosition: TreeSitterPoint;
+  newEndPosition: TreeSitterPoint;
+}
+
+export interface TreeSitterTree {
+  rootNode: TreeSitterSyntaxNode;
+  edit?(edit: TreeSitterEdit): void;
+  delete?(): void;
+}
+
 export interface TreeSitterParser {
-  parse(content: string): { rootNode: TreeSitterSyntaxNode };
+  parse(content: string, oldTree?: unknown): TreeSitterTree;
 }
 
 /**
@@ -39,6 +59,8 @@ export type TreeSitterLanguage =
   | "swift";
 
 const WASM_CACHE_DIR = join(process.cwd(), ".graphflow-cache", "wasm");
+const languageLoadPromises = new Map<TreeSitterLanguage, Promise<unknown>>();
+const parserPool = new Map<TreeSitterLanguage, Promise<TreeSitterParser>>();
 
 function wasmFileName(language: TreeSitterLanguage): string {
   return `tree-sitter-${language}.wasm`;
@@ -103,10 +125,33 @@ function resolveTreeSitterWasmsPath(fileName: string): string | null {
 export async function getTreeSitterParser(
   language: TreeSitterLanguage
 ): Promise<TreeSitterParser> {
+  const pooledParser = parserPool.get(language);
+  if (pooledParser) {
+    return pooledParser;
+  }
+
+  const parserPromise = createTreeSitterParser(language);
+  parserPool.set(language, parserPromise);
+  return parserPromise;
+}
+
+async function createTreeSitterParser(language: TreeSitterLanguage): Promise<TreeSitterParser> {
   if (!initPromise) {
     initPromise = Parser.init();
   }
   await initPromise;
+
+  const parser = new Parser();
+  const lang = await loadTreeSitterLanguage(language);
+  parser.setLanguage(lang);
+  return parser as TreeSitterParser;
+}
+
+async function loadTreeSitterLanguage(language: TreeSitterLanguage): Promise<unknown> {
+  const cachedLanguage = languageLoadPromises.get(language);
+  if (cachedLanguage) {
+    return cachedLanguage;
+  }
 
   const wasmPath = resolveBundledWasmPath(language);
   if (!wasmPath) {
@@ -116,8 +161,7 @@ export async function getTreeSitterParser(
     );
   }
 
-  const parser = new Parser();
-  const lang = await Parser.Language.load(wasmPath);
-  parser.setLanguage(lang);
-  return parser as TreeSitterParser;
+  const languagePromise = Parser.Language.load(wasmPath) as Promise<unknown>;
+  languageLoadPromises.set(language, languagePromise);
+  return languagePromise;
 }

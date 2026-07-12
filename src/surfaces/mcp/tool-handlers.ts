@@ -17,6 +17,7 @@ import {
   submitAgentInsightResult,
   mergeAgentInsightResult,
 } from "../cli/runtime";
+import { getRuntimeTimelineSummary } from "../../core/cancellation";
 import type { McpServer } from "./server.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -169,6 +170,7 @@ export async function executeToolCall(
         health,
         graph,
         stats,
+        runtimeTimeline: getRuntimeTimelineSummary(),
       });
     }
     case "graphflow_artifact": {

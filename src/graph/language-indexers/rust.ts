@@ -1,5 +1,6 @@
 import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index.js";
-import { getTreeSitterParser, type TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
+import { parseFileIncremental } from "./incremental-parse.js";
+import type { TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
 
 /**
  * Rust indexer using tree-sitter AST (upgraded from line-level regex).
@@ -19,8 +20,7 @@ export const rustIndexer: LanguageIndexer = {
 
     let tree;
     try {
-      const parser = await getTreeSitterParser("rust");
-      tree = parser.parse(content);
+      tree = await parseFileIncremental(filePath, "rust", content);
     } catch {
       // Fallback to regex if tree-sitter WASM unavailable
       return rustRegexFallback(filePath, content);
