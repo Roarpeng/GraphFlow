@@ -67,6 +67,9 @@ export interface TaskRunResult {
       prompt: string;
       expectedFormat: string;
     }>;
+    agentInstructions?: string;
+    requiresAgentBridge?: boolean;
+    status?: "awaiting-agent" | "complete";
     insightSummary?: string;
     /** 多 Agent 协作编排：每个任务节点建议的 agent 专业领域映射 */
     agentAssignments?: Array<{ taskId: string; specialty: AgentSpecialty }>;

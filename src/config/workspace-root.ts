@@ -41,7 +41,14 @@ export function resolveRuntimeWorkspaceRoot(options?: {
 
   const envRoot = process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim();
   if (envRoot) {
-    return assertSafeWorkspaceRoot(envRoot, "GRAPHFLOW_WORKSPACE_ROOT");
+    const resolvedEnv = resolve(envRoot);
+    // Cursor often spawns MCP with cwd=home and a poisoned env; clear and
+    // fall through so explicit rootDir / discovery can still succeed.
+    if (isUnsafeWorkspaceFallback(resolvedEnv)) {
+      delete process.env.GRAPHFLOW_WORKSPACE_ROOT;
+    } else {
+      return resolvedEnv;
+    }
   }
 
   if (options?.projectWorkspaceRoot?.trim()) {

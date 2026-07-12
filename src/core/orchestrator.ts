@@ -208,7 +208,12 @@ async function runOrchestration(
         ? {
             agentMode: "delegated-llm" as const,
             agentWorkItems: planInsightBundle.agentWorkItems,
+            ...(planInsightBundle.agentInstructions
+              ? { agentInstructions: planInsightBundle.agentInstructions }
+              : {}),
             ...(insightSummary ? { insightSummary } : {}),
+            requiresAgentBridge: true as const,
+            status: "awaiting-agent" as const,
           }
         : insightSummary
           ? { insightSummary }
@@ -217,7 +222,7 @@ async function runOrchestration(
       status: "DELEGATED",
       attempts: 0,
       feedback: planInsightBundle?.mode === "agent-delegated"
-        ? `[DELEGATED][AGENT-LLM] Planned ${plan.length} task(s); use agentWorkItems prompts with your model (no GraphFlow API). plannerDraft=${shorten(plannerDraft)}`
+        ? `[DELEGATED][AGENT-BRIDGE] No GraphFlow LLM — complete agentWorkItems via graphflow_insight submit/merge before treating the plan as final. provisionalPlan=${plan.length}; plannerDraft=${shorten(plannerDraft)}`
         : `[DELEGATED] Planned ${plan.length} task(s) for external agent execution; plannerDraft=${shorten(plannerDraft)}`,
       ...(brainstormIdeas ? { brainstormIdeas } : {}),
       executionDescriptor: {

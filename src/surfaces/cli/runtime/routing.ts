@@ -33,6 +33,7 @@ import {
   submitAgentInsight,
   type SubmitAgentInsightResult,
 } from "../../../core/submit-agent-insight";
+import { getRuntimeTimelineSummary } from "../../../core/cancellation";
 import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
 import { buildEmbeddingOptions } from "./env.js";
 import { extractTokenCost } from "./helpers.js";
@@ -186,6 +187,7 @@ export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResu
       fallbackApplied: validator.fallbackApplied,
     },
     compression,
+    runtimeTimeline: getRuntimeTimelineSummary(),
   };
 }
 
@@ -292,6 +294,9 @@ export interface PlanInsightResult {
   }>;
   agentWorkItems?: AgentWorkItem[];
   agentInstructions?: string;
+  status?: "awaiting-agent" | "complete";
+  complete?: boolean;
+  requiresAgentBridge?: boolean;
 }
 
 export async function planInsightResult(task: string, configPath?: string): Promise<PlanInsightResult> {
@@ -309,6 +314,9 @@ export async function planInsightResult(task: string, configPath?: string): Prom
       })),
       ...(delegated.agentWorkItems ? { agentWorkItems: delegated.agentWorkItems } : {}),
       ...(delegated.agentInstructions ? { agentInstructions: delegated.agentInstructions } : {}),
+      status: "awaiting-agent",
+      complete: false,
+      requiresAgentBridge: true,
     };
   }
 
@@ -324,6 +332,9 @@ export async function planInsightResult(task: string, configPath?: string): Prom
       description: node.description,
       dependencies: node.dependencies,
     })),
+    status: "complete",
+    complete: true,
+    requiresAgentBridge: false,
   };
 }
 

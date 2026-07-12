@@ -816,8 +816,8 @@ function formatAgentDelegationChatMarkdown(
     "",
     "Close the loop:",
     "1. Answer each work-item prompt with your model.",
-    `2. Call \`graphflow_submit_insight\` per item (\`task\`, \`workItemId\`, \`response\`${episodeSuffix}).`,
-    "3. When all items are submitted, call `graphflow_merge_insight` to merge insights into the plan.",
+    `2. Call \`graphflow_insight\` with mode=\`submit\` per item (\`task\`, \`workItemId\`, \`response\`${episodeSuffix}).`,
+    "3. When all required items are submitted, call `graphflow_insight` with mode=`merge` to produce the real insight + plan.",
     "4. Execute the plan / `executionDescriptor`.",
     `5. Call \`graphflow_report_outcome\` with \`success\`${result.episodeId ? ` and \`episodeId\`=\`${result.episodeId}\`` : ""}.`
   );

@@ -682,7 +682,7 @@ export function buildAgentWorkItemsHtml(result: AgentDelegationPanelResult, scri
     <section class="reminder">
       Complete the prompts below with your connected coding agent model, then close the loop:
       <ul>
-        <li>Call <code>graphflow_submit_insight</code> with your Six Hats / plan-refinement JSON responses.</li>
+        <li>Call <code>graphflow_insight</code> (mode=<code>submit</code>) with your Six Hats / plan-refinement JSON responses, then <code>merge</code>.</li>
         <li>After executing the task, call <code>graphflow_report_outcome</code>${result.episodeId ? ` with episodeId <code>${escapeHtml(result.episodeId)}</code>` : ""}.</li>
       </ul>
     </section>

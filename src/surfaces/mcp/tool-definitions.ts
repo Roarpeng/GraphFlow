@@ -63,7 +63,8 @@ export function getToolDefinitions(): ToolDefinition[] {
     },
     {
       name: "graphflow_plan",
-      description: "[Core] Generate a DAG-style task plan. Use mode='simple' for quick planning, mode='insight' for deep Six Hats + 5-Why analysis.",
+      description:
+        "[Core] Generate a DAG-style task plan. mode='simple' for quick planning; mode='insight' for Six Hats + 5-Why. Without a GraphFlow LLM API key, insight mode returns mode='agent-delegated' with agentWorkItems — you MUST answer them via graphflow_insight (submit then merge). Do not treat placeholder insight/plan as final.",
       inputSchema: {
         type: "object",
         properties: {
