@@ -726,7 +726,10 @@ export function resolveMcpNodeLaunch(options: {
   // 1. Explicit node command (highest priority)
   const explicitNode = options.nodeCommand?.trim();
   if (explicitNode && isUsableNodeCommand(explicitNode) && !isEphemeralNodePath(explicitNode)) {
-    return { command: explicitNode, env: { ...MCP_STDIO_ENV } };
+    return {
+      command: preferSpaceFreeWindowsPath(explicitNode),
+      env: { ...MCP_STDIO_ENV },
+    };
   }
 
   // 2. System Node — preferred over Electron because:
@@ -735,14 +738,24 @@ export function resolveMcpNodeLaunch(options: {
   //    - Better compatibility with MCP client spawn logic
   const systemNode = resolveSystemNodeCommand();
   if (systemNode && systemNode !== "node") {
-    return { command: systemNode, env: { ...MCP_STDIO_ENV } };
+    const safeNode = preferSpaceFreeWindowsPath(systemNode);
+    // Trae/some clients invoke `command` via cmd.exe without quoting. If we still
+    // have spaces (8.3 disabled), fall back to bare "node" so PATH resolution works.
+    if (safeNode.includes(" ")) {
+      return { command: "node", env: { ...MCP_STDIO_ENV } };
+    }
+    return { command: safeNode, env: { ...MCP_STDIO_ENV } };
   }
 
   // 3. Electron fallback — when system Node is unavailable, use the IDE's bundled Electron
   const electronExecPath = options.electronExecPath?.trim();
   if (electronExecPath && existsSync(electronExecPath)) {
+    const safeElectron = preferSpaceFreeWindowsPath(electronExecPath);
+    if (safeElectron.includes(" ")) {
+      return { command: "node", env: { ...MCP_STDIO_ENV } };
+    }
     return {
-      command: electronExecPath,
+      command: safeElectron,
       env: {
         ...MCP_STDIO_ENV,
         ELECTRON_RUN_AS_NODE: "1",
@@ -760,7 +773,7 @@ export function resolveMcpNodeLaunch(options: {
  * quoting, so paths like "C:\Program Files\..." break with "'C:\Program' is not
  * recognized". The 8.3 short name (e.g., "C:\PROGRA~1\...") avoids this entirely.
  */
-function getWindowsShortPath(longPath: string): string | undefined {
+export function getWindowsShortPath(longPath: string): string | undefined {
   if (!isWindows() || !longPath || !longPath.includes(" ")) {
     return longPath;
   }
@@ -785,8 +798,9 @@ function getWindowsShortPath(longPath: string): string | undefined {
   }
   // Fallback: PowerShell with FileSystemObject COM
   try {
+    const escaped = longPath.replace(/'/g, "''");
     const result = execSync(
-      `$fso = New-Object -ComObject Scripting.FileSystemObject; $fso.GetFile('${longPath}').ShortPath`,
+      `$fso = New-Object -ComObject Scripting.FileSystemObject; if (Test-Path -LiteralPath '${escaped}') { if ((Get-Item -LiteralPath '${escaped}') -is [System.IO.DirectoryInfo]) { $fso.GetFolder('${escaped}').ShortPath } else { $fso.GetFile('${escaped}').ShortPath } }`,
       {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
@@ -801,6 +815,56 @@ function getWindowsShortPath(longPath: string): string | undefined {
     // 8.3 name generation may be disabled on some volumes
   }
   return undefined;
+}
+
+/** Prefer 8.3 short path on Windows when the input contains spaces; otherwise keep as-is. */
+export function preferSpaceFreeWindowsPath(pathValue: string): string {
+  if (!isWindows() || !pathValue.includes(" ")) {
+    return pathValue;
+  }
+  return getWindowsShortPath(pathValue) ?? pathValue;
+}
+
+/**
+ * Final guard for MCP clients (notably Trae) that spawn `command` via cmd.exe
+ * without quoting. Ensures install-time configs never write spaced absolute paths.
+ */
+export function sanitizeMcpServerNodeForWindowsClients(node: McpServerNode): McpServerNode {
+  if (!isWindows()) {
+    return node;
+  }
+
+  let command = preferSpaceFreeWindowsPath(node.command);
+  // Absolute node/electron paths that still contain spaces → bare "node" via PATH.
+  if (
+    command.includes(" ") &&
+    (/[\\/]node(\.exe)?$/i.test(command) || /[\\/]electron(\.exe)?$/i.test(command))
+  ) {
+    command = "node";
+  }
+
+  const args = node.args.map((arg) => {
+    if (!arg.includes(" ")) {
+      return arg;
+    }
+    // Only rewrite filesystem-looking args; leave flags like "--foo bar" alone.
+    if (/^[A-Za-z]:[\\/]/.test(arg) || arg.startsWith("\\\\") || arg.includes("/") || arg.includes("\\")) {
+      return preferSpaceFreeWindowsPath(arg);
+    }
+    return arg;
+  });
+
+  const sanitized: McpServerNode = {
+    command,
+    args,
+  };
+  if (node.env) {
+    sanitized.env = node.env;
+  }
+  if (node.cwd) {
+    sanitized.cwd = preferSpaceFreeWindowsPath(node.cwd);
+  }
+  return sanitized;
 }
 
 function resolveWindowsNpxLaunch(): { command: string; args: string[] } | undefined {
@@ -834,6 +898,10 @@ function resolveWindowsNpxLaunch(): { command: string; args: string[] } | undefi
 }
 
 export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
+  return sanitizeMcpServerNodeForWindowsClients(buildMcpServerNodeRaw(options));
+}
+
+function buildMcpServerNodeRaw(options: McpInstallOptions): McpServerNode {
   const cwd = options.workspaceRoot ?? options.npmScriptCwd ?? process.cwd();
   // Only inject workspace root when explicitly passed (workspace-scope installs).
   // Never fall back to process.env — that pollutes user-level agent configs.
@@ -1158,13 +1226,13 @@ function injectIntoConfig(
     delete mergedEnv.GRAPHFLOW_WORKSPACE_ROOT;
   }
 
-  servers[serverName] = {
+  servers[serverName] = sanitizeMcpServerNodeForWindowsClients({
     ...previous,
     ...node,
     ...(previous?.args && !node.args?.length ? { args: previous.args } : {}),
     ...(previous?.command && !node.command ? { command: previous.command } : {}),
     env: mergedEnv,
-  };
+  });
   if (!Object.prototype.hasOwnProperty.call(node, "cwd")) {
     delete servers[serverName].cwd;
   }

@@ -75,16 +75,16 @@ jobs:
           VSIX=$(ls artifacts/graphflow-vscode-*.vsix | head -n 1)
           NOTES="GraphFlow VS Code/Cursor extension **v${VERSION}**.
 
-          ## Highlights (1.7.1+)
-          - Resilient embedding: hash fallback when Xenova is unavailable (no more MODULE_NOT_FOUND spam)
-          - Retrieval denoise: demote vscode-extension/vendor noise for architecture queries
-          - Optional full-graph vector recall via \`embeddingPolicy.enableFullGraphVectorRecall\`
-          - Offline MiniLM cache: \`GRAPHFLOW_EMBEDDING_CACHE_DIR\` or \`embeddingPolicy.modelCacheDir\`
-          - VSIX does **not** bundle \`@xenova/transformers\` (use cache or hash fallback)
-          - Installer surface frozen (no new IDE auto-install targets)
+          ## Highlights
+          - Trae/Windows: MCP install writes space-free node paths (fixes 'C:\\Program' is not recognized)
+          - Resilient embedding: hash fallback when Xenova is unavailable
+          - Retrieval denoise + optional full-graph vector recall
+          - Offline MiniLM cache via GRAPHFLOW_EMBEDDING_CACHE_DIR
+          - VSIX does **not** bundle @xenova/transformers
 
           ## Install
           Download \`graphflow-vscode-${VERSION}.vsix\` → **Extensions → Install from VSIX** → reload.
+          Then run **GraphFlow: Install MCP to Agents** so Trae configs are rewritten with the fixed command.
 
           Built on Windows from commit ${GITHUB_SHA::7}."
 

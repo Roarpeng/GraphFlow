@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import {
@@ -52,6 +52,53 @@ describe("M63 Antigravity / Gemini / Copilot install", () => {
         process.env.GRAPHFLOW_WORKSPACE_ROOT = prev;
       }
     }
+  });
+
+  it("Windows node-bundled command avoids spaces for Trae-style unquoted spawn", () => {
+    if (process.platform !== "win32") {
+      return;
+    }
+    const spacedNode = "C:\\Program Files\\nodejs\\node.exe";
+    if (!existsSync(spacedNode)) {
+      return;
+    }
+    const dir = mkdtempSync(join(tmpdir(), "gf-mcp-space-"));
+    const launcher = join(dir, "mcp-launcher.cjs");
+    const server = join(dir, "server.js");
+    writeFileSync(launcher, "console.log('ok')\n", "utf8");
+    writeFileSync(server, "console.log('server')\n", "utf8");
+    try {
+      const node = buildMcpServerNode({
+        strategy: "node-bundled",
+        bundledServerPath: server,
+        launcherPath: launcher,
+        nodeCommand: spacedNode,
+      });
+      expect(node.command).not.toMatch(/\s/);
+      expect(existsSync(node.command) || node.command === "node").toBe(true);
+      expect(node.args[0]).toBe(launcher);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("sanitizeMcpServerNodeForWindowsClients rewrites spaced Program Files command", async () => {
+    if (process.platform !== "win32") {
+      return;
+    }
+    const spacedNode = "C:\\Program Files\\nodejs\\node.exe";
+    if (!existsSync(spacedNode)) {
+      return;
+    }
+    const { sanitizeMcpServerNodeForWindowsClients } = await import(
+      "../src/integrations/agent-mcp-installer"
+    );
+    const sanitized = sanitizeMcpServerNodeForWindowsClients({
+      command: spacedNode,
+      args: ["launcher.cjs"],
+    });
+    expect(sanitized.command).not.toMatch(/\s/);
+    expect(sanitized.command === "node" || existsSync(sanitized.command)).toBe(true);
   });
 
   it("installs Antigravity rules, skills, Copilot instructions, and project GEMINI.md", () => {

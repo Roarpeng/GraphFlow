@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.7.2] - 2026-07-12
+
+### Fixed
+
+- **Trae/Windows MCP install**：`buildMcpServerNode` / 写入配置时统一将含空格的 `command`（如 `C:\Program Files\nodejs\node.exe`）转为 8.3 短路径或回退 `node`，避免 Trae Solo 经 cmd 无引号启动时出现 `'C:\Program' 不是内部或外部命令`
+
 ## [1.7.1] - 2026-07-12
 
 ### Added
