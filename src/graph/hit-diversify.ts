@@ -29,22 +29,51 @@ function parentDir(path: string): string {
   return idx > 0 ? normalized.slice(0, idx) : "";
 }
 
+function looksLikeSourcePath(path: string): boolean {
+  const normalized = normalizePath(path);
+  if (!normalized || normalized.startsWith("__node__:")) {
+    return false;
+  }
+  // Real indexed symbols use file paths with separators or extensions.
+  if (normalized.includes("/") || normalized.includes("\\")) {
+    return true;
+  }
+  if (/\.(ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|kt|swift|md|json)$/i.test(normalized)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Resolve the source file used for diversify bucketing.
+ * When the graph node has no reliable file path (synthetic ids like `symbol:mod0`),
+ * fall back to a per-node bucket so diversify does not collapse unrelated symbols
+ * that happen to share the first content token (e.g. all starting with "function").
+ */
 function sourceFileForNode(node: GraphNode): string {
   const fromMeta =
     typeof node.metadata?.file === "string" && node.metadata.file.trim()
       ? node.metadata.file.trim()
-      : "";
-  if (fromMeta) {
+      : typeof node.metadata?.sourcePath === "string" && node.metadata.sourcePath.trim()
+        ? node.metadata.sourcePath.trim()
+        : "";
+  if (looksLikeSourcePath(fromMeta)) {
     return normalizePath(fromMeta);
   }
+
+  if (node.type === "Symbol") {
+    const fromId = extractFileFromSymbolId(node.id);
+    if (fromId && looksLikeSourcePath(fromId)) {
+      return normalizePath(fromId);
+    }
+  }
+
   const extracted = extractNodeSourcePath(node);
-  if (extracted) {
+  if (looksLikeSourcePath(extracted)) {
     return normalizePath(extracted);
   }
-  if (node.type === "Symbol") {
-    return normalizePath(extractFileFromSymbolId(node.id) ?? "");
-  }
-  return "";
+
+  return `__node__:${node.id}`;
 }
 
 /**

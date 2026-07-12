@@ -116,14 +116,14 @@ function graphClient(nodes: GraphNode[], keywordHits: GraphNode[]): GraphClient 
 }
 
 describe("M79 sibling slice recall", () => {
-  it("diversifyHitsBySourceFile caps symbols per file and round-robins", () => {
-    const { hubSymbols, sliceFiles } = buildStoreFamilyGraph();
-    const monopoly = [...hubSymbols, ...sliceFiles.flatMap(() => [])];
-    // Only hub symbols — after diversify, at most 2 from useGameStore.
-    const diversified = diversifyHitsBySourceFile(monopoly, { maxSymbolsPerFile: 2 });
-    const fromStore = diversified.filter((n) => n.id.includes("useGameStore.ts"));
-    expect(fromStore.length).toBeLessThanOrEqual(2);
-    expect(diversified.length).toBe(2);
+  it("diversifyHitsBySourceFile does not collapse pathless synthetic symbols", () => {
+    const synthetic: GraphNode[] = Array.from({ length: 10 }, (_, i) => ({
+      id: `symbol:mod${i}`,
+      type: "Symbol",
+      content: `function module${i}Handler(data: Data) processes module ${i} logic`,
+    }));
+    const diversified = diversifyHitsBySourceFile(synthetic, { maxSymbolsPerFile: 2 });
+    expect(diversified.length).toBe(10);
   });
 
   it("hasModuleFamilyIntent detects store/slice queries and store path hits", () => {
