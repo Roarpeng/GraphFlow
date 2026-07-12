@@ -103,8 +103,10 @@ describe("M55 MCP integration flows", () => {
       expect(result.complete).toBe(false);
       expect(result.status).toBe("awaiting-agent");
       expect(result.insight?.placeholder).toBe(true);
-      expect(result.agentWorkItems?.length).toBeGreaterThan(0);
+      // Coding/refactor tasks keep the full 18-item bridge set.
+      expect(result.agentWorkItems?.length).toBe(18);
       expect(result.agentInstructions).toContain("graphflow_insight");
+      expect(result.agentInstructions).toContain("MUST");
       // Placeholder response must not invent a DAG; agent completes plan via merge.
       expect(result.plan).toEqual([]);
     } finally {

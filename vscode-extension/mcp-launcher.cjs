@@ -129,6 +129,14 @@ function isUnsafeWorkspacePath(dir) {
 /**
  * Resolve a safe workspace root for the MCP child.
  * Returns undefined when no safe project root is available — never home/AppData.
+ *
+ * Contract: NEVER pin GRAPHFLOW_WORKSPACE_ROOT to os.homedir() / AppData.
+ * Cursor often spawns MCP with cwd=home; pinning home causes EPERM while indexing
+ * protected folders. Clear unsafe env and leave the var unset when no project root
+ * is discovered (child then requires explicit rootDir on tools).
+ *
+ * Covered by TS unit tests on ensureMcpWorkspaceEnv + resolveRuntimeWorkspaceRoot
+ * (m74); this launcher mirrors the same unsafe-path checks before spawn.
  */
 function resolveChildWorkspaceRoot() {
   const explicit = process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim();

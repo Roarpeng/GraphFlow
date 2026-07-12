@@ -7,6 +7,7 @@ import { hasUsableLlmProvider } from "../src/config/llm-availability";
 import {
   buildAgentDelegatedPlanInsight,
   buildAgentInsightWorkItems,
+  isCompactAgentInsightTask,
 } from "../src/core/agent-delegation";
 import { orchestrate } from "../src/core/orchestrator";
 import { GraphifyClient } from "../src/graph/graphify-client";
@@ -25,15 +26,39 @@ describe("M56 agent-delegated LLM (no API key)", () => {
     expect(hasUsableLlmProvider(config)).toBe(false);
   });
 
-  it("builds six-hats work items for the connected coding agent", () => {
+  it("builds full 18-item set for coding/refactor tasks", () => {
+    expect(isCompactAgentInsightTask("refactor architecture module")).toBe(false);
     const items = buildAgentInsightWorkItems("refactor architecture module");
     expect(items.length).toBe(18);
+    expect(items.filter((item) => !item.optional).length).toBe(11);
     expect(items.filter((item) => item.kind === "six-hats").length).toBe(6);
     const fiveWhys = items.filter((item) => item.kind === "five-whys");
     expect(fiveWhys.length).toBe(6);
     expect(fiveWhys.every((item) => item.optional === true)).toBe(true);
     expect(items.filter((item) => item.kind === "plan-refinement").length).toBe(1);
     expect(items[0]?.prompt).toContain("Task:");
+  });
+
+  it("builds compact required set for research/architecture analysis", () => {
+    expect(isCompactAgentInsightTask("architecture research of GraphFlow layers")).toBe(true);
+    expect(isCompactAgentInsightTask("调研 MCP 与 context 压缩")).toBe(true);
+    expect(isCompactAgentInsightTask("analyze orchestration design")).toBe(true);
+
+    const items = buildAgentInsightWorkItems("architecture research of GraphFlow layers");
+    const required = items.filter((item) => !item.optional);
+    expect(required.map((item) => item.id)).toEqual([
+      "intent-analysis",
+      "hat-1-white",
+      "hat-3-black",
+      "hat-4-yellow",
+      "hat-6-blue",
+      "decision-matrix",
+      "plan-refinement",
+    ]);
+    expect(items.length).toBe(8);
+    expect(items.find((item) => item.id === "plan-reflection")?.optional).toBe(true);
+    expect(items.some((item) => item.id === "requirement-analysis")).toBe(false);
+    expect(items.some((item) => item.kind === "five-whys")).toBe(false);
   });
 
   it("returns agent-delegated plan_insight without external API", async () => {
@@ -49,8 +74,10 @@ describe("M56 agent-delegated LLM (no API key)", () => {
       expect(result.status).toBe("awaiting-agent");
       expect(result.insight.placeholder).toBe(true);
       expect(result.plan).toEqual([]);
-      expect(result.agentWorkItems?.length).toBeGreaterThan(0);
+      expect(result.agentWorkItems?.length).toBe(18);
       expect(result.agentInstructions).toContain("AGENT-BRIDGE REQUIRED");
+      expect(result.agentInstructions).toContain("MUST submit");
+      expect(result.agentInstructions).toContain("PLACEHOLDERS");
       expect(result.agentInstructions).toContain('graphflow_insight({ mode: "submit"');
       expect(result.agentInstructions).toContain('graphflow_insight({ mode: "merge"');
       expect(result.agentInstructions).not.toContain("graphflow_submit_insight");
@@ -81,8 +108,9 @@ describe("M56 agent-delegated LLM (no API key)", () => {
       expect(run.status).toBe("DELEGATED");
       expect(run.executionDescriptor?.agentMode).toBe("delegated-llm");
       expect(run.executionDescriptor?.requiresAgentBridge).toBe(true);
-      expect(run.executionDescriptor?.agentWorkItems?.length).toBeGreaterThan(0);
+      expect(run.executionDescriptor?.agentWorkItems?.length).toBe(18);
       expect(run.executionDescriptor?.agentInstructions).toContain("graphflow_insight");
+      expect(run.executionDescriptor?.agentInstructions).toContain("MUST");
       expect(run.feedback).toContain("[AGENT-BRIDGE]");
     } finally {
       unlinkSync(configPath);

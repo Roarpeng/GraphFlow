@@ -13,9 +13,13 @@ const DEPRIORITIZED_PATH_PATTERNS = [
 
 const PRIORITIZED_PATH_PATTERNS = [
   /(?:^|\/)src\//,
-  /(?:^|\/)vscode-extension\/src\//,
   /(?:^|\/)tests\//,
 ];
+
+/** Soft-demote IDE/extension/docs noise unless the query explicitly targets them. */
+const VSCODE_EXTENSION_PATH_PATTERN = /(?:^|\/)vscode-extension\//;
+const AGENT_SKILL_PATH_PATTERN = /(?:^|\/)\.agent\//;
+const DOCS_PATH_PATTERN = /(?:^|\/)docs\//;
 
 const UI_PAGE_PATH_PATTERN = /(?:^|\/)src\/pages\//;
 const UI_COMPONENT_PATH_PATTERN = /(?:^|\/)src\/components\//;
@@ -37,6 +41,43 @@ const UI_INTERACTION_TOKENS = new Set([
   "button",
   "animation",
   "render",
+]);
+
+/** Tokens that indicate core-engine / architecture retrieval intent. */
+const CORE_ENGINE_TOKENS = new Set([
+  "orchestrator",
+  "orchestration",
+  "dag",
+  "planner",
+  "planning",
+  "slicer",
+  "context",
+  "mcp",
+  "architecture",
+  "engine",
+  "flywheel",
+  "episodic",
+  "indexer",
+  "routing",
+  "bridge",
+  "compress",
+  "compression",
+  "anchor",
+  "token",
+  "skill",
+  "graph",
+  "client",
+  "runtime",
+]);
+
+/** Tokens that indicate the caller explicitly wants vscode-extension / IDE UI. */
+const EXTENSION_INTENT_TOKENS = new Set([
+  "vscode",
+  "extension",
+  "webview",
+  "statusbar",
+  "sidebar",
+  "panel",
 ]);
 
 export function containsCJK(text: string): boolean {
@@ -254,6 +295,52 @@ function queryMatchesNode(node: GraphNode, queries: string[]): boolean {
 export interface RankNodesOptions {
   scoreTokens?: Iterable<string>;
   matchQueries?: string[];
+  /** Optional workspace path segments used as retrieval hints (e.g. from extractPathTokens). */
+  pathHints?: Iterable<string>;
+}
+
+function hasCoreEngineIntent(tokens: Set<string>): boolean {
+  return [...tokens].some((token) => CORE_ENGINE_TOKENS.has(token));
+}
+
+function hasExtensionIntent(tokens: Set<string>, query: string, pathHints: Set<string>): boolean {
+  if (/vscode-extension/i.test(query)) {
+    return true;
+  }
+  if ([...pathHints].some((hint) => /vscode-extension/i.test(hint))) {
+    return true;
+  }
+  return [...tokens].some((token) => EXTENSION_INTENT_TOKENS.has(token));
+}
+
+/**
+ * Soft-demote vscode-extension / .agent / docs paths for core-engine queries.
+ * Never hard-excludes — extension hits can still surface when they are the only match
+ * or when the query explicitly targets the extension.
+ */
+function extensionNoisePenalty(
+  path: string,
+  coreIntent: boolean,
+  extensionIntent: boolean
+): number {
+  if (extensionIntent) {
+    if (VSCODE_EXTENSION_PATH_PATTERN.test(path)) {
+      return 8;
+    }
+    return 0;
+  }
+
+  if (VSCODE_EXTENSION_PATH_PATTERN.test(path)) {
+    // Strong demotion for core/architecture queries; mild demotion otherwise.
+    return coreIntent ? -20 : -10;
+  }
+  if (AGENT_SKILL_PATH_PATTERN.test(path)) {
+    return coreIntent ? -14 : -6;
+  }
+  if (coreIntent && DOCS_PATH_PATTERN.test(path)) {
+    return -8;
+  }
+  return 0;
 }
 
 /** Re-rank keyword hits so integration/config noise does not dominate architecture queries. */
@@ -264,7 +351,12 @@ export function rankNodesForContextQuery(
 ): GraphNode[] {
   const queryTokens = new Set(options?.scoreTokens ?? tokenizeForIndex(query));
   const matchQueries = options?.matchQueries ?? [query];
+  const pathHints = new Set(
+    [...(options?.pathHints ?? [])].map((hint) => hint.toLowerCase()).filter(Boolean)
+  );
   const uiIntent = [...queryTokens].some((token) => UI_INTERACTION_TOKENS.has(token));
+  const coreIntent = hasCoreEngineIntent(queryTokens);
+  const extensionIntent = hasExtensionIntent(queryTokens, query, pathHints);
 
   const scored = nodes.map((node) => {
     let score = 0;
@@ -290,6 +382,7 @@ export function rankNodesForContextQuery(
     if (PRIORITIZED_PATH_PATTERNS.some((pattern) => pattern.test(path))) {
       score += 8;
     }
+    score += extensionNoisePenalty(path, coreIntent, extensionIntent);
     if (uiIntent) {
       if (UI_PAGE_PATH_PATTERN.test(path)) {
         score += 12;

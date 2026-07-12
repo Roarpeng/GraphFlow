@@ -1,7 +1,7 @@
 import type { GraphNode } from "../core/types.js";
 import type { GraphClient } from "./client-factory.js";
 import { reciprocalRankFusion } from "../learning/embeddings.js";
-import { buildSearchScoreTokens, expandSearchQueries } from "./graph-utils.js";
+import { buildSearchScoreTokens, expandSearchQueries, extractPathTokens } from "./graph-utils.js";
 import { rankNodesForContextQuery } from "./graph-utils.js";
 
 /**
@@ -17,6 +17,7 @@ export async function collectExpandedKeywordHits(
   const queries = expandSearchQueries(query, workspaceRoot, englishQuery);
   const baseScoreTokens = buildSearchScoreTokens(query, englishQuery);
   const matchQueries = englishQuery?.trim() ? [query, englishQuery.trim()] : [query];
+  const pathHints = extractPathTokens(workspaceRoot);
   const rankings: GraphNode[][] = [];
 
   for (const q of queries) {
@@ -26,6 +27,7 @@ export async function collectExpandedKeywordHits(
       rankNodesForContextQuery(hits, query, {
         scoreTokens: scoreTokens.length > 0 ? scoreTokens : baseScoreTokens,
         matchQueries,
+        pathHints,
       })
     );
   }
