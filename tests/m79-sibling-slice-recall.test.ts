@@ -126,6 +126,14 @@ describe("M79 sibling slice recall", () => {
     expect(diversified.length).toBe(10);
   });
 
+  it("diversifyHitsBySourceFile caps symbols per file and round-robins", () => {
+    const { hubSymbols } = buildStoreFamilyGraph();
+    const diversified = diversifyHitsBySourceFile(hubSymbols, { maxSymbolsPerFile: 2 });
+    const fromStore = diversified.filter((n) => n.id.includes("useGameStore.ts"));
+    expect(fromStore.length).toBeLessThanOrEqual(2);
+    expect(diversified.length).toBe(2);
+  });
+
   it("hasModuleFamilyIntent detects store/slice queries and store path hits", () => {
     expect(hasModuleFamilyIntent("游戏状态管理", "useGameStore slices localStorage")).toBe(true);
     expect(hasModuleFamilyIntent("random ui theme colors")).toBe(false);
