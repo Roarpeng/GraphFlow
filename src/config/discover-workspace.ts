@@ -205,8 +205,14 @@ export function discoverWorkspaceRoot(fromDir: string = process.cwd()): string |
 export function ensureMcpWorkspaceEnv(fromDir: string = process.cwd()): string | undefined {
   const existing = process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim();
   if (existing) {
-    process.env.GRAPHFLOW_WORKSPACE_ROOT = resolve(existing);
-    return process.env.GRAPHFLOW_WORKSPACE_ROOT;
+    const resolved = resolve(existing);
+    if (isUnsafeWorkspaceFallback(resolved)) {
+      delete process.env.GRAPHFLOW_WORKSPACE_ROOT;
+      // Fall through to discovery — never pin MCP to home/AppData.
+    } else {
+      process.env.GRAPHFLOW_WORKSPACE_ROOT = resolved;
+      return process.env.GRAPHFLOW_WORKSPACE_ROOT;
+    }
   }
 
   const discovered = discoverWorkspaceRoot(fromDir);

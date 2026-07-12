@@ -11,7 +11,10 @@
 import { watch, type FSWatcher, statSync } from "node:fs";
 import { join, sep, extname } from "node:path";
 import { resolveConfig } from "../config/resolve.js";
-import { resolveIncludeExtensions } from "../config/include-extensions.js";
+import {
+  DEFAULT_INCLUDE_EXTENSIONS,
+  resolveIncludeExtensions,
+} from "../config/include-extensions.js";
 import { safeReaddirSync } from "../utils/safe-fs.js";
 import { logger } from "../utils/logger.js";
 
@@ -37,6 +40,12 @@ const WATCH_IGNORED_DIRS = new Set([
   ".graphflow-cache",
   "graphflow-out",
   ".codegraph",
+  // Defense-in-depth if root was mis-resolved to the user profile.
+  "AppData",
+  "Application Data",
+  "Local Settings",
+  "OneDrive",
+  "ElevatedDiagnostics",
 ]);
 
 export class GraphFileWatcher {
@@ -66,8 +75,12 @@ export class GraphFileWatcher {
       const config = resolveConfig(this.configPath);
       this.includeExtensions = resolveIncludeExtensions(config.graphPolicy.includeExtensions);
     } catch (error) {
-      logger.warn({ error }, "Failed to resolve config for file watcher; using no extension filter");
-      this.includeExtensions = [];
+      // Empty filter previously meant "watch everything" and indexed AppData JSON noise.
+      logger.warn(
+        { error },
+        "Failed to resolve config for file watcher; using default extension filter"
+      );
+      this.includeExtensions = [...DEFAULT_INCLUDE_EXTENSIONS];
     }
 
     this.setupWatchers(this.rootDir);

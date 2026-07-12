@@ -1,7 +1,11 @@
+import { createTimeoutSignal, isAbortError } from "../../core/cancellation";
 import { logger } from "../../utils/logger";
+
 export interface ProviderTextRequest {
   prompt: string;
   model: string;
+  /** External cancel/timeout signal; merged with provider-local timeout. */
+  signal?: AbortSignal;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -43,8 +47,7 @@ export async function openaiGenerateText(request: ProviderTextRequest): Promise<
     return `[openai:${request.model}] ${request.prompt}`;
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const { signal, dispose } = createTimeoutSignal(timeoutMs, request.signal);
 
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -59,7 +62,7 @@ export async function openaiGenerateText(request: ProviderTextRequest): Promise<
         temperature: 0.1,
         max_tokens: 512,
       }),
-      signal: controller.signal,
+      signal,
     });
 
     if (!response.ok) {
@@ -74,6 +77,9 @@ export async function openaiGenerateText(request: ProviderTextRequest): Promise<
     }
     return content;
   } catch (error: unknown) {
+    if (isAbortError(error) || signal.aborted) {
+      throw error instanceof Error ? error : new Error("openai request aborted");
+    }
     const message = error instanceof Error ? error.message : String(error);
     logger.error({ error: message }, "Provider adapter caught error");
     if (strict) {
@@ -81,6 +87,6 @@ export async function openaiGenerateText(request: ProviderTextRequest): Promise<
     }
     return `[openai:${request.model}] ${request.prompt}`;
   } finally {
-    clearTimeout(timer);
+    dispose();
   }
 }

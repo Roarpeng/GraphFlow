@@ -2,12 +2,15 @@ import { logger } from "../utils/logger";
 import type { TaskNode } from "./types";
 import type { GraphClient } from "../graph/client-factory";
 import { DagCheckpoint, computeDagId } from "./dag-checkpoint";
+import { createTimeoutSignal, emitRuntimeTimeline } from "./cancellation";
 
-export type TaskExecutor = (task: TaskNode) => Promise<boolean>;
+export type TaskExecutor = (task: TaskNode, signal?: AbortSignal) => Promise<boolean>;
 
 export interface DagExecutionOptions {
   concurrencyLimit?: number;
   nodeTimeoutMs?: number;
+  /** Parent cancel signal for the whole DAG run. */
+  signal?: AbortSignal;
   /** 图存储客户端，用于 DAG 执行状态持久化（checkpoint）。不提供时纯内存执行。 */
   graphClient?: GraphClient;
   /** DAG 检查点 ID，格式 dag:${taskHash}。不提供时根据 plan 自动计算。 */
@@ -133,22 +136,52 @@ export async function executeDag(
     for (const batch of batches) {
       const results = await Promise.all(
         batch.map(async (task) => {
-          // 包裹 timeout，成功路径也要清掉定时器，避免长驻进程里 timer 泄漏
-          let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-          const taskPromise = executor(task);
-          const timeoutPromise = new Promise<boolean>((_, reject) => {
-            timeoutHandle = setTimeout(() => reject(new Error("TIMEOUT")), timeoutMs);
+          const startedAt = Date.now();
+          const { signal, abort, dispose } = createTimeoutSignal(timeoutMs, options?.signal);
+          emitRuntimeTimeline({ phase: "dag.node", status: "started", id: task.id });
+
+          // Signal-aware executors cancel in-flight work (e.g. provider fetch).
+          const taskPromise = Promise.resolve().then(() => executor(task, signal));
+          // Prevent unhandled rejection after we stop awaiting (timeout/abort race).
+          void taskPromise.catch(() => undefined);
+
+          const abortWait = new Promise<never>((_, reject) => {
+            if (signal.aborted) {
+              reject(new Error("TIMEOUT"));
+              return;
+            }
+            signal.addEventListener(
+              "abort",
+              () => reject(new Error("TIMEOUT")),
+              { once: true }
+            );
           });
+
           let ok: boolean;
           try {
-            ok = await Promise.race([taskPromise, timeoutPromise]);
+            ok = await Promise.race([taskPromise, abortWait]);
+            emitRuntimeTimeline({
+              phase: "dag.node",
+              status: "completed",
+              id: task.id,
+              durationMs: Date.now() - startedAt,
+            });
           } catch (error) {
+            if (!signal.aborted) {
+              abort(error);
+            }
+            const timedOut = signal.aborted;
+            emitRuntimeTimeline({
+              phase: "dag.node",
+              status: timedOut ? "timeout" : "failed",
+              id: task.id,
+              detail: error instanceof Error ? error.message : String(error),
+              durationMs: Date.now() - startedAt,
+            });
             logger.error({ error, taskId: task.id }, "DAG task execution failed");
             ok = false;
           } finally {
-            if (timeoutHandle) {
-              clearTimeout(timeoutHandle);
-            }
+            dispose();
           }
           return { task, ok };
         }),

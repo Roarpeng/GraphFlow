@@ -202,21 +202,39 @@ function installMcpProcessGuards(): void {
 
 if (require.main === module) {
   installMcpProcessGuards();
-  ensureMcpWorkspaceEnv();
+  const workspaceRoot = ensureMcpWorkspaceEnv();
 
-  // Start file watcher for auto-indexing on save (best-effort, non-blocking).
-  // This enables incremental re-indexing when files change, keeping the knowledge
-  // graph fresh without requiring manual `graphflow index` calls.
+  // Start file watcher only when we resolved a real project root.
+  // Cursor often spawns MCP with cwd=user home; watching that freezes startup
+  // by indexing AppData/Chrome/OneDrive and flooding stderr.
   void (async () => {
+    if (!workspaceRoot) {
+      console.error(
+        "[GraphFlow MCP] No safe workspace root resolved; skipping auto file watcher. " +
+          "Pass rootDir on tools or set GRAPHFLOW_WORKSPACE_ROOT."
+      );
+      return;
+    }
     try {
+      const { isUnsafeWorkspaceFallback } = await import("../../config/discover-workspace.js");
+      if (isUnsafeWorkspaceFallback(workspaceRoot)) {
+        console.error(
+          `[GraphFlow MCP] Refusing to watch unsafe workspace root: ${workspaceRoot}`
+        );
+        return;
+      }
       const { resolveConfig } = await import("../../config/resolve.js");
       const { startFileWatcherIfEnabled } = await import("../cli/runtime/graph.js");
       const config = resolveConfig();
       startFileWatcherIfEnabled(config);
-    } catch {
-      // File watcher is best-effort; don't fail MCP startup
+    } catch (error) {
+      console.error(
+        "[GraphFlow MCP] File watcher not started:",
+        error instanceof Error ? error.message : error
+      );
     }
   })();
 
+  // Respond to initialize immediately; watcher is background-only.
   startStdioServer();
 }
