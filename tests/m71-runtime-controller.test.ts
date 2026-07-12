@@ -57,8 +57,13 @@ describe("M71 runtime controller", () => {
     const runtime = new RuntimeController();
     const plan = [task("first"), task("second", ["first"])];
     let firstSawAbort = false;
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
     const executor: TaskExecutor = async (node, signal) => {
       if (node.id === "first") {
+        markStarted?.();
         await new Promise<never>((_, reject) => {
           signal?.addEventListener(
             "abort",
@@ -79,7 +84,7 @@ describe("M71 runtime controller", () => {
       nodeTimeoutMs: 1_000,
     });
 
-    await flushMicrotasks();
+    await started;
     runtime.cancel(new Error("user cancelled"));
     expect(runtime.state).toBe("cancelled");
     const result = await run;

@@ -2,7 +2,12 @@ import { logger } from "../utils/logger";
 import type { TaskNode } from "./types";
 import type { GraphClient } from "../graph/client-factory";
 import { DagCheckpoint, computeDagId } from "./dag-checkpoint";
-import { createTimeoutSignal, emitRuntimeTimeline } from "./cancellation";
+import {
+  createMergedAbortSignal,
+  createTimeoutSignal,
+  emitRuntimeTimeline,
+  waitWhilePaused,
+} from "./cancellation";
 import type { RuntimeController } from "./runtime-controller";
 
 export type TaskExecutor = (task: TaskNode, signal?: AbortSignal) => Promise<boolean>;
@@ -137,10 +142,25 @@ export async function executeDag(
     }
 
     for (const batch of batches) {
+      try {
+        await waitWhilePaused(options?.runtime);
+      } catch (error) {
+        for (const task of batch) {
+          emitRuntimeTimeline({
+            phase: "dag.node",
+            status: "aborted",
+            id: task.id,
+            detail: error instanceof Error ? error.message : String(error),
+          });
+          failed.add(task.id);
+        }
+        continue;
+      }
+
       const results = await Promise.all(
         batch.map(async (task) => {
           try {
-            await options?.runtime?.waitIfPaused();
+            await waitWhilePaused(options?.runtime);
           } catch (error) {
             emitRuntimeTimeline({
               phase: "dag.node",
@@ -151,9 +171,9 @@ export async function executeDag(
             return { task, ok: false };
           }
 
-          const parentSignal = options?.runtime?.signal ?? options?.signal;
+          const parentSignal = createMergedAbortSignal([options?.signal, options?.runtime?.signal]);
           const startedAt = Date.now();
-          const { signal, abort, dispose } = createTimeoutSignal(timeoutMs, parentSignal);
+          const { signal, abort, dispose } = createTimeoutSignal(timeoutMs, parentSignal.signal);
           emitRuntimeTimeline({ phase: "dag.node", status: "started", id: task.id });
 
           // Signal-aware executors cancel in-flight work (e.g. provider fetch).
@@ -163,12 +183,12 @@ export async function executeDag(
 
           const abortWait = new Promise<never>((_, reject) => {
             if (signal.aborted) {
-              reject(new Error("TIMEOUT"));
+              reject(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
               return;
             }
             signal.addEventListener(
               "abort",
-              () => reject(new Error("TIMEOUT")),
+              () => reject(signal.reason instanceof Error ? signal.reason : new Error("Aborted")),
               { once: true }
             );
           });
@@ -186,10 +206,16 @@ export async function executeDag(
             if (!signal.aborted) {
               abort(error);
             }
-            const timedOut = signal.aborted;
+            const reasonText =
+              signal.reason instanceof Error
+                ? signal.reason.message
+                : error instanceof Error
+                  ? error.message
+                  : String(signal.reason ?? error);
+            const timedOut = signal.aborted && /timed out/i.test(reasonText);
             emitRuntimeTimeline({
               phase: "dag.node",
-              status: timedOut ? "timeout" : "failed",
+              status: timedOut ? "timeout" : signal.aborted ? "aborted" : "failed",
               id: task.id,
               detail: error instanceof Error ? error.message : String(error),
               durationMs: Date.now() - startedAt,
@@ -198,6 +224,7 @@ export async function executeDag(
             ok = false;
           } finally {
             dispose();
+            parentSignal.dispose();
           }
           return { task, ok };
         }),
