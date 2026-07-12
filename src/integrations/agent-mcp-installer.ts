@@ -852,12 +852,20 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
     const runtimeRoot =
       options.bundledRuntimeRoot ?? join(options.bundledServerPath, "..", "..", "..");
     if (options.launcherPath) {
+      // Cursor/Node spawn(.cmd, {shell:false}) fails on Windows with EINVAL /
+      // "系统找不到指定的路径". Prefer the sibling .cjs under node; fall back to cmd /c.
+      let launcherForSpawn = options.launcherPath;
       if (isWindows() && options.launcherPath.toLowerCase().endsWith(".cmd")) {
-        return {
-          command: options.launcherPath,
-          args: [],
-          env: { ...mcpEnv },
-        };
+        const cjsSibling = options.launcherPath.replace(/\.cmd$/i, ".cjs");
+        if (existsSync(cjsSibling)) {
+          launcherForSpawn = cjsSibling;
+        } else {
+          return {
+            command: "cmd.exe",
+            args: ["/c", options.launcherPath],
+            env: { ...mcpEnv },
+          };
+        }
       }
 
       const launch = resolveMcpNodeLaunch({
@@ -866,7 +874,7 @@ export function buildMcpServerNode(options: McpInstallOptions): McpServerNode {
       });
       return {
         command: launch.command,
-        args: [options.launcherPath],
+        args: [launcherForSpawn],
         env: { ...mcpEnv, ...launch.env },
       };
     }

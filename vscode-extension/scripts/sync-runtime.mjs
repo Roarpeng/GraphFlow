@@ -33,7 +33,15 @@ function readPackage(name, modulesRoot) {
 const SKIP_VENDOR_PACKAGES = new Set([
   // Platform-specific native binaries must not be copied from the build OS into the VSIX.
   "onnxruntime-node",
+  // sharp is native / platform-specific; text embeddings do not require it.
+  "sharp",
 ]);
+
+// NOTE: `@xenova/transformers` (+ onnxruntime-web) is intentionally NOT in
+// runtimeRoots — it adds ~100MB+ to the VSIX. The core runtime falls back to
+// FNV-1a hash embeddings when the package cannot be resolved from vendor.
+// Users who install transformers separately can pre-seed the model cache and
+// point GRAPHFLOW_EMBEDDING_CACHE_DIR / embeddingPolicy.modelCacheDir at it.
 
 function bundlePackage(name, modulesRoot, vendorModules, visited) {
   if (visited.has(name) || SKIP_VENDOR_PACKAGES.has(name)) {
@@ -139,6 +147,8 @@ const runtimeRoots = [
   "gpt-tokenizer",
   "web-tree-sitter",
   "pino",
+  // Installer surface is frozen; do not add more IDE-specific runtime targets
+  // or @xenova/transformers here (see note above).
 ];
 
 const visited = new Set();

@@ -131,7 +131,7 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 
 ### 发布信息
 
-- 最新版本：**v1.7.0**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.7.0`
+- 最新版本：**v1.7.1**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.7.1`
 - **GitHub Release**：push 到 `main` 后 CI 在 `windows-2022` 上自动构建 VSIX 并发布到 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
 - **npm 发布**：push tag `v*`（如 `v1.4.1`）触发 [Publish npm](https://github.com/Roarpeng/GraphFlow/actions/workflows/publish-npm.yml) 工作流
 - 变更日志：`CHANGELOG.md`
@@ -263,11 +263,14 @@ GraphFlow 的压缩采用「两层渐进」策略，先用零成本图结构压�
   "embeddingPolicy": {
     "enabled": true,
     "provider": "transformers",
+    "modelCacheDir": "/path/to/preseeded/transformers-cache",
     "topK": 8,
     "minSimilarity": 0.05
   }
 }
 ```
+
+离线环境可提前预下载 `@xenova/transformers` 模型缓存，并通过 `embeddingPolicy.modelCacheDir` 或环境变量 `GRAPHFLOW_EMBEDDING_CACHE_DIR` 指向该目录。
 
 查看当前压缩与路由状态：
 
@@ -432,7 +435,7 @@ cp graphflow.config.example.json graphflow.config.json
 
 ## VS Code / Cursor 扩展
 
-扩展内置 GraphFlow runtime，**安装 VSIX 后无需再 clone 本仓库或配置 `npm run start`**。
+扩展内置 GraphFlow runtime，**安装 VSIX 后无需再 clone 本仓库或配置 `npm run start`**。VSIX 仍不捆绑 `@xenova/transformers` 模型包；需要本地语义向量时可预置缓存并设置 `GRAPHFLOW_EMBEDDING_CACHE_DIR`。Installer 支持面已冻结，后续不再继续扩展新的 IDE 安装目标。
 
 ### 安装 VSIX（推荐）
 
@@ -445,9 +448,9 @@ cp graphflow.config.example.json graphflow.config.json
 CLI 安装（若已安装 `code` / `cursor` 命令）：
 
 ```bash
-code --install-extension graphflow-vscode-1.7.0.vsix
+code --install-extension graphflow-vscode-1.7.1.vsix
 # 或
-cursor --install-extension graphflow-vscode-1.7.0.vsix
+cursor --install-extension graphflow-vscode-1.7.1.vsix
 ```
 
 ### 命令面板

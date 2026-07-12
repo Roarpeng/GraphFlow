@@ -125,6 +125,8 @@ export interface OrchestrateOptions {
   enableEpisodicMemory?: boolean;
   enableLlmTriage?: boolean;
   embeddingProvider?: import("../learning/embeddings").EmbeddingProvider;
+  /** Search all graph nodes with embeddings for vector recall. Default false. */
+  enableFullGraphVectorRecall?: boolean;
   configPath?: string;
   executionMode?: "bridge" | "llm";
   /** Enable zero-cost graph-structure compression (edge weights + PageRank). Default true. */

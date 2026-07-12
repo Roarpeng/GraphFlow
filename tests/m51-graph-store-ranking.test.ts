@@ -128,4 +128,43 @@ describe("M51 graph store resilience and retrieval ranking", () => {
       ranked.findIndex((node) => /src\/(core|graph)\//.test(node.id))
     );
   });
+
+  it("demotes packaged vendor and build output below core src for architecture queries", () => {
+    const nodes: GraphNode[] = [
+      {
+        id: "symbol:vendor/graphflow/src/core/orchestrator.ts:vend1",
+        type: "Symbol",
+        content: "function packagedOrchestrator graphflow architecture orchestrator planner context mcp graph",
+      },
+      {
+        id: "file:node_modules/@roarpeng/graphflow/dist/graph/context-slicer.js",
+        type: "File",
+        content: "node_modules graphflow architecture orchestrator planner context mcp graph slicer",
+      },
+      {
+        id: "file:dist/core/orchestrator.js",
+        type: "File",
+        content: "dist graphflow architecture orchestrator planner context mcp graph",
+      },
+      {
+        id: "file:src/core/orchestrator.ts",
+        type: "File",
+        content: "src/core/orchestrator.ts orchestrator planner context engine",
+      },
+      {
+        id: "symbol:src/graph/context-slicer.ts:slicer1",
+        type: "Symbol",
+        content: "function buildContextPackage context slicer graph architecture",
+      },
+    ];
+
+    const ranked = rankNodesForContextQuery(nodes, "graphflow architecture orchestrator planner context mcp graph");
+    const firstNoiseIndex = ranked.findIndex((node) =>
+      /(?:^|:)(?:vendor|node_modules|dist)\//.test(node.id)
+    );
+    const firstCoreIndex = ranked.findIndex((node) => /src\/(?:core|graph)\//.test(node.id));
+
+    expect(firstCoreIndex).toBeGreaterThanOrEqual(0);
+    expect(firstNoiseIndex).toBeGreaterThan(firstCoreIndex);
+  });
 });

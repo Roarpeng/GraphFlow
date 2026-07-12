@@ -70,6 +70,7 @@ export function getDefaultConfig(): GraphFlowConfig {
       vectorStorePath: `${DEFAULT_OUTPUT_DIR}/vectors.db`,
       topK: 8,
       minSimilarity: 0.05,
+      enableFullGraphVectorRecall: false,
     },
   });
 }
