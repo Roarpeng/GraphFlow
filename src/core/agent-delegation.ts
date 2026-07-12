@@ -4,8 +4,14 @@ import {
   buildHatAnalysisPrompt,
   type SixHatsInsight,
 } from "../agents/insight";
+import {
+  isCompactAgentInsightTask,
+  isResearchKeyHatColor,
+} from "../agents/task-profile";
 import { planTasks } from "../agents/planner";
 import type { TaskNode } from "./types";
+
+export { isCompactAgentInsightTask, isResearchAnalysisTask } from "../agents/task-profile";
 
 export interface AgentWorkItem {
   id: string;
@@ -39,17 +45,8 @@ const HAT_RESPONSE_SCHEMA = {
   criticalInsight: "string — what this hat contributes",
 };
 
-export function buildAgentInsightWorkItems(task: string): AgentWorkItem[] {
-  const items: AgentWorkItem[] = SIX_HATS.map((hat, index) => ({
-    id: `hat-${index + 1}-${hat.color}`,
-    kind: "six-hats" as const,
-    hat: hat.name,
-    prompt: buildHatAnalysisPrompt(task, hat),
-    expectedFormat: "json" as const,
-    responseSchema: HAT_RESPONSE_SCHEMA,
-  }));
-
-  items.unshift({
+function buildIntentWorkItem(task: string): AgentWorkItem {
+  return {
     id: "intent-analysis",
     kind: "intent",
     prompt: [
@@ -73,9 +70,11 @@ export function buildAgentInsightWorkItems(task: string): AgentWorkItem[] {
       nonGoals: "string[]",
       successDefinition: "string",
     },
-  });
+  };
+}
 
-  items.splice(1, 0, {
+function buildRequirementWorkItem(task: string): AgentWorkItem {
+  return {
     id: "requirement-analysis",
     kind: "requirement",
     prompt: [
@@ -99,39 +98,52 @@ export function buildAgentInsightWorkItems(task: string): AgentWorkItem[] {
       priority: "string",
       scope: "object",
     },
-  });
+  };
+}
 
-  SIX_HATS.forEach((hat, index) => {
-    items.push({
-      id: `why-${index + 1}-${hat.color}`,
-      kind: "five-whys",
-      hat: hat.name,
-      optional: true,
-      prompt: [
-        `Task: ${task}`,
-        "",
-        `[OPTIONAL — only answer if your ${hat.name} observation had certainty < 0.6]`,
-        `You are drilling into your ${hat.name} observation with a 5-Why chain.`,
-        `Focus per step: ${hat.whyFocus}`,
-        `Final convergence: ${hat.whyRootFocus}`,
-        "",
-        "Produce up to 5 Why steps, each a {question, answer}, then the converged rootCause.",
-        "Return ONLY a JSON object:",
-        "{",
-        '  "steps": [{"question": "Why ...?", "answer": "..."}],',
-        '  "rootCause": "the single root cause this chain converges to"',
-        "}",
-        "If the hat's certainty was >= 0.6, skip this item (do not submit).",
-      ].join("\n"),
-      expectedFormat: "json",
-      responseSchema: {
-        steps: "Array<{question:string, answer:string}>",
-        rootCause: "string — the converged root cause",
-      },
-    });
-  });
+function buildHatWorkItem(task: string, hat: (typeof SIX_HATS)[number], index: number): AgentWorkItem {
+  return {
+    id: `hat-${index + 1}-${hat.color}`,
+    kind: "six-hats",
+    hat: hat.name,
+    prompt: buildHatAnalysisPrompt(task, hat),
+    expectedFormat: "json",
+    responseSchema: HAT_RESPONSE_SCHEMA,
+  };
+}
 
-  items.push({
+function buildFiveWhyWorkItem(task: string, hat: (typeof SIX_HATS)[number], index: number): AgentWorkItem {
+  return {
+    id: `why-${index + 1}-${hat.color}`,
+    kind: "five-whys",
+    hat: hat.name,
+    optional: true,
+    prompt: [
+      `Task: ${task}`,
+      "",
+      `[OPTIONAL — only answer if your ${hat.name} observation had certainty < 0.6]`,
+      `You are drilling into your ${hat.name} observation with a 5-Why chain.`,
+      `Focus per step: ${hat.whyFocus}`,
+      `Final convergence: ${hat.whyRootFocus}`,
+      "",
+      "Produce up to 5 Why steps, each a {question, answer}, then the converged rootCause.",
+      "Return ONLY a JSON object:",
+      "{",
+      '  "steps": [{"question": "Why ...?", "answer": "..."}],',
+      '  "rootCause": "the single root cause this chain converges to"',
+      "}",
+      "If the hat's certainty was >= 0.6, skip this item (do not submit).",
+    ].join("\n"),
+    expectedFormat: "json",
+    responseSchema: {
+      steps: "Array<{question:string, answer:string}>",
+      rootCause: "string — the converged root cause",
+    },
+  };
+}
+
+function buildFirstPrinciplesWorkItem(task: string): AgentWorkItem {
+  return {
     id: "first-principles",
     kind: "first-principles",
     optional: true,
@@ -155,9 +167,11 @@ export function buildAgentInsightWorkItems(task: string): AgentWorkItem[] {
       deconstructedTo: "string[]",
       challenges: "string[]",
     },
-  });
+  };
+}
 
-  items.push({
+function buildDecisionMatrixWorkItem(task: string): AgentWorkItem {
+  return {
     id: "decision-matrix",
     kind: "decision-matrix",
     prompt: [
@@ -177,9 +191,11 @@ export function buildAgentInsightWorkItems(task: string): AgentWorkItem[] {
       recommendedOption: "string",
       rationale: "string",
     },
-  });
+  };
+}
 
-  items.push({
+function buildPlanRefinementWorkItem(task: string): AgentWorkItem {
+  return {
     id: "plan-refinement",
     kind: "plan-refinement",
     prompt: [
@@ -194,15 +210,21 @@ export function buildAgentInsightWorkItems(task: string): AgentWorkItem[] {
     responseSchema: {
       items: { id: "string", description: "string", dependencies: "string[]" },
     },
-  });
+  };
+}
 
-  items.push({
+function buildPlanReflectionWorkItem(task: string, optional: boolean): AgentWorkItem {
+  return {
     id: "plan-reflection",
     kind: "reflection",
+    ...(optional ? { optional: true } : {}),
     prompt: [
       `Task: ${task}`,
       "",
-      "Reflect on the quality of the plan you produced.",
+      optional
+        ? "[OPTIONAL for research/architecture compact mode]"
+        : "Reflect on the quality of the plan you produced.",
+      optional ? "Optionally reflect on the quality of the plan you produced." : "",
       "Return ONLY a JSON object:",
       "{",
       '  "confidence": 0.0-1.0,',
@@ -210,7 +232,9 @@ export function buildAgentInsightWorkItems(task: string): AgentWorkItem[] {
       '  "missingInformation": ["information that would improve the plan"],',
       '  "improvementDirections": ["how the plan could be improved"]',
       "}",
-    ].join("\n"),
+    ]
+      .filter(Boolean)
+      .join("\n"),
     expectedFormat: "json",
     responseSchema: {
       confidence: "number",
@@ -218,9 +242,52 @@ export function buildAgentInsightWorkItems(task: string): AgentWorkItem[] {
       missingInformation: "string[]",
       improvementDirections: "string[]",
     },
+  };
+}
+
+/** Compact set for research/analysis: ~7 required (+ optional reflection). */
+function buildCompactAgentInsightWorkItems(task: string): AgentWorkItem[] {
+  const items: AgentWorkItem[] = [buildIntentWorkItem(task)];
+
+  SIX_HATS.forEach((hat, index) => {
+    if (!isResearchKeyHatColor(hat.color)) {
+      return;
+    }
+    items.push(buildHatWorkItem(task, hat, index));
   });
 
+  items.push(buildDecisionMatrixWorkItem(task));
+  items.push(buildPlanRefinementWorkItem(task));
+  // Reflection is optional in compact mode — merge only requires !optional IDs.
+  items.push(buildPlanReflectionWorkItem(task, true));
+
   return items;
+}
+
+/** Full 18-item set for coding/refactor (default). */
+function buildFullAgentInsightWorkItems(task: string): AgentWorkItem[] {
+  const items: AgentWorkItem[] = [buildIntentWorkItem(task), buildRequirementWorkItem(task)];
+
+  SIX_HATS.forEach((hat, index) => {
+    items.push(buildHatWorkItem(task, hat, index));
+  });
+
+  SIX_HATS.forEach((hat, index) => {
+    items.push(buildFiveWhyWorkItem(task, hat, index));
+  });
+
+  items.push(buildFirstPrinciplesWorkItem(task));
+  items.push(buildDecisionMatrixWorkItem(task));
+  items.push(buildPlanRefinementWorkItem(task));
+  items.push(buildPlanReflectionWorkItem(task, false));
+
+  return items;
+}
+
+export function buildAgentInsightWorkItems(task: string): AgentWorkItem[] {
+  return isCompactAgentInsightTask(task)
+    ? buildCompactAgentInsightWorkItems(task)
+    : buildFullAgentInsightWorkItems(task);
 }
 
 export function buildAgentDelegationInstructions(
@@ -228,28 +295,33 @@ export function buildAgentDelegationInstructions(
   workItems: AgentWorkItem[]
 ): string {
   const required = workItems.filter((item) => !item.optional);
+  const compact = isCompactAgentInsightTask(task);
   const lines = [
     "[AGENT-BRIDGE REQUIRED] No GraphFlow LLM API key is configured.",
-    "YOU (the connected coding agent) must complete the insight analysis with your own model.",
-    "The insight/plan fields in this response are PLACEHOLDERS — not a finished analysis. Do not execute them as the final plan.",
+    "YOU (the connected coding agent) MUST complete the insight analysis with your own model.",
+    "The insight/plan fields in this response are PLACEHOLDERS — not a finished analysis.",
+    "Do NOT treat placeholder insight/plan as final. Do NOT skip submit+merge.",
     "",
-    "Protocol:",
-    '1. Answer each required work item prompt with your model (JSON only).',
-    '2. Submit each via graphflow_insight({ mode: "submit", task, workItemId, response }).',
-    '3. After all required items are submitted, call graphflow_insight({ mode: "merge", task }).',
+    "Protocol (MUST follow in order):",
+    '1. Answer each REQUIRED work item prompt with your model (JSON only).',
+    '2. MUST submit each via graphflow_insight({ mode: "submit", task, workItemId, response }).',
+    '3. After all required items are submitted, MUST call graphflow_insight({ mode: "merge", task }).',
     "4. Use the merged insight + plan as the real result, then implement / report_outcome as needed.",
     "",
     `Task: ${task}`,
     "",
+    `Mode: ${compact ? "compact (research/architecture analysis)" : "full (coding/refactor)"}`,
     `Required work items (${required.length}): ${required.map((item) => item.id).join(", ")}`,
-    "Suggested order: (1) intent-analysis, (2) requirement-analysis, (3-8) six-hats, (9-14) five-whys [optional if hat certainty>=0.6], (15) first-principles [optional], (16) decision-matrix, (17) plan-refinement, (18) plan-reflection.",
+    compact
+      ? "Suggested order: (1) intent-analysis, (2-5) hats white/black/yellow/blue, (6) decision-matrix, (7) plan-refinement, (8) plan-reflection [optional]."
+      : "Suggested order: (1) intent-analysis, (2) requirement-analysis, (3-8) six-hats, (9-14) five-whys [optional if hat certainty>=0.6], (15) first-principles [optional], (16) decision-matrix, (17) plan-refinement, (18) plan-reflection.",
     "",
     "Work items:",
   ];
 
   for (const item of workItems) {
     lines.push(
-      `- ${item.id} (${item.kind}${item.hat ? ` / ${item.hat}` : ""})${item.optional ? " [optional]" : ""}`
+      `- ${item.id} (${item.kind}${item.hat ? ` / ${item.hat}` : ""})${item.optional ? " [optional]" : " [REQUIRED]"}`
     );
   }
 

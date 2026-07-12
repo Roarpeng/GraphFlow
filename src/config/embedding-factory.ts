@@ -5,7 +5,12 @@ import {
   createTransformersEmbeddingProvider,
   createOpenAiEmbeddingProvider,
   warmupEmbeddingProvider,
+  EMBEDDING_DIM,
 } from "../learning/embeddings";
+import {
+  configureEmbeddingQualityMeta,
+  wrapEmbeddingProviderWithQualityMonitor,
+} from "../learning/embedding-quality";
 
 export function createEmbeddingProviderFromConfig(
   config: GraphFlowConfig
@@ -18,6 +23,9 @@ export function createEmbeddingProviderFromConfig(
   const provider = policy?.provider ?? "transformers";
 
   let embeddingProvider: EmbeddingProvider | undefined;
+  let model = "Xenova/all-MiniLM-L6-v2";
+  let dimensions = EMBEDDING_DIM;
+  let resolvedProviderName = "transformers";
 
   if (provider === "transformers") {
     embeddingProvider = createTransformersEmbeddingProvider();
@@ -30,13 +38,16 @@ export function createEmbeddingProviderFromConfig(
     if (!apiKey) {
       embeddingProvider = createTransformersEmbeddingProvider();
     } else {
+      model = policy?.model ?? "text-embedding-3-small";
+      dimensions = 1536;
+      resolvedProviderName = "openai";
       const openAiOptions: {
         apiKey: string;
         model?: string;
         baseUrl?: string;
       } = {
         apiKey,
-        model: policy?.model ?? "text-embedding-3-small",
+        model,
       };
       const baseUrl = policy?.baseUrl ?? config.providers.openai?.baseUrl;
       if (baseUrl) {
@@ -49,9 +60,19 @@ export function createEmbeddingProviderFromConfig(
     embeddingProvider = createTransformersEmbeddingProvider();
   }
 
-  // 创建后异步预热：避免首个真实请求的冷启动延迟。
-  // 非阻塞：用 void 触发，预热失败由 warmupEmbeddingProvider 内部静默处理。
   if (embeddingProvider) {
+    configureEmbeddingQualityMeta({
+      provider: resolvedProviderName,
+      model,
+      dimensions,
+    });
+    embeddingProvider = wrapEmbeddingProviderWithQualityMonitor(embeddingProvider, {
+      provider: resolvedProviderName,
+      model,
+      dimensions,
+    });
+    // 创建后异步预热：避免首个真实请求的冷启动延迟。
+    // 非阻塞：用 void 触发，预热失败由 warmupEmbeddingProvider 内部静默处理。
     void warmupEmbeddingProvider(embeddingProvider);
   }
 

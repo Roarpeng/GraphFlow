@@ -145,6 +145,24 @@ export interface RoutingDiagnosisResult {
     model: string;
     embedded: boolean;
   };
+  /** Lightweight embedding provider health / quality snapshot (in-process). */
+  embeddingQuality?: {
+    provider?: string;
+    model?: string;
+    dimensions?: number;
+    totalCalls: number;
+    failures: number;
+    failureRate: number;
+    lastError?: string;
+    lastCallAt?: number;
+    lastSample?: {
+      relatedSimilarity: number;
+      unrelatedSimilarity: number;
+      separationScore: number;
+      dimensions: number;
+      sampledAt: number;
+    };
+  };
   runtimeTimeline: RuntimeTimelineSummary;
 }
 
@@ -207,6 +225,8 @@ export interface ReportOutcomeResult {
   episodeId?: string;
   outcome?: "pass" | "fail";
   reason?: string;
+  /** Number of skill atoms upserted when the flywheel ran; 0 if skipped or no atoms. */
+  skillsUpdated?: number;
 }
 
 export interface ExpandAnchorResult {

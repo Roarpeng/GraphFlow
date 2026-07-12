@@ -1,8 +1,12 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { GraphifyClient } from "../src/graph/graphify-client";
 import { orchestrate } from "../src/core/orchestrator";
 import { recordEpisode, updateEpisodeOutcome, findSimilarEpisodes } from "../src/learning/episodic-memory";
 import { applySkillLearning, suggestSkillHints } from "../src/learning/skill-flywheel";
+import { reportOutcome, runTaskResult, getSkillInsights } from "../src/surfaces/cli/runtime";
 
 describe("M48 bridge mode outcome feedback loop", () => {
   // ── Task 1: Bridge mode returns DELEGATED, not HUMAN_REVIEW_REQUIRED ──
@@ -125,11 +129,16 @@ describe("M48 bridge mode outcome feedback loop", () => {
     expect(updated?.outcome).toBe("pass");
 
     // Step 3: Apply skill learning with the reported success
-    await applySkillLearning(client, updated!.task, {
-      status: "COMPLETED",
-      attempts: 1,
-      feedback: "done",
-    });
+    await applySkillLearning(
+      client,
+      updated!.task,
+      {
+        status: "COMPLETED",
+        attempts: 1,
+        feedback: "done",
+      },
+      updated!.lessons
+    );
 
     // Now skills should exist with positive scores
     snapshot = client.snapshot();
@@ -139,6 +148,108 @@ describe("M48 bridge mode outcome feedback loop", () => {
     // Skill hints should now be available for similar tasks
     const hints = await suggestSkillHints(client, "update readme", 3);
     expect(hints.length).toBeGreaterThan(0);
+  });
+
+  // ── Task 5b: reportOutcome path seeds skills from lessons ──────────
+  it("reportOutcome marks episode pass and writes skills from lessons", async () => {
+    const previousTimeout = process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS;
+    process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS = "1000";
+
+    const root = mkdtempSync(join(tmpdir(), "graphflow-report-outcome-"));
+    const configPath = join(root, "graphflow.config.json");
+    const storePath = join(root, "graph-store.json");
+
+    try {
+      mkdirSync(join(root, "src"), { recursive: true });
+      writeFileSync(join(root, "src", "demo.ts"), "export function demo() { return 1; }", "utf8");
+      writeFileSync(
+        configPath,
+        JSON.stringify(
+          {
+            providers: {},
+            tiers: {
+              smart: { provider: "openai", model: "gpt-5.3-codex" },
+              economy: { provider: "openai", model: "gpt-4.1-mini" },
+            },
+            budgetPolicy: { runTokenCap: 2000 },
+            graphPolicy: {
+              enableAutoBuild: true,
+              enableNearLosslessMode: true,
+              autoIndexOnPreview: false,
+              autoIndexOnRun: true,
+              workspaceRoot: root,
+              includeExtensions: [".ts"],
+              transport: "file",
+              graphStorePath: storePath,
+              maxContextTokens: 200,
+            },
+            learningPolicy: {
+              enableFlywheel: true,
+              trainingCadence: "nightly",
+              exportPath: join(root, "learning.jsonl"),
+            },
+            skillPolicy: {
+              enableSkillFlywheel: true,
+              maxSkillHints: 4,
+            },
+            routingPolicy: {
+              enableDynamicRouting: false,
+              requireApiKeyForHealthy: true,
+            },
+          },
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      // Skill-poor task alone yields no atoms; lessons must seed skills.
+      const runResult = await runTaskResult("go", configPath);
+      expect(runResult.episodeId).toBeDefined();
+
+      const reported = await reportOutcome(
+        runResult.episodeId!,
+        true,
+        ["prefer concise regression checks", "keep readme sections focused"],
+        configPath
+      );
+
+      expect(reported.ok).toBe(true);
+      expect(reported.outcome).toBe("pass");
+      expect(reported.skillsUpdated).toBeGreaterThan(0);
+
+      const insights = await getSkillInsights(configPath, 10);
+      expect(insights.skills.length).toBeGreaterThan(0);
+    } finally {
+      if (previousTimeout === undefined) {
+        delete process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS;
+      } else {
+        process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS = previousTimeout;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60000);
+
+  // ── Task 5c: lessons alone can seed skill atoms ────────────────────
+  it("applySkillLearning uses lessons when task text is skill-poor", async () => {
+    const client = new GraphifyClient();
+    const withoutLessons = await applySkillLearning(
+      client,
+      "go",
+      { status: "COMPLETED", attempts: 1, feedback: "done" }
+    );
+    expect(withoutLessons).toBe(0);
+
+    const withLessons = await applySkillLearning(
+      client,
+      "go",
+      { status: "COMPLETED", attempts: 1, feedback: "done" },
+      ["prefer concise regression checks"]
+    );
+
+    expect(withLessons).toBeGreaterThan(0);
+    const snapshot = client.snapshot();
+    expect(snapshot.nodes.some((node) => node.type === "Skill")).toBe(true);
   });
 
   // ── Task 6: updateEpisodeOutcome returns undefined for unknown id ──

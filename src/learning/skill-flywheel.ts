@@ -117,11 +117,18 @@ export function extractSkillAtoms(task: string): string[] {
 export async function applySkillLearning(
   client: GraphClient,
   task: string,
-  run: TaskRunResult
-): Promise<void> {
-  const skills = extractSkillAtoms(task);
+  run: TaskRunResult,
+  lessons?: string[]
+): Promise<number> {
+  const lessonText = (lessons ?? [])
+    .map((lesson) => lesson.trim())
+    .filter((lesson) => lesson.length > 0);
+  // Prefer task atoms; fold reported lessons so bridge report_outcome can seed skills
+  // even when the original task string is too short/generic to extract atoms.
+  const learningCorpus = [task, ...lessonText].filter(Boolean).join(" and ");
+  const skills = extractSkillAtoms(learningCorpus);
   if (skills.length === 0) {
-    return;
+    return 0;
   }
 
   const passed = run.status === "COMPLETED";
@@ -196,6 +203,7 @@ export async function applySkillLearning(
 
   await client.upsertNodes(nodes);
   await client.upsertEdges(dedupEdges(edges));
+  return skills.length;
 }
 
 export async function suggestSkillHints(

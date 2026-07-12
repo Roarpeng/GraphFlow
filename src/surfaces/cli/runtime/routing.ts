@@ -35,6 +35,7 @@ import {
 } from "../../../core/submit-agent-insight";
 import { getRuntimeTimelineSummary } from "../../../core/cancellation";
 import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
+import { getEmbeddingQualitySummary } from "../../../learning/embedding-quality";
 import { buildEmbeddingOptions } from "./env.js";
 import { extractTokenCost } from "./helpers.js";
 import type {
@@ -187,6 +188,7 @@ export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResu
       fallbackApplied: validator.fallbackApplied,
     },
     compression,
+    embeddingQuality: getEmbeddingQualitySummary(),
     runtimeTimeline: getRuntimeTimelineSummary(),
   };
 }
@@ -372,19 +374,27 @@ export async function reportOutcome(
   }
 
   // Apply skill score updates that were skipped during bridge delegation.
+  // Lessons are folded into skill atom extraction so short/generic tasks still learn.
+  let skillsUpdated = 0;
   if (config.skillPolicy?.enableSkillFlywheel) {
     const syntheticRun: TaskRunResult = {
       status: success ? "COMPLETED" : "FAILED",
       attempts: updated.attempts,
       feedback: updated.runFeedback ?? "",
     };
-    await applySkillLearning(graphClient, updated.task, syntheticRun);
+    skillsUpdated = await applySkillLearning(
+      graphClient,
+      updated.task,
+      syntheticRun,
+      updated.lessons
+    );
   }
 
   return {
     ok: true,
     episodeId: updated.id,
     outcome: success ? "pass" : "fail",
+    skillsUpdated,
   };
 }
 

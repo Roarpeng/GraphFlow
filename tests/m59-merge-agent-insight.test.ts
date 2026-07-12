@@ -163,6 +163,57 @@ describe("M59 merge agent insight", () => {
     expect(merged.submittedCount).toBe(2);
   });
 
+  it("compact research task merge requires only the compact ID set", () => {
+    const researchTask = "architecture research of context compression";
+    const requiredIds = buildAgentInsightWorkItems(researchTask)
+      .filter((item) => !item.optional)
+      .map((item) => item.id);
+    expect(requiredIds).toEqual([
+      "intent-analysis",
+      "hat-1-white",
+      "hat-3-black",
+      "hat-4-yellow",
+      "hat-6-blue",
+      "decision-matrix",
+      "plan-refinement",
+    ]);
+
+    const records = requiredIds.map((workItemId) => ({
+      workItemId,
+      parsed:
+        workItemId === "plan-refinement"
+          ? {
+              items: [{ id: "task-1", description: "Summarize architecture", dependencies: [] }],
+            }
+          : workItemId === "decision-matrix"
+            ? {
+                options: [{ name: "A", description: "keep", scores: {}, pros: [], cons: [] }],
+                recommendedOption: "A",
+                rationale: "simple",
+              }
+            : workItemId === "intent-analysis"
+              ? {
+                  explicitIntent: "research",
+                  implicitIntent: "understand",
+                  coreProblem: "scope",
+                  nonGoals: [],
+                  successDefinition: "report",
+                }
+              : {
+                  observation: `${workItemId} obs`,
+                  certainty: 0.8,
+                  criticalInsight: `${workItemId} insight`,
+                },
+      nodeId: `decision:agent-insight:${workItemId}`,
+    }));
+
+    const merged = mergeAgentInsights(researchTask, records);
+    expect(merged.complete).toBe(true);
+    expect(merged.missing).toEqual([]);
+    expect(merged.submittedCount).toBe(7);
+    expect(merged.insight.hats.length).toBe(4);
+  });
+
   it("MCP graphflow_insight merge works", async () => {
     const storePath = join(tmpdir(), `graphflow-m59-store-${Date.now()}.json`);
     const configPath = writeFileConfig(storePath);

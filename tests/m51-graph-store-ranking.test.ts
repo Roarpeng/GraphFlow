@@ -80,4 +80,52 @@ describe("M51 graph store resilience and retrieval ranking", () => {
     expect(ranked.some((node) => node.id.includes("mcp.json"))).toBe(true);
     expect(ranked.findIndex((node) => node.id.includes("mcp.json"))).toBeGreaterThan(0);
   });
+
+  it("prefers src/core and src/graph over vscode-extension for core engine queries", () => {
+    const nodes: GraphNode[] = [
+      {
+        id: "file:vscode-extension/src/extension.ts",
+        type: "File",
+        content: "vscode-extension/src/extension.ts activate orchestrator mcp graphflow",
+      },
+      {
+        id: "symbol:vscode-extension/src/extension.ts:ext1",
+        type: "Symbol",
+        content: "function activate orchestrator planner context",
+      },
+      {
+        id: "file:src/core/orchestrator.ts",
+        type: "File",
+        content: "src/core/orchestrator.ts orchestrator bridge mode planner",
+      },
+      {
+        id: "symbol:src/graph/context-slicer.ts:slicer1",
+        type: "Symbol",
+        content: "function buildContextPackage context slicer orchestrator",
+      },
+      {
+        id: "file:.agent/skills/graphflow/SKILL.md",
+        type: "File",
+        content: ".agent/skills/graphflow/SKILL.md orchestrator context planner",
+      },
+    ];
+
+    const ranked = rankNodesForContextQuery(nodes, "orchestrator architecture context-slicer planner", {
+      scoreTokens: [
+        "orchestrator",
+        "architecture",
+        "context",
+        "slicer",
+        "planner",
+      ],
+    });
+
+    expect(ranked[0]?.id).toMatch(/src\/(core|graph)\//);
+    expect(ranked.some((node) => node.id.includes("vscode-extension"))).toBe(true);
+    expect(
+      ranked.findIndex((node) => node.id.includes("vscode-extension"))
+    ).toBeGreaterThan(
+      ranked.findIndex((node) => /src\/(core|graph)\//.test(node.id))
+    );
+  });
 });

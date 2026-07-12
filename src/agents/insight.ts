@@ -22,6 +22,7 @@ import type {
   AgentThinkingProtocol,
 } from "./atp-schema";
 import { applyFirstPrinciples, evaluateOptions } from "./decision-engine";
+import { isResearchAnalysisTask, isResearchKeyHatColor } from "./task-profile";
 
 /** === Hat Definitions === */
 
@@ -509,6 +510,13 @@ export function shouldShortCircuitAtp(
   return false;
 }
 
+export interface AnalyzeSixHatsOptions {
+  /** Subset of hats to run; defaults to all six. */
+  hats?: HatDefinition[];
+  /** When true, never run automatic 5-Why chains. */
+  skipFiveWhys?: boolean;
+}
+
 /**
  * Run the full Six Thinking Hats + Five Whys analysis on a task,
  * then generate a DAG-style plan that incorporates the insights.
@@ -517,7 +525,10 @@ export function shouldShortCircuitAtp(
  * Intent -> Requirement -> SixHats -> 5Why -> FirstPrinciples
  * -> DecisionMatrix -> Planning -> Reflection.
  *
- * Adaptive short-circuit: simple tasks skip FirstPrinciples, DecisionMatrix, and Reflection.
+ * Adaptive short-circuit:
+ * - Simple tasks skip FirstPrinciples, DecisionMatrix, and Reflection.
+ * - Research/analysis tasks use a shorter path: key hats only, skip First Principles
+ *   and 5-Why spam, but keep Decision Matrix + Reflection.
  *
  * @param task The task to analyze
  * @param options Model selection and context options
@@ -532,7 +543,17 @@ export async function planInsight(
   plan: TaskNode[] | null;
   atp?: AgentThinkingProtocol;
 }> {
-  const insight = await analyzeWithSixHats(task, options);
+  const researchShortPath = isResearchAnalysisTask(task);
+  const insight = await analyzeWithSixHats(
+    task,
+    options,
+    researchShortPath
+      ? {
+          hats: SIX_HATS.filter((hat) => isResearchKeyHatColor(hat.color)),
+          skipFiveWhys: true,
+        }
+      : undefined
+  );
   const plan = await buildPlanFromInsight(task, insight, options);
 
   if (!runFullAtp) {
@@ -572,6 +593,29 @@ export async function planInsight(
     return { insight, plan, atp };
   }
 
+  if (researchShortPath) {
+    logger.info({ task }, "ATP research short-path: skipping First Principles and 5-Why");
+    const emptyFirstPrinciples = {
+      assumptions: [] as string[],
+      facts: [] as string[],
+      deconstructedTo: [] as string[],
+      challenges: [] as string[],
+    };
+    const decisionMatrix = await evaluateOptions(task, insight, emptyFirstPrinciples, options);
+    const reflection = await reflectOnPlan(insight, plan, options);
+    const atp: AgentThinkingProtocol = {
+      task,
+      intent,
+      requirements,
+      sixHatsInsight: insight,
+      firstPrinciples: emptyFirstPrinciples,
+      decisionMatrix,
+      plan: plan ?? [],
+      reflection,
+    };
+    return { insight, plan, atp };
+  }
+
   const firstPrinciples = await applyFirstPrinciples(task, insight, options);
   const decisionMatrix = await evaluateOptions(task, insight, firstPrinciples, options);
   const reflection = await reflectOnPlan(insight, plan, options);
@@ -598,12 +642,15 @@ export async function planInsight(
  */
 export async function analyzeWithSixHats(
   task: string,
-  options: PlanInsightOptions
+  options: PlanInsightOptions,
+  analyzeOptions?: AnalyzeSixHatsOptions
 ): Promise<SixHatsInsight> {
   const hatResults: WhyChainSection[] = [];
+  const hats = analyzeOptions?.hats ?? SIX_HATS;
+  const skipFiveWhys = analyzeOptions?.skipFiveWhys === true;
 
-  for (const hat of SIX_HATS) {
-    const section = await analyzeSingleHat(task, hat, options);
+  for (const hat of hats) {
+    const section = await analyzeSingleHat(task, hat, options, skipFiveWhys);
     hatResults.push(section);
   }
 
@@ -669,7 +716,8 @@ const CERTAINTY_THRESHOLD = 0.6;
 async function analyzeSingleHat(
   task: string,
   hat: HatDefinition,
-  options: PlanInsightOptions
+  options: PlanInsightOptions,
+  skipFiveWhys: boolean = false
 ): Promise<WhyChainSection> {
   const prompt = buildHatPrompt(task, hat);
   let raw = "";
@@ -681,7 +729,7 @@ async function analyzeSingleHat(
 
   const parsed = parseHatResponse(raw, hat);
   const whyChain: FiveWhyResult | null =
-    parsed.certainty < CERTAINTY_THRESHOLD
+    !skipFiveWhys && parsed.certainty < CERTAINTY_THRESHOLD
       ? await applyFiveWhys(parsed.observation, hat, options)
       : null;
 
