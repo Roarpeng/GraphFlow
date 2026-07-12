@@ -2,9 +2,9 @@
   "name": "graphflow-vscode",
   "publisher": "roarpeng",
   "displayName": "GraphFlow",
-  "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.7.1: resilient hash embedding fallback, retrieval denoise, optional full-graph vector recall, offline model cache.",
+  "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.7.2: Trae-safe Windows MCP paths (no Program Files split), resilient embedding, retrieval denoise.",
   "icon": "media/graphflow.png",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"
