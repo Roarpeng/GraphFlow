@@ -39,6 +39,8 @@ export interface LayeredPackageOptions {
   taskMode?: TaskMode;
   /** Enable vector recall via embedding similarity search. */
   enableVectorRecall?: boolean;
+  /** When true, vector recall searches all snapshot nodes with embeddings instead of keyword hits only. Default false. */
+  enableFullGraphVectorRecall?: boolean;
   /** Embedding provider for vector recall. Required when enableVectorRecall is true. */
   embeddingProvider?: EmbeddingProvider;
   /** Top-K results for vector recall. Default 8. */

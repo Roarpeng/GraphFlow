@@ -77,12 +77,18 @@ export interface GraphFlowConfig {
   };
   embeddingPolicy?: {
     enabled?: boolean;
-    provider?: "openai" | "transformers";
+    provider?: "openai" | "transformers" | "hash";
     model?: string;
     baseUrl?: string;
     apiKey?: string;
+    /** Optional local cache for @xenova/transformers models; can be pre-seeded for offline use. */
+    modelCacheDir?: string;
+    /** Backward-compatible alias for modelCacheDir. */
+    transformersCachePath?: string;
     vectorStorePath?: string;
     topK?: number;
     minSimilarity?: number;
+    /** Opt in to vector recall across all graph nodes with embeddings. Default false. */
+    enableFullGraphVectorRecall?: boolean;
   };
 }

@@ -16,8 +16,22 @@ const PRIORITIZED_PATH_PATTERNS = [
   /(?:^|\/)tests\//,
 ];
 
-/** Soft-demote IDE/extension/docs noise unless the query explicitly targets them. */
+/** Core implementation paths should beat packaging mirrors for architecture queries. */
+const CORE_SOURCE_PATH_PATTERNS = [
+  /(?:^|\/)src\/graph\//,
+  /(?:^|\/)src\/core\//,
+  /(?:^|\/)src\/surfaces\/mcp\//,
+  /(?:^|\/)src\/learning\//,
+  /(?:^|\/)src\/skills\//,
+];
+
+/** Soft-demote IDE/extension/docs and packaged dependency noise unless explicitly targeted. */
 const VSCODE_EXTENSION_PATH_PATTERN = /(?:^|\/)vscode-extension\//;
+const PACKAGING_NOISE_PATH_PATTERNS = [
+  /(?:^|\/)vendor\//,
+  /(?:^|\/)node_modules\//,
+];
+const BUILD_OUTPUT_PATH_PATTERN = /(?:^|\/)dist\//;
 const AGENT_SKILL_PATH_PATTERN = /(?:^|\/)\.agent\//;
 const DOCS_PATH_PATTERN = /(?:^|\/)docs\//;
 
@@ -343,7 +357,20 @@ function extensionNoisePenalty(
   return 0;
 }
 
-/** Re-rank keyword hits so integration/config noise does not dominate architecture queries. */
+function packagingNoisePenalty(path: string, coreIntent: boolean): number {
+  if (PACKAGING_NOISE_PATH_PATTERNS.some((pattern) => pattern.test(path))) {
+    return coreIntent ? -28 : -16;
+  }
+  if (BUILD_OUTPUT_PATH_PATTERN.test(path) && !/(?:^|\/)src\//.test(path)) {
+    return coreIntent ? -22 : -10;
+  }
+  return 0;
+}
+
+/**
+ * Re-rank keyword hits so integration/config/packaging noise does not dominate
+ * architecture queries.
+ */
 export function rankNodesForContextQuery(
   nodes: GraphNode[],
   query: string,
@@ -382,7 +409,11 @@ export function rankNodesForContextQuery(
     if (PRIORITIZED_PATH_PATTERNS.some((pattern) => pattern.test(path))) {
       score += 8;
     }
+    if (coreIntent && CORE_SOURCE_PATH_PATTERNS.some((pattern) => pattern.test(path))) {
+      score += 12;
+    }
     score += extensionNoisePenalty(path, coreIntent, extensionIntent);
+    score += packagingNoisePenalty(path, coreIntent);
     if (uiIntent) {
       if (UI_PAGE_PATH_PATTERN.test(path)) {
         score += 12;

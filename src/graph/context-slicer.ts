@@ -122,6 +122,49 @@ export function vectorRecall(
   return scored.slice(0, topK).map((s) => s.node);
 }
 
+function collectVectorRecallCandidates(
+  client: GraphClient,
+  keywordHits: GraphNode[],
+  enableFullGraphVectorRecall: boolean
+): GraphNode[] {
+  if (!enableFullGraphVectorRecall) {
+    return keywordHits;
+  }
+
+  const byId = new Map<string, GraphNode>();
+  for (const hit of keywordHits) {
+    if (extractEmbedding(hit)) {
+      byId.set(hit.id, hit);
+    }
+  }
+
+  const snapshot = client.readSnapshot?.();
+  if (!snapshot) {
+    return keywordHits;
+  }
+
+  for (const node of snapshot.nodes) {
+    if (extractEmbedding(node)) {
+      byId.set(node.id, node);
+    }
+  }
+
+  return byId.size > 0 ? Array.from(byId.values()) : keywordHits;
+}
+
+async function hnswVectorRecall(
+  nodes: GraphNode[],
+  queryEmbedding: number[],
+  topK: number,
+  minSimilarity: number
+): Promise<GraphNode[]> {
+  const { HnswVectorIndex } = await import("../learning/hnsw-index.js");
+  const index = new HnswVectorIndex();
+  index.load(nodes);
+  const results = await index.search(queryEmbedding, topK, minSimilarity);
+  return results.map((result) => result.node);
+}
+
 export async function buildLayeredContextPackage(
   client: GraphClient,
   query: string,
@@ -141,7 +184,12 @@ export async function buildLayeredContextPackage(
       const queryEmbedding = await options.embeddingProvider.embed(query);
       const topK = options.vectorTopK ?? 8;
       const minSim = options.vectorMinSimilarity ?? 0.05;
-      const vectorHits = vectorRecall(keywordHits, queryEmbedding, topK, minSim);
+      const vectorCandidates = collectVectorRecallCandidates(
+        client,
+        keywordHits,
+        options.enableFullGraphVectorRecall === true
+      );
+      const vectorHits = await hnswVectorRecall(vectorCandidates, queryEmbedding, topK, minSim);
       hits = reciprocalRankFusion([keywordHits, vectorHits]);
     } catch (error) {
       logger.warn({ error }, "Vector recall failed in buildLayeredContextPackage");
@@ -347,7 +395,7 @@ export async function buildEnhancedContextPackage(
   if (options?.taskMode) {
     const estimate = estimateContextBudget(task, options.taskMode);
     maxTokens = estimate.tokens;
-    logger.info({ estimate }, "Adaptive budget estimated");
+    logger.debug({ estimate }, "Adaptive budget estimated");
   }
 
   // Step 1: RepoMap fallback for tight budgets.
@@ -383,12 +431,12 @@ export async function buildEnhancedContextPackage(
       const queryEmbedding = await options.embeddingProvider.embed(query);
       const topK = options.vectorTopK ?? 8;
       const minSim = options.vectorMinSimilarity ?? 0.05;
-
-      const { HnswVectorIndex } = await import("../learning/hnsw-index.js");
-      const index = new HnswVectorIndex();
-      index.load(keywordHits);
-      const results = await index.search(queryEmbedding, topK, minSim);
-      const vectorHits = results.map((r) => r.node);
+      const vectorCandidates = collectVectorRecallCandidates(
+        client,
+        keywordHits,
+        options.enableFullGraphVectorRecall === true
+      );
+      const vectorHits = await hnswVectorRecall(vectorCandidates, queryEmbedding, topK, minSim);
       hits = reciprocalRankFusion([keywordHits, vectorHits]);
     } catch (error) {
       logger.warn({ error }, "Vector recall failed in buildEnhancedContextPackage");

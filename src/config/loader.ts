@@ -287,9 +287,14 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       model: input.embeddingPolicy?.model ?? "Xenova/bge-base-zh-v1.5",
       ...(input.embeddingPolicy?.baseUrl ? { baseUrl: input.embeddingPolicy.baseUrl } : {}),
       ...(input.embeddingPolicy?.apiKey ? { apiKey: input.embeddingPolicy.apiKey } : {}),
+      ...(input.embeddingPolicy?.modelCacheDir ? { modelCacheDir: input.embeddingPolicy.modelCacheDir } : {}),
+      ...(input.embeddingPolicy?.transformersCachePath
+        ? { transformersCachePath: input.embeddingPolicy.transformersCachePath }
+        : {}),
       vectorStorePath: input.embeddingPolicy?.vectorStorePath ?? `${DEFAULT_OUTPUT_DIR}/vectors.db`,
       topK: input.embeddingPolicy?.topK ?? 8,
       minSimilarity: input.embeddingPolicy?.minSimilarity ?? 0.05,
+      enableFullGraphVectorRecall: input.embeddingPolicy?.enableFullGraphVectorRecall ?? false,
     },
   };
 }

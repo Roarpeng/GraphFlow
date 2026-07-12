@@ -29,6 +29,9 @@ export async function maybeBuildNearLosslessContext(
       ? {
           embeddingProvider: options.embeddingProvider,
           enableVectorRecall: true as const,
+          ...(options.enableFullGraphVectorRecall === true
+            ? { enableFullGraphVectorRecall: true as const }
+            : {}),
         }
       : {}),
   };

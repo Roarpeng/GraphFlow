@@ -6,8 +6,17 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 
 ## 当前版本
 
-- Extension：**1.4.3**
-- 对应 VSIX：`../artifacts/graphflow-vscode-1.4.3.vsix`（CI 构建）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
+- Extension / runtime：**1.7.1**
+- 对应 VSIX：`../artifacts/graphflow-vscode-1.7.1.vsix`（CI 构建）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
+
+### v1.7.1 要点
+
+- **Embedding 韧性**：扩展 vendor 不捆绑 `@xenova/transformers`；缺失或 HF 不可达时自动降级到 `fnv1a-384` hash，不再刷 `ERR_MODULE_NOT_FOUND`
+- **检索降噪**：架构类查询降低 `vscode-extension` / `vendor` / `node_modules` 权重，优先 `src/graph`、`src/core` 等
+- **可选全图向量召回**：`embeddingPolicy.enableFullGraphVectorRecall: true`（默认关闭）
+- **离线模型缓存**：`embeddingPolicy.modelCacheDir` 或环境变量 `GRAPHFLOW_EMBEDDING_CACHE_DIR`
+- **飞轮**：`report_outcome` 成功路径写入 Skill 节点
+- **Installer 面冻结**：不再扩展新的 IDE 自动安装目标
 
 ## 安装 VSIX（最终用户）
 
@@ -22,9 +31,9 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 ### 方式 B：命令行
 
 ```bash
-code --install-extension graphflow-vscode-1.4.3.vsix
+code --install-extension graphflow-vscode-1.7.1.vsix
 # Cursor CLI（若已安装）：
-cursor --install-extension graphflow-vscode-1.4.3.vsix
+cursor --install-extension graphflow-vscode-1.7.1.vsix
 ```
 
 ### 安装后推荐流程
@@ -37,7 +46,9 @@ cursor --install-extension graphflow-vscode-1.4.3.vsix
 6. （可选）配置 Provider / Smart·Economy 模型 → **测试路由**
 7. 命令面板 → **GraphFlow: Preview Context** 或 **GraphFlow: Show Graph** 验证
 
-> **无需 LLM** 即可使用：结构建图、Context Preview（hash embedding 向量召回）、知识图谱可视化、MCP `graphflow_inspect_graph`。
+> **无需 LLM** 即可使用：结构建图、Context Preview（hash embedding 兜底向量召回）、知识图谱可视化、MCP 工具。
+>
+> **关于语义模型**：VSIX **不**捆绑 `@xenova/transformers`（体积约 100MB+）。默认 hash 可用；若需本地 MiniLM，请预置缓存并设置 `GRAPHFLOW_EMBEDDING_CACHE_DIR`（或配置 `embeddingPolicy.modelCacheDir`）。
 
 ## 功能命令
 
@@ -72,7 +83,7 @@ Chat Agent（`@graphflow`）：`/run`、`/plan`、`/graph`、`/skills`、`/diagn
 
 直接发送 VSIX 文件即可，同事**无需** clone GraphFlow 仓库：
 
-1. 从 Releases 下载 `graphflow-vscode-1.4.3.vsix`
+1. 从 Releases 下载 `graphflow-vscode-1.7.1.vsix`
 2. 按上文「安装 VSIX」步骤安装
 3. 打开项目 → Settings → 建立图谱
 
@@ -129,6 +140,11 @@ npm run package:extension
 
 - Settings → **建立图谱（无需 LLM）**
 - 或 MCP：`graphflow_index`（传入 `rootDir` 为项目绝对路径）
+
+**MCP 日志出现 No safe workspace root**
+
+- 正常保护提示：启动 cwd 不是用户项目时会跳过自动 file watcher
+- 工具调用请传 `rootDir`，或设置 `GRAPHFLOW_WORKSPACE_ROOT`
 
 **命令执行失败（开发模式）**
 

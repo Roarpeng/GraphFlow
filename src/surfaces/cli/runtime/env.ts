@@ -9,6 +9,9 @@ export function buildEmbeddingOptions(config: GraphFlowConfig) {
   return {
     embeddingProvider,
     enableVectorRecall: true as const,
+    ...(config.embeddingPolicy?.enableFullGraphVectorRecall === true
+      ? { enableFullGraphVectorRecall: true as const }
+      : {}),
     ...(config.embeddingPolicy?.topK !== undefined ? { vectorTopK: config.embeddingPolicy.topK } : {}),
     ...(config.embeddingPolicy?.minSimilarity !== undefined
       ? { vectorMinSimilarity: config.embeddingPolicy.minSimilarity }

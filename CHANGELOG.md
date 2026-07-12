@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-07-12
+
+### Added
+
+- **Resilient local embedding**：`@xenova/transformers` 缺失或加载失败时自动降级到 `fnv1a-384` hash；支持从 workspace `node_modules` 解析
+- **可选全图向量召回**：`embeddingPolicy.enableFullGraphVectorRecall`（默认 `false`），开启后对带 embedding 的图节点做 HNSW + RRF
+- **P2 transformers 离线缓存路径**：`embeddingPolicy.modelCacheDir` / `transformersCachePath` 或 `GRAPHFLOW_EMBEDDING_CACHE_DIR`
+- **测试**：`m77-embedding-fallback`、`m78-full-graph-vector-recall`
+
+### Changed
+
+- **检索降噪**：架构查询提升 `src/graph`/`src/core` 等，降低 `vscode-extension`/`vendor`/`node_modules`/非 src `dist` 权重
+- **Adaptive budget 日志**：`logger.info` → `logger.debug`，避免 MCP stderr 被 IDE 标成伪 error
+- **Installer surface 冻结**：当前 IDE/Agent 安装目标保持维护，不再继续扩展新的 IDE 自动安装面
+- **VSIX / 扩展说明**：`graphflow-vscode@1.7.1` 描述与 README 同步上述行为
+- **Windows MCP launcher**：优先 spawn `.cjs`，避免 `.cmd` + `shell:false` 的 EINVAL
+
+### Notes (VSIX)
+
+- VSIX **仍不**捆绑 `@xenova/transformers`（体积与平台原生依赖）
+- 默认 hash embedding 可用；真语义请预置缓存目录
+
 ## [1.7.0] - 2026-07-11
 
 ### Added
