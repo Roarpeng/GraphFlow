@@ -42,14 +42,14 @@ const RELATED_B = "compress codebase context to reduce tokens";
 const UNRELATED = "banana smoothie recipe with mango";
 
 export function resetEmbeddingQualityStats(): void {
-  state.provider = undefined;
-  state.model = undefined;
-  state.dimensions = undefined;
+  delete state.provider;
+  delete state.model;
+  delete state.dimensions;
   state.totalCalls = 0;
   state.failures = 0;
-  state.lastError = undefined;
-  state.lastCallAt = undefined;
-  state.lastSample = undefined;
+  delete state.lastError;
+  delete state.lastCallAt;
+  delete state.lastSample;
 }
 
 export function configureEmbeddingQualityMeta(meta: {
@@ -153,7 +153,7 @@ export function wrapEmbeddingProviderWithQualityMonitor(
     configureEmbeddingQualityMeta(meta);
   }
 
-  return {
+  const wrapped: EmbeddingProvider = {
     async embed(text: string): Promise<number[]> {
       try {
         const vector = await provider.embed(text);
@@ -164,10 +164,11 @@ export function wrapEmbeddingProviderWithQualityMonitor(
         throw error;
       }
     },
-    warmup: provider.warmup
-      ? async () => {
-          await provider.warmup!();
-        }
-      : undefined,
   };
+  if (provider.warmup) {
+    wrapped.warmup = async () => {
+      await provider.warmup!();
+    };
+  }
+  return wrapped;
 }
