@@ -1,3 +1,4 @@
+import { createTimeoutSignal, isAbortError } from "../../core/cancellation";
 import { logger } from "../../utils/logger";
 import type { ProviderTextRequest } from "./openai";
 
@@ -18,8 +19,8 @@ export async function doubaoGenerateText(request: ProviderTextRequest): Promise<
     return `[doubao:${request.model}] ${request.prompt}`;
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const { signal, dispose } = createTimeoutSignal(timeoutMs, request.signal);
+
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
@@ -33,7 +34,7 @@ export async function doubaoGenerateText(request: ProviderTextRequest): Promise<
         temperature: 0.1,
         max_tokens: 512,
       }),
-      signal: controller.signal,
+      signal,
     });
 
     if (!response.ok) {
@@ -50,6 +51,9 @@ export async function doubaoGenerateText(request: ProviderTextRequest): Promise<
     }
     return text;
   } catch (error: unknown) {
+    if (isAbortError(error) || signal.aborted) {
+      throw error instanceof Error ? error : new Error("doubao request aborted");
+    }
     logger.error(
       { error: error instanceof Error ? error.message : String(error) },
       "Provider adapter caught error"
@@ -59,6 +63,6 @@ export async function doubaoGenerateText(request: ProviderTextRequest): Promise<
     }
     return `[doubao:${request.model}] ${request.prompt}`;
   } finally {
-    clearTimeout(timer);
+    dispose();
   }
 }

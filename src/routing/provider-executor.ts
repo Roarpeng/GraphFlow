@@ -1,4 +1,5 @@
 import type { AgentRole } from "../core/types";
+import { isAbortError, runAbortable } from "../core/cancellation";
 import { logger } from "../utils/logger";
 import type { ModelSelection } from "./model-router";
 import { anthropicGenerateText } from "./provider-adapters/anthropic";
@@ -92,27 +93,6 @@ export function formatPromptWithContext(
   return lines.join("\n");
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  if (timeoutMs <= 0) {
-    return promise;
-  }
-
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-  });
-
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
-}
-
 function getCircuitState(key: string): CircuitState {
   const found = circuitByProvider.get(key);
   if (found) {
@@ -171,13 +151,11 @@ export async function executeRolePrompt(
   role: AgentRole,
   prompt: string,
   selection: ModelSelection,
-  context?: PromptContext
+  context?: PromptContext,
+  signal?: AbortSignal
 ): Promise<string> {
   const finalPrompt = formatPromptWithContext(role, prompt, context);
-  const request = {
-    prompt: finalPrompt,
-    model: selection.model,
-  };
+  const label = `${selection.provider}/${selection.model}`;
 
   const timeoutMsRaw = Number(process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS ?? 15000);
   const timeoutMs = Number.isFinite(timeoutMsRaw) ? Math.max(1000, Math.floor(timeoutMsRaw)) : 15000;
@@ -192,7 +170,12 @@ export async function executeRolePrompt(
     });
   }
 
-  const execute = async (): Promise<string> => {
+  const execute = async (abortSignal: AbortSignal): Promise<string> => {
+    const request = {
+      prompt: finalPrompt,
+      model: selection.model,
+      signal: abortSignal,
+    };
     if (selection.provider === "anthropic") {
       return anthropicGenerateText(request);
     }
@@ -214,14 +197,24 @@ export async function executeRolePrompt(
 
   let attempt = 0;
   while (attempt <= retryBudget) {
+    if (signal?.aborted) {
+      throw new ProviderError({
+        provider: selection.provider,
+        model: selection.model,
+        message: `${label} aborted`,
+        retryable: false,
+      });
+    }
     try {
-      const value = await withTimeout(execute(), timeoutMs, `${selection.provider}/${selection.model}`);
+      const value = await runAbortable(label, timeoutMs, signal, execute, "provider.fetch");
       circuitState.failures = 0;
       delete circuitState.openedUntil;
       return value;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const retryable = !/invalid|unauthorized|forbidden|404|not found/i.test(message);
+      const aborted = isAbortError(error) || signal?.aborted || /timed out|aborted/i.test(message);
+      const retryable =
+        !aborted && !/invalid|unauthorized|forbidden|404|not found/i.test(message);
       const wrapped = new ProviderError({
         provider: selection.provider,
         model: selection.model,

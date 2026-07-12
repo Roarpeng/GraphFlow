@@ -20,26 +20,37 @@ import {
  * Global config (~/.graphflow.config.json) must never pin workspaceRoot — it is
  * shared across all projects on the machine.
  */
+function assertSafeWorkspaceRoot(root: string, source: string): string {
+  const resolved = resolve(root);
+  if (isUnsafeWorkspaceFallback(resolved)) {
+    throw new Error(
+      `Refusing to use unsafe workspace root from ${source}: ${resolved}. ` +
+        `Set GRAPHFLOW_WORKSPACE_ROOT to your project directory (not home/AppData).`
+    );
+  }
+  return resolved;
+}
+
 export function resolveRuntimeWorkspaceRoot(options?: {
   rootDir?: string;
   projectWorkspaceRoot?: string;
 }): string {
   if (options?.rootDir?.trim()) {
-    return resolve(options.rootDir.trim());
+    return assertSafeWorkspaceRoot(options.rootDir.trim(), "rootDir");
   }
 
   const envRoot = process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim();
   if (envRoot) {
-    return resolve(envRoot);
+    return assertSafeWorkspaceRoot(envRoot, "GRAPHFLOW_WORKSPACE_ROOT");
   }
 
   if (options?.projectWorkspaceRoot?.trim()) {
-    return resolve(options.projectWorkspaceRoot.trim());
+    return assertSafeWorkspaceRoot(options.projectWorkspaceRoot.trim(), "projectWorkspaceRoot");
   }
 
   const discovered = discoverWorkspaceRoot(process.cwd());
   if (discovered) {
-    return discovered;
+    return assertSafeWorkspaceRoot(discovered, "discovery");
   }
 
   const cwd = resolve(process.cwd());
@@ -50,7 +61,7 @@ export function resolveRuntimeWorkspaceRoot(options?: {
   if (isGraphFlowRuntimeDirectory(cwd) || isUnsafeWorkspaceFallback(cwd)) {
     const hinted = tryResolveIdeWorkspaceHint();
     if (hinted) {
-      return hinted;
+      return assertSafeWorkspaceRoot(hinted, "IDE workspace hint");
     }
     if (isGraphFlowRuntimeDirectory(cwd)) {
       return cwd;

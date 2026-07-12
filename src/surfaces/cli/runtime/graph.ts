@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isUnsafeWorkspaceFallback } from "../../../config/discover-workspace.js";
 import { resolveConfig } from "../../../config/resolve";
 import { resolveGraphStorePath } from "../../../config/paths";
 import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
@@ -13,6 +14,7 @@ import { GraphFileWatcher } from "../../../graph/file-watcher.js";
 import { extractNodeSourcePath } from "../../../graph/graph-utils";
 import { sampleGraphForSnapshot } from "../../../graph/snapshot-view.js";
 import { getSavingsStats, resetSavingsStats, recordSavings } from "../../../graph/token-savings.js";
+import { logger } from "../../../utils/logger.js";
 import { buildEmbeddingOptions,
 } from "./env.js";
 import {
@@ -558,6 +560,15 @@ export function startFileWatcherIfEnabled(
   }
 
   const rootDir = config.graphPolicy.workspaceRoot ?? process.cwd();
+  // MCP/IDE often spawn with cwd=home; never watch the whole user profile.
+  if (isUnsafeWorkspaceFallback(rootDir)) {
+    logger.warn(
+      { rootDir },
+      "Skipping file watcher: workspace root is unsafe (home/AppData). Pass rootDir or set GRAPHFLOW_WORKSPACE_ROOT."
+    );
+    return null;
+  }
+
   const watcher = new GraphFileWatcher(rootDir, configPath);
 
   watcher.onChange((files) => {

@@ -153,7 +153,8 @@ export class GraphifyFileClient {
   private writeStore(store: GraphStore): void {
     const dir = dirname(this.storePath);
     mkdirSync(dir, { recursive: true });
-    const payload = JSON.stringify(store);
+    // Pretty-print so nodes/edges are human-readable in editors (not one giant line).
+    const payload = `${JSON.stringify(store, null, 2)}\n`;
     const tempPath = join(
       dir,
       `.graphflow-graph-${process.pid}-${randomBytes(4).toString("hex")}.tmp`

@@ -1,3 +1,4 @@
+import { createTimeoutSignal, isAbortError } from "../../core/cancellation";
 import { logger } from "../../utils/logger";
 import type { ProviderTextRequest } from "./openai";
 
@@ -15,8 +16,8 @@ export async function anthropicGenerateText(request: ProviderTextRequest): Promi
     return `[anthropic:${request.model}] ${request.prompt}`;
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const { signal, dispose } = createTimeoutSignal(timeoutMs, request.signal);
+
   try {
     const response = await fetch(`${baseUrl}/v1/messages`, {
       method: "POST",
@@ -31,7 +32,7 @@ export async function anthropicGenerateText(request: ProviderTextRequest): Promi
         temperature: 0.1,
         messages: [{ role: "user", content: request.prompt }],
       }),
-      signal: controller.signal,
+      signal,
     });
 
     if (!response.ok) {
@@ -48,6 +49,9 @@ export async function anthropicGenerateText(request: ProviderTextRequest): Promi
     }
     return text;
   } catch (error: unknown) {
+    if (isAbortError(error) || signal.aborted) {
+      throw error instanceof Error ? error : new Error("anthropic request aborted");
+    }
     logger.error(
       { error: error instanceof Error ? error.message : String(error) },
       "Provider adapter caught error"
@@ -57,6 +61,6 @@ export async function anthropicGenerateText(request: ProviderTextRequest): Promi
     }
     return `[anthropic:${request.model}] ${request.prompt}`;
   } finally {
-    clearTimeout(timer);
+    dispose();
   }
 }
