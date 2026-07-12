@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir, release } from "node:os";
@@ -754,6 +754,55 @@ export function resolveMcpNodeLaunch(options: {
   return { command: "node", env: { ...MCP_STDIO_ENV } };
 }
 
+/**
+ * On Windows, convert a long path containing spaces to its 8.3 short form.
+ * Many MCP clients (e.g., TRAE) spawn the `command` field via cmd.exe without
+ * quoting, so paths like "C:\Program Files\..." break with "'C:\Program' is not
+ * recognized". The 8.3 short name (e.g., "C:\PROGRA~1\...") avoids this entirely.
+ */
+function getWindowsShortPath(longPath: string): string | undefined {
+  if (!isWindows() || !longPath || !longPath.includes(" ")) {
+    return longPath;
+  }
+  // Try cmd.exe first (faster, available on all Windows)
+  try {
+    const result = execSync(
+      `for %A in ("${longPath}") do @echo %~sA`,
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 3000,
+        shell: "cmd.exe",
+      }
+    ).trim();
+    const lines = result.split(/\r?\n/).filter((l) => l.trim());
+    const shortPath = lines[lines.length - 1]?.trim();
+    if (shortPath && !shortPath.includes(" ") && existsSync(shortPath)) {
+      return shortPath;
+    }
+  } catch {
+    // fall through to PowerShell
+  }
+  // Fallback: PowerShell with FileSystemObject COM
+  try {
+    const result = execSync(
+      `$fso = New-Object -ComObject Scripting.FileSystemObject; $fso.GetFile('${longPath}').ShortPath`,
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 5000,
+        shell: "powershell.exe",
+      }
+    ).trim();
+    if (result && !result.includes(" ") && existsSync(result)) {
+      return result;
+    }
+  } catch {
+    // 8.3 name generation may be disabled on some volumes
+  }
+  return undefined;
+}
+
 function resolveWindowsNpxLaunch(): { command: string; args: string[] } | undefined {
   const node = resolveSystemNodeCommand();
   if (!node) {
@@ -766,9 +815,18 @@ function resolveWindowsNpxLaunch(): { command: string; args: string[] } | undefi
   ];
   for (const npxCli of candidates) {
     if (existsSync(npxCli)) {
+      // If paths contain spaces, try 8.3 short format to avoid quoting issues
+      // with MCP clients that don't properly quote the command (e.g., TRAE).
+      const shortNode = getWindowsShortPath(node) ?? node;
+      const shortNpxCli = getWindowsShortPath(npxCli) ?? npxCli;
+      if (shortNode.includes(" ") || shortNpxCli.includes(" ")) {
+        // Can't resolve to a space-free path; fall back to npx.cmd which
+        // relies on PATH resolution and handles quoting internally.
+        return undefined;
+      }
       return {
-        command: node,
-        args: [npxCli, "-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
+        command: shortNode,
+        args: [shortNpxCli, "-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
       };
     }
   }
