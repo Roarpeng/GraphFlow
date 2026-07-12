@@ -46,8 +46,9 @@ Do **not** hardcode `GRAPHFLOW_WORKSPACE_ROOT` — let the MCP server detect the
 Code symbols are mostly English. For Chinese user questions:
 
 1. **Proactive:** Before or with `graphflow_context`, translate intent to English **file/class/component names** (e.g. `PoseDetectionPage`, `BattlePage`, `shieldEffect`) and pass `englishQuery`. Avoid generic terms like `exercise` when the user means UI/camera — they often match data/types layers.
-2. **Reactive:** If preview returns `agentWorkItems` with `query-translate-en` (low `anchorCount`), answer the JSON prompt with your model, then retry preview with `englishQuery`.
-3. Keep `query` as the original Chinese text; use `englishQuery` for search terms only.
+2. **Module families (store/slices):** Prefer file stems (`useGameStore companionSlice dailySlice inventorySlice`), not bare domain words like `monster` (often hits `data/monsters` instead of `monsterSlice`).
+3. **Reactive:** If preview returns `agentWorkItems` with `query-translate-en` (low `anchorCount`), answer the JSON prompt with your model, then retry preview with `englishQuery`.
+4. Keep `query` as the original Chinese text; use `englishQuery` for search terms only.
 
 ## High-frequency MCP tools
 

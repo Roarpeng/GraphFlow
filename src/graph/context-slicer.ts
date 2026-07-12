@@ -8,6 +8,7 @@ import {
 import type { GraphClient } from "./client-factory.js";
 import { rankNodesForContextQuery } from "./graph-utils.js";
 import { collectExpandedKeywordHits } from "./query-expand.js";
+import { prepareHitsForPackaging } from "./hit-diversify.js";
 import {
   extractConnectedSubgraph,
   computePageRank,
@@ -43,6 +44,15 @@ export {
   deriveModuleId,
   extractFileFromSymbolId,
 } from "./context-slicer-utils.js";
+
+export {
+  diversifyHitsBySourceFile,
+  expandSiblingDirectoryHits,
+  hasModuleFamilyIntent,
+  prepareHitsForPackaging,
+  DEFAULT_MAX_SYMBOLS_PER_FILE,
+  DEFAULT_MAX_SIBLING_FILES,
+} from "./hit-diversify.js";
 
 // Import internal helpers (not re-exported)
 import {
@@ -196,6 +206,13 @@ export async function buildLayeredContextPackage(
       hits = keywordHits;
     }
   }
+
+  const snapshotNodes = client.readSnapshot?.()?.nodes;
+  hits = prepareHitsForPackaging(hits, {
+    query,
+    ...(options?.englishQuery !== undefined ? { englishQuery: options.englishQuery } : {}),
+    ...(snapshotNodes !== undefined ? { allNodes: snapshotNodes } : {}),
+  });
 
   const summaryChannel: string[] = [];
   const anchorChannel: ContextAnchorItem[] = [];
@@ -465,6 +482,13 @@ export async function buildEnhancedContextPackage(
       logger.warn({ error }, "Graph compression failed, using uncompressed hits");
     }
   }
+
+  const snapshotNodes = client.readSnapshot?.()?.nodes;
+  hits = prepareHitsForPackaging(hits, {
+    query,
+    ...(options?.englishQuery !== undefined ? { englishQuery: options.englishQuery } : {}),
+    ...(snapshotNodes !== undefined ? { allNodes: snapshotNodes } : {}),
+  });
 
   // Step 4: Build layered package (existing logic).
   const summaryChannel: string[] = [];

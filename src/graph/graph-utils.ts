@@ -38,6 +38,7 @@ const DOCS_PATH_PATTERN = /(?:^|\/)docs\//;
 const UI_PAGE_PATH_PATTERN = /(?:^|\/)src\/pages\//;
 const UI_COMPONENT_PATH_PATTERN = /(?:^|\/)src\/components\//;
 const DATA_LAYER_PATH_PATTERN = /(?:^|\/)src\/(?:data|types)\//;
+const SLICES_PATH_PATTERN = /(?:^|\/)slices(?:\/|$)/i;
 
 /** Tokens that suggest UI/page behavior rather than shared data types. */
 const UI_INTERACTION_TOKENS = new Set([
@@ -384,6 +385,10 @@ export function rankNodesForContextQuery(
   const uiIntent = [...queryTokens].some((token) => UI_INTERACTION_TOKENS.has(token));
   const coreIntent = hasCoreEngineIntent(queryTokens);
   const extensionIntent = hasExtensionIntent(queryTokens, query, pathHints);
+  const sliceIntent =
+    queryTokens.has("slice") ||
+    queryTokens.has("slices") ||
+    matchQueries.some((q) => /\bslices?\b/i.test(q));
 
   const scored = nodes.map((node) => {
     let score = 0;
@@ -411,6 +416,9 @@ export function rankNodesForContextQuery(
     }
     if (coreIntent && CORE_SOURCE_PATH_PATTERNS.some((pattern) => pattern.test(path))) {
       score += 12;
+    }
+    if (sliceIntent && SLICES_PATH_PATTERN.test(path)) {
+      score += 10;
     }
     score += extensionNoisePenalty(path, coreIntent, extensionIntent);
     score += packagingNoisePenalty(path, coreIntent);
