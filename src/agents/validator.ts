@@ -25,7 +25,7 @@ export function validateTaskResult(task: string, workerOutput: string): Validati
   }
 
   // Detect placeholder/fallback output from provider adapters
-  const isPlaceholder = /^\[(openai|anthropic|bailian|doubao):[^\]]+\]/i.test(workerOutput.trim());
+  const isPlaceholder = /^\[(openai|anthropic|bailian|doubao|deepseek):[^\]]+\]/i.test(workerOutput.trim());
   if (isPlaceholder) {
     return {
       passed: false,

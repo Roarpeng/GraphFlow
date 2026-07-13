@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.7.4] - 2026-07-13
+
+### Added
+
+- **DeepSeek 一等 provider**：`ProviderName` 新增 `deepseek`；默认模型 `deepseek-v4-pro` / `deepseek-v4-flash`；Settings 可选 deepseek
+- **配置→env 桥接**：`resolveConfig` 将 `providers.*.apiKey/baseUrl` 注入 `DEEPSEEK_*` / `OPENAI_*` 等（不覆盖已有环境变量）
+- **DeepSeek 能力**：思考模式（thinking + reasoning_effort）、JSON Output、`reasoning_content` 解析、KV cache usage 记录、可选只读 graph tool_calls
+
+### Fixed
+
+- **LLM 配置无法联通**：此前适配器只读环境变量，忽略配置文件中的 apiKey/baseUrl
+
 ## [Unreleased]
 
 ## [1.7.3] - 2026-07-12

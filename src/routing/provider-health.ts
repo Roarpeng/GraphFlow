@@ -2,7 +2,13 @@ import { resolveConfigSecret } from "../config/secrets";
 import type { GraphFlowConfig } from "../config/schema";
 import type { ProviderHealthMap, ProviderName } from "./model-router";
 
-export const ALL_PROVIDERS: ProviderName[] = ["openai", "anthropic", "bailian", "doubao"];
+export const ALL_PROVIDERS: ProviderName[] = [
+  "openai",
+  "anthropic",
+  "bailian",
+  "doubao",
+  "deepseek",
+];
 
 // Runtime consecutive-failure tracker (in-memory only)
 const failureCounts = new Map<ProviderName, number>();

@@ -6,6 +6,7 @@ import { mergeGraphFlowConfig } from "./merge";
 import { getDefaultConfig } from "./defaults";
 import { resolveGlobalConfigPath } from "./scaffold";
 import { bindRuntimeWorkspaceRoot } from "./workspace-root";
+import { applyProviderEnvFromConfig } from "./provider-env";
 import { logger } from "../utils/logger";
 
 function isDefaultProjectConfigPath(path: string): boolean {
@@ -51,6 +52,11 @@ export function resolveWritableConfigPath(path = "graphflow.config.json"): strin
   return resolveGlobalConfigPath();
 }
 
+function finalizeConfig(config: GraphFlowConfig): GraphFlowConfig {
+  applyProviderEnvFromConfig(config);
+  return config;
+}
+
 export function resolveConfig(path = "graphflow.config.json"): GraphFlowConfig {
   if (!isDefaultProjectConfigPath(path)) {
     const result = loadConfigSafe(path);
@@ -58,9 +64,11 @@ export function resolveConfig(path = "graphflow.config.json"): GraphFlowConfig {
       logger.warn({ path: result.configPath, error: result.error }, "Using default config for explicit path");
     }
     const projectRoot = result.config.graphPolicy.workspaceRoot;
-    return bindRuntimeWorkspaceRoot(
-      result.config,
-      projectRoot ? { projectWorkspaceRoot: projectRoot } : undefined
+    return finalizeConfig(
+      bindRuntimeWorkspaceRoot(
+        result.config,
+        projectRoot ? { projectWorkspaceRoot: projectRoot } : undefined
+      )
     );
   }
 
@@ -91,9 +99,11 @@ export function resolveConfig(path = "graphflow.config.json"): GraphFlowConfig {
     merged = base;
   }
 
-  return bindRuntimeWorkspaceRoot(
-    merged,
-    projectWorkspaceRoot ? { projectWorkspaceRoot } : undefined
+  return finalizeConfig(
+    bindRuntimeWorkspaceRoot(
+      merged,
+      projectWorkspaceRoot ? { projectWorkspaceRoot } : undefined
+    )
   );
 }
 

@@ -1531,7 +1531,7 @@ export function formatModelConfigGuide(workspaceRoot?: string): string {
     "在 VS Code 命令面板运行：`GraphFlow: Settings`",
     "",
     "## 2. 配置 LLM Provider（规划 / 执行任务）",
-    "- 在设置面板的 Smart / Economy 层分别选择 provider（如 openai / anthropic / bailian / doubao）",
+    "- 在设置面板的 Smart / Economy 层分别选择 provider（如 deepseek / openai / anthropic / bailian / doubao）",
     "- API Key：填环境变量名（如 `DEEPSEEK_API_KEY`）、`${DEEPSEEK_API_KEY}`、或直接 `sk-...`",
     "- Base URL：每层卡片内直接填写（如 DeepSeek 使用 `https://api.deepseek.com`）",
     "- Smart / Economy 模型均可选；留空则使用 provider 默认路由",

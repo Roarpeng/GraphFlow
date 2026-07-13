@@ -1243,21 +1243,22 @@ function renderSettingsTierCard(
     <label>Provider
       <select id="settings-${prefix}-provider" name="${prefix}Provider">
         ${renderProviderOption("openai", provider)}
+        ${renderProviderOption("deepseek", provider)}
         ${renderProviderOption("anthropic", provider)}
         ${renderProviderOption("bailian", provider)}
         ${renderProviderOption("doubao", provider)}
       </select>
     </label>
     <label>API Key
-      <input id="settings-${prefix}-api-key" name="${prefix}ApiKey" value="${escapeHtml(apiKey ?? "")}" placeholder="DEEPSEEK_API_KEY or sk-..." />
+      <input id="settings-${prefix}-api-key" name="${prefix}ApiKey" value="${escapeHtml(apiKey ?? "")}" placeholder="sk-... or DEEPSEEK_API_KEY" />
     </label>
     <label>Base URL
-      <input id="settings-${prefix}-base-url" name="${prefix}BaseUrl" value="${escapeHtml(baseUrl ?? "")}" placeholder="https://api.deepseek.com（OpenAI 兼容接口必填）" />
+      <input id="settings-${prefix}-base-url" name="${prefix}BaseUrl" value="${escapeHtml(baseUrl ?? "")}" placeholder="${provider === "deepseek" ? "https://api.deepseek.com（可空）" : "https://api.openai.com/v1"}" />
     </label>
     <label>Model
-      <input id="settings-${prefix}-model" name="${prefix}Model" value="${escapeHtml(model)}" placeholder="${tier === "smart" ? "deepseek-reasoner" : "deepseek-chat"}" />
+      <input id="settings-${prefix}-model" name="${prefix}Model" value="${escapeHtml(model)}" placeholder="${tier === "smart" ? "deepseek-v4-pro" : "deepseek-v4-flash"}" />
     </label>
-    <p class="tier-hint">使用 DeepSeek 等 OpenAI 兼容 API 时，Provider 选 openai 并填写 Base URL。</p>
+    <p class="tier-hint">推荐选择 <strong>deepseek</strong> 并填写 API Key；Base URL 默认为 https://api.deepseek.com。旧配置若用 openai + DeepSeek URL，请迁移到 deepseek provider。</p>
   </div>`;
 }
 

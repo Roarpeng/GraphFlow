@@ -90,7 +90,7 @@ export function validateConfigDetailed(path = "graphflow.config.json"): ConfigVa
   }
 
   if (parsed.routingPolicy?.providerPriority) {
-    const allowed = new Set(["openai", "anthropic", "bailian", "doubao"]);
+    const allowed = new Set(["openai", "anthropic", "bailian", "doubao", "deepseek"]);
     const invalid = parsed.routingPolicy.providerPriority.some((p) => !allowed.has(p));
     if (invalid) {
       issues.push({ severity: "error", field: "routingPolicy.providerPriority", message: "Contains unknown provider" });
@@ -234,7 +234,7 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
   }
 
   if (input.routingPolicy?.providerPriority) {
-    const allowed = new Set(["openai", "anthropic", "bailian", "doubao"]);
+    const allowed = new Set(["openai", "anthropic", "bailian", "doubao", "deepseek"]);
     const invalid = input.routingPolicy.providerPriority.some((provider) => !allowed.has(provider));
     if (invalid) {
       throw new Error("Invalid config: routingPolicy.providerPriority contains unknown provider.");
@@ -270,8 +270,10 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     routingPolicy: {
       enableDynamicRouting: input.routingPolicy?.enableDynamicRouting ?? true,
       requireApiKeyForHealthy: input.routingPolicy?.requireApiKeyForHealthy ?? false,
+      enableProviderTools: input.routingPolicy?.enableProviderTools ?? true,
       providerPriority: input.routingPolicy?.providerPriority ?? [
         "openai",
+        "deepseek",
         "anthropic",
         "bailian",
         "doubao",

@@ -122,7 +122,7 @@ export interface RunTaskSummary {
 
 export interface RoutingDiagnosisResult {
   dynamicRouting: boolean;
-  health: Record<"openai" | "anthropic" | "bailian" | "doubao", boolean>;
+  health: Record<"openai" | "anthropic" | "bailian" | "doubao" | "deepseek", boolean>;
   priority: string[];
   planner: {
     provider: string;

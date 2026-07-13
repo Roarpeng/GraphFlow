@@ -128,9 +128,18 @@
     }
 
     if (snapshot.provider === "openai" && !snapshot.baseUrl) {
+      const looksLikeEnvOnly = false;
       issues.push({
         field: `${prefix}BaseUrl`,
-        message: `${label} 层 OpenAI 兼容接口需填写 Base URL`,
+        message: `${label} 层 openai 兼容第三方接口需填写 Base URL（官方 OpenAI 可填 https://api.openai.com/v1）`,
+      });
+      void looksLikeEnvOnly;
+    }
+
+    if (snapshot.provider === "deepseek" && snapshot.baseUrl && !/deepseek\.com/i.test(snapshot.baseUrl)) {
+      issues.push({
+        field: `${prefix}BaseUrl`,
+        message: `${label} 层 deepseek 的 Base URL 建议为 https://api.deepseek.com`,
       });
     }
 
