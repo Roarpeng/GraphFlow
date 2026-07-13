@@ -4,6 +4,13 @@ export interface ProviderConfig {
   timeoutMs?: number;
   maxTokens?: number;
   temperature?: number;
+  /** DeepSeek thinking mode; auto = map by GraphFlow role. */
+  thinking?: "enabled" | "disabled" | "auto";
+  reasoningEffort?: "high" | "max";
+  /** Force JSON object response_format when supported. */
+  jsonMode?: boolean | "auto";
+  /** Allow DeepSeek tool_calls against read-only graph tools. */
+  enableTools?: boolean;
 }
 
 export interface GraphFlowConfig {
@@ -69,7 +76,9 @@ export interface GraphFlowConfig {
   routingPolicy?: {
     enableDynamicRouting?: boolean;
     requireApiKeyForHealthy?: boolean;
-    providerPriority?: Array<"openai" | "anthropic" | "bailian" | "doubao">;
+    providerPriority?: Array<"openai" | "anthropic" | "bailian" | "doubao" | "deepseek">;
+    /** Allow provider tool_calls (DeepSeek) against read-only GraphFlow tools. */
+    enableProviderTools?: boolean;
   };
   skillPolicy?: {
     enableSkillFlywheel?: boolean;

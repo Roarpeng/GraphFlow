@@ -197,7 +197,7 @@ export function diagnoseRouting(configPath?: string): string {
   const result = diagnoseRoutingResult(configPath);
   return [
     `dynamicRouting=${result.dynamicRouting ? "on" : "off"}`,
-    `health=openai:${result.health.openai},anthropic:${result.health.anthropic},bailian:${result.health.bailian},doubao:${result.health.doubao}`,
+    `health=openai:${result.health.openai},anthropic:${result.health.anthropic},bailian:${result.health.bailian},doubao:${result.health.doubao},deepseek:${result.health.deepseek}`,
     `priority=${result.priority.join(",")}`,
     `planner=${result.planner.provider}/${result.planner.model}${result.planner.fallbackApplied ? ":fallback" : ""}`,
     `worker=${result.worker.provider}/${result.worker.model}${result.worker.fallbackApplied ? ":fallback" : ""}`,
@@ -227,7 +227,7 @@ async function probeRoleConnectivity(
   try {
     const sample = await executeRolePrompt(role, "Reply with exactly: ok", selection);
     const cleaned = sample.trim().slice(0, 120);
-    const ok = cleaned.length > 0 && !/^\[(openai|anthropic|bailian|doubao):/i.test(cleaned);
+      const ok = cleaned.length > 0 && !/^\[(openai|anthropic|bailian|doubao|deepseek):/i.test(cleaned);
     return {
       role,
       provider: selection.provider,
@@ -235,7 +235,23 @@ async function probeRoleConnectivity(
       ok,
       latencyMs: Date.now() - started,
       sample: cleaned,
-      ...(ok ? {} : { error: "Provider returned placeholder/fallback output" }),
+      ...(ok
+        ? {}
+        : {
+            error: !process.env[
+              selection.provider === "deepseek"
+                ? "DEEPSEEK_API_KEY"
+                : selection.provider === "anthropic"
+                  ? "ANTHROPIC_API_KEY"
+                  : selection.provider === "bailian"
+                    ? "BAILIAN_API_KEY"
+                    : selection.provider === "doubao"
+                      ? "DOUBAO_API_KEY"
+                      : "OPENAI_API_KEY"
+            ]?.trim()
+              ? "Missing provider credentials (config not applied or apiKey empty)"
+              : "Provider returned placeholder/fallback output",
+          }),
     };
   } catch (error) {
     return {

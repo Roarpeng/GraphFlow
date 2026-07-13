@@ -1,11 +1,16 @@
 import type { AgentRole } from "../core/types";
 import { isAbortError, runAbortable } from "../core/cancellation";
+import { resolveConfig } from "../config/resolve";
 import { logger } from "../utils/logger";
 import type { ModelSelection } from "./model-router";
 import { anthropicGenerateText } from "./provider-adapters/anthropic";
 import { bailianGenerateText } from "./provider-adapters/bailian";
+import { deepseekGenerateText, deepseekGenerateTextDetailed } from "./provider-adapters/deepseek";
 import { doubaoGenerateText } from "./provider-adapters/doubao";
 import { openaiGenerateText } from "./provider-adapters/openai";
+import type { ProviderChatMessage, ProviderTextRequest, ProviderUsageStats } from "./provider-adapters/types";
+import { buildProviderRequestForRole, shouldEnableProviderTools } from "./role-capabilities";
+import { runDeepseekToolLoop } from "./deepseek-tools";
 
 export class ProviderError extends Error {
   provider: ModelSelection["provider"];
@@ -44,6 +49,12 @@ export interface PromptContext {
 
 const MAX_SUMMARY_LINES = 20;
 const MAX_SKILL_HINTS = 8;
+
+let lastProviderUsage: ProviderUsageStats | undefined;
+
+export function getLastProviderUsage(): ProviderUsageStats | undefined {
+  return lastProviderUsage;
+}
 
 function hasAnyContext(context?: PromptContext): boolean {
   if (!context) {
@@ -146,6 +157,42 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function dispatchProvider(
+  request: ProviderTextRequest,
+  selection: ModelSelection,
+  enableTools: boolean
+): Promise<string> {
+  if (selection.provider === "anthropic") {
+    return anthropicGenerateText(request);
+  }
+  if (selection.provider === "bailian") {
+    return bailianGenerateText(request);
+  }
+  if (selection.provider === "doubao") {
+    return doubaoGenerateText(request);
+  }
+  if (selection.provider === "deepseek") {
+    if (enableTools) {
+      const result = await runDeepseekToolLoop(request);
+      lastProviderUsage = result.usage;
+      if (result.usage?.promptCacheHitTokens !== undefined) {
+        logger.info(
+          {
+            provider: "deepseek",
+            cacheHit: result.usage.promptCacheHitTokens,
+            cacheMiss: result.usage.promptCacheMissTokens,
+          },
+          "DeepSeek cache usage"
+        );
+      }
+      return result.content;
+    }
+    const detailed = await deepseekGenerateTextDetailed(request);
+    lastProviderUsage = detailed.usage;
+    return detailed.content || (await deepseekGenerateText(request));
+  }
+  return openaiGenerateText(request);
+}
 
 export async function executeRolePrompt(
   role: AgentRole,
@@ -154,10 +201,18 @@ export async function executeRolePrompt(
   context?: PromptContext,
   signal?: AbortSignal
 ): Promise<string> {
-  const finalPrompt = formatPromptWithContext(role, prompt, context);
+  const config = resolveConfig();
+  const request = buildProviderRequestForRole(role, prompt, selection, config, context);
+  if (signal) {
+    request.signal = signal;
+  }
+  const enableTools =
+    role === "planner" &&
+    !/^\s*Reply with exactly:\s*ok\s*$/i.test(prompt.trim()) &&
+    shouldEnableProviderTools(selection, config);
   const label = `${selection.provider}/${selection.model}`;
 
-  const timeoutMsRaw = Number(process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS ?? 15000);
+  const timeoutMsRaw = Number(process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS ?? (selection.provider === "deepseek" ? 60000 : 15000));
   const timeoutMs = Number.isFinite(timeoutMsRaw) ? Math.max(1000, Math.floor(timeoutMsRaw)) : 15000;
   const circuitKey = `${selection.provider}:${selection.model}`;
   const circuitState = getCircuitState(circuitKey);
@@ -171,24 +226,8 @@ export async function executeRolePrompt(
   }
 
   const execute = async (abortSignal: AbortSignal): Promise<string> => {
-    const request = {
-      prompt: finalPrompt,
-      model: selection.model,
-      signal: abortSignal,
-    };
-    if (selection.provider === "anthropic") {
-      return anthropicGenerateText(request);
-    }
-
-    if (selection.provider === "bailian") {
-      return bailianGenerateText(request);
-    }
-
-    if (selection.provider === "doubao") {
-      return doubaoGenerateText(request);
-    }
-
-    return openaiGenerateText(request);
+    const req: ProviderTextRequest = { ...request, signal: abortSignal };
+    return dispatchProvider(req, selection, enableTools);
   };
 
   const retryBudget = getRetryBudget();
@@ -270,3 +309,11 @@ export async function executeRolePrompt(
     retryable: true,
   });
 }
+
+/** @internal test helper */
+export function __resetProviderCircuitsForTests(): void {
+  circuitByProvider.clear();
+  lastProviderUsage = undefined;
+}
+
+export type { ProviderChatMessage };

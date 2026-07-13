@@ -43,13 +43,13 @@ function selectionToDecision(role: "planner" | "worker" | "validator", selection
 }
 
 export function decisionToSelection(decision: RouteDecision): {
-  provider: "openai" | "anthropic" | "bailian" | "doubao";
+  provider: "openai" | "anthropic" | "bailian" | "doubao" | "deepseek";
   model: string;
   tier: "smart" | "economy";
   fallbackApplied: boolean;
 } {
   return {
-    provider: decision.provider as "openai" | "anthropic" | "bailian" | "doubao",
+    provider: decision.provider as "openai" | "anthropic" | "bailian" | "doubao" | "deepseek",
     model: decision.model,
     tier: decision.tier,
     fallbackApplied: decision.fallbackApplied,

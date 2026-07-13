@@ -3,7 +3,7 @@ import type { GraphFlowConfig } from "../config/schema";
 import { resolveConfig } from "../config/resolve";
 
 export type ModelTier = "smart" | "economy";
-export type ProviderName = "openai" | "anthropic" | "bailian" | "doubao";
+export type ProviderName = "openai" | "anthropic" | "bailian" | "doubao" | "deepseek";
 
 export type ProviderHealthMap = Record<ProviderName, boolean>;
 
@@ -37,6 +37,10 @@ const DEFAULT_MODELS: Record<ProviderName, Record<ModelTier, string>> = {
   doubao: {
     smart: "doubao-pro-32k",
     economy: "doubao-lite-32k",
+  },
+  deepseek: {
+    smart: "deepseek-v4-pro",
+    economy: "deepseek-v4-flash",
   },
 };
 
@@ -107,7 +111,7 @@ export function resolveModelWithFallback(
     return base;
   }
 
-  const chain = fallbackChain ?? ["anthropic", "bailian", "doubao"];
+  const chain = fallbackChain ?? ["anthropic", "bailian", "doubao", "deepseek"];
   const available = chain.find((provider) => provider !== base.provider && providerHealth[provider]);
 
   if (!available) {

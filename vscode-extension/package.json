@@ -4,7 +4,7 @@
   "displayName": "GraphFlow",
   "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.7.3: painless Trae MCP path auto-repair on activate, Trae-safe install, resilient embedding.",
   "icon": "media/graphflow.png",
-  "version": "1.7.3",
+  "version": "1.7.4",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"

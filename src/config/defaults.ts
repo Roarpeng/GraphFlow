@@ -57,7 +57,8 @@ export function getDefaultConfig(): GraphFlowConfig {
     routingPolicy: {
       enableDynamicRouting: true,
       requireApiKeyForHealthy: false,
-      providerPriority: ["openai", "anthropic", "bailian", "doubao"],
+      providerPriority: ["openai", "deepseek", "anthropic", "bailian", "doubao"],
+      enableProviderTools: true,
     },
     skillPolicy: {
       enableSkillFlywheel: true,

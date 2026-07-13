@@ -48,13 +48,13 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 
 > 实话实说：论纯图谱的成熟度与社区规模，CodeGraph 更领先；论 LSP 符号编辑标准，Serena 更专精；论整库打包，Repomix 更简单。GraphFlow 的价值在于把"图谱 + 压缩 + 规划 + 学习记忆"合到一处，让 agent 不仅省 token，还能跨会话复用项目经验。
 
-## 当前能力总览（v1.7.3+）
+## 当前能力总览（v1.7.4+）
 
 | 能力域 | 说明 |
 | --- | --- |
 | **任务规划与移交** | 按任务复杂度分流 simple / complex / insight；DAG 规划；**ATP v1.0 Agent Thinking Protocol**：Intent → Requirement → Six Hats → 5-Why → First Principles → Decision Matrix → Planning → Reflection（`planInsight(task, opts, true)` 开启完整 8 阶段分析，简单任务自动 short-circuit）；Agent 委托模式生成 work items；默认 **bridge 模式**输出结构化任务描述符交给外部 coding agent 执行 |
 
-| **模型路由** | Smart / Economy 双 tier；多 provider 健康探测与 fallback（OpenAI、Anthropic、百炼、豆包） |
+| **模型路由** | Smart / Economy 双 tier；多 provider 健康探测与 fallback（**DeepSeek**、OpenAI、Anthropic、百炼、豆包） |
 | **知识图谱** | 工作区 AST 索引（TS/JS/Python/Rust/Go/C/C++/Java/Ruby/Kotlin/Swift）；File / Module / Symbol 节点 + 依赖/引用/定义/调用/继承边；图谱 artifact 导入/导出 |
 | **上下文压缩** | L1/L2/L3 分层锚点；近无损打包；图结构压缩（边权重+PageRank，零成本默认开启）；向量召回 + RRF 融合；RepoMap 概览；自适应预算 |
 | **持续建图** | 默认 `autoIndexOnSave`；MCP 启动时自动启动 FileWatcher；preview / run 前按需增量索引；MCP `graphflow_index` 单文件增量 |
@@ -131,7 +131,7 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 
 ### 发布信息
 
-- 最新版本：**v1.7.3**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.7.3`
+- 最新版本：**v1.7.4**（root + vscode-extension）；npm：`@roarpeng/graphflow@1.7.4`
 - **GitHub Release**：push 到 `main` 后 CI 在 `windows-2022` 上自动构建 VSIX 并发布到 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
 - **npm 发布**：push tag `v*`（如 `v1.4.1`）触发 [Publish npm](https://github.com/Roarpeng/GraphFlow/actions/workflows/publish-npm.yml) 工作流
 - 变更日志：`CHANGELOG.md`
@@ -448,9 +448,9 @@ cp graphflow.config.example.json graphflow.config.json
 CLI 安装（若已安装 `code` / `cursor` 命令）：
 
 ```bash
-code --install-extension graphflow-vscode-1.7.3.vsix
+code --install-extension graphflow-vscode-1.7.4.vsix
 # 或
-cursor --install-extension graphflow-vscode-1.7.3.vsix
+cursor --install-extension graphflow-vscode-1.7.4.vsix
 ```
 
 ### 命令面板
@@ -527,6 +527,7 @@ npm run package:extension
 **API Key 未配置**
 
 - 在 `graphflow.config.json` 配置 provider `apiKey`，支持 `${ENV_VAR}` 占位
+- **DeepSeek（推荐）**：`providers.deepseek` + `tiers.*.provider: "deepseek"`，Base URL 默认 `https://api.deepseek.com`，模型用 `deepseek-v4-pro` / `deepseek-v4-flash`（见 [DeepSeek API 文档](https://api-docs.deepseek.com/zh-cn/)）
 
 **无 LLM 时能用吗**
 
@@ -540,7 +541,7 @@ GraphFlow/
 ├── src/
 │   ├── core/           # 编排核心：orchestrator, triage, dag-engine, types
 │   ├── graph/          # 索引、上下文切片、图压缩、snapshot
-│   ├── routing/        # 模型路由与健康探测（openai/anthropic/bailian/doubao）
+│   ├── routing/        # 模型路由与健康探测（deepseek/openai/anthropic/bailian/doubao）
 │   ├── learning/       # embeddings, episode, skill-flywheel, reflector, hnsw
 │   └── surfaces/
 │       ├── cli/        # CLI + runtime 子模块

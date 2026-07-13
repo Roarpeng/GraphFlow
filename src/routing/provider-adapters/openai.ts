@@ -1,36 +1,15 @@
 import { createTimeoutSignal, isAbortError } from "../../core/cancellation";
 import { logger } from "../../utils/logger";
+import {
+  asRecord,
+  pickChatContent,
+  type ProviderTextRequest,
+} from "./types";
 
-export interface ProviderTextRequest {
-  prompt: string;
-  model: string;
-  /** External cancel/timeout signal; merged with provider-local timeout. */
-  signal?: AbortSignal;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  if (value && typeof value === "object") {
-    return value as Record<string, unknown>;
-  }
-  return {};
-}
+export type { ProviderTextRequest } from "./types";
 
 function pickContent(payload: Record<string, unknown>): string | undefined {
-  const choices = payload.choices;
-  if (!Array.isArray(choices) || choices.length === 0) {
-    return undefined;
-  }
-  const first = asRecord(choices[0]);
-  const message = asRecord(first.message);
-  const content = message.content;
-  if (typeof content === "string" && content.trim().length > 0) {
-    return content.trim();
-  }
-  const text = first.text;
-  if (typeof text === "string" && text.trim().length > 0) {
-    return text.trim();
-  }
-  return undefined;
+  return pickChatContent(payload).content;
 }
 
 export async function openaiGenerateText(request: ProviderTextRequest): Promise<string> {
@@ -48,20 +27,29 @@ export async function openaiGenerateText(request: ProviderTextRequest): Promise<
   }
 
   const { signal, dispose } = createTimeoutSignal(timeoutMs, request.signal);
+  const messages =
+    request.messages && request.messages.length > 0
+      ? request.messages
+      : [{ role: "user" as const, content: request.prompt }];
 
   try {
+    const body: Record<string, unknown> = {
+      model: request.model,
+      messages,
+      temperature: request.temperature ?? 0.1,
+      max_tokens: request.maxTokens ?? 512,
+    };
+    if (request.responseFormat) {
+      body.response_format = request.responseFormat;
+    }
+
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model: request.model,
-        messages: [{ role: "user", content: request.prompt }],
-        temperature: 0.1,
-        max_tokens: 512,
-      }),
+      body: JSON.stringify(body),
       signal,
     });
 

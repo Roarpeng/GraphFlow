@@ -6,7 +6,11 @@
     },
     "deepseek": {
       "apiKey": "${DEEPSEEK_API_KEY}",
-      "baseUrl": "https://api.deepseek.com"
+      "baseUrl": "https://api.deepseek.com",
+      "thinking": "auto",
+      "reasoningEffort": "high",
+      "jsonMode": "auto",
+      "enableTools": true
     },
     "anthropic": {
       "apiKey": "${ANTHROPIC_API_KEY}"
@@ -16,21 +20,11 @@
     },
     "doubao": {
       "apiKey": "${DOUBAO_API_KEY}"
-    },
-    "openbmb": {
-      "mode": "embedded",
-      "engine": "command",
-      "commandPath": "${GRAPHFLOW_MINICPM_COMMAND}",
-      "modelPath": "${GRAPHFLOW_MINICPM_MODEL_PATH}",
-      "baseUrl": "http://localhost:11434",
-      "timeoutMs": 5000,
-      "maxTokens": 256,
-      "temperature": 0.1
     }
   },
   "tiers": {
-    "smart": { "provider": "openai", "model": "gpt-4.1" },
-    "economy": { "provider": "openai", "model": "gpt-4.1-mini" }
+    "smart": { "provider": "deepseek", "model": "deepseek-v4-pro" },
+    "economy": { "provider": "deepseek", "model": "deepseek-v4-flash" }
   },
   "budgetPolicy": {
     "runTokenCap": 4000
@@ -46,44 +40,23 @@
     "graphStorePath": "graphflow-out/graphflow-graph.json",
     "maxContextTokens": 1500,
     "layerQuota": { "l1": 6, "l2": 4, "l3": 3 },
-    "semanticEnrichment": {
-      "enabled": true,
-      "mode": "post-index",
-      "model": "minicpm5-1b",
-      "batchSize": 5,
-      "sleepMs": 1000,
-      "timeoutMs": 5000,
-      "autoRunOnIndex": true
-    },
     "compression": {
-      "enabled": false,
-      "backend": "inherit",
       "enableGraphCompression": true,
-      "enableRepoMapFallback": false,
-      "enableAdaptiveBudget": true,
-      "autoDownloadEmbedded": true,
-      "timeoutMs": 5000
+      "enableAdaptiveBudget": true
     }
   },
   "learningPolicy": {
     "enableFlywheel": true,
     "trainingCadence": "nightly",
-    "canaryRatio": 10,
     "exportPath": "graphflow-out/learning-dataset.jsonl",
     "eventsPath": "graphflow-out/learning-events.jsonl",
-    "summaryPath": "graphflow-out/learning-summary.json",
-    "skillEvolution": {
-      "enabled": true,
-      "model": "minicpm5-1b",
-      "minCoOccur": 2,
-      "minSuccess": 2,
-      "enableTripleFusion": true
-    }
+    "summaryPath": "graphflow-out/learning-summary.json"
   },
   "routingPolicy": {
     "enableDynamicRouting": true,
     "requireApiKeyForHealthy": false,
-    "providerPriority": ["openai", "anthropic", "bailian", "doubao", "openbmb"]
+    "enableProviderTools": true,
+    "providerPriority": ["deepseek", "openai", "anthropic", "bailian", "doubao"]
   },
   "skillPolicy": {
     "enableSkillFlywheel": true,
