@@ -528,6 +528,30 @@ export function buildAgentProfiles(): AgentProfile[] {
         },
       ],
     },
+    {
+      id: "qoder",
+      name: "Qoder",
+      // Qoder MCP 配置格式：user-scope 在 ~/.qoder/mcp.json，project-scope 在 .qoder/mcp.json
+      // 均使用 "mcpServers" 键
+      markerPaths: [
+        join(home, ".qoder"),
+        join(appData, "Qoder"),
+        join(localAppData, "Programs", "qoder"),
+      ],
+      userTargets: [
+        {
+          configPath: join(home, ".qoder", "mcp.json"),
+          serversKey: "mcpServers",
+        },
+        {
+          configPath: isWindows()
+            ? join(appData, "Qoder", "User", "mcp.json")
+            : join(home, ".config", "Qoder", "User", "mcp.json"),
+          serversKey: "mcpServers",
+        },
+      ],
+      workspaceRelativePaths: [{ relativePath: join(".qoder", "mcp.json"), serversKey: "mcpServers" }],
+    },
   ];
 
   if (wslWindowsHome) {
