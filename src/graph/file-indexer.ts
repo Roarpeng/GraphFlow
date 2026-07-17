@@ -150,13 +150,13 @@ async function processFile(
 export async function indexWorkspaceFiles(
   client: GraphClient,
   rootDir: string,
-  options?: FileIndexerOptions
-): Promise<{ indexedFiles: number; indexedSymbols: number; indexedReferences: number }> {
+  options?: FileIndexerOptions & { signal?: AbortSignal }
+): Promise<{ indexedFiles: number; indexedSymbols: number; indexedReferences: number; cancelled?: boolean }> {
   const includeExtensions = options?.includeExtensions ?? DEFAULT_EXTENSIONS;
   const maxFileSizeBytes = options?.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE;
   const forceReindex = options?.forceReindex ?? false;
-  // 并行索引并发数，默认每批 10 个文件
   const concurrency = Math.max(1, options?.concurrency ?? 10);
+  const signal = options?.signal;
 
   const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
   let cacheState = loadCacheState(cachePath, forceReindex);
@@ -182,15 +182,28 @@ export async function indexWorkspaceFiles(
   const edges: GraphEdge[] = [];
   const parsed: ParsedFile[] = [];
 
-  // ── 并行分批索引：每批 concurrency 个文件并行处理 ──
   let processedCount = 0;
   for (let i = 0; i < scanned.length; i += concurrency) {
+    if (signal?.aborted) {
+      logger.info({ processed: processedCount, total: scanned.length }, "工作区索引已取消");
+      return {
+        indexedFiles: nodes.filter((node) => node.type === "File").length,
+        indexedSymbols: nodes.filter((node) => node.type === "Symbol").length,
+        indexedReferences: 0,
+        cancelled: true,
+      };
+    }
+
     const batch = scanned.slice(i, i + concurrency);
     const batchResults = await Promise.all(
-      batch.map((file) => processFile(file, cacheState, forceReindex, client))
+      batch.map((file) => {
+        if (signal?.aborted) {
+          return Promise.resolve<FileProcessResult | null>(null);
+        }
+        return processFile(file, cacheState, forceReindex, client);
+      })
     );
 
-    // 顺序合并本批结果到共享数组（避免并行写冲突）
     for (const result of batchResults) {
       if (result) {
         nodes.push(...result.fileNodes);
@@ -199,7 +212,6 @@ export async function indexWorkspaceFiles(
         cacheState[result.relPath] = result.cacheEntry;
       }
       processedCount += 1;
-      // 每 100 个文件输出一次进度日志
       if (processedCount > 0 && processedCount % 100 === 0) {
         logger.info(
           { processed: processedCount, total: scanned.length, percent: `${((processedCount / scanned.length) * 100).toFixed(1)}%` },

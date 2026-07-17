@@ -617,50 +617,41 @@ export function getAgentSkillTargets(): Array<{
 }> {
   const { home } = resolveHomePaths();
   return [
-    // Cursor 用户级 Skill（~/.cursor/skills/graphflow/SKILL.md）
     {
       agent: "Cursor",
       markerDir: join(home, ".cursor"),
       skillsRoot: join(home, ".cursor", "skills"),
     },
-    // Claude Code 用户级 Skill（~/.claude/skills/graphflow/SKILL.md）
     {
       agent: "Claude Code",
       markerDir: join(home, ".claude"),
       skillsRoot: join(home, ".claude", "skills"),
     },
-    // Codex 用户级 Skill — 同时写入两个路径确保兼容
-    // ~/.codex/skills/graphflow/SKILL.md（旧路径，部分版本兼容）
     {
       agent: "Codex",
       markerDir: join(home, ".codex"),
       skillsRoot: join(home, ".codex", "skills"),
     },
-    // ~/.agents/skills/graphflow/SKILL.md（Agent Skills 标准路径）
     {
       agent: "Codex (agents)",
       markerDir: join(home, ".codex"),
       skillsRoot: join(home, ".agents", "skills"),
     },
-    // Roo Code 用户级 Skill（~/.roo/skills/graphflow/SKILL.md）
     {
       agent: "Roo Code",
       markerDir: join(home, ".roo"),
       skillsRoot: join(home, ".roo", "skills"),
     },
-    // Kilo Code 用户级 Skill（~/.kilocode/skills/graphflow/SKILL.md）
     {
       agent: "Kilo Code",
       markerDir: join(home, ".kilocode"),
       skillsRoot: join(home, ".kilocode", "skills"),
     },
-    // Antigravity 全局 Skill（~/.gemini/antigravity/skills/graphflow/SKILL.md）
     {
       agent: "Antigravity",
       markerDir: join(home, ".gemini", "antigravity"),
       skillsRoot: join(home, ".gemini", "antigravity", "skills"),
     },
-    // Qoder 用户级 Skill（~/.qoder/skills/graphflow/SKILL.md）
     {
       agent: "Qoder",
       markerDir: join(home, ".qoder"),

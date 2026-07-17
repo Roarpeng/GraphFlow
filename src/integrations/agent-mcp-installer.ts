@@ -317,9 +317,6 @@ export function buildAgentProfiles(): AgentProfile[] {
     {
       id: "claude-code",
       name: "Claude Code",
-      // Claude Code stores user-scope MCP servers under the top-level `mcpServers`
-      // key of ~/.claude.json. Per official docs it does NOT read ~/.claude/mcp.json
-      // or %APPDATA%/Claude*/mcp.json, so those legacy paths are intentionally dropped.
       markerPaths: [
         join(home, ".claude"),
         join(home, ".claude.json"),
@@ -327,7 +324,6 @@ export function buildAgentProfiles(): AgentProfile[] {
       userTargets: [
         { configPath: join(home, ".claude.json"), serversKey: "mcpServers" },
       ],
-      // Project scope is shared via <project>/.mcp.json (top-level `mcpServers`).
       workspaceRelativePaths: [{ relativePath: ".mcp.json", serversKey: "mcpServers" }],
     },
     {
@@ -426,9 +422,6 @@ export function buildAgentProfiles(): AgentProfile[] {
     {
       id: "gemini",
       name: "Gemini",
-      // Gemini CLI reads MCP servers from the `mcpServers` object in settings.json.
-      // User scope: ~/.gemini/settings.json; project scope: <project>/.gemini/settings.json.
-      // Shared Antigravity toolchain: ~/.gemini/config/mcp_config.json (optional).
       markerPaths: [
         join(home, ".gemini"),
       ],
@@ -458,13 +451,9 @@ export function buildAgentProfiles(): AgentProfile[] {
         },
       ],
     },
-    // ─── 实验性支持 ───
     {
       id: "antigravity",
       name: "Antigravity",
-      // Google Antigravity MCP: ~/.gemini/antigravity/mcp_config.json (mcpServers key).
-      // Shared config across Antigravity products: ~/.gemini/config/mcp_config.json.
-      // Project scope: .agents/mcp_config.json
       markerPaths: [
         join(home, ".gemini", "antigravity"),
         join(home, ".antigravity"),
@@ -496,8 +485,6 @@ export function buildAgentProfiles(): AgentProfile[] {
     {
       id: "zed",
       name: "Zed",
-      // Zed 已在 v0.165+ 支持 MCP（称为 "context servers"）
-      // 配置格式: settings.json 中的 "context_servers" 键
       markerPaths: [
         join(home, ".config", "zed"),
         isWindows() ? join(appData, "Zed") : undefined,
@@ -514,10 +501,6 @@ export function buildAgentProfiles(): AgentProfile[] {
     {
       id: "continue",
       name: "Continue",
-      // Continue 是 VS Code / JetBrains 的 AI 编程助手扩展
-      // MCP 配置写入 ~/.continue/config.yaml 中的 "mcpServers" 节
-      // 注意：Continue 的 config.yaml 格式为 YAML，当前实现仅支持 JSON
-      // 如需完整支持，需额外添加 YAML 读写逻辑
       markerPaths: [
         join(home, ".continue"),
       ],
@@ -531,8 +514,6 @@ export function buildAgentProfiles(): AgentProfile[] {
     {
       id: "qoder",
       name: "Qoder",
-      // Qoder MCP 配置格式：user-scope 在 ~/.qoder/mcp.json，project-scope 在 .qoder/mcp.json
-      // 均使用 "mcpServers" 键
       markerPaths: [
         join(home, ".qoder"),
         join(appData, "Qoder"),
