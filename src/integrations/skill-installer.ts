@@ -660,6 +660,12 @@ export function getAgentSkillTargets(): Array<{
       markerDir: join(home, ".gemini", "antigravity"),
       skillsRoot: join(home, ".gemini", "antigravity", "skills"),
     },
+    // Qoder 用户级 Skill（~/.qoder/skills/graphflow/SKILL.md）
+    {
+      agent: "Qoder",
+      markerDir: join(home, ".qoder"),
+      skillsRoot: join(home, ".qoder", "skills"),
+    },
   ];
 }
 
