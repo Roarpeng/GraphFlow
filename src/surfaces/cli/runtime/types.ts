@@ -73,6 +73,7 @@ export interface GraphIndexResult {
   indexedFiles: number;
   indexedSymbols: number;
   indexedReferences: number;
+  cancelled?: boolean;
 }
 
 export interface GraphRebuildResult extends GraphIndexResult {

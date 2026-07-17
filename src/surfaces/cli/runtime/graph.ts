@@ -64,6 +64,14 @@ export async function previewContext(
   englishQuery?: string
 ): Promise<ContextPreviewResult> {
   const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
+  const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
+
+  const { getCachedContext, cacheContextResult } = await import("../../../graph/context-cache.js");
+  const cached = getCachedContext(query, workspaceRoot);
+  if (cached) {
+    return cached;
+  }
+
   const graphClient = createGraphClient(config);
 
   if (config.graphPolicy.autoIndexOnPreview) {
@@ -149,7 +157,6 @@ export async function previewContext(
     // Savings tracking is best-effort; don't fail the preview if it errors
   }
 
-  const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
   const anchorCount = pkg.anchorChannel.length;
   const queryTranslationDelegation = shouldDelegateQueryTranslation(query, anchorCount, englishQuery)
     ? {
@@ -159,7 +166,7 @@ export async function previewContext(
       }
     : undefined;
 
-  return {
+  const result: ContextPreviewResult = {
     query,
     ...(englishQuery?.trim() ? { englishQuery: englishQuery.trim() } : {}),
     summaryCount: pkg.summaryChannel.length,
@@ -183,12 +190,19 @@ export async function previewContext(
     },
     ...(queryTranslationDelegation ?? {}),
   };
+
+  cacheContextResult(query, workspaceRoot, result);
+
+  return result;
 }
 
 export async function indexGraph(rootDir?: string, configPath?: string): Promise<GraphIndexResult> {
   const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
   const graphClient = createGraphClient(config);
   const targetDir = config.graphPolicy.workspaceRoot ?? process.cwd();
+
+  const { invalidateContextCache } = await import("../../../graph/context-cache.js");
+  invalidateContextCache(targetDir);
 
   const indexOptions = config.graphPolicy.includeExtensions
     ? { includeExtensions: config.graphPolicy.includeExtensions }

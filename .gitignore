@@ -27,5 +27,8 @@ runs.json
 vscode-extension/vendor/
 .joycode/
 tsc_output.txt
+.gemini/
+Cursor/
+.mcp.json
 benchmarks/.cache/
 graphify-out/
