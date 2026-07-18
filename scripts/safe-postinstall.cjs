@@ -512,6 +512,7 @@ function main() {
     }
 
     console.log("[GraphFlow] Post-install complete.");
+    console.log("[GraphFlow] 请打开一个项目文件夹以使用 GraphFlow 的全部功能。");
   } catch (err) {
     console.warn("[GraphFlow] Post-install setup encountered an error (non-fatal):", err.message || String(err));
     console.warn("[GraphFlow] GraphFlow core is still installed. To complete setup manually, run:");
