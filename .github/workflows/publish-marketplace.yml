@@ -1,0 +1,80 @@
+name: Publish to VS Code Marketplace
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml
+
+  publish-marketplace:
+    needs: validate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            vscode-extension/package-lock.json
+
+      - name: Enable package manager
+        run: corepack enable
+
+      - name: Install root dependencies
+        run: npm ci --no-audit
+        env:
+          GRAPHFLOW_SKIP_POSTINSTALL: "1"
+
+      - name: Install extension dependencies
+        run: npm ci --prefix vscode-extension
+
+      - name: Build and package extension
+        run: npm run build && npm run build:extension && npm run package:extension
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+
+      - name: Publish to VS Code Marketplace (PAT mode)
+        if: secrets.VSCE_PAT != ''
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          echo "Publishing GraphFlow v${VERSION} to VS Code Marketplace (PAT mode)..."
+          cd vscode-extension
+          vsce publish --no-git-tag-version --pat "$VSCE_PAT"
+
+      - name: Install Azure CLI
+        if: secrets.VSCE_PAT == '' && secrets.AZURE_CLIENT_ID != ''
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Publish to VS Code Marketplace (Entra ID mode)
+        if: secrets.VSCE_PAT == '' && secrets.AZURE_CLIENT_ID != ''
+        run: |
+          VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          echo "Publishing GraphFlow v${VERSION} to VS Code Marketplace (Entra ID mode)..."
+          cd vscode-extension
+          vsce publish --no-git-tag-version --azure-credential
+
+      - name: Log success
+        run: |
+          VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          echo "Successfully published GraphFlow v${VERSION} to VS Code Marketplace"
