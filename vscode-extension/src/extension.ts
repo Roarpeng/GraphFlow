@@ -59,7 +59,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const workspaceRoot = getWorkspaceRoot();
     if (!workspaceRoot) {
-      vscode.window.showErrorMessage("No workspace folder found.");
+      vscode.window.showInformationMessage("GraphFlow: 请先打开一个项目文件夹。", "打开文件夹").then((choice) => {
+        if (choice === "打开文件夹") {
+          void vscode.commands.executeCommand("workbench.action.files.openFolder");
+        }
+      });
       return;
     }
 
@@ -99,7 +103,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const workspaceRoot = getWorkspaceRoot();
     if (!workspaceRoot) {
-      vscode.window.showErrorMessage("No workspace folder found.");
+      vscode.window.showInformationMessage("GraphFlow: 请先打开一个项目文件夹。", "打开文件夹").then((choice) => {
+        if (choice === "打开文件夹") {
+          void vscode.commands.executeCommand("workbench.action.files.openFolder");
+        }
+      });
       return;
     }
 
@@ -152,7 +160,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const workspaceRoot = getWorkspaceRoot();
     if (!workspaceRoot) {
-      vscode.window.showErrorMessage("No workspace folder found.");
+      vscode.window.showInformationMessage("GraphFlow: 请先打开一个项目文件夹。", "打开文件夹").then((choice) => {
+        if (choice === "打开文件夹") {
+          void vscode.commands.executeCommand("workbench.action.files.openFolder");
+        }
+      });
       return;
     }
 
@@ -176,7 +188,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const workspaceRoot = getWorkspaceRoot();
     if (!workspaceRoot) {
-      vscode.window.showErrorMessage("No workspace folder found.");
+      vscode.window.showInformationMessage("GraphFlow: 请先打开一个项目文件夹。", "打开文件夹").then((choice) => {
+        if (choice === "打开文件夹") {
+          void vscode.commands.executeCommand("workbench.action.files.openFolder");
+        }
+      });
       return;
     }
 
@@ -191,7 +207,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const showGraph = vscode.commands.registerCommand("graphflow.showGraph", async () => {
     const workspaceRoot = getWorkspaceRoot();
     if (!workspaceRoot) {
-      vscode.window.showErrorMessage("No workspace folder found.");
+      vscode.window.showInformationMessage("GraphFlow: 请先打开一个项目文件夹。", "打开文件夹").then((choice) => {
+        if (choice === "打开文件夹") {
+          void vscode.commands.executeCommand("workbench.action.files.openFolder");
+        }
+      });
       return;
     }
 
@@ -204,7 +224,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const showSkills = vscode.commands.registerCommand("graphflow.showSkills", async () => {
     const workspaceRoot = getWorkspaceRoot();
     if (!workspaceRoot) {
-      vscode.window.showErrorMessage("No workspace folder found.");
+      vscode.window.showInformationMessage("GraphFlow: 请先打开一个项目文件夹。", "打开文件夹").then((choice) => {
+        if (choice === "打开文件夹") {
+          void vscode.commands.executeCommand("workbench.action.files.openFolder");
+        }
+      });
       return;
     }
 
@@ -224,7 +248,7 @@ export function activate(context: vscode.ExtensionContext): void {
     async (request, _context, stream) => {
       const workspaceRoot = getWorkspaceRoot();
       if (!workspaceRoot) {
-        stream.markdown("No workspace folder found.");
+        stream.markdown("GraphFlow: 请先打开一个项目文件夹后再使用。");
         return;
       }
 
@@ -502,7 +526,15 @@ async function runMcpBootstrap(
     output.appendLine(guide);
 
     if (options.isFreshInstall) {
-      void vscode.commands.executeCommand("graphflow.showSettings");
+      if (workspaceRoot) {
+        void vscode.commands.executeCommand("graphflow.showSettings");
+      } else {
+        vscode.window.showInformationMessage("GraphFlow 安装成功！请打开一个项目文件夹以开始使用。", "打开项目").then((choice) => {
+          if (choice === "打开项目") {
+            void vscode.commands.executeCommand("workbench.action.files.openFolder");
+          }
+        });
+      }
     }
 
     if (!options.forceNotify && successes.length === 0) {
@@ -524,14 +556,20 @@ async function runMcpBootstrap(
 
     const allNotified = [...successes, ...updated];
     const installedNames = [...new Set(allNotified.map((result) => result.agentName))].join(", ");
+    
+    const message = workspaceRoot
+      ? `GraphFlow MCP 已安装到: ${installedNames}。请配置模型 API Key 后重启对应 Agent 工具。`
+      : `GraphFlow MCP 已安装到: ${installedNames}。请打开一个项目文件夹以使用 GraphFlow 的全部功能。`;
+    
+    const buttons = workspaceRoot ? ["配置模型"] : ["打开项目"];
+    
     vscode.window
-      .showInformationMessage(
-        `GraphFlow MCP 已安装到: ${installedNames}。请配置模型 API Key 后重启对应 Agent 工具。`,
-        "配置模型"
-      )
+      .showInformationMessage(message, ...buttons)
       .then((choice) => {
         if (choice === "配置模型") {
           void vscode.commands.executeCommand("graphflow.showSettings");
+        } else if (choice === "打开项目") {
+          void vscode.commands.executeCommand("workbench.action.files.openFolder");
         }
       });
     return { results, mcpAgents: panelStatus.mcpAgents };
