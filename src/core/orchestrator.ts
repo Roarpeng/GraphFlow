@@ -2,6 +2,7 @@ import { planTasks, planTasksLlm } from "../agents/planner.js";
 import { brainstormTaskLlm } from "../agents/brainstormer.js";
 import { resolveConfig } from "../config/resolve.js";
 import { hasUsableLlmProvider } from "../config/llm-availability.js";
+import { buildProviderHealthMap } from "../routing/provider-health.js";
 import { logger } from "../utils/logger.js";
 import { summarizeEpisodeForPrompt } from "../learning/episodic-memory.js";
 import { executeRolePrompt } from "../routing/provider-executor.js";
@@ -69,27 +70,48 @@ async function runOrchestration(
   options?: OrchestrateOptions
 ): Promise<TaskRunResult> {
   logger.info({ task: input.task }, "Orchestration task started");
+  
+  const insightConfig = resolveConfig(options?.configPath);
+  const hasExternalLlm = hasUsableLlmProvider(insightConfig);
+  
+  const providerHealth = options?.providerHealth ?? buildProviderHealthMap(insightConfig);
+  const workerProvider = insightConfig.tiers.smart.provider as import("../routing/model-router").ProviderName;
+  const validatorProvider = insightConfig.tiers.economy.provider as import("../routing/model-router").ProviderName;
+  const isProviderHealthy = providerHealth[workerProvider] && providerHealth[validatorProvider];
+  
+  const effectiveExecutionMode: "bridge" | "llm" = options?.executionMode ?? (
+    ((hasExternalLlm && isProviderHealthy) || options?.enableLlmAgents) ? "llm" : "bridge"
+  );
+  
+  const effectiveOptions: OrchestrateOptions = {
+    ...options,
+    executionMode: effectiveExecutionMode,
+    enableLlmAgents: !!(hasExternalLlm && isProviderHealthy) || (options?.enableLlmAgents ?? false),
+  };
+  
+  logger.info({ hasExternalLlm, executionMode: effectiveExecutionMode }, "Orchestration execution mode determined");
+  
   // 预置种子技能（幂等）：在技能飞轮启用时为图写入常见工程技能基线，
   // 须在构建技能提示之前执行，确保种子技能可被 suggestSkillHints 命中。
-  await maybeSeedInitialSkills(options);
+  await maybeSeedInitialSkills(effectiveOptions);
   const retryOptions = input.maxRetries !== undefined ? { maxRetries: input.maxRetries } : {};
-  const contextPackage = await maybeBuildNearLosslessContext(input, options);
+  const contextPackage = await maybeBuildNearLosslessContext(input, effectiveOptions);
   const routeDecisions = buildRouteDecisions(
-    options?.providerHealth,
-    options?.providerFallbackChain,
-    options?.configPath
+    effectiveOptions?.providerHealth,
+    effectiveOptions?.providerFallbackChain,
+    effectiveOptions?.configPath
   );
-  const skillHints = await maybeBuildSkillHints(input.task, options);
-  const similarEpisodes = await maybeFindSimilarEpisodes(input.task, options);
+  const skillHints = await maybeBuildSkillHints(input.task, effectiveOptions);
+  const similarEpisodes = await maybeFindSimilarEpisodes(input.task, effectiveOptions);
   const episodeSummaries = await Promise.all(
-    similarEpisodes.map((ep) => summarizeEpisodeForPrompt(ep, options?.graphClient))
+    similarEpisodes.map((ep) => summarizeEpisodeForPrompt(ep, effectiveOptions?.graphClient))
   );
-  const promptContext = buildPromptContext(contextPackage, skillHints, episodeSummaries, options);
+  const promptContext = buildPromptContext(contextPackage, skillHints, episodeSummaries, effectiveOptions);
   const promptContextLines = promptContext?.summaryChannel?.length ?? 0;
 
   let triageExplanation = triageTaskExplain(input.task);
   let mode = triageExplanation.decision;
-  if (options?.enableLlmTriage) {
+  if (effectiveOptions?.enableLlmTriage) {
     const llmDecision = await triageTaskLlm(input.task, decisionToSelection(routeDecisions.planner), promptContext);
     mode = llmDecision;
     // LLM triage 路径：保留启发式原因，并标记为 llmBased，用于准确率数据收集
@@ -98,10 +120,10 @@ async function runOrchestration(
   // 记录 triage 决策 learning event（任务描述、决策、原因、时间戳），用于后续准确率分析。
   // 仅在图客户端可用时记录；失败不阻断主流程。
   let triageId: string | undefined;
-  if (options?.graphClient) {
+  if (effectiveOptions?.graphClient) {
     try {
       triageId = await recordTriageDecision(
-        options.graphClient,
+        effectiveOptions.graphClient,
         input.task,
         mode,
         triageExplanation.reason
@@ -115,11 +137,11 @@ async function runOrchestration(
   if (mode === "simple") {
     const workerSelection = selectionIfHealthy(
       decisionToSelection(routeDecisions.worker),
-      options?.providerHealth
+      effectiveOptions?.providerHealth
     );
     const validatorSelection = selectionIfHealthy(
       decisionToSelection(routeDecisions.validator),
-      options?.providerHealth
+      effectiveOptions?.providerHealth
     );
     const run = await runSimpleTask({
       task: input.task,
@@ -127,14 +149,14 @@ async function runOrchestration(
       ...(workerSelection ? { workerSelection } : {}),
       ...(validatorSelection ? { validatorSelection } : {}),
       ...(promptContext ? { workerContext: promptContext, validatorContext: promptContext } : {}),
-      ...(options?.executionMode ? { executionMode: options.executionMode } : {}),
+      ...(effectiveOptions?.executionMode ? { executionMode: effectiveOptions.executionMode } : {}),
     });
-    const finalRun = appendContextFeedback(run, contextPackage, promptContextLines, options);
+    const finalRun = appendContextFeedback(run, contextPackage, promptContextLines, effectiveOptions);
     const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
-    await maybeSyncGraph(input.task, withRoute, options);
-    await maybeSyncSkillGraph(input.task, withRoute, options);
+    await maybeSyncGraph(input.task, withRoute, effectiveOptions);
+    await maybeSyncSkillGraph(input.task, withRoute, effectiveOptions);
     logger.info({ status: withRoute.status, task: input.task }, "Orchestration task finished (simple mode)");
-    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options, triageId);
+    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, effectiveOptions, triageId);
   }
 
   const plannerSelection = decisionToSelection(routeDecisions.planner);
@@ -143,16 +165,15 @@ async function runOrchestration(
   let plan: TaskNode[];
   let planInsightBundle: AgentDelegatedPlanInsight | undefined;
 
-  const insightConfig = resolveConfig(options?.configPath);
   const autoPlanInsight =
-    options?.enablePlanInsight === true ||
-    (options?.enablePlanInsight !== false &&
-      !hasUsableLlmProvider(insightConfig) &&
-      options?.enableLlmAgents !== true &&
-      (options?.executionMode === "bridge" || options?.executionMode === undefined));
+    effectiveOptions?.enablePlanInsight === true ||
+    (effectiveOptions?.enablePlanInsight !== false &&
+      !hasExternalLlm &&
+      effectiveOptions?.enableLlmAgents !== true &&
+      effectiveOptions?.executionMode === "bridge");
 
   if (autoPlanInsight) {
-    planInsightBundle = await maybeRunPlanInsightForComplex(input.task, options);
+    planInsightBundle = await maybeRunPlanInsightForComplex(input.task, effectiveOptions);
   }
 
   if (planInsightBundle) {
@@ -162,7 +183,7 @@ async function runOrchestration(
     } else {
       plan = planInsightBundle.plan;
     }
-  } else if (options?.enableLlmAgents) {
+  } else if (effectiveOptions?.enableLlmAgents) {
     brainstormIdeas = await brainstormTaskLlm(input.task, plannerSelection, promptContext);
     plan = await planTasksLlm(input.task, {
       selection: plannerSelection,
@@ -185,7 +206,7 @@ async function runOrchestration(
       );
 
   // Bridge mode: package the planned DAG for external agent execution instead of running it
-  if (options?.executionMode === "bridge") {
+  if (effectiveOptions?.executionMode === "bridge") {
     // 多 Agent 协作编排：为每个任务节点标注建议的 agent 专业领域
     const assignedPlan = assignAgentsToTasks(plan);
     const agentAssignments = buildAgentAssignments(assignedPlan);
@@ -234,22 +255,22 @@ async function runOrchestration(
         ...delegatedExtras,
       },
     };
-    const finalRun = appendContextFeedback(bridgeRun, contextPackage, promptContextLines, options);
+    const finalRun = appendContextFeedback(bridgeRun, contextPackage, promptContextLines, effectiveOptions);
     const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
-    await maybeSyncSkillGraph(input.task, withRoute, options);
+    await maybeSyncSkillGraph(input.task, withRoute, effectiveOptions);
     logger.info({ status: withRoute.status, task: input.task }, "Orchestration task delegated (bridge mode)");
-    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options, triageId);
+    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, effectiveOptions, triageId);
   }
 
   const runner = async (node: TaskNode): Promise<boolean> => {
     logger.info({ nodeId: node.id, description: node.description }, "Executing task node");
     const workerSelection = selectionIfHealthy(
       decisionToSelection(routeDecisions.worker),
-      options?.providerHealth
+      effectiveOptions?.providerHealth
     );
     const validatorSelection = selectionIfHealthy(
       decisionToSelection(routeDecisions.validator),
-      options?.providerHealth
+      effectiveOptions?.providerHealth
     );
     const run = await runSimpleTask({
       task: node.description,
@@ -257,14 +278,15 @@ async function runOrchestration(
       ...(workerSelection ? { workerSelection } : {}),
       ...(validatorSelection ? { validatorSelection } : {}),
       ...(promptContext ? { workerContext: promptContext, validatorContext: promptContext } : {}),
+      ...(effectiveOptions?.executionMode ? { executionMode: effectiveOptions.executionMode } : {}),
     });
     return run.status === "COMPLETED";
   };
 
   let result = await executeDag(plan, runner);
   let replanRounds = 0;
-  const maxReplanRounds = options?.maxReplanRounds ?? 1;
-  const canReplan = options?.enableDriftReplan === true && options.enableLlmAgents === true;
+  const maxReplanRounds = effectiveOptions?.maxReplanRounds ?? 1;
+  const canReplan = effectiveOptions?.enableDriftReplan === true && effectiveOptions.enableLlmAgents === true;
 
   while (
     canReplan &&
@@ -306,12 +328,12 @@ async function runOrchestration(
       replanRounds,
       ...(brainstormIdeas ? { brainstormIdeas } : {}),
     };
-    const finalRun = appendContextFeedback(run, contextPackage, promptContextLines, options);
+    const finalRun = appendContextFeedback(run, contextPackage, promptContextLines, effectiveOptions);
     const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
-    await maybeSyncGraph(input.task, withRoute, options);
-    await maybeSyncSkillGraph(input.task, withRoute, options);
+    await maybeSyncGraph(input.task, withRoute, effectiveOptions);
+    await maybeSyncSkillGraph(input.task, withRoute, effectiveOptions);
     logger.error({ status: withRoute.status, failed: result.failed }, "Orchestration task failed or needs human review");
-    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options);
+    return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, effectiveOptions);
   }
 
   const run: TaskRunResult = {
@@ -322,12 +344,12 @@ async function runOrchestration(
     replanRounds,
     ...(brainstormIdeas ? { brainstormIdeas } : {}),
   };
-  const finalRun = appendContextFeedback(run, contextPackage, promptContextLines, options);
+  const finalRun = appendContextFeedback(run, contextPackage, promptContextLines, effectiveOptions);
   const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
-  await maybeSyncGraph(input.task, withRoute, options);
-  await maybeSyncSkillGraph(input.task, withRoute, options);
+  await maybeSyncGraph(input.task, withRoute, effectiveOptions);
+  await maybeSyncSkillGraph(input.task, withRoute, effectiveOptions);
   logger.info({ status: withRoute.status, task: input.task, rounds: result.rounds }, "Orchestration task completed successfully");
-  return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, options, triageId);
+  return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, effectiveOptions, triageId);
 }
 
 function projectPlan(plan: TaskNode[]): string {
