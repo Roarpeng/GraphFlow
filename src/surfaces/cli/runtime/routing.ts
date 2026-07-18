@@ -70,14 +70,15 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       config.graphPolicy.compression?.enableAdaptiveBudget !== false &&
       (config.graphPolicy.compression?.enableAdaptiveBudget === true ||
         taskComplexity === "complex");
+    const hasExternalLlm = hasUsableLlmProvider(config);
     const orchestrateOptions: OrchestrateOptions = {
       graphClient,
       enableAutoGraphSync: config.graphPolicy.enableAutoBuild,
       maxContextTokens: config.graphPolicy.maxContextTokens,
       enableEpisodicMemory: config.learningPolicy.enableFlywheel,
-      enableLlmAgents: false,
+      enableLlmAgents: hasExternalLlm,
       enableLlmTriage: false,
-      executionMode: "bridge", // Default to bridge mode: delegate execution to external agents
+      executionMode: hasExternalLlm ? "llm" : "bridge",
       ...(configPath ? { configPath } : {}),
       ...embeddingOptions,
       ...(config.skillPolicy?.enableSkillFlywheel
