@@ -439,7 +439,7 @@ cp graphflow.config.example.json graphflow.config.json
 
 ### 安装 VSIX（推荐）
 
-1. 打开 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)，下载最新 `graphflow-vscode-<version>.vsix`（CI 在每次 push `main` / tag 后自动构建）
+1. 打开 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)，下载最新 `graphflow-tool-<version>.vsix`（CI 在每次 push `main` / tag 后自动构建）
 2. **VS Code**：扩展视图 → `…` → **从 VSIX 安装…** → 选择下载的文件
 3. **Cursor**：扩展视图 → 右上角 `…` → **Install from VSIX** → 选择下载的文件
 4. 重启编辑器；首次激活会自动尝试安装 GraphFlow MCP 到本机 Agent 配置
@@ -448,8 +448,8 @@ cp graphflow.config.example.json graphflow.config.json
 CLI 安装（若已安装 `code` / `cursor` 命令）：
 
 ```bash
-code --install-extension graphflow-vscode-1.7.5.vsix
-cursor --install-extension graphflow-vscode-1.7.5.vsix
+code --install-extension graphflow-tool-1.7.5.vsix
+cursor --install-extension graphflow-tool-1.7.5.vsix
 ```
 
 ### 命令面板
@@ -488,7 +488,7 @@ npm run build
 
 ```bash
 npm run package:extension
-# 输出：artifacts/graphflow-vscode-<version>.vsix
+# 输出：artifacts/graphflow-tool-<version>.vsix
 ```
 
 ## 本地验收清单

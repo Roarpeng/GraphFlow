@@ -57,9 +57,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # Keep only the 2 newest graphflow-vscode-extension artifacts to avoid quota exhaustion (~150MB each).
+          # Keep only the 2 newest graphflow-tool-extension artifacts to avoid quota exhaustion (~150MB each).
           mapfile -t OLD_IDS < <(gh api "repos/${{ github.repository }}/actions/artifacts?per_page=100" \
-            --jq '.artifacts | map(select(.name=="graphflow-vscode-extension")) | sort_by(.created_at) | reverse | .[2:] | .[].id')
+            --jq '.artifacts | map(select(.name=="graphflow-tool-extension")) | sort_by(.created_at) | reverse | .[2:] | .[].id')
           for id in "${OLD_IDS[@]}"; do
             echo "Deleting artifact id=$id"
             gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/${id}" || true
@@ -72,7 +72,7 @@ jobs:
         run: |
           VERSION=$(node -p "require('./vscode-extension/package.json').version")
           TAG="v${VERSION}"
-          VSIX=$(ls artifacts/graphflow-vscode-*.vsix | head -n 1)
+          VSIX=$(ls artifacts/graphflow-tool-*.vsix | head -n 1)
           NOTES="GraphFlow VS Code/Cursor extension **v${VERSION}**.
 
           ## Highlights
@@ -84,7 +84,7 @@ jobs:
           - VSIX does **not** bundle @xenova/transformers
 
           ## Install
-          Download \`graphflow-vscode-${VERSION}.vsix\` → **Extensions → Install from VSIX** → reload.
+          Download \`graphflow-tool-${VERSION}.vsix\` → **Extensions → Install from VSIX** → reload.
           MCP path repair runs automatically on activate (no manual Install required for the Program Files fix).
 
           Built on Windows from commit ${GITHUB_SHA::7}."
@@ -101,8 +101,8 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: graphflow-vscode-extension
-          path: artifacts/graphflow-vscode-*.vsix
+          name: graphflow-tool-extension
+          path: artifacts/graphflow-tool-*.vsix
           retention-days: 7
           overwrite: true
 

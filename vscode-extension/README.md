@@ -7,7 +7,7 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 ## 当前版本
 
 - Extension / runtime：**1.7.3**
-- 对应 VSIX：`../artifacts/graphflow-vscode-1.7.3.vsix`（CI 构建）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
+- 对应 VSIX：`../artifacts/graphflow-tool-1.7.3.vsix`（CI 构建）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
 
 ### v1.7.3 要点
 
@@ -28,7 +28,7 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 ### 方式 A：图形界面（推荐）
 
 1. 打开 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
-2. 下载最新 `graphflow-vscode-<version>.vsix`
+2. 下载最新 `graphflow-tool-<version>.vsix`
 3. **VS Code**：扩展侧边栏 → `…` → **从 VSIX 安装…**
 4. **Cursor**：扩展侧边栏 → `…` → **Install from VSIX**
 5. 重启编辑器
@@ -36,9 +36,9 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 ### 方式 B：命令行
 
 ```bash
-code --install-extension graphflow-vscode-1.7.3.vsix
+code --install-extension graphflow-tool-1.7.3.vsix
 # Cursor CLI（若已安装）：
-cursor --install-extension graphflow-vscode-1.7.3.vsix
+cursor --install-extension graphflow-tool-1.7.3.vsix
 ```
 
 ### 安装后推荐流程
@@ -88,7 +88,7 @@ Chat Agent（`@graphflow`）：`/run`、`/plan`、`/graph`、`/skills`、`/diagn
 
 直接发送 VSIX 文件即可，同事**无需** clone GraphFlow 仓库：
 
-1. 从 Releases 下载 `graphflow-vscode-1.7.3.vsix`
+1. 从 Releases 下载 `graphflow-tool-1.7.3.vsix`
 2. 按上文「安装 VSIX」步骤安装
 3. 打开项目 → Settings → 建立图谱
 
@@ -119,7 +119,7 @@ VS Code 中按 `F5` 启动 Extension Development Host。
 npm run package:extension
 ```
 
-输出：`artifacts/graphflow-vscode-<version>.vsix`
+输出：`artifacts/graphflow-tool-<version>.vsix`
 
 ## 最小环境要求
 

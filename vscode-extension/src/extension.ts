@@ -27,7 +27,7 @@ interface RunRecord {
 }
 
 const runs: RunRecord[] = [];
-const CHAT_PARTICIPANT_ID = "roarpeng.graphflow-vscode.graphflowAgent";
+const CHAT_PARTICIPANT_ID = "roarpeng.graphflow-tool.graphflowAgent";
 let runtimePromise: Promise<GraphFlowRuntime> | undefined;
 
 const MCP_INSTALL_VERSION_KEY = "graphflow.mcpInstallVersion";
