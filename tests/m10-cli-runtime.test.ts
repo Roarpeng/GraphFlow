@@ -377,9 +377,10 @@ describe("M10 CLI runtime", () => {
       );
 
       // Bridge mode returns DELEGATED; close the learning loop via reportOutcome
-      const runResult = await runTaskResult("update readme", configPath);
+      // Use a meaningful task (not stopword-only phrases like "update readme").
+      const runResult = await runTaskResult("refactor orchestrator and add tests", configPath);
       if (runResult.episodeId) {
-        await reportOutcome(runResult.episodeId, true, [], configPath);
+        await reportOutcome(runResult.episodeId, true, ["prefer bridge outcome reporting"], configPath);
       }
       const insights = await getSkillInsights(configPath, 10);
 
