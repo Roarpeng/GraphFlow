@@ -7,7 +7,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const extensionRoot = join(scriptDir, "..");
 const artifactsDir = join(extensionRoot, "..", "artifacts");
 const version = JSON.parse(readFileSync(join(extensionRoot, "package.json"), "utf8")).version;
-const outFile = join(artifactsDir, `graphflow-vscode-${version}.vsix`);
+const outFile = join(artifactsDir, `graphflow-tool-${version}.vsix`);
 
 mkdirSync(artifactsDir, { recursive: true });
 
