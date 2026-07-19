@@ -31,7 +31,7 @@ describe("M48 bridge mode outcome feedback loop", () => {
   it("should not penalize skill scores during bridge delegation", async () => {
     const client = new GraphifyClient();
     const run = await orchestrate(
-      { task: "update readme and add tests" },
+      { task: "refactor planner and add tests" },
       {
         graphClient: client,
         enableEpisodicMemory: true,
@@ -103,7 +103,7 @@ describe("M48 bridge mode outcome feedback loop", () => {
 
     // Step 1: Bridge mode — task delegated, skill NOT penalized
     const run = await orchestrate(
-      { task: "update readme and add tests" },
+      { task: "refactor planner and add tests" },
       {
         graphClient: client,
         enableEpisodicMemory: true,
@@ -124,7 +124,7 @@ describe("M48 bridge mode outcome feedback loop", () => {
       client,
       run.episodeId!,
       "pass",
-      ["keep readme sections concise"]
+      ["keep planner steps small"]
     );
     expect(updated?.outcome).toBe("pass");
 
@@ -146,7 +146,7 @@ describe("M48 bridge mode outcome feedback loop", () => {
     expect(skillNodes.length).toBeGreaterThan(0);
 
     // Skill hints should now be available for similar tasks
-    const hints = await suggestSkillHints(client, "update readme", 3);
+    const hints = await suggestSkillHints(client, "refactor planner and add tests", 3);
     expect(hints.length).toBeGreaterThan(0);
   });
 

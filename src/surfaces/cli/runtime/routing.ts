@@ -16,7 +16,11 @@ import { createGraphClient } from "../../../graph/client-factory";
 import { indexWorkspaceFiles, hasPendingGraphIndexWork } from "../../../graph/file-indexer";
 import { appendFeedbackEvent } from "../../../learning/learning-events";
 import { updateEpisodeOutcome } from "../../../learning/episodic-memory";
-import { applySkillLearning } from "../../../learning/skill-flywheel";
+import {
+  applySkillLearning,
+  extractSkillAtoms,
+  pruneFailedSkills,
+} from "../../../learning/skill-flywheel";
 import {
   resolveModelForRole,
   resolveModelWithFallback,
@@ -369,8 +373,44 @@ export { planInsight } from "../../../agents/insight";
  * executing the `executionDescriptor`. This closes the learning loop:
  *
  * 1. Updates the episode record from "pending" → "pass"/"fail".
- * 2. Applies skill score updates that were skipped during delegation.
+ * 2. Applies skill score updates that were skipped during delegation
+ *    (failure learning is dampened without quality lessons).
+ * 3. Soft-prunes chronically failing atomic skills from insight surfaces.
  */
+const MAX_OUTCOME_LESSONS = 4;
+const MIN_QUALITY_LESSON_CHARS = 8;
+
+/**
+ * Trim, drop empties, cap at 4. Used by reportOutcome before episode update.
+ */
+export function sanitizeOutcomeLessons(lessons: string[]): string[] {
+  return lessons
+    .map((lesson) => (typeof lesson === "string" ? lesson.trim() : ""))
+    .filter((lesson) => lesson.length > 0)
+    .slice(0, MAX_OUTCOME_LESSONS);
+}
+
+function countQualityLessons(lessons: string[]): number {
+  return lessons.filter((lesson) => lesson.length >= MIN_QUALITY_LESSON_CHARS).length;
+}
+
+/**
+ * Decide whether bridge outcome should drive skill score updates.
+ * Success runs when task+lessons yield atoms; failure requires quality lessons (>=8 chars).
+ */
+export function shouldApplySkillLearningFromOutcome(
+  success: boolean,
+  task: string,
+  sanitizedLessons: string[]
+): boolean {
+  if (!success) {
+    // Failure without quality lessons: skip penalty spam.
+    return countQualityLessons(sanitizedLessons) > 0;
+  }
+  const corpus = [task, ...sanitizedLessons].filter(Boolean).join(" and ");
+  return extractSkillAtoms(corpus).length > 0;
+}
+
 export async function reportOutcome(
   episodeId: string,
   success: boolean,
@@ -380,11 +420,14 @@ export async function reportOutcome(
   const config = resolveConfig(configPath);
   const graphClient = createGraphClient(config);
 
+  const sanitizedLessons = sanitizeOutcomeLessons(lessons ?? []);
+
+  // Always update episode outcome (success/fail), even when skill learning is dampened.
   const updated = await updateEpisodeOutcome(
     graphClient,
     episodeId,
     success ? "pass" : "fail",
-    lessons
+    sanitizedLessons
   );
   if (!updated) {
     return { ok: false, reason: `Episode not found: ${episodeId}` };
@@ -393,7 +436,10 @@ export async function reportOutcome(
   // Apply skill score updates that were skipped during bridge delegation.
   // Lessons are folded into skill atom extraction so short/generic tasks still learn.
   let skillsUpdated = 0;
-  if (config.skillPolicy?.enableSkillFlywheel) {
+  if (
+    config.skillPolicy?.enableSkillFlywheel &&
+    shouldApplySkillLearningFromOutcome(success, updated.task, sanitizedLessons)
+  ) {
     const syntheticRun: TaskRunResult = {
       status: success ? "COMPLETED" : "FAILED",
       attempts: updated.attempts,
@@ -403,8 +449,11 @@ export async function reportOutcome(
       graphClient,
       updated.task,
       syntheticRun,
-      updated.lessons
+      sanitizedLessons
     );
+  } else if (config.skillPolicy?.enableSkillFlywheel) {
+    // Still soft-prune toxic skills when learning is dampened.
+    await pruneFailedSkills(graphClient);
   }
 
   return {

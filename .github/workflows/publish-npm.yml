@@ -20,7 +20,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           registry-url: https://registry.npmjs.org
           cache: npm
 
@@ -36,8 +36,8 @@ jobs:
       - name: Lint, build, and test
         run: npm run lint && npm run build && npm test
 
-      - name: Publish graphflow package
-        run: npm publish --access public
+      - name: Publish @roarpeng/graphflow (idempotent)
+        run: node scripts/publish-npm-idempotent.mjs
         env:
           NODE_AUTH_TOKEN: ${{ secrets.npm_token != '' && secrets.npm_token || secrets.NPM_TOKEN }}
           HUSKY: "0"

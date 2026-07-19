@@ -1,4 +1,5 @@
 import type { GraphEdge, GraphNode } from "../core/types";
+import { ARCHITECTURE_QUERY } from "./context-slicer-types.js";
 
 const TOKEN_SPLIT = /[^a-zA-Z0-9_\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]+/g;
 const CJK_RE = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/;
@@ -24,6 +25,18 @@ const CORE_SOURCE_PATH_PATTERNS = [
   /(?:^|\/)src\/learning\//,
   /(?:^|\/)src\/skills\//,
 ];
+
+/** Hub paths that should dominate architecture / overview ranking. */
+const ARCHITECTURE_HUB_PATH_PATTERNS = [
+  /(?:^|\/)src\/core\/orchestrator/i,
+  /(?:^|\/)src\/surfaces\/mcp\//i,
+  /(?:^|\/)README(?:\.[^/]+)?$/i,
+];
+
+/** Leaf / peripheral paths to demote only for architecture overview queries. */
+const ARCHITECTURE_PERIPHERAL_TYPES_PATTERN = /(?:^|\/)[^/]*types\.ts$/i;
+const ARCHITECTURE_PERIPHERAL_ERROR_PATTERN = /(?:^|\/)[^/]*error[^/]*\.ts$/i;
+const ARCHITECTURE_PANELS_PATH_PATTERN = /(?:^|\/)vscode-extension\/src\/panels\.ts$/i;
 
 /** Soft-demote IDE/extension/docs and packaged dependency noise unless explicitly targeted. */
 const VSCODE_EXTENSION_PATH_PATTERN = /(?:^|\/)vscode-extension\//;
@@ -145,6 +158,23 @@ export function tokenizeForIndex(text: string): string[] {
   }
 
   return [...out];
+}
+
+/**
+ * Merge original query with optional agent-translated English for matching / intent detection.
+ * Keeps both sides so CJK overview wording and englishQuery hubs are visible together.
+ */
+export function composeContextQuery(query: string, englishQuery?: string): string {
+  const q = query.trim();
+  const en = englishQuery?.trim();
+  if (!q) return en ?? "";
+  if (!en) return q;
+  const qLower = q.toLowerCase();
+  const enLower = en.toLowerCase();
+  if (qLower === enLower || qLower.includes(enLower) || enLower.includes(qLower)) {
+    return q.length >= en.length ? q : en;
+  }
+  return `${q} ${en}`;
 }
 
 /** Tokens used for re-ranking: original query + agent English + active sub-query. */
@@ -312,6 +342,40 @@ export interface RankNodesOptions {
   matchQueries?: string[];
   /** Optional workspace path segments used as retrieval hints (e.g. from extractPathTokens). */
   pathHints?: Iterable<string>;
+  /** Agent-translated English terms; composed with query for architecture intent detection. */
+  englishQuery?: string;
+}
+
+function hasArchitectureIntent(query: string, englishQuery?: string, matchQueries?: string[]): boolean {
+  if (ARCHITECTURE_QUERY.test(composeContextQuery(query, englishQuery))) {
+    return true;
+  }
+  return (matchQueries ?? []).some((q) => ARCHITECTURE_QUERY.test(q));
+}
+
+/** Extra boost for orchestrator / MCP / README hubs on architecture overview queries. */
+function architectureHubBoost(path: string): number {
+  if (ARCHITECTURE_HUB_PATH_PATTERNS.some((pattern) => pattern.test(path))) {
+    return 16;
+  }
+  return 0;
+}
+
+/**
+ * Soft-demote peripheral types/errors/panels for architecture queries only.
+ * Normal code search (non-architecture) is unaffected.
+ */
+function architecturePeripheralPenalty(path: string): number {
+  if (ARCHITECTURE_PANELS_PATH_PATTERN.test(path)) {
+    return -18;
+  }
+  if (ARCHITECTURE_PERIPHERAL_TYPES_PATTERN.test(path)) {
+    return -10;
+  }
+  if (ARCHITECTURE_PERIPHERAL_ERROR_PATTERN.test(path)) {
+    return -10;
+  }
+  return 0;
 }
 
 function hasCoreEngineIntent(tokens: Set<string>): boolean {
@@ -383,7 +447,8 @@ export function rankNodesForContextQuery(
     [...(options?.pathHints ?? [])].map((hint) => hint.toLowerCase()).filter(Boolean)
   );
   const uiIntent = [...queryTokens].some((token) => UI_INTERACTION_TOKENS.has(token));
-  const coreIntent = hasCoreEngineIntent(queryTokens);
+  const architectureIntent = hasArchitectureIntent(query, options?.englishQuery, matchQueries);
+  const coreIntent = hasCoreEngineIntent(queryTokens) || architectureIntent;
   const extensionIntent = hasExtensionIntent(queryTokens, query, pathHints);
   const sliceIntent =
     queryTokens.has("slice") ||
@@ -416,6 +481,10 @@ export function rankNodesForContextQuery(
     }
     if (coreIntent && CORE_SOURCE_PATH_PATTERNS.some((pattern) => pattern.test(path))) {
       score += 12;
+    }
+    if (architectureIntent) {
+      score += architectureHubBoost(path);
+      score += architecturePeripheralPenalty(path);
     }
     if (sliceIntent && SLICES_PATH_PATTERN.test(path)) {
       score += 10;

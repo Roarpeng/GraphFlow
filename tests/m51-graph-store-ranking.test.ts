@@ -167,4 +167,30 @@ describe("M51 graph store resilience and retrieval ranking", () => {
     expect(firstCoreIndex).toBeGreaterThanOrEqual(0);
     expect(firstNoiseIndex).toBeGreaterThan(firstCoreIndex);
   });
+
+  it("boosts README hubs on architecture overview queries", () => {
+    const nodes: GraphNode[] = [
+      {
+        id: "file:src/graph/context-slicer-types.ts",
+        type: "File",
+        content: "context-slicer-types architecture module types",
+      },
+      {
+        id: "file:README.md",
+        type: "File",
+        content: "README.md architecture module overview",
+      },
+      {
+        id: "file:src/core/orchestrator.ts",
+        type: "File",
+        content: "orchestrator architecture module",
+      },
+    ];
+
+    const ranked = rankNodesForContextQuery(nodes, "architecture module overview");
+    const readmeIdx = ranked.findIndex((n) => /README/i.test(n.id));
+    const typesIdx = ranked.findIndex((n) => n.id.includes("types.ts"));
+    expect(readmeIdx).toBeGreaterThanOrEqual(0);
+    expect(typesIdx).toBeGreaterThan(readmeIdx);
+  });
 });

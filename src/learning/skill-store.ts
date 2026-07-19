@@ -44,6 +44,7 @@ export function parseSkillState(content: string): SkillState | undefined {
       uses: parsed.uses ?? 0,
       lastOutcome: parsed.lastOutcome === "fail" ? "fail" : "pass",
       updatedAt: parsed.updatedAt ?? 0,
+      ...(parsed.hidden === true ? { hidden: true } : {}),
     };
   } catch (error) {
     logger.error({ error }, "Caught error");

@@ -28,6 +28,7 @@ export async function collectExpandedKeywordHits(
         scoreTokens: scoreTokens.length > 0 ? scoreTokens : baseScoreTokens,
         matchQueries,
         pathHints,
+        ...(englishQuery !== undefined ? { englishQuery } : {}),
       })
     );
   }

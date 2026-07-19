@@ -6,7 +6,7 @@ import {
   reciprocalRankFusion,
 } from "../learning/embeddings.js";
 import type { GraphClient } from "./client-factory.js";
-import { rankNodesForContextQuery } from "./graph-utils.js";
+import { rankNodesForContextQuery, composeContextQuery, buildSearchScoreTokens } from "./graph-utils.js";
 import { collectExpandedKeywordHits } from "./query-expand.js";
 import { prepareHitsForPackaging } from "./hit-diversify.js";
 import {
@@ -289,12 +289,19 @@ export async function buildLayeredContextPackage(
     }
   }
 
-  if (!truncated && ARCHITECTURE_QUERY.test(query)) {
+  if (!truncated && ARCHITECTURE_QUERY.test(composeContextQuery(query, options?.englishQuery))) {
     const l3Candidates = rankNodesForContextQuery(
       (await client.queryByKeyword(query)).filter(
         (n) => n.type === "Skill" || n.type === "Decision"
       ),
-      query
+      query,
+      {
+        scoreTokens: buildSearchScoreTokens(query, options?.englishQuery),
+        matchQueries: options?.englishQuery?.trim()
+          ? [query, options.englishQuery.trim()]
+          : [query],
+        ...(options?.englishQuery !== undefined ? { englishQuery: options.englishQuery } : {}),
+      }
     );
     let l3Added = 0;
     for (const node of l3Candidates) {

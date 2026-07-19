@@ -73,4 +73,9 @@ export const DEFAULT_EXPANSION_RELATIONS: GraphEdge["relation"][] = [
   "defines",
 ];
 
-export const ARCHITECTURE_QUERY = /architecture|refactor|module|design|架构|模块/i;
+/**
+ * Overview / architecture retrieval intent (EN + CJK).
+ * Used to surface orchestrator / MCP / README hubs and demote peripheral leaves.
+ */
+export const ARCHITECTURE_QUERY =
+  /architecture|architect|orchestrat|refactor|module|design|structure|overview|package[\s_-]*structure|mcp|readme|架构|模块|顶层|发布|概览|结构|设计|分层/i;

@@ -158,8 +158,12 @@ export function compactPreview(content: string, maxLength: number): string {
 
 export function parseSkillInsight(node: GraphNode): SkillInsightItem | undefined {
   try {
-    const parsed = JSON.parse(node.content) as Partial<SkillInsightItem>;
+    const parsed = JSON.parse(node.content) as Partial<SkillInsightItem> & { hidden?: boolean };
     if (!parsed.id || !parsed.name) {
+      return undefined;
+    }
+    // Soft-hidden toxic skills (pruneFailedSkills) stay out of insights listings.
+    if (parsed.hidden === true) {
       return undefined;
     }
 
