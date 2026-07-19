@@ -1,9 +1,19 @@
-const Parser = require("web-tree-sitter");
+const TreeSitterMod = require("web-tree-sitter");
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 
 const requireFn = createRequire(__filename);
+
+/** web-tree-sitter >=0.25 exports { Parser, Language }; older versions export Parser directly. */
+const Parser: {
+  init(moduleOptions?: unknown): Promise<void>;
+  new (): TreeSitterParser & { setLanguage(lang: unknown): void };
+} = TreeSitterMod.Parser ?? TreeSitterMod;
+
+const Language: {
+  load(input: string | Uint8Array): Promise<unknown>;
+} = TreeSitterMod.Language ?? TreeSitterMod.Parser?.Language ?? TreeSitterMod;
 
 let initPromise: Promise<void> | null = null;
 
@@ -46,6 +56,7 @@ export interface TreeSitterParser {
  * Previously only python/go used tree-sitter; rust/c-cpp used regex.
  * Now all four use tree-sitter for consistent AST-level extraction.
  * Phase 2: added java/ruby to broaden language coverage (toward codebase-memory-mcp's 158 languages).
+ * Phase 3: kotlin/swift; Phase 4: dart (requires web-tree-sitter >=0.25 for ABI 15).
  */
 export type TreeSitterLanguage =
   | "python"
@@ -56,7 +67,8 @@ export type TreeSitterLanguage =
   | "java"
   | "ruby"
   | "kotlin"
-  | "swift";
+  | "swift"
+  | "dart";
 
 const WASM_CACHE_DIR = join(process.cwd(), ".graphflow-cache", "wasm");
 const languageLoadPromises = new Map<TreeSitterLanguage, Promise<unknown>>();
@@ -161,7 +173,7 @@ async function loadTreeSitterLanguage(language: TreeSitterLanguage): Promise<unk
     );
   }
 
-  const languagePromise = Parser.Language.load(wasmPath) as Promise<unknown>;
+  const languagePromise = Language.load(wasmPath) as Promise<unknown>;
   languageLoadPromises.set(language, languagePromise);
   return languagePromise;
 }

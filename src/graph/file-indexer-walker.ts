@@ -39,6 +39,7 @@ export const IGNORED_DIRS = new Set([
   ".git", "node_modules", "dist", "coverage", "tmp", "venv", ".venv", "env", ".env",
   "__pycache__", ".vscode", ".idea", ".next", "build", "install", "log",
   ".graphflow-cache", "graphflow-out",
+  ".dart_tool",
   // Windows protected / system-heavy directories (EPERM when scanned)
   "ElevatedDiagnostics", "Application Data", "Packages", "Microsoft", "Temp", "Temporary Internet Files",
   "System Volume Information", "$Recycle.Bin",

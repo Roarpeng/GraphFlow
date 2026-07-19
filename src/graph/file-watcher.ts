@@ -40,6 +40,7 @@ const WATCH_IGNORED_DIRS = new Set([
   ".graphflow-cache",
   "graphflow-out",
   ".codegraph",
+  ".dart_tool",
   // Defense-in-depth if root was mis-resolved to the user profile.
   "AppData",
   "Application Data",
