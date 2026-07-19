@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.7.7] - 2026-07-19
+
+### Added
+
+- **npm 幂等发布**：`scripts/publish-npm-idempotent.mjs`，已发布版本不再因 E403 失败
+- **技能飞轮卫生**：全 stopword 短语过滤、`pruneFailedSkills` 软隐藏毒技能、`reportOutcome` lessons 质量门
+- **架构检索加权**：架构/CJK 查询优先 orchestrator / MCP / README，压低 types/errors/panels
+- **安装指令块**：统一为 10 工具面 + `graphflow_context` + CallMcpTool 契约
+
+### Changed
+
+- CI / publish workflows 升级 Node **22**
+- Marketplace：无密钥时 dispatch 跳过警告；tag 推送无密钥则明确失败；日志使用 GraphFlow Tool / `graphflow-tool`
+
 ## [1.7.4] - 2026-07-13
 
 ### Added

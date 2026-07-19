@@ -73,13 +73,26 @@ function isBareStopword(skill: string): boolean {
   return STOPWORDS.has(skill);
 }
 
+/** True when every non-empty token in the phrase is a stopword (e.g. "update readme"). */
+export function isAllStopwordPhrase(phrase: string): boolean {
+  const tokens = phrase
+    .split(/\s+/)
+    .map((token) => token.replace(/[^a-z0-9_./-]/g, ""))
+    .filter((token) => token.length > 0);
+  if (tokens.length === 0) {
+    return true;
+  }
+  return tokens.every((token) => STOPWORDS.has(token));
+}
+
 export function extractSkillAtoms(task: string): string[] {
   const normalized = task.trim().toLowerCase();
 
   const phrases = normalized
     .split(/\band\b|,|;/i)
     .map((part) => part.trim())
-    .filter((part) => part.length >= 3);
+    .filter((part) => part.length >= 3)
+    .filter((part) => !isAllStopwordPhrase(part));
 
   const longPhrases = phrases.filter(
     (part) => part.length >= 6 && !isPathLikePhrase(part)
@@ -91,6 +104,9 @@ export function extractSkillAtoms(task: string): string[] {
   const tokenSkills: string[] = [];
   const partsForTokens = phrases.length > 0 ? phrases : [normalized];
   for (const part of partsForTokens) {
+    if (isAllStopwordPhrase(part)) {
+      continue;
+    }
     if (part.length >= 6 && !isPathLikePhrase(part)) {
       continue;
     }
@@ -111,7 +127,86 @@ export function extractSkillAtoms(task: string): string[] {
 
   return dedup([...longPhrases, ...shortPhrases, ...phraseHeadTokens, ...tokenSkills, ...zhWords])
     .filter((skill) => !isBareStopword(skill))
+    .filter((skill) => !isAllStopwordPhrase(skill))
     .slice(0, 8);
+}
+
+export interface PruneFailedSkillsOptions {
+  /** Soft-hide when score is at or below this (default -5). */
+  scoreThreshold?: number;
+  /** Require at least this many uses before pruning (default 5). */
+  minUses?: number;
+  /** Cap how many skills to hide in one pass (default 50). */
+  maxPrune?: number;
+}
+
+export interface PruneFailedSkillsResult {
+  pruned: number;
+  ids: string[];
+}
+
+function isToxicAtomicSkill(
+  state: SkillState,
+  scoreThreshold: number,
+  minUses: number
+): boolean {
+  if (state.hidden) {
+    return false;
+  }
+  return (
+    state.lastOutcome === "fail" &&
+    state.score <= scoreThreshold &&
+    state.uses >= minUses
+  );
+}
+
+async function listSkillNodes(client: GraphClient): Promise<GraphNode[]> {
+  if (client.readSnapshot) {
+    return client.readSnapshot().nodes.filter((node) => node.type === "Skill");
+  }
+  const hits = await client.queryByKeyword("skill");
+  return hits.filter((node) => node.type === "Skill");
+}
+
+/**
+ * Soft-hide chronically failing low-score atomic skills so they stop polluting
+ * insights and hint ranking. Prefer hide over delete (Decision history stays).
+ */
+export async function pruneFailedSkills(
+  client: GraphClient,
+  options?: PruneFailedSkillsOptions
+): Promise<PruneFailedSkillsResult> {
+  const scoreThreshold = options?.scoreThreshold ?? -5;
+  const minUses = options?.minUses ?? 5;
+  const maxPrune = options?.maxPrune ?? 50;
+
+  const skillNodes = await listSkillNodes(client);
+  const updates: GraphNode[] = [];
+  const ids: string[] = [];
+
+  for (const node of skillNodes) {
+    if (ids.length >= maxPrune) {
+      break;
+    }
+    const atomic = parseSkillState(node.content);
+    if (!atomic || !isToxicAtomicSkill(atomic, scoreThreshold, minUses)) {
+      continue;
+    }
+    const next: SkillState = {
+      ...atomic,
+      score: boundedScore(atomic.score - 1),
+      hidden: true,
+      updatedAt: Date.now(),
+    };
+    updates.push({ id: next.id, type: "Skill", content: serializeAtomic(next) });
+    ids.push(next.id);
+  }
+
+  if (updates.length > 0) {
+    await client.upsertNodes(updates);
+  }
+
+  return { pruned: ids.length, ids };
 }
 
 export async function applySkillLearning(
@@ -127,14 +222,19 @@ export async function applySkillLearning(
   // even when the original task string is too short/generic to extract atoms.
   const learningCorpus = [task, ...lessonText].filter(Boolean).join(" and ");
   const skills = extractSkillAtoms(learningCorpus);
+  const passed = run.status === "COMPLETED";
+
   if (skills.length === 0) {
+    if (!passed) {
+      await pruneFailedSkills(client);
+    }
     return 0;
   }
 
-  const passed = run.status === "COMPLETED";
   const now = Date.now();
   const nodes: GraphNode[] = [];
   const edges: SkillEdge[] = [];
+  const learnedSkills: string[] = [];
 
   // Create the Decision node so `improves` edges don't dangle.
   const decisionId = `decision:task:${hashText(task)}`;
@@ -148,6 +248,10 @@ export async function applySkillLearning(
   for (const skill of skills) {
     const id = skillNodeId(skill);
     const previous = await readSkillState(client, id);
+    // Do not keep amplifying soft-hidden toxic atoms on further failures.
+    if (previous?.hidden && !passed) {
+      continue;
+    }
     const next: SkillState = {
       id,
       name: skill,
@@ -155,6 +259,8 @@ export async function applySkillLearning(
       uses: (previous?.uses ?? 0) + 1,
       lastOutcome: passed ? "pass" : "fail",
       updatedAt: now,
+      // Pass clears soft-hide; fail preserves it if already set.
+      ...(passed ? {} : previous?.hidden ? { hidden: true } : {}),
     };
 
     nodes.push({ id, type: "Skill", content: serializeAtomic(next) });
@@ -163,12 +269,20 @@ export async function applySkillLearning(
       to: decisionId,
       relation: "improves",
     });
+    learnedSkills.push(skill);
   }
 
-  for (let i = 0; i < skills.length; i += 1) {
-    for (let j = i + 1; j < skills.length; j += 1) {
-      const a = skills[i]!;
-      const b = skills[j]!;
+  if (learnedSkills.length === 0) {
+    if (!passed) {
+      await pruneFailedSkills(client);
+    }
+    return 0;
+  }
+
+  for (let i = 0; i < learnedSkills.length; i += 1) {
+    for (let j = i + 1; j < learnedSkills.length; j += 1) {
+      const a = learnedSkills[i]!;
+      const b = learnedSkills[j]!;
       edges.push({
         from: skillNodeId(a),
         to: skillNodeId(b),
@@ -203,7 +317,12 @@ export async function applySkillLearning(
 
   await client.upsertNodes(nodes);
   await client.upsertEdges(dedupEdges(edges));
-  return skills.length;
+
+  if (!passed) {
+    await pruneFailedSkills(client);
+  }
+
+  return learnedSkills.length;
 }
 
 export async function suggestSkillHints(
@@ -226,7 +345,7 @@ export async function suggestSkillHints(
       continue;
     }
     const atomic = parseSkillState(node.content);
-    if (atomic) {
+    if (atomic && !atomic.hidden) {
       atomicStates.push(atomic);
     }
   }

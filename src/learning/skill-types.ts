@@ -7,6 +7,8 @@ export interface SkillState {
   uses: number;
   lastOutcome: "pass" | "fail";
   updatedAt: number;
+  /** Soft-hidden from insights/hints after pruneFailedSkills (toxic fail streak). */
+  hidden?: boolean;
 }
 
 export interface CompositeSkillState {
