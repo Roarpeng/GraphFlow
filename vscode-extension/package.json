@@ -1,5 +1,5 @@
 {
-  "name": "graphflow-vscode",
+  "name": "graphflow-tool",
   "publisher": "roarpeng",
   "displayName": "GraphFlow",
   "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.7.5: automatic execution mode - LLM only when configured and healthy, otherwise bridge mode.",
@@ -26,7 +26,7 @@
     "onCommand:graphflow.showSkills",
     "onCommand:graphflow.installMcp",
     "onStartupFinished",
-    "onChatParticipant:roarpeng.graphflow-vscode.graphflowAgent"
+    "onChatParticipant:roarpeng.graphflow-tool.graphflowAgent"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -80,7 +80,7 @@
     ],
     "chatParticipants": [
       {
-        "id": "roarpeng.graphflow-vscode.graphflowAgent",
+        "id": "roarpeng.graphflow-tool.graphflowAgent",
         "name": "graphflow",
         "fullName": "GraphFlow Agent",
         "description": "Run GraphFlow tasks and planning in chat",

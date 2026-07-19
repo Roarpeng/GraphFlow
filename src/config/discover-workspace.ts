@@ -6,6 +6,7 @@ const RUNTIME_DIR_MARKERS = [
   "/vendor/graphflow",
   "node_modules/@roarpeng/graphflow",
   "graphflow-vscode-",
+  "graphflow-tool-",
   "/.cursor/extensions/",
 ];
 
