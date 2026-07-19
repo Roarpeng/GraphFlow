@@ -4,7 +4,7 @@
   "displayName": "GraphFlow Tool",
   "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.7.5: automatic execution mode - LLM only when configured and healthy, otherwise bridge mode.",
   "icon": "media/graphflow.png",
-  "version": "1.7.5",
+  "version": "1.7.6",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"
