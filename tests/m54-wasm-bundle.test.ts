@@ -6,7 +6,18 @@ import {
   type TreeSitterLanguage,
 } from "../src/graph/language-indexers/tree-sitter-loader.js";
 
-const GRAMMARS: TreeSitterLanguage[] = ["python", "go", "rust", "c", "cpp", "java", "ruby"];
+const GRAMMARS: TreeSitterLanguage[] = [
+  "python",
+  "go",
+  "rust",
+  "c",
+  "cpp",
+  "java",
+  "ruby",
+  "kotlin",
+  "swift",
+  "dart",
+];
 
 describe("M54 bundled wasm grammars", () => {
   it("resolves all required grammars from the bundled wasm directory", () => {

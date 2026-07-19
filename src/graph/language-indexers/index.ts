@@ -7,6 +7,7 @@ import { javaIndexer } from "./java";
 import { rubyIndexer } from "./ruby";
 import { kotlinIndexer } from "./kotlin";
 import { swiftIndexer } from "./swift";
+import { dartIndexer } from "./dart";
 
 export interface DeclaredSymbol {
   name: string;
@@ -70,6 +71,7 @@ const INDEXERS: LanguageIndexer[] = [
   rubyIndexer,
   kotlinIndexer,
   swiftIndexer,
+  dartIndexer,
 ];
 
 export function getIndexerForFile(filename: string): LanguageIndexer | undefined {

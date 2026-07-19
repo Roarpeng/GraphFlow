@@ -13,8 +13,8 @@ const { join } = require("node:path");
 const { createRequire } = require("node:module");
 
 const requireFn = createRequire(__filename);
-const GRAMMARS = ["python", "go", "rust", "c", "cpp", "java", "ruby", "kotlin", "swift"];
-const VERSION = "0.1.11";
+const GRAMMARS = ["python", "go", "rust", "c", "cpp", "java", "ruby", "kotlin", "swift", "dart"];
+const VERSION = "0.1.13";
 const OUTPUT_DIR = join(__dirname, "..", "wasm");
 
 function resolveTreeSitterWasmsOutDir() {

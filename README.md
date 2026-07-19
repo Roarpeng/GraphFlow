@@ -323,6 +323,7 @@ const run = await orchestrate(
 | Ruby | `.rb` |
 | Kotlin | `.kt` |
 | Swift | `.swift` |
+| Dart | `.dart` |
 
 通过 `graphPolicy.includeExtensions` 限制扫描范围。tree-sitter WASM 语法包在 `npm run build` 时打�?`wasm/` 并随 npm 包分发，安装后无需联网下载�?
 

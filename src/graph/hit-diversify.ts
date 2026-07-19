@@ -38,7 +38,7 @@ function looksLikeSourcePath(path: string): boolean {
   if (normalized.includes("/") || normalized.includes("\\")) {
     return true;
   }
-  if (/\.(ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|kt|swift|md|json)$/i.test(normalized)) {
+  if (/\.(ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|kt|swift|dart|md|json)$/i.test(normalized)) {
     return true;
   }
   return false;

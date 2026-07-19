@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Dart / Flutter 索引器**：新增 `.dart` tree-sitter 索引器（class/mixin/extension/enum/typedef/function/import）；忽略 `.dart_tool`；`tree-sitter-wasms` 升至 0.1.13，`web-tree-sitter` 升至 0.25.10（支持 Dart ABI 15）
+
 ## [1.7.7] - 2026-07-19
 
 ### Added
@@ -27,8 +33,6 @@ All notable changes to this project are documented in this file.
 ### Fixed
 
 - **LLM 配置无法联通**：此前适配器只读环境变量，忽略配置文件中的 apiKey/baseUrl
-
-## [Unreleased]
 
 ## [1.7.3] - 2026-07-12
 
