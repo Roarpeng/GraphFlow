@@ -37,11 +37,15 @@ import {
   submitAgentInsight,
   type SubmitAgentInsightResult,
 } from "../../../core/submit-agent-insight";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { getRuntimeTimelineSummary } from "../../../core/cancellation";
-import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
+import { bindRuntimeWorkspaceRoot, resolveRuntimeWorkspaceRoot } from "../../../config/workspace-root";
 import { getEmbeddingQualitySummary } from "../../../learning/embedding-quality";
 import { buildEmbeddingOptions } from "./env.js";
 import { extractTokenCost } from "./helpers.js";
+import { hasIndexCache } from "../../../graph/file-indexer-cache";
 import type {
   PlanPreviewResult,
   ReportOutcomeResult,
@@ -173,6 +177,17 @@ export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResu
     embedded: false,
   };
 
+  const workspaceRoot = computeWorkspaceRootDiagnosis(config);
+  const graphFreshness = computeGraphFreshnessDiagnosis(config);
+  const modelCache = computeModelCacheDiagnosis();
+  const providerEntries = Object.entries(health).filter(([, v]) => v);
+  const connectivitySummary = {
+    total: Object.keys(health).length,
+    healthy: providerEntries.length,
+    unhealthy: Object.keys(health).length - providerEntries.length,
+    providerNames: providerEntries.map(([k]) => k),
+  };
+
   return {
     dynamicRouting: config.routingPolicy?.enableDynamicRouting ?? false,
     health,
@@ -195,7 +210,58 @@ export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResu
     compression,
     embeddingQuality: getEmbeddingQualitySummary(),
     runtimeTimeline: getRuntimeTimelineSummary(),
+    workspaceRoot,
+    graphFreshness,
+    modelCache,
+    connectivitySummary,
   };
+}
+
+function computeWorkspaceRootDiagnosis(config: ReturnType<typeof resolveConfig>) {
+  const envSet = Boolean(process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim());
+  const resolved = resolveRuntimeWorkspaceRoot({
+    ...(config.graphPolicy.workspaceRoot ? { projectWorkspaceRoot: config.graphPolicy.workspaceRoot } : {}),
+  });
+  let discovery: "env" | "config" | "auto" | "cwd" = "cwd";
+  if (envSet) {
+    discovery = "env";
+  } else if (config.graphPolicy.workspaceRoot) {
+    discovery = "config";
+  } else if (resolved !== process.cwd()) {
+    discovery = "auto";
+  }
+  const exists = existsSync(resolved);
+  const hasPackageJson = exists && existsSync(join(resolved, "package.json"));
+  const stale = envSet && (!exists || !hasPackageJson);
+  return { path: resolved, discovery, exists, hasPackageJson, stale };
+}
+
+function computeGraphFreshnessDiagnosis(config: ReturnType<typeof resolveConfig>) {
+  const root = config.graphPolicy.workspaceRoot ?? process.cwd();
+  const cached = hasIndexCache(root);
+  let stale = false;
+  let cacheFileCount = 0;
+  if (cached) {
+    stale = hasPendingGraphIndexWork(root);
+    try {
+      const cachePath = join(root, ".graphflow-cache", "index-state.json");
+      const raw = readFileSync(cachePath, "utf8");
+      const parsed = JSON.parse(raw);
+      cacheFileCount = parsed?.state ? Object.keys(parsed.state).length : 0;
+    } catch {
+      cacheFileCount = 0;
+    }
+  }
+  return { hasIndexCache: cached, stale, cacheFileCount };
+}
+
+function computeModelCacheDiagnosis() {
+  const envDir = process.env.GRAPHFLOW_EMBEDDING_CACHE_DIR?.trim();
+  const defaultDir = join(homedir(), ".cache", "huggingface");
+  const cacheDir = envDir || defaultDir;
+  const resolution: "env" | "default" = envDir ? "env" : "default";
+  const exists = existsSync(cacheDir) || existsSync(join(cacheDir, "hub"));
+  return { exists, path: cacheDir, resolution };
 }
 
 export function diagnoseRouting(configPath?: string): string {

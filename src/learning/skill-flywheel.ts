@@ -421,3 +421,110 @@ export async function suggestSkillHints(
 
   return chosen.map((item) => item.name);
 }
+
+const DECAY_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
+const DECAY_RATE = 1;
+
+export interface SkillDecayResult {
+  total: number;
+  decayed: number;
+  skipped: number;
+}
+
+export async function maybeDecaySkills(client: GraphClient): Promise<SkillDecayResult> {
+  const nodes = await client.queryByKeyword("skill:");
+  const skillNodes = dedupNodes(nodes.filter((n) => n.type === "Skill"));
+
+  const now = Date.now();
+  const updates: GraphNode[] = [];
+  let decayed = 0;
+  let skipped = 0;
+
+  for (const node of skillNodes) {
+    const skill = parseSkillState(node.content);
+    if (!skill) {
+      skipped += 1;
+      continue;
+    }
+
+    const lastDecayedAt = skill.lastDecayedAt ?? skill.updatedAt;
+    const daysSinceDecay = (now - lastDecayedAt) / DECAY_THRESHOLD_MS;
+    if (daysSinceDecay < 1) {
+      skipped += 1;
+      continue;
+    }
+
+    const decayAmount = Math.floor(daysSinceDecay) * DECAY_RATE;
+    if (decayAmount <= 0) {
+      skipped += 1;
+      continue;
+    }
+
+    let newScore = skill.score;
+    if (skill.score > 0) {
+      newScore = Math.max(0, skill.score - decayAmount);
+    } else if (skill.score < 0) {
+      newScore = Math.min(0, skill.score + decayAmount);
+    }
+
+    if (newScore === skill.score) {
+      skipped += 1;
+      continue;
+    }
+
+    const updated: SkillState = {
+      ...skill,
+      score: boundedScore(newScore),
+      lastDecayedAt: now,
+    };
+
+    updates.push({ id: skill.id, type: "Skill", content: serializeAtomic(updated) });
+    decayed += 1;
+  }
+
+  if (updates.length > 0) {
+    await client.upsertNodes(updates);
+  }
+
+  return { total: skillNodes.length, decayed, skipped };
+}
+
+export async function resetSkillScore(
+  client: GraphClient,
+  skillName: string
+): Promise<SkillState | undefined> {
+  const id = skillNodeId(skillName);
+  const previous = await readSkillState(client, id);
+  if (!previous) {
+    return undefined;
+  }
+
+  const reset: SkillState = {
+    ...previous,
+    score: 0,
+    updatedAt: Date.now(),
+    lastDecayedAt: Date.now(),
+  };
+
+  await client.upsertNodes([{ id, type: "Skill", content: serializeAtomic(reset) }]);
+  return reset;
+}
+
+export async function pruneLowSkills(client: GraphClient): Promise<{ pruned: number }> {
+  const nodes = await client.queryByKeyword("skill:");
+  const skillNodes = dedupNodes(nodes.filter((n) => n.type === "Skill"));
+  let pruned = 0;
+
+  for (const node of skillNodes) {
+    const skill = parseSkillState(node.content);
+    if (!skill) continue;
+    if (skill.score < -15) {
+      if (client.deleteNode) {
+        await client.deleteNode(node.id);
+      }
+      pruned += 1;
+    }
+  }
+
+  return { pruned };
+}

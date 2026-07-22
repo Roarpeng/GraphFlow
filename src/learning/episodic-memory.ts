@@ -440,3 +440,18 @@ export async function pruneExpiredEpisodes(
 
   return { pruned: toPrune.length };
 }
+
+export async function forgetEpisodes(client: GraphClient): Promise<{ removed: number }> {
+  const nodes = await client.queryByKeyword(EPISODE_SENTINEL);
+  const episodeNodes = nodes.filter((n) => isEpisodeNode(n));
+  let removed = 0;
+
+  for (const node of episodeNodes) {
+    if (client.deleteNode) {
+      await client.deleteNode(node.id);
+    }
+    removed += 1;
+  }
+
+  return { removed };
+}
