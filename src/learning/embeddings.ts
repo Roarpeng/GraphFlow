@@ -132,7 +132,9 @@ function isModuleNotFoundError(error: unknown): boolean {
   const message = err.message ?? "";
   return (
     message.includes("Cannot find package '@xenova/transformers'") ||
-    message.includes("Cannot find module '@xenova/transformers'")
+    message.includes("Cannot find module '@xenova/transformers'") ||
+    message.includes("Cannot find package '@huggingface/transformers'") ||
+    message.includes("Cannot find module '@huggingface/transformers'")
   );
 }
 
@@ -173,34 +175,46 @@ async function importTransformersFromRoot(root: string): Promise<TransformersMod
   }
   try {
     const requireFromRoot = createRequire(pkgJson);
-    const resolved = requireFromRoot.resolve("@xenova/transformers");
-    return (await import(pathToFileURL(resolved).href)) as TransformersModule;
+    // Try @huggingface/transformers (v3) first, fall back to legacy @xenova/transformers
+    for (const pkg of ["@huggingface/transformers", "@xenova/transformers"]) {
+      try {
+        const resolved = requireFromRoot.resolve(pkg);
+        return (await import(pathToFileURL(resolved).href)) as TransformersModule;
+      } catch {
+        // try next
+      }
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
 /**
- * Load `@xenova/transformers`, optionally resolving from workspace node_modules
- * when the bundled runtime (extension vendor) does not include the package.
- *
- * `@xenova/transformers` reads `HF_ENDPOINT` from `process.env` natively
- * to configure the Hugging Face model hub endpoint / mirror.
+ * Load transformers, preferring `@huggingface/transformers` (v3, in dependencies)
+ * with legacy fallback to `@xenova/transformers`. Both read `HF_ENDPOINT` from
+ * `process.env` natively to configure the Hugging Face model hub endpoint / mirror.
  */
 export async function loadTransformersModule(resolveRoots: string[] = []): Promise<TransformersModule> {
-  try {
-    return (await import("@xenova/transformers")) as TransformersModule;
-  } catch (primaryError) {
-    const roots = [...new Set(resolveRoots.filter((r) => typeof r === "string" && r.length > 0))];
-    for (const root of roots) {
-      const loaded = await importTransformersFromRoot(root);
-      if (loaded) {
-        logger.info({ root }, "Loaded @xenova/transformers from workspace resolve root");
-        return loaded;
-      }
+  // @huggingface/transformers v3 is a direct dependency and should always resolve.
+  // Keep @xenova/transformers as legacy fallback for workspace node_modules.
+  let lastError: unknown = null;
+  for (const pkg of ["@huggingface/transformers", "@xenova/transformers"]) {
+    try {
+      return (await import(pkg)) as TransformersModule;
+    } catch (error) {
+      lastError = error;
     }
-    throw primaryError;
   }
+  const roots = [...new Set(resolveRoots.filter((r) => typeof r === "string" && r.length > 0))];
+  for (const root of roots) {
+    const loaded = await importTransformersFromRoot(root);
+    if (loaded) {
+      logger.info({ root }, "Loaded transformers from workspace resolve root");
+      return loaded;
+    }
+  }
+  throw lastError;
 }
 
 export function createTransformersEmbeddingProvider(options?: {
