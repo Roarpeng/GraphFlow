@@ -1,4 +1,11 @@
-# GraphFlow Token-First Rule (Antigravity)
+---
+description: GraphFlow token-first — always call graphflow_context before code exploration, debugging, or edits.
+alwaysApply: true
+globs:
+  - "**/*"
+---
+
+# GraphFlow Token-First Rule (Trae)
 
 GraphFlow is a graph-based context and planning MCP service. **You MUST use it before broad file search or reading many files.**
 
@@ -19,8 +26,9 @@ Before code exploration, implementation, debugging, review, planning, or archite
 Code symbols are mostly English. For Chinese user questions:
 
 1. **Proactive:** Translate intent to English **file/class/component names** and pass **`englishQuery`** (e.g. `PoseDetectionPage`, `BattlePage`, `shieldEffect`). Avoid generic `exercise` when the user means UI/camera.
-2. **Reactive:** If preview returns `agentWorkItems` with `query-translate-en`, answer the JSON prompt, then retry with `englishQuery`.
-3. Keep `query` as the original Chinese text.
+2. **Module families (store/slices):** Prefer file stems (`useGameStore companionSlice dailySlice`), not bare domain words like `monster` (often hits `data/monsters` instead of `monsterSlice`).
+3. **Reactive:** If preview returns `agentWorkItems` with `query-translate-en`, answer the JSON prompt, then retry with `englishQuery`.
+4. Keep `query` as the original Chinese text.
 
 ```typescript
 graphflow_context({
@@ -38,7 +46,7 @@ graphflow_context({
 | `graphflow_plan` | Multi-step tasks |
 | `graphflow_index` | After significant edits |
 
-For the full 10-tool reference and workflows, use Skill **`graphflow`** in `~/.gemini/antigravity/skills/graphflow/SKILL.md` or `.agent/skills/graphflow/SKILL.md`.
+For the full 10-tool reference and workflows, use Skill **`#graphflow`** or `@skills/graphflow/SKILL.md`.
 
 ## Bridge mode
 

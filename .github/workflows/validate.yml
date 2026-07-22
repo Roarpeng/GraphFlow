@@ -5,7 +5,12 @@ on:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        node-version: [20, 22]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout
@@ -14,7 +19,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -51,3 +56,43 @@ jobs:
 
       - name: Test extension
         run: npm run test:extension
+
+  validate-platforms:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Enable package manager
+        run: corepack enable
+
+      - name: Install root dependencies
+        run: npm ci --no-audit
+        env:
+          GRAPHFLOW_SKIP_POSTINSTALL: "1"
+
+      - name: Rebuild native modules
+        run: npm rebuild better-sqlite3
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build core
+        run: npm run build
+
+      - name: Test
+        run: npm test
+        env:
+          GRAPHFLOW_SKIP_EMBEDDING_WARMUP: "1"
