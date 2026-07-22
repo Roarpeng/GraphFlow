@@ -78,7 +78,7 @@ export function exportGraphArtifact(
   config: GraphFlowConfig,
   outputPath?: string,
   client?: GraphClient,
-  options?: { compression?: "gzip" | "none" }
+  options?: { compression?: "gzip" | "none"; includeEpisodes?: boolean }
 ): ExportResult {
   const store = client?.readSnapshot
     ? client.readSnapshot()
@@ -89,6 +89,15 @@ export function exportGraphArtifact(
       "Graph store is empty. Run `graphflow graph index` before exporting."
     );
   }
+
+  const includeEpisodes = options?.includeEpisodes ?? false;
+  const nodes = includeEpisodes
+    ? store.nodes
+    : store.nodes.filter((n) => !n.id.startsWith("episode:"));
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const edges = includeEpisodes
+    ? store.edges
+    : store.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
 
   const root = config.graphPolicy.workspaceRoot ?? process.cwd();
   const compression = options?.compression ?? "gzip";
@@ -105,14 +114,13 @@ export function exportGraphArtifact(
     version: ARTIFACT_VERSION,
     createdAt: new Date().toISOString(),
     workspaceRoot: root,
-    nodeCount: store.nodes.length,
-    edgeCount: store.edges.length,
+    nodeCount: nodes.length,
+    edgeCount: edges.length,
     sha256: "",
-    nodes: store.nodes,
-    edges: store.edges,
+    nodes,
+    edges,
   };
 
-  // Compute checksum over nodes+edges (excluding the checksum field itself)
   const contentForHash = JSON.stringify({
     version: artifact.version,
     nodes: artifact.nodes,
@@ -133,14 +141,14 @@ export function exportGraphArtifact(
   const bytes = statSync(targetPath).size;
   const ratio = uncompressedBytes > 0 ? (bytes / uncompressedBytes).toFixed(3) : "0";
   logger.info(
-    { path: targetPath, nodes: store.nodes.length, edges: store.edges.length, bytes, uncompressedBytes, ratio, compression },
+    { path: targetPath, nodes: nodes.length, edges: edges.length, bytes, uncompressedBytes, ratio, compression },
     "Graph artifact exported"
   );
 
   return {
     path: targetPath,
-    nodeCount: store.nodes.length,
-    edgeCount: store.edges.length,
+    nodeCount: nodes.length,
+    edgeCount: edges.length,
     bytes,
     uncompressedBytes,
     sha256: artifact.sha256,

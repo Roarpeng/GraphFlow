@@ -394,7 +394,7 @@ export async function exportArtifact(
   configPath?: string,
   outputPath?: string,
   client?: GraphClient,
-  options?: { compression?: "gzip" | "none" }
+  options?: { compression?: "gzip" | "none"; includeEpisodes?: boolean }
 ): Promise<{
   path: string;
   nodeCount: number;

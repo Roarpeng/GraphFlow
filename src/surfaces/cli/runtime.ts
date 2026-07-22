@@ -51,6 +51,10 @@ export { assertGraphFlowRuntime, type GraphFlowRuntime, type GraphFlowRuntimeMod
 export {
   runLearningNightly,
   runLearningNightlyResult,
+  runSkillDecay,
+  runSkillReset,
+  runSkillPrune,
+  runLearnForget,
 } from "./runtime/learning.js";
 export {
   detectInstalledAgents,

@@ -9,6 +9,7 @@ export interface SkillState {
   updatedAt: number;
   /** Soft-hidden from insights/hints after pruneFailedSkills (toxic fail streak). */
   hidden?: boolean;
+  lastDecayedAt?: number;
 }
 
 export interface CompositeSkillState {

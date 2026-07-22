@@ -163,8 +163,33 @@ export interface RoutingDiagnosisResult {
       dimensions: number;
       sampledAt: number;
     };
+    backend?: string;
+    fallbackReason?: string;
   };
   runtimeTimeline: RuntimeTimelineSummary;
+  workspaceRoot: {
+    path: string;
+    discovery: "env" | "config" | "auto" | "cwd";
+    exists: boolean;
+    hasPackageJson: boolean;
+    stale: boolean;
+  };
+  graphFreshness: {
+    hasIndexCache: boolean;
+    stale: boolean;
+    cacheFileCount: number;
+  };
+  modelCache: {
+    exists: boolean;
+    path: string;
+    resolution: "env" | "default";
+  };
+  connectivitySummary: {
+    total: number;
+    healthy: number;
+    unhealthy: number;
+    providerNames: string[];
+  };
 }
 
 export interface SettingsValidationIssue {

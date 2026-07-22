@@ -20,6 +20,10 @@ import {
   resetTokenSavingsStats,
   runLearningNightly,
   runLearningNightlyResult,
+  runLearnForget,
+  runSkillDecay,
+  runSkillReset,
+  runSkillPrune,
   runTask,
   runTaskResult,
 } from "./runtime";
@@ -247,6 +251,40 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
+  if (command === "skill" && args[0] === "decay") {
+    const data = await runSkillDecay(configPath);
+    return {
+      command: "skill-decay",
+      data,
+      legacyText: `total=${data.total}; decayed=${data.decayed}; skipped=${data.skipped}`,
+    };
+  }
+
+  if (command === "skill" && args[0] === "reset") {
+    const nameIdx = args.indexOf("--name");
+    const skillName = nameIdx >= 0 ? args[nameIdx + 1]?.trim() : undefined;
+    if (!skillName) {
+      console.log("Skill name is required. Use --name <name>.");
+      process.exitCode = 1;
+      return undefined;
+    }
+    const data = await runSkillReset(skillName, configPath);
+    return {
+      command: "skill-reset",
+      data,
+      legacyText: `name=${data.name}; reset=${data.reset}`,
+    };
+  }
+
+  if (command === "skill" && args[0] === "prune") {
+    const data = await runSkillPrune(configPath);
+    return {
+      command: "skill-prune",
+      data,
+      legacyText: `pruned=${data.pruned}`,
+    };
+  }
+
   if (command === "route" && args[0] === "diagnose") {
     const data = diagnoseRoutingResult(configPath);
     return {
@@ -259,7 +297,11 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   if (command === "artifact" && args[0] === "export") {
     const outputPath = args[1]?.trim() || undefined;
     const noCompress = args.includes("--no-compress");
-    const data = await exportArtifact(configPath, outputPath, undefined, noCompress ? { compression: "none" } : undefined);
+    const includeEpisodes = args.includes("--include-episodes");
+    const data = await exportArtifact(configPath, outputPath, undefined, {
+      ...(noCompress ? { compression: "none" as const } : {}),
+      ...(includeEpisodes ? { includeEpisodes: true } : {}),
+    });
     return {
       command: "artifact-export",
       data,
@@ -310,6 +352,15 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       command: "learn-nightly",
       data,
       legacyText: await runLearningNightly(configPath),
+    };
+  }
+
+  if (command === "learn" && args[0] === "forget") {
+    const data = await runLearnForget(configPath);
+    return {
+      command: "learn-forget",
+      data,
+      legacyText: `removed=${data.removed}`,
     };
   }
 
