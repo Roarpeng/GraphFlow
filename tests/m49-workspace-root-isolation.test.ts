@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -16,8 +16,9 @@ let previousConfigHome = process.env.GRAPHFLOW_CONFIG_HOME;
 function createTempRoot(prefix: string): string {
   const root = join(tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   mkdirSync(root, { recursive: true });
-  tempRoots.push(root);
-  return root;
+  const resolved = realpathSync(root);
+  tempRoots.push(resolved);
+  return resolved;
 }
 
 function useTempHome(home: string): void {
