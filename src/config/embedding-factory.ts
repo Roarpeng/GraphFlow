@@ -11,6 +11,7 @@ import {
 } from "../learning/embeddings";
 import {
   configureEmbeddingQualityMeta,
+  configureEmbeddingQualityBackend,
   wrapEmbeddingProviderWithQualityMonitor,
 } from "../learning/embedding-quality";
 
@@ -50,8 +51,10 @@ export function createEmbeddingProviderFromConfig(
     model = HASH_EMBEDDING_MODEL;
     resolvedProviderName = "hash";
     embeddingProvider = createHashEmbeddingProvider();
+    configureEmbeddingQualityBackend("hash");
   } else if (provider === "transformers") {
     resolvedProviderName = "transformers";
+    configureEmbeddingQualityBackend("pending");
     embeddingProvider = createResilientLocalEmbeddingProvider({
       resolveRoots: collectResolveRoots(config),
       ...(modelCacheDir ? { modelCacheDir } : {}),
@@ -61,6 +64,7 @@ export function createEmbeddingProviderFromConfig(
           model: HASH_EMBEDDING_MODEL,
           dimensions: EMBEDDING_DIM,
         });
+        configureEmbeddingQualityBackend("hash");
       },
     });
   } else if (provider === "openai") {
@@ -71,6 +75,7 @@ export function createEmbeddingProviderFromConfig(
       "";
     if (!apiKey) {
       resolvedProviderName = "transformers";
+      configureEmbeddingQualityBackend("pending");
       embeddingProvider = createResilientLocalEmbeddingProvider({
         resolveRoots: collectResolveRoots(config),
         ...(modelCacheDir ? { modelCacheDir } : {}),
@@ -80,12 +85,14 @@ export function createEmbeddingProviderFromConfig(
             model: HASH_EMBEDDING_MODEL,
             dimensions: EMBEDDING_DIM,
           });
+          configureEmbeddingQualityBackend("hash");
         },
       });
     } else {
       model = policy?.model ?? "text-embedding-3-small";
       dimensions = 1536;
       resolvedProviderName = "openai";
+      configureEmbeddingQualityBackend("openai");
       const openAiOptions: {
         apiKey: string;
         model?: string;
@@ -103,6 +110,7 @@ export function createEmbeddingProviderFromConfig(
   } else {
     // Unknown provider fallback to resilient local
     resolvedProviderName = "transformers";
+    configureEmbeddingQualityBackend("pending");
     embeddingProvider = createResilientLocalEmbeddingProvider({
       resolveRoots: collectResolveRoots(config),
       ...(modelCacheDir ? { modelCacheDir } : {}),
@@ -112,6 +120,7 @@ export function createEmbeddingProviderFromConfig(
           model: HASH_EMBEDDING_MODEL,
           dimensions: EMBEDDING_DIM,
         });
+        configureEmbeddingQualityBackend("hash");
       },
     });
   }

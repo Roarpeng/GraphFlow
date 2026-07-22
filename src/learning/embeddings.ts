@@ -8,6 +8,9 @@ import { logger } from "../utils/logger";
 export const EMBEDDING_DIM = 384;
 export const HASH_EMBEDDING_MODEL = "fnv1a-384";
 export const GRAPHFLOW_EMBEDDING_CACHE_DIR_ENV = "GRAPHFLOW_EMBEDDING_CACHE_DIR";
+export const GRAPHFLOW_EMBEDDING_TIMEOUT_MS_ENV = "GRAPHFLOW_EMBEDDING_TIMEOUT_MS";
+export const HF_ENDPOINT_ENV = "HF_ENDPOINT";
+export const GRAPHFLOW_HF_ENDPOINT_ENV = "GRAPHFLOW_HF_ENDPOINT";
 
 export type LocalEmbeddingBackend = "transformers" | "hash";
 
@@ -24,6 +27,8 @@ export interface EmbeddingProvider {
 export interface ResilientLocalEmbeddingProvider extends EmbeddingProvider {
   /** Resolved after first successful embed attempt (transformers or hash fallback). */
   getBackend(): LocalEmbeddingBackend | "pending";
+  /** Null unless the provider fell back to hash. */
+  getFallbackReason(): string | null;
 }
 
 /**
@@ -80,6 +85,16 @@ function l2Normalize(vec: number[]): number[] {
   return vec.map((v) => v * inv);
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Timeout after ${ms}ms: ${label}`)), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); }
+    );
+  });
+}
+
 /**
  * Zero-cost deterministic embedding (FNV-1a bag-of-tokens).
  * Used when `@xenova/transformers` is unavailable (e.g. VS Code extension vendor bundle).
@@ -124,6 +139,7 @@ function isModuleNotFoundError(error: unknown): boolean {
 type TransformersModule = {
   env?: {
     cacheDir?: string;
+    remoteHost?: string;
   };
   pipeline: (
     task: "feature-extraction",
@@ -167,6 +183,9 @@ async function importTransformersFromRoot(root: string): Promise<TransformersMod
 /**
  * Load `@xenova/transformers`, optionally resolving from workspace node_modules
  * when the bundled runtime (extension vendor) does not include the package.
+ *
+ * `@xenova/transformers` reads `HF_ENDPOINT` from `process.env` natively
+ * to configure the Hugging Face model hub endpoint / mirror.
  */
 export async function loadTransformersModule(resolveRoots: string[] = []): Promise<TransformersModule> {
   try {
@@ -202,8 +221,17 @@ export function createTransformersEmbeddingProvider(options?: {
     try {
       const transformers = await loadModule(resolveRoots);
       applyTransformersCacheDir(transformers, options?.modelCacheDir);
+      const mirror = process.env[HF_ENDPOINT_ENV] || process.env[GRAPHFLOW_HF_ENDPOINT_ENV];
+      if (mirror && transformers.env) {
+        transformers.env.remoteHost = mirror;
+      }
       const { pipeline } = transformers;
-      extractor = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+      const timeoutMs = parseInt(process.env[GRAPHFLOW_EMBEDDING_TIMEOUT_MS_ENV] ?? "", 10) || 60000;
+      extractor = await withTimeout(
+        pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2"),
+        timeoutMs,
+        "pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')"
+      );
       return extractor;
     } catch (error) {
       loadError = error;
@@ -244,10 +272,14 @@ export function createResilientLocalEmbeddingProvider(options?: {
   });
   const fallback = createHashEmbeddingProvider();
   let backend: LocalEmbeddingBackend | "pending" = "pending";
+  let fallbackReason: string | null = null;
 
   return {
     getBackend() {
       return backend;
+    },
+    getFallbackReason() {
+      return fallbackReason;
     },
     async embed(text: string): Promise<number[]> {
       if (backend === "hash") {
@@ -262,6 +294,7 @@ export function createResilientLocalEmbeddingProvider(options?: {
         return vector;
       } catch (error) {
         backend = "hash";
+        fallbackReason = isModuleNotFoundError(error) ? "module-not-found" : "load-or-inference-failed";
         logger.warn(
           {
             error,
@@ -314,7 +347,64 @@ export function createOpenAiEmbeddingProvider(options: {
   };
 }
 
+/**
+ * 量化 embedding 的存储格式版本号。
+ * int8-v1：单向量对称量化，original[i] ≈ data[i] * scale，data 为 [-127, 127] 整数。
+ * 选型依据（见 benchmarks/run-embedding-storage-benchmark.ts）：int8 与 float16 的
+ * top-k 召回排序重合度相当（≈95%+），但 int8 的 JSON 体积更小（约 -33% vs float32）。
+ */
+export const QUANTIZED_EMBEDDING_FORMAT = "int8-v1";
+/** 量化 embedding 的 metadata 键；遗留 float32 键为 `embedding`（只读兼容，不再写入）。 */
+export const QUANTIZED_EMBEDDING_METADATA_KEY = "embeddingQ";
+
+export interface QuantizedEmbedding {
+  format: typeof QUANTIZED_EMBEDDING_FORMAT;
+  /** 反量化系数：original[i] ≈ data[i] * scale */
+  scale: number;
+  data: number[];
+}
+
+export function quantizeEmbedding(embedding: number[]): QuantizedEmbedding {
+  let maxAbs = 0;
+  for (const v of embedding) {
+    const a = Math.abs(v);
+    if (a > maxAbs) maxAbs = a;
+  }
+  const scale = maxAbs > 0 ? maxAbs / 127 : 0;
+  const data = new Array<number>(embedding.length);
+  for (let i = 0; i < embedding.length; i += 1) {
+    const v = embedding[i] ?? 0;
+    data[i] = scale === 0 ? 0 : Math.max(-127, Math.min(127, Math.round(v / scale)));
+  }
+  return { format: QUANTIZED_EMBEDDING_FORMAT, scale, data };
+}
+
+export function dequantizeEmbedding(quantized: QuantizedEmbedding): number[] {
+  return quantized.data.map((v) => v * quantized.scale);
+}
+
+function isQuantizedEmbedding(raw: unknown): raw is QuantizedEmbedding {
+  if (!raw || typeof raw !== "object") return false;
+  const q = raw as QuantizedEmbedding;
+  if (q.format !== QUANTIZED_EMBEDDING_FORMAT) return false;
+  if (typeof q.scale !== "number" || !Number.isFinite(q.scale) || q.scale < 0) return false;
+  if (!Array.isArray(q.data) || q.data.length === 0) return false;
+  for (const v of q.data) {
+    if (typeof v !== "number" || !Number.isFinite(v)) return false;
+  }
+  return true;
+}
+
+/**
+ * 读取节点 embedding。优先读取量化格式 `metadata.embeddingQ`（新写入路径）并反量化；
+ * 否则回退读取遗留的 float32 `metadata.embedding`。下游消费者（cosineSimilarity、RRF 等）
+ * 拿到的始终是 float 向量，无需感知存储格式。
+ */
 export function extractEmbedding(node: GraphNode): number[] | null {
+  const quantized = node.metadata?.[QUANTIZED_EMBEDDING_METADATA_KEY];
+  if (isQuantizedEmbedding(quantized)) {
+    return dequantizeEmbedding(quantized);
+  }
   const raw = node.metadata?.embedding;
   if (!Array.isArray(raw) || raw.length === 0) return null;
   for (const v of raw) {
@@ -324,10 +414,11 @@ export function extractEmbedding(node: GraphNode): number[] | null {
 }
 
 export function attachEmbedding(node: GraphNode, embedding: number[]): GraphNode {
-  return {
-    ...node,
-    metadata: { ...(node.metadata ?? {}), embedding },
-  };
+  const metadata = { ...(node.metadata ?? {}) };
+  // 新写入统一使用量化键，并移除遗留 float32 键以避免双份存储
+  delete metadata.embedding;
+  metadata[QUANTIZED_EMBEDDING_METADATA_KEY] = quantizeEmbedding(embedding);
+  return { ...node, metadata };
 }
 
 export async function embedAndAttachNodes(
