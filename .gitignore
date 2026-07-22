@@ -16,6 +16,7 @@ patch.ts
 patch-adapters.ts
 graphflow.config.json
 .graphflow-cache/
+# GraphFlow runtime data (contains episodic/learning data - do not commit to VCS)
 graphflow-out/
 wasm/
 stdout.txt
