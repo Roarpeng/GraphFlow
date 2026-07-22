@@ -232,6 +232,23 @@ function getClaudeMdSourceFile() {
 }
 
 /**
+ * 获取 GraphFlow Rules 源文件路径（trae-rules，所有 agent rules 的单一数据源）
+ * @returns {string | null} 源文件路径，不存在则返回 null
+ */
+function getRulesSourceFile() {
+  const candidates = [
+    join(__dirname, "..", "dist", "surfaces", "trae-rules", "graphflow.md"),
+    join(__dirname, "..", "src", "surfaces", "trae-rules", "graphflow.md"),
+  ];
+  for (const filePath of candidates) {
+    if (existsSync(filePath)) {
+      return filePath;
+    }
+  }
+  return null;
+}
+
+/**
  * 获取 Cursor rules 目录列表。
  * Cursor 的 rules 目录为 ~/.cursor/rules/（跨平台一致），
  * 也有用户使用 %APPDATA%/Cursor/User/rules/。
@@ -341,12 +358,20 @@ function installWorkspaceLevelMcp(workspaceRoot) {
   const configFiles = [
     { path: join(workspaceRoot, ".cursor", "mcp.json"), name: "Cursor", key: "mcpServers" },
     { path: join(workspaceRoot, ".vscode", "mcp.json"), name: "VS Code", key: "servers" },
+    { path: join(workspaceRoot, ".opencode", "opencode.json"), name: "Opencode", key: "mcp", opencode: true },
   ];
 
   const mcpEntry = {
     command: "npx",
     args: ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
     env: { GRAPHFLOW_MCP_STDIO: "1", GRAPHFLOW_LOG_JSON: "1" },
+  };
+
+  const opencodeMcpEntry = {
+    command: ["npx", "-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
+    enabled: true,
+    environment: { GRAPHFLOW_LOG_JSON: "1" },
+    type: "local",
   };
 
   for (const config of configFiles) {
@@ -362,13 +387,14 @@ function installWorkspaceLevelMcp(workspaceRoot) {
         // 配置文件为空或损坏，初始化为空对象
       }
 
+      const entry = config.opencode ? opencodeMcpEntry : mcpEntry;
       const servers = json[config.key] || {};
       if (servers.graphflow) {
         results.push({ configPath: config.path, status: "skipped", name: config.name, reason: "already configured" });
         continue;
       }
 
-      servers.graphflow = mcpEntry;
+      servers.graphflow = entry;
       json[config.key] = servers;
       writeFileSync(config.path, JSON.stringify(json, null, 2) + "\n", "utf8");
       results.push({ configPath: config.path, status: "created", name: config.name });
@@ -391,6 +417,7 @@ function installWorkspaceLevelSkills(workspaceRoot) {
   const configFiles = [
     join(workspaceRoot, ".cursor", "mcp.json"),
     join(workspaceRoot, ".vscode", "mcp.json"),
+    join(workspaceRoot, ".opencode", "opencode.json"),
   ];
   const hasWorkspaceConfig = configFiles.some((p) => existsSync(p));
 
@@ -417,6 +444,16 @@ function installWorkspaceLevelSkills(workspaceRoot) {
     const rulesResult = installFileToDir(cursorRulesSource, cursorRulesDir, "graphflow.mdc");
     if (rulesResult.status !== "skipped") {
       console.log(`[GraphFlow] Workspace 级 Cursor Rules: ${rulesResult.status}${rulesResult.reason ? ` (${rulesResult.reason})` : ""}`);
+    }
+  }
+
+  // 安装 Opencode Rules 到 workspace 级 .opencode/rules/
+  const rulesSource = getRulesSourceFile();
+  if (rulesSource && existsSync(join(workspaceRoot, ".opencode"))) {
+    const opencodeRulesDir = join(workspaceRoot, ".opencode", "rules");
+    const opencodeRulesResult = installFileToDir(rulesSource, opencodeRulesDir, "graphflow.md");
+    if (opencodeRulesResult.status !== "skipped") {
+      console.log(`[GraphFlow] Workspace 级 Opencode Rules: ${opencodeRulesResult.status}${opencodeRulesResult.reason ? ` (${opencodeRulesResult.reason})` : ""}`);
     }
   }
 }

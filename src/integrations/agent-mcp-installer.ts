@@ -3,13 +3,20 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir, release } from "node:os";
 
-export type McpServersKey = "mcpServers" | "servers" | "context_servers";
+export type McpServersKey = "mcpServers" | "servers" | "context_servers" | "mcp";
 
 export interface McpServerNode {
   command: string;
   args: string[];
   cwd?: string;
   env?: Record<string, string>;
+}
+
+export interface OpencodeMcpServerNode {
+  command: string[];
+  enabled: boolean;
+  environment: Record<string, string>;
+  type: "local";
 }
 
 export type McpInstallStrategy = "npx" | "npm-script" | "node-bundled";
@@ -58,7 +65,7 @@ export interface McpAgentInstallStatus {
   installed: boolean;
 }
 
-export type McpConfigFormat = "json" | "codex-toml";
+export type McpConfigFormat = "json" | "codex-toml" | "opencode";
 
 export interface AgentProfile {
   id: string;
@@ -582,6 +589,9 @@ function isGraphflowMcpInstalled(
     const raw = readFileSync(configPath, "utf8");
     return new RegExp(`^\\[mcp_servers\\.${escapeRegExp(serverName)}\\]`, "m").test(raw);
   }
+  if (configFormat === "opencode") {
+    return isOpencodeMcpInstalled(configPath, serverName);
+  }
   const json = readJsonConfig(configPath);
   const servers = (json[serversKey] as Record<string, McpServerNode> | undefined) ?? {};
   return Boolean(servers[serverName]);
@@ -926,7 +936,7 @@ export function repairUnsafeWindowsMcpCommands(
     options?.targets ??
     buildAgentProfiles().flatMap((profile) =>
       profile.userTargets
-        .filter((t) => (t.configFormat ?? "json") !== "codex-toml")
+        .filter((t) => (t.configFormat ?? "json") !== "codex-toml" && (t.configFormat ?? "json") !== "opencode")
         .map((t) => ({
           agentId: profile.id,
           agentName: profile.name,
@@ -1257,6 +1267,69 @@ function removeCodexMcpSection(content: string, serverName: string): string {
   return cleaned;
 }
 
+function formatOpencodeMcpEntry(node: McpServerNode): OpencodeMcpServerNode {
+  const environment: Record<string, string> = { ...(node.env ?? {}) };
+  // Remove key that opencode reads natively; avoid duplication
+  delete environment.GRAPHFLOW_MCP_STDIO;
+  return {
+    command: [node.command, ...node.args],
+    enabled: true,
+    environment,
+    type: "local",
+  };
+}
+
+function injectIntoOpencodeConfig(
+  configPath: string,
+  serverName: string,
+  node: McpServerNode
+): "injected" | "created" | "updated" {
+  const existed = existsSync(configPath);
+  const json = readJsonConfig(configPath);
+  const servers = (json.mcp as Record<string, OpencodeMcpServerNode> | undefined) ?? {};
+  const serverExisted = !!servers[serverName];
+  servers[serverName] = formatOpencodeMcpEntry(node);
+  json.mcp = servers;
+  writeJsonConfig(configPath, json);
+  if (!existed) return "created";
+  if (!serverExisted) return "injected";
+  return "updated";
+}
+
+function removeOpencodeMcpEntry(
+  configPath: string,
+  serverName: string
+): boolean {
+  if (!existsSync(configPath)) {
+    return false;
+  }
+  const json = readJsonConfig(configPath);
+  const servers = (json.mcp as Record<string, OpencodeMcpServerNode> | undefined) ?? {};
+  if (!servers[serverName]) {
+    return false;
+  }
+  delete servers[serverName];
+  if (Object.keys(servers).length === 0) {
+    delete json.mcp;
+  } else {
+    json.mcp = servers;
+  }
+  writeJsonConfig(configPath, json);
+  return true;
+}
+
+function isOpencodeMcpInstalled(
+  configPath: string,
+  serverName: string
+): boolean {
+  if (!existsSync(configPath)) {
+    return false;
+  }
+  const json = readJsonConfig(configPath);
+  const servers = (json.mcp as Record<string, OpencodeMcpServerNode> | undefined) ?? {};
+  return !!servers[serverName];
+}
+
 function formatCodexMcpTomlBlock(serverName: string, node: McpServerNode): string {
   const args =
     node.args.length > 0 ? `args = [${node.args.map((arg) => JSON.stringify(arg)).join(", ")}]` : undefined;
@@ -1306,6 +1379,9 @@ function injectIntoAgentConfig(
 ): "injected" | "created" | "updated" {
   if (configFormat === "codex-toml") {
     return injectIntoCodexToml(configPath, serverName, node);
+  }
+  if (configFormat === "opencode") {
+    return injectIntoOpencodeConfig(configPath, serverName, node);
   }
   return injectIntoConfig(configPath, serversKey, serverName, node);
 }
@@ -1502,6 +1578,8 @@ export function uninstallMcpFromDetectedAgents(options?: McpRemoveOptions): McpR
         let removed = false;
         if (userTarget.configFormat === "codex-toml") {
           removed = removeCodexMcpEntry(userTarget.configPath, serverName);
+        } else if (userTarget.configFormat === "opencode") {
+          removed = removeOpencodeMcpEntry(userTarget.configPath, serverName);
         } else {
           removed = removeMcpEntry(userTarget.configPath, userTarget.serversKey, serverName);
         }

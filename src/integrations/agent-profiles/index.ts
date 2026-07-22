@@ -17,6 +17,7 @@ import "./profiles/amazon-q";
 import "./profiles/zed";
 import "./profiles/continue";
 import "./profiles/qoder";
+import "./profiles/opencode";
 
 import "./skills/cursor";
 import "./skills/claude-code";
@@ -25,3 +26,4 @@ import "./skills/roo-code";
 import "./skills/kilocode";
 import "./skills/antigravity";
 import "./skills/qoder";
+import "./skills/opencode";
