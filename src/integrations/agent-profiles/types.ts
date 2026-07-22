@@ -1,6 +1,6 @@
-export type McpServersKey = "mcpServers" | "servers" | "context_servers";
+export type McpServersKey = "mcpServers" | "servers" | "context_servers" | "mcp";
 
-export type McpConfigFormat = "json" | "codex-toml";
+export type McpConfigFormat = "json" | "codex-toml" | "opencode";
 
 export interface McpServerTarget {
   configPath: string;

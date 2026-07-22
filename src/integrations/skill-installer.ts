@@ -468,6 +468,14 @@ export function getAgentInstructionTargets(): Array<{
     filePath: join(home, ".kilocode", "AGENTS.md"),
   });
 
+  // Opencode 全局指令：~/.config/opencode/AGENTS.md
+  targets.push({
+    agent: "Opencode",
+    markerDir: join(home, ".config", "opencode"),
+    destDir: join(home, ".config", "opencode"),
+    filePath: join(home, ".config", "opencode", "AGENTS.md"),
+  });
+
   // Cline 全局指令：Documents/Cline/Rules/graphflow.md
   const documentsDir = isWindows ? join(home, "Documents") : join(home, "Documents");
   const clineMarkerCandidates = [
