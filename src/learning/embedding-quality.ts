@@ -19,6 +19,8 @@ export interface EmbeddingQualitySummary {
   lastError?: string;
   lastCallAt?: number;
   lastSample?: EmbeddingQualitySample;
+  backend?: string;
+  fallbackReason?: string;
 }
 
 interface EmbeddingQualityState {
@@ -30,6 +32,8 @@ interface EmbeddingQualityState {
   lastError?: string;
   lastCallAt?: number;
   lastSample?: EmbeddingQualitySample;
+  backend?: string;
+  fallbackReason?: string;
 }
 
 const state: EmbeddingQualityState = {
@@ -66,6 +70,14 @@ export function configureEmbeddingQualityMeta(meta: {
   if (meta.dimensions !== undefined) {
     state.dimensions = meta.dimensions;
   }
+}
+
+export function configureEmbeddingQualityBackend(backend: string): void {
+  state.backend = backend;
+}
+
+export function configureEmbeddingQualityFallbackReason(reason: string): void {
+  state.fallbackReason = reason;
 }
 
 export function recordEmbeddingSuccess(dimensions?: number): void {
@@ -141,6 +153,8 @@ export function getEmbeddingQualitySummary(): EmbeddingQualitySummary {
     ...(state.lastError ? { lastError: state.lastError } : {}),
     ...(typeof state.lastCallAt === "number" ? { lastCallAt: state.lastCallAt } : {}),
     ...(state.lastSample ? { lastSample: state.lastSample } : {}),
+    ...(state.backend ? { backend: state.backend } : {}),
+    ...(state.fallbackReason ? { fallbackReason: state.fallbackReason } : {}),
   };
 }
 

@@ -2,6 +2,8 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
 ## [1.7.8] - 2026-07-19
 
 ### Added
@@ -21,6 +23,30 @@ All notable changes to this project are documented in this file.
 
 - CI / publish workflows 升级 Node **22**
 - Marketplace：无密钥时 dispatch 跳过警告；tag 推送无密钥则明确失败；日志使用 GraphFlow Tool / `graphflow-tool`
+
+## [1.7.6] - 2026-07-19
+
+### Changed
+
+- **VS Code 扩展更名**：`graphflow-vscode` → `graphflow-tool`，规避 Marketplace displayName 冲突；VSIX 文件名同步改为 `graphflow-tool`
+- **扩展 displayName**：更新为 `GraphFlow Tool`
+
+## [1.7.5] - 2026-07-18
+
+### Added
+
+- **Qoder MCP / Skill 支持**：自动检测用户级 `~/.qoder/mcp.json`（Windows `%APPDATA%/Qoder/User/mcp.json`）与项目级 `.qoder/mcp.json`；Skill 安装至 `~/.qoder/skills/graphflow/SKILL.md`
+- **Agent Profile 模块化**：新建 `src/integrations/agent-profiles/` 目录与注册机制，各 IDE/Agent profile 独立成文件维护
+- **统一错误类型**：新增标准化错误类型与处理函数
+- **增量索引取消机制**：`file-indexer` 支持 `AbortController` 取消
+- **Skill 健康检查**：新增 Skill 完整性检测
+- **previewContext LRU 缓存**：新增 `src/graph/context-cache.ts`
+- **VS Code Marketplace 自动发布**：新增 `publish-marketplace.yml` workflow
+
+### Changed
+
+- **自动执行模式**：LLM 仅在已配置且健康时启用，否则自动回退 bridge mode（`src/core/orchestrator.ts`）
+- **安装体验优化**：无项目打开时由报错改为友好提示并提供打开文件夹按钮；npm 与插件安装后的项目引导提示统一
 
 ## [1.7.4] - 2026-07-13
 
