@@ -8,6 +8,8 @@ import { rubyIndexer } from "./ruby";
 import { kotlinIndexer } from "./kotlin";
 import { swiftIndexer } from "./swift";
 import { dartIndexer } from "./dart";
+import { markdownIndexer } from "./markdown";
+import { plcopenIndexer } from "./plcopen-xml";
 
 export interface DeclaredSymbol {
   name: string;
@@ -72,6 +74,8 @@ const INDEXERS: LanguageIndexer[] = [
   kotlinIndexer,
   swiftIndexer,
   dartIndexer,
+  markdownIndexer,
+  plcopenIndexer,
 ];
 
 export function getIndexerForFile(filename: string): LanguageIndexer | undefined {

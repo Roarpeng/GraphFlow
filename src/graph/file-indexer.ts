@@ -14,6 +14,7 @@ import { logger } from "../utils/logger.js";
 import type { GraphEdge, GraphNode } from "../core/types.js";
 import type { GraphClient } from "./client-factory.js";
 import { getIndexerForFile } from "./language-indexers/index.js";
+import { buildDocumentEdges } from "./language-indexers/markdown.js";
 import type { CallRelation, InheritRelation } from "./language-indexers/index.js";
 import { embedAndAttachNodes } from "../learning/embeddings.js";
 
@@ -43,6 +44,7 @@ import {
   buildSingleFileReferenceEdges,
   buildSingleFileCallAndInheritEdges,
 } from "./file-indexer-edges.js";
+import { buildPlcEdges } from "./language-indexers/plcopen-xml.js";
 
 // ── Batch workspace indexing ─────────────────────────────────────────
 
@@ -124,6 +126,16 @@ async function processFile(
   const { nodes: fileNodes, edges: fileEdges } = buildFileNodesAndEdges(
     relPath, file.size, language, declared, imports
   );
+
+  if (language === "markdown" && declared.length > 0) {
+    const docEdges = buildDocumentEdges(fileNodeId, declared);
+    fileEdges.push(...docEdges);
+  }
+
+  if (language === "plcopen" && declared.length > 0) {
+    const plcEdges = buildPlcEdges(fileNodeId, declared, imports);
+    fileEdges.push(...plcEdges);
+  }
 
   return {
     relPath,
@@ -336,6 +348,16 @@ export async function indexSingleFile(
   edges.push(...fileEdges);
 
   const fileNodeId = `file:${relPath}`;
+
+  if (language === "markdown" && declared.length > 0) {
+    const docEdges = buildDocumentEdges(fileNodeId, declared);
+    edges.push(...docEdges);
+  }
+
+  if (language === "plcopen" && declared.length > 0) {
+    const plcEdges = buildPlcEdges(fileNodeId, declared, imports);
+    edges.push(...plcEdges);
+  }
 
   // Cross-file references: scan content against existing graph symbols
   let referenceCount = 0;
