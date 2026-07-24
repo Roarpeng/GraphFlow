@@ -2,7 +2,32 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [1.7.9] - 2026-07-22
+
+### Added
+
+- **Opencode agent 支持**：自动检测 `~/.config/opencode/` 并安装 MCP（`mcp` 键/数组 `command`/`enabled`/`type: "local"` 格式）、Skill（`~/.config/opencode/skills/`）和 AGENTS.md 指令；workspace 级 MCP 注入支持 opencode 格式
+- **embedding 超时**：`pipelines()` 模型下载 60s 超时（`GRAPHFLOW_EMBEDDING_TIMEOUT_MS`），超时自动降级 hash
+- **HF 镜像**：`HF_ENDPOINT` / `GRAPHFLOW_HF_ENDPOINT` 环境变量配置 HuggingFace 镜像（如 hf-mirror.com）
+- **fallback 标注**：`ResilientLocalEmbeddingProvider.getFallbackReason()`，diagnose 输出当前 backend 和降级原因
+- **全面健康检查**：`graphflow_diagnose` 增加 workspaceRoot 解析、graphFreshness、modelCache、connectivitySummary
+- **技能衰减**：`maybeDecaySkills`（七天内无活动分数向 0 衰减 ±1）、`resetSkillScore`、`pruneLowSkills`；CLI `skill decay/reset/prune`
+- **Episode 隐私**：`forgetEpisodes()` + `learn forget`；artifact export 默认排除 episode（`--include-episodes` 可还原）
+- **CI 矩阵**：`validate.yml` Node 20/22 矩阵 + `validate-platforms` job（win/mac Node 22）
+- **Surface sync 脚本**：`scripts/sync-surfaces.cjs` + `--check` 模式 + `npm run sync:surfaces`
+- **WASM 版本标记**：`wasm/.grammar-version` 版本校验，升级时强制重建
+
+### Changed
+
+- **迁移到 `@huggingface/transformers` v3**：`loadTransformersModule` 优先使用已在 `dependencies` 中的 v3，`@xenova/transformers` 保留为 legacy fallback
+- **`pino-pretty` 移到 devDependencies**：减小生产安装体积
+- **README 测试数**：59→72 文件、280+→357+ tests（脚本化生成，避免再次漂移）
+
+### Fixed
+
+- **macOS CI**：`m49-workspace-root-isolation` 测试通过 `realpathSync` 解析 `/var` → `/private/var` 符号链接
+- **package-lock.json 同步**：与 `package.json` 依赖版本对齐
+- **CI tsc 构建**：`@huggingface/transformers` 直接可解析，无需额外安装
 
 ## [1.7.8] - 2026-07-19
 
