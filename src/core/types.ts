@@ -161,5 +161,7 @@ export interface GraphEdge {
     | "improves"
     | "conflicts_with"
     | "calls"
-    | "inherits";
+    | "inherits"
+    | "part_of"
+    | "next_section";
 }
