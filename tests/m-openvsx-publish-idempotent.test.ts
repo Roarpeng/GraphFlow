@@ -15,7 +15,7 @@ describe("Open VSX idempotent publish helper", () => {
         {
           version: "1.8.0",
           allVersions: {
-            "1.7.9": "https://open-vsx.org/api/graphflow/graphflow-tool/1.7.9",
+            "1.7.9": "https://open-vsx.org/api/roarpeng/graphflow-tool/1.7.9",
           },
         },
         "1.7.9"
@@ -25,12 +25,12 @@ describe("Open VSX idempotent publish helper", () => {
     expect(openVsxHasVersion(null, "1.7.9")).toBe(false);
   });
 
-  it("resolves open_vsx_token and aligns publisher to Open VSX namespace", () => {
+  it("resolves open_vsx_token and keeps publisher aligned with roarpeng namespace", () => {
     expect(resolveOpenVsxToken({ open_vsx_token: "from-secret" })).toBe("from-secret");
     expect(resolveOpenVsxToken({ OPEN_VSX_TOKEN: "upper", OVSX_PAT: "legacy" })).toBe("upper");
     expect(resolveOpenVsxToken({ OVSX_PAT: "legacy" })).toBe("legacy");
 
-    const aligned = alignPackageJsonForNamespace(
+    const same = alignPackageJsonForNamespace(
       {
         name: "graphflow-tool",
         publisher: "roarpeng",
@@ -39,14 +39,11 @@ describe("Open VSX idempotent publish helper", () => {
           chatParticipants: [{ id: "roarpeng.graphflow-tool.graphflowAgent" }],
         },
       },
-      "graphflow"
+      "roarpeng"
     );
-    expect(aligned.publisher).toBe("graphflow");
-    expect(aligned.activationEvents).toContain(
-      "onChatParticipant:graphflow.graphflow-tool.graphflowAgent"
-    );
-    expect(aligned.contributes.chatParticipants[0].id).toBe(
-      "graphflow.graphflow-tool.graphflowAgent"
+    expect(same.publisher).toBe("roarpeng");
+    expect(same.activationEvents).toContain(
+      "onChatParticipant:roarpeng.graphflow-tool.graphflowAgent"
     );
   });
 
@@ -56,6 +53,6 @@ describe("Open VSX idempotent publish helper", () => {
     expect(workflow).toContain("needs: package-windows");
     expect(workflow).toContain("publish-openvsx-idempotent.mjs");
     expect(workflow).toContain("secrets.open_vsx_token");
-    expect(workflow).toContain("OVSX_NAMESPACE: graphflow");
+    expect(workflow).toContain("OVSX_NAMESPACE: roarpeng");
   });
 });

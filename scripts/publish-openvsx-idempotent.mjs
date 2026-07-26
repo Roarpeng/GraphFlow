@@ -5,7 +5,7 @@
  *
  * Env:
  *   open_vsx_token | OPEN_VSX_TOKEN | OVSX_PAT — personal access token
- *   OVSX_NAMESPACE   — Open VSX namespace (default: graphflow)
+ *   OVSX_NAMESPACE   — Open VSX namespace (default: package.json publisher, e.g. roarpeng)
  *   OVSX_REGISTRY_URL — optional registry base (default https://open-vsx.org)
  *   OVSX_VSIX         — optional path to a prebuilt .vsix; otherwise packages first
  */
@@ -123,7 +123,7 @@ async function main() {
   const pkg = readExtensionPackage();
   const name = pkg.name;
   const version = pkg.version;
-  const namespace = process.env.OVSX_NAMESPACE || "graphflow";
+  const namespace = process.env.OVSX_NAMESPACE || pkg.publisher || "roarpeng";
   let patched = false;
 
   console.log(`Checking Open VSX for ${namespace}.${name}@${version} via ${registryUrl}...`);

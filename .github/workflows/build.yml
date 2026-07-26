@@ -167,5 +167,5 @@ jobs:
         if: steps.ovsx.outputs.mode == 'pat'
         env:
           OPEN_VSX_TOKEN: ${{ secrets.open_vsx_token }}
-          OVSX_NAMESPACE: graphflow
+          OVSX_NAMESPACE: roarpeng
         run: node scripts/publish-openvsx-idempotent.mjs
