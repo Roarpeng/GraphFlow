@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- **Open VSX 自动发布**：`Build` workflow 在 `package-windows` 成功后幂等推送到 Open VSX（`scripts/publish-openvsx-idempotent.mjs`，密钥 `OVSX_PAT`；版本已存在则跳过）
 - **Opencode agent 支持**：自动检测 `~/.config/opencode/` 并安装 MCP（`mcp` 键/数组 `command`/`enabled`/`type: "local"` 格式）、Skill（`~/.config/opencode/skills/`）和 AGENTS.md 指令；workspace 级 MCP 注入支持 opencode 格式
 - **embedding 超时**：`pipelines()` 模型下载 60s 超时（`GRAPHFLOW_EMBEDDING_TIMEOUT_MS`），超时自动降级 hash
 - **HF 镜像**：`HF_ENDPOINT` / `GRAPHFLOW_HF_ENDPOINT` 环境变量配置 HuggingFace 镜像（如 hf-mirror.com）
