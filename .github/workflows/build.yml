@@ -124,11 +124,11 @@ jobs:
       - name: Resolve Open VSX credentials
         id: ovsx
         env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+          OPEN_VSX_TOKEN: ${{ secrets.open_vsx_token }}
         run: |
-          if [ -n "${OVSX_PAT}" ]; then
+          if [ -n "${OPEN_VSX_TOKEN}" ]; then
             echo "mode=pat" >> "$GITHUB_OUTPUT"
-            echo "Open VSX auth: OVSX_PAT configured"
+            echo "Open VSX auth: open_vsx_token configured"
           else
             echo "mode=none" >> "$GITHUB_OUTPUT"
             echo "Open VSX auth: none"
@@ -137,7 +137,7 @@ jobs:
       - name: Skip Open VSX publish without token
         if: steps.ovsx.outputs.mode == 'none'
         run: |
-          echo "::warning::Skipping Open VSX publish: repository secret OVSX_PAT is not configured."
+          echo "::warning::Skipping Open VSX publish: repository secret open_vsx_token is not configured."
 
       - name: Setup Node.js
         if: steps.ovsx.outputs.mode == 'pat'
@@ -163,12 +163,9 @@ jobs:
         if: steps.ovsx.outputs.mode == 'pat'
         run: npm ci --prefix vscode-extension
 
-      - name: Build and package GraphFlow Tool VSIX
-        if: steps.ovsx.outputs.mode == 'pat'
-        run: npm run build && npm run build:extension && npm run package:extension
-
       - name: Publish GraphFlow Tool to Open VSX
         if: steps.ovsx.outputs.mode == 'pat'
         env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+          OPEN_VSX_TOKEN: ${{ secrets.open_vsx_token }}
+          OVSX_NAMESPACE: graphflow
         run: node scripts/publish-openvsx-idempotent.mjs

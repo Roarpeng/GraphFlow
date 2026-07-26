@@ -133,7 +133,7 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 
 - ?????**v1.7.9**?root + vscode-extension??npm?`@roarpeng/graphflow@1.7.9`
 - **GitHub Release**?push ??`main` ??CI ??`windows-2022` ??????VSIX ???? [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
-- **Open VSX**：`main` / `v*` Build 成功后自动幂等发布到 [Open VSX](https://open-vsx.org/)（需仓库密钥 `OVSX_PAT`；版本已存在则跳过）
+- **Open VSX**：`main` / `v*` Build 成功后自动幂等发布到 [Open VSX](https://open-vsx.org/extension/graphflow/graphflow-tool)（密钥 `open_vsx_token`，namespace `graphflow`；版本已存在则跳过）
 - **npm ??**?push tag `v*`?? `v1.4.1`????[Publish npm](https://github.com/Roarpeng/GraphFlow/actions/workflows/publish-npm.yml) ????
 - ?????`CHANGELOG.md`
 
