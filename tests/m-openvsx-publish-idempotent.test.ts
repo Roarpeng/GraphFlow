@@ -5,7 +5,7 @@ import {
   alignPackageJsonForNamespace,
   openVsxHasVersion,
   resolveOpenVsxToken,
-} from "../scripts/publish-openvsx-idempotent.mjs";
+} from "../scripts/openvsx-publish-lib.cjs";
 
 describe("Open VSX idempotent publish helper", () => {
   it("detects current and historical versions from metadata", () => {
