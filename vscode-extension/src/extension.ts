@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { resolveRuntimeCwd, requireWorkspaceFolder } from "./workspace";
@@ -27,7 +28,18 @@ interface RunRecord {
 }
 
 const runs: RunRecord[] = [];
-const CHAT_PARTICIPANT_ID = "roarpeng.graphflow-tool.graphflowAgent";
+function resolveChatParticipantId(): string {
+  try {
+    const pkgPath = join(__dirname, "..", "package.json");
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { publisher?: string; name?: string };
+    const publisher = pkg.publisher || "roarpeng";
+    const name = pkg.name || "graphflow-tool";
+    return `${publisher}.${name}.graphflowAgent`;
+  } catch {
+    return "roarpeng.graphflow-tool.graphflowAgent";
+  }
+}
+const CHAT_PARTICIPANT_ID = resolveChatParticipantId();
 let runtimePromise: Promise<GraphFlowRuntime> | undefined;
 
 const MCP_INSTALL_VERSION_KEY = "graphflow.mcpInstallVersion";

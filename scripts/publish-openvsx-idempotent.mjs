@@ -4,22 +4,32 @@
  * If the extension version is already on open-vsx.org, exit 0.
  *
  * Env:
- *   OVSX_PAT          — required personal access token
+ *   open_vsx_token | OPEN_VSX_TOKEN | OVSX_PAT — personal access token
+ *   OVSX_NAMESPACE   — Open VSX namespace (default: graphflow)
  *   OVSX_REGISTRY_URL — optional registry base (default https://open-vsx.org)
- *   OVSX_VSIX         — optional path to a prebuilt .vsix; otherwise publishes from vscode-extension/
+ *   OVSX_VSIX         — optional path to a prebuilt .vsix; otherwise packages first
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const extensionDir = join(root, "vscode-extension");
-const pkg = JSON.parse(readFileSync(join(extensionDir, "package.json"), "utf8"));
-const publisher = pkg.publisher;
-const name = pkg.name;
-const version = pkg.version;
+const packageJsonPath = join(extensionDir, "package.json");
+const packageJsonBackupPath = join(extensionDir, "package.json.openvsx-backup");
 const registryUrl = (process.env.OVSX_REGISTRY_URL || "https://open-vsx.org").replace(/\/$/, "");
+
+export function resolveOpenVsxToken(env = process.env) {
+  return env.open_vsx_token || env.OPEN_VSX_TOKEN || env.OVSX_PAT || "";
+}
 
 export function openVsxHasVersion(metadata, targetVersion) {
   if (!metadata || typeof metadata !== "object") {
@@ -30,6 +40,33 @@ export function openVsxHasVersion(metadata, targetVersion) {
   }
   const all = metadata.allVersions;
   return Boolean(all && typeof all === "object" && all[targetVersion]);
+}
+
+export function alignPackageJsonForNamespace(pkg, namespace) {
+  const next = structuredClone(pkg);
+  const previousPublisher = String(next.publisher ?? "");
+  const name = String(next.name ?? "graphflow-tool");
+  const previousChatId = `${previousPublisher}.${name}.graphflowAgent`;
+  const nextChatId = `${namespace}.${name}.graphflowAgent`;
+
+  next.publisher = namespace;
+
+  if (Array.isArray(next.activationEvents)) {
+    next.activationEvents = next.activationEvents.map((event) =>
+      typeof event === "string" ? event.split(previousChatId).join(nextChatId) : event
+    );
+  }
+
+  const participants = next.contributes?.chatParticipants;
+  if (Array.isArray(participants)) {
+    for (const participant of participants) {
+      if (participant && typeof participant.id === "string") {
+        participant.id = participant.id.split(previousChatId).join(nextChatId);
+      }
+    }
+  }
+
+  return next;
 }
 
 export async function fetchOpenVsxMetadata(baseUrl, ns, ext) {
@@ -46,11 +83,19 @@ export async function fetchOpenVsxMetadata(baseUrl, ns, ext) {
   return response.json();
 }
 
-function resolveVsixPath() {
+function readExtensionPackage() {
+  return JSON.parse(readFileSync(packageJsonPath, "utf8"));
+}
+
+function resolveVsixPath(version) {
   if (process.env.OVSX_VSIX) {
     return process.env.OVSX_VSIX;
   }
   const artifactsDir = join(root, "artifacts");
+  const preferred = join(artifactsDir, `graphflow-tool-${version}.vsix`);
+  if (existsSync(preferred)) {
+    return preferred;
+  }
   if (!existsSync(artifactsDir)) {
     return null;
   }
@@ -63,30 +108,60 @@ function resolveVsixPath() {
   return join(artifactsDir, matches[matches.length - 1]);
 }
 
-function publishWithOvsx(vsixPath, token) {
-  const args = ["--yes", "ovsx", "publish"];
-  if (vsixPath) {
-    args.push(vsixPath);
-  }
-  args.push("--pat", token);
-  return spawnSync("npx", args, {
-    cwd: vsixPath ? root : extensionDir,
+function run(command, args, cwd) {
+  return spawnSync(command, args, {
+    cwd,
     encoding: "utf8",
     env: process.env,
+    shell: process.platform === "win32",
   });
 }
 
+function publishWithOvsx(vsixPath, token) {
+  const args = ["--yes", "ovsx", "publish", vsixPath, "--pat", token];
+  return run("npx", args, root);
+}
+
+function packageExtension() {
+  const build = run("npm", ["run", "build"], root);
+  if (build.stdout) process.stdout.write(build.stdout);
+  if (build.stderr) process.stderr.write(build.stderr);
+  if (build.status !== 0) {
+    return build;
+  }
+  const pack = run("npm", ["run", "package:extension"], root);
+  if (pack.stdout) process.stdout.write(pack.stdout);
+  if (pack.stderr) process.stderr.write(pack.stderr);
+  return pack;
+}
+
+function restorePackageJson() {
+  if (!existsSync(packageJsonBackupPath)) {
+    return;
+  }
+  copyFileSync(packageJsonBackupPath, packageJsonPath);
+  unlinkSync(packageJsonBackupPath);
+}
+
 async function main() {
-  const token = process.env.OVSX_PAT;
+  const token = resolveOpenVsxToken();
   if (!token) {
-    console.error("OVSX_PAT is required to publish to Open VSX.");
+    console.error(
+      "Open VSX token is required. Set repository secret open_vsx_token (mapped to env open_vsx_token / OPEN_VSX_TOKEN / OVSX_PAT)."
+    );
     process.exit(1);
   }
 
-  console.log(`Checking Open VSX for ${publisher}.${name}@${version} via ${registryUrl}...`);
+  const pkg = readExtensionPackage();
+  const name = pkg.name;
+  const version = pkg.version;
+  const namespace = process.env.OVSX_NAMESPACE || "graphflow";
+  let patched = false;
+
+  console.log(`Checking Open VSX for ${namespace}.${name}@${version} via ${registryUrl}...`);
   let metadata;
   try {
-    metadata = await fetchOpenVsxMetadata(registryUrl, publisher, name);
+    metadata = await fetchOpenVsxMetadata(registryUrl, namespace, name);
   } catch (error) {
     console.warn(
       `Warning: could not query Open VSX metadata (${error instanceof Error ? error.message : error}). Continuing with publish.`
@@ -96,42 +171,75 @@ async function main() {
 
   if (openVsxHasVersion(metadata, version)) {
     console.log(
-      `${publisher}.${name}@${version} is already published on Open VSX. Skipping publish (idempotent success).`
+      `${namespace}.${name}@${version} is already published on Open VSX. Skipping publish (idempotent success).`
     );
-    process.exit(0);
+    return;
   }
 
-  const vsixPath = resolveVsixPath();
-  if (vsixPath) {
-    console.log(`Publishing prebuilt VSIX: ${vsixPath}`);
-  } else {
-    console.log(`No prebuilt VSIX found; publishing from ${extensionDir} via ovsx package+upload.`);
+  let exitCode = 0;
+  try {
+    if (pkg.publisher !== namespace) {
+      console.log(
+        `Aligning package publisher "${pkg.publisher}" -> Open VSX namespace "${namespace}" for this publish only.`
+      );
+      copyFileSync(packageJsonPath, packageJsonBackupPath);
+      const aligned = alignPackageJsonForNamespace(pkg, namespace);
+      writeFileSync(packageJsonPath, `${JSON.stringify(aligned, null, 2)}\n`, "utf8");
+      patched = true;
+    }
+
+    let vsixPath = resolveVsixPath(version);
+    if (!vsixPath || patched) {
+      console.log("Packaging extension for Open VSX...");
+      const packed = packageExtension();
+      if (packed.status !== 0) {
+        console.error(`Extension packaging failed with exit code ${packed.status ?? 1}`);
+        exitCode = packed.status ?? 1;
+        return;
+      }
+      vsixPath = resolveVsixPath(version);
+    }
+
+    if (!vsixPath || !existsSync(vsixPath)) {
+      console.error("No VSIX found under artifacts/ after packaging.");
+      exitCode = 1;
+      return;
+    }
+
+    console.log(`Publishing VSIX to Open VSX namespace ${namespace}: ${vsixPath}`);
+    const publish = publishWithOvsx(vsixPath, token);
+    if (publish.stdout) process.stdout.write(publish.stdout);
+    if (publish.stderr) process.stderr.write(publish.stderr);
+
+    if (publish.status === 0) {
+      console.log(`Published ${namespace}.${name}@${version} to Open VSX successfully.`);
+      return;
+    }
+
+    const combined = `${publish.stdout || ""}\n${publish.stderr || ""}`;
+    const alreadyPublished =
+      /already\s+(exists|published)/i.test(combined) ||
+      /version\s+already/i.test(combined) ||
+      /is already published/i.test(combined);
+
+    if (alreadyPublished) {
+      console.log(
+        `${namespace}.${name}@${version} already exists on Open VSX (publish conflict). Treating as success (idempotent).`
+      );
+      return;
+    }
+
+    console.error(`Open VSX publish failed with exit code ${publish.status ?? 1}`);
+    exitCode = publish.status ?? 1;
+  } finally {
+    if (patched) {
+      restorePackageJson();
+    }
   }
 
-  const publish = publishWithOvsx(vsixPath, token);
-  if (publish.stdout) process.stdout.write(publish.stdout);
-  if (publish.stderr) process.stderr.write(publish.stderr);
-
-  if (publish.status === 0) {
-    console.log(`Published ${publisher}.${name}@${version} to Open VSX successfully.`);
-    process.exit(0);
+  if (exitCode !== 0) {
+    process.exit(exitCode);
   }
-
-  const combined = `${publish.stdout || ""}\n${publish.stderr || ""}`;
-  const alreadyPublished =
-    /already\s+(exists|published)/i.test(combined) ||
-    /version\s+already/i.test(combined) ||
-    /is already published/i.test(combined);
-
-  if (alreadyPublished) {
-    console.log(
-      `${publisher}.${name}@${version} already exists on Open VSX (publish conflict). Treating as success (idempotent).`
-    );
-    process.exit(0);
-  }
-
-  console.error(`Open VSX publish failed with exit code ${publish.status ?? 1}`);
-  process.exit(publish.status ?? 1);
 }
 
 const isDirectRun =
@@ -141,6 +249,9 @@ const isDirectRun =
 if (isDirectRun) {
   main().catch((error) => {
     console.error("Open VSX publish failed:", error);
+    if (existsSync(packageJsonBackupPath)) {
+      restorePackageJson();
+    }
     process.exit(1);
   });
 }
