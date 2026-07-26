@@ -52,12 +52,15 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   }
 
   if (command === "doctor") {
-    const { runDoctor } = require("./init");
-    runDoctor();
+    const { buildDoctorReport, formatDoctorLegacyText } = require("./init") as typeof import("./init");
+    const data = buildDoctorReport(process.cwd());
+    if (!data.ok) {
+      process.exitCode = 1;
+    }
     return {
       command: "doctor",
-      data: {},
-      legacyText: `Doctor complete`,
+      data,
+      legacyText: formatDoctorLegacyText(data),
     };
   }
 
