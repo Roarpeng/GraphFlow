@@ -111,3 +111,64 @@ jobs:
         shell: bash
         run: |
           echo "::warning::VSIX artifact upload failed (often due to Actions storage quota). VSIX was still published to GitHub Releases if the release step succeeded."
+
+  publish-openvsx:
+    needs: package-windows
+    if: success()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve Open VSX credentials
+        id: ovsx
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -n "${OVSX_PAT}" ]; then
+            echo "mode=pat" >> "$GITHUB_OUTPUT"
+            echo "Open VSX auth: OVSX_PAT configured"
+          else
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+            echo "Open VSX auth: none"
+          fi
+
+      - name: Skip Open VSX publish without token
+        if: steps.ovsx.outputs.mode == 'none'
+        run: |
+          echo "::warning::Skipping Open VSX publish: repository secret OVSX_PAT is not configured."
+
+      - name: Setup Node.js
+        if: steps.ovsx.outputs.mode == 'pat'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            vscode-extension/package-lock.json
+
+      - name: Enable package manager
+        if: steps.ovsx.outputs.mode == 'pat'
+        run: corepack enable
+
+      - name: Install root dependencies
+        if: steps.ovsx.outputs.mode == 'pat'
+        run: npm ci --no-audit
+        env:
+          GRAPHFLOW_SKIP_POSTINSTALL: "1"
+
+      - name: Install extension dependencies
+        if: steps.ovsx.outputs.mode == 'pat'
+        run: npm ci --prefix vscode-extension
+
+      - name: Build and package GraphFlow Tool VSIX
+        if: steps.ovsx.outputs.mode == 'pat'
+        run: npm run build && npm run build:extension && npm run package:extension
+
+      - name: Publish GraphFlow Tool to Open VSX
+        if: steps.ovsx.outputs.mode == 'pat'
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: node scripts/publish-openvsx-idempotent.mjs
