@@ -75,6 +75,8 @@ describe("M17 release readiness", () => {
   it("exposes stable help and version text for CLI users", () => {
     expect(buildCliUsage()).toContain("Usage: graphflow <command> [options]");
     expect(buildCliUsage()).toContain("run \"<task>\" [--json] [--config <path>]");
+    expect(buildCliUsage()).toContain("outcome report <episodeId> <success>");
+    expect(buildCliUsage()).toContain("insight submit");
     expect(getCliVersion()).toMatch(/^\d+\.\d+\./);
   });
 

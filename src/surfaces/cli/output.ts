@@ -26,6 +26,9 @@ export function buildCliUsage(): string {
     "  config init [--global]",
     "  config validate [--json] [--config <path>]",
     '  run "<task>" [--json] [--config <path>]',
+    "  outcome report <episodeId> <success> [--lesson <text>]... [--json] [--config <path>]",
+    '  insight submit --task "<task>" --work-item-id <id> --response "<json>" [--episode-id <id>] [--json] [--config <path>]',
+    '  insight merge --task "<task>" [--json] [--config <path>]',
     '  plan "<task>" [--json] [--config <path>]',
     '  plan insight "<task>" [--json] [--config <path>]',
     '  context preview "<query>" [--json] [--config <path>]',
@@ -49,6 +52,59 @@ export function buildCliUsage(): string {
     "  help | --help | -h",
     "  version | --version | -v",
   ].join("\n");
+}
+
+/** Parse bridge outcome success tokens (true/false/pass/fail/1/0/yes/no). */
+export function parseCliSuccess(raw: string | undefined): boolean | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  const value = raw.trim().toLowerCase();
+  if (["true", "1", "pass", "success", "yes", "y"].includes(value)) {
+    return true;
+  }
+  if (["false", "0", "fail", "failed", "no", "n"].includes(value)) {
+    return false;
+  }
+  return undefined;
+}
+
+/** Collect all values for a repeated CLI flag (e.g. --lesson a --lesson b). */
+export function collectCliFlagValues(args: string[], flag: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === flag) {
+      const next = args[index + 1];
+      if (next && !next.startsWith("--")) {
+        values.push(next);
+        index += 1;
+      }
+    }
+  }
+  return values;
+}
+
+/** Read the first value for a CLI flag; supports `--flag=value` and `--flag value`. */
+export function readCliFlagValue(args: string[], flag: string): string | undefined {
+  const eqPrefix = `${flag}=`;
+  for (let index = 0; index < args.length; index += 1) {
+    const current = args[index];
+    if (!current) {
+      continue;
+    }
+    if (current.startsWith(eqPrefix)) {
+      const value = current.slice(eqPrefix.length).trim();
+      return value.length > 0 ? value : undefined;
+    }
+    if (current === flag) {
+      const next = args[index + 1];
+      if (next && !next.startsWith("--")) {
+        return next;
+      }
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 export function getCliVersion(): string {
