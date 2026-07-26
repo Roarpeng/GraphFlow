@@ -293,52 +293,185 @@ export function runUninstall() {
   console.log("[FINISH] Uninstall complete.");
 }
 
-export function runDoctor() {
-  console.log("[DOCTOR] GraphFlow self-diagnosis...");
+export type DoctorCheckStatus = "installed" | "missing" | "n/a";
+export type DoctorCheckCategory = "mcp" | "config" | "skill" | "instruction" | "project";
 
-  // 1. Detect agents
+export interface DoctorCheckItem {
+  category: DoctorCheckCategory;
+  agent: string;
+  path: string;
+  scope?: "user" | "workspace" | "global";
+  status: DoctorCheckStatus;
+  detected?: boolean;
+}
+
+export interface DoctorReport {
+  command: "doctor";
+  detectedAgents: Array<{ id: string; name: string }>;
+  checks: DoctorCheckItem[];
+  summary: {
+    total: number;
+    installed: number;
+    missing: number;
+    na: number;
+  };
+  /** True when no check is missing (n/a allowed). */
+  ok: boolean;
+  /** Next steps when missing items exist; empty when ok. */
+  remediation: string[];
+}
+
+function toDoctorStatus(installed: boolean, detected = true): DoctorCheckStatus {
+  if (installed) return "installed";
+  return detected ? "missing" : "n/a";
+}
+
+export function buildDoctorReport(workspaceRoot: string = process.cwd()): DoctorReport {
   const agents = detectInstalledAgents();
-  console.log(`Detected agents: ${agents.map((a) => a.name).join(", ") || "none"}`);
+  const checks: DoctorCheckItem[] = [];
 
-  // 2. MCP install status
-  const mcpStatus = getMcpInstallStatus();
-  for (const status of mcpStatus) {
-    const icon = status.installed ? "[INSTALLED]" : "[MISSING]";
-    console.log(`${icon} ${status.agentName} (${status.scope}): ${status.configPath}`);
+  for (const status of getMcpInstallStatus()) {
+    checks.push({
+      category: "mcp",
+      agent: status.agentName,
+      path: status.configPath,
+      scope: status.scope,
+      status: toDoctorStatus(status.installed, status.detected),
+      detected: status.detected,
+    });
   }
 
-  // 3. Config status
   const globalConfigPath = join(homedir(), ".graphflow.config.json");
-  console.log(`Global config: ${existsSync(globalConfigPath) ? "exists" : "missing"} at ${globalConfigPath}`);
+  checks.push({
+    category: "config",
+    agent: "GraphFlow",
+    path: globalConfigPath,
+    scope: "global",
+    status: existsSync(globalConfigPath) ? "installed" : "missing",
+    detected: true,
+  });
 
-  // 4. Trae CN Rules / Skills (project + user)
-  const traeStatus = getTraeInstallStatus(process.cwd());
-  for (const status of traeStatus) {
-    const icon = status.installed ? "[INSTALLED]" : status.detected ? "[MISSING]" : "[N/A]";
-    console.log(`${icon} ${status.agent}: ${status.configPath}`);
+  for (const status of getTraeInstallStatus(workspaceRoot)) {
+    checks.push({
+      category: "project",
+      agent: status.agent,
+      path: status.configPath,
+      status: toDoctorStatus(status.installed, status.detected),
+      detected: status.detected,
+    });
   }
 
-  // 4b. Antigravity / Gemini project assets
-  for (const status of getAntigravityInstallStatus(process.cwd())) {
-    const icon = status.installed ? "[INSTALLED]" : status.detected ? "[MISSING]" : "[N/A]";
-    console.log(`${icon} ${status.agent}: ${status.configPath}`);
+  for (const status of getAntigravityInstallStatus(workspaceRoot)) {
+    checks.push({
+      category: "project",
+      agent: status.agent,
+      path: status.configPath,
+      status: toDoctorStatus(status.installed, status.detected),
+      detected: status.detected,
+    });
   }
 
-  // 4c. GitHub Copilot project instructions
-  for (const status of getCopilotInstallStatus(process.cwd())) {
-    const icon = status.installed ? "[INSTALLED]" : "[MISSING]";
-    console.log(`${icon} ${status.agent}: ${status.configPath}`);
+  for (const status of getCopilotInstallStatus(workspaceRoot)) {
+    checks.push({
+      category: "instruction",
+      agent: status.agent,
+      path: status.configPath,
+      status: toDoctorStatus(status.installed, true),
+      detected: true,
+    });
   }
 
-  // 5. Other agent skills / instructions
-  for (const status of [...getAgentSkillStatus(), ...getAgentInstructionStatus()]) {
+  for (const status of getAgentSkillStatus()) {
     if (!status.detected) continue;
-    const icon = status.installed ? "[INSTALLED]" : "[MISSING]";
-    console.log(`${icon} ${status.agent}: ${status.configPath}`);
+    checks.push({
+      category: "skill",
+      agent: status.agent,
+      path: status.configPath,
+      status: toDoctorStatus(status.installed, status.detected),
+      detected: status.detected,
+    });
   }
 
-  // 6. Model config guide
-  console.log("\n" + formatModelConfigGuide());
+  for (const status of getAgentInstructionStatus()) {
+    if (!status.detected) continue;
+    checks.push({
+      category: "instruction",
+      agent: status.agent,
+      path: status.configPath,
+      status: toDoctorStatus(status.installed, status.detected),
+      detected: status.detected,
+    });
+  }
+
+  const installed = checks.filter((c) => c.status === "installed").length;
+  const missing = checks.filter((c) => c.status === "missing").length;
+  const na = checks.filter((c) => c.status === "n/a").length;
+  const ok = missing === 0;
+  const remediation = ok
+    ? []
+    : [
+        "Run `graphflow install` to register MCP + Skills for detected agents.",
+        "Re-run `graphflow doctor --json` and fix any remaining missing items.",
+        "Ensure target agent directories exist (e.g. ~/.cursor) so installers can detect them.",
+      ];
+
+  return {
+    command: "doctor",
+    detectedAgents: agents.map((a) => ({ id: a.id, name: a.name })),
+    checks,
+    summary: {
+      total: checks.length,
+      installed,
+      missing,
+      na,
+    },
+    ok,
+    remediation,
+  };
+}
+
+export function formatDoctorLegacyText(report: DoctorReport): string {
+  const lines: string[] = [];
+  lines.push("[DOCTOR] GraphFlow self-diagnosis...");
+  lines.push(
+    `Detected agents: ${report.detectedAgents.map((a) => a.name).join(", ") || "none"}`
+  );
+
+  for (const check of report.checks) {
+    const icon =
+      check.status === "installed"
+        ? "[INSTALLED]"
+        : check.status === "missing"
+          ? "[MISSING]"
+          : "[N/A]";
+    const scope = check.scope ? ` (${check.scope})` : "";
+    lines.push(`${icon} ${check.agent}${scope}: ${check.path}`);
+  }
+
+  lines.push(
+    `summary: installed=${report.summary.installed} missing=${report.summary.missing} n/a=${report.summary.na} ok=${report.ok}`
+  );
+
+  if (report.remediation.length > 0) {
+    lines.push("");
+    lines.push("Remediation:");
+    for (const step of report.remediation) {
+      lines.push(`- ${step}`);
+    }
+  }
+
+  lines.push("");
+  lines.push(formatModelConfigGuide());
+  return lines.join("\n");
+}
+
+export function runDoctor() {
+  const report = buildDoctorReport(process.cwd());
+  console.log(formatDoctorLegacyText(report));
+  if (!report.ok) {
+    process.exitCode = 1;
+  }
+  return report;
 }
 
 export function runMcpRemove(agentId?: string) {
