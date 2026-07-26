@@ -17,6 +17,7 @@ import {
   planInsightResult,
   previewContext,
   rebuildGraph,
+  reportOutcome,
   resetTokenSavingsStats,
   runLearningNightly,
   runLearningNightlyResult,
@@ -26,9 +27,20 @@ import {
   runSkillPrune,
   runTask,
   runTaskResult,
+  submitAgentInsightResult,
+  mergeAgentInsightResult,
 } from "./runtime";
 import { validateConfigDetailed, type ConfigValidationResult } from "../../config/loader.js";
-import { buildCliUsage, formatCliResult, getCliVersion, parseCliOptions, type CliCommandResult } from "./output";
+import {
+  buildCliUsage,
+  collectCliFlagValues,
+  formatCliResult,
+  getCliVersion,
+  parseCliOptions,
+  parseCliSuccess,
+  readCliFlagValue,
+  type CliCommandResult,
+} from "./output";
 
 async function executeCommand(command: string, args: string[], configPath?: string): Promise<CliCommandResult | undefined> {
   if (command === "install") {
@@ -107,6 +119,79 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       command,
       data,
       legacyText: await runTask(task, configPath),
+    };
+  }
+
+  if (command === "outcome" && args[0] === "report") {
+    const episodeId = args[1]?.trim();
+    const success = parseCliSuccess(args[2]);
+    if (!episodeId || success === undefined) {
+      console.log("Usage: graphflow outcome report <episodeId> <success> [--lesson <text>]...");
+      process.exitCode = 1;
+      return undefined;
+    }
+    const lessons = collectCliFlagValues(args, "--lesson");
+    const data = await reportOutcome(episodeId, success, lessons, configPath);
+    return {
+      command: "outcome-report",
+      data,
+      legacyText: data.ok
+        ? `ok=true; episodeId=${data.episodeId}; outcome=${data.outcome}; skillsUpdated=${data.skillsUpdated}`
+        : `ok=false; reason=${data.reason ?? "unknown"}`,
+    };
+  }
+
+  if (command === "insight" && args[0] === "submit") {
+    const task =
+      readCliFlagValue(args, "--task") ??
+      readCliFlagValue(args, "--task-text");
+    const workItemId =
+      readCliFlagValue(args, "--work-item-id") ??
+      readCliFlagValue(args, "--workItemId");
+    const response =
+      readCliFlagValue(args, "--response") ??
+      readCliFlagValue(args, "--response-json");
+    const episodeId =
+      readCliFlagValue(args, "--episode-id") ??
+      readCliFlagValue(args, "--episodeId");
+    if (!task || !workItemId || !response) {
+      console.log(
+        'Usage: graphflow insight submit --task "<task>" --work-item-id <id> --response "<json>" [--episode-id <id>]'
+      );
+      process.exitCode = 1;
+      return undefined;
+    }
+    const data = await submitAgentInsightResult(
+      task,
+      workItemId,
+      response,
+      configPath,
+      episodeId
+    );
+    return {
+      command: "insight-submit",
+      data,
+      legacyText: data.ok
+        ? `ok=true; nodeId=${data.nodeId}; mergeComplete=${data.merge?.complete ?? false}`
+        : `ok=false; reason=${data.reason}`,
+    };
+  }
+
+  if (command === "insight" && args[0] === "merge") {
+    const task =
+      readCliFlagValue(args, "--task") ??
+      readCliFlagValue(args, "--task-text") ??
+      args.slice(1).filter((part) => !part.startsWith("--")).join(" ").trim();
+    if (!task) {
+      console.log('Usage: graphflow insight merge --task "<task>"');
+      process.exitCode = 1;
+      return undefined;
+    }
+    const data = await mergeAgentInsightResult(task, configPath);
+    return {
+      command: "insight-merge",
+      data,
+      legacyText: `complete=${data.complete}; submitted=${data.submittedCount}; missing=${data.missing.join(",") || "none"}; planNodes=${data.plan.length}`,
     };
   }
 
