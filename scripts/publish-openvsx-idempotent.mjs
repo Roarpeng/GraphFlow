@@ -18,8 +18,16 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+const require = createRequire(import.meta.url);
+const {
+  resolveOpenVsxToken,
+  openVsxHasVersion,
+  alignPackageJsonForNamespace,
+} = require("./openvsx-publish-lib.cjs");
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const extensionDir = join(root, "vscode-extension");
@@ -27,47 +35,7 @@ const packageJsonPath = join(extensionDir, "package.json");
 const packageJsonBackupPath = join(extensionDir, "package.json.openvsx-backup");
 const registryUrl = (process.env.OVSX_REGISTRY_URL || "https://open-vsx.org").replace(/\/$/, "");
 
-export function resolveOpenVsxToken(env = process.env) {
-  return env.open_vsx_token || env.OPEN_VSX_TOKEN || env.OVSX_PAT || "";
-}
-
-export function openVsxHasVersion(metadata, targetVersion) {
-  if (!metadata || typeof metadata !== "object") {
-    return false;
-  }
-  if (metadata.version === targetVersion) {
-    return true;
-  }
-  const all = metadata.allVersions;
-  return Boolean(all && typeof all === "object" && all[targetVersion]);
-}
-
-export function alignPackageJsonForNamespace(pkg, namespace) {
-  const next = structuredClone(pkg);
-  const previousPublisher = String(next.publisher ?? "");
-  const name = String(next.name ?? "graphflow-tool");
-  const previousChatId = `${previousPublisher}.${name}.graphflowAgent`;
-  const nextChatId = `${namespace}.${name}.graphflowAgent`;
-
-  next.publisher = namespace;
-
-  if (Array.isArray(next.activationEvents)) {
-    next.activationEvents = next.activationEvents.map((event) =>
-      typeof event === "string" ? event.split(previousChatId).join(nextChatId) : event
-    );
-  }
-
-  const participants = next.contributes?.chatParticipants;
-  if (Array.isArray(participants)) {
-    for (const participant of participants) {
-      if (participant && typeof participant.id === "string") {
-        participant.id = participant.id.split(previousChatId).join(nextChatId);
-      }
-    }
-  }
-
-  return next;
-}
+export { resolveOpenVsxToken, openVsxHasVersion, alignPackageJsonForNamespace };
 
 export async function fetchOpenVsxMetadata(baseUrl, ns, ext) {
   const url = `${baseUrl}/api/${encodeURIComponent(ns)}/${encodeURIComponent(ext)}`;
