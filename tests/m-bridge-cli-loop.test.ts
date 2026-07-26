@@ -86,40 +86,35 @@ describe("Bridge CLI learning loop", () => {
       const runResult = await runTaskResult(task, configPath);
       expect(runResult.episodeId).toBeTruthy();
 
-      const workItems =
-        runResult.executionDescriptor?.agentWorkItems?.filter((item) => !item.optional) ?? [];
-      // Submit the required items that keep the bridge protocol honest.
-      for (const item of workItems.slice(0, 2)) {
-        const response =
-          item.kind === "intent"
-            ? JSON.stringify({
-                intent: "Close CLI bridge learning loop",
-                users: ["coding agents without MCP"],
-                successCriteria: ["outcome report updates skills"],
-              })
-            : item.kind === "requirement"
-              ? JSON.stringify({
-                  functional: ["CLI outcome report", "CLI insight submit/merge"],
-                  constraints: ["no MCP required"],
-                  acceptance: ["skillsUpdated > 0 after success"],
-                })
-              : JSON.stringify({
-                  observation: "Bridge CLI fallback must close the flywheel",
-                  certainty: 0.9,
-                  criticalInsight: "Documented CLI commands must exist",
-                });
-        const submitted = await submitAgentInsightResult(
-          task,
-          item.id,
-          response,
-          configPath,
-          runResult.episodeId
-        );
-        expect(submitted.ok).toBe(true);
-      }
+      const intent = await submitAgentInsightResult(
+        task,
+        "intent-analysis",
+        JSON.stringify({
+          intent: "Close CLI bridge learning loop",
+          users: ["coding agents without MCP"],
+          successCriteria: ["outcome report updates skills"],
+        }),
+        configPath,
+        runResult.episodeId
+      );
+      expect(intent.ok).toBe(true);
+
+      const requirement = await submitAgentInsightResult(
+        task,
+        "requirement-analysis",
+        JSON.stringify({
+          functional: ["CLI outcome report", "CLI insight submit/merge"],
+          constraints: ["no MCP required"],
+          acceptance: ["skillsUpdated > 0 after success"],
+        }),
+        configPath,
+        runResult.episodeId
+      );
+      expect(requirement.ok).toBe(true);
 
       const merged = await mergeAgentInsightResult(task, configPath);
       expect(merged.submittedCount).toBeGreaterThan(0);
+      expect(merged.complete).toBe(false);
 
       const outcome = await reportOutcome(
         runResult.episodeId!,
