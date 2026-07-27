@@ -853,7 +853,7 @@ export function buildSettingsHtml(
           : ""
       }
       <div class="flow-box">
-        <h3>v${escapeHtml(status?.extensionVersion ?? "1.7.10")} 本版亮点</h3>
+        <h3>v${escapeHtml(status?.extensionVersion ?? "1.7.11")} 本版亮点</h3>
         <ol>
           <li><strong>MCP 工作区安全发现</strong>：修复安装后 Cursor 以 home 启动 MCP 时报 <code>unsafe workspace root from discovery</code>；自动读取 <code>WORKSPACE_FOLDER_PATHS</code>，npx 写入 <code>${"${workspaceFolder}"}</code>。</li>
           <li><strong>安装自检</strong>：CLI <code>graphflow install --json</code> / <code>doctor --json</code> 输出结构化成功项、缺失项与 remediation。</li>
