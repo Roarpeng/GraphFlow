@@ -9,6 +9,7 @@ import {
   getCopilotInstallStatus,
   getAgentInstructionStatus,
   getAgentSkillStatus,
+  type SkillInstallSummary,
 } from "../../integrations/skill-installer";
 import {
   detectInstalledAgents,
@@ -16,6 +17,7 @@ import {
   getMcpInstallStatus,
   installMcpToDetectedAgents,
   uninstallMcpFromDetectedAgents,
+  type McpInstallResult,
 } from "../../integrations/agent-mcp-installer";
 
 const isWindows = process.platform === "win32";
@@ -213,41 +215,158 @@ export function installCursorRules(): CursorRulesInstallResult[] {
   return results;
 }
 
-export function runInstall() {
-  const workspaceRoot = process.cwd();
-  console.log("[START] Installing GraphFlow — global config + skills/rules + MCP...");
+export interface InstallReport {
+  command: "install";
+  globalConfig: {
+    path: string;
+    status: "created" | "skipped" | "error";
+    message?: string;
+  };
+  skills: SkillInstallSummary;
+  mcp: McpInstallResult[];
+  /** Post-install doctor self-check (never silently skip failures). */
+  doctor: DoctorReport;
+  /** True when MCP install had no errors and doctor reports no missing items. */
+  ok: boolean;
+  remediation: string[];
+}
 
-  // 1. Create global config
+export interface BuildInstallReportOptions {
+  /** When false, skip async graph bootstrap (tests / dry structural install). Default true. */
+  bootstrapGraph?: boolean;
+}
+
+export function buildInstallReport(
+  workspaceRoot: string = process.cwd(),
+  options: BuildInstallReportOptions = {}
+): InstallReport {
+  const bootstrapGraph = options.bootstrapGraph !== false;
   const globalConfig = ensureGlobalGraphFlowConfig();
-  if (globalConfig.status === "created") {
-    console.log(`[CREATED] Global config: ${globalConfig.path}`);
-  } else {
-    console.log(`[SKIP] Global config already exists: ${globalConfig.path}`);
-  }
-
-  // 2. Install all skills/rules via skill-installer
-  installAllSkills(undefined, (message: string) => console.log(message), workspaceRoot);
-
-  // 3. Install MCP to detected agents
-  const mcpResults = installMcpToDetectedAgents({
+  // Silent during report build so `--json` is not polluted; human text comes from formatInstallLegacyText.
+  const skills = installAllSkills(undefined, () => undefined, workspaceRoot);
+  const mcp = installMcpToDetectedAgents({
     strategy: "npx",
     installScope: "user",
     workspaceRoot,
   });
-  for (const result of mcpResults) {
+
+  if (bootstrapGraph) {
+    void bootstrapGraphIndex(workspaceRoot).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[WARN] Bootstrap graph index skipped: ${message}`);
+    });
+  }
+
+  const doctor = buildDoctorReport(workspaceRoot);
+  const mcpHasError = mcp.some((item) => item.status === "error");
+  const skillHasError = [
+    ...skills.traeSkills,
+    ...skills.cursorRules,
+    ...skills.claudeMd,
+    ...skills.agentInstructions,
+    ...skills.agentSkills,
+    ...skills.projectRules,
+  ].some((item) => item.status === "error");
+  const ok = doctor.ok && !mcpHasError && globalConfig.status !== "error";
+  const remediation: string[] = [];
+  if (!ok) {
+    if (globalConfig.status === "error") {
+      remediation.push(
+        `Fix global config creation at ${globalConfig.path}${globalConfig.message ? `: ${globalConfig.message}` : "."}`
+      );
+    }
+    if (mcpHasError) {
+      remediation.push("Re-run `graphflow install` after fixing MCP target paths for agents marked error.");
+    }
+    if (skillHasError) {
+      remediation.push("Inspect skill/rules targets marked error and ensure agent directories are writable.");
+    }
+    remediation.push(...doctor.remediation);
+  }
+
+  return {
+    command: "install",
+    globalConfig: {
+      path: globalConfig.path,
+      status: globalConfig.status,
+      ...(globalConfig.message ? { message: globalConfig.message } : {}),
+    },
+    skills,
+    mcp,
+    doctor,
+    ok,
+    remediation,
+  };
+}
+
+export function formatInstallLegacyText(report: InstallReport): string {
+  const lines: string[] = [];
+  lines.push("[START] Installing GraphFlow — global config + skills/rules + MCP...");
+
+  if (report.globalConfig.status === "created") {
+    lines.push(`[CREATED] Global config: ${report.globalConfig.path}`);
+  } else if (report.globalConfig.status === "error") {
+    lines.push(
+      `[ERROR] Global config: ${report.globalConfig.path}${report.globalConfig.message ? ` (${report.globalConfig.message})` : ""}`
+    );
+  } else {
+    lines.push(`[SKIP] Global config already exists: ${report.globalConfig.path}`);
+  }
+
+  const skillGroups: Array<[string, SkillInstallSummary["traeSkills"]]> = [
+    ["Trae Skill", report.skills.traeSkills],
+    ["Cursor Rules", report.skills.cursorRules],
+    ["Claude Code CLAUDE.md", report.skills.claudeMd],
+    ["Agent instructions", report.skills.agentInstructions],
+    ["Agent Skill", report.skills.agentSkills],
+    ["Project rules", report.skills.projectRules],
+  ];
+  for (const [label, items] of skillGroups) {
+    for (const result of items) {
+      if (result.status === "error") {
+        lines.push(`[WARN] ${label} ${result.target}: ${result.message ?? "error"}`);
+      } else if (result.status === "skipped") {
+        lines.push(`[SKIP] ${label} ${result.target}: ${result.message ?? "skipped"}`);
+      } else {
+        lines.push(
+          `[OK] ${result.status === "created" ? "Created" : "Updated"} ${label} for ${result.target}`
+        );
+      }
+    }
+  }
+
+  for (const result of report.mcp) {
     const icon = result.status === "error" ? "[ERROR]" : result.status === "skipped" ? "[SKIP]" : "[OK]";
-    console.log(
+    lines.push(
       `${icon} MCP ${result.agentName} (${result.scope}): ${result.status} -> ${result.configPath}${result.message ? ` (${result.message})` : ""}`
     );
   }
 
-  // 4. Bootstrap graph index
-  void bootstrapGraphIndex(workspaceRoot).catch((error) => {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[WARN] Bootstrap graph index skipped: ${message}`);
-  });
+  lines.push(
+    `[FINISH] Installation complete! Global config: ${report.globalConfig.path}`
+  );
+  lines.push(
+    `doctor ok=${report.doctor.ok} installed=${report.doctor.summary.installed} missing=${report.doctor.summary.missing} install ok=${report.ok}`
+  );
 
-  console.log(`[FINISH] Installation complete! Global config: ${join(homedir(), ".graphflow.config.json")}`);
+  if (report.remediation.length > 0) {
+    lines.push("");
+    lines.push("Remediation:");
+    for (const step of report.remediation) {
+      lines.push(`- ${step}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+export function runInstall() {
+  const report = buildInstallReport(process.cwd());
+  console.log(formatInstallLegacyText(report));
+  if (!report.ok) {
+    process.exitCode = 1;
+  }
+  return report;
 }
 
 export function runInit() {

@@ -44,12 +44,15 @@ import {
 
 async function executeCommand(command: string, args: string[], configPath?: string): Promise<CliCommandResult | undefined> {
   if (command === "install") {
-    const { runInstall } = require("./init");
-    runInstall();
+    const { buildInstallReport, formatInstallLegacyText } = require("./init") as typeof import("./init");
+    const data = buildInstallReport(process.cwd());
+    if (!data.ok) {
+      process.exitCode = 1;
+    }
     return {
       command: "install",
-      data: {},
-      legacyText: `Installation complete`,
+      data,
+      legacyText: formatInstallLegacyText(data),
     };
   }
 
