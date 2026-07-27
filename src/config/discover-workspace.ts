@@ -242,10 +242,13 @@ export function discoverWorkspaceRoot(fromDir: string = process.cwd()): string |
   }
 
   // Cursor/npx often start MCP at home or inside the npm package runtime.
-  // Prefer IDE-provided project paths over failing closed.
-  const hinted = tryResolveIdeWorkspaceHint();
-  if (hinted) {
-    return hinted;
+  // Only then prefer IDE-provided project paths — never override a normal cwd
+  // with stale PWD/INIT_CWD pointing at an unrelated repo.
+  if (isGraphFlowRuntimeDirectory(resolvedFrom) || isUnsafeWorkspaceFallback(resolvedFrom)) {
+    const hinted = tryResolveIdeWorkspaceHint();
+    if (hinted) {
+      return hinted;
+    }
   }
 
   return undefined;
