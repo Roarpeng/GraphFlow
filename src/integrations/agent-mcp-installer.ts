@@ -1093,10 +1093,14 @@ function buildMcpServerNodeRaw(options: McpInstallOptions): McpServerNode {
     };
   }
 
-  // npx 策略：不在 MCP 配置中硬编码 cwd 和 GRAPHFLOW_WORKSPACE_ROOT。
-  // MCP client 会使用自己的 cwd 启动进程，MCP server 启动后通过 discover-workspace.ts 自动检测工作区。
-  // 硬编码 Linux 风格的 /repo 占位符在 Windows 上无效，会导致启动失败。
-  const npxEnv: Record<string, string> = { ...MCP_STDIO_ENV };
+  // npx 策略：不硬编码绝对路径 cwd（跨机器无效）。
+  // 写入 Cursor/VS Code 可展开的 ${workspaceFolder}，让 MCP 子进程拿到真实项目根。
+  // 不支持插值的宿主会留下字面量；discover-workspace 会忽略 unresolved placeholder
+  // 并回退到 WORKSPACE_FOLDER_PATHS / rootDir。
+  const npxEnv: Record<string, string> = {
+    ...MCP_STDIO_ENV,
+    GRAPHFLOW_WORKSPACE_ROOT: "${workspaceFolder}",
+  };
 
   if (isWindows()) {
     const winNpx = resolveWindowsNpxLaunch();
