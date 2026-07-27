@@ -173,6 +173,8 @@ describe("M15 VS Code observability panels", () => {
     );
 
     expect(html).toContain("GraphFlow Settings");
+    expect(html).toContain("本版亮点");
+    expect(html).toContain("unsafe workspace root from discovery");
     expect(html).toContain('id="settings-smart-provider"');
     expect(html).toContain('id="settings-smart-model"');
     expect(html).toContain('id="settings-max-context-tokens"');

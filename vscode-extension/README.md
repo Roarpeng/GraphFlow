@@ -6,22 +6,26 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 
 ## 当前版本
 
-- Extension / runtime：**1.7.3**
-- 对应 VSIX：`../artifacts/graphflow-tool-1.7.3.vsix`（CI 构建）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
+- Extension / runtime：**1.7.10**
+- 对应 VSIX：`../artifacts/graphflow-tool-1.7.10.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
 
-### v1.7.3 要点
+### v1.7.10 要点
 
-- **无痛 MCP**：扩展激活时自动扫描并修复 Trae 等配置里含空格的 `command`（无需再手动 Install）
-- Embedding 韧性 / 检索降噪 / Trae 安装写短路径（见 1.7.1–1.7.2）
+- **MCP home-cwd 修复**：Cursor 以用户 home 启动 MCP 时，不再把 `/home/<user>` 当作工作区（修复 `unsafe workspace root from discovery`）
+- **工作区发现增强**：读取 Cursor `WORKSPACE_FOLDER_PATHS`；忽略未展开的 `${workspaceFolder}` 占位符
+- **npx MCP 安装**：写入 `GRAPHFLOW_WORKSPACE_ROOT=${workspaceFolder}`，由 Cursor/VS Code 插值到真实项目根
+- **安装自检**：`graphflow install --json` / `doctor --json` 输出结构化成功/缺失/remediation
+- **Bridge CLI 飞轮**：`insight submit/merge` + `outcome report` 可在无 GraphFlow LLM 时关闭学习循环
+- Settings 工具页同步展示本版亮点与 MCP 使用提示
 
-### v1.7.2 要点（保留）
+### v1.7.9 要点（保留）
 
-- **Embedding 韧性**：扩展 vendor 不捆绑 `@xenova/transformers`；缺失或 HF 不可达时自动降级到 `fnv1a-384` hash，不再刷 `ERR_MODULE_NOT_FOUND`
-- **检索降噪**：架构类查询降低 `vscode-extension` / `vendor` / `node_modules` 权重，优先 `src/graph`、`src/core` 等
-- **可选全图向量召回**：`embeddingPolicy.enableFullGraphVectorRecall: true`（默认关闭）
-- **离线模型缓存**：`embeddingPolicy.modelCacheDir` 或环境变量 `GRAPHFLOW_EMBEDDING_CACHE_DIR`
-- **飞轮**：`report_outcome` 成功路径写入 Skill 节点
-- **Installer 面冻结**：不再扩展新的 IDE 自动安装目标
+- Open VSX 自动发布、Opencode agent 支持、embedding 超时/HF 镜像、全面 diagnose、技能衰减、Episode 隐私
+
+### v1.7.3 / 1.7.2 要点（保留）
+
+- **无痛 MCP**：扩展激活时自动扫描并修复 Trae 等配置里含空格的 `command`
+- Embedding 韧性 / 检索降噪 / 可选全图向量召回 / 离线模型缓存
 
 ## 安装 VSIX（最终用户）
 
@@ -36,9 +40,9 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 ### 方式 B：命令行
 
 ```bash
-code --install-extension graphflow-tool-1.7.3.vsix
+code --install-extension graphflow-tool-1.7.10.vsix
 # Cursor CLI（若已安装）：
-cursor --install-extension graphflow-tool-1.7.3.vsix
+cursor --install-extension graphflow-tool-1.7.10.vsix
 ```
 
 ### 安装后推荐流程
@@ -59,14 +63,14 @@ cursor --install-extension graphflow-tool-1.7.3.vsix
 
 | 命令 | 说明 |
 | --- | --- |
-| GraphFlow: Show Settings | 配置、建图、路由测试 |
+| GraphFlow: Show Settings | 配置、建图、路由测试、本版亮点 |
 | GraphFlow: Show Graph | 知识图谱可视化 |
 | GraphFlow: Preview Context | 上下文压缩与 Token Budget |
 | GraphFlow: Plan & Brainstorm | 任务规划 |
+| GraphFlow: Plan Insight (Six Hats) | 六顶思考帽深度规划 |
 | GraphFlow: Run Task | 执行任务 |
 | GraphFlow: Skill Insights | 技能学习面板 |
 | GraphFlow: Install MCP to Agents | 手动重试 MCP 自动安装 |
-| GraphFlow: Model Setup Guide | 模型配置说明 |
 
 Chat Agent（`@graphflow`）：`/run`、`/plan`、`/graph`、`/skills`、`/diagnose`、`/learn`、`/history`
 
@@ -88,7 +92,7 @@ Chat Agent（`@graphflow`）：`/run`、`/plan`、`/graph`、`/skills`、`/diagn
 
 直接发送 VSIX 文件即可，同事**无需** clone GraphFlow 仓库：
 
-1. 从 Releases 下载 `graphflow-tool-1.7.3.vsix`
+1. 从 Releases 或本地 `artifacts/` 取得 `graphflow-tool-1.7.10.vsix`
 2. 按上文「安装 VSIX」步骤安装
 3. 打开项目 → Settings → 建立图谱
 
@@ -139,12 +143,18 @@ npm run package:extension
 **MCP 未自动安装**
 
 - 命令面板 → **GraphFlow: Install MCP to Agents**
-- 或终端：`npx @roarpeng/graphflow install`
+- 或终端：`npx @roarpeng/graphflow@1.7.10 install`
 
 **图谱为空 / Preview 0 anchors**
 
 - Settings → **建立图谱（无需 LLM）**
 - 或 MCP：`graphflow_index`（传入 `rootDir` 为项目绝对路径）
+
+**MCP 报错 `unsafe workspace root from discovery: /home/...`**
+
+- 升级到 **1.7.10+**，然后 Settings → **安装 / 更新 MCP**，Reload Window
+- 工具调用务必传 `rootDir`（项目绝对路径）
+- CLI：`graphflow doctor --json` 查看 MCP/Skill 注册状态
 
 **MCP 日志出现 No safe workspace root**
 
