@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { homedir, release } from "node:os";
 
 const RUNTIME_DIR_MARKERS = [
@@ -17,9 +17,42 @@ const IDE_WORKSPACE_ENV_KEYS = [
   "CURSOR_PROJECT_DIR",
   "VSCODE_CWD",
   "VSCODE_WORKSPACE_FOLDER",
+  // Cursor injects this on MCP child processes (single path or path.delimiter-separated).
+  "WORKSPACE_FOLDER_PATHS",
+  "WORKSPACE_FOLDER",
   "INIT_CWD",
   "PWD",
 ] as const;
+
+/** Unexpanded IDE placeholders must never be treated as filesystem roots. */
+export function isUnresolvedWorkspacePlaceholder(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return /\$\{[^}]+\}/.test(trimmed) || /\$[A-Z_][A-Z0-9_]*/.test(trimmed);
+}
+
+function parseWorkspaceFolderPaths(value: string): string[] {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return [];
+  }
+  if (trimmed.includes(delimiter)) {
+    return trimmed
+      .split(delimiter)
+      .map((part) => part.trim())
+      .filter(Boolean);
+  }
+  // Some hosts join with commas; keep paths that look absolute.
+  if (trimmed.includes(",") && !trimmed.includes(" ")) {
+    return trimmed
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+  }
+  return [trimmed];
+}
 
 function isWsl(): boolean {
   if (process.platform !== "linux") {
@@ -138,21 +171,34 @@ function resolveIdeWorkspaceHint(): string | undefined {
   const wsl = isWsl();
   for (const key of IDE_WORKSPACE_ENV_KEYS) {
     if (key === "GRAPHFLOW_WORKSPACE_ROOT") {
+      // Handled separately by ensureMcpWorkspaceEnv / resolveRuntimeWorkspaceRoot.
       continue;
     }
     const value = process.env[key]?.trim();
-    if (!value) {
+    if (!value || isUnresolvedWorkspacePlaceholder(value)) {
       continue;
     }
-    const normalized = wsl && value.startsWith("\\\\wsl$\\")
-      ? wslUncToPath(value)
-      : value;
-    const resolved = resolve(normalized);
-    if (hasProjectWorkspaceMarkers(resolved)) {
-      return resolved;
-    }
-    if (wsl && existsSync(resolved)) {
-      return resolved;
+
+    const candidates =
+      key === "WORKSPACE_FOLDER_PATHS" ? parseWorkspaceFolderPaths(value) : [value];
+
+    for (const candidate of candidates) {
+      if (!candidate || isUnresolvedWorkspacePlaceholder(candidate)) {
+        continue;
+      }
+      const normalized =
+        wsl && candidate.startsWith("\\\\wsl$\\") ? wslUncToPath(candidate) : candidate;
+      const resolved = resolve(normalized);
+      if (isUnsafeWorkspaceFallback(resolved)) {
+        continue;
+      }
+      if (hasProjectWorkspaceMarkers(resolved) || hasDevProjectMarkers(resolved)) {
+        return resolved;
+      }
+      // WSL UNC hints may lack markers on the Linux mount; still accept existing safe paths.
+      if (wsl && existsSync(resolved)) {
+        return resolved;
+      }
     }
   }
   return undefined;
@@ -195,8 +241,11 @@ export function discoverWorkspaceRoot(fromDir: string = process.cwd()): string |
     current = parent;
   }
 
-  if (isGraphFlowRuntimeDirectory(resolvedFrom)) {
-    return resolveIdeWorkspaceHint();
+  // Cursor/npx often start MCP at home or inside the npm package runtime.
+  // Prefer IDE-provided project paths over failing closed.
+  const hinted = tryResolveIdeWorkspaceHint();
+  if (hinted) {
+    return hinted;
   }
 
   return undefined;
@@ -206,11 +255,11 @@ export function discoverWorkspaceRoot(fromDir: string = process.cwd()): string |
 export function ensureMcpWorkspaceEnv(fromDir: string = process.cwd()): string | undefined {
   const existing = process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim();
   if (existing) {
-    const resolved = resolve(existing);
-    if (isUnsafeWorkspaceFallback(resolved)) {
+    if (isUnresolvedWorkspacePlaceholder(existing) || isUnsafeWorkspaceFallback(resolve(existing))) {
       delete process.env.GRAPHFLOW_WORKSPACE_ROOT;
-      // Fall through to discovery — never pin MCP to home/AppData.
+      // Fall through to discovery — never pin MCP to home/AppData/unexpanded placeholders.
     } else {
+      const resolved = resolve(existing);
       process.env.GRAPHFLOW_WORKSPACE_ROOT = resolved;
       return process.env.GRAPHFLOW_WORKSPACE_ROOT;
     }

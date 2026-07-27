@@ -36,7 +36,7 @@ describe("M63 Antigravity / Gemini / Copilot install", () => {
     expect(paths).toContain(join(homedir(), ".gemini", "config", "mcp_config.json"));
   });
 
-  it("user-scope MCP node omits GRAPHFLOW_WORKSPACE_ROOT", () => {
+  it("user-scope npx MCP node uses ${workspaceFolder}, never leaks process env paths", () => {
     const prev = process.env.GRAPHFLOW_WORKSPACE_ROOT;
     process.env.GRAPHFLOW_WORKSPACE_ROOT = "/should/not/leak";
     try {
@@ -44,7 +44,7 @@ describe("M63 Antigravity / Gemini / Copilot install", () => {
         strategy: "npx",
         workspaceRoot: undefined,
       });
-      expect(node.env?.GRAPHFLOW_WORKSPACE_ROOT).toBeUndefined();
+      expect(node.env?.GRAPHFLOW_WORKSPACE_ROOT).toBe("${workspaceFolder}");
     } finally {
       if (prev === undefined) {
         delete process.env.GRAPHFLOW_WORKSPACE_ROOT;
@@ -196,7 +196,7 @@ describe("M63 Antigravity / Gemini / Copilot install", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("installMcpToDetectedAgents writes npx config without WORKSPACE_ROOT for user scope", () => {
+  it("installMcpToDetectedAgents writes ${workspaceFolder} for user-scope npx, not absolute paths", () => {
     const results = installMcpToDetectedAgents({
       strategy: "npx",
       installScope: "user",
@@ -210,7 +210,10 @@ describe("M63 Antigravity / Gemini / Copilot install", () => {
       const json = JSON.parse(readFileSync(written.configPath, "utf8")) as {
         mcpServers?: { graphflow?: { env?: Record<string, string> } };
       };
-      expect(json.mcpServers?.graphflow?.env?.GRAPHFLOW_WORKSPACE_ROOT).toBeUndefined();
+      expect(json.mcpServers?.graphflow?.env?.GRAPHFLOW_WORKSPACE_ROOT).toBe("${workspaceFolder}");
+      expect(json.mcpServers?.graphflow?.env?.GRAPHFLOW_WORKSPACE_ROOT).not.toBe(
+        "/wrong/project/root"
+      );
     }
   });
 });

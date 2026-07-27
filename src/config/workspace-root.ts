@@ -3,6 +3,7 @@ import type { GraphFlowConfig } from "./schema";
 import {
   discoverWorkspaceRoot,
   isGraphFlowRuntimeDirectory,
+  isUnresolvedWorkspacePlaceholder,
   isUnsafeWorkspaceFallback,
   isUsableWorkspaceFallback,
   tryResolveIdeWorkspaceHint,
@@ -44,7 +45,9 @@ export function resolveRuntimeWorkspaceRoot(options?: {
     const resolvedEnv = resolve(envRoot);
     // Cursor often spawns MCP with cwd=home and a poisoned env; clear and
     // fall through so explicit rootDir / discovery can still succeed.
-    if (isUnsafeWorkspaceFallback(resolvedEnv)) {
+    // Also clear unexpanded placeholders like ${workspaceFolder} left by hosts
+    // that do not interpolate mcp.json env values.
+    if (isUnresolvedWorkspacePlaceholder(envRoot) || isUnsafeWorkspaceFallback(resolvedEnv)) {
       delete process.env.GRAPHFLOW_WORKSPACE_ROOT;
     } else {
       return resolvedEnv;
@@ -57,7 +60,10 @@ export function resolveRuntimeWorkspaceRoot(options?: {
 
   const discovered = discoverWorkspaceRoot(process.cwd());
   if (discovered) {
-    return assertSafeWorkspaceRoot(discovered, "discovery");
+    // Defense in depth: discovery must never surface home/AppData. Skip if it does.
+    if (!isUnsafeWorkspaceFallback(discovered)) {
+      return resolve(discovered);
+    }
   }
 
   const cwd = resolve(process.cwd());
