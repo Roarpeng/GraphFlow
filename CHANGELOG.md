@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.7.11] - 2026-07-27
+
+### Changed
+
+- **Settings 工具页**：同步展示 v1.7.11 本版亮点（MCP home-cwd 修复、install/doctor JSON 自检、Bridge 飞轮、无需 LLM 能力）
+- **扩展 README / marketplace description**：对齐最新版本与 FAQ
+
 ## [1.7.10] - 2026-07-27
 
 ### Fixed
