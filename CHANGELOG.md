@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.7.10] - 2026-07-27
+
+### Fixed
+
+- **MCP home-cwd discovery**：安装后 Cursor 常以 `cwd=/home/<user>` 启动 MCP；discovery 不再通过 IDE hint 把 home 当作工作区（修复 `Refusing to use unsafe workspace root from discovery: /home/...`）
+- **读取 `WORKSPACE_FOLDER_PATHS`**：优先使用 Cursor 注入的工作区路径；忽略未展开的 `${workspaceFolder}` 占位符
+- **npx MCP 安装**：写入 `GRAPHFLOW_WORKSPACE_ROOT=${workspaceFolder}`，由 Cursor/VS Code 插值到真实项目根
+
 ## [1.7.9] - 2026-07-22
 
 ### Added
