@@ -853,6 +853,16 @@ export function buildSettingsHtml(
           : ""
       }
       <div class="flow-box">
+        <h3>v${escapeHtml(status?.extensionVersion ?? "1.7.10")} 本版亮点</h3>
+        <ol>
+          <li><strong>MCP 工作区安全发现</strong>：修复安装后 Cursor 以 home 启动 MCP 时报 <code>unsafe workspace root from discovery</code>；自动读取 <code>WORKSPACE_FOLDER_PATHS</code>，npx 写入 <code>${"${workspaceFolder}"}</code>。</li>
+          <li><strong>安装自检</strong>：CLI <code>graphflow install --json</code> / <code>doctor --json</code> 输出结构化成功项、缺失项与 remediation。</li>
+          <li><strong>Bridge 飞轮</strong>：无 LLM 时走 Agent Bridge；CLI 支持 <code>insight submit/merge</code> + <code>outcome report</code> 关闭学习循环。</li>
+          <li><strong>无需 LLM 可用</strong>：结构建图、Context Preview、知识图谱可视化、10 个 MCP 工具；配置模型后启用规划/语义增强。</li>
+        </ol>
+        <p class="flow-hint">工具调用请传 <code>rootDir</code>（项目绝对路径）。若 MCP 日志提示 unsafe workspace，重新执行「安装 / 更新 MCP」并 Reload Window。</p>
+      </div>
+      <div class="flow-box">
         <h3>快速上手</h3>
         <ol>
           <li>填写图谱存储路径，点击「建立图谱」—— 无需 LLM 即可索引代码结构。</li>
@@ -865,7 +875,7 @@ export function buildSettingsHtml(
 
     <section class="panel">
       <h2>MCP 自动配置</h2>
-      <p class="flow-hint" style="margin-bottom: 10px;">安装扩展时会自动将 GraphFlow MCP 写入本机已检测到的 AI Agent / IDE 用户级配置。配置后请<strong>重启对应工具</strong>以加载 MCP。</p>
+      <p class="flow-hint" style="margin-bottom: 10px;">安装扩展时会自动将 GraphFlow MCP 写入本机已检测到的 AI Agent / IDE 用户级配置（含 Cursor <code>${"${workspaceFolder}"}</code> 插值）。配置后请<strong>重启对应工具 / Reload Window</strong>以加载 MCP。</p>
       <ul id="settings-mcp-status-list" class="status-list">${mcpStatusLines}</ul>
       <div style="margin-top: 10px;">
         <button id="settings-install-mcp" type="button" class="btn-index">安装 / 更新 MCP 到已检测 Agent</button>

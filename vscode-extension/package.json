@@ -2,7 +2,7 @@
   "name": "graphflow-tool",
   "publisher": "roarpeng",
   "displayName": "GraphFlow Tool",
-  "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.7.5: automatic execution mode - LLM only when configured and healthy, otherwise bridge mode.",
+  "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.7.10: safe MCP workspace discovery (home-cwd fix), workspaceFolder install env, install/doctor JSON self-check, bridge flywheel CLI.",
   "icon": "media/graphflow.png",
   "version": "1.7.10",
   "repository": {
