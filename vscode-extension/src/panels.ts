@@ -853,7 +853,7 @@ export function buildSettingsHtml(
           : ""
       }
       <div class="flow-box">
-        <h3>v${escapeHtml(status?.extensionVersion ?? "1.7.13")} 本版亮点</h3>
+        <h3>v${escapeHtml(status?.extensionVersion ?? "1.7.14")} 本版亮点</h3>
         <ol>
           <li><strong>Plan Agent Bridge</strong>：无 GraphFlow LLM 时，默认 <code>graphflow_plan</code> 也委托连接 Agent（intent→decomposition），并附带本地 <code>suggestedNodes</code> 供参考。</li>
           <li><strong>Plan 子句拆分</strong>：分析类冒号列表不再被启发式拆成伪并行 DAG。</li>
