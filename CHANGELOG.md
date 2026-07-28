@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.7.12] - 2026-07-28
+
+### Fixed
+
+- **`graphflow_plan` 误拆分析维度**：冒号后的评价维度列表（如 assumptions、failure modes、validation gates）不再被 `,`/`、`/`，` 拆成独立并行任务节点；仅当各子句都像可执行任务时才弱分隔
+- **brainstormer** 共用同一 `splitTaskClauses`，避免目标澄清变成名词碎片
+
 ## [1.7.11] - 2026-07-27
 
 ### Changed
