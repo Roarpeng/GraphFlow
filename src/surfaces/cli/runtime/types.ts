@@ -1,6 +1,7 @@
 import type { GraphEdge, GraphNode, TaskStatus } from "../../../core/types";
 import type { GraphSnapshotSampleEdge, GraphSnapshotSampleNode } from "../../../graph/snapshot-view.js";
 import type { RuntimeTimelineSummary } from "../../../core/cancellation";
+import type { AgentWorkItem } from "../../../core/agent-delegation";
 
 export type { GraphSnapshotSampleEdge, GraphSnapshotSampleNode };
 import type { GraphFlowConfig } from "../../../config/schema";
@@ -241,9 +242,20 @@ export interface SettingsPanelStatusData {
 }
 
 export interface PlanPreviewResult {
-  mode: "simple" | "complex";
+  /** Triage label when local-only; `agent-delegated` when no GraphFlow LLM (bridge). */
+  mode: "simple" | "complex" | "agent-delegated";
+  /** Original triage classification (kept when mode is agent-delegated). */
+  triageMode?: "simple" | "complex";
   ideas: string[];
   nodes: Array<{ id: string; description: string; dependencies: string[] }>;
+  /** Same as nodes when bridge suggests a local heuristic DAG. */
+  suggestedNodes?: Array<{ id: string; description: string; dependencies: string[] }>;
+  nodesStatus?: "suggested" | "final";
+  agentWorkItems?: AgentWorkItem[];
+  agentInstructions?: string;
+  status?: "awaiting-agent" | "complete";
+  complete?: boolean;
+  requiresAgentBridge?: boolean;
 }
 
 export interface ReportOutcomeResult {

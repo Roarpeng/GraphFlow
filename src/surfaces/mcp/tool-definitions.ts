@@ -64,12 +64,12 @@ export function getToolDefinitions(): ToolDefinition[] {
     {
       name: "graphflow_plan",
       description:
-        "[Core] Generate a DAG-style task plan. mode='simple' for quick planning; mode='insight' for Six Hats + 5-Why. Without a GraphFlow LLM API key, insight mode returns mode='agent-delegated' with agentWorkItems — you MUST answer them via graphflow_insight (submit then merge). Do not treat placeholder insight/plan as final.",
+        "[Core] Generate a DAG-style task plan. mode='simple' (default) for planning; mode='insight' for Six Hats + 5-Why. Without a GraphFlow LLM API key, BOTH modes bridge to you (the coding agent): simple returns mode='agent-delegated' with lightweight simple-plan-* work items plus optional suggestedNodes (heuristic, non-final); insight returns the full Six Hats work-item set. MUST answer via graphflow_insight (submit then merge). Do not treat suggested/placeholder plan as final.",
       inputSchema: {
         type: "object",
         properties: {
           task: { type: "string", description: "Task description to plan. Include what you need to accomplish." },
-          mode: { type: "string", enum: ["simple", "insight"], description: "Planning mode: 'simple' (default) for quick planning, 'insight' for Six Thinking Hats + 5-Why deep analysis." },
+          mode: { type: "string", enum: ["simple", "insight"], description: "Planning mode: 'simple' (default) for agent-bridged task decomposition (or local/LLM when configured), 'insight' for Six Thinking Hats + 5-Why deep analysis." },
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
         },
         required: ["task"],

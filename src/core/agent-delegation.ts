@@ -1,3 +1,4 @@
+import { brainstormTask } from "../agents/brainstormer";
 import {
   SIX_HATS,
   analyzeWithSixHatsHeuristic,
@@ -9,6 +10,7 @@ import {
   isResearchKeyHatColor,
 } from "../agents/task-profile";
 import { planTasks } from "../agents/planner";
+import { triageTask } from "./triage";
 import type { TaskNode } from "./types";
 
 export { isCompactAgentInsightTask, isResearchAnalysisTask } from "../agents/task-profile";
@@ -210,6 +212,135 @@ function buildPlanRefinementWorkItem(task: string): AgentWorkItem {
     responseSchema: {
       items: { id: "string", description: "string", dependencies: "string[]" },
     },
+  };
+}
+
+/** Work-item IDs for lightweight simple-plan bridge (not full Six Hats). */
+export const SIMPLE_PLAN_BRIDGE_REQUIRED_IDS = [
+  "simple-plan-intent",
+  "simple-plan-decomposition",
+] as const;
+
+export type SimplePlanNode = {
+  id: string;
+  description: string;
+  dependencies: string[];
+};
+
+/**
+ * Compact agent-bridge for default graphflow_plan when GraphFlow has no LLM.
+ * Local heuristic DAG is attached as a non-final suggestion only.
+ */
+export function buildAgentDelegatedSimplePlan(task: string): {
+  mode: "agent-delegated";
+  triageMode: "simple" | "complex";
+  ideas: string[];
+  /** Provisional heuristic nodes — NOT final until agent submit+merge. */
+  nodes: SimplePlanNode[];
+  suggestedNodes: SimplePlanNode[];
+  agentWorkItems: AgentWorkItem[];
+  agentInstructions: string;
+  status: "awaiting-agent";
+  complete: false;
+  requiresAgentBridge: true;
+  nodesStatus: "suggested";
+} {
+  const triageMode = triageTask(task);
+  const ideas = brainstormTask(task);
+  const suggestedNodes = planTasks(task).map((node) => ({
+    id: node.id,
+    description: node.description,
+    dependencies: node.dependencies,
+  }));
+  const suggestedJson = JSON.stringify(suggestedNodes, null, 2);
+
+  const agentWorkItems: AgentWorkItem[] = [
+    {
+      id: "simple-plan-intent",
+      kind: "intent",
+      prompt: [
+        `Task: ${task}`,
+        "",
+        "Before splitting into subtasks, understand the task as ONE intent.",
+        "Do NOT treat colon-list evaluation dimensions (e.g. assumptions, failure modes) as separate work items.",
+        "Return ONLY a JSON object:",
+        "{",
+        '  "explicitIntent": "what the user explicitly asked for",',
+        '  "implicitIntent": "the underlying need",',
+        '  "coreProblem": "the core problem to solve",',
+        '  "nonGoals": ["things out of scope"],',
+        '  "successDefinition": "how to know the task is done"',
+        "}",
+      ].join("\n"),
+      expectedFormat: "json",
+      responseSchema: {
+        explicitIntent: "string",
+        implicitIntent: "string",
+        coreProblem: "string",
+        nonGoals: "string[]",
+        successDefinition: "string",
+      },
+    },
+    {
+      id: "simple-plan-decomposition",
+      kind: "plan-refinement",
+      prompt: [
+        `Task: ${task}`,
+        "",
+        "Produce the FINAL DAG task plan using your model.",
+        "A local heuristic suggestion is provided below — use it only if it is high-quality;",
+        "otherwise replace it with a better split grounded in your intent analysis.",
+        "Rules:",
+        "- Max 8 tasks; each description must be actionable (verb + object)",
+        "- Do NOT invent parallel noun-phrase tasks from punctuation lists",
+        "- Prefer sequential design → implement → verify when the request is one analytical intent",
+        "",
+        "Suggested local plan (non-authoritative):",
+        suggestedJson,
+        "",
+        "Return ONLY a JSON array: [{id, description, dependencies}]",
+      ].join("\n"),
+      expectedFormat: "json",
+      responseSchema: {
+        items: { id: "string", description: "string", dependencies: "string[]" },
+      },
+    },
+  ];
+
+  const agentInstructions = [
+    "[AGENT-BRIDGE REQUIRED] No GraphFlow LLM API key is configured.",
+    "YOU (the connected coding agent) MUST decompose this task with your own model.",
+    "The nodes/suggestedNodes fields are LOCAL HEURISTIC SUGGESTIONS — not a finished plan.",
+    "Do NOT treat suggestedNodes as final. Prefer your own DAG after intent analysis.",
+    "",
+    "Protocol (MUST follow in order):",
+    '1. Answer each REQUIRED work item with your model (JSON only).',
+    '2. MUST submit each via graphflow_insight({ mode: "submit", task, workItemId, response }).',
+    '3. After both required items are submitted, MUST call graphflow_insight({ mode: "merge", task }).',
+    "4. Use the merged plan as the real DAG, then implement.",
+    "",
+    `Task: ${task}`,
+    "",
+    "Mode: simple-plan bridge (intent → decomposition)",
+    `Required work items (2): ${SIMPLE_PLAN_BRIDGE_REQUIRED_IDS.join(", ")}`,
+    "Suggested order: (1) simple-plan-intent, (2) simple-plan-decomposition.",
+    "",
+    "Work items:",
+    ...agentWorkItems.map((item) => `- ${item.id} (${item.kind}) [REQUIRED]`),
+  ].join("\n");
+
+  return {
+    mode: "agent-delegated",
+    triageMode,
+    ideas,
+    nodes: suggestedNodes,
+    suggestedNodes,
+    agentWorkItems,
+    agentInstructions,
+    status: "awaiting-agent",
+    complete: false,
+    requiresAgentBridge: true,
+    nodesStatus: "suggested",
   };
 }
 

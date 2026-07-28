@@ -43,8 +43,10 @@ export type { TaskRunResult } from "./core/types";
 export { hasUsableLlmProvider } from "./config/llm-availability";
 export {
   buildAgentDelegatedPlanInsight,
+  buildAgentDelegatedSimplePlan,
   buildAgentInsightWorkItems,
   summarizeInsightForContext,
+  SIMPLE_PLAN_BRIDGE_REQUIRED_IDS,
   type AgentDelegatedPlanInsight,
   type AgentDelegationMode,
   type AgentWorkItem,

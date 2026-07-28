@@ -1,7 +1,8 @@
 import { describe, expect, it, beforeAll, afterAll } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { getDefaultConfig } from "../src/config/defaults";
 import {
   getGraphFlowSettings,
   getSkillInsights,
@@ -158,11 +159,29 @@ describe("M10 CLI runtime", () => {
   });
 
   it("returns plan and brainstorm output for complex tasks", () => {
-    const output = planAndBrainstorm("update readme and add tests and refactor architecture module");
-    expect(output).toContain("mode=complex");
-    expect(output).toContain("ideas=");
-    expect(output).toContain("plan=");
-    expect(output).toContain("task-1");
+    const configPath = join(tmpdir(), `gf-m10-plan-${Date.now()}.json`);
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        ...getDefaultConfig(),
+        providers: {
+          openai: { apiKey: "sk-test-local", baseUrl: "https://api.openai.com/v1" },
+        },
+      }),
+      "utf8"
+    );
+    try {
+      const output = planAndBrainstorm(
+        "update readme and add tests and refactor architecture module",
+        configPath
+      );
+      expect(output).toContain("mode=complex");
+      expect(output).toContain("ideas=");
+      expect(output).toContain("plan=");
+      expect(output).toContain("task-1");
+    } finally {
+      unlinkSync(configPath);
+    }
   });
 
   it("persists graph data when using file transport", async () => {

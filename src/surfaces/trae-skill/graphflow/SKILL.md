@@ -206,6 +206,10 @@ For **module families** (Zustand store + `slices/`): put file stems in `englishQ
 ```
 Step 1: graphflow_context(query: "<task>")
 Step 2: graphflow_plan(task: "<task description>")
+  - Without GraphFlow LLM: returns mode=agent-delegated + agentWorkItems
+    (simple-plan-intent, simple-plan-decomposition) and optional suggestedNodes.
+    MUST submit/merge via graphflow_insight before treating the DAG as final.
+  - Local suggestedNodes are heuristic hints only.
 Step 3: Review plan steps and dependencies
 Step 4: Execute step by step, using GraphFlow context for each step
 Step 5: graphflow_index() after major changes

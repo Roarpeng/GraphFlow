@@ -8,6 +8,7 @@ import {
 import {
   buildAgentInsightWorkItems,
   buildHeuristicPlanFromInsight,
+  SIMPLE_PLAN_BRIDGE_REQUIRED_IDS,
 } from "./agent-delegation";
 import type { GraphClient } from "../graph/client-factory";
 import { GraphifyClient } from "../graph/graphify-client";
@@ -185,16 +186,55 @@ export function mergeAgentInsights(
   task: string,
   records: AgentInsightRecord[]
 ): MergeAgentInsightsResult {
-  const allItems = buildAgentInsightWorkItems(task);
-  const requiredIds = allItems.filter((i) => !i.optional).map((i) => i.id);
   const byWorkItem = new Map<string, AgentInsightRecord>();
   for (const record of records) {
     byWorkItem.set(record.workItemId, record);
   }
 
+  const usesSimplePlanBridge = SIMPLE_PLAN_BRIDGE_REQUIRED_IDS.some((id) =>
+    byWorkItem.has(id)
+  );
+  const requiredIds = usesSimplePlanBridge
+    ? [...SIMPLE_PLAN_BRIDGE_REQUIRED_IDS]
+    : buildAgentInsightWorkItems(task)
+        .filter((i) => !i.optional)
+        .map((i) => i.id);
+
   const submittedIds = requiredIds.filter((id) => byWorkItem.has(id));
   const missing = requiredIds.filter((id) => !byWorkItem.has(id));
   const complete = missing.length === 0;
+
+  if (usesSimplePlanBridge) {
+    const planRecord =
+      byWorkItem.get("simple-plan-decomposition") ?? byWorkItem.get("plan-refinement");
+    const planFromAgent = planRecord ? parsePlanItems(planRecord.parsed) : [];
+    const intent = byWorkItem.get("simple-plan-intent")?.parsed;
+    const refined =
+      intent && typeof intent.coreProblem === "string" && intent.coreProblem.trim()
+        ? String(intent.coreProblem).trim()
+        : task;
+
+    const insight: SixHatsInsight = {
+      task,
+      hats: [],
+      blueHatSynthesis: "",
+      rootCauses: [],
+      criticalRisks: [],
+      coreValue: "",
+      refinedTaskStatement: refined,
+    };
+
+    return {
+      insight,
+      plan:
+        planFromAgent.length > 0
+          ? planFromAgent
+          : buildHeuristicPlanFromInsight(task, insight),
+      complete,
+      missing,
+      submittedCount: submittedIds.length,
+    };
+  }
 
   const hatResults: WhyChainSection[] = [];
   for (let index = 0; index < SIX_HATS.length; index++) {

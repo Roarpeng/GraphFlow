@@ -853,9 +853,10 @@ export function buildSettingsHtml(
           : ""
       }
       <div class="flow-box">
-        <h3>v${escapeHtml(status?.extensionVersion ?? "1.7.12")} 本版亮点</h3>
+        <h3>v${escapeHtml(status?.extensionVersion ?? "1.7.13")} 本版亮点</h3>
         <ol>
-          <li><strong>Plan 子句拆分</strong>：分析类冒号列表（assumptions、failure modes…）不再被启发式拆成伪并行 DAG；弱分隔符仅在各子句均可执行时才拆分。</li>
+          <li><strong>Plan Agent Bridge</strong>：无 GraphFlow LLM 时，默认 <code>graphflow_plan</code> 也委托连接 Agent（intent→decomposition），并附带本地 <code>suggestedNodes</code> 供参考。</li>
+          <li><strong>Plan 子句拆分</strong>：分析类冒号列表不再被启发式拆成伪并行 DAG。</li>
           <li><strong>MCP 工作区安全发现</strong>：修复 home-cwd 下 <code>unsafe workspace root from discovery</code>；读取 <code>WORKSPACE_FOLDER_PATHS</code>，npx 写入 <code>${"${workspaceFolder}"}</code>。</li>
           <li><strong>安装自检</strong>：CLI <code>graphflow install --json</code> / <code>doctor --json</code> 输出结构化成功项、缺失项与 remediation。</li>
           <li><strong>Bridge 飞轮 / 无需 LLM</strong>：insight/outcome CLI；结构建图、Context Preview、10 个 MCP 工具开箱可用。</li>
