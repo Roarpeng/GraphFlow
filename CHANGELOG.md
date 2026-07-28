@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.7.13] - 2026-07-28
+
+### Changed
+
+- **`graphflow_plan` 无 LLM 也 Bridge**：默认 simple 模式在未配置 GraphFlow LLM 时返回 `mode=agent-delegated`，下发 `simple-plan-intent` + `simple-plan-decomposition` work items，由连接的 coding agent 理解任务并拆 DAG；本地启发式结果以 `suggestedNodes`（`nodesStatus=suggested`）附带，不作终稿
+- **merge 协议**：识别 simple-plan work item ID，两步 submit 后即可 merge 出最终 plan（不与 insight 全量帽子协议混淆）
+
 ## [1.7.12] - 2026-07-28
 
 ### Fixed

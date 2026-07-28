@@ -4,6 +4,7 @@ import { planInsight, type SixHatsInsight } from "../../../agents/insight";
 import { hasUsableLlmProvider } from "../../../config/llm-availability";
 import {
   buildAgentDelegatedPlanInsight,
+  buildAgentDelegatedSimplePlan,
   type AgentDelegationMode,
   type AgentWorkItem,
 } from "../../../core/agent-delegation";
@@ -346,7 +347,15 @@ export async function probeRoutingConnectivity(
   ]);
 }
 
-export function planAndBrainstormResult(task: string): PlanPreviewResult {
+export function planAndBrainstormResult(task: string, configPath?: string): PlanPreviewResult {
+  const config = resolveConfig(configPath);
+
+  // No GraphFlow LLM → bridge to connected coding agent for task decomposition.
+  // Local heuristic DAG is attached as suggestedNodes only.
+  if (!hasUsableLlmProvider(config)) {
+    return buildAgentDelegatedSimplePlan(task);
+  }
+
   const mode = triageTask(task);
   const ideas = brainstormTask(task);
   const nodes = planTasks(task).map((node) => ({
@@ -359,17 +368,25 @@ export function planAndBrainstormResult(task: string): PlanPreviewResult {
     mode,
     ideas,
     nodes,
+    nodesStatus: "final",
+    complete: true,
+    requiresAgentBridge: false,
   };
 }
 
-export function planAndBrainstorm(task: string): string {
-  const result = planAndBrainstormResult(task);
+export function planAndBrainstorm(task: string, configPath?: string): string {
+  const result = planAndBrainstormResult(task, configPath);
+  const planPart = result.nodes
+    .map((node) => `${node.id}[${node.dependencies.join(",") || "-"}]:${node.description}`)
+    .join(" | ");
+  const bridge =
+    result.requiresAgentBridge === true
+      ? `; bridge=awaiting-agent; workItems=${result.agentWorkItems?.length ?? 0}`
+      : "";
   return [
     `mode=${result.mode}`,
     `ideas=${result.ideas.join(" | ")}`,
-    `plan=${result.nodes
-      .map((node) => `${node.id}[${node.dependencies.join(",") || "-"}]:${node.description}`)
-      .join(" | ")}`,
+    `plan=${planPart}${bridge}`,
   ].join("; ");
 }
 

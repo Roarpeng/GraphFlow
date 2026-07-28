@@ -33,9 +33,11 @@ export interface PlanTaskInput extends SkillInvocationOptions {
 
 export interface PlanTaskOutput {
   success: boolean;
-  mode: "simple" | "complex";
+  mode: "simple" | "complex" | "agent-delegated";
   ideas: string[];
   nodes: Array<{ id: string; description: string; dependencies: string[] }>;
+  suggestedNodes?: Array<{ id: string; description: string; dependencies: string[] }>;
+  requiresAgentBridge?: boolean;
 }
 
 export interface PlanInsightInput extends SkillInvocationOptions {
@@ -126,12 +128,16 @@ export const graphflowSkills = {
     description: "Plan a coding task with graph context, producing structured task nodes with dependencies.",
     version: "1.0.0",
     async invoke(input: PlanTaskInput): Promise<PlanTaskOutput> {
-      const result = await planAndBrainstormResult(input.task);
+      const result = planAndBrainstormResult(input.task, input.configPath);
       return {
         success: true,
         mode: result.mode,
         ideas: result.ideas,
         nodes: result.nodes,
+        ...(result.suggestedNodes ? { suggestedNodes: result.suggestedNodes } : {}),
+        ...(result.requiresAgentBridge !== undefined
+          ? { requiresAgentBridge: result.requiresAgentBridge }
+          : {}),
       };
     },
   },

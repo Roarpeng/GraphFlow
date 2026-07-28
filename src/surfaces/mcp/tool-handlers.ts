@@ -108,7 +108,9 @@ export async function executeToolCall(
           await planInsightResult(task, readOptionalString(args.configPath))
         );
       }
-      return textResponse(planAndBrainstormResult(task));
+      return textResponse(
+        planAndBrainstormResult(task, readOptionalString(args.configPath))
+      );
     }
     case "graphflow_index": {
       const filePath = readOptionalString(args.filePath);

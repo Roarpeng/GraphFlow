@@ -2,9 +2,9 @@
   "name": "graphflow-tool",
   "publisher": "roarpeng",
   "displayName": "GraphFlow Tool",
-  "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.7.12: plan clause-split fix (analytical colon-lists), safe MCP workspace discovery, install/doctor JSON self-check, bridge flywheel CLI.",
+  "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.7.13: graphflow_plan bridges to agent without LLM + suggestedNodes; plan clause-split fix; safe MCP workspace discovery.",
   "icon": "media/graphflow.png",
-  "version": "1.7.12",
+  "version": "1.7.13",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"
