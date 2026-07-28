@@ -7,6 +7,7 @@ import { orchestrate } from "../src/core/orchestrator";
 import { recordEpisode, updateEpisodeOutcome, findSimilarEpisodes } from "../src/learning/episodic-memory";
 import { applySkillLearning, suggestSkillHints } from "../src/learning/skill-flywheel";
 import { reportOutcome, runTaskResult, getSkillInsights } from "../src/surfaces/cli/runtime";
+import { createNoLlmConfigPath } from "./helpers/no-llm-config";
 
 describe("M48 bridge mode outcome feedback loop", () => {
   // ── Task 1: Bridge mode returns DELEGATED, not HUMAN_REVIEW_REQUIRED ──
@@ -18,6 +19,7 @@ describe("M48 bridge mode outcome feedback loop", () => {
         graphClient: client,
         enableEpisodicMemory: true,
         executionMode: "bridge",
+        configPath: createNoLlmConfigPath(),
       }
     );
 
@@ -37,6 +39,7 @@ describe("M48 bridge mode outcome feedback loop", () => {
         enableEpisodicMemory: true,
         enableSkillFlywheel: true,
         executionMode: "bridge",
+        configPath: createNoLlmConfigPath(),
       }
     );
 
@@ -58,6 +61,7 @@ describe("M48 bridge mode outcome feedback loop", () => {
         graphClient: client,
         enableEpisodicMemory: true,
         executionMode: "bridge",
+        configPath: createNoLlmConfigPath(),
       }
     );
 
@@ -109,6 +113,7 @@ describe("M48 bridge mode outcome feedback loop", () => {
         enableEpisodicMemory: true,
         enableSkillFlywheel: true,
         executionMode: "bridge",
+        configPath: createNoLlmConfigPath(),
       }
     );
 

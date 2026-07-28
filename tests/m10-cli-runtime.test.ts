@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getDefaultConfig } from "../src/config/defaults";
+import { createNoLlmConfigPath } from "./helpers/no-llm-config";
 import {
   getGraphFlowSettings,
   getSkillInsights,
@@ -32,22 +33,15 @@ describe("M10 CLI runtime", () => {
   });
 
   it("runs task and returns standard output line", async () => {
-    try {
-      const output = await runTask("update readme");
-      expect(output).toContain("status=");
-      expect(output).toContain("feedback=");
-    } catch (e: unknown) {
-      if (e instanceof Error && e.name === "ProviderError") {
-        // Expected on CI if real LLM times out
-        expect(e.message).toBeDefined();
-      } else {
-        throw e;
-      }
-    }
+    // Isolated no-LLM config: deterministic bridge-mode output on any machine,
+    // regardless of ambient API keys in the repo/global config.
+    const output = await runTask("update readme", createNoLlmConfigPath());
+    expect(output).toContain("status=");
+    expect(output).toContain("feedback=");
   }, 60000);
 
   it("returns context preview stats", async () => {
-    const preview = await previewContext("orchestrate");
+    const preview = await previewContext("orchestrate", createNoLlmConfigPath());
     expect(preview.summaryCount).toBeGreaterThanOrEqual(0);
     expect(preview.anchorCount).toBeGreaterThanOrEqual(0);
     expect(preview.tokenEstimate).toBeGreaterThanOrEqual(0);

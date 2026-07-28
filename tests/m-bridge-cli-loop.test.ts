@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { createNoLlmConfigPath } from "./helpers/no-llm-config";
 import {
   buildCliUsage,
   collectCliFlagValues,
@@ -41,46 +42,37 @@ describe("Bridge CLI learning loop", () => {
 
   it("closes bridge flywheel via insight submit/merge + outcome report", async () => {
     const root = mkdtempSync(join(tmpdir(), "graphflow-bridge-cli-"));
-    const configPath = join(root, "graphflow.config.json");
     const storePath = join(root, "graph.json");
     const previousTimeout = process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS;
 
     try {
       process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS = "1000";
-      writeFileSync(
-        configPath,
-        JSON.stringify(
-          {
-            graphPolicy: {
-              enableAutoBuild: true,
-              enableNearLosslessMode: true,
-              autoIndexOnPreview: false,
-              autoIndexOnRun: false,
-              workspaceRoot: root,
-              includeExtensions: [".ts"],
-              transport: "file",
-              graphStorePath: storePath,
-              maxContextTokens: 200,
-            },
-            learningPolicy: {
-              enableFlywheel: true,
-              trainingCadence: "nightly",
-              exportPath: join(root, "learning.jsonl"),
-            },
-            skillPolicy: {
-              enableSkillFlywheel: true,
-              maxSkillHints: 4,
-            },
-            routingPolicy: {
-              enableDynamicRouting: false,
-              requireApiKeyForHealthy: true,
-            },
-          },
-          null,
-          2
-        ),
-        "utf8"
-      );
+      const configPath = createNoLlmConfigPath({
+        graphPolicy: {
+          enableAutoBuild: true,
+          enableNearLosslessMode: true,
+          autoIndexOnPreview: false,
+          autoIndexOnRun: false,
+          workspaceRoot: root,
+          includeExtensions: [".ts"],
+          transport: "file",
+          graphStorePath: storePath,
+          maxContextTokens: 200,
+        },
+        learningPolicy: {
+          enableFlywheel: true,
+          trainingCadence: "nightly",
+          exportPath: join(root, "learning.jsonl"),
+        },
+        skillPolicy: {
+          enableSkillFlywheel: true,
+          maxSkillHints: 4,
+        },
+        routingPolicy: {
+          enableDynamicRouting: false,
+          requireApiKeyForHealthy: true,
+        },
+      });
 
       const task = "refactor orchestrator and strengthen bridge outcome reporting";
       const runResult = await runTaskResult(task, configPath);

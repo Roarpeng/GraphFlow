@@ -853,15 +853,15 @@ export function buildSettingsHtml(
           : ""
       }
       <div class="flow-box">
-        <h3>v${escapeHtml(status?.extensionVersion ?? "1.7.14")} 本版亮点</h3>
+        <h3>v${escapeHtml(status?.extensionVersion ?? "1.7.15")} 本版亮点</h3>
         <ol>
-          <li><strong>Plan Agent Bridge</strong>：无 GraphFlow LLM 时，默认 <code>graphflow_plan</code> 也委托连接 Agent（intent→decomposition），并附带本地 <code>suggestedNodes</code> 供参考。</li>
-          <li><strong>Plan 子句拆分</strong>：分析类冒号列表不再被启发式拆成伪并行 DAG。</li>
-          <li><strong>MCP 工作区安全发现</strong>：修复 home-cwd 下 <code>unsafe workspace root from discovery</code>；读取 <code>WORKSPACE_FOLDER_PATHS</code>，npx 写入 <code>${"${workspaceFolder}"}</code>。</li>
-          <li><strong>安装自检</strong>：CLI <code>graphflow install --json</code> / <code>doctor --json</code> 输出结构化成功项、缺失项与 remediation。</li>
-          <li><strong>Bridge 飞轮 / 无需 LLM</strong>：insight/outcome CLI；结构建图、Context Preview、10 个 MCP 工具开箱可用。</li>
+          <li><strong>检索质量护栏</strong>：26 条查询 golden set 回归 + 词干匹配，orchestrator 类查询不再漏召；PageRank LRU 缓存、HNSW 向量索引跨进程持久化。</li>
+          <li><strong>存储 auto</strong>：<code>transport: "auto"</code> sqlite 优先、JSON 透明降级；修复 sqlite FTS camelCase 检索盲区。</li>
+          <li><strong>Skill 飞轮可度量</strong>：<code>npm run benchmark:skills</code> A/B 基准；<code>graphflow skill report</code> 贡献报告；<code>skill sync</code> 技能包进 git 共享。</li>
+          <li><strong>ATP IR 公开规范</strong>：<code>docs/atp-ir-spec-v1.md</code> 定义 Agent 委托载荷契约（atp-ir/1.0）。</li>
+          <li><strong>测试环境隔离</strong>：本机 API key 不再把单测变成真实 LLM 调用；90 文件 / 443 tests 全绿。</li>
         </ol>
-        <p class="flow-hint">工具调用请传 <code>rootDir</code>（项目绝对路径）。若 MCP 日志提示 unsafe workspace，重新执行「安装 / 更新 MCP」并 Reload Window。</p>
+        <p class="flow-hint">工具调用请传 <code>rootDir</code>（项目绝对路径）。若 MCP 日志提示 unsafe workspace root from discovery，重新执行「安装 / 更新 MCP」并 Reload Window。</p>
       </div>
       <div class="flow-box">
         <h3>快速上手</h3>

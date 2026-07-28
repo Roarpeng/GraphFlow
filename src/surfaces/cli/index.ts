@@ -5,10 +5,12 @@ import {
   diagnoseRoutingResult,
   exportArtifact,
   exportSkillPackageRuntime,
+  getFlywheelReport,
   getSkillInsights,
   getTokenSavingsStats,
   importArtifact,
   importSkillPackageRuntime,
+  syncSkillPackageRuntime,
   indexFile,
   indexGraph,
   inspectGraph,
@@ -342,6 +344,28 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
+  if (command === "skill" && args[0] === "sync") {
+    // Git-based team sharing: export to / import from the committable
+    // `.graphflow/skills/team-skills.json` (override with --path <file>).
+    const directionArg = args[1]?.trim().toLowerCase();
+    if (directionArg !== "export" && directionArg !== "import") {
+      console.log("Usage: graphflow skill sync <export|import> [--path <file>]");
+      process.exitCode = 1;
+      return undefined;
+    }
+    const pathIdx = args.indexOf("--path");
+    const customPath = pathIdx >= 0 ? args[pathIdx + 1]?.trim() : undefined;
+    const data = await syncSkillPackageRuntime(configPath, directionArg, customPath);
+    return {
+      command: "skill-sync",
+      data,
+      legacyText:
+        data.direction === "export"
+          ? `direction=export; path=${data.path}; skillCount=${data.skillCount}; bytes=${data.bytes}`
+          : `direction=import; path=${data.path}; imported=${data.imported}; skipped=${data.skipped}; total=${data.total}`,
+    };
+  }
+
   if (command === "skill" && args[0] === "decay") {
     const data = await runSkillDecay(configPath);
     return {
@@ -373,6 +397,21 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       command: "skill-prune",
       data,
       legacyText: `pruned=${data.pruned}`,
+    };
+  }
+
+  if (command === "skill" && args[0] === "report") {
+    // Flywheel contribution report: skills health, most-used skills,
+    // episode outcomes — makes the learning loop observable.
+    const data = getFlywheelReport(configPath);
+    return {
+      command: "skill-report",
+      data,
+      legacyText: [
+        `skills=${data.skills.total}(+${data.skills.positive}/0${data.skills.neutral}/-${data.skills.negative})`,
+        `episodes=${data.episodes.total}(pass:${data.episodes.pass},fail:${data.episodes.fail},pending:${data.episodes.pending},lessons:${data.episodes.withLessons})`,
+        `topUsed=${data.skills.topUsed.map((s) => `${s.name}:${s.uses}`).join(",") || "-"}`,
+      ].join("; "),
     };
   }
 

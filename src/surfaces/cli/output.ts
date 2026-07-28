@@ -43,6 +43,8 @@ export function buildCliUsage(): string {
     "  skill insights [--json] [--config <path>]",
     "  skill export [path] [--json] [--config <path>]",
     "  skill import [path] [--json] [--config <path>]",
+    "  skill sync <export|import> [--path <file>]  # git-committable team skill package (.graphflow/skills/team-skills.json)",
+    "  skill report [--json] [--config <path>]  # flywheel contribution: skills health + episode outcomes",
     "  skill decay [--json] [--config <path>]",
     "  skill reset --name <name> [--json] [--config <path>]",
     "  skill prune [--json] [--config <path>]",

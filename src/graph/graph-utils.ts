@@ -442,6 +442,18 @@ export function rankNodesForContextQuery(
   options?: RankNodesOptions
 ): GraphNode[] {
   const queryTokens = new Set(options?.scoreTokens ?? tokenizeForIndex(query));
+  // Prefix-stem matching: exact token matching misses morphological variants
+  // ("orchestrate" query vs "orchestration"/"orchestrator" in code). Stems of
+  // >= 6 chars are conservative enough to avoid false positives ("task" never
+  // stems) while catching common verb/noun/derived forms. Stem hits score half
+  // of an exact hit.
+  const STEM_LEN = 6;
+  const queryStems = new Set<string>();
+  for (const token of queryTokens) {
+    if (token.length >= STEM_LEN) {
+      queryStems.add(token.slice(0, STEM_LEN));
+    }
+  }
   const matchQueries = options?.matchQueries ?? [query];
   const pathHints = new Set(
     [...(options?.pathHints ?? [])].map((hint) => hint.toLowerCase()).filter(Boolean)
@@ -465,6 +477,9 @@ export function rankNodesForContextQuery(
       if (queryTokens.has(token)) {
         score += 2;
         tokenHits += 1;
+      } else if (queryStems.size > 0 && token.length >= STEM_LEN && queryStems.has(token.slice(0, STEM_LEN))) {
+        score += 1;
+        tokenHits += 0.5;
       }
     }
 

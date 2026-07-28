@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "1.7.14",
+  "version": "1.7.15",
   "publishConfig": {
     "access": "public"
   },
@@ -45,6 +45,7 @@
     "start": "tsx src/surfaces/cli/index.ts",
     "start:mcp": "tsx src/surfaces/mcp/server.ts",
     "benchmark": "tsx benchmarks/run-token-benchmark.ts",
+    "benchmark:skills": "tsx benchmarks/run-skill-ab-benchmark.ts",
     "lint": "eslint .",
     "build:extension": "npm --prefix vscode-extension run build",
     "test:extension": "npm --prefix vscode-extension run test:runtime",

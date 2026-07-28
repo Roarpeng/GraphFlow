@@ -30,7 +30,7 @@ export interface GraphFlowConfig {
     autoIndexOnSave?: boolean;
     workspaceRoot?: string;
     includeExtensions?: string[];
-    transport: "memory" | "mcp-http" | "file" | "sqlite";
+    transport: "memory" | "mcp-http" | "file" | "sqlite" | "auto";
     mcpEndpoint?: string;
     mcpApiKey?: string;
     graphStorePath?: string;

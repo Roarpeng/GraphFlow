@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   formatCliResult,
@@ -52,11 +54,29 @@ describe("M16 agent integrations", () => {
   });
 
   it("executes MCP tool calls and returns text content", async () => {
+    // Isolate from ambient machine state: an explicit configPath is loaded
+    // standalone (no global ~/.graphflow.config.json merge), so a config with
+    // no provider credentials guarantees the agent-delegated bridge path on
+    // any machine, regardless of locally installed API keys.
+    const sandboxDir = mkdtempSync(join(tmpdir(), "graphflow-m16-"));
+    const sandboxConfigPath = join(sandboxDir, "graphflow.config.json");
+    writeFileSync(
+      sandboxConfigPath,
+      JSON.stringify({
+        providers: {},
+        tiers: {
+          smart: { provider: "openai", model: "gpt-4.1" },
+          economy: { provider: "openai", model: "gpt-4.1-mini" },
+        },
+      })
+    );
+
     const response = await executeToolCall(
       {
         name: "graphflow_plan",
         arguments: {
           task: "refactor planner and add tests",
+          configPath: sandboxConfigPath,
         },
       },
       createMcpServer()

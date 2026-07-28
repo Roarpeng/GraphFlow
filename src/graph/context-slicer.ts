@@ -166,11 +166,13 @@ async function hnswVectorRecall(
   nodes: GraphNode[],
   queryEmbedding: number[],
   topK: number,
-  minSimilarity: number
+  minSimilarity: number,
+  hnswIndexPath?: string
 ): Promise<GraphNode[]> {
-  const { HnswVectorIndex } = await import("../learning/hnsw-index.js");
-  const index = new HnswVectorIndex();
-  index.load(nodes);
+  // Memoized per-process + optional disk-persisted index: avoids re-extracting
+  // embeddings for every query and speeds up MCP server restarts.
+  const { getSharedVectorIndex } = await import("../learning/hnsw-index.js");
+  const { index } = getSharedVectorIndex(nodes, hnswIndexPath);
   const results = await index.search(queryEmbedding, topK, minSimilarity);
   return results.map((result) => result.node);
 }
@@ -199,7 +201,7 @@ export async function buildLayeredContextPackage(
         keywordHits,
         options.enableFullGraphVectorRecall === true
       );
-      const vectorHits = await hnswVectorRecall(vectorCandidates, queryEmbedding, topK, minSim);
+      const vectorHits = await hnswVectorRecall(vectorCandidates, queryEmbedding, topK, minSim, options?.hnswIndexPath);
       hits = reciprocalRankFusion([keywordHits, vectorHits]);
     } catch (error) {
       logger.warn({ error }, "Vector recall failed in buildLayeredContextPackage");
@@ -460,7 +462,7 @@ export async function buildEnhancedContextPackage(
         keywordHits,
         options.enableFullGraphVectorRecall === true
       );
-      const vectorHits = await hnswVectorRecall(vectorCandidates, queryEmbedding, topK, minSim);
+      const vectorHits = await hnswVectorRecall(vectorCandidates, queryEmbedding, topK, minSim, options?.hnswIndexPath);
       hits = reciprocalRankFusion([keywordHits, vectorHits]);
     } catch (error) {
       logger.warn({ error }, "Vector recall failed in buildEnhancedContextPackage");

@@ -58,9 +58,9 @@ export function validateConfigDetailed(path = "graphflow.config.json"): ConfigVa
   if (!parsed.graphPolicy) {
     issues.push({ severity: "error", field: "graphPolicy", message: "graphPolicy is required" });
   } else {
-    const allowedTransports = new Set(["memory", "mcp-http", "file", "sqlite"]);
+    const allowedTransports = new Set(["memory", "mcp-http", "file", "sqlite", "auto"]);
     if (!allowedTransports.has(parsed.graphPolicy.transport)) {
-      issues.push({ severity: "error", field: "graphPolicy.transport", message: `Must be one of: memory|mcp-http|file|sqlite, got "${parsed.graphPolicy.transport}"` });
+      issues.push({ severity: "error", field: "graphPolicy.transport", message: `Must be one of: memory|mcp-http|file|sqlite|auto, got "${parsed.graphPolicy.transport}"` });
     }
     if (parsed.graphPolicy.transport === "mcp-http" && !parsed.graphPolicy.mcpEndpoint) {
       issues.push({ severity: "error", field: "graphPolicy.mcpEndpoint", message: "Required for mcp-http transport" });
@@ -210,7 +210,7 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     throw new Error("Invalid config: graphPolicy.graphStorePath is required for file transport.");
   }
 
-  const allowedTransports = new Set(["memory", "mcp-http", "file", "sqlite"]);
+  const allowedTransports = new Set(["memory", "mcp-http", "file", "sqlite", "auto"]);
   if (!allowedTransports.has(input.graphPolicy.transport)) {
     throw new Error(`Invalid config: graphPolicy.transport must be one of memory|mcp-http|file|sqlite.`);
   }
@@ -255,7 +255,7 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       workspaceRoot,
       graphStorePath:
         input.graphPolicy.graphStorePath ??
-        (input.graphPolicy.transport === "sqlite"
+        (input.graphPolicy.transport === "sqlite" || input.graphPolicy.transport === "auto"
           ? `${DEFAULT_OUTPUT_DIR}/graphflow-graph.sqlite`
           : `${DEFAULT_OUTPUT_DIR}/graphflow-graph.json`),
       includeExtensions: resolveIncludeExtensions(input.graphPolicy.includeExtensions),

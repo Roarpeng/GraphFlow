@@ -125,6 +125,8 @@ export interface OrchestrateOptions {
   enableEpisodicMemory?: boolean;
   enableLlmTriage?: boolean;
   embeddingProvider?: import("../learning/embeddings").EmbeddingProvider;
+  /** Optional path to persist the vector recall index across process restarts. */
+  hnswIndexPath?: string;
   /** Search all graph nodes with embeddings for vector recall. Default false. */
   enableFullGraphVectorRecall?: boolean;
   configPath?: string;

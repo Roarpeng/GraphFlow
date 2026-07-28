@@ -107,6 +107,57 @@ export interface PageRankOptions {
 }
 
 /**
+ * PageRank is recomputed on every context query over largely-identical graph
+ * snapshots. Cache results keyed by a full fingerprint of (node ids, edges,
+ * damping, iterations) so repeated previews on an unchanged graph skip the
+ * 20-iteration O(E) loop. Small LRU: graph snapshots turn over on reindex.
+ */
+const PAGE_RANK_CACHE_LIMIT = 8;
+const pageRankCache = new Map<string, Map<string, number>>();
+
+/** Test/diagnostic hook: cache hit/miss counters. */
+export const pageRankCacheStats = { hits: 0, misses: 0 };
+
+/** Test hook: clear the PageRank cache. */
+export function resetPageRankCache(): void {
+  pageRankCache.clear();
+  pageRankCacheStats.hits = 0;
+  pageRankCacheStats.misses = 0;
+}
+
+function fnvMix(h: number, value: number): number {
+  h ^= value;
+  return Math.imul(h, 0x01000193);
+}
+
+function fingerprintPageRankInput(
+  ids: string[],
+  edges: GraphEdge[],
+  damping: number,
+  iterations: number
+): string {
+  let h = 0x811c9dc5;
+  h = fnvMix(h, ids.length);
+  h = fnvMix(h, edges.length);
+  h = fnvMix(h, Math.round(damping * 1000));
+  h = fnvMix(h, iterations);
+  for (const id of ids) {
+    for (let i = 0; i < id.length; i += 1) {
+      h = fnvMix(h, id.charCodeAt(i));
+    }
+  }
+  // Full edge hash (not sampled): a stale hit would blend wrong centrality
+  // into ranking, so fingerprint correctness matters more than the O(E) cost,
+  // which is still ~20x cheaper than the PageRank iterations it replaces.
+  for (const edge of edges) {
+    for (let i = 0; i < edge.from.length; i += 1) h = fnvMix(h, edge.from.charCodeAt(i));
+    for (let i = 0; i < edge.relation.length; i += 1) h = fnvMix(h, edge.relation.charCodeAt(i));
+    for (let i = 0; i < edge.to.length; i += 1) h = fnvMix(h, edge.to.charCodeAt(i));
+  }
+  return (h >>> 0).toString(36);
+}
+
+/**
  * Computes weighted PageRank over a node/edge set. Used to surface "central"
  * nodes (frequently-referenced functions, core modules) that should be
  * prioritized in the context budget.
@@ -124,6 +175,17 @@ export function computePageRank(
   const idSet = new Set(ids);
   const n = ids.length;
   if (n === 0) return new Map();
+
+  const cacheKey = fingerprintPageRankInput(ids, edges, damping, iterations);
+  const cached = pageRankCache.get(cacheKey);
+  if (cached) {
+    pageRankCacheStats.hits += 1;
+    // Refresh LRU position.
+    pageRankCache.delete(cacheKey);
+    pageRankCache.set(cacheKey, cached);
+    return new Map(cached);
+  }
+  pageRankCacheStats.misses += 1;
 
   // Build weighted outbound adjacency.
   const outWeight = new Map<string, number>();
@@ -167,6 +229,15 @@ export function computePageRank(
 
     rank = next;
   }
+
+  // Store in LRU cache (evict oldest when full).
+  if (pageRankCache.size >= PAGE_RANK_CACHE_LIMIT) {
+    const oldest = pageRankCache.keys().next().value;
+    if (oldest !== undefined) {
+      pageRankCache.delete(oldest);
+    }
+  }
+  pageRankCache.set(cacheKey, new Map(rank));
 
   return rank;
 }

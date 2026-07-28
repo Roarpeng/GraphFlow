@@ -91,5 +91,22 @@ export function createGraphClient(config: GraphFlowConfig): GraphClient {
     }
   }
 
+  if (config.graphPolicy.transport === "auto") {
+    // Auto: prefer sqlite (FTS5, no whole-file read/write amplification on
+    // large repos) and transparently fall back to the JSON file store when
+    // better-sqlite3 is unavailable (e.g. missing optional dependency).
+    const sqlitePath = resolveGraphStorePath(config).replace(/\.json$/i, ".sqlite");
+    try {
+      return new GraphifySqliteClient(sqlitePath);
+    } catch {
+      const fallbackPath = sqlitePath.replace(/\.sqlite$/i, ".json");
+      logger.info(
+        { fallbackPath },
+        "[graphflow] auto transport: sqlite unavailable, using file store"
+      );
+      return new GraphifyFileClient(fallbackPath);
+    }
+  }
+
   return new InMemoryGraphClientAdapter(new GraphifyClient());
 }

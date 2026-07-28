@@ -32,6 +32,7 @@ export async function maybeBuildNearLosslessContext(
           ...(options.enableFullGraphVectorRecall === true
             ? { enableFullGraphVectorRecall: true as const }
             : {}),
+          ...(options.hnswIndexPath ? { hnswIndexPath: options.hnswIndexPath } : {}),
         }
       : {}),
   };

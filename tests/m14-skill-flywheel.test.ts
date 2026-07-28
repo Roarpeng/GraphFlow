@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { GraphifyClient } from "../src/graph/graphify-client";
 import { applySkillLearning, extractSkillAtoms, suggestSkillHints } from "../src/learning/skill-flywheel";
 import { orchestrate } from "../src/core/orchestrator";
+import { createNoLlmConfigPath } from "./helpers/no-llm-config";
 
 describe("M14 skill flywheel", () => {
   it("extracts reusable skill atoms from task text", () => {
@@ -63,6 +64,7 @@ describe("M14 skill flywheel", () => {
         enableSkillFlywheel: true,
         skillHintsLimit: 3,
         executionMode: "bridge",
+        configPath: createNoLlmConfigPath(),
       }
     );
 

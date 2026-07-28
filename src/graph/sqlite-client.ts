@@ -32,24 +32,25 @@ CREATE TABLE IF NOT EXISTS nodes(
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL,
   content TEXT NOT NULL,
-  metadata TEXT
+  metadata TEXT,
+  searchtext TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type);
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
-  content,
+  searchtext,
   content='nodes',
   content_rowid='rowid',
   tokenize='unicode61 remove_diacritics 2'
 );
 CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
-  INSERT INTO nodes_fts(rowid, content) VALUES (new.rowid, new.content);
+  INSERT INTO nodes_fts(rowid, searchtext) VALUES (new.rowid, new.searchtext);
 END;
 CREATE TRIGGER IF NOT EXISTS nodes_ad AFTER DELETE ON nodes BEGIN
-  INSERT INTO nodes_fts(nodes_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+  INSERT INTO nodes_fts(nodes_fts, rowid, searchtext) VALUES('delete', old.rowid, old.searchtext);
 END;
 CREATE TRIGGER IF NOT EXISTS nodes_au AFTER UPDATE ON nodes BEGIN
-  INSERT INTO nodes_fts(nodes_fts, rowid, content) VALUES('delete', old.rowid, old.content);
-  INSERT INTO nodes_fts(rowid, content) VALUES (new.rowid, new.content);
+  INSERT INTO nodes_fts(nodes_fts, rowid, searchtext) VALUES('delete', old.rowid, old.searchtext);
+  INSERT INTO nodes_fts(rowid, searchtext) VALUES (new.rowid, new.searchtext);
 END;
 CREATE TABLE IF NOT EXISTS edges(
   from_id TEXT NOT NULL,
@@ -61,6 +62,18 @@ CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(from_id);
 CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_id);
 CREATE INDEX IF NOT EXISTS idx_edges_relation ON edges(relation);
 `;
+
+/**
+ * FTS indexes `searchtext` = raw content + tokenizer-aligned subtokens.
+ * Without this, camelCase identifiers are indexed as ONE token by FTS5
+ * ("alphahandler") while queries split into ["alpha","handler"], and the
+ * suffix token can never match (FTS5 only supports prefix queries) — making
+ * camelCase symbols unfindable on the sqlite/auto transports.
+ */
+export function buildSearchText(content: string): string {
+  const subtokens = tokenizeForIndex(content);
+  return subtokens.length > 0 ? `${content} ${subtokens.join(" ")}` : content;
+}
 
 function rowToNode(row: NodeRow): GraphNode {
   const node: GraphNode = {
@@ -117,20 +130,69 @@ export class GraphifySqliteClient implements GraphClient {
     const currentVersion = this.db.pragma("user_version", { simple: true }) as number;
     if (currentVersion < 1) {
       this.db.exec(SCHEMA_SQL);
-      this.db.pragma("user_version = 1");
+      this.db.pragma("user_version = 2");
+      return;
     }
+    if (currentVersion < 2) {
+      // v1 → v2: add searchtext column, rebuild FTS over tokenizer-aligned text.
+      this.migrateV1ToV2();
+      this.db.pragma("user_version = 2");
+    }
+  }
+
+  private migrateV1ToV2(): void {
+    this.db.exec(`
+      ALTER TABLE nodes ADD COLUMN searchtext TEXT NOT NULL DEFAULT '';
+      DROP TRIGGER IF EXISTS nodes_ai;
+      DROP TRIGGER IF EXISTS nodes_ad;
+      DROP TRIGGER IF EXISTS nodes_au;
+      DROP TABLE IF EXISTS nodes_fts;
+    `);
+
+    // Backfill searchtext in JS (tokenizeForIndex is not available in SQL).
+    const rows = this.db.prepare(`SELECT rowid, content FROM nodes`).all() as Array<{
+      rowid: number;
+      content: string;
+    }>;
+    const update = this.db.prepare(`UPDATE nodes SET searchtext = ? WHERE rowid = ?`);
+    const backfill = this.db.transaction((batch: typeof rows) => {
+      for (const row of batch) {
+        update.run(buildSearchText(row.content), row.rowid);
+      }
+    });
+    backfill(rows);
+
+    this.db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+        searchtext,
+        content='nodes',
+        content_rowid='rowid',
+        tokenize='unicode61 remove_diacritics 2'
+      );
+      CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
+        INSERT INTO nodes_fts(rowid, searchtext) VALUES (new.rowid, new.searchtext);
+      END;
+      CREATE TRIGGER IF NOT EXISTS nodes_ad AFTER DELETE ON nodes BEGIN
+        INSERT INTO nodes_fts(nodes_fts, rowid, searchtext) VALUES('delete', old.rowid, old.searchtext);
+      END;
+      CREATE TRIGGER IF NOT EXISTS nodes_au AFTER UPDATE ON nodes BEGIN
+        INSERT INTO nodes_fts(nodes_fts, rowid, searchtext) VALUES('delete', old.rowid, old.searchtext);
+        INSERT INTO nodes_fts(rowid, searchtext) VALUES (new.rowid, new.searchtext);
+      END;
+      INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild');
+    `);
   }
 
   async upsertNodes(nodes: GraphNode[]): Promise<void> {
     if (nodes.length === 0) return;
     const stmt = this.db.prepare(
-      `INSERT INTO nodes(id, type, content, metadata) VALUES(?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET type=excluded.type, content=excluded.content, metadata=excluded.metadata`
+      `INSERT INTO nodes(id, type, content, metadata, searchtext) VALUES(?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET type=excluded.type, content=excluded.content, metadata=excluded.metadata, searchtext=excluded.searchtext`
     );
     const tx = this.db.transaction((batch: GraphNode[]) => {
       for (const n of batch) {
         const metaJson = n.metadata !== undefined ? JSON.stringify(n.metadata) : null;
-        stmt.run(n.id, n.type, n.content, metaJson);
+        stmt.run(n.id, n.type, n.content, metaJson, buildSearchText(n.content));
       }
     });
     tx(nodes);

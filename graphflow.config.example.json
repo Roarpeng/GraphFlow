@@ -36,8 +36,8 @@
     "autoIndexOnRun": true,
     "autoIndexOnSave": true,
     "includeExtensions": [".ts", ".tsx", ".js", ".jsx", ".md", ".json", ".py", ".rs", ".go", ".c", ".h", ".cpp", ".cc", ".hpp", ".java", ".rb"],
-    "transport": "file",
-    "graphStorePath": "graphflow-out/graphflow-graph.json",
+    "transport": "auto",
+    "graphStorePath": "graphflow-out/graphflow-graph.sqlite",
     "maxContextTokens": 1500,
     "layerQuota": { "l1": 6, "l2": 4, "l3": 3 },
     "compression": {

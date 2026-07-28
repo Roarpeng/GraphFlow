@@ -14,6 +14,7 @@ import { buildRepoMap, formatRepoMapString } from "../src/graph/repo-map";
 import { estimateContextBudget } from "../src/graph/adaptive-budget";
 import { buildEnhancedContextPackage } from "../src/graph/context-slicer";
 import { attachEmbedding } from "../src/learning/embeddings";
+import { createNoLlmConfigPath } from "./helpers/no-llm-config";
 
 function simpleEmbedding(text: string, dim = 384): number[] {
   const vec = new Array(dim).fill(0);
@@ -185,6 +186,7 @@ describe("M44 Enhanced Context Compression", () => {
       await graphClient.upsertNodes(nodes);
 
       let withAdaptive = 0;
+      const noLlmConfigPath = createNoLlmConfigPath();
       await orchestrate(
         { task: complexTask },
         {
@@ -192,6 +194,7 @@ describe("M44 Enhanced Context Compression", () => {
           enableNearLosslessMode: true,
           maxContextTokens: 200,
           executionMode: "bridge",
+          configPath: noLlmConfigPath,
           onContextPackage: (pkg) => {
             withAdaptive = pkg.tokenEstimate;
           },
@@ -207,6 +210,7 @@ describe("M44 Enhanced Context Compression", () => {
           maxContextTokens: 200,
           enableAdaptiveBudget: false,
           executionMode: "bridge",
+          configPath: noLlmConfigPath,
           onContextPackage: (pkg) => {
             withoutAdaptive = pkg.tokenEstimate;
           },

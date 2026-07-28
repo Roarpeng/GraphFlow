@@ -3,6 +3,7 @@ import {
   exportArtifact,
   expandAnchor,
   getSkillInsights,
+  getFlywheelReport,
   getTokenSavingsStats,
   importArtifact,
   indexFile,
@@ -168,10 +169,12 @@ export async function executeToolCall(
       const health = diagnoseRoutingResult(configPath);
       const graph = await inspectGraph(configPath, buildInspectOptions(args));
       const stats = getTokenSavingsStats(configPath, readOptionalString(args.rootDir));
+      const flywheel = getFlywheelReport(configPath, readOptionalString(args.rootDir));
       return textResponse({
         health,
         graph,
         stats,
+        flywheel,
         runtimeTimeline: getRuntimeTimelineSummary(),
       });
     }
