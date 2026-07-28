@@ -2,6 +2,9 @@ import { logger } from "../utils/logger";
 import type { TaskNode } from "../core/types";
 import type { ModelSelection } from "../routing/model-router";
 import { executeRolePrompt, type PromptContext } from "../routing/provider-executor";
+import { splitTaskClauses } from "./task-clauses";
+
+export { looksLikeActionableTaskClause, splitTaskClauses } from "./task-clauses";
 
 function toNode(id: string, description: string, dependencies: string[]): TaskNode {
   return {
@@ -15,10 +18,7 @@ function toNode(id: string, description: string, dependencies: string[]): TaskNo
 }
 
 export function planTasks(task: string, skillHints?: string[]): TaskNode[] {
-  const parts = task
-    .split(/\band\b|,|;|并且|以及|然后|接着|同时|再|、|，|；|。/i)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
+  const parts = splitTaskClauses(task);
 
   if (parts.length <= 1) {
     const baseTask = task.trim();
@@ -87,6 +87,9 @@ function buildPlannerPrompt(task: string, options: PlanTasksLlmOptions): string 
   lines.push("- id: short string like task-1");
   lines.push("- description: concrete actionable subtask");
   lines.push("- dependencies: array of ids this task depends on (may be empty)");
+  lines.push(
+    "- Do NOT split a single analytical request into noun-phrase dimensions listed after a colon (e.g. assumptions, failure modes)."
+  );
   lines.push(`Task: ${task}`);
   if (options.skillHints && options.skillHints.length > 0) {
     lines.push(`Skill hints: ${options.skillHints.join(", ")}`);
