@@ -38,16 +38,22 @@ export function buildBatchReferenceEdges(
   let referenceCount = 0;
   const identifierRe = /\b\w{3,}\b/g;
 
+  // Nothing can be referenced — skip the regex scan over every file entirely.
+  if (symbolIndex.size === 0) {
+    return { edges, referenceCount };
+  }
+
   for (const file of parsed) {
     if (!file.scannable) {
       continue;
     }
     const ownNames = new Set(file.declared.map((s) => s.name));
     const seenThisFile = new Set<string>();
-    const matches = file.content.match(identifierRe);
-    if (!matches) continue;
+    // matchAll iterates without materializing a giant intermediate array of
+    // every identifier (large files can yield tens of thousands of matches).
     const seenIdent = new Set<string>();
-    for (const name of matches) {
+    for (const match of file.content.matchAll(identifierRe)) {
+      const name = match[0];
       if (seenIdent.has(name)) continue;
       seenIdent.add(name);
       if (name.length < 3 || REFERENCE_SKIPLIST.has(name)) {

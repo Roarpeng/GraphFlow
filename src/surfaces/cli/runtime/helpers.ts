@@ -23,7 +23,7 @@ export function loadGraphStore(config: GraphFlowConfig): { nodes: GraphNode[]; e
     return { nodes: [], edges: [] };
   }
 
-  if (transport === "sqlite") {
+  if (transport === "sqlite" || transport === "auto") {
     const dbPath = resolveGraphStorePath(config);
     try {
       const client = new GraphifySqliteClient(dbPath);

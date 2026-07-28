@@ -25,6 +25,8 @@ export {
   importArtifact,
   exportSkillPackageRuntime,
   importSkillPackageRuntime,
+  syncSkillPackageRuntime,
+  getFlywheelReport,
   getTokenSavingsStats,
   resetTokenSavingsStats,
   startFileWatcherIfEnabled,

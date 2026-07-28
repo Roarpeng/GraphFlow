@@ -6,10 +6,20 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 
 ## 当前版本
 
-- Extension / runtime：**1.7.14**
-- 对应 VSIX：`../artifacts/graphflow-tool-1.7.14.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
+- Extension / runtime：**1.7.15**
+- 对应 VSIX：`../artifacts/graphflow-tool-1.7.15.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
 
-### v1.7.14 要点
+### v1.7.15 要点
+
+- **检索质量护栏**：26 条查询 golden set 回归测试 + 词干匹配（`routing` 命中 `route`），orchestrator 类查询不再漏召
+- **性能**：PageRank 全图指纹 LRU 缓存（重复打包零重算）；HNSW 向量索引跨进程持久化（`embeddingPolicy.vectorStorePath` 派生 `.hnsw`）
+- **存储 `transport: "auto"`**：sqlite 优先、JSON 文件透明降级；顺手修复 sqlite FTS 的 camelCase 检索盲区（schema v2）
+- **Skill 飞轮可度量**：`npm run benchmark:skills` A/B 基准（注入率/召回率/开销）；`graphflow skill report` 飞轮贡献报告；`graphflow skill sync export/import` 技能包进 git 团队共享
+- **ATP IR 公开规范**：`docs/atp-ir-spec-v1.md` 定义 `atp-ir/1.0` 委托载荷契约
+- **README 重写**：修复中文乱码，新定位「编码 Agent 的上下文与记忆层」
+- **测试环境隔离**：本机 ambient 配置不再让单测变成真实 LLM 网络调用；90 文件 / 443 tests 全绿
+
+### v1.7.14 要点（保留）
 
 - **Plan Agent Bridge**：无 GraphFlow LLM 时默认 `graphflow_plan` 也委托连接 Agent 拆任务，并附带本地 `suggestedNodes`
 - **Plan 子句拆分修复**：分析类冒号列表（assumptions、failure modes、validation gates…）不再被启发式拆成伪并行 DAG
@@ -42,9 +52,9 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 ### 方式 B：命令行
 
 ```bash
-code --install-extension graphflow-tool-1.7.14.vsix
+code --install-extension graphflow-tool-1.7.15.vsix
 # Cursor CLI（若已安装）：
-cursor --install-extension graphflow-tool-1.7.14.vsix
+cursor --install-extension graphflow-tool-1.7.15.vsix
 ```
 
 ### 安装后推荐流程
@@ -94,7 +104,7 @@ Chat Agent（`@graphflow`）：`/run`、`/plan`、`/graph`、`/skills`、`/diagn
 
 直接发送 VSIX 文件即可，同事**无需** clone GraphFlow 仓库：
 
-1. 从 Releases 或本地 `artifacts/` 取得 `graphflow-tool-1.7.14.vsix`
+1. 从 Releases 或本地 `artifacts/` 取得 `graphflow-tool-1.7.15.vsix`
 2. 按上文「安装 VSIX」步骤安装
 3. 打开项目 → Settings → 建立图谱
 
@@ -145,7 +155,7 @@ npm run package:extension
 **MCP 未自动安装**
 
 - 命令面板 → **GraphFlow: Install MCP to Agents**
-- 或终端：`npx @roarpeng/graphflow@1.7.14 install`
+- 或终端：`npx @roarpeng/graphflow@1.7.15 install`
 
 **图谱为空 / Preview 0 anchors**
 
@@ -154,7 +164,7 @@ npm run package:extension
 
 **MCP 报错 `unsafe workspace root from discovery: /home/...`**
 
-- 升级到 **1.7.14+**，然后 Settings → **安装 / 更新 MCP**，Reload Window
+- 升级到 **1.7.15+**，然后 Settings → **安装 / 更新 MCP**，Reload Window
 - 工具调用务必传 `rootDir`（项目绝对路径）
 - CLI：`graphflow doctor --json` 查看 MCP/Skill 注册状态
 

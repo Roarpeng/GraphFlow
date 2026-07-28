@@ -43,10 +43,23 @@ import {
 
 function graphStoreNeedsIndexing(config: GraphFlowConfig): boolean {
   const storePath = resolveGraphStorePath(config);
+  if (config.graphPolicy.transport === "auto" && !existsSync(storePath)) {
+    // Auto transport may have fallen back to the JSON store on this machine.
+    const fallbackPath = storePath.replace(/\.sqlite$/i, ".json");
+    if (existsSync(fallbackPath)) {
+      try {
+        const parsed = JSON.parse(readFileSync(fallbackPath, "utf8")) as { nodes?: unknown[] };
+        return !Array.isArray(parsed.nodes) || parsed.nodes.length === 0;
+      } catch {
+        return true;
+      }
+    }
+    return true;
+  }
   if (!existsSync(storePath)) {
     return true;
   }
-  if (config.graphPolicy.transport === "sqlite") {
+  if (config.graphPolicy.transport === "sqlite" || config.graphPolicy.transport === "auto") {
     return false;
   }
   try {
@@ -350,8 +363,7 @@ export async function getSkillInsights(
   configPath?: string,
   limit = 12,
   rootDir?: string
-): Promise<SkillInsightsResult> {
-  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
+): Promise<SkillInsightsResult> {  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
   const boundedLimit = Math.max(1, limit);
 
   if (config.graphPolicy.transport === "mcp-http") {
@@ -387,6 +399,98 @@ export async function getSkillInsights(
     transport: config.graphPolicy.transport,
     storePath: resolveGraphStorePath(config),
     skills,
+  };
+}
+
+export interface FlywheelReport {
+  transport: string;
+  storePath: string;
+  skills: {
+    total: number;
+    positive: number;
+    neutral: number;
+    negative: number;
+    /** Most-used skills — what the flywheel actually injects most often. */
+    topUsed: Array<{ name: string; score: number; uses: number }>;
+  };
+  episodes: {
+    total: number;
+    pass: number;
+    fail: number;
+    pending: number;
+    /** Episodes carrying extracted lessons (flywheel raw material). */
+    withLessons: number;
+  };
+  /** Decision nodes that are not episodes (Six Hats / plan insights). */
+  insightDecisions: number;
+}
+
+/**
+ * Flywheel contribution report: makes the learning loop observable — how many
+ * skills exist, their health distribution, which get used, and how episodes
+ * (pass/fail/pending + lessons) accumulate. Read-only; never triggers indexing.
+ */
+export function getFlywheelReport(configPath?: string, rootDir?: string): FlywheelReport {
+  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
+  const store = loadGraphStore(config);
+
+  const skillItems = store.nodes
+    .filter((node) => node.type === "Skill")
+    .map((node) => parseSkillInsight(node))
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+  const topUsed = [...skillItems]
+    .sort((a, b) => b.uses - a.uses || b.score - a.score)
+    .slice(0, 5)
+    .map((item) => ({ name: item.name, score: item.score, uses: item.uses }));
+
+  let pass = 0;
+  let fail = 0;
+  let pending = 0;
+  let withLessons = 0;
+  let episodeCount = 0;
+  let insightDecisions = 0;
+  for (const node of store.nodes) {
+    if (node.type !== "Decision") continue;
+    const kind = typeof node.metadata?.kind === "string" ? node.metadata.kind : undefined;
+    if (kind !== "episode") {
+      insightDecisions += 1;
+      continue;
+    }
+    episodeCount += 1;
+    try {
+      const record = JSON.parse(
+        typeof node.metadata?.record === "string" ? node.metadata.record : "{}"
+      ) as { outcome?: string; lessons?: unknown[] };
+      if (record.outcome === "pass") pass += 1;
+      else if (record.outcome === "fail") fail += 1;
+      else pending += 1;
+      if (Array.isArray(record.lessons) && record.lessons.length > 0) {
+        withLessons += 1;
+      }
+    } catch {
+      pending += 1;
+    }
+  }
+
+  return {
+    transport: config.graphPolicy.transport,
+    storePath: resolveGraphStorePath(config),
+    skills: {
+      total: skillItems.length,
+      positive: skillItems.filter((s) => s.score > 0).length,
+      neutral: skillItems.filter((s) => s.score === 0).length,
+      negative: skillItems.filter((s) => s.score < 0).length,
+      topUsed,
+    },
+    episodes: {
+      total: episodeCount,
+      pass,
+      fail,
+      pending,
+      withLessons,
+    },
+    insightDecisions,
   };
 }
 
@@ -462,6 +566,41 @@ export async function importSkillPackageRuntime(
       : join(root, inputPath))
     : join(root, "graphflow-out", "skills.json");
   return importSkillPackage(graphClient, sourcePath);
+}
+
+/**
+ * Git-based team skill sharing.
+ *
+ * Exports/imports the skill package at a canonical, committable location:
+ * `<workspace>/.graphflow/skills/team-skills.json`. Teams commit this file so
+ * every member's agents share the same accumulated project experience.
+ *
+ * @param configPath 可选配置路径
+ * @param direction "export"（本地图 → 团队文件）或 "import"（团队文件 → 本地图）
+ * @param customPath 覆盖默认团队技能包路径
+ */
+export async function syncSkillPackageRuntime(
+  configPath: string | undefined,
+  direction: "export" | "import",
+  customPath?: string
+): Promise<
+  | { direction: "export"; path: string; skillCount: number; bytes: number }
+  | { direction: "import"; path: string; imported: number; skipped: number; total: number }
+> {
+  const config = resolveConfig(configPath);
+  const root = config.graphPolicy.workspaceRoot ?? process.cwd();
+  const teamPath = customPath
+    ? (customPath.startsWith("/") || /^[A-Za-z]:/.test(customPath)
+      ? customPath
+      : join(root, customPath))
+    : join(root, ".graphflow", "skills", "team-skills.json");
+
+  if (direction === "export") {
+    const result = await exportSkillPackageRuntime(configPath, teamPath);
+    return { direction: "export", ...result };
+  }
+  const result = await importSkillPackageRuntime(configPath, teamPath);
+  return { direction: "import", ...result };
 }
 
 export function getTokenSavingsStats(configPath?: string, rootDir?: string): {

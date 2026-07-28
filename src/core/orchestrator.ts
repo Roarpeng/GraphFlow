@@ -198,12 +198,17 @@ async function runOrchestration(
 
   const plannerDraft = planInsightBundle
     ? `[plan-insight:${planInsightBundle.mode}] ${summarizeInsightForContext(planInsightBundle.insight)}`
-    : await executeRolePrompt(
-        "planner",
-        `plan task: ${input.task}`,
-        plannerSelection,
-        promptContext
-      );
+    : effectiveOptions?.executionMode === "bridge"
+      // Bridge mode delegates execution to the external agent; burning a real
+      // LLM call here only to decorate the feedback string is pure cost and
+      // makes bridge flows hang on machines with slow/unreachable providers.
+      ? `[bridge] planned ${plan.length} task(s) for external agent execution`
+      : await executeRolePrompt(
+          "planner",
+          `plan task: ${input.task}`,
+          plannerSelection,
+          promptContext
+        );
 
   // Bridge mode: package the planned DAG for external agent execution instead of running it
   if (effectiveOptions?.executionMode === "bridge") {

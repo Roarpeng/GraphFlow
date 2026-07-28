@@ -2,9 +2,9 @@
   "name": "graphflow-tool",
   "publisher": "roarpeng",
   "displayName": "GraphFlow Tool",
-  "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.7.14: graphflow_plan agent bridge without LLM + suggestedNodes; plan clause-split fix; safe MCP workspace discovery.",
+  "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.7.15: retrieval golden set + stemming, PageRank/HNSW caches, auto graph transport (sqlite-first), skill A/B benchmark + team sync, ATP IR spec.",
   "icon": "media/graphflow.png",
-  "version": "1.7.14",
+  "version": "1.7.15",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"

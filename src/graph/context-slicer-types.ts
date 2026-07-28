@@ -51,6 +51,8 @@ export interface LayeredPackageOptions {
   workspaceRoot?: string;
   /** Agent-translated English search terms (see Skill CJK workflow). */
   englishQuery?: string;
+  /** Optional path to persist the vector index across process restarts. */
+  hnswIndexPath?: string;
 }
 
 export interface SubgraphExpansionOptions {

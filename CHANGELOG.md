@@ -2,6 +2,35 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.7.15] - 2026-07-28
+
+### Added
+
+- **检索 golden set 回归测试**：`tests/retrieval-golden.test.ts` 固定 26 条代表性查询（orchestrator / context / skill flywheel / planner 等），断言关键源文件召得回且命中率 ≥ 80%，检索质量从此有回归护栏
+- **词干匹配**：`rankNodesForContextQuery` 对 ≥ 6 字符的查询 token 做前缀词干匹配（如 `routing` 命中 `route`），修复 "orchestrate task routing" 类查询召不回 orchestrator 的盲区
+- **PageRank LRU 缓存**：`computePageRank` 以全图指纹（节点 + 边 + 参数）为键缓存结果（上限 8 条），重复上下文打包零重算；导出 `pageRankCacheStats` / `resetPageRankCache`
+- **HNSW 向量索引持久化**：`getSharedVectorIndex(nodes, persistPath?)` 进程内 memo + 磁盘恢复（Float32 base64，上限 20k 向量）；`OrchestrateOptions.hnswIndexPath` / `embeddingPolicy.vectorStorePath` 派生 `.hnsw` 路径，跨进程复用向量召回索引
+- **`transport: "auto"`**：图存储自动选择——sqlite 优先（FTS5 检索、避免大仓库全文件读写放大），better-sqlite3 不可用时透明降级 JSON 文件存储；`graphflow.config.example.json` 默认改为 auto
+- **Skill A/B 基准**：`benchmarks/run-skill-ab-benchmark.ts`（`npm run benchmark:skills`）离线确定性度量 skill 飞轮价值——hint 注入率、episode 召回率、Jaccard 相关性代理、token 开销（实测注入 100% / 召回 100% / 25.6 tok 每任务）
+- **技能包团队共享**：`graphflow skill sync export|import [--path]` 双向同步技能包到可进 git 的 JSON 文件（默认 `.graphflow/skills/team-skills.json`），幂等再导入
+- **飞轮贡献报告**：`graphflow skill report` / `graphflow_diagnose` 新增 flywheel 字段——skills 正/中/负分分布、topUsed、episodes pass/fail/pending/withLessons、insight decisions 计数
+- **ATP IR 公开规范**：`docs/atp-ir-spec-v1.md` 定义 `atp-ir/1.0`——角色、AgentWorkItem/TaskNode 载荷 schema、full ATP vs simple-plan bridge ID 注册表、submit/merge 契约、兼容性规则
+- **测试基建**：`tests/helpers/no-llm-config.ts` 隔离配置工厂（providers 空 + budget/learning/embedding/graph policy 完整，防 `loadConfigSafe` 静默回退默认配置）；`tests/helpers/setup.ts` 注册进 vitest setupFiles，测试默认 2s provider/embedding 超时
+
+### Changed
+
+- **README 重写**：新定位「编码 Agent 的上下文与记忆层」，修复旧版中文乱码（0x3F 损坏）；30 秒上手、能力矩阵、10 MCP 工具表、CLI 速查、基准与 ATP 规范链接
+- **Bridge 模式省一次 LLM 调用**：orchestrate 在 bridge（agent-delegated）模式下跳过 `plannerDraft` 的纯装饰性 LLM 调用（其结果仅用于 feedback 字符串，无下游引用）
+- **引用边构建优化**：`file-indexer-edges` 改用 `matchAll` 流式扫描避免大中间数组，symbolIndex 为空时早退
+- **测试环境隔离**：m7/m9/m10/m14/m16/m44/m48/m-bridge-cli-loop 全部改用显式隔离 configPath，本机 ambient 配置（真实 API key）不再把单测变成 30–60s 网络调用
+
+### Fixed
+
+- **sqlite FTS camelCase 盲区**：FTS5 不拆 camelCase，而查询侧经 `tokenizeForIndex` 拆成子词，后缀子词永远匹配不上；schema 升级 v2（`searchtext` 列 = 原文 + 拆分子词，含 ALTER/backfill/重建 FTS/trigger 迁移）
+- **m16 环境敏感断言**：agent 集成测试改用 mkdtemp 临时 config，`agent-delegated` 断言在任意本机环境下确定性通过
+- **m48 文档一致性**：README 版本徽章回归，与 package.json 单一事实源对齐
+- **lint**：`client-factory` auto 降级分支未使用变量、golden set 测试冗余 eslint-disable
+
 ## [1.7.14] - 2026-07-28
 
 ### Fixed

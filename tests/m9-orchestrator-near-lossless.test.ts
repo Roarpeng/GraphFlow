@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { orchestrate } from "../src/core/orchestrator";
 import { validateConfig } from "../src/config/loader";
 import { createGraphClient } from "../src/graph/client-factory";
+import { createNoLlmConfigPath } from "./helpers/no-llm-config";
 
 describe("M9 orchestrator near-lossless integration", () => {
   it("attaches context package metrics in feedback when enabled", async () => {
@@ -42,6 +43,7 @@ describe("M9 orchestrator near-lossless integration", () => {
         maxContextTokens: 120,
         layerQuota: { l1: 2, l2: 1, l3: 1 },
         executionMode: "bridge",
+        configPath: createNoLlmConfigPath(),
         onContextPackage: (pkg) => {
           capturedAnchors = pkg.anchorChannel.length;
         },
@@ -60,7 +62,7 @@ describe("M9 orchestrator near-lossless integration", () => {
       {
         task: "update readme and add tests and refactor architecture module",
       },
-      { executionMode: "bridge" }
+      { executionMode: "bridge", configPath: createNoLlmConfigPath() }
     );
 
     expect(run.status).toBe("DELEGATED");

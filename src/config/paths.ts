@@ -14,7 +14,7 @@ export function resolveGraphStorePath(config: GraphFlowConfig): string {
   const root = config.graphPolicy.workspaceRoot ?? process.cwd();
   const storePath =
     config.graphPolicy.graphStorePath ??
-    (config.graphPolicy.transport === "sqlite"
+    (config.graphPolicy.transport === "sqlite" || config.graphPolicy.transport === "auto"
       ? `${DEFAULT_OUTPUT_DIR}/graphflow-graph.sqlite`
       : `${DEFAULT_OUTPUT_DIR}/graphflow-graph.json`);
   return resolveWorkspacePath(root, storePath);
