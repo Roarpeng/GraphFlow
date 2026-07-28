@@ -853,12 +853,12 @@ export function buildSettingsHtml(
           : ""
       }
       <div class="flow-box">
-        <h3>v${escapeHtml(status?.extensionVersion ?? "1.7.11")} 本版亮点</h3>
+        <h3>v${escapeHtml(status?.extensionVersion ?? "1.7.12")} 本版亮点</h3>
         <ol>
-          <li><strong>MCP 工作区安全发现</strong>：修复安装后 Cursor 以 home 启动 MCP 时报 <code>unsafe workspace root from discovery</code>；自动读取 <code>WORKSPACE_FOLDER_PATHS</code>，npx 写入 <code>${"${workspaceFolder}"}</code>。</li>
+          <li><strong>Plan 子句拆分</strong>：分析类冒号列表（assumptions、failure modes…）不再被启发式拆成伪并行 DAG；弱分隔符仅在各子句均可执行时才拆分。</li>
+          <li><strong>MCP 工作区安全发现</strong>：修复 home-cwd 下 <code>unsafe workspace root from discovery</code>；读取 <code>WORKSPACE_FOLDER_PATHS</code>，npx 写入 <code>${"${workspaceFolder}"}</code>。</li>
           <li><strong>安装自检</strong>：CLI <code>graphflow install --json</code> / <code>doctor --json</code> 输出结构化成功项、缺失项与 remediation。</li>
-          <li><strong>Bridge 飞轮</strong>：无 LLM 时走 Agent Bridge；CLI 支持 <code>insight submit/merge</code> + <code>outcome report</code> 关闭学习循环。</li>
-          <li><strong>无需 LLM 可用</strong>：结构建图、Context Preview、知识图谱可视化、10 个 MCP 工具；配置模型后启用规划/语义增强。</li>
+          <li><strong>Bridge 飞轮 / 无需 LLM</strong>：insight/outcome CLI；结构建图、Context Preview、10 个 MCP 工具开箱可用。</li>
         </ol>
         <p class="flow-hint">工具调用请传 <code>rootDir</code>（项目绝对路径）。若 MCP 日志提示 unsafe workspace，重新执行「安装 / 更新 MCP」并 Reload Window。</p>
       </div>
