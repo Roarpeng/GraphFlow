@@ -1,6 +1,7 @@
 import { logger } from "../utils/logger";
 import type { ModelSelection } from "../routing/model-router";
 import { executeRolePrompt, type PromptContext } from "../routing/provider-executor";
+import { splitTaskClauses } from "./task-clauses";
 
 export function brainstormTask(task: string): string[] {
   const normalized = task.trim();
@@ -8,12 +9,8 @@ export function brainstormTask(task: string): string[] {
     return ["澄清目标: 任务描述不能为空"];
   }
 
-  const clauses = normalized
-    .split(/\band\b|,|;/i)
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  const focus = clauses.slice(0, 3);
+  const clauses = splitTaskClauses(normalized);
+  const focus = clauses.length > 1 ? clauses.slice(0, 3) : [normalized];
   const ideas = [
     `目标澄清: 明确要完成 ${focus.join("、")}`,
     `实现路径: 先拆分子任务并并行推进，再做集成校验`,
