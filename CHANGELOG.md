@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.7.14] - 2026-07-28
+
+### Fixed
+
+- **CI / m16**：无 LLM 时 `graphflow_plan` 返回 `mode=agent-delegated`，更新集成测试断言（修复 v1.7.13 构建失败）
+
 ## [1.7.13] - 2026-07-28
 
 ### Changed

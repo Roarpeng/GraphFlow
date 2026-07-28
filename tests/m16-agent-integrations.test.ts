@@ -63,7 +63,12 @@ describe("M16 agent integrations", () => {
     );
 
     expect(response.content[0]?.type).toBe("text");
-    expect(response.content[0]?.text).toContain('"mode": "complex"');
+    const text = response.content[0]?.text ?? "";
+    // Default GraphFlow config has no usable LLM → simple plan bridges to the agent.
+    expect(text).toContain('"mode": "agent-delegated"');
+    expect(text).toContain('"triageMode": "complex"');
+    expect(text).toContain('"requiresAgentBridge": true');
+    expect(text).toContain("simple-plan-decomposition");
   });
 
   it("publishes Apache-2.0 metadata and agent binaries", () => {
