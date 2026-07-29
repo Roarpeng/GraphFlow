@@ -1,13 +1,16 @@
 # ATP/IR — Agent Thinking Protocol Intermediate Representation
-## Public Specification v1.0
+## Public Specification v1.1
 
-> Status: **Stable** ｜ Protocol version: `atp-ir/1.0` ｜ Reference implementation: GraphFlow (`@roarpeng/graphflow`) v1.7+
+> Status: **Stable** ｜ Protocol version: `atp-ir/1.1` ｜ Reference implementation: GraphFlow (`@roarpeng/graphflow`) v1.8+
 >
 > This document is the **versioned public contract** for the Agent Thinking
 > Protocol IR and its agent-bridge submit/merge flow. Third-party tools may
 > implement compatible producers (that emit ATP work items) or consumers
 > (that answer and merge them). Changes to this document follow the
 > compatibility rules in §7.
+>
+> v1.1 is additive over v1.0: goal anchors, the clarification gate, the
+> alignment-check work item, deviation reporting, and goal versioning (§5.1).
 
 ---
 
@@ -120,9 +123,17 @@ external coding agent (Cursor, Claude Code, …) as the answering agent.
 | --- | --- | --- |
 | `simple-plan-intent` | intent | ✅ |
 | `simple-plan-decomposition` | plan-refinement | ✅ |
+| `alignment-check` | alignment | optional (post-execution) |
 
 The two sets MUST NOT be mixed in one merge: presence of any
 `simple-plan-*` ID selects the simple-plan merge contract.
+
+### 4.3 Protocol-level items (any set)
+
+| ID | kind | required |
+| --- | --- | --- |
+| `clarification` | clarification | conditional — required when intent confidence < 0.6 |
+| `alignment-check` | alignment | optional, post-execution |
 
 ## 5. Submit / merge protocol
 
@@ -131,7 +142,8 @@ producer:  plan(task) ──► { agentWorkItems, agentInstructions, status:"awa
 agent:     for each REQUIRED item → answer with own model
 agent:     insight submit  { task, workItemId, response (JSON string), episodeId? }
 agent:     insight merge   { task }
-consumer:  merge ──► { complete, submittedCount, missing[], insight, plan }
+consumer:  merge ──► { complete, submittedCount, missing[], insight, plan,
+                       needsClarification?, intentConfidence? }
 ```
 
 1. **Submit** is idempotent per `(task, workItemId)`: re-submitting replaces
@@ -139,15 +151,61 @@ consumer:  merge ──► { complete, submittedCount, missing[], insight, plan 
    §3.3 payload for that item kind; unparseable payloads are stored raw and
    count as submitted but degrade merge quality.
 2. **Merge** computes the required-ID set (§4), reports `complete=true` only
-   when every required ID has a submission, and derives:
+   when every required ID has a submission AND the clarification gate (§5.1)
+   is satisfied, and derives:
    - `insight` — a SixHatsInsight-shaped synthesis (sparse for the
      simple-plan bridge: `refinedTaskStatement` from `coreProblem`).
    - `plan` — the final `TaskNode[]`; from `plan-refinement` /
      `simple-plan-decomposition` when parseable, else the producer's
      heuristic suggestion.
 3. **Outcome reporting** is a separate concern: after execution, agents call
-   `report_outcome(episodeId, success, lessons[])` so the learning flywheel
-   can score skills and update the episode (`pending → pass|fail`).
+   `report_outcome(episodeId, success, lessons[], deviation?)` so the learning
+   flywheel can score skills and update the episode (`pending → pass|fail`).
+
+### 5.1 Goal anchors, clarification gate, and alignment checks (atp-ir/1.1)
+
+**Goal anchor.** Submitting `intent-analysis`, `simple-plan-intent`, or
+`clarification` with a payload containing `coreProblem` and/or
+`successDefinition` upserts a first-class **goal node**
+(`id = goal:<hash(task)>`, metadata `kind:"goal"`). The anchor — coreProblem,
+successDefinition, nonGoals — is injected into every packaged prompt context
+for that task so executing agents stay aligned with the ORIGINAL requirement.
+Submit results echo `goal: { goalId, version, versioned, changedFields,
+staleEpisodes, confidence? }`.
+
+**Clarification gate (P3).** Intent payloads carry `confidence` (0.0–1.0).
+When the effective confidence (the `clarification` submission wins over the
+original intent) is below **0.6**, merge reports `complete=false` with
+`needsClarification=true` and `intentConfidence`, even if every required ID
+was submitted. The agent MUST answer a `clarification` work item and resubmit
+with confidence ≥ 0.6 before the plan finalizes. Payloads without a
+`confidence` field are treated as fully confident (legacy compatible).
+
+**Alignment check (P2).** After executing a subtask or the whole plan, the
+agent SHOULD submit `alignment-check`:
+
+```json
+{
+  "aligned": true,
+  "servedSuccessCriteria": ["..."],
+  "violatedNonGoals": [],
+  "drift": "none | misread-requirement | scope-creep | tech-drift",
+  "correction": ""
+}
+```
+
+It is recorded as a decision node and NEVER blocks merge.
+
+**Deviation reporting (P1).** `report_outcome` accepts
+`deviation ∈ {none, misread-requirement, scope-creep, tech-drift}` classifying
+WHY the work deviated from the goal anchor; it is persisted on the episode
+record and aggregated in the flywheel report (`skill report` / diagnose).
+
+**Goal versioning (P4).** Goal nodes are versioned. Re-submitting an intent
+whose five-tuple materially differs snapshots the old record to
+`goal:<hash>:v<n>` (status `superseded`) and advances the active node to
+`v<n+1>` with a `changedFields` diff; still-pending episodes for the task are
+flagged `staleGoal`. Identical re-submissions only refresh the timestamp.
 
 ## 6. Transport bindings
 
@@ -177,4 +235,5 @@ Both bindings share identical semantics; this document is the source of truth.
 
 *Reference implementation points: work-item construction
 (`src/core/agent-delegation.ts`), submit/merge (`src/core/submit-agent-insight.ts`,
-`src/core/merge-agent-insight.ts`), IR types (`src/agents/atp-schema.ts`).*
+`src/core/merge-agent-insight.ts`), goal anchors (`src/core/goal-anchor.ts`),
+IR types (`src/agents/atp-schema.ts`).*

@@ -6,10 +6,19 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 
 ## 当前版本
 
-- Extension / runtime：**1.7.15**
-- 对应 VSIX：`../artifacts/graphflow-tool-1.7.15.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
+- Extension / runtime：**1.8.0**
+- 对应 VSIX：`../artifacts/graphflow-tool-1.8.0.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
 
-### v1.7.15 要点
+### v1.8.0 要点（目标对齐）
+
+- **Goal 锚点**：intent 五元组（coreProblem / successDefinition / nonGoals）固化为图一等公民，每次打包自动注入原始需求——执行全程记得为什么出发
+- **低置信度澄清门**：intent `confidence < 0.6` 时不出 plan，先澄清（`clarification` work item）
+- **alignment-check 回检**：执行后对照目标锚点检查产出，附 drift 分类（`alignment-check` work item，不阻塞 merge）
+- **deviation 偏离分类**：`report_outcome` / `outcome report --deviation` 记录 `misread-requirement / scope-creep / tech-drift`，飞轮报告聚合
+- **Goal 版本链**：需求变更自动版本化 + `changedFields` diff，pending episodes 标记 `staleGoal`
+- **ATP/IR v1.1**：公开规范增量升级，v1.0 兼容
+
+### v1.7.15 要点（保留）
 
 - **检索质量护栏**：26 条查询 golden set 回归测试 + 词干匹配（`routing` 命中 `route`），orchestrator 类查询不再漏召
 - **性能**：PageRank 全图指纹 LRU 缓存（重复打包零重算）；HNSW 向量索引跨进程持久化（`embeddingPolicy.vectorStorePath` 派生 `.hnsw`）
@@ -52,9 +61,9 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 ### 方式 B：命令行
 
 ```bash
-code --install-extension graphflow-tool-1.7.15.vsix
+code --install-extension graphflow-tool-1.8.0.vsix
 # Cursor CLI（若已安装）：
-cursor --install-extension graphflow-tool-1.7.15.vsix
+cursor --install-extension graphflow-tool-1.8.0.vsix
 ```
 
 ### 安装后推荐流程
@@ -104,7 +113,7 @@ Chat Agent（`@graphflow`）：`/run`、`/plan`、`/graph`、`/skills`、`/diagn
 
 直接发送 VSIX 文件即可，同事**无需** clone GraphFlow 仓库：
 
-1. 从 Releases 或本地 `artifacts/` 取得 `graphflow-tool-1.7.15.vsix`
+1. 从 Releases 或本地 `artifacts/` 取得 `graphflow-tool-1.8.0.vsix`
 2. 按上文「安装 VSIX」步骤安装
 3. 打开项目 → Settings → 建立图谱
 
@@ -155,7 +164,7 @@ npm run package:extension
 **MCP 未自动安装**
 
 - 命令面板 → **GraphFlow: Install MCP to Agents**
-- 或终端：`npx @roarpeng/graphflow@1.7.15 install`
+- 或终端：`npx @roarpeng/graphflow@1.8.0 install`
 
 **图谱为空 / Preview 0 anchors**
 
@@ -164,7 +173,7 @@ npm run package:extension
 
 **MCP 报错 `unsafe workspace root from discovery: /home/...`**
 
-- 升级到 **1.7.15+**，然后 Settings → **安装 / 更新 MCP**，Reload Window
+- 升级到 **1.8.0+**，然后 Settings → **安装 / 更新 MCP**，Reload Window
 - 工具调用务必传 `rootDir`（项目绝对路径）
 - CLI：`graphflow doctor --json` 查看 MCP/Skill 注册状态
 

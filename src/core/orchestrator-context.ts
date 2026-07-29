@@ -3,6 +3,7 @@ import { resolveConfig } from "../config/resolve.js";
 import { hasUsableLlmProvider } from "../config/llm-availability.js";
 import type { LayeredContextPackage } from "../graph/context-slicer.js";
 import { suggestSkillHints } from "../learning/skill-flywheel.js";
+import { formatGoalAnchorForPrompt, getActiveGoalAnchor } from "./goal-anchor.js";
 import { resolveModelForRole } from "../routing/model-router.js";
 import type { PromptContext } from "../routing/provider-executor.js";
 import { buildAgentDelegatedPlanInsight, type AgentDelegatedPlanInsight } from "./agent-delegation.js";
@@ -95,17 +96,24 @@ export function buildPromptContext(
   contextPackage: LayeredContextPackage | undefined,
   skillHints: string[],
   episodeSummaries: string[],
-  options?: OrchestrateOptions
+  options?: OrchestrateOptions,
+  goalAnchors: string[] = []
 ): PromptContext | undefined {
   const includeGraph = options?.enableGraphContextInPrompt === true && contextPackage !== undefined;
   const includeEpisodes = options?.enableEpisodicMemory === true && episodeSummaries.length > 0;
   // Skill hints should be injected independently of graph context,
   // so that skill flywheel works even without near-lossless context.
   const includeSkillHints = skillHints.length > 0;
-  if (!includeGraph && !includeEpisodes && !includeSkillHints) {
+  // Goal anchors likewise: the original requirement must ride along whenever
+  // an agent (or bridge prompt) is about to act on this task.
+  const includeGoalAnchors = goalAnchors.length > 0;
+  if (!includeGraph && !includeEpisodes && !includeSkillHints && !includeGoalAnchors) {
     return undefined;
   }
   const ctx: PromptContext = {};
+  if (includeGoalAnchors) {
+    ctx.goalAnchors = goalAnchors;
+  }
   if (includeGraph && contextPackage && contextPackage.summaryChannel.length > 0) {
     ctx.summaryChannel = contextPackage.summaryChannel;
   }
@@ -115,7 +123,7 @@ export function buildPromptContext(
   if (includeEpisodes) {
     ctx.extraInstructions = [...episodeSummaries];
   }
-  if (!ctx.summaryChannel && !ctx.skillHints && !ctx.extraInstructions) {
+  if (!ctx.summaryChannel && !ctx.skillHints && !ctx.extraInstructions && !ctx.goalAnchors) {
     return undefined;
   }
   return ctx;
@@ -127,6 +135,23 @@ export async function maybeBuildSkillHints(task: string, options?: OrchestrateOp
   }
 
   return suggestSkillHints(options.graphClient, task, options.skillHintsLimit ?? 3);
+}
+
+/**
+ * P0 — Load the task's active goal anchor (if an intent was ever submitted for
+ * it) and format it for prompt injection. Never blocks: any failure means no
+ * anchor, not a failed orchestration.
+ */
+export async function maybeBuildGoalAnchors(task: string, options?: OrchestrateOptions): Promise<string[]> {
+  if (!options?.graphClient) {
+    return [];
+  }
+  try {
+    const goal = await getActiveGoalAnchor(options.graphClient, task);
+    return goal ? [formatGoalAnchorForPrompt(goal)] : [];
+  } catch {
+    return [];
+  }
 }
 
 const COMPLEX_KEYWORDS = [

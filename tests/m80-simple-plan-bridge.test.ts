@@ -38,17 +38,20 @@ describe("M80 simple plan agent bridge", () => {
   const task =
     "Critically evaluate reliability of look-down-init curriculum for copper tube FOV acquisition: assumptions、failure modes、validation gates";
 
-  it("buildAgentDelegatedSimplePlan returns suggested DAG + 2 work items", () => {
+  it("buildAgentDelegatedSimplePlan returns suggested DAG + required work items + optional alignment-check", () => {
     const result = buildAgentDelegatedSimplePlan(task);
     expect(result.mode).toBe("agent-delegated");
     expect(result.requiresAgentBridge).toBe(true);
     expect(result.nodesStatus).toBe("suggested");
     expect(result.suggestedNodes.length).toBeGreaterThan(0);
     expect(result.nodes).toEqual(result.suggestedNodes);
-    expect(result.agentWorkItems.map((item) => item.id)).toEqual([
-      ...SIMPLE_PLAN_BRIDGE_REQUIRED_IDS,
-    ]);
+    const required = result.agentWorkItems.filter((item) => !item.optional);
+    expect(required.map((item) => item.id)).toEqual([...SIMPLE_PLAN_BRIDGE_REQUIRED_IDS]);
+    // P2: execution-time alignment check rides along as an optional item.
+    const optionalIds = result.agentWorkItems.filter((item) => item.optional).map((i) => i.id);
+    expect(optionalIds).toEqual(["alignment-check"]);
     expect(result.agentInstructions).toContain("simple-plan-decomposition");
+    expect(result.agentInstructions).toContain("alignment-check");
     expect(result.agentWorkItems[1]?.prompt).toContain("Suggested local plan");
   });
 
@@ -61,7 +64,7 @@ describe("M80 simple plan agent bridge", () => {
       expect(result.status).toBe("awaiting-agent");
       expect(result.complete).toBe(false);
       expect(result.suggestedNodes?.length).toBeGreaterThan(0);
-      expect(result.agentWorkItems?.length).toBe(2);
+      expect(result.agentWorkItems?.filter((item) => !item.optional).length).toBe(2);
     } finally {
       unlinkSync(configPath);
     }
@@ -97,16 +100,15 @@ describe("M80 simple plan agent bridge", () => {
         mode: string;
         requiresAgentBridge?: boolean;
         suggestedNodes?: unknown[];
-        agentWorkItems?: Array<{ id: string }>;
+        agentWorkItems?: Array<{ id: string; optional?: boolean }>;
         nodesStatus?: string;
       };
       expect(result.mode).toBe("agent-delegated");
       expect(result.requiresAgentBridge).toBe(true);
       expect(result.nodesStatus).toBe("suggested");
       expect(result.suggestedNodes?.length).toBeGreaterThan(0);
-      expect(result.agentWorkItems?.map((item) => item.id)).toEqual([
-        ...SIMPLE_PLAN_BRIDGE_REQUIRED_IDS,
-      ]);
+      const required = result.agentWorkItems?.filter((item) => !item.optional);
+      expect(required?.map((item) => item.id)).toEqual([...SIMPLE_PLAN_BRIDGE_REQUIRED_IDS]);
     } finally {
       unlinkSync(configPath);
     }

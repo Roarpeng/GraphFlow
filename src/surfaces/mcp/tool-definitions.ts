@@ -37,6 +37,12 @@ export function getToolDefinitions(): ToolDefinition[] {
             items: { type: "string" },
             description: "Optional lessons learned (max 4).",
           },
+          deviation: {
+            type: "string",
+            enum: ["none", "misread-requirement", "scope-creep", "tech-drift"],
+            description:
+              "Optional drift classification vs the original goal anchor: did the work deviate because the requirement was misread, the scope crept, or the technical approach drifted? Use 'none' when it stayed aligned.",
+          },
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
         },
         required: ["episodeId", "success"],

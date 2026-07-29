@@ -17,7 +17,7 @@ export { isCompactAgentInsightTask, isResearchAnalysisTask } from "../agents/tas
 
 export interface AgentWorkItem {
   id: string;
-  kind: "six-hats" | "five-whys" | "plan-refinement" | "query-translate" | "intent" | "requirement" | "first-principles" | "decision-matrix" | "reflection";
+  kind: "six-hats" | "five-whys" | "plan-refinement" | "query-translate" | "intent" | "requirement" | "first-principles" | "decision-matrix" | "reflection" | "clarification" | "alignment";
   hat?: string;
   prompt: string;
   expectedFormat: "json";
@@ -61,7 +61,8 @@ function buildIntentWorkItem(task: string): AgentWorkItem {
       '  "implicitIntent": "the underlying need",',
       '  "coreProblem": "the core problem to solve",',
       '  "nonGoals": ["things out of scope"],',
-      '  "successDefinition": "how to know the task is done"',
+      '  "successDefinition": "how to know the task is done",',
+      '  "confidence": "0.0-1.0 — how sure you are this reading is correct; below 0.6 a clarification round is REQUIRED"',
       "}",
     ].join("\n"),
     expectedFormat: "json",
@@ -71,6 +72,7 @@ function buildIntentWorkItem(task: string): AgentWorkItem {
       coreProblem: "string",
       nonGoals: "string[]",
       successDefinition: "string",
+      confidence: "number 0.0-1.0",
     },
   };
 }
@@ -221,6 +223,93 @@ export const SIMPLE_PLAN_BRIDGE_REQUIRED_IDS = [
   "simple-plan-decomposition",
 ] as const;
 
+/**
+ * P3 — Clarification round: issued when the submitted intent confidence is
+ * below the merge threshold. The agent must resolve the ambiguities and
+ * resubmit with confidence >= 0.6 before a plan can be finalized.
+ */
+export function buildClarificationWorkItem(
+  task: string,
+  ambiguities?: string[]
+): AgentWorkItem {
+  const ambiguityLines =
+    ambiguities && ambiguities.length > 0
+      ? ["Known ambiguities to resolve:", ...ambiguities.slice(0, 6).map((a) => `- ${a}`), ""]
+      : [];
+  return {
+    id: "clarification",
+    kind: "clarification",
+    prompt: [
+      `Task: ${task}`,
+      "",
+      "Your earlier intent analysis had LOW confidence. Do NOT plan yet.",
+      ...ambiguityLines,
+      "Resolve the intent by re-reading the task and, if available, the surrounding",
+      "conversation/codebase. Then restate the intent with higher confidence.",
+      "Return ONLY a JSON object:",
+      "{",
+      '  "explicitIntent": "what the user explicitly asked for",',
+      '  "implicitIntent": "the underlying need",',
+      '  "coreProblem": "the core problem to solve",',
+      '  "nonGoals": ["things out of scope"],',
+      '  "successDefinition": "how to know the task is done",',
+      '  "confidence": "0.0-1.0 — must be >= 0.6 to proceed",',
+      '  "whatChanged": "what you resolved vs the previous reading"',
+      "}",
+    ].join("\n"),
+    expectedFormat: "json",
+    responseSchema: {
+      explicitIntent: "string",
+      implicitIntent: "string",
+      coreProblem: "string",
+      nonGoals: "string[]",
+      successDefinition: "string",
+      confidence: "number 0.0-1.0",
+      whatChanged: "string",
+    },
+  };
+}
+
+/**
+ * P2 — Execution-time alignment check: after finishing a subtask (or the whole
+ * plan), the executing agent checks its output against the goal anchor
+ * (successDefinition / nonGoals) and reports drift. Submitted via
+ * graphflow_insight({ mode: "submit", workItemId: "alignment-check" });
+ * never blocks merge.
+ */
+export function buildAlignmentCheckWorkItem(task: string): AgentWorkItem {
+  return {
+    id: "alignment-check",
+    kind: "alignment",
+    optional: true,
+    prompt: [
+      `Task: ${task}`,
+      "",
+      "[EXECUTION-TIME CHECK — submit after completing a subtask or the whole plan]",
+      "Check your actual output against the ORIGINAL goal anchor:",
+      "1. Does it serve the successDefinition?",
+      "2. Did you touch anything listed in nonGoals?",
+      "3. Did the work drift from the coreProblem (scope creep / tech drift)?",
+      "Return ONLY a JSON object:",
+      "{",
+      '  "aligned": true|false,',
+      '  "servedSuccessCriteria": ["which success criteria this output serves"],',
+      '  "violatedNonGoals": ["non-goal items touched, empty if none"],',
+      '  "drift": "none|misread-requirement|scope-creep|tech-drift",',
+      '  "correction": "what to change to re-align, empty if aligned"',
+      "}",
+    ].join("\n"),
+    expectedFormat: "json",
+    responseSchema: {
+      aligned: "boolean",
+      servedSuccessCriteria: "string[]",
+      violatedNonGoals: "string[]",
+      drift: "none|misread-requirement|scope-creep|tech-drift",
+      correction: "string",
+    },
+  };
+}
+
 export type SimplePlanNode = {
   id: string;
   description: string;
@@ -269,7 +358,8 @@ export function buildAgentDelegatedSimplePlan(task: string): {
         '  "implicitIntent": "the underlying need",',
         '  "coreProblem": "the core problem to solve",',
         '  "nonGoals": ["things out of scope"],',
-        '  "successDefinition": "how to know the task is done"',
+        '  "successDefinition": "how to know the task is done",',
+        '  "confidence": "0.0-1.0 — how sure you are this reading is correct; below 0.6 a clarification round is REQUIRED"',
         "}",
       ].join("\n"),
       expectedFormat: "json",
@@ -279,6 +369,7 @@ export function buildAgentDelegatedSimplePlan(task: string): {
         coreProblem: "string",
         nonGoals: "string[]",
         successDefinition: "string",
+        confidence: "number 0.0-1.0",
       },
     },
     {
@@ -305,6 +396,8 @@ export function buildAgentDelegatedSimplePlan(task: string): {
         items: { id: "string", description: "string", dependencies: "string[]" },
       },
     },
+    // P2: execution-time alignment check — optional, submitted after work is done.
+    buildAlignmentCheckWorkItem(task),
   ];
 
   const agentInstructions = [
@@ -318,15 +411,20 @@ export function buildAgentDelegatedSimplePlan(task: string): {
     '2. MUST submit each via graphflow_insight({ mode: "submit", task, workItemId, response }).',
     '3. After both required items are submitted, MUST call graphflow_insight({ mode: "merge", task }).',
     "4. Use the merged plan as the real DAG, then implement.",
+    "5. [OPTIONAL but RECOMMENDED] After finishing, submit an alignment-check against the goal anchor",
+    '   (workItemId: "alignment-check"): does the output serve successDefinition without touching nonGoals?',
+    "   Then graphflow_report_outcome with drift classification.",
     "",
     `Task: ${task}`,
     "",
     "Mode: simple-plan bridge (intent → decomposition)",
     `Required work items (2): ${SIMPLE_PLAN_BRIDGE_REQUIRED_IDS.join(", ")}`,
-    "Suggested order: (1) simple-plan-intent, (2) simple-plan-decomposition.",
+    "Suggested order: (1) simple-plan-intent, (2) simple-plan-decomposition, [post-execution] alignment-check.",
     "",
     "Work items:",
-    ...agentWorkItems.map((item) => `- ${item.id} (${item.kind}) [REQUIRED]`),
+    ...agentWorkItems.map(
+      (item) => `- ${item.id} (${item.kind})${item.optional ? " [optional]" : " [REQUIRED]"}`
+    ),
   ].join("\n");
 
   return {
@@ -438,6 +536,9 @@ export function buildAgentDelegationInstructions(
     '2. MUST submit each via graphflow_insight({ mode: "submit", task, workItemId, response }).',
     '3. After all required items are submitted, MUST call graphflow_insight({ mode: "merge", task }).',
     "4. Use the merged insight + plan as the real result, then implement / report_outcome as needed.",
+    "5. [OPTIONAL but RECOMMENDED] After execution, submit an alignment-check",
+    '   (workItemId: "alignment-check") against the goal anchor: does the output serve',
+    "   successDefinition without touching nonGoals? Report drift in graphflow_report_outcome.",
     "",
     `Task: ${task}`,
     "",

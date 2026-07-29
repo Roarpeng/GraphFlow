@@ -19,6 +19,7 @@ import {
   mergeAgentInsightResult,
 } from "../cli/runtime";
 import { getRuntimeTimelineSummary } from "../../core/cancellation";
+import { isDeviationKind } from "../../learning/episodic-memory";
 import type { McpServer } from "./server.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -57,12 +58,15 @@ export async function executeToolCall(
       const lessons = Array.isArray(lessonsRaw)
         ? lessonsRaw.filter((l): l is string => typeof l === "string")
         : [];
+      const deviationRaw = readOptionalString(args.deviation);
+      const deviation = isDeviationKind(deviationRaw) ? deviationRaw : undefined;
       return textResponse(
         await reportOutcome(
           readRequiredString(args.episodeId, "episodeId"),
           typeof args.success === "boolean" ? args.success : false,
           lessons,
-          readOptionalString(args.configPath)
+          readOptionalString(args.configPath),
+          deviation
         )
       );
     }

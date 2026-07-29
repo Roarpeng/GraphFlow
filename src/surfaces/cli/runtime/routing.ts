@@ -16,7 +16,7 @@ import { triageTask } from "../../../core/triage";
 import { createGraphClient } from "../../../graph/client-factory";
 import { indexWorkspaceFiles, hasPendingGraphIndexWork } from "../../../graph/file-indexer";
 import { appendFeedbackEvent } from "../../../learning/learning-events";
-import { updateEpisodeOutcome } from "../../../learning/episodic-memory";
+import { updateEpisodeOutcome, type DeviationKind } from "../../../learning/episodic-memory";
 import {
   applySkillLearning,
   extractSkillAtoms,
@@ -498,7 +498,8 @@ export async function reportOutcome(
   episodeId: string,
   success: boolean,
   lessons: string[],
-  configPath?: string
+  configPath?: string,
+  deviation?: DeviationKind
 ): Promise<ReportOutcomeResult> {
   const config = resolveConfig(configPath);
   const graphClient = createGraphClient(config);
@@ -510,7 +511,8 @@ export async function reportOutcome(
     graphClient,
     episodeId,
     success ? "pass" : "fail",
-    sanitizedLessons
+    sanitizedLessons,
+    deviation
   );
   if (!updated) {
     return { ok: false, reason: `Episode not found: ${episodeId}` };
@@ -544,6 +546,7 @@ export async function reportOutcome(
     episodeId: updated.id,
     outcome: success ? "pass" : "fail",
     skillsUpdated,
+    ...(updated.deviation !== undefined ? { deviation: updated.deviation } : {}),
   };
 }
 

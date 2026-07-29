@@ -33,6 +33,7 @@ import {
   mergeAgentInsightResult,
 } from "./runtime";
 import { validateConfigDetailed, type ConfigValidationResult } from "../../config/loader.js";
+import { isDeviationKind } from "../../learning/episodic-memory";
 import {
   buildCliUsage,
   collectCliFlagValues,
@@ -131,12 +132,14 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     const episodeId = args[1]?.trim();
     const success = parseCliSuccess(args[2]);
     if (!episodeId || success === undefined) {
-      console.log("Usage: graphflow outcome report <episodeId> <success> [--lesson <text>]...");
+      console.log("Usage: graphflow outcome report <episodeId> <success> [--lesson <text>]... [--deviation <none|misread-requirement|scope-creep|tech-drift>]");
       process.exitCode = 1;
       return undefined;
     }
     const lessons = collectCliFlagValues(args, "--lesson");
-    const data = await reportOutcome(episodeId, success, lessons, configPath);
+    const deviationRaw = readCliFlagValue(args, "--deviation");
+    const deviation = isDeviationKind(deviationRaw) ? deviationRaw : undefined;
+    const data = await reportOutcome(episodeId, success, lessons, configPath, deviation);
     return {
       command: "outcome-report",
       data,

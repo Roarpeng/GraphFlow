@@ -420,9 +420,21 @@ export interface FlywheelReport {
     pending: number;
     /** Episodes carrying extracted lessons (flywheel raw material). */
     withLessons: number;
+    /** P1 — drift classification counts across episodes that reported deviation. */
+    deviations: {
+      misreadRequirement: number;
+      scopeCreep: number;
+      techDrift: number;
+      none: number;
+    };
   };
   /** Decision nodes that are not episodes (Six Hats / plan insights). */
   insightDecisions: number;
+  /** P0/P4 — goal anchors: active requirement anchors + superseded versions. */
+  goals: {
+    active: number;
+    supersededVersions: number;
+  };
 }
 
 /**
@@ -450,9 +462,17 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
   let withLessons = 0;
   let episodeCount = 0;
   let insightDecisions = 0;
+  const deviations = { misreadRequirement: 0, scopeCreep: 0, techDrift: 0, none: 0 };
+  let goalsActive = 0;
+  let goalsSuperseded = 0;
   for (const node of store.nodes) {
     if (node.type !== "Decision") continue;
     const kind = typeof node.metadata?.kind === "string" ? node.metadata.kind : undefined;
+    if (kind === "goal") {
+      if (node.metadata?.status === "superseded") goalsSuperseded += 1;
+      else goalsActive += 1;
+      continue;
+    }
     if (kind !== "episode") {
       insightDecisions += 1;
       continue;
@@ -461,13 +481,17 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
     try {
       const record = JSON.parse(
         typeof node.metadata?.record === "string" ? node.metadata.record : "{}"
-      ) as { outcome?: string; lessons?: unknown[] };
+      ) as { outcome?: string; lessons?: unknown[]; deviation?: string };
       if (record.outcome === "pass") pass += 1;
       else if (record.outcome === "fail") fail += 1;
       else pending += 1;
       if (Array.isArray(record.lessons) && record.lessons.length > 0) {
         withLessons += 1;
       }
+      if (record.deviation === "misread-requirement") deviations.misreadRequirement += 1;
+      else if (record.deviation === "scope-creep") deviations.scopeCreep += 1;
+      else if (record.deviation === "tech-drift") deviations.techDrift += 1;
+      else if (record.deviation === "none") deviations.none += 1;
     } catch {
       pending += 1;
     }
@@ -489,8 +513,13 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
       fail,
       pending,
       withLessons,
+      deviations,
     },
     insightDecisions,
+    goals: {
+      active: goalsActive,
+      supersededVersions: goalsSuperseded,
+    },
   };
 }
 

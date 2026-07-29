@@ -265,6 +265,8 @@ export interface ReportOutcomeResult {
   reason?: string;
   /** Number of skill atoms upserted when the flywheel ran; 0 if skipped or no atoms. */
   skillsUpdated?: number;
+  /** P1 — drift classification echoed back when reported (none / misread-requirement / scope-creep / tech-drift). */
+  deviation?: string;
 }
 
 export interface ExpandAnchorResult {
