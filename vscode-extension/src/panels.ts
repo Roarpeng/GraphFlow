@@ -853,13 +853,13 @@ export function buildSettingsHtml(
           : ""
       }
       <div class="flow-box">
-        <h3>v${escapeHtml(status?.extensionVersion ?? "1.7.15")} 本版亮点</h3>
+        <h3>v${escapeHtml(status?.extensionVersion ?? "1.8.0")} 本版亮点</h3>
         <ol>
-          <li><strong>检索质量护栏</strong>：26 条查询 golden set 回归 + 词干匹配，orchestrator 类查询不再漏召；PageRank LRU 缓存、HNSW 向量索引跨进程持久化。</li>
-          <li><strong>存储 auto</strong>：<code>transport: "auto"</code> sqlite 优先、JSON 透明降级；修复 sqlite FTS camelCase 检索盲区。</li>
-          <li><strong>Skill 飞轮可度量</strong>：<code>npm run benchmark:skills</code> A/B 基准；<code>graphflow skill report</code> 贡献报告；<code>skill sync</code> 技能包进 git 共享。</li>
-          <li><strong>ATP IR 公开规范</strong>：<code>docs/atp-ir-spec-v1.md</code> 定义 Agent 委托载荷契约（atp-ir/1.0）。</li>
-          <li><strong>测试环境隔离</strong>：本机 API key 不再把单测变成真实 LLM 调用；90 文件 / 443 tests 全绿。</li>
+          <li><strong>Goal 锚点</strong>：intent 五元组固化为图一等公民，每次打包自动注入原始需求——执行全程记得为什么出发。</li>
+          <li><strong>低置信度澄清门</strong>：intent <code>confidence &lt; 0.6</code> 不出 plan，先澄清再定稿。</li>
+          <li><strong>alignment-check 回检</strong>：执行后对照目标锚点检查产出是否服务 successDefinition、是否触碰 nonGoals。</li>
+          <li><strong>deviation 偏离分类</strong>：<code>report_outcome</code> 记录 misread-requirement / scope-creep / tech-drift，飞轮报告聚合可度量。</li>
+          <li><strong>Goal 版本链</strong>：需求变更自动版本化 + changedFields diff，pending episodes 标记 staleGoal；ATP/IR 规范升级 v1.1。</li>
         </ol>
         <p class="flow-hint">工具调用请传 <code>rootDir</code>（项目绝对路径）。若 MCP 日志提示 unsafe workspace root from discovery，重新执行「安装 / 更新 MCP」并 Reload Window。</p>
       </div>

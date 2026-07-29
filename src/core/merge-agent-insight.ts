@@ -10,6 +10,7 @@ import {
   buildHeuristicPlanFromInsight,
   SIMPLE_PLAN_BRIDGE_REQUIRED_IDS,
 } from "./agent-delegation";
+import { CLARIFICATION_CONFIDENCE_THRESHOLD } from "./goal-anchor";
 import type { GraphClient } from "../graph/client-factory";
 import { GraphifyClient } from "../graph/graphify-client";
 import type { GraphNode, TaskNode } from "./types";
@@ -28,6 +29,10 @@ export interface MergeAgentInsightsResult {
   complete: boolean;
   missing: string[];
   submittedCount: number;
+  /** True when intent confidence is below the clarification threshold. */
+  needsClarification?: boolean;
+  /** Effective intent confidence after any clarification round. */
+  intentConfidence?: number;
 }
 
 function normalizeTask(task: string): string {
@@ -182,6 +187,34 @@ function parsePlanItems(parsed: Record<string, unknown>): TaskNode[] {
   return items.length > 0 ? items.slice(0, 8) : [];
 }
 
+function readConfidence(parsed: Record<string, unknown> | undefined): number | undefined {
+  if (!parsed) {
+    return undefined;
+  }
+  const raw = parsed.confidence;
+  return typeof raw === "number" && Number.isFinite(raw)
+    ? Math.min(1, Math.max(0, raw))
+    : undefined;
+}
+
+/**
+ * Effective intent confidence: the clarification round (if any) wins over the
+ * original intent analysis. Missing confidence counts as fully confident so
+ * legacy payloads without the field keep flowing.
+ */
+export function resolveIntentConfidence(
+  byWorkItem: Map<string, AgentInsightRecord>
+): number {
+  const intent =
+    byWorkItem.get("simple-plan-intent") ?? byWorkItem.get("intent-analysis");
+  const clarification = byWorkItem.get("clarification");
+  const clarificationConfidence = readConfidence(clarification?.parsed);
+  if (clarificationConfidence !== undefined) {
+    return clarificationConfidence;
+  }
+  return readConfidence(intent?.parsed) ?? 1;
+}
+
 export function mergeAgentInsights(
   task: string,
   records: AgentInsightRecord[]
@@ -202,7 +235,15 @@ export function mergeAgentInsights(
 
   const submittedIds = requiredIds.filter((id) => byWorkItem.has(id));
   const missing = requiredIds.filter((id) => !byWorkItem.has(id));
-  const complete = missing.length === 0;
+  // P3: a fully-submitted but low-confidence intent must NOT finalize a plan —
+  // the agent should run a clarification round and resubmit first.
+  const intentConfidence = resolveIntentConfidence(byWorkItem);
+  const needsClarification = intentConfidence < CLARIFICATION_CONFIDENCE_THRESHOLD;
+  const complete = missing.length === 0 && !needsClarification;
+  const clarificationFlags = {
+    needsClarification,
+    intentConfidence,
+  };
 
   if (usesSimplePlanBridge) {
     const planRecord =
@@ -233,6 +274,7 @@ export function mergeAgentInsights(
       complete,
       missing,
       submittedCount: submittedIds.length,
+      ...clarificationFlags,
     };
   }
 
@@ -290,6 +332,7 @@ export function mergeAgentInsights(
     complete,
     missing,
     submittedCount: submittedIds.length,
+    ...clarificationFlags,
   };
 }
 

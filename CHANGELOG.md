@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.8.0] - 2026-07-28
+
+目标对齐（Goal Alignment）版本：让 Agent 在长时间、多步骤任务中始终记得为什么出发——治「需求理解不透」与「干着干着偏离」两大痛点。
+
+### Added
+
+- **Goal 锚点节点化（P0）**：`intent-analysis` / `simple-plan-intent` / `clarification` 提交自动把意图五元组（coreProblem / successDefinition / nonGoals…）固化为图一等公民节点（`goal:<hash(task)>`，metadata `kind:"goal"`）；`PromptContext.goalAnchors` 在每次打包时以最高优先级位置注入原始需求，orchestrate 各角色 prompt 全程可见
+- **低置信度澄清门（P3）**：intent 载荷新增 `confidence`；有效置信度 < 0.6 时 merge 拒绝定稿（`complete=false` + `needsClarification=true` + `intentConfidence`），须先提交 `clarification` work item 澄清至 ≥ 0.6；无 confidence 字段的旧载荷按 1.0 处理（向后兼容）
+- **alignment-check 执行期回检（P2）**：新 work item（`kind:"alignment"`，optional）——子任务/计划完成后回检「产出是否服务 successDefinition、是否触碰 nonGoals」，附 drift 分类；simple bridge 与 full ATP 的 agentInstructions 均加入执行期协议说明；永不阻塞 merge
+- **deviation 偏离分类（P1）**：`report_outcome` / `outcome report --deviation` 接受 `none | misread-requirement | scope-creep | tech-drift`，持久化到 episode record；飞轮报告新增 `episodes.deviations` 聚合与 `goals`（active/superseded）统计；MCP `graphflow_report_outcome` schema 同步
+- **Goal 版本链 + 变更 diff（P4）**：需求实质变更时旧记录快照为 `goal:<hash>:v<n>`（status `superseded`），active 节点版本 +1 并带 `changedFields` diff；同任务 pending episodes 自动标记 `staleGoal`；相同再提交仅刷新时间戳
+- **ATP/IR 规范 v1.1**：`docs/atp-ir-spec-v1.md` 升级——§4.3 协议级 work items、§5.1 goal anchor / clarification gate / alignment check / deviation / goal versioning（纯增量，v1.0 兼容）
+
+### Changed
+
+- **测试**：新增 `tests/goal-anchor.test.ts`（12 用例覆盖 P0–P4）；m80 simple bridge 断言更新为「required 2 项 + optional alignment-check」；flywheel report 测试覆盖 deviation 聚合与 goal 统计；全套 **92 文件 / 455 tests** 通过
+
 ## [1.7.15] - 2026-07-28
 
 ### Added

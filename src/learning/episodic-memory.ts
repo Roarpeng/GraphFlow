@@ -19,6 +19,26 @@ export interface EpisodeRecord {
   createdAt: number;
   updatedAt: number;
   runFeedback?: string;
+  /**
+   * P1 — Drift classification: WHY the work deviated from the original goal
+   * anchor (or "none" when it stayed aligned). Makes deviation measurable and
+   * learnable instead of collapsing every outcome into pass/fail.
+   */
+  deviation?: DeviationKind;
+}
+
+/** Drift taxonomy shared by alignment-check submit and outcome report. */
+export const DEVIATION_KINDS = [
+  "none",
+  "misread-requirement",
+  "scope-creep",
+  "tech-drift",
+] as const;
+
+export type DeviationKind = (typeof DEVIATION_KINDS)[number];
+
+export function isDeviationKind(value: unknown): value is DeviationKind {
+  return typeof value === "string" && (DEVIATION_KINDS as readonly string[]).includes(value);
 }
 
 const EPISODE_PREFIX = "episode:";
@@ -55,6 +75,7 @@ export async function recordEpisode(
     createdAt: now,
     updatedAt: now,
     ...(episode.runFeedback !== undefined ? { runFeedback: episode.runFeedback } : {}),
+    ...(episode.deviation !== undefined ? { deviation: episode.deviation } : {}),
   };
 
   const node: GraphNode = {
@@ -91,7 +112,8 @@ export async function updateEpisodeOutcome(
   client: GraphClient,
   episodeId: string,
   outcome: "pass" | "fail",
-  lessons?: string[]
+  lessons?: string[],
+  deviation?: DeviationKind
 ): Promise<EpisodeRecord | undefined> {
   if (!client.getNodesByIds) {
     return undefined;
@@ -109,6 +131,7 @@ export async function updateEpisodeOutcome(
     ...rec,
     outcome,
     lessons: lessons ? lessons.slice(0, 4) : rec.lessons,
+    ...(deviation !== undefined ? { deviation } : {}),
     updatedAt: Date.now(),
   };
   const updatedNode: GraphNode = {
@@ -356,6 +379,7 @@ function deserialize(node: GraphNode): EpisodeRecord | undefined {
       createdAt: parsed.createdAt ?? 0,
       updatedAt: parsed.updatedAt ?? 0,
       ...(parsed.runFeedback !== undefined ? { runFeedback: parsed.runFeedback } : {}),
+      ...(isDeviationKind(parsed.deviation) ? { deviation: parsed.deviation } : {}),
     };
   } catch {
     return undefined;

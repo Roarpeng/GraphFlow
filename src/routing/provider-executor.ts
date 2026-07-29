@@ -45,10 +45,17 @@ export interface PromptContext {
   summaryChannel?: string[];
   skillHints?: string[];
   extraInstructions?: string[];
+  /**
+   * Goal anchor lines (P0): the ORIGINAL requirement — coreProblem,
+   * successDefinition, nonGoals — rendered FIRST so every agent role sees
+   * what the task is ultimately for before any other context.
+   */
+  goalAnchors?: string[];
 }
 
 const MAX_SUMMARY_LINES = 20;
 const MAX_SKILL_HINTS = 8;
+const MAX_GOAL_ANCHORS = 2;
 
 let lastProviderUsage: ProviderUsageStats | undefined;
 
@@ -63,7 +70,8 @@ function hasAnyContext(context?: PromptContext): boolean {
   const s = context.summaryChannel?.some((x) => x && x.trim().length > 0);
   const k = context.skillHints?.some((x) => x && x.trim().length > 0);
   const e = context.extraInstructions?.some((x) => x && x.trim().length > 0);
-  return Boolean(s || k || e);
+  const g = context.goalAnchors?.some((x) => x && x.trim().length > 0);
+  return Boolean(s || k || e || g);
 }
 
 export function formatPromptWithContext(
@@ -77,6 +85,14 @@ export function formatPromptWithContext(
   }
 
   const lines: string[] = [rolePrefix];
+
+  const goals = (context?.goalAnchors ?? []).filter((line) => line && line.trim().length > 0);
+  if (goals.length > 0) {
+    lines.push("Goal anchor (original requirement — stay aligned):");
+    for (const item of goals.slice(0, MAX_GOAL_ANCHORS)) {
+      lines.push(`- ${item}`);
+    }
+  }
 
   const summaries = (context?.summaryChannel ?? []).filter((line) => line && line.trim().length > 0);
   if (summaries.length > 0) {

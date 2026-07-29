@@ -1,6 +1,6 @@
 # GraphFlow
 
-[![npm version](https://img.shields.io/badge/npm-1.7.15-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.8.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **编码 Agent 的上下文与记忆层** — Local-first 代码知识图谱 + 上下文压缩 + 跨会话学习飞轮
 
@@ -54,19 +54,20 @@ Agent 先调 `graphflow_context` 拿压缩上下文，再用 `graphflow_plan` �
 
 | 模块 | 能力 |
 | --- | --- |
-| **规划协议** | ATP v1.0（Intent / Requirement / Six Hats / 5-Why / First Principles / Decision Matrix / Planning / Reflection）；simple / complex / insight 三种模式；无 LLM 时 agent-delegated 桥接；[ATP/IR 公开规范 v1.0](docs/atp-ir-spec-v1.md) |
+| **规划协议** | ATP v1.1（Intent / Requirement / Six Hats / 5-Why / First Principles / Decision Matrix / Planning / Reflection）；simple / complex / insight 三种模式；无 LLM 时 agent-delegated 桥接；[ATP/IR 公开规范 v1.1](docs/atp-ir-spec-v1.md) |
+| **目标对齐** | **Goal 锚点节点化**（intent 五元组固化为一等公民，每次打包自动注入原始需求）；**低置信度澄清门**（confidence < 0.6 不出 plan）；**alignment-check 执行期回检**；**deviation 偏离分类**（misread-requirement / scope-creep / tech-drift）；**Goal 版本链 + 变更 diff** |
 | **知识图谱** | 12 语言 AST 索引（TS/JS/Python/Rust/Go/C/C++/Java/Ruby/Kotlin/Swift/Dart）；File / Module / Symbol 节点 + 依赖/引用/定义/调用/继承边 |
 | **上下文压缩** | L1/L2/L3 分层锚点；图结构压缩（边权重 + PageRank，**LRU 缓存**）；**词干匹配召回**（orchestrate ↔ orchestration）；向量召回 + RRF；RepoMap 概览；自适应预算 |
 | **检索质量** | **Golden-set 回归门禁**（26 查询，CI 强制 ≥80% 召回，实测 100%） |
 | **向量索引** | 进程内记忆化 + **磁盘持久化**（指纹校验，MCP 重启秒级恢复） |
 | **存储后端** | `file` / `memory` / `sqlite`（FTS5，**searchtext 分词增强**，camelCase 可检索）/ **`auto`（sqlite 优先自动切换）** / `mcp-http` |
-| **学习飞轮** | Episodic Memory、Reflection、Skill 节点（score ±1，bounded [-20,20]）、nightly 学习、技能衰减/剪枝、**飞轮贡献报告**（`skill report` / `graphflow_diagnose`） |
+| **学习飞轮** | Episodic Memory、Reflection、Skill 节点（score ±1，bounded [-20,20]）、nightly 学习、技能衰减/剪枝、**飞轮贡献报告**（`skill report` / `graphflow_diagnose`，含偏离聚合与 Goal 统计） |
 | **团队共享** | **`skill sync`**：技能包导出/导入到可提交的 `.graphflow/skills/team-skills.json` |
 | **效果基准** | [token 节省 98.7%](benchmarks/RESULTS.md)（独立复核）；[Skill A/B 基准](benchmarks/SKILL-AB-RESULTS.md)（注入率/召回率/开销，`npm run benchmark:skills`） |
 | **模型路由** | Smart / Economy 双 tier；多 provider 健康探测与 fallback（DeepSeek、OpenAI、Anthropic、百炼、豆包） |
 | **可观测性** | `graphflow_diagnose`：provider 健康 + 图统计 + token 节省 + **飞轮报告** |
 | **Agent 接入** | CLI `--json`；MCP stdio（10 工具）；自动安装 MCP 到 15+ Agent |
-| **工程质量** | TypeScript strict；**90 测试文件 / 443 tests**；`npm run ci` 含扩展打包与 smoke |
+| **工程质量** | TypeScript strict；**92 测试文件 / 455 tests**；`npm run ci` 含扩展打包与 smoke |
 
 ### 定位说明
 
@@ -79,7 +80,7 @@ Agent 先调 `graphflow_context` 拿压缩上下文，再用 `graphflow_plan` �
 | `graphflow_context` | 压缩上下文包（query → 锚点 + 摘要；anchorId → 展开） |
 | `graphflow_plan` | 任务规划（mode='simple' 或 'insight'；无 LLM 时 agent-delegated） |
 | `graphflow_run` | 编排 + Bridge 执行描述符 |
-| `graphflow_report_outcome` | 结果回填，闭环学习飞轮 |
+| `graphflow_report_outcome` | 结果回填（含 deviation 偏离分类），闭环学习飞轮 |
 | `graphflow_insight` | ATP 洞察 submit / merge（Agent 桥接协议） |
 | `graphflow_index` | 增量 / 全量索引 |
 | `graphflow_skill_insights` | 技能洞察 |
@@ -153,7 +154,7 @@ npm install
 npm run ci        # lint + build + 测试 + 扩展打包 + smoke
 ```
 
-要求 Node.js ≥ 20、npm ≥ 10。预期：lint 无错误、构建成功、443 测试通过。
+要求 Node.js ≥ 20、npm ≥ 10。预期：lint 无错误、构建成功、455 测试通过。
 
 ## 项目结构
 
@@ -168,7 +169,7 @@ GraphFlow/
 │   └── surfaces/
 │       ├── cli/        # CLI + runtime
 │       └── mcp/        # MCP server（10 工具）
-├── tests/              # 90 文件 / 443 tests（含检索 golden set）
+├── tests/              # 92 文件 / 455 tests（含检索 golden set、goal anchor）
 ├── benchmarks/         # token 节省 + skill A/B 基准（可复现）
 ├── docs/               # ATP v1.0 设计 + ATP/IR 公开规范
 ├── vscode-extension/   # VS Code 面板与命令

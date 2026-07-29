@@ -2,9 +2,9 @@
   "name": "graphflow-tool",
   "publisher": "roarpeng",
   "displayName": "GraphFlow Tool",
-  "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.7.15: retrieval golden set + stemming, PageRank/HNSW caches, auto graph transport (sqlite-first), skill A/B benchmark + team sync, ATP IR spec.",
+  "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.8.0: goal anchors injected into every packaged prompt, low-confidence clarification gate, execution-time alignment checks, deviation classification, goal versioning (ATP/IR 1.1).",
   "icon": "media/graphflow.png",
-  "version": "1.7.15",
+  "version": "1.8.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"

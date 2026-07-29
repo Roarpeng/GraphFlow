@@ -73,6 +73,7 @@ describe("flywheel contribution report", () => {
       keyDecisions: [],
       lessons: [],
       attempts: 1,
+      deviation: "misread-requirement",
     });
     await recordEpisode(client, {
       task: "delegated bridge task",
@@ -82,17 +83,47 @@ describe("flywheel contribution report", () => {
       lessons: [],
       attempts: 0,
     });
+    await recordEpisode(client, {
+      task: "over-engineered helper",
+      plan: [],
+      outcome: "fail",
+      keyDecisions: [],
+      lessons: [],
+      attempts: 2,
+      deviation: "scope-creep",
+    });
+
+    // Seed one goal anchor + one superseded version.
+    await client.upsertNodes([
+      {
+        id: "goal:abc",
+        type: "Decision",
+        content: "goal v2: cache search",
+        metadata: { kind: "goal", version: 2, status: "active", record: "{}" },
+      },
+      {
+        id: "goal:abc:v1",
+        type: "Decision",
+        content: "goal v1: cache search",
+        metadata: { kind: "goal", version: 1, status: "superseded", record: "{}" },
+      },
+    ]);
 
     const report = getFlywheelReport(configPath);
 
     expect(report.skills.total).toBeGreaterThan(0);
     expect(report.skills.positive).toBeGreaterThan(0);
     expect(report.skills.negative).toBeGreaterThan(0);
-    expect(report.episodes.total).toBe(3);
+    expect(report.episodes.total).toBe(4);
     expect(report.episodes.pass).toBe(1);
-    expect(report.episodes.fail).toBe(1);
+    expect(report.episodes.fail).toBe(2);
     expect(report.episodes.pending).toBe(1);
     expect(report.episodes.withLessons).toBe(1);
+    expect(report.episodes.deviations.misreadRequirement).toBe(1);
+    expect(report.episodes.deviations.scopeCreep).toBe(1);
+    expect(report.episodes.deviations.techDrift).toBe(0);
+    expect(report.goals.active).toBe(1);
+    expect(report.goals.supersededVersions).toBe(1);
   });
 
   it("returns an empty report for a missing store (read-only, no indexing)", () => {

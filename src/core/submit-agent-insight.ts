@@ -2,6 +2,13 @@ import type { GraphNode, TaskNode } from "./types";
 import type { GraphClient } from "../graph/client-factory";
 import type { SixHatsInsight } from "../agents/insight";
 import { mergeAgentInsightsFromGraph } from "./merge-agent-insight";
+import {
+  CLARIFICATION_CONFIDENCE_THRESHOLD,
+  extractGoalFromIntentPayload,
+  INTENT_GOAL_WORK_ITEM_IDS,
+  upsertGoalAnchor,
+  type GoalUpsertResult,
+} from "./goal-anchor";
 import { hashText } from "../utils/hash";
 
 export interface SubmitAgentInsightInput {
@@ -22,9 +29,25 @@ export type SubmitAgentInsightResult =
         insight: SixHatsInsight;
         plan: TaskNode[];
         missing: string[];
+        needsClarification?: boolean;
+        intentConfidence?: number;
       };
+      /** Present when the submission created/updated a goal anchor. */
+      goal?: {
+        goalId: string;
+        version: number;
+        versioned: boolean;
+        changedFields: string[];
+        staleEpisodes: number;
+        confidence?: number;
+      };
+      /** True when the submitted intent confidence is below threshold. */
+      needsClarification?: boolean;
     }
   | { ok: false; reason: string };
+
+export const ALIGNMENT_CHECK_WORK_ITEM_ID = "alignment-check";
+export const CLARIFICATION_WORK_ITEM_ID = "clarification";
 
 function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 3)}...`;
@@ -74,6 +97,17 @@ function buildDecisionContent(workItemId: string, parsed: Record<string, unknown
   return truncate(`agent-insight ${workItemId}: ${summary}`, 200);
 }
 
+function readConfidence(parsed: Record<string, unknown>): number | undefined {
+  const raw = parsed.confidence;
+  return typeof raw === "number" && Number.isFinite(raw)
+    ? Math.min(1, Math.max(0, raw))
+    : undefined;
+}
+
+function isIntentWorkItem(workItemId: string): boolean {
+  return (INTENT_GOAL_WORK_ITEM_IDS as readonly string[]).includes(workItemId);
+}
+
 export async function submitAgentInsight(
   client: GraphClient,
   input: SubmitAgentInsightInput
@@ -106,18 +140,54 @@ export async function submitAgentInsight(
 
   await client.upsertNodes([node]);
 
-  const merged = await mergeAgentInsightsFromGraph(client, input.task);
   const result: Extract<SubmitAgentInsightResult, { ok: true }> = {
     ok: true,
     nodeId,
     parsed: parsedResult.parsed,
   };
+
+  // P0/P4: intent submissions (and clarifications) maintain the goal anchor.
+  const confidence = readConfidence(parsedResult.parsed);
+  if (isIntentWorkItem(input.workItemId) || input.workItemId === CLARIFICATION_WORK_ITEM_ID) {
+    const goalFields = extractGoalFromIntentPayload(parsedResult.parsed);
+    if (goalFields) {
+      const upsert: GoalUpsertResult = await upsertGoalAnchor(
+        client,
+        input.task,
+        goalFields,
+        confidence
+      );
+      result.goal = {
+        goalId: upsert.goalId,
+        version: upsert.record.version,
+        versioned: upsert.versioned,
+        changedFields: upsert.changedFields,
+        staleEpisodes: upsert.staleEpisodes,
+        ...(upsert.record.confidence !== undefined
+          ? { confidence: upsert.record.confidence }
+          : {}),
+      };
+    }
+    // P3: low-confidence intent should trigger a clarification round rather
+    // than being silently planned over.
+    if (confidence !== undefined && confidence < CLARIFICATION_CONFIDENCE_THRESHOLD) {
+      result.needsClarification = true;
+    }
+  }
+
+  const merged = await mergeAgentInsightsFromGraph(client, input.task);
   if (merged.complete) {
     result.merge = {
       complete: merged.complete,
       insight: merged.insight,
       plan: merged.plan,
       missing: merged.missing,
+      ...(merged.needsClarification !== undefined
+        ? { needsClarification: merged.needsClarification }
+        : {}),
+      ...(merged.intentConfidence !== undefined
+        ? { intentConfidence: merged.intentConfidence }
+        : {}),
     };
   }
   return result;

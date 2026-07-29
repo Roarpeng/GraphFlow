@@ -26,6 +26,7 @@ import {
   buildPromptContext,
   appendContextFeedback,
   maybeBuildSkillHints,
+  maybeBuildGoalAnchors,
   maybeRunPlanInsightForComplex,
 } from "./orchestrator-context.js";
 
@@ -102,11 +103,12 @@ async function runOrchestration(
     effectiveOptions?.configPath
   );
   const skillHints = await maybeBuildSkillHints(input.task, effectiveOptions);
+  const goalAnchors = await maybeBuildGoalAnchors(input.task, effectiveOptions);
   const similarEpisodes = await maybeFindSimilarEpisodes(input.task, effectiveOptions);
   const episodeSummaries = await Promise.all(
     similarEpisodes.map((ep) => summarizeEpisodeForPrompt(ep, effectiveOptions?.graphClient))
   );
-  const promptContext = buildPromptContext(contextPackage, skillHints, episodeSummaries, effectiveOptions);
+  const promptContext = buildPromptContext(contextPackage, skillHints, episodeSummaries, effectiveOptions, goalAnchors);
   const promptContextLines = promptContext?.summaryChannel?.length ?? 0;
 
   let triageExplanation = triageTaskExplain(input.task);
