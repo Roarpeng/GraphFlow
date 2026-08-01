@@ -51,6 +51,9 @@ export function buildCliUsage(): string {
     "  route diagnose [--json] [--config <path>]",
     "  learn nightly [--json] [--config <path>]",
     "  learn forget [--json] [--config <path>]",
+    "  memory list [--limit N] [--outcome pass|fail|pending] [--json] [--config <path>]  # audit episodic memory: evidence records (id, task, outcome, lessons, staleGoal, updatedAt) sorted by updatedAt desc",
+    '  memory search "<query>" [--limit N] [--json] [--config <path>]  # semantic similarity over episodes (FNV fallback); per-hit id, task, score, outcome',
+    "  memory forget <episodeId> [--json] [--config <path>]  # delete a single episode record; unknown id is a clean no-op",
     "  help | --help | -h",
     "  version | --version | -v",
   ].join("\n");
