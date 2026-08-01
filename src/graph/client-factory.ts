@@ -70,7 +70,27 @@ class InMemoryGraphClientAdapter implements GraphClient {
 
 export function createGraphClient(config: GraphFlowConfig): GraphClient {
   if (config.graphPolicy.transport === "mcp-http") {
-    return new GraphifyMcpClient(config.graphPolicy.mcpEndpoint!, config.graphPolicy.mcpApiKey);
+    // Team backend pilot: remote Graphify server, transparently falling back
+    // to the local JSON file store when the endpoint is missing, malformed,
+    // or unreachable at operation time (mirrors the sqlite -> file pattern).
+    const endpoint = config.graphPolicy.mcpEndpoint;
+    if (!endpoint) {
+      throw new Error(
+        "[graphflow] graphPolicy.mcpEndpoint is required for mcp-http transport. " +
+          'Add it to graphflow.config.json, e.g. "http://graphify.team.internal:8080".'
+      );
+    }
+    const fallbackPath = resolveGraphStorePath(config);
+    try {
+      return new GraphifyMcpClient(endpoint, config.graphPolicy.mcpApiKey, { fallbackPath });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        { err, fallbackPath },
+        `[graphflow] mcp-http transport unavailable, falling back to file. Reason: ${msg}`
+      );
+      return new GraphifyFileClient(fallbackPath);
+    }
   }
 
   if (config.graphPolicy.transport === "file") {

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { extractEnvPlaceholderName } from "./secrets";
+import { validateGraphifyEndpoint } from "./graphify-endpoint";
 import type { GraphFlowConfig } from "./schema";
 import { getDefaultConfig, resolveMaxContextTokens, DEFAULT_OUTPUT_DIR } from "./defaults";
 import { resolveIncludeExtensions } from "./include-extensions.js";
@@ -62,8 +63,15 @@ export function validateConfigDetailed(path = "graphflow.config.json"): ConfigVa
     if (!allowedTransports.has(parsed.graphPolicy.transport)) {
       issues.push({ severity: "error", field: "graphPolicy.transport", message: `Must be one of: memory|mcp-http|file|sqlite|auto, got "${parsed.graphPolicy.transport}"` });
     }
-    if (parsed.graphPolicy.transport === "mcp-http" && !parsed.graphPolicy.mcpEndpoint) {
-      issues.push({ severity: "error", field: "graphPolicy.mcpEndpoint", message: "Required for mcp-http transport" });
+    if (parsed.graphPolicy.transport === "mcp-http") {
+      if (!parsed.graphPolicy.mcpEndpoint) {
+        issues.push({ severity: "error", field: "graphPolicy.mcpEndpoint", message: "Required for mcp-http transport" });
+      } else {
+        const invalid = validateGraphifyEndpoint(parsed.graphPolicy.mcpEndpoint);
+        if (invalid) {
+          issues.push({ severity: "error", field: "graphPolicy.mcpEndpoint", message: invalid });
+        }
+      }
     }
     if (parsed.graphPolicy.transport === "file" && !parsed.graphPolicy.graphStorePath) {
       issues.push({ severity: "warning", field: "graphPolicy.graphStorePath", message: "Not set for file transport; will use default" });
@@ -202,8 +210,17 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     throw new Error("Invalid config: graphPolicy is required.");
   }
 
-  if (input.graphPolicy.transport === "mcp-http" && !input.graphPolicy.mcpEndpoint) {
-    throw new Error("Invalid config: graphPolicy.mcpEndpoint is required for mcp-http.");
+  if (input.graphPolicy.transport === "mcp-http") {
+    if (!input.graphPolicy.mcpEndpoint) {
+      throw new Error(
+        "Invalid config: graphPolicy.mcpEndpoint is required for mcp-http. " +
+          'Point it at a Graphify team server, e.g. "http://graphify.team.internal:8080".'
+      );
+    }
+    const invalid = validateGraphifyEndpoint(input.graphPolicy.mcpEndpoint);
+    if (invalid) {
+      throw new Error(`Invalid config: ${invalid}`);
+    }
   }
 
   if (input.graphPolicy.transport === "file" && !input.graphPolicy.graphStorePath) {
