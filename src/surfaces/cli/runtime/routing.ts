@@ -44,6 +44,7 @@ import { join } from "node:path";
 import { getRuntimeTimelineSummary } from "../../../core/cancellation";
 import { bindRuntimeWorkspaceRoot, resolveRuntimeWorkspaceRoot } from "../../../config/workspace-root";
 import { getEmbeddingQualitySummary } from "../../../learning/embedding-quality";
+import { resolveActiveEmbeddingBackend } from "../../../config/embedding-factory";
 import { buildEmbeddingOptions } from "./env.js";
 import { extractTokenCost } from "./helpers.js";
 import { hasIndexCache } from "../../../graph/file-indexer-cache";
@@ -177,6 +178,9 @@ export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResu
     model: "none",
     embedded: false,
   };
+  // P0-1: report the ACTIVE embedding backend — "semantic" when a real model
+  // (MiniLM via transformers / OpenAI) is active, "off" for FNV-1a hash or none.
+  const embeddingBackend = resolveActiveEmbeddingBackend(config);
 
   const workspaceRoot = computeWorkspaceRootDiagnosis(config);
   const graphFreshness = computeGraphFreshnessDiagnosis(config);
@@ -209,6 +213,7 @@ export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResu
       fallbackApplied: validator.fallbackApplied,
     },
     compression,
+    embeddingBackend,
     embeddingQuality: getEmbeddingQualitySummary(),
     runtimeTimeline: getRuntimeTimelineSummary(),
     workspaceRoot,
@@ -275,6 +280,7 @@ export function diagnoseRouting(configPath?: string): string {
     `worker=${result.worker.provider}/${result.worker.model}${result.worker.fallbackApplied ? ":fallback" : ""}`,
     `validator=${result.validator.provider}/${result.validator.model}${result.validator.fallbackApplied ? ":fallback" : ""}`,
     `compression=${result.compression.backend}:${result.compression.provider}/${result.compression.model}${result.compression.embedded ? ":embedded" : ""}`,
+    `embeddings=${result.embeddingBackend}`,
   ].join("; ");
 }
 
