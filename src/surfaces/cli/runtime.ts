@@ -59,6 +59,15 @@ export {
   runLearnForget,
 } from "./runtime/learning.js";
 export {
+  listEpisodes,
+  searchEpisodes,
+  forgetEpisode,
+  type MemoryOutcome,
+  type MemoryEpisodeItem,
+  type MemorySearchHit,
+  type MemoryForgetResult,
+} from "./runtime/memory.js";
+export {
   detectInstalledAgents,
   formatModelConfigGuide,
   installMcpToDetectedAgents,

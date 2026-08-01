@@ -31,6 +31,12 @@ import {
   runTaskResult,
   submitAgentInsightResult,
   mergeAgentInsightResult,
+  listEpisodes,
+  searchEpisodes,
+  forgetEpisode,
+  type MemoryEpisodeItem,
+  type MemorySearchHit,
+  type MemoryOutcome,
 } from "./runtime";
 import { validateConfigDetailed, type ConfigValidationResult } from "../../config/loader.js";
 import { isDeviationKind } from "../../learning/episodic-memory";
@@ -504,9 +510,106 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
+  if (command === "memory" && args[0] === "list") {
+    // Audit view of episodic memory: evidence records (id, task, outcome,
+    // lessons count, staleGoal flag, updatedAt), sorted by updatedAt desc.
+    const limitRaw = readCliFlagValue(args, "--limit");
+    const limit = limitRaw ? Number(limitRaw) : undefined;
+    if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+      console.log("Usage: graphflow memory list [--limit N] [--outcome pass|fail|pending] [--json] [--config <path>]");
+      process.exitCode = 1;
+      return undefined;
+    }
+    const outcomeRaw = readCliFlagValue(args, "--outcome");
+    const outcome: MemoryOutcome | undefined =
+      outcomeRaw === "pass" || outcomeRaw === "fail" || outcomeRaw === "pending"
+        ? outcomeRaw
+        : undefined;
+    if (outcomeRaw && !outcome) {
+      console.log("Usage: graphflow memory list [--limit N] [--outcome pass|fail|pending] [--json] [--config <path>]");
+      process.exitCode = 1;
+      return undefined;
+    }
+    const data = await listEpisodes(configPath, {
+      ...(limit !== undefined ? { limit } : {}),
+      ...(outcome ? { outcome } : {}),
+    });
+    return {
+      command: "memory-list",
+      data,
+      legacyText: formatMemoryList(data),
+    };
+  }
+
+  if (command === "memory" && args[0] === "search") {
+    const query = args
+      .slice(1)
+      .filter((part) => !part.startsWith("--"))
+      .join(" ")
+      .trim();
+    if (!query) {
+      console.log('Usage: graphflow memory search "<query>" [--limit N] [--json] [--config <path>]');
+      process.exitCode = 1;
+      return undefined;
+    }
+    const limitRaw = readCliFlagValue(args, "--limit");
+    const limit = limitRaw ? Number(limitRaw) : 10;
+    if (!Number.isInteger(limit) || limit <= 0) {
+      console.log('Usage: graphflow memory search "<query>" [--limit N] [--json] [--config <path>]');
+      process.exitCode = 1;
+      return undefined;
+    }
+    const data = await searchEpisodes(query, configPath, limit);
+    return {
+      command: "memory-search",
+      data,
+      legacyText: formatMemorySearch(data),
+    };
+  }
+
+  if (command === "memory" && args[0] === "forget") {
+    const episodeId = args[1]?.trim();
+    if (!episodeId || episodeId.startsWith("--")) {
+      console.log("Usage: graphflow memory forget <episodeId> [--json] [--config <path>]");
+      process.exitCode = 1;
+      return undefined;
+    }
+    const data = await forgetEpisode(episodeId, configPath);
+    if (!data.found) {
+      // Unknown id: clean no-op, reported without crashing.
+      process.exitCode = 1;
+    }
+    return {
+      command: "memory-forget",
+      data,
+      legacyText: `found=${data.found}; removed=${data.removed}${data.reason ? `; reason=${data.reason}` : ""}`,
+    };
+  }
+
   console.log(buildCliUsage());
   process.exitCode = 1;
   return undefined;
+}
+
+function formatMemoryList(items: MemoryEpisodeItem[]): string {
+  const lines: string[] = [`count=${items.length}`];
+  for (const item of items) {
+    const stale = item.staleGoal ? `; staleGoal=${item.staleGoal}` : "";
+    lines.push(
+      `id=${item.id}; task=${item.task}; outcome=${item.outcome}; lessons=${item.lessons}; updatedAt=${new Date(item.updatedAt).toISOString()}${stale}`
+    );
+  }
+  return lines.join("\n");
+}
+
+function formatMemorySearch(hits: MemorySearchHit[]): string {
+  const lines: string[] = [`hits=${hits.length}`];
+  for (const hit of hits) {
+    lines.push(
+      `id=${hit.id}; score=${hit.score.toFixed(3)}; outcome=${hit.outcome}; task=${hit.task}`
+    );
+  }
+  return lines.join("\n");
 }
 
 function formatValidationResult(data: ConfigValidationResult): string {
