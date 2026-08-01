@@ -1,52 +1,41 @@
 # GraphFlow VS Code Extension
 
-GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、任务规划、知识图谱可视化，并一键安装 GraphFlow MCP。
+GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、任务规划、知识图谱可视化、**跨会话记忆审计**，并一键安装 GraphFlow MCP。
 
-扩展**内置 GraphFlow runtime**（v1.4+），安装 VSIX 后**不需要**工作区存在 GraphFlow 源码，也**不需要**运行 `npm run start`。
+扩展**内置 GraphFlow runtime**，安装 VSIX 后**不需要**工作区存在 GraphFlow 源码，也**不需要**运行 `npm run start`。
 
 ## 当前版本
 
-- Extension / runtime：**1.9.3**
-- 对应 VSIX：`../artifacts/graphflow-1.9.3.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
+- Extension / runtime：**1.9.4**
+- 市场身份：`roarpeng.graphflow`（displayName **GraphFlow Context & Memory**）
+- 对应 VSIX：`../artifacts/graphflow-1.9.4.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
 
-### v1.9.3 要点（目标对齐）
+## v1.9.x 要点
 
-- **Goal 锚点**：intent 五元组（coreProblem / successDefinition / nonGoals）固化为图一等公民，每次打包自动注入原始需求——执行全程记得为什么出发
-- **低置信度澄清门**：intent `confidence < 0.6` 时不出 plan，先澄清（`clarification` work item）
-- **alignment-check 回检**：执行后对照目标锚点检查产出，附 drift 分类（`alignment-check` work item，不阻塞 merge）
-- **deviation 偏离分类**：`report_outcome` / `outcome report --deviation` 记录 `misread-requirement / scope-creep / tech-drift`，飞轮报告聚合
+- **记忆透明化（Memory Transparency）**：跨会话记忆可度量、可审计、可归因
+  - **记忆审计**：`graphflow memory list|search|forget`（CLI / runtime 均可）——按结局过滤、相似度排序检索、单条记忆删除；每条记忆带来源任务、结局、lessons、staleGoal 标记
+  - **记忆 ROI 基准**：`npm run benchmark:memory` 实测记忆开 100.0% vs 关 56.5%（62 任务，救回 27、0 受损），含「哪条记忆救了哪个任务」归因链
+  - **飞轮归因面板**：Skill Insights 面板新增 memoryAttribution 区块（记忆命中数、stale 记忆数、成败置信分布、Top 贡献记忆证据链、偏离分类）
+- **语义 embedding 可选后端**：`graphPolicy.embeddingProvider: "fnv" | "transformers"`（默认 `fnv` 离线安全；`transformers` 经 `@huggingface/transformers` 懒加载 all-MiniLM-L6-v2，失败自动降级 FNV）
+- **技能质量分类**：`proven / correctable / anti-pattern / noise` 四类——噪声技能提取即拒、装载时清理；仅 anti-pattern 记负分
+- **检索 golden set 132 查询**：10 域回归门禁 + 负样本 + Top-K 位置断言，防压缩/排序悄悄劣化召回
+- **skill sync 双向 MERGE**：团队技能包导入按 per-skill 并集合并（updatedAt 较新者胜、`--force` 覆盖），golden 检索集随包同步
+- **扩展改名**：`graphflow-tool` → `graphflow`（VSIX 产物 `graphflow-<version>.vsix`；Open VSX 新名待补发）
+
+### v1.8 要点（目标对齐，历史）
+
+- **Goal 锚点**：intent 五元组固化为图一等公民，每次打包自动注入原始需求
+- **低置信度澄清门**：`confidence < 0.6` 不出 plan，先澄清
+- **alignment-check 回检** + **deviation 偏离分类**（misread-requirement / scope-creep / tech-drift）
 - **Goal 版本链**：需求变更自动版本化 + `changedFields` diff，pending episodes 标记 `staleGoal`
-- **ATP/IR v1.1**：公开规范增量升级，v1.0 兼容
+- **ATP/IR v1.1** 公开规范（v1.0 兼容）
 
-### v1.7.15 要点（保留）
+### 更早要点（简）
 
-- **检索质量护栏**：26 条查询 golden set 回归测试 + 词干匹配（`routing` 命中 `route`），orchestrator 类查询不再漏召
-- **性能**：PageRank 全图指纹 LRU 缓存（重复打包零重算）；HNSW 向量索引跨进程持久化（`embeddingPolicy.vectorStorePath` 派生 `.hnsw`）
-- **存储 `transport: "auto"`**：sqlite 优先、JSON 文件透明降级；顺手修复 sqlite FTS 的 camelCase 检索盲区（schema v2）
-- **Skill 飞轮可度量**：`npm run benchmark:skills` A/B 基准（注入率/召回率/开销）；`graphflow skill report` 飞轮贡献报告；`graphflow skill sync export/import` 技能包进 git 团队共享
-- **ATP IR 公开规范**：`docs/atp-ir-spec-v1.md` 定义 `atp-ir/1.0` 委托载荷契约
-- **README 重写**：修复中文乱码，新定位「编码 Agent 的上下文与记忆层」
-- **测试环境隔离**：本机 ambient 配置不再让单测变成真实 LLM 网络调用；90 文件 / 443 tests 全绿
-
-### v1.7.14 要点（保留）
-
-- **Plan Agent Bridge**：无 GraphFlow LLM 时默认 `graphflow_plan` 也委托连接 Agent 拆任务，并附带本地 `suggestedNodes`
-- **Plan 子句拆分修复**：分析类冒号列表（assumptions、failure modes、validation gates…）不再被启发式拆成伪并行 DAG
-- **MCP home-cwd 修复**：Cursor 以用户 home 启动 MCP 时，不再把 `/home/<user>` 当作工作区（修复 `unsafe workspace root from discovery`）
-- **工作区发现增强**：读取 Cursor `WORKSPACE_FOLDER_PATHS`；忽略未展开的 `${workspaceFolder}` 占位符
-- **npx MCP 安装**：写入 `GRAPHFLOW_WORKSPACE_ROOT=${workspaceFolder}`，由 Cursor/VS Code 插值到真实项目根
-- **安装自检**：`graphflow install --json` / `doctor --json` 输出结构化成功/缺失/remediation
-- **Bridge CLI 飞轮**：`insight submit/merge` + `outcome report` 可在无 GraphFlow LLM 时关闭学习循环
-- Settings 工具页同步展示本版亮点与 MCP 使用提示
-
-### v1.7.9 要点（保留）
-
-- Open VSX 自动发布、Opencode agent 支持、embedding 超时/HF 镜像、全面 diagnose、技能衰减、Episode 隐私
-
-### v1.7.3 / 1.7.2 要点（保留）
-
-- **无痛 MCP**：扩展激活时自动扫描并修复 Trae 等配置里含空格的 `command`
-- Embedding 韧性 / 检索降噪 / 可选全图向量召回 / 离线模型缓存
+- 检索词干匹配、PageRank LRU 缓存、HNSW 向量索引持久化、`transport: "auto"`（sqlite 优先降级 file）
+- Plan Agent Bridge：无 GraphFlow LLM 时规划委托连接 Agent（agent-delegated + `suggestedNodes`）
+- MCP home-cwd 修复、工作区发现增强、`install --json` / `doctor --json` 结构化自检
+- Open VSX 自动发布、Opencode agent 支持、embedding 超时/HF 镜像
 
 ## 安装 VSIX（最终用户）
 
@@ -61,9 +50,9 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 ### 方式 B：命令行
 
 ```bash
-code --install-extension graphflow-1.9.3.vsix
+code --install-extension graphflow-1.9.4.vsix
 # Cursor CLI（若已安装）：
-cursor --install-extension graphflow-1.9.3.vsix
+cursor --install-extension graphflow-1.9.4.vsix
 ```
 
 ### 安装后推荐流程
@@ -73,12 +62,13 @@ cursor --install-extension graphflow-1.9.3.vsix
 3. 命令面板 → **GraphFlow: Show Settings**
 4. 确认 Graph Store Path（默认 `graphflow-out/graphflow-graph.json`）→ **Save Settings**
 5. 点击 **建立图谱（无需 LLM）** — 纯 AST 结构索引，无需 API Key
-6. （可选）配置 Provider / Smart·Economy 模型 → **测试路由**
+6. （可选）配置 Provider / Smart·Economy 模型 → **测试路由**；或设 `graphPolicy.embeddingProvider: "transformers"` 启用本地语义召回
 7. 命令面板 → **GraphFlow: Preview Context** 或 **GraphFlow: Show Graph** 验证
+8. 使用一段时间后打开 **GraphFlow: Skill Insights** 查看飞轮贡献与记忆归因
 
-> **无需 LLM** 即可使用：结构建图、Context Preview（hash embedding 兜底向量召回）、知识图谱可视化、MCP 工具。
+> **无需 LLM** 即可使用：结构建图、Context Preview（FNV-1a hash 向量召回兜底）、知识图谱可视化、记忆审计、MCP 工具。
 >
-> **关于语义模型**：VSIX **不**捆绑 `@xenova/transformers`（体积约 100MB+）。默认 hash 可用；若需本地 MiniLM，请预置缓存并设置 `GRAPHFLOW_EMBEDDING_CACHE_DIR`（或配置 `embeddingPolicy.modelCacheDir`）。
+> **关于语义模型**：VSIX **不**捆绑 `@huggingface/transformers` 模型（约 100MB+）。默认 `fnv` 离线可用；启用 `transformers` 时模型懒加载，无缓存/失败会告警并自动降级回 FNV。
 
 ## 功能命令
 
@@ -90,7 +80,7 @@ cursor --install-extension graphflow-1.9.3.vsix
 | GraphFlow: Plan & Brainstorm | 任务规划 |
 | GraphFlow: Plan Insight (Six Hats) | 六顶思考帽深度规划 |
 | GraphFlow: Run Task | 执行任务 |
-| GraphFlow: Skill Insights | 技能学习面板 |
+| GraphFlow: Skill Insights | 技能飞轮 + **记忆归因面板** |
 | GraphFlow: Install MCP to Agents | 手动重试 MCP 自动安装 |
 
 Chat Agent（`@graphflow`）：`/run`、`/plan`、`/graph`、`/skills`、`/diagnose`、`/learn`、`/history`
@@ -104,16 +94,24 @@ Chat Agent（`@graphflow`）：`/run`、`/plan`、`/graph`、`/skills`、`/diagn
 | `/run <task>` | `/run update readme and add tests` |
 | `/plan <task>` | `/plan refactor architecture and add tests` |
 | `/graph` | 输出图谱快照统计 |
-| `/skills` | 技能飞轮 Top 洞察 |
+| `/skills` | 技能飞轮 Top 洞察 + 记忆归因 |
 | `/diagnose` | 路由健康诊断 |
 | `/learn` | 触发 nightly 学习 |
 | `/history` | 本次会话运行记录 |
+
+## 记忆审计（CLI，扩展同 runtime）
+
+```bash
+graphflow memory list --outcome fail          # 失败的 episode 证据记录
+graphflow memory search "embedding fallback"  # 相似记忆检索（排序 + 分数）
+graphflow memory forget <episodeId>           # 删除单条记忆
+```
 
 ## 给同事分发
 
 直接发送 VSIX 文件即可，同事**无需** clone GraphFlow 仓库：
 
-1. 从 Releases 或本地 `artifacts/` 取得 `graphflow-1.9.3.vsix`
+1. 从 Releases 或本地 `artifacts/` 取得 `graphflow-1.9.4.vsix`
 2. 按上文「安装 VSIX」步骤安装
 3. 打开项目 → Settings → 建立图谱
 
@@ -164,7 +162,7 @@ npm run package:extension
 **MCP 未自动安装**
 
 - 命令面板 → **GraphFlow: Install MCP to Agents**
-- 或终端：`npx @roarpeng/graphflow@1.9.3 install`
+- 或终端：`npx @roarpeng/graphflow@1.9.4 install`
 
 **图谱为空 / Preview 0 anchors**
 
@@ -173,7 +171,7 @@ npm run package:extension
 
 **MCP 报错 `unsafe workspace root from discovery: /home/...`**
 
-- 升级到 **1.9.3+**，然后 Settings → **安装 / 更新 MCP**，Reload Window
+- 升级到 **1.9.4+**，然后 Settings → **安装 / 更新 MCP**，Reload Window
 - 工具调用务必传 `rootDir`（项目绝对路径）
 - CLI：`graphflow doctor --json` 查看 MCP/Skill 注册状态
 
