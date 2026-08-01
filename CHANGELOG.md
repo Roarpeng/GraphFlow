@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.9.1] - 2026-08-01
+
+记忆透明化版本:让「跨会话记忆」可度量、可审计、可归因。
+
+### Added
+
+- **记忆 ROI 基准（正式化）**：`npm run benchmark:memory`（`benchmarks/run-memory-ab.ts`）——62 任务（26 golden + 36 hard：跨模块影响面/消歧/间接形态），记忆开 vs 关双臂，实测 **ON 100.0% vs OFF 56.5%**（救回 27 任务、0 受损，其中 hard 域 17 个）；**归因链**逐任务记录「哪条记忆救了哪个任务」（top episode + 相似度 + 注入文本），JSON 落 `benchmarks/.cache/memory-ab-results.json`
+- **记忆审计 CLI**：`graphflow memory list [--outcome pass|fail|pending]`（证据记录：id/任务/结局/lessons/staleGoal）、`memory search "<query>"`（相似度排序命中）、`memory forget <id>`（物理删除，未知 id 干净 no-op）；runtime facade 暴露 `listEpisodes/searchEpisodes/forgetEpisode`
+- **飞轮报告归因区块**：`getFlywheelReport` 新增 `memoryAttribution`（memoryHits / staleEpisodes / confidence 分布 / topContributingMemories 证据链 / deviationBreakdown），全字段增量兼容
+
+### Changed
+
+- **VS Code 扩展改名**：`graphflow-tool` → **`graphflow`**（Open VSX 名称可用已验证；新身份 `roarpeng.graphflow`，VSIX 产物 `graphflow-<version>.vsix`）；扩展包名、agent 标识、CI 工件、文档同步
+- **测试 94 文件/646 → 95 文件/652**，全量通过
+
 ## [1.9.0] - 2026-08-01
 
 技能质量与团队化版本:飞轮从「机制完整、效果未知」走向「A/B 实证 + 质量门禁 + 团队共享」。
