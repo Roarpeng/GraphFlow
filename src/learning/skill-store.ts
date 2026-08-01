@@ -46,6 +46,13 @@ export function parseSkillState(content: string): SkillState | undefined {
       updatedAt: parsed.updatedAt ?? 0,
       ...(parsed.hidden === true ? { hidden: true } : {}),
       ...(typeof parsed.lastDecayedAt === "number" ? { lastDecayedAt: parsed.lastDecayedAt } : {}),
+      ...(parsed.hasSymbolEvidence === true ? { hasSymbolEvidence: true } : {}),
+      ...(parsed.linkedSuccess === true ? { linkedSuccess: true } : {}),
+      ...(typeof parsed.failStreak === "number" && parsed.failStreak > 0 ? { failStreak: parsed.failStreak } : {}),
+      ...(parsed.seeded === true ? { seeded: true } : {}),
+      ...(parsed.outcomeKind === "proven" || parsed.outcomeKind === "correctable" || parsed.outcomeKind === "anti-pattern" || parsed.outcomeKind === "noise"
+        ? { outcomeKind: parsed.outcomeKind }
+        : {}),
     };
   } catch (error) {
     logger.error({ error }, "Caught error");
@@ -74,6 +81,11 @@ export function parseCompositeState(content: string): CompositeSkillState | unde
       uses: parsed.uses ?? 0,
       lastOutcome: parsed.lastOutcome === "fail" ? "fail" : "pass",
       updatedAt: parsed.updatedAt ?? 0,
+      ...(parsed.hasSymbolEvidence === true ? { hasSymbolEvidence: true } : {}),
+      ...(parsed.seeded === true ? { seeded: true } : {}),
+      ...(parsed.outcomeKind === "proven" || parsed.outcomeKind === "correctable" || parsed.outcomeKind === "anti-pattern" || parsed.outcomeKind === "noise"
+        ? { outcomeKind: parsed.outcomeKind }
+        : {}),
     };
   } catch (error) {
     logger.error({ error }, "Caught error");

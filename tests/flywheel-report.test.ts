@@ -45,13 +45,25 @@ describe("flywheel contribution report", () => {
 
     const client = createGraphClient(validateConfig(JSON.parse(JSON.stringify(configJson))));
 
-    // Seed skills: one passing task, one failing task.
-    await applySkillLearning(client, "refactor planner module and add tests", {
+    // Seed skills: one passing task (twice → proven, positive score) and one
+    // failing task (twice → anti-pattern, negative score). P0-2 taxonomy:
+    // single observations stay neutral (correctable).
+    await applySkillLearning(client, "refactor planner module in planner.ts and add tests", {
       status: "COMPLETED",
       attempts: 1,
       feedback: "done",
     });
-    await applySkillLearning(client, "fix broken cache layer", {
+    await applySkillLearning(client, "refactor planner module in planner.ts and add tests", {
+      status: "COMPLETED",
+      attempts: 1,
+      feedback: "done",
+    });
+    await applySkillLearning(client, "fix broken cache layer in cache-layer.ts", {
+      status: "FAILED",
+      attempts: 1,
+      feedback: "failed",
+    });
+    await applySkillLearning(client, "fix broken cache layer in cache-layer.ts", {
       status: "FAILED",
       attempts: 1,
       feedback: "failed",
