@@ -910,7 +910,7 @@ export function buildSettingsHtml(
           : ""
       }
       <div class="flow-box">
-        <h3>v${escapeHtml(status?.extensionVersion ?? "1.9.2")} 本版亮点</h3>
+        <h3>v${escapeHtml(status?.extensionVersion ?? "1.9.3")} 本版亮点</h3>
         <ol>
           <li><strong>Goal 锚点</strong>：intent 五元组固化为图一等公民，每次打包自动注入原始需求——执行全程记得为什么出发。</li>
           <li><strong>低置信度澄清门</strong>：intent <code>confidence &lt; 0.6</code> 不出 plan，先澄清再定稿。</li>
