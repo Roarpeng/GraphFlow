@@ -224,6 +224,7 @@ export async function indexWorkspaceFiles(
         cacheState[result.relPath] = result.cacheEntry;
       }
       processedCount += 1;
+      options?.onProgress?.(processedCount, scanned.length);
       if (processedCount > 0 && processedCount % 100 === 0) {
         logger.info(
           { processed: processedCount, total: scanned.length, percent: `${((processedCount / scanned.length) * 100).toFixed(1)}%` },

@@ -3,11 +3,25 @@ process.env.GRAPHFLOW_MCP_STDIO ??= "1";
 process.env.GRAPHFLOW_LOG_JSON ??= "1";
 
 import type { Readable, Writable } from "node:stream";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import {
+  CallToolRequestSchema,
+  ErrorCode,
+  LATEST_PROTOCOL_VERSION,
+  ListToolsRequestSchema,
+  McpError,
+  SetLevelRequestSchema,
+  type CallToolResult,
+  type LoggingLevel,
+} from "@modelcontextprotocol/sdk/types.js";
 import { ensureMcpWorkspaceEnv } from "../../config/discover-workspace.js";
+import { attachMcpLogSink } from "../../utils/logger.js";
 import { getToolDefinitions, type ToolDefinition } from "./tool-definitions.js";
 import {
   executeToolCall as executeToolCallImpl,
   isRecord,
+  readProgressToken,
   readRequiredString,
   type ToolCall,
   type ToolCallResponse,
@@ -17,21 +31,14 @@ import { PACKAGE_VERSION } from "./version.js";
 export { getToolDefinitions } from "./tool-definitions.js";
 export type { ToolCall, ToolCallResponse } from "./tool-handlers.js";
 
-export async function executeToolCall(
-  call: ToolCall,
-  server: McpServer = createMcpServer()
-): Promise<ToolCallResponse> {
-  return executeToolCallImpl(call, server);
-}
-
-interface JsonRpcRequest {
+export interface JsonRpcRequest {
   jsonrpc: "2.0";
   id?: number | string;
   method: string;
   params?: Record<string, unknown>;
 }
 
-interface JsonRpcResponse {
+export interface JsonRpcResponse {
   jsonrpc: "2.0";
   id: number | string | null;
   result?: unknown;
@@ -47,13 +54,29 @@ interface JsonRpcNotification {
   params?: Record<string, unknown>;
 }
 
+/** Servers whose SDK transport is currently connected, so notifications can be emitted. */
+const connectedServers = new WeakSet<McpServer>();
+
 export interface McpServer {
   serverInfo: {
     name: string;
     version: string;
   };
   tools: ToolDefinition[];
+  /** SDK-backed server used by startStdioServer for the wire connection. */
+  sdkServer: Server;
   handleRequest(request: JsonRpcRequest): Promise<JsonRpcResponse | undefined>;
+  /** Emit a notifications/progress update for a long-running tool call (no-op when not connected). */
+  sendProgress(progressToken: string | number, progress: number, total: number): void;
+  /** Emit a notifications/message log entry (no-op when not connected). */
+  sendLogNotification(level: LoggingLevel, message: string): void;
+}
+
+export async function executeToolCall(
+  call: ToolCall,
+  server: McpServer = createMcpServer()
+): Promise<ToolCallResponse> {
+  return executeToolCallImpl(call, server);
 }
 
 export function createMcpServer(
@@ -61,120 +84,134 @@ export function createMcpServer(
 ): McpServer {
   const tools = getToolDefinitions();
 
-  return {
+  const sdkServer = new Server(
+    {
+      name: "graphflow",
+      version: PACKAGE_VERSION,
+    },
+    {
+      capabilities: {
+        tools: {},
+        logging: {},
+      },
+    }
+  );
+
+  const wrapper: McpServer = {
     serverInfo: {
       name: "graphflow",
       version: PACKAGE_VERSION,
     },
     tools,
+    sdkServer,
+    sendProgress(progressToken: string | number, progress: number, total: number): void {
+      if (!connectedServers.has(wrapper)) {
+        return;
+      }
+      void sdkServer
+        .notification({
+          method: "notifications/progress",
+          params: { progressToken, progress, total },
+        })
+        .catch(() => {
+          // Notification is best-effort; drop failures (e.g. transport closing).
+        });
+    },
+    sendLogNotification(level: LoggingLevel, message: string): void {
+      if (!connectedServers.has(wrapper)) {
+        return;
+      }
+      void sdkServer
+        .notification({
+          method: "notifications/message",
+          params: { level, data: message, loggerName: "graphflow" },
+        })
+        .catch(() => {
+          // Best-effort log notification; stderr remains the fallback channel.
+        });
+    },
     async handleRequest(request: JsonRpcRequest): Promise<JsonRpcResponse | undefined> {
       if (request.method === "notifications/initialized") {
         return undefined;
       }
-
-      if (request.method === "initialize") {
-        return {
-          jsonrpc: "2.0",
-          id: request.id ?? null,
-          result: {
-            protocolVersion: "2024-11-05",
-            capabilities: {
-              tools: {},
-            },
-            serverInfo: {
-              name: "graphflow",
-              version: PACKAGE_VERSION,
-            },
-          },
-        };
-      }
-
-      if (request.method === "tools/list") {
-        return {
-          jsonrpc: "2.0",
-          id: request.id ?? null,
-          result: {
-            tools,
-          },
-        };
-      }
-
-      if (request.method === "tools/call") {
-        try {
-          const params = request.params ?? {};
-          const result = await executeToolCallImpl({
-            name: readRequiredString(params.name, "name"),
-            arguments: isRecord(params.arguments) ? params.arguments : {},
-          }, undefined);
-          return {
-            jsonrpc: "2.0",
-            id: request.id ?? null,
-            result,
-          };
-        } catch (error) {
-          return {
-            jsonrpc: "2.0",
-            id: request.id ?? null,
-            error: {
-              code: -32000,
-              message: error instanceof Error ? error.message : "Unknown tool execution error",
-            },
-          };
+      try {
+        switch (request.method) {
+          case "initialize":
+            return respond(request.id ?? null, {
+              protocolVersion: LATEST_PROTOCOL_VERSION,
+              capabilities: {
+                tools: {},
+                logging: {},
+              },
+              serverInfo: wrapper.serverInfo,
+            });
+          case "ping":
+            return respond(request.id ?? null, {});
+          case "tools/list":
+            return respond(request.id ?? null, { tools });
+          case "tools/call":
+            return respond(request.id ?? null, await callTool(request.params ?? {}));
+          default:
+            throw new McpError(ErrorCode.MethodNotFound, `Method not found: ${request.method}`);
         }
+      } catch (error) {
+        return respondError(request.id ?? null, error);
       }
-
-      return {
-        jsonrpc: "2.0",
-        id: request.id ?? null,
-        error: {
-          code: -32601,
-          message: `Method not found: ${request.method}`,
-        },
-      };
     },
+  };
+
+  async function callTool(params: Record<string, unknown>): Promise<CallToolResult> {
+    const progressToken = readProgressToken(params);
+    const call: ToolCall = {
+      name: readRequiredString(params.name, "name"),
+      arguments: isRecord(params.arguments) ? params.arguments : {},
+      ...(progressToken !== undefined ? { progressToken } : {}),
+    };
+    try {
+      return await executeToolCallImpl(call, wrapper);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown tool execution error";
+      wrapper.sendLogNotification("error", `Tool '${call.name}' failed: ${message}`);
+      throw new McpError(ErrorCode.InternalError, message);
+    }
+  }
+
+  sdkServer.setRequestHandler(ListToolsRequestSchema, () => ({ tools }));
+  sdkServer.setRequestHandler(CallToolRequestSchema, (request) => callTool(request.params as Record<string, unknown>));
+  sdkServer.setRequestHandler(SetLevelRequestSchema, () => ({}));
+
+  return wrapper;
+}
+
+function respond(id: number | string | null, result: unknown): JsonRpcResponse {
+  return {
+    jsonrpc: "2.0",
+    id,
+    result,
   };
 }
 
-export function startStdioServer(
-  server: McpServer = createMcpServer((notification) => writeMessage(process.stdout, notification)),
+function respondError(id: number | string | null, error: unknown): JsonRpcResponse {
+  const code = error instanceof McpError ? error.code : ErrorCode.InternalError;
+  const message = error instanceof Error ? error.message : "Unknown error";
+  return {
+    jsonrpc: "2.0",
+    id,
+    error: { code, message },
+  };
+}
+
+export async function startStdioServer(
+  server: McpServer = createMcpServer(),
   input: Readable = process.stdin,
   output: Writable = process.stdout
-): void {
-  let buffer = "";
-
-  input.setEncoding("utf8");
-  input.on("data", async (chunk: string) => {
-    buffer += chunk;
-
-    let newlineIndex: number;
-    while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
-      const line = buffer.slice(0, newlineIndex).trim();
-      buffer = buffer.slice(newlineIndex + 1);
-
-      if (!line) {
-        continue;
-      }
-
-      try {
-        const request = JSON.parse(line) as JsonRpcRequest;
-        const response = await server.handleRequest(request);
-        if (response) {
-          writeMessage(output, response);
-        }
-      } catch (err) {
-        // Ignore parse errors from invalid JSON lines
-        console.error("[GraphFlow MCP] Error parsing incoming message:", err);
-      }
-    }
-  });
+): Promise<void> {
+  const transport = new StdioServerTransport(input, output);
+  await server.sdkServer.connect(transport);
+  connectedServers.add(server);
 }
 
-function writeMessage(output: Writable, response: JsonRpcResponse | JsonRpcNotification): void {
-  const payload = JSON.stringify(response);
-  output.write(`${payload}\n`);
-}
-
-function installMcpProcessGuards(): void {
+function installMcpProcessGuards(server: McpServer): void {
   process.on("uncaughtException", (error) => {
     console.error("[GraphFlow MCP] uncaughtException:", error);
     process.exit(1);
@@ -191,50 +228,63 @@ function installMcpProcessGuards(): void {
     }
     shuttingDown = true;
     console.error(`[GraphFlow MCP] Received ${signal}, shutting down gracefully...`);
-    // Stop accepting new stdin input so in-flight requests can settle.
-    process.stdin.pause();
-    // Give in-flight handlers a brief window to flush before exiting.
-    setTimeout(() => process.exit(0), 500).unref();
+    void server.sdkServer
+      .close()
+      .catch(() => {
+        // Best-effort close; fall through to exit.
+      })
+      .finally(() => process.exit(0));
+    setTimeout(() => process.exit(0), 1000).unref();
   };
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 if (require.main === module) {
-  installMcpProcessGuards();
-  const workspaceRoot = ensureMcpWorkspaceEnv();
+  const server = createMcpServer();
+  installMcpProcessGuards(server);
+  attachMcpLogSink((level, message) => server.sendLogNotification(level as LoggingLevel, message));
 
   // Start file watcher only when we resolved a real project root.
   // Cursor often spawns MCP with cwd=user home; watching that freezes startup
   // by indexing AppData/Chrome/OneDrive and flooding stderr.
+  const workspaceRoot = ensureMcpWorkspaceEnv();
   void (async () => {
     if (!workspaceRoot) {
-      console.error(
+      const message =
         "[GraphFlow MCP] No safe workspace root resolved; skipping auto file watcher. " +
-          "Pass rootDir on tools or set GRAPHFLOW_WORKSPACE_ROOT."
-      );
+        "Pass rootDir on tools or set GRAPHFLOW_WORKSPACE_ROOT.";
+      console.error(message);
+      server.sendLogNotification("warning", message);
       return;
     }
     try {
       const { isUnsafeWorkspaceFallback } = await import("../../config/discover-workspace.js");
       if (isUnsafeWorkspaceFallback(workspaceRoot)) {
-        console.error(
-          `[GraphFlow MCP] Refusing to watch unsafe workspace root: ${workspaceRoot}`
-        );
+        const message = `[GraphFlow MCP] Refusing to watch unsafe workspace root: ${workspaceRoot}`;
+        console.error(message);
+        server.sendLogNotification("warning", message);
         return;
       }
       const { resolveConfig } = await import("../../config/resolve.js");
       const { startFileWatcherIfEnabled } = await import("../cli/runtime/graph.js");
       const config = resolveConfig();
-      startFileWatcherIfEnabled(config);
+      const started = startFileWatcherIfEnabled(config);
+      if (started) {
+        server.sendLogNotification("info", "[GraphFlow MCP] File watcher started");
+      }
     } catch (error) {
-      console.error(
-        "[GraphFlow MCP] File watcher not started:",
-        error instanceof Error ? error.message : error
-      );
+      const message =
+        "[GraphFlow MCP] File watcher not started: " +
+        (error instanceof Error ? error.message : error);
+      console.error(message);
+      server.sendLogNotification("error", message);
     }
   })();
 
   // Respond to initialize immediately; watcher is background-only.
-  startStdioServer();
+  void startStdioServer(server).catch((error) => {
+    console.error("[GraphFlow MCP] Failed to start stdio server:", error);
+    process.exit(1);
+  });
 }

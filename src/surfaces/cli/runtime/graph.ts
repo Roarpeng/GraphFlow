@@ -209,7 +209,11 @@ export async function previewContext(
   return result;
 }
 
-export async function indexGraph(rootDir?: string, configPath?: string): Promise<GraphIndexResult> {
+export async function indexGraph(
+  rootDir?: string,
+  configPath?: string,
+  options?: { onProgress?: (processed: number, total: number) => void }
+): Promise<GraphIndexResult> {
   const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
   const graphClient = createGraphClient(config);
   const targetDir = config.graphPolicy.workspaceRoot ?? process.cwd();
@@ -223,6 +227,7 @@ export async function indexGraph(rootDir?: string, configPath?: string): Promise
 
   const indexed = await indexWorkspaceFiles(graphClient, targetDir, {
     ...indexOptions,
+    ...(options?.onProgress ? { onProgress: options.onProgress } : {}),
   });
 
   return indexed;
@@ -261,7 +266,11 @@ export async function indexFile(
   return { ...result, path: absPath };
 }
 
-export async function rebuildGraph(rootDir?: string, configPath?: string): Promise<GraphRebuildResult> {
+export async function rebuildGraph(
+  rootDir?: string,
+  configPath?: string,
+  options?: { onProgress?: (processed: number, total: number) => void }
+): Promise<GraphRebuildResult> {
   const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
   const graphClient = createGraphClient(config);
   const targetDir = config.graphPolicy.workspaceRoot ?? process.cwd();
@@ -276,6 +285,7 @@ export async function rebuildGraph(rootDir?: string, configPath?: string): Promi
   const indexed = await indexWorkspaceFiles(graphClient, targetDir, {
     ...indexOptions,
     forceReindex: true,
+    ...(options?.onProgress ? { onProgress: options.onProgress } : {}),
   });
 
   return {
