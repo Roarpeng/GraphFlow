@@ -561,8 +561,9 @@ export async function importArtifact(
  */
 export async function exportSkillPackageRuntime(
   configPath?: string,
-  outputPath?: string
-): Promise<{ path: string; skillCount: number; bytes: number }> {
+  outputPath?: string,
+  opts?: { goldenQueries?: string[] }
+): Promise<{ path: string; skillCount: number; bytes: number; goldenQueries?: number }> {
   const config = resolveConfig(configPath);
   const graphClient = createGraphClient(config);
   const { exportSkillPackage } = await import("../../../learning/skill-package.js");
@@ -572,19 +573,32 @@ export async function exportSkillPackageRuntime(
       ? outputPath
       : join(root, outputPath))
     : join(root, "graphflow-out", "skills.json");
-  return exportSkillPackage(graphClient, targetPath);
+  return exportSkillPackage(graphClient, targetPath, opts?.goldenQueries ? { goldenQueries: opts.goldenQueries } : undefined);
 }
 
 /**
- * 导入技能包，跳过已存在的技能。
+ * 导入技能包（双向 MERGE：per-skill-id union，updatedAt 较新者胜，
+ * 并列保留本地，仅本地技能保留；opts.force 恢复覆盖语义）。
+ * 技能包携带 goldenQueries 时合并进本地集合并写入
+ * `.graphflow/team-golden.json` 旁车文件。
  *
  * @param configPath 可选配置路径
  * @param inputPath 输入文件路径（默认 graphflow-out/skills.json）
+ * @param opts 导入选项（force / goldenPath）
  */
 export async function importSkillPackageRuntime(
   configPath?: string,
-  inputPath?: string
-): Promise<{ path: string; imported: number; skipped: number; total: number }> {
+  inputPath?: string,
+  opts?: { force?: boolean; goldenPath?: string }
+): Promise<{
+  path: string;
+  imported: number;
+  skipped: number;
+  updated: number;
+  total: number;
+  goldenPath?: string;
+  goldenQueries?: number;
+}> {
   const config = resolveConfig(configPath);
   const graphClient = createGraphClient(config);
   const { importSkillPackage } = await import("../../../learning/skill-package.js");
@@ -594,7 +608,45 @@ export async function importSkillPackageRuntime(
       ? inputPath
       : join(root, inputPath))
     : join(root, "graphflow-out", "skills.json");
-  return importSkillPackage(graphClient, sourcePath);
+  const goldenPath = opts?.goldenPath ?? join(root, ".graphflow", "team-golden.json");
+  return importSkillPackage(graphClient, sourcePath, { force: opts?.force ?? false, goldenPath });
+}
+
+/**
+ * 加载团队 golden 检索基准查询：
+ * 优先从仓库内的 retrieval-golden 测试导出（开发环境），
+ * 失败（如安装包环境无 tests/ 目录）时回退到本地 `.graphflow/team-golden.json` 旁车文件。
+ */
+async function loadCanonicalGoldenQueries(root: string): Promise<string[]> {
+  try {
+    // 动态 import 避免生产构建解析 tests/（tsconfig exclude）；非字面量说明符
+    const testFile = "retrieval-golden.test";
+    const specifier = `../../../../tests/${testFile}.ts`;
+    const mod = (await import(specifier)) as {
+      GOLDEN_SET?: ReadonlyArray<{ query: string }>;
+    };
+    const queries =
+      mod.GOLDEN_SET?.map((entry) => entry.query).filter(
+        (q): q is string => typeof q === "string"
+      ) ?? [];
+    if (queries.length > 0) {
+      return queries;
+    }
+  } catch {
+    // 非仓库环境：tests/ 不存在 → 回退旁车文件
+  }
+  try {
+    const sidecar = join(root, ".graphflow", "team-golden.json");
+    if (existsSync(sidecar)) {
+      const parsed = JSON.parse(readFileSync(sidecar, "utf8")) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed.filter((q): q is string => typeof q === "string");
+      }
+    }
+  } catch {
+    // 旁车文件缺失/损坏 → 无 golden 查询
+  }
+  return [];
 }
 
 /**
@@ -604,17 +656,33 @@ export async function importSkillPackageRuntime(
  * `<workspace>/.graphflow/skills/team-skills.json`. Teams commit this file so
  * every member's agents share the same accumulated project experience.
  *
+ * 冲突策略（import）：双向 MERGE —— per-skill-id union；同 id 冲突时
+ * `updatedAt` 较新者胜、并列保留本地；仅本地/仅包中技能均保留；
+ * `--force` 恢复覆盖语义。golden 查询随包往返，导入时合并（本地优先、
+ * 按文本去重）写入 `.graphflow/team-golden.json` 旁车文件。
+ *
  * @param configPath 可选配置路径
  * @param direction "export"（本地图 → 团队文件）或 "import"（团队文件 → 本地图）
  * @param customPath 覆盖默认团队技能包路径
+ * @param opts 同步选项（force：import 时恢复覆盖语义）
  */
 export async function syncSkillPackageRuntime(
   configPath: string | undefined,
   direction: "export" | "import",
-  customPath?: string
+  customPath?: string,
+  opts?: { force?: boolean }
 ): Promise<
-  | { direction: "export"; path: string; skillCount: number; bytes: number }
-  | { direction: "import"; path: string; imported: number; skipped: number; total: number }
+  | { direction: "export"; path: string; skillCount: number; bytes: number; goldenQueries?: number }
+  | {
+      direction: "import";
+      path: string;
+      imported: number;
+      skipped: number;
+      updated: number;
+      total: number;
+      goldenPath?: string;
+      goldenQueries?: number;
+    }
 > {
   const config = resolveConfig(configPath);
   const root = config.graphPolicy.workspaceRoot ?? process.cwd();
@@ -625,10 +693,14 @@ export async function syncSkillPackageRuntime(
     : join(root, ".graphflow", "skills", "team-skills.json");
 
   if (direction === "export") {
-    const result = await exportSkillPackageRuntime(configPath, teamPath);
+    // 导出时打包团队 golden 检索基准（canonical 查询列表）
+    const goldenQueries = await loadCanonicalGoldenQueries(root);
+    const result = await exportSkillPackageRuntime(configPath, teamPath, { goldenQueries });
     return { direction: "export", ...result };
   }
-  const result = await importSkillPackageRuntime(configPath, teamPath);
+  const result = await importSkillPackageRuntime(configPath, teamPath, {
+    force: opts?.force ?? false,
+  });
   return { direction: "import", ...result };
 }
 

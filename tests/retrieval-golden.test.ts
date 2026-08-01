@@ -61,9 +61,14 @@ interface GoldenEntry {
   expectAny: string[];
   domain: string;
   topK?: number;
+  mustNotContain?: string[];
 }
 
-const GOLDEN_SET: ReadonlyArray<GoldenEntry> = [
+/**
+ * The canonical retrieval golden set, exported so `skill sync export` can
+ * bundle the team queries into the skill package (`goldenQueries` field).
+ */
+export const GOLDEN_SET: ReadonlyArray<GoldenEntry> = [
   // ── domain: orchestrator (src/core + src/agents) ──────────────────────────
   { query: "orchestrate task routing", expectAny: ["orchestrator"], domain: "orchestrator", topK: 4 },
   { query: "dag execution engine", expectAny: ["dag-engine", "executedag"], domain: "orchestrator", topK: 3 },
