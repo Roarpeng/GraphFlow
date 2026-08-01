@@ -107,7 +107,7 @@ describe("M48 bridge mode outcome feedback loop", () => {
 
     // Step 1: Bridge mode — task delegated, skill NOT penalized
     const run = await orchestrate(
-      { task: "refactor planner and add tests" },
+      { task: "refactor planner.ts and add tests" },
       {
         graphClient: client,
         enableEpisodicMemory: true,
@@ -151,7 +151,7 @@ describe("M48 bridge mode outcome feedback loop", () => {
     expect(skillNodes.length).toBeGreaterThan(0);
 
     // Skill hints should now be available for similar tasks
-    const hints = await suggestSkillHints(client, "refactor planner and add tests", 3);
+    const hints = await suggestSkillHints(client, "refactor planner.ts and add tests", 3);
     expect(hints.length).toBeGreaterThan(0);
   });
 
@@ -215,7 +215,7 @@ describe("M48 bridge mode outcome feedback loop", () => {
       const reported = await reportOutcome(
         runResult.episodeId!,
         true,
-        ["prefer concise regression checks", "keep readme sections focused"],
+        ["prefer concise regression checks in regression-checks.ts", "keep sections focused on goal-anchor.ts"],
         configPath
       );
 
@@ -249,7 +249,7 @@ describe("M48 bridge mode outcome feedback loop", () => {
       client,
       "go",
       { status: "COMPLETED", attempts: 1, feedback: "done" },
-      ["prefer concise regression checks"]
+      ["prefer concise regression checks in regression-checks.ts"]
     );
 
     expect(withLessons).toBeGreaterThan(0);

@@ -36,6 +36,7 @@ import {
   maybeSyncGraph,
   maybeSyncSkillGraph,
   finalizeEpisode,
+  maybeCleanupNoiseSkills,
   maybeSeedInitialSkills,
 } from "./orchestrator-episode.js";
 
@@ -95,6 +96,9 @@ async function runOrchestration(
   // 预置种子技能（幂等）：在技能飞轮启用时为图写入常见工程技能基线，
   // 须在构建技能提示之前执行，确保种子技能可被 suggestSkillHints 命中。
   await maybeSeedInitialSkills(effectiveOptions);
+  // P0-2: prune legacy pure-noise skill nodes (no symbol evidence) on load,
+  // before hints are built or any new learning is applied.
+  await maybeCleanupNoiseSkills(effectiveOptions);
   const retryOptions = input.maxRetries !== undefined ? { maxRetries: input.maxRetries } : {};
   const contextPackage = await maybeBuildNearLosslessContext(input, effectiveOptions);
   const routeDecisions = buildRouteDecisions(
