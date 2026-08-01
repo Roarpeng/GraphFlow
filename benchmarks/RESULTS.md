@@ -83,3 +83,98 @@ npm run benchmark
 
 No API key is required. The script builds its own isolated graph under
 `benchmarks/.cache/` and overwrites this file with fresh numbers on every run.
+
+<!-- BEGIN P1-2 SKILL-AB BENCHMARK -->
+## Skill-Flywheel End-to-End A/B Benchmark — Results (P1-2)
+
+> Appended by `npm run benchmark:ab` (`benchmarks/run-skill-ab.ts`).
+> Last run: 2026-08-01T05:32:09.980Z
+> Structured JSON: `benchmarks/.cache/skill-ab-results.json`
+
+## Summary
+
+26 retrieval-golden tasks (10 "indirect": the
+golden module name is morphologically distinct from the query words, e.g.
+"orchestrate" vs `orchestrator`), run end-to-end on an in-memory graph seeded
+with the golden target, distractors and a decoy. Arm A additionally simulates
+27 historical tasks through the real learning paths.
+
+| Metric | Arm A (flywheel ON) | Arm B (flywheel OFF) |
+| --- | --- | --- |
+| **Success proxy** (golden target within Top-5) | **100.0%** (26/26) | **61.5%** (16/26) |
+| Success via package Top-5 only | 61.5% | 61.5% |
+| Tasks rescued by flywheel (B miss → A hit) | 10 | — |
+| Tasks hurt by flywheel (B hit → A miss) | 0 | — |
+| Hint injection rate | 100.0% | 0% |
+| Episode recall rate | 100.0% | 0% |
+| Mean prompt-token overhead / task | 44.6 | 0 |
+| Total prompt-token overhead | 1160 | 0 |
+| Mean package tokens / task | 744.9 | 45.8 |
+| Decoy contamination (Top-5) | 3.8% | 3.8% |
+| Decoy contamination (injection) | 0.0% | 0% |
+| Mean wall-clock / task | 2.4 ms | 2.0 ms |
+| Total wall-clock | 0.2 s | — |
+
+## Per-task detail
+
+| Task | Golden module | Direct | Top-5 (B) | Success (A) | Pkg Top-5 (A) | Injection hit (A) | Hints | Episodes | Overhead tokens |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `orchestrate task routing` | `orchestrator` | no | miss | hit | no | yes | 3 | 1 | 38 |
+| `dag execution engine` | `dag-engine` | yes | hit | hit | yes | yes | 3 | 2 | 59 |
+| `triage task classification simple complex` | `triage` | yes | hit | hit | yes | yes | 3 | 1 | 41 |
+| `model router provider selection` | `model-router` | yes | hit | hit | yes | yes | 3 | 3 | 79 |
+| `provider health fallback chain` | `provider-health` | yes | hit | hit | yes | yes | 3 | 3 | 72 |
+| `graph compression pagerank centrality` | `graph-compression` | yes | hit | hit | yes | yes | 3 | 2 | 53 |
+| `context slicer layered package` | `context-slicer` | yes | hit | hit | yes | yes | 3 | 1 | 34 |
+| `skill flywheel hints scoring` | `skill-flywheel` | yes | hit | hit | yes | yes | 3 | 1 | 28 |
+| `episodic memory similar episodes` | `episodic-memory` | yes | hit | hit | yes | yes | 2 | 1 | 32 |
+| `embedding cosine similarity vector` | `embeddings` | no | miss | hit | no | yes | 3 | 1 | 31 |
+| `file watcher incremental index on save` | `filewatcher` | no | miss | hit | no | yes | 3 | 2 | 63 |
+| `sqlite graph storage fts5` | `sqlite-client` | yes | hit | hit | yes | yes | 3 | 2 | 59 |
+| `repo map module overview` | `repomap` | no | miss | hit | no | yes | 2 | 1 | 26 |
+| `token savings statistics` | `tokensavings` | no | miss | hit | no | yes | 3 | 2 | 52 |
+| `mcp server tool definitions` | `tool-definitions` | yes | hit | hit | yes | yes | 3 | 1 | 35 |
+| `cli output json formatting` | `formatcliresult` | no | miss | hit | no | yes | 3 | 1 | 37 |
+| `agent delegation work items bridge` | `workitem` | no | miss | hit | no | yes | 3 | 1 | 26 |
+| `six hats insight planning` | `brainstormer` | no | miss | hit | no | yes | 3 | 1 | 30 |
+| `hnsw approximate nearest neighbor index` | `hnsw` | yes | hit | hit | yes | yes | 3 | 2 | 65 |
+| `adaptive token budget estimation` | `estimatecontextbudget` | no | miss | hit | no | yes | 3 | 2 | 58 |
+| `artifact export import graph snapshot` | `artifact-manager` | yes | hit | hit | yes | yes | 3 | 2 | 53 |
+| `nightly learning trainer` | `nightly-trainer` | yes | hit | hit | yes | yes | 2 | 1 | 31 |
+| `reflect episodes extract lessons` | `reflector` | no | miss | hit | no | yes | 3 | 1 | 31 |
+| `dag checkpoint recovery taskrun` | `dag-checkpoint` | yes | hit | hit | yes | yes | 3 | 2 | 59 |
+| `cancellation timeout controller` | `cancellation` | yes | hit | hit | yes | yes | 3 | 1 | 28 |
+| `language indexers tree sitter wasm` | `language-indexers` | yes | hit | hit | yes | yes | 3 | 1 | 40 |
+
+## Methodology & honest caveats
+
+- **Task set** is duplicated from `tests/retrieval-golden.test.ts` GOLDEN_SET
+  (that file is owned by another agent and is not modified). Each task's
+  golden node id (`file:src/golden/<module>.ts`) contains an `expectAny`
+  alternative verbatim.
+- **Success proxy**: Top-K = the first 5 ranked anchors of the compressed
+  context package (the retrieval channel); success there means the **golden
+  node id** is within those 5 anchors (precise id membership — avoids
+  substring false positives from distractor/decoy nodes). For Arm A, the
+  injected hints + episode summaries form an additional channel an agent reads
+  in full; hints/episodes reference modules by **name**, so injection success
+  is the `expectAny` substring check. Arm A success = package Top-5 hit
+  **or** injection hit. The package-only hit rate is reported separately for a
+  like-for-like retrieval comparison.
+- **Arm B success is deliberately imperfect**: for the 10
+  indirect tasks the golden file shares zero tokens with the query (realistic:
+  module names are morphologically different from task wording), so pure
+  retrieval cannot find it — prior episodic experience is the only bridge.
+- Both arms run through the **real** retrieval and learning paths
+  (`buildEnhancedContextPackage`, `applySkillLearning`, `recordEpisode`,
+  `suggestSkillHints`, `findSimilarEpisodes`, `summarizeEpisodeForPrompt`)
+  on isolated in-memory graphs — no mocks, no network, no API key.
+- Token counts use `gpt-tokenizer` (gpt-4o encoding), identical to the token
+  benchmark. Hashing is the project's DJB2a (FNV-class) — fully deterministic
+  within a run; episode ids embed `Date.now()` so ids differ across runs, but
+  ranking depends on tokens/scores, not ids.
+- This measures a mechanical success proxy, not LLM task completion. It
+  validates that the flywheel's injected context and graph nodes move the
+  needle on finding the expected target, and quantifies the exact token and
+  wall-clock cost.
+<!-- END P1-2 SKILL-AB BENCHMARK -->
