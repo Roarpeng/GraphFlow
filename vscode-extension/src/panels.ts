@@ -33,6 +33,30 @@ export interface SkillInsightsResult {
     lastOutcome: "pass" | "fail";
     updatedAt: number;
   }>;
+  /** Flywheel contribution stats fed from the CLI `getFlywheelReport` computation. */
+  flywheel?: FlywheelPanelData;
+}
+
+/** Learning-loop contribution data shown in the Skill Insights panel's Flywheel section. */
+export interface FlywheelPanelData {
+  skills: {
+    total: number;
+    positive: number;
+    neutral: number;
+    negative: number;
+    /** Most-used skills — what the flywheel actually injects most often. */
+    topUsed: Array<{ name: string; score: number; uses: number }>;
+  };
+  episodes: {
+    total: number;
+    pass: number;
+    fail: number;
+    pending: number;
+    /** Episodes carrying extracted lessons (flywheel raw material). */
+    withLessons: number;
+  };
+  /** Decision nodes that are not episodes (Six Hats / plan insights). */
+  insightDecisions: number;
 }
 
 export interface AgentWorkItemView {
@@ -441,6 +465,7 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
 export function buildSkillInsightsHtml(insights: SkillInsightsResult, scriptUri: string): string {
   const serverTableRows = renderServerSkillTableRows(insights.skills);
   const serverSummary = renderServerSkillSummary(insights.skills);
+  const flywheelSection = insights.flywheel ? renderFlywheelSectionHtml(insights.flywheel) : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -507,8 +532,39 @@ export function buildSkillInsightsHtml(insights: SkillInsightsResult, scriptUri:
     .summary-card .label { color: var(--muted); font-size: 12px; }
     .summary-card .value { margin-top: 6px; font-size: 18px; font-weight: 700; }
     .empty { padding: 18px; color: var(--muted); }
+    .fw-panel { padding: 14px; }
+    .fw-panel h2 { margin: 0 0 12px; font-size: 14px; letter-spacing: 0.04em; color: var(--muted); }
+    .fw-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+    .fw-card { border: 1px solid var(--line); border-radius: 14px; padding: 12px; background: #fff; }
+    .fw-card .label { color: var(--muted); font-size: 12px; }
+    .fw-counts { display: flex; gap: 14px; margin-top: 8px; flex-wrap: wrap; }
+    .fw-count { display: grid; gap: 2px; }
+    .fw-count .num { font-size: 17px; font-weight: 700; }
+    .fw-count .num.positive { color: var(--accent); }
+    .fw-count .num.fail { color: var(--danger); }
+    .fw-count .num.pending { color: var(--warn); }
+    .fw-count .num.neutral { color: var(--muted); }
+    .fw-count .num.insight { color: #6d28d9; }
+    .fw-count .tag { font-size: 11px; color: var(--muted); }
+    .fw-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .fw-block { border: 1px solid var(--line); border-radius: 14px; padding: 12px; background: #fff; }
+    .fw-block-label { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+    .fw-top-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+    .fw-top-skill { display: flex; justify-content: space-between; align-items: center; gap: 8px; border: 1px solid #ece2d7; border-radius: 10px; padding: 6px 10px; font-size: 13px; }
+    .fw-skill-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fw-skill-meta { font-size: 11px; color: var(--muted); white-space: nowrap; }
+    .fw-bar { display: flex; height: 14px; border-radius: 999px; overflow: hidden; border: 1px solid var(--line); background: #f3eadf; }
+    .fw-bar-seg.pass { background: var(--accent); }
+    .fw-bar-seg.fail { background: var(--danger); }
+    .fw-bar-seg.pending { background: var(--warn); }
+    .fw-bar-legend { display: flex; gap: 12px; margin-top: 8px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+    .fw-bar-legend .dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; margin-right: 4px; }
+    .fw-bar-legend .dot.pass { background: var(--accent); }
+    .fw-bar-legend .dot.fail { background: var(--danger); }
+    .fw-bar-legend .dot.pending { background: var(--warn); }
+    .fw-empty { color: var(--muted); font-size: 13px; }
     @media (max-width: 900px) {
-      .toolbar, .summary { grid-template-columns: 1fr; }
+      .toolbar, .summary, .fw-grid, .fw-row { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -546,6 +602,7 @@ export function buildSkillInsightsHtml(insights: SkillInsightsResult, scriptUri:
       </div>
     </section>
     <section class="summary" id="skill-summary">${serverSummary}</section>
+    ${flywheelSection}
     <section class="panel">
       <table data-role="skill-table">
         <thead>
@@ -1232,6 +1289,75 @@ function renderServerSkillTableRows(skills: SkillInsightsResult["skills"]): stri
       );
     })
     .join("");
+}
+
+function renderFlywheelSectionHtml(flywheel: FlywheelPanelData): string {
+  const { skills, episodes, insightDecisions } = flywheel;
+  const totalSegments = Math.max(episodes.total, 1);
+  const passPct = Math.round((episodes.pass / totalSegments) * 100);
+  const failPct = Math.round((episodes.fail / totalSegments) * 100);
+  const pendingPct = Math.max(100 - passPct - failPct, 0);
+
+  const topUsedRows = skills.topUsed
+    .map(
+      (item) =>
+        `<li class="fw-top-skill"><span class="fw-skill-name">${escapeHtml(item.name)}</span>` +
+        `<span class="fw-skill-meta">score ${item.score} · ${item.uses} uses</span></li>`
+    )
+    .join("");
+
+  return `<section class="fw-panel panel">
+    <h2>Flywheel · 学习飞轮贡献</h2>
+    <div class="fw-grid">
+      <div class="fw-card">
+        <div class="label">Skill distribution</div>
+        <div class="fw-counts">
+          <div class="fw-count"><span class="num positive">${skills.positive}</span><span class="tag">positive</span></div>
+          <div class="fw-count"><span class="num neutral">${skills.neutral}</span><span class="tag">neutral</span></div>
+          <div class="fw-count"><span class="num fail">${skills.negative}</span><span class="tag">negative</span></div>
+          <div class="fw-count"><span class="num">${skills.total}</span><span class="tag">total</span></div>
+        </div>
+      </div>
+      <div class="fw-card">
+        <div class="label">Episodes</div>
+        <div class="fw-counts">
+          <div class="fw-count"><span class="num positive">${episodes.pass}</span><span class="tag">pass</span></div>
+          <div class="fw-count"><span class="num fail">${episodes.fail}</span><span class="tag">fail</span></div>
+          <div class="fw-count"><span class="num pending">${episodes.pending}</span><span class="tag">pending</span></div>
+          <div class="fw-count"><span class="num">${episodes.withLessons}</span><span class="tag">with lessons</span></div>
+        </div>
+      </div>
+      <div class="fw-card">
+        <div class="label">Insight decisions</div>
+        <div class="fw-counts">
+          <div class="fw-count"><span class="num insight">${insightDecisions}</span><span class="tag">non-episode decisions</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="fw-row">
+      <div class="fw-block">
+        <div class="fw-block-label">Top used skills</div>
+        ${
+          skills.topUsed.length > 0
+            ? `<ul class="fw-top-list">${topUsedRows}</ul>`
+            : '<div class="fw-empty">No skills used yet — run some tasks to spin the flywheel.</div>'
+        }
+      </div>
+      <div class="fw-block">
+        <div class="fw-block-label">Episode outcomes</div>
+        <div class="fw-bar">
+          <div class="fw-bar-seg pass" style="width:${passPct}%"></div>
+          <div class="fw-bar-seg fail" style="width:${failPct}%"></div>
+          <div class="fw-bar-seg pending" style="width:${pendingPct}%"></div>
+        </div>
+        <div class="fw-bar-legend">
+          <span><span class="dot pass"></span>pass ${episodes.pass}</span>
+          <span><span class="dot fail"></span>fail ${episodes.fail}</span>
+          <span><span class="dot pending"></span>pending ${episodes.pending}</span>
+        </div>
+      </div>
+    </div>
+  </section>`;
 }
 
 function renderSettingsTierCard(

@@ -8,7 +8,7 @@ import type {
   installMcpToDetectedAgents,
   repairUnsafeWindowsMcpCommands,
 } from "../../../integrations/agent-mcp-installer";
-import type { getSkillInsights, indexGraph, inspectGraph, previewContext, rebuildGraph, startFileWatcherIfEnabled } from "./graph.js";
+import type { getFlywheelReport, getSkillInsights, indexGraph, inspectGraph, previewContext, rebuildGraph, startFileWatcherIfEnabled } from "./graph.js";
 import type { getSettingsPanelStatus, indexGraphFromSettings, testRoutingAndIndexGraph } from "./panel.js";
 import type {
   diagnoseRouting,
@@ -38,6 +38,7 @@ export interface GraphFlowRuntimeModule {
   diagnoseRoutingResult: typeof diagnoseRoutingResult;
   inspectGraph: typeof inspectGraph;
   getSkillInsights: typeof getSkillInsights;
+  getFlywheelReport: typeof getFlywheelReport;
   startFileWatcherIfEnabled: typeof startFileWatcherIfEnabled;
   getGraphFlowSettings: typeof getGraphFlowSettings;
   getSettingsPanelStatus: typeof getSettingsPanelStatus;
@@ -62,6 +63,7 @@ const REQUIRED_EXPORTS: Array<keyof GraphFlowRuntimeModule> = [
   "diagnoseRouting",
   "inspectGraph",
   "getSkillInsights",
+  "getFlywheelReport",
   "startFileWatcherIfEnabled",
   "getGraphFlowSettings",
   "getSettingsPanelStatus",

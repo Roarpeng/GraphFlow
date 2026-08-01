@@ -245,7 +245,10 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     const insights = await runGraphFlow(workspaceRoot, (runtime) => runtime.getSkillInsights(undefined, 24));
-    showSkillInsightsPanel(context, insights);
+    const flywheel = await runGraphFlow(workspaceRoot, (runtime) =>
+      Promise.resolve(runtime.getFlywheelReport())
+    );
+    showSkillInsightsPanel(context, { ...insights, flywheel });
   });
 
   const installMcp = vscode.commands.registerCommand("graphflow.installMcp", async () => {
