@@ -102,7 +102,6 @@ describe("P0-1 semantic embedding backend", () => {
   });
 
   it("transformers configured and healthy → provider used for query embedding in recall path", async () => {
-    const config = defaultConfigWith({ embeddingProvider: "transformers" });
     const nodes = [
       { id: "symbol:auth", type: "Symbol", content: "auth login handler" },
       { id: "symbol:cache", type: "Symbol", content: "cache invalidation helper" },
