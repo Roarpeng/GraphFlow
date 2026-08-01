@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.9.2] - 2026-08-01
+
+### Fixed
+
+- **Marketplace 发布**：新身份 `roarpeng.graphflow` 的 displayName 改为 **`GraphFlow`**（`GraphFlow Tool` 被旧列表 `roarpeng.graphflow-tool` 持有，VS Marketplace 拒绝重复 displayName；经 Marketplace 搜索 API 验证 `GraphFlow` 未被占用）
+
 ## [1.9.1] - 2026-08-01
 
 记忆透明化版本:让「跨会话记忆」可度量、可审计、可归因。
