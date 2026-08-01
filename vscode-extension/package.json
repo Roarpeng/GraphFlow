@@ -2,9 +2,9 @@
   "name": "graphflow",
   "publisher": "roarpeng",
   "displayName": "GraphFlow Context & Memory",
-  "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.9.1: memory transparency embedding backend, skill outcome taxonomy, retrieval golden set, team skill sync, flywheel panel.",
+  "description": "Token-first code context, knowledge graph, MCP, planning and cross-session memory for VS Code/Cursor: memory audit CLI, flywheel attribution panel, semantic embeddings, skill sync.",
   "icon": "media/graphflow.png",
-  "version": "1.9.3",
+  "version": "1.9.4",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"

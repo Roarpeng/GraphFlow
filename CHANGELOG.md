@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.9.4] - 2026-08-01
+
+### Changed
+
+- **扩展市场说明更新**：vscode-extension/README.md 重写为 v1.9.x 最新使用说明（记忆审计 CLI、飞轮归因面板、语义 embedding 配置、技能分类、skill sync、改名后市场身份 `roarpeng.graphflow` / `GraphFlow Context & Memory`）；扩展 description 改为版本无关描述（消除版本钉死导致的文档腐化）
+
 ## [1.9.3] - 2026-08-01
 
 ### Fixed
