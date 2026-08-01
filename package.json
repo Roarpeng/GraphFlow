@@ -47,6 +47,7 @@
     "benchmark": "tsx benchmarks/run-token-benchmark.ts",
     "benchmark:skills": "tsx benchmarks/run-skill-ab-benchmark.ts",
     "benchmark:ab": "tsx benchmarks/run-skill-ab.ts",
+    "benchmark:memory": "tsx benchmarks/run-memory-ab.ts",
     "lint": "eslint .",
     "build:extension": "npm --prefix vscode-extension run build",
     "test:extension": "npm --prefix vscode-extension run test:runtime",
