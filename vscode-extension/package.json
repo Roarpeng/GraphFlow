@@ -2,9 +2,9 @@
   "name": "graphflow",
   "publisher": "roarpeng",
   "displayName": "GraphFlow Tool",
-  "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.9.0: semantic embedding backend, skill outcome taxonomy, retrieval golden set, team skill sync, flywheel panel.",
+  "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.9.1: memory transparency embedding backend, skill outcome taxonomy, retrieval golden set, team skill sync, flywheel panel.",
   "icon": "media/graphflow.png",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"
