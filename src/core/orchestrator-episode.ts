@@ -4,7 +4,7 @@ import {
   recordEpisode,
   type EpisodeRecord,
 } from "../learning/episodic-memory.js";
-import { applySkillLearning } from "../learning/skill-flywheel.js";
+import { applySkillLearning, cleanupNoiseSkills } from "../learning/skill-flywheel.js";
 import { seedInitialSkills } from "../learning/seed-skills.js";
 import { backfillTriageOutcome } from "../learning/triage-telemetry.js";
 import { logger } from "../utils/logger.js";
@@ -24,6 +24,23 @@ export async function maybeSeedInitialSkills(options?: OrchestrateOptions): Prom
   } catch (error) {
     // 种子技能写入失败不应阻断编排主流程
     logger.warn({ error }, "Seed skills initialization failed");
+  }
+}
+
+/**
+ * P0-2 load-time cleanup: when the skill flywheel is active, prune legacy
+ * pure-noise skill nodes (no symbol evidence) that older versions extracted
+ * from generic episode text ("update", "readme", ...). Idempotent; never
+ * touches curated seed skills. Failures never block orchestration.
+ */
+export async function maybeCleanupNoiseSkills(options?: OrchestrateOptions): Promise<void> {
+  if (!options?.enableSkillFlywheel || !options.graphClient) {
+    return;
+  }
+  try {
+    await cleanupNoiseSkills(options.graphClient);
+  } catch (error) {
+    logger.warn({ error }, "Skill noise cleanup failed");
   }
 }
 

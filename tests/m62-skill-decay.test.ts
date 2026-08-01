@@ -29,11 +29,9 @@ describe("M62 skill decay and atom hygiene", () => {
     expect(atoms.some((s) => s.includes("update"))).toBe(false);
     expect(atoms.some((s) => s.includes("readme"))).toBe(false);
 
-    const mixed = extractSkillAtoms("update readme and add tests and refactor architecture module");
+    const mixed = extractSkillAtoms("update readme and add tests and refactor goal-anchor.ts");
     expect(mixed.some((s) => s.includes("update readme"))).toBe(false);
-    expect(
-      mixed.some((s) => s.includes("add tests") || s.includes("refactor") || s.includes("architecture"))
-    ).toBe(true);
+    expect(mixed.some((s) => s.includes("add tests") || s.includes("refactor"))).toBe(true);
   });
 
   it("pruneFailedSkills soft-hides toxic atomic skills from hints and insights", async () => {
@@ -93,9 +91,15 @@ describe("M62 skill decay and atom hygiene", () => {
     expect(shouldApplySkillLearningFromOutcome(false, "update readme", ["long enough lesson"])).toBe(
       true
     );
+    // P0-2 gate: success without project-symbol evidence yields no atoms.
     expect(shouldApplySkillLearningFromOutcome(true, "refactor planner and add tests", [])).toBe(
-      true
+      false
     );
+    expect(
+      shouldApplySkillLearningFromOutcome(true, "refactor planner and add tests", [
+        "keep planner.ts small",
+      ])
+    ).toBe(true);
     expect(shouldApplySkillLearningFromOutcome(false, "refactor planner and add tests", [])).toBe(
       false
     );

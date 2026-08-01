@@ -91,6 +91,10 @@ export async function seedInitialSkills(client: GraphClient): Promise<SeedResult
       // 种子技能默认记为 pass，仅作为初始状态，不影响后续真实学习
       lastOutcome: "pass",
       updatedAt: now,
+      // P0-2: curated baseline — load-time noise cleanup must never prune seeds.
+      seeded: true,
+      hasSymbolEvidence: true,
+      outcomeKind: "proven",
     };
     nodes.push({ id, type: "Skill", content: serializeAtomic(state) });
     createdAtomic.push(name);
@@ -119,6 +123,10 @@ export async function seedInitialSkills(client: GraphClient): Promise<SeedResult
       uses: SEED_INITIAL_USES,
       lastOutcome: "pass",
       updatedAt: now,
+      // P0-2: curated baseline — load-time noise cleanup must never prune seeds.
+      seeded: true,
+      hasSymbolEvidence: true,
+      outcomeKind: "proven",
     };
     nodes.push({ id, type: "Skill", content: serializeComposite(state) });
     createdComposite.push(state.name);

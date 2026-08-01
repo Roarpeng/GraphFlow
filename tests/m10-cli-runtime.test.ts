@@ -393,7 +393,7 @@ describe("M10 CLI runtime", () => {
       // Use a meaningful task (not stopword-only phrases like "update readme").
       const runResult = await runTaskResult("refactor orchestrator and add tests", configPath);
       if (runResult.episodeId) {
-        await reportOutcome(runResult.episodeId, true, ["prefer bridge outcome reporting"], configPath);
+        await reportOutcome(runResult.episodeId, true, ["prefer bridge outcome reporting in orchestrator-episode.ts"], configPath);
       }
       const insights = await getSkillInsights(configPath, 10);
 

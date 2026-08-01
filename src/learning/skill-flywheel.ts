@@ -7,6 +7,7 @@ import type {
   SkillState,
   CompositeSkillState,
   SkillEdge,
+  SkillOutcomeKind,
 } from "./skill-types";
 
 // 导入提取出去的辅助函数与存储方法
@@ -38,6 +39,43 @@ const STOPWORDS = new Set([
 ]);
 
 const PATH_EXT_RE = /\.(ts|tsx|js|jsx|mjs|cjs|json|md|txt|py|go|rs|css|html)\b/i;
+
+/**
+ * P0-2 extraction quality gate: a skill candidate must reference project-specific
+ * symbols (file/function/class paths from the episode record, e.g. "goal-anchor.ts").
+ * These shapes are unambiguous project-symbol evidence:
+ *  - file references:  goal-anchor.ts, src/a/b.js, readme.md, compose_skill.go
+ *  - slash paths:      src/learning/skill-flywheel.ts
+ *  - camelCase:        skillNodeId, GraphifyClient
+ *  - snake_case:       compose_skill_id
+ * Generic bare tokens without symbol evidence (update, readme, create, fix) never
+ * qualify, so shallow n-gram noise can no longer become a skill node.
+ */
+const PROJECT_SYMBOL_PATTERNS: Array<{ test: RegExp; match: RegExp }> = [
+  { test: /[a-z0-9_./-]+\.[a-z0-9]{2,8}\b/i, match: /[a-z0-9_./-]+\.[a-z0-9]{2,8}\b/gi },
+  { test: /\b[a-z0-9_-]+\/[a-z0-9_./-]+\b/i, match: /\b[a-z0-9_-]+\/[a-z0-9_./-]+\b/gi },
+  { test: /[a-z]+[A-Z][a-zA-Z0-9]*/, match: /[a-z]+[A-Z][a-zA-Z0-9]*/g },
+  { test: /\b[a-z0-9]+(?:_[a-z0-9]+)+\b/i, match: /\b[a-z0-9]+(?:_[a-z0-9]+)+\b/gi },
+];
+
+/** True when the text references at least one project-specific symbol. */
+export function hasProjectSymbolEvidence(text: string): boolean {
+  if (!text) return false;
+  return PROJECT_SYMBOL_PATTERNS.some(({ test }) => test.test(text));
+}
+
+/** Extract project-symbol-shaped tokens from the text (for diagnostics/tests). */
+export function extractProjectSymbols(text: string): string[] {
+  const out = new Set<string>();
+  if (!text) return [];
+  for (const { match } of PROJECT_SYMBOL_PATTERNS) {
+    for (const m of text.matchAll(match)) {
+      const token = m[0].trim();
+      if (token.length > 0) out.add(token);
+    }
+  }
+  return Array.from(out);
+}
 
 function isPathLikeToken(token: string): boolean {
   if (token.includes("/")) {
@@ -85,8 +123,15 @@ export function isAllStopwordPhrase(phrase: string): boolean {
   return tokens.every((token) => STOPWORDS.has(token));
 }
 
-export function extractSkillAtoms(task: string): string[] {
-  const normalized = task.trim().toLowerCase();
+export function extractSkillAtoms(task: string, evidence?: string[]): string[] {
+  const corpus = [task, ...(evidence ?? [])].filter(Boolean).join(" ");
+  // P0-2 quality gate: reject corpora that reference no project-specific symbols
+  // (file/function/class paths). Generic bare-token text ("update readme",
+  // "create fix") is extraction noise and must not become skill candidates.
+  if (!hasProjectSymbolEvidence(corpus)) {
+    return [];
+  }
+  const normalized = corpus.trim().toLowerCase();
 
   const phrases = normalized
     .split(/\band\b|,|;/i)
@@ -114,7 +159,7 @@ export function extractSkillAtoms(task: string): string[] {
   }
 
   const segmenter = new Intl.Segmenter("zh", { granularity: "word" });
-  const zhWords = Array.from(segmenter.segment(task))
+  const zhWords = Array.from(segmenter.segment(corpus))
     .filter(
       (seg) =>
         seg.isWordLike &&
@@ -129,6 +174,43 @@ export function extractSkillAtoms(task: string): string[] {
     .filter((skill) => !isBareStopword(skill))
     .filter((skill) => !isAllStopwordPhrase(skill))
     .slice(0, 8);
+}
+
+export interface SkillLearningOptions {
+  /** Extra episode-record material (plan descriptions, key decisions) that
+   *  carries project-symbol evidence for the extraction gate. */
+  evidence?: string[];
+  /** True when the outcome was reported back through the episode outcome loop
+   *  (bridge reportOutcome) — counts as a "linked successful outcome". */
+  linked?: boolean;
+}
+
+/**
+ * P0-2 outcome taxonomy classification:
+ * - noise:        no symbol evidence — never persisted; pruned on load.
+ * - anti-pattern: >= 2 consecutive failures with symbol evidence — the ONLY
+ *                 class that accrues negative score.
+ * - proven:       >= 2 uses or a linked successful outcome — the ONLY class
+ *                 that accrues positive score. Curated seed skills count as
+ *                 proven by design (baseline, never sinkable to negative).
+ * - correctable:  symbol evidence present, not yet proven. Score stays put.
+ */
+export function classifySkillOutcome(options: {
+  uses: number;
+  failStreak: number;
+  linkedSuccess: boolean;
+  seeded?: boolean;
+}): SkillOutcomeKind {
+  if (options.seeded === true) {
+    return "proven";
+  }
+  if (options.failStreak >= 2) {
+    return "anti-pattern";
+  }
+  if (options.uses >= 2 || options.linkedSuccess) {
+    return "proven";
+  }
+  return "correctable";
 }
 
 export interface PruneFailedSkillsOptions {
@@ -209,20 +291,146 @@ export async function pruneFailedSkills(
   return { pruned: ids.length, ids };
 }
 
+export interface CleanupNoiseSkillsResult {
+  /** Nodes deleted (or soft-hidden when deleteNode is unavailable). */
+  pruned: number;
+  ids: string[];
+  /** Legacy nodes whose names carry symbol evidence, re-tagged as correctable. */
+  reclassified: number;
+}
+
+/**
+ * A legacy skill name carries project-symbol evidence when it contains a
+ * file reference, slash path, camelCase or snake_case token. Bare generic
+ * tokens ("update", "readme", "create", "fix") never qualify.
+ */
+function isSymbolicSkillName(name: string): boolean {
+  return hasProjectSymbolEvidence(name.replace(/\+/g, " "));
+}
+
+/**
+ * P0-2 load-time cleanup: reclassify / prune existing pure-noise skill nodes.
+ * Nodes learned by older versions have no symbol evidence (shallow n-grams
+ * like "update" at score=-2). Curated seed nodes (seeded: true) and nodes
+ * whose names carry symbol evidence are kept; everything else is pruned.
+ * Runs at graph load (orchestration start / outcome report) — idempotent.
+ */
+export async function cleanupNoiseSkills(
+  client: GraphClient
+): Promise<CleanupNoiseSkillsResult> {
+  const skillNodes = await listSkillNodes(client);
+  const ids: string[] = [];
+  const updates: GraphNode[] = [];
+  let reclassified = 0;
+
+  for (const node of skillNodes) {
+    const atomic = parseSkillState(node.content);
+    if (atomic) {
+      // Explicit extraction-time evidence (new versions) or curated seed.
+      if (atomic.hasSymbolEvidence === true || atomic.seeded === true) {
+        continue;
+      }
+      if (isSymbolicSkillName(atomic.name)) {
+        // Legacy node whose name carries symbol evidence: keep, but tag it
+        // explicitly so future loads skip re-inspection.
+        if (atomic.outcomeKind !== "correctable") {
+          updates.push({
+            id: atomic.id,
+            type: "Skill",
+            content: serializeAtomic({
+              ...atomic,
+              hasSymbolEvidence: true,
+              outcomeKind: "correctable",
+              updatedAt: Date.now(),
+            }),
+          });
+          reclassified += 1;
+        }
+        continue;
+      }
+      ids.push(atomic.id);
+      if (client.deleteNode) {
+        await client.deleteNode(atomic.id);
+      } else {
+        updates.push({
+          id: atomic.id,
+          type: "Skill",
+          content: serializeAtomic({
+            ...atomic,
+            hidden: true,
+            outcomeKind: "noise",
+            updatedAt: Date.now(),
+          }),
+        });
+      }
+      continue;
+    }
+
+    const composite = parseCompositeState(node.content);
+    if (composite) {
+      if (composite.hasSymbolEvidence === true || composite.seeded === true) {
+        continue;
+      }
+      if (isSymbolicSkillName(composite.name)) {
+        if (composite.outcomeKind !== "correctable") {
+          updates.push({
+            id: composite.id,
+            type: "Skill",
+            content: serializeComposite({
+              ...composite,
+              hasSymbolEvidence: true,
+              outcomeKind: "correctable",
+              updatedAt: Date.now(),
+            }),
+          });
+          reclassified += 1;
+        }
+        continue;
+      }
+      ids.push(composite.id);
+      if (client.deleteNode) {
+        await client.deleteNode(composite.id);
+      } else {
+        // CompositeSkillState has no `hidden` flag; tag as noise so the next
+        // load (or a deleteNode-capable client) finishes the job.
+        updates.push({
+          id: composite.id,
+          type: "Skill",
+          content: serializeComposite({
+            ...composite,
+            outcomeKind: "noise",
+            updatedAt: Date.now(),
+          }),
+        });
+      }
+    }
+  }
+
+  if (updates.length > 0) {
+    await client.upsertNodes(updates);
+  }
+
+  return { pruned: ids.length, ids, reclassified };
+}
+
 export async function applySkillLearning(
   client: GraphClient,
   task: string,
   run: TaskRunResult,
-  lessons?: string[]
+  lessons?: string[],
+  options?: SkillLearningOptions
 ): Promise<number> {
   const lessonText = (lessons ?? [])
     .map((lesson) => lesson.trim())
     .filter((lesson) => lesson.length > 0);
   // Prefer task atoms; fold reported lessons so bridge report_outcome can seed skills
   // even when the original task string is too short/generic to extract atoms.
+  // P0-2: evidence (plan descriptions / key decisions from the episode record)
+  // provides project-symbol references for the extraction quality gate.
   const learningCorpus = [task, ...lessonText].filter(Boolean).join(" and ");
-  const skills = extractSkillAtoms(learningCorpus);
+  const skills = extractSkillAtoms(learningCorpus, options?.evidence);
   const passed = run.status === "COMPLETED";
+  const linked = options?.linked === true;
 
   if (skills.length === 0) {
     if (!passed) {
@@ -252,13 +460,36 @@ export async function applySkillLearning(
     if (previous?.hidden && !passed) {
       continue;
     }
+    const uses = (previous?.uses ?? 0) + 1;
+    const failStreak = passed ? 0 : (previous?.failStreak ?? 0) + 1;
+    const linkedSuccess =
+      (passed && linked) || previous?.linkedSuccess === true;
+    const outcomeKind = classifySkillOutcome({
+      uses,
+      failStreak,
+      linkedSuccess,
+      ...(previous?.seeded === true ? { seeded: true } : {}),
+    });
+    // Evidence gate: positive score accrues only for proven skills (>= 2 uses
+    // or a linked successful outcome); negative scoring applies ONLY to
+    // anti-pattern outcomes (>= 2 consecutive failures).
+    let score = previous?.score ?? 0;
+    if (passed && outcomeKind === "proven") {
+      score += 1;
+    } else if (!passed && outcomeKind === "anti-pattern") {
+      score -= 1;
+    }
     const next: SkillState = {
       id,
       name: skill,
-      score: boundedScore((previous?.score ?? 0) + (passed ? 1 : -1)),
-      uses: (previous?.uses ?? 0) + 1,
+      score: boundedScore(score),
+      uses,
       lastOutcome: passed ? "pass" : "fail",
       updatedAt: now,
+      hasSymbolEvidence: true,
+      linkedSuccess,
+      failStreak,
+      outcomeKind,
       // Pass clears soft-hide; fail preserves it if already set.
       ...(passed ? {} : previous?.hidden ? { hidden: true } : {}),
     };
@@ -303,8 +534,24 @@ export async function applySkillLearning(
         uses: previous?.uses ?? 0,
         lastOutcome: passed ? "pass" : "fail",
         updatedAt: now,
+        hasSymbolEvidence: true,
+        ...(previous?.seeded === true ? { seeded: true } : {}),
       };
-      composite.score = boundedScore(composite.successCount - composite.failureCount);
+      // P0-2 taxonomy: negative composite scores apply only to anti-pattern
+      // pairs (>= 2 failures and more failures than successes); correctable /
+      // proven pairs are clamped to non-negative.
+      const compositeAntiPattern =
+        composite.failureCount >= 2 && composite.failureCount > composite.successCount;
+      composite.score = boundedScore(
+        compositeAntiPattern
+          ? composite.successCount - composite.failureCount
+          : Math.max(0, composite.successCount - composite.failureCount)
+      );
+      composite.outcomeKind = compositeAntiPattern
+        ? "anti-pattern"
+        : compositeGateMet(composite)
+          ? "proven"
+          : "correctable";
 
       nodes.push({ id: compositeId, type: "Skill", content: serializeComposite(composite) });
 

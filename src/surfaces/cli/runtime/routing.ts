@@ -19,6 +19,7 @@ import { appendFeedbackEvent } from "../../../learning/learning-events";
 import { updateEpisodeOutcome, type DeviationKind } from "../../../learning/episodic-memory";
 import {
   applySkillLearning,
+  cleanupNoiseSkills,
   extractSkillAtoms,
   pruneFailedSkills,
 } from "../../../learning/skill-flywheel";
@@ -510,6 +511,16 @@ export async function reportOutcome(
   const config = resolveConfig(configPath);
   const graphClient = createGraphClient(config);
 
+  // P0-2: prune legacy pure-noise skill nodes (no symbol evidence) at load,
+  // before any new learning is applied in this process.
+  if (config.skillPolicy?.enableSkillFlywheel) {
+    try {
+      await cleanupNoiseSkills(graphClient);
+    } catch {
+      // cleanup failure must not block the outcome report
+    }
+  }
+
   const sanitizedLessons = sanitizeOutcomeLessons(lessons ?? []);
 
   // Always update episode outcome (success/fail), even when skill learning is dampened.
@@ -540,7 +551,18 @@ export async function reportOutcome(
       graphClient,
       updated.task,
       syntheticRun,
-      sanitizedLessons
+      sanitizedLessons,
+      {
+        // Episode-record material (plan descriptions, key decisions) supplies
+        // project-symbol evidence for the extraction gate.
+        evidence: [
+          ...updated.plan.map((p) => p.description),
+          ...updated.keyDecisions,
+        ],
+        // This success is linked to the episode via reportOutcome: counts as a
+        // "linked successful outcome" for the proven classification.
+        linked: true,
+      }
     );
   } else if (config.skillPolicy?.enableSkillFlywheel) {
     // Still soft-prune toxic skills when learning is dampened.
