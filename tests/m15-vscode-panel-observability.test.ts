@@ -103,6 +103,85 @@ describe("M15 VS Code observability panels", () => {
     expect(html).toContain("refactor planner");
   });
 
+  it("renders the flywheel contribution section with skill distribution, topUsed skills, and episode bar", () => {
+    const html = buildSkillInsightsHtml(
+      {
+        source: "graph-store",
+        transport: "file",
+        storePath: "graphflow-out/graphflow-graph.json",
+        skills: [
+          {
+            id: "skill:add-tests",
+            name: "add tests",
+            score: 4,
+            uses: 6,
+            lastOutcome: "pass",
+            updatedAt: 1,
+          },
+        ],
+        flywheel: {
+          skills: {
+            total: 3,
+            positive: 1,
+            neutral: 1,
+            negative: 1,
+            topUsed: [
+              { name: "add tests", score: 4, uses: 6 },
+              { name: "refactor planner", score: -1, uses: 2 },
+            ],
+          },
+          episodes: { total: 4, pass: 2, fail: 1, pending: 1, withLessons: 3 },
+          insightDecisions: 5,
+        },
+      },
+      "https://example.vscode-cdn.net/media/skill-insights.js"
+    );
+
+    expect(html).toContain("Flywheel");
+    expect(html).toContain("Skill distribution");
+    expect(html).toContain("positive");
+    expect(html).toContain("neutral");
+    expect(html).toContain("negative");
+    expect(html).toContain("Insight decisions");
+    expect(html).toContain("Top used skills");
+    expect(html).toContain("add tests");
+    expect(html).toContain("refactor planner");
+    expect(html).toContain("Episode outcomes");
+    expect(html).toContain('class="fw-bar-seg pass"');
+    expect(html).toContain('class="fw-bar-seg fail"');
+    expect(html).toContain('class="fw-bar-seg pending"');
+    expect(html).toContain("with lessons");
+  });
+
+  it("keeps the flywheel panel data feed shape (skill distribution, topUsed, episodes, insight decisions)", () => {
+    const insights = {
+      source: "graph-store" as const,
+      transport: "file" as const,
+      skills: [],
+      flywheel: {
+        skills: {
+          total: 2,
+          positive: 1,
+          neutral: 0,
+          negative: 1,
+          topUsed: [{ name: "add tests", score: 4, uses: 6 }],
+        },
+        episodes: { total: 3, pass: 2, fail: 0, pending: 1, withLessons: 2 },
+        insightDecisions: 4,
+      },
+    };
+
+    const json = JSON.stringify(insights);
+    expect(json).toContain('"flywheel"');
+    expect(json).toContain('"positive"');
+    expect(json).toContain('"neutral"');
+    expect(json).toContain('"negative"');
+    expect(json).toContain('"topUsed"');
+    expect(json).toContain('"withLessons"');
+    expect(json).toContain('"insightDecisions"');
+    expect(insights.flywheel.episodes.total).toBe(insights.flywheel.episodes.pass + insights.flywheel.episodes.fail + insights.flywheel.episodes.pending);
+  });
+
   it("renders context preview token budget and anchors", () => {
     const html = buildContextPreviewHtml(
       {
