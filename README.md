@@ -1,6 +1,6 @@
 # GraphFlow
 
-[![npm version](https://img.shields.io/badge/npm-1.8.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.9.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **编码 Agent 的上下文与记忆层** — Local-first 代码知识图谱 + 上下文压缩 + 跨会话学习飞轮
 
