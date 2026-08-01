@@ -31,7 +31,14 @@ export interface GraphFlowConfig {
     workspaceRoot?: string;
     includeExtensions?: string[];
     transport: "memory" | "mcp-http" | "file" | "sqlite" | "auto";
+    /**
+     * Graphify team-backend endpoint (transport: "mcp-http" only). Must be an
+     * http(s) URL, e.g. "http://graphify.team.internal:8080". When the endpoint
+     * is missing, malformed, or unreachable, GraphFlow logs a warning and falls
+     * back to the local JSON file store (graphPolicy.graphStorePath).
+     */
     mcpEndpoint?: string;
+    /** Optional bearer token sent as `Authorization: Bearer <key>` to the Graphify endpoint. */
     mcpApiKey?: string;
     graphStorePath?: string;
     maxContextTokens: number;

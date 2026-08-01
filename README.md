@@ -121,6 +121,16 @@ graphflow doctor                           # 安装自检
 | `embeddingPolicy.vectorStorePath` | 向量索引持久化路径（自动派生 `.hnsw`） |
 | `skillPolicy.enableSkillFlywheel` | 学习飞轮开关 |
 
+## Team backend pilot（团队后端试点）
+
+将 `graphPolicy.transport` 设为 `mcp-http` 即可把图谱托管到远程 Graphify 服务（团队共享），需配置 `graphPolicy.mcpEndpoint`（http(s) URL，可选 `mcpApiKey` bearer token）：
+
+```json
+{ "graphPolicy": { "transport": "mcp-http", "mcpEndpoint": "http://graphify.team.internal:8080" } }
+```
+
+Endpoint 缺失/格式非法会在配置校验时直接报错；连接失败或运行期请求失败则透明降级到本地 JSON 文件存储（`graphPolicy.graphStorePath`，默认 `graphflow-out/graphflow-graph.json`）并记录 `logger.warn`，与 sqlite→file 降级一致，不会中断 Agent 流程。试点协议暂不支持全量快照：`readSnapshot` 返回本地镜像文件（可能滞后）。
+
 ## 基准
 
 - **Token 节省**：[benchmarks/RESULTS.md](benchmarks/RESULTS.md) — 8 个代表性查询，230,069 → 2,893 tokens（**98.7%**），独立 gpt-tokenizer 复核，`npm run benchmark` 可复现。
