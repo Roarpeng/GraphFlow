@@ -22,6 +22,7 @@ import type {
 } from "./routing.js";
 import type { getGraphFlowSettings, saveGraphFlowSettings } from "./settings.js";
 import type { runLearningNightly, runLearningNightlyResult } from "./learning.js";
+import type { listEpisodes, searchEpisodes, forgetEpisode } from "./memory.js";
 
 /** Bundled runtime module shape used by VS Code extension and other dynamic importers. */
 export interface GraphFlowRuntimeModule {
@@ -53,6 +54,9 @@ export interface GraphFlowRuntimeModule {
   repairUnsafeWindowsMcpCommands: typeof repairUnsafeWindowsMcpCommands;
   runLearningNightly: typeof runLearningNightly;
   runLearningNightlyResult: typeof runLearningNightlyResult;
+  listEpisodes: typeof listEpisodes;
+  searchEpisodes: typeof searchEpisodes;
+  forgetEpisode: typeof forgetEpisode;
 }
 
 const REQUIRED_EXPORTS: Array<keyof GraphFlowRuntimeModule> = [
@@ -78,6 +82,9 @@ const REQUIRED_EXPORTS: Array<keyof GraphFlowRuntimeModule> = [
   "repairUnsafeWindowsMcpCommands",
   "runLearningNightly",
   "runLearningNightlyResult",
+  "listEpisodes",
+  "searchEpisodes",
+  "forgetEpisode",
 ];
 
 export function assertGraphFlowRuntime(module: unknown): GraphFlowRuntimeModule {
