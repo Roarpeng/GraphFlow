@@ -6,9 +6,9 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 
 ## 当前版本
 
-- Extension / runtime：**1.9.4**
+- Extension / runtime：**1.9.5**
 - 市场身份：`roarpeng.graphflow`（displayName **GraphFlow Context & Memory**）
-- 对应 VSIX：`../artifacts/graphflow-1.9.4.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
+- 对应 VSIX：`../artifacts/graphflow-1.9.5.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
 
 ## v1.9.x 要点
 
@@ -50,9 +50,9 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 ### 方式 B：命令行
 
 ```bash
-code --install-extension graphflow-1.9.4.vsix
+code --install-extension graphflow-1.9.5.vsix
 # Cursor CLI（若已安装）：
-cursor --install-extension graphflow-1.9.4.vsix
+cursor --install-extension graphflow-1.9.5.vsix
 ```
 
 ### 安装后推荐流程
@@ -111,7 +111,7 @@ graphflow memory forget <episodeId>           # 删除单条记忆
 
 直接发送 VSIX 文件即可，同事**无需** clone GraphFlow 仓库：
 
-1. 从 Releases 或本地 `artifacts/` 取得 `graphflow-1.9.4.vsix`
+1. 从 Releases 或本地 `artifacts/` 取得 `graphflow-1.9.5.vsix`
 2. 按上文「安装 VSIX」步骤安装
 3. 打开项目 → Settings → 建立图谱
 
@@ -162,7 +162,7 @@ npm run package:extension
 **MCP 未自动安装**
 
 - 命令面板 → **GraphFlow: Install MCP to Agents**
-- 或终端：`npx @roarpeng/graphflow@1.9.4 install`
+- 或终端：`npx @roarpeng/graphflow@1.9.5 install`
 
 **图谱为空 / Preview 0 anchors**
 
@@ -171,7 +171,7 @@ npm run package:extension
 
 **MCP 报错 `unsafe workspace root from discovery: /home/...`**
 
-- 升级到 **1.9.4+**，然后 Settings → **安装 / 更新 MCP**，Reload Window
+- 升级到 **1.9.5+**，然后 Settings → **安装 / 更新 MCP**，Reload Window
 - 工具调用务必传 `rootDir`（项目绝对路径）
 - CLI：`graphflow doctor --json` 查看 MCP/Skill 注册状态
 
