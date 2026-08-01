@@ -7,6 +7,7 @@ export default defineConfig({
       '**/node_modules/**',
       '**/dist/**',
       '**/vscode-extension/**',
+      '**/.claude/worktrees/**',
     ],
     // Integration tests may wait on provider health (~10s); keep a hard ceiling
     // so a hung network call cannot stall CI for 30+ minutes.

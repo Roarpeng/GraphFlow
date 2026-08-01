@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PLCopen XML fixture covering:
+     - <returnType> in nested <type> form (ComputeAxis) and inline form (ReadSensor)
+     - input / output / inOut variables
+     - ST CASE statement with numeric branch labels ("1:", "2..5:")
+     - a real jump label ("STEP1:") that must be skipped by the ST label detector
+     - function calls with arguments inside CASE branches -->
+<project xmlns="http://www.plcopen.org/xml/tc6.xsd">
+  <types>
+    <pous>
+
+      <!-- ===== FUNCTION: nested <type> returnType + CASE with numeric branches ===== -->
+      <pou name="ComputeAxis" pouType="function">
+        <interface>
+          <returnType>
+            <type><REAL/></type>
+          </returnType>
+          <inputVars>
+            <variable name="speed">
+              <type><REAL/></type>
+            </variable>
+            <variable name="mode">
+              <type><INT/></type>
+            </variable>
+          </inputVars>
+          <outputVars>
+            <variable name="errorCode">
+              <type><INT/></type>
+            </variable>
+          </outputVars>
+        </interface>
+        <body>
+          <ST>
+            <xhtml><![CDATA[
+// Numeric CASE branches: calls inside branches must become call edges
+CASE mode OF
+  1:
+    ComputeAxis := Scale(speed, 2.0);
+  2..5:
+    ComputeAxis := Hold(speed);
+ELSE
+  ComputeAxis := 0.0;
+END_CASE;
+]]></xhtml>
+          </ST>
+        </body>
+      </pou>
+
+      <!-- ===== FUNCTION: inline returnType + STEP1 jump label ===== -->
+      <pou name="ReadSensor" pouType="function">
+        <interface>
+          <returnType><DINT/></returnType>
+          <inputVars>
+            <variable name="channel">
+              <type><INT/></type>
+            </variable>
+          </inputVars>
+          <inOutVars>
+            <variable name="rawBuffer">
+              <type><derived name="TRAFFIC_STATE"/></type>
+            </variable>
+          </inOutVars>
+        </interface>
+        <body>
+          <ST>
+            <xhtml><![CDATA[
+STEP1:
+ReadSensor := channel;
+ReadSensor := Scale(ReadSensor, rawBuffer);
+IF ReadSensor > 100 THEN
+  JMP STEP1;
+END_IF;
+]]></xhtml>
+          </ST>
+        </body>
+      </pou>
+
+    </pous>
+  </types>
+</project>

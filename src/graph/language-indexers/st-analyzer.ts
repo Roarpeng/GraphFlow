@@ -289,8 +289,12 @@ export function analyzeStCode(pouName: string, stCode: string): StAnalysisResult
       pendingCallLine = 0;
     }
 
-    // ── Skip label-only lines (step1:) ──────────────────────────
-    if (parenDepth === 0 && /^\w+\s*:\s*(?!:)/i.test(cline) && !cline.includes(":=")) {
+    if (
+      parenDepth === 0 &&
+      /^\w+\s*:\s*(?!:)/i.test(cline) &&
+      !cline.includes(":=") &&
+      !/^\s*\d+(?:\.\.\d+)?\s*:/.test(cline)
+    ) {
       continue;
     }
 

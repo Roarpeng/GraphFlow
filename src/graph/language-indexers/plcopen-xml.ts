@@ -21,7 +21,6 @@ const VAR_SCOPE_TAGS = [
   "outputVars",
   "inOutVars",
   "tempVars",
-  "returnType",
 ];
 
 function isPlcOpenXml(content: string): boolean {
@@ -41,6 +40,29 @@ function extractTypeName(typeContent: string): string {
   if (simple?.[1]) return simple[1];
 
   return "UNKNOWN";
+}
+
+function extractReturnType(
+  pouBody: string,
+  pouName: string,
+  filePath: string,
+  symbols: DeclaredSymbol[],
+): void {
+  const rtRe = /<returnType>\s*(?:<type>([\s\S]*?)<\/type>|([\s\S]*?))\s*<\/returnType>/i;
+  const m = rtRe.exec(pouBody);
+  const typeContent = (m?.[1] ?? m?.[2])?.trim();
+  if (typeContent) {
+    const retType = extractTypeName(typeContent);
+    symbols.push({
+      name: `${pouName}.return`,
+      kind: "variable",
+      line: 0,
+      exported: true,
+      signature: `VAR_RETURN ${retType} ${pouName}`,
+      jsdoc: `${pouName}:returnType`,
+      file: filePath,
+    });
+  }
 }
 
 function extractPouVariables(
@@ -186,6 +208,7 @@ function extract(filePath: string, content: string): ExtractionResult {
     });
 
     if (pouBody) {
+      extractReturnType(pouBody, pouName, filePath, symbols);
       extractPouVariables(pouBody, pouName, filePath, symbols, imports);
       extractStCode(pouBody, pouName, filePath, symbols);
     }

@@ -88,7 +88,7 @@ No API key is required. The script builds its own isolated graph under
 ## Skill-Flywheel End-to-End A/B Benchmark — Results (P1-2)
 
 > Appended by `npm run benchmark:ab` (`benchmarks/run-skill-ab.ts`).
-> Last run: 2026-08-01T05:32:09.980Z
+> Last run: 2026-08-01T05:36:30.940Z
 > Structured JSON: `benchmarks/.cache/skill-ab-results.json`
 
 ## Summary
@@ -105,46 +105,46 @@ with the golden target, distractors and a decoy. Arm A additionally simulates
 | Success via package Top-5 only | 61.5% | 61.5% |
 | Tasks rescued by flywheel (B miss → A hit) | 10 | — |
 | Tasks hurt by flywheel (B hit → A miss) | 0 | — |
-| Hint injection rate | 100.0% | 0% |
+| Hint injection rate | 0.0% | 0% |
 | Episode recall rate | 100.0% | 0% |
-| Mean prompt-token overhead / task | 44.6 | 0 |
-| Total prompt-token overhead | 1160 | 0 |
-| Mean package tokens / task | 744.9 | 45.8 |
+| Mean prompt-token overhead / task | 33.2 | 0 |
+| Total prompt-token overhead | 862 | 0 |
+| Mean package tokens / task | 57.5 | 45.8 |
 | Decoy contamination (Top-5) | 3.8% | 3.8% |
 | Decoy contamination (injection) | 0.0% | 0% |
-| Mean wall-clock / task | 2.4 ms | 2.0 ms |
-| Total wall-clock | 0.2 s | — |
+| Mean wall-clock / task | 0.3 ms | 2.1 ms |
+| Total wall-clock | 0.1 s | — |
 
 ## Per-task detail
 
 | Task | Golden module | Direct | Top-5 (B) | Success (A) | Pkg Top-5 (A) | Injection hit (A) | Hints | Episodes | Overhead tokens |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `orchestrate task routing` | `orchestrator` | no | miss | hit | no | yes | 3 | 1 | 38 |
-| `dag execution engine` | `dag-engine` | yes | hit | hit | yes | yes | 3 | 2 | 59 |
-| `triage task classification simple complex` | `triage` | yes | hit | hit | yes | yes | 3 | 1 | 41 |
-| `model router provider selection` | `model-router` | yes | hit | hit | yes | yes | 3 | 3 | 79 |
-| `provider health fallback chain` | `provider-health` | yes | hit | hit | yes | yes | 3 | 3 | 72 |
-| `graph compression pagerank centrality` | `graph-compression` | yes | hit | hit | yes | yes | 3 | 2 | 53 |
-| `context slicer layered package` | `context-slicer` | yes | hit | hit | yes | yes | 3 | 1 | 34 |
-| `skill flywheel hints scoring` | `skill-flywheel` | yes | hit | hit | yes | yes | 3 | 1 | 28 |
-| `episodic memory similar episodes` | `episodic-memory` | yes | hit | hit | yes | yes | 2 | 1 | 32 |
-| `embedding cosine similarity vector` | `embeddings` | no | miss | hit | no | yes | 3 | 1 | 31 |
-| `file watcher incremental index on save` | `filewatcher` | no | miss | hit | no | yes | 3 | 2 | 63 |
-| `sqlite graph storage fts5` | `sqlite-client` | yes | hit | hit | yes | yes | 3 | 2 | 59 |
-| `repo map module overview` | `repomap` | no | miss | hit | no | yes | 2 | 1 | 26 |
-| `token savings statistics` | `tokensavings` | no | miss | hit | no | yes | 3 | 2 | 52 |
-| `mcp server tool definitions` | `tool-definitions` | yes | hit | hit | yes | yes | 3 | 1 | 35 |
-| `cli output json formatting` | `formatcliresult` | no | miss | hit | no | yes | 3 | 1 | 37 |
-| `agent delegation work items bridge` | `workitem` | no | miss | hit | no | yes | 3 | 1 | 26 |
-| `six hats insight planning` | `brainstormer` | no | miss | hit | no | yes | 3 | 1 | 30 |
-| `hnsw approximate nearest neighbor index` | `hnsw` | yes | hit | hit | yes | yes | 3 | 2 | 65 |
-| `adaptive token budget estimation` | `estimatecontextbudget` | no | miss | hit | no | yes | 3 | 2 | 58 |
-| `artifact export import graph snapshot` | `artifact-manager` | yes | hit | hit | yes | yes | 3 | 2 | 53 |
-| `nightly learning trainer` | `nightly-trainer` | yes | hit | hit | yes | yes | 2 | 1 | 31 |
-| `reflect episodes extract lessons` | `reflector` | no | miss | hit | no | yes | 3 | 1 | 31 |
-| `dag checkpoint recovery taskrun` | `dag-checkpoint` | yes | hit | hit | yes | yes | 3 | 2 | 59 |
-| `cancellation timeout controller` | `cancellation` | yes | hit | hit | yes | yes | 3 | 1 | 28 |
-| `language indexers tree sitter wasm` | `language-indexers` | yes | hit | hit | yes | yes | 3 | 1 | 40 |
+| `orchestrate task routing` | `orchestrator` | no | miss | hit | no | yes | 0 | 1 | 24 |
+| `dag execution engine` | `dag-engine` | yes | hit | hit | yes | yes | 0 | 2 | 47 |
+| `triage task classification simple complex` | `triage` | yes | hit | hit | yes | yes | 0 | 1 | 25 |
+| `model router provider selection` | `model-router` | yes | hit | hit | yes | yes | 0 | 3 | 65 |
+| `provider health fallback chain` | `provider-health` | yes | hit | hit | yes | yes | 0 | 3 | 65 |
+| `graph compression pagerank centrality` | `graph-compression` | yes | hit | hit | yes | yes | 0 | 2 | 44 |
+| `context slicer layered package` | `context-slicer` | yes | hit | hit | yes | yes | 0 | 1 | 21 |
+| `skill flywheel hints scoring` | `skill-flywheel` | yes | hit | hit | yes | yes | 0 | 1 | 23 |
+| `episodic memory similar episodes` | `episodic-memory` | yes | hit | hit | yes | yes | 0 | 1 | 21 |
+| `embedding cosine similarity vector` | `embeddings` | no | miss | hit | no | yes | 0 | 1 | 20 |
+| `file watcher incremental index on save` | `filewatcher` | no | miss | hit | no | yes | 0 | 2 | 49 |
+| `sqlite graph storage fts5` | `sqlite-client` | yes | hit | hit | yes | yes | 0 | 2 | 46 |
+| `repo map module overview` | `repomap` | no | miss | hit | no | yes | 0 | 1 | 20 |
+| `token savings statistics` | `tokensavings` | no | miss | hit | no | yes | 0 | 2 | 43 |
+| `mcp server tool definitions` | `tool-definitions` | yes | hit | hit | yes | yes | 0 | 1 | 21 |
+| `cli output json formatting` | `formatcliresult` | no | miss | hit | no | yes | 0 | 1 | 23 |
+| `agent delegation work items bridge` | `workitem` | no | miss | hit | no | yes | 0 | 1 | 20 |
+| `six hats insight planning` | `brainstormer` | no | miss | hit | no | yes | 0 | 1 | 20 |
+| `hnsw approximate nearest neighbor index` | `hnsw` | yes | hit | hit | yes | yes | 0 | 2 | 49 |
+| `adaptive token budget estimation` | `estimatecontextbudget` | no | miss | hit | no | yes | 0 | 2 | 44 |
+| `artifact export import graph snapshot` | `artifact-manager` | yes | hit | hit | yes | yes | 0 | 2 | 44 |
+| `nightly learning trainer` | `nightly-trainer` | yes | hit | hit | yes | yes | 0 | 1 | 20 |
+| `reflect episodes extract lessons` | `reflector` | no | miss | hit | no | yes | 0 | 1 | 19 |
+| `dag checkpoint recovery taskrun` | `dag-checkpoint` | yes | hit | hit | yes | yes | 0 | 2 | 47 |
+| `cancellation timeout controller` | `cancellation` | yes | hit | hit | yes | yes | 0 | 1 | 19 |
+| `language indexers tree sitter wasm` | `language-indexers` | yes | hit | hit | yes | yes | 0 | 1 | 23 |
 
 ## Methodology & honest caveats
 
