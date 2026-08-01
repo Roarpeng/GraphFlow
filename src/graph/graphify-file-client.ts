@@ -183,9 +183,15 @@ export class GraphifyFileClient {
   }
 
   async deleteNode(id: string): Promise<void> {
+    await this.deleteNodes([id]);
+  }
+
+  async deleteNodes(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
     const store = this.readStore();
-    store.nodes = store.nodes.filter((n) => n.id !== id);
-    store.edges = store.edges.filter((e) => e.from !== id && e.to !== id);
+    store.nodes = store.nodes.filter((n) => !idSet.has(n.id));
+    store.edges = store.edges.filter((e) => !(idSet.has(e.from) || idSet.has(e.to)));
     this.writeStore(store);
   }
 

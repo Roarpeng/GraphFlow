@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import type { Server } from "node:http";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -307,5 +307,28 @@ describe("P2-3 Graphify mcp-http team backend (pilot)", () => {
     const mirror = new GraphifyFileClient(storePath);
     const hits = await mirror.queryByKeyword("validator");
     expect(hits.map((n) => n.id)).toEqual(["n3"]);
+  });
+});
+
+describe("GraphifyFileClient batch delete", () => {
+  it("deleteNodes removes nodes and dangling edges in a single write", async () => {
+    const storePath = join(tmpdir(), `graphflow-file-delete-${Date.now()}.json`);
+    try {
+      const client = new GraphifyFileClient(storePath);
+      await client.upsertNodes(sampleNodes);
+      await client.upsertEdges(sampleEdges);
+
+      await client.deleteNodes(["n1", "n3"]);
+
+      const store = JSON.parse(readFileSync(storePath, "utf8")) as {
+        nodes: Array<{ id: string }>;
+        edges: Array<{ from: string; to: string }>;
+      };
+      expect(store.nodes.map((n) => n.id)).toEqual(["n2"]);
+      // n1 -> n2 / n1 -> n3 edges are dangling now and must be pruned
+      expect(store.edges).toEqual([]);
+    } finally {
+      rmSync(storePath, { force: true });
+    }
   });
 });

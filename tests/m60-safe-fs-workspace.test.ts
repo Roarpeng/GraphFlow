@@ -139,4 +139,30 @@ describe("M60 safe fs and unsafe workspace roots", () => {
     const files = walkFiles(root, [".ts"]);
     expect(files.some((file) => file.endsWith("app.ts"))).toBe(true);
   });
+
+  it("walkFiles skips agent tooling dirs incl. .claude/worktrees full-repo copies", () => {
+    const root = createTempRoot("graphflow-walk-ignored");
+    const cases: string[] = [
+      ".agent", ".claude", ".cursor", ".gemini", ".joycode", ".trae", "Cursor",
+    ];
+    for (const dir of cases) {
+      mkdirSync(join(root, dir, "nested"), { recursive: true });
+      writeFileSync(join(root, dir, "nested", "worktree-copy.ts"), "export const x = 1;\n");
+    }
+
+    const files = walkFiles(root, [".ts"]);
+    expect(files).toEqual([]);
+  });
+
+  it("walkFiles still indexes real source next to ignored agent dirs", () => {
+    const root = createTempRoot("graphflow-walk-mixed");
+    mkdirSync(join(root, "src", "deep"), { recursive: true });
+    mkdirSync(join(root, ".claude", "worktrees", "agent-abc"), { recursive: true });
+    writeFileSync(join(root, "src", "deep", "main.ts"), "export const main = 1;\n");
+    writeFileSync(join(root, ".claude", "worktrees", "agent-abc", "dup.ts"), "export const dup = 1;\n");
+
+    const files = walkFiles(root, [".ts"]);
+    expect(files).toHaveLength(1);
+    expect(files[0].endsWith(join("src", "deep", "main.ts"))).toBe(true);
+  });
 });

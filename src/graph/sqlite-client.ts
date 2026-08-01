@@ -303,11 +303,24 @@ export class GraphifySqliteClient implements GraphClient {
   }
 
   async deleteNode(id: string): Promise<void> {
-    const stmt = this.db.prepare(`DELETE FROM nodes WHERE id = ?`);
-    const stmtEdge = this.db.prepare(`DELETE FROM edges WHERE from_id = ? OR to_id = ?`);
+    await this.deleteNodes([id]);
+  }
+
+  async deleteNodes(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
     this.db.transaction(() => {
-      stmt.run(id);
-      stmtEdge.run(id, id);
+      // SQLITE_MAX_VARIABLE_NUMBER default is 999; chunk to stay clear of it.
+      const CHUNK = 400;
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const chunk = ids.slice(i, i + CHUNK);
+        const placeholders = chunk.map(() => "?").join(",");
+        const stmtNode = this.db.prepare(`DELETE FROM nodes WHERE id IN (${placeholders})`);
+        const stmtEdge = this.db.prepare(
+          `DELETE FROM edges WHERE from_id IN (${placeholders}) OR to_id IN (${placeholders})`
+        );
+        stmtNode.run(...chunk);
+        stmtEdge.run(...chunk, ...chunk);
+      }
     })();
   }
 

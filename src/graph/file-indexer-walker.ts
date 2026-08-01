@@ -42,6 +42,10 @@ export const IGNORED_DIRS = new Set([
   "__pycache__", ".vscode", ".idea", ".next", "build", "install", "log",
   ".graphflow-cache", "graphflow-out",
   ".dart_tool",
+  // Agent tooling dirs: `.claude/worktrees` holds full repo copies per worktree
+  // and other agents keep settings/transcripts here — indexing them pollutes
+  // the graph with duplicate files (observed: 76% of File nodes).
+  ".agent", ".claude", ".cursor", ".gemini", ".joycode", ".trae", "Cursor",
   // Windows protected / system-heavy directories (EPERM when scanned)
   "ElevatedDiagnostics", "Application Data", "Packages", "Microsoft", "Temp", "Temporary Internet Files",
   "System Volume Information", "$Recycle.Bin",

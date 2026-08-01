@@ -103,4 +103,66 @@ describe("M11 workspace indexing", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("incremental re-index prunes nodes of deleted files (batch delete)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "graphflow-index-prune-"));
+    try {
+      mkdirSync(join(root, "src"), { recursive: true });
+      writeFileSync(join(root, "src", "keep.ts"), "export function keep() { return 1; }\n", "utf8");
+      writeFileSync(join(root, "src", "gone.ts"), "export function gone() { return 2; }\n", "utf8");
+
+      const storePath = join(root, "tmp", "graphflow-graph.json");
+      const config = validateConfig({
+        providers: {},
+        tiers: {
+          smart: { provider: "openai", model: "gpt-5.3-codex" },
+          economy: { provider: "openai", model: "gpt-4.1-mini" },
+        },
+        budgetPolicy: { runTokenCap: 2000 },
+        graphPolicy: {
+          enableAutoBuild: true,
+          enableNearLosslessMode: true,
+          autoIndexOnPreview: true,
+          autoIndexOnRun: true,
+          workspaceRoot: root,
+          includeExtensions: [".ts"],
+          transport: "file",
+          graphStorePath: storePath,
+          maxContextTokens: 200,
+        },
+        learningPolicy: {
+          enableFlywheel: true,
+          trainingCadence: "nightly",
+          canaryRatio: 10,
+          exportPath: "graphflow-out/learning-dataset.jsonl",
+        },
+      });
+
+      const client = createGraphClient(config);
+      await indexWorkspaceFiles(client, root, { includeExtensions: [".ts"] });
+
+      unlinkSync(join(root, "src", "gone.ts"));
+
+      const second = await indexWorkspaceFiles(client, root, { includeExtensions: [".ts"] });
+      const store = JSON.parse(readFileSync(storePath, "utf8")) as {
+        nodes: Array<{ id: string }>;
+        edges: Array<{ from: string; to: string }>;
+      };
+
+      const nodeIds = store.nodes.map((node) => node.id);
+      expect(nodeIds).toContain("file:src/keep.ts");
+      expect(nodeIds).not.toContain("file:src/gone.ts");
+      expect(nodeIds.some((id) => id.startsWith("symbol:src/gone.ts:"))).toBe(false);
+      // dangling edges pointing at pruned nodes must be gone too
+      expect(
+        store.edges.some(
+          (edge) => edge.from.startsWith("file:src/gone.ts") || edge.to.startsWith("file:src/gone.ts")
+        )
+      ).toBe(false);
+      // unchanged file skipped: only pruning happened
+      expect(second.indexedFiles).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
