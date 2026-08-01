@@ -396,10 +396,10 @@ v1.7.14 → v1.9.4 的关键投入：
 
 1. **MCP 传输层 SDK 化**（P0）：手写 JSON-RPC → `@modelcontextprotocol/sdk@1.29`；协议 2024-11-05 → 2025-11-25；新增 ping/logging/progress；错误码标准化。收益：协议协商与版本回退由 SDK 保证，未来协议升级免重写握手层。详见 §8.2。
 2. **CI 完整化**（P0）：ci.yml 增加 `push: branches: [main]`——此前完整 CI 只在 PR 触发，main 推送只跑 Build，导致"推送了但没有 CI"的观感。
+3. **MCP resources 能力**（P2）：新增 `graphflow://diagnose` 资源（provider 健康、图统计、token 节省、飞轮报告），capabilities 声明 `resources`，`resources/list`/`resources/read` 可用，未知 URI 返回标准 `-32602`；与诊断工具共享同一数据源。
 
 **待办（按优先级）：**
 
-3. **MCP resources 能力**（P2）：把知识图统计/诊断数据暴露为 `graphflow://` resources，配合 `notifications/resources/list_changed`，让客户端原生发现图状态。
 4. **MCP 2026-07-28 无状态规范适配**（P3 前瞻）：MCP 刚发布史上最大改版（2026-07-28，业界称 MCP 2.0）：移除 initialize 握手、新增 `server/discover`、每请求 `_meta` 携带协议信息、工具 schema 升级 JSON Schema 2020-12（`oneOf` 可用于 `graphflow_insight` 的 mode 条件必填）、`ping`/`logging/setLevel` 移除但保留 12 个月兼容窗口、roots/sampling/logging 进入弃用期。当前 SDK 1.29 最新支持 2025-11-25；**升级 SDK 即自动获得兼容，无需重写**（这是 SDK 化的核心收益）。注意：2026-07-28 移除 ping——若升级 SDK 后协议声明到新版本，需复核 ping 依赖。
 5. **学习飞轮效果证据**（P1，延续）：把 skill A/B 基准从"基建存在"推进到"公开结论"——同一批真实任务开关 skill hints 各跑 N 次，对比成功率与 token，结果进 benchmarks/RESULTS.md。
 
