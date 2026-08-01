@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.9.3] - 2026-08-01
+
+### Fixed
+
+- **Marketplace 发布（二次）**：`GraphFlow` 显示名亦被第三方占用（不出现在公开搜索，疑似下架/保留名），改为 `GraphFlow Context & Memory`
+
 ## [1.9.2] - 2026-08-01
 
 ### Fixed
