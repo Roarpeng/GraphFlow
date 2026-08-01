@@ -435,6 +435,47 @@ export interface FlywheelReport {
     active: number;
     supersededVersions: number;
   };
+  /**
+   * MEMORY ATTRIBUTION — makes episodic memory observable: how much stored
+   * memory could contribute to task rescue, how confident the outcome
+   * distribution is, the freshest evidence chain, and why work deviated.
+   * Additive-only: existing consumers (VS Code panel, MCP diagnose) keep
+   * reading the fields above unchanged.
+   */
+  memoryAttribution: {
+    /**
+     * Total episode recall hits across recent runs. Episode records do not
+     * yet persist per-run recall telemetry, so this falls back to episodes
+     * carrying lessons — the rescue material the v1.9 A/B benchmark proved
+     * is what saves tasks.
+     */
+    memoryHits: number;
+    /** Episodes flagged staleGoal by goal versioning (the requirement moved
+     *  under them, so their plan context must not be trusted as-is). */
+    staleEpisodes: number;
+    /** Pass/fail/pending distribution as percentages of all episodes. */
+    confidence: {
+      passPercent: number;
+      failPercent: number;
+      pendingPercent: number;
+    };
+    /** Top 3 most-recent episodes — the evidence chain: what memory holds
+     *  that could inform the next run (task truncated, outcome, lesson count). */
+    topContributingMemories: Array<{
+      id: string;
+      task: string;
+      outcome: string;
+      lessonsCount: number;
+      updatedAt: number;
+    }>;
+    /** Counts per deviation category across stored episode records. */
+    deviationBreakdown: {
+      none: number;
+      misreadRequirement: number;
+      scopeCreep: number;
+      techDrift: number;
+    };
+  };
 }
 
 /**
@@ -465,6 +506,15 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
   const deviations = { misreadRequirement: 0, scopeCreep: 0, techDrift: 0, none: 0 };
   let goalsActive = 0;
   let goalsSuperseded = 0;
+  const episodes: Array<{
+    id: string;
+    task: string;
+    outcome: string;
+    lessonsCount: number;
+    updatedAt: number;
+    stale: boolean;
+    deviation?: string;
+  }> = [];
   for (const node of store.nodes) {
     if (node.type !== "Decision") continue;
     const kind = typeof node.metadata?.kind === "string" ? node.metadata.kind : undefined;
@@ -481,7 +531,14 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
     try {
       const record = JSON.parse(
         typeof node.metadata?.record === "string" ? node.metadata.record : "{}"
-      ) as { outcome?: string; lessons?: unknown[]; deviation?: string };
+      ) as {
+        outcome?: string;
+        lessons?: unknown[];
+        deviation?: string;
+        task?: string;
+        updatedAt?: number;
+        id?: string;
+      };
       if (record.outcome === "pass") pass += 1;
       else if (record.outcome === "fail") fail += 1;
       else pending += 1;
@@ -492,10 +549,32 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
       else if (record.deviation === "scope-creep") deviations.scopeCreep += 1;
       else if (record.deviation === "tech-drift") deviations.techDrift += 1;
       else if (record.deviation === "none") deviations.none += 1;
+      episodes.push({
+        id: typeof record.id === "string" ? record.id : node.id,
+        task: typeof record.task === "string" ? record.task : node.content,
+        outcome: typeof record.outcome === "string" ? record.outcome : "pending",
+        lessonsCount: Array.isArray(record.lessons) ? record.lessons.length : 0,
+        updatedAt: typeof record.updatedAt === "number" ? record.updatedAt : 0,
+        stale: node.metadata?.staleGoal !== undefined,
+        ...(typeof record.deviation === "string" ? { deviation: record.deviation } : {}),
+      });
     } catch {
       pending += 1;
     }
   }
+
+  const memoryHits = episodes.filter((e) => e.lessonsCount > 0).length;
+  const staleEpisodes = episodes.filter((e) => e.stale).length;
+  const topContributingMemories = [...episodes]
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 3)
+    .map((e) => ({
+      id: e.id,
+      task: e.task.length > 60 ? `${e.task.slice(0, 57)}...` : e.task,
+      outcome: e.outcome,
+      lessonsCount: e.lessonsCount,
+      updatedAt: e.updatedAt,
+    }));
 
   return {
     transport: config.graphPolicy.transport,
@@ -519,6 +598,22 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
     goals: {
       active: goalsActive,
       supersededVersions: goalsSuperseded,
+    },
+    memoryAttribution: {
+      memoryHits,
+      staleEpisodes,
+      confidence: {
+        passPercent: episodeCount === 0 ? 0 : Math.round((pass / episodeCount) * 100),
+        failPercent: episodeCount === 0 ? 0 : Math.round((fail / episodeCount) * 100),
+        pendingPercent: episodeCount === 0 ? 0 : Math.round((pending / episodeCount) * 100),
+      },
+      topContributingMemories,
+      deviationBreakdown: {
+        none: deviations.none,
+        misreadRequirement: deviations.misreadRequirement,
+        scopeCreep: deviations.scopeCreep,
+        techDrift: deviations.techDrift,
+      },
     },
   };
 }
