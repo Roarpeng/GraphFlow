@@ -1,5 +1,5 @@
 {
-  "name": "graphflow-tool",
+  "name": "graphflow",
   "publisher": "roarpeng",
   "displayName": "GraphFlow Tool",
   "description": "Token-first code context, knowledge graph, MCP, and planning for VS Code/Cursor. v1.9.0: semantic embedding backend, skill outcome taxonomy, retrieval golden set, team skill sync, flywheel panel.",
@@ -26,7 +26,7 @@
     "onCommand:graphflow.showSkills",
     "onCommand:graphflow.installMcp",
     "onStartupFinished",
-    "onChatParticipant:roarpeng.graphflow-tool.graphflowAgent"
+    "onChatParticipant:roarpeng.graphflow.graphflowAgent"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -80,7 +80,7 @@
     ],
     "chatParticipants": [
       {
-        "id": "roarpeng.graphflow-tool.graphflowAgent",
+        "id": "roarpeng.graphflow.graphflowAgent",
         "name": "graphflow",
         "fullName": "GraphFlow Agent",
         "description": "Run GraphFlow tasks and planning in chat",

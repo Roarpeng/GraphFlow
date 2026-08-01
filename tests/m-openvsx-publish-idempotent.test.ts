@@ -15,7 +15,7 @@ describe("Open VSX idempotent publish helper", () => {
         {
           version: "1.8.0",
           allVersions: {
-            "1.7.9": "https://open-vsx.org/api/roarpeng/graphflow-tool/1.7.9",
+            "1.7.9": "https://open-vsx.org/api/roarpeng/graphflow/1.7.9",
           },
         },
         "1.7.9"
@@ -32,18 +32,18 @@ describe("Open VSX idempotent publish helper", () => {
 
     const same = alignPackageJsonForNamespace(
       {
-        name: "graphflow-tool",
+        name: "graphflow",
         publisher: "roarpeng",
-        activationEvents: ["onChatParticipant:roarpeng.graphflow-tool.graphflowAgent"],
+        activationEvents: ["onChatParticipant:roarpeng.graphflow.graphflowAgent"],
         contributes: {
-          chatParticipants: [{ id: "roarpeng.graphflow-tool.graphflowAgent" }],
+          chatParticipants: [{ id: "roarpeng.graphflow.graphflowAgent" }],
         },
       },
       "roarpeng"
     );
     expect(same.publisher).toBe("roarpeng");
     expect(same.activationEvents).toContain(
-      "onChatParticipant:roarpeng.graphflow-tool.graphflowAgent"
+      "onChatParticipant:roarpeng.graphflow.graphflowAgent"
     );
   });
 

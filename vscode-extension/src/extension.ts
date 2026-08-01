@@ -33,10 +33,10 @@ function resolveChatParticipantId(): string {
     const pkgPath = join(__dirname, "..", "package.json");
     const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { publisher?: string; name?: string };
     const publisher = pkg.publisher || "roarpeng";
-    const name = pkg.name || "graphflow-tool";
+    const name = pkg.name || "graphflow";
     return `${publisher}.${name}.graphflowAgent`;
   } catch {
-    return "roarpeng.graphflow-tool.graphflowAgent";
+    return "roarpeng.graphflow.graphflowAgent";
   }
 }
 const CHAT_PARTICIPANT_ID = resolveChatParticipantId();

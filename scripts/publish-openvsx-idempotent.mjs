@@ -60,7 +60,7 @@ function resolveVsixPath(version) {
     return process.env.OVSX_VSIX;
   }
   const artifactsDir = join(root, "artifacts");
-  const preferred = join(artifactsDir, `graphflow-tool-${version}.vsix`);
+  const preferred = join(artifactsDir, `graphflow-${version}.vsix`);
   if (existsSync(preferred)) {
     return preferred;
   }
@@ -68,7 +68,7 @@ function resolveVsixPath(version) {
     return null;
   }
   const matches = readdirSync(artifactsDir)
-    .filter((file) => file.startsWith("graphflow-tool-") && file.endsWith(".vsix"))
+    .filter((file) => file.startsWith("graphflow-") && file.endsWith(".vsix"))
     .sort();
   if (matches.length === 0) {
     return null;

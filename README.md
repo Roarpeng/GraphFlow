@@ -139,7 +139,7 @@ Endpoint 缺失/格式非法会在配置校验时直接报错；连接失败或�
 
 ## VS Code / Cursor 扩展
 
-从 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases) 下载 `graphflow-tool-<version>.vsix` 安装（或 Open VSX：`roarpeng.graphflow-tool`）。
+从 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases) 下载 `graphflow-<version>.vsix` 安装（或 Open VSX：`roarpeng.graphflow`）。
 
 命令：Settings / Show Graph（图谱可视化）/ Preview Context / Plan & Brainstorm / Run Task / Skill Insights / Install MCP；Chat Agent `@graphflow`（`/run` `/plan` `/graph` `/skills` `/diagnose` `/learn` `/history`）。
 
