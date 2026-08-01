@@ -138,29 +138,42 @@ export class GraphifyClient {
   }
 
   async deleteNode(id: string): Promise<void> {
-    const node = this.nodes.get(id);
-    if (!node) return;
-    this.removeNodeFromIndex(node);
+    await this.deleteNodes([id]);
+  }
+
+  async deleteNodes(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
+    for (const id of ids) {
+      const node = this.nodes.get(id);
+      if (node) this.removeNodeFromIndex(node);
+    }
 
     for (let i = this.edges.length - 1; i >= 0; i--) {
       const edge = this.edges[i];
       if (!edge) continue;
-      if (edge.from === id || edge.to === id) {
+      if (idSet.has(edge.from) || idSet.has(edge.to)) {
         this.edges.splice(i, 1);
       }
     }
 
-    this.edgesByFrom.delete(id);
-    this.edgesByTo.delete(id);
+    for (const id of ids) {
+      this.edgesByFrom.delete(id);
+      this.edgesByTo.delete(id);
+    }
 
     for (const [k, v] of this.edgesByFrom.entries()) {
-      this.edgesByFrom.set(k, v.filter((e) => e.to !== id));
+      const filtered = v.filter((e) => !idSet.has(e.to));
+      if (filtered.length !== v.length) this.edgesByFrom.set(k, filtered);
     }
     for (const [k, v] of this.edgesByTo.entries()) {
-      this.edgesByTo.set(k, v.filter((e) => e.from !== id));
+      const filtered = v.filter((e) => !idSet.has(e.from));
+      if (filtered.length !== v.length) this.edgesByTo.set(k, filtered);
     }
 
-    this.nodes.delete(id);
+    for (const id of ids) {
+      this.nodes.delete(id);
+    }
   }
 
   async deleteEdge(from: string, to: string, relation: GraphEdge["relation"]): Promise<void> {

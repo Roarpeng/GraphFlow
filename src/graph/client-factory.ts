@@ -24,6 +24,9 @@ export interface GraphClient {
     direction?: "out" | "in" | "both"
   ): Promise<{ node: GraphNode; via: GraphEdge["relation"] }[]>;
   deleteNode?(id: string): Promise<void>;
+  /** Batch delete nodes (and dangling edges). Backends implement this to avoid
+   *  the read-modify-write amplification of per-node deleteNode loops. */
+  deleteNodes?(ids: string[]): Promise<void>;
   deleteEdge?(from: string, to: string, relation: GraphEdge["relation"]): Promise<void>;
   vacuum?(): Promise<void> | void;
 }
@@ -61,6 +64,10 @@ class InMemoryGraphClientAdapter implements GraphClient {
 
   async deleteNode(id: string): Promise<void> {
     return this.client.deleteNode(id);
+  }
+
+  async deleteNodes(ids: string[]): Promise<void> {
+    return this.client.deleteNodes(ids);
   }
 
   async deleteEdge(from: string, to: string, relation: GraphEdge["relation"]): Promise<void> {
