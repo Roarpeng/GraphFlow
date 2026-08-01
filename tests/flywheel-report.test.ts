@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { applySkillLearning } from "../src/learning/skill-flywheel";
 import { recordEpisode } from "../src/learning/episodic-memory";
 import { createGraphClient } from "../src/graph/client-factory";
+import type { GraphNode } from "../src/core/types";
 import { validateConfig } from "../src/config/loader";
 import { getFlywheelReport } from "../src/surfaces/cli/runtime";
 
@@ -136,6 +137,169 @@ describe("flywheel contribution report", () => {
     expect(report.episodes.deviations.techDrift).toBe(0);
     expect(report.goals.active).toBe(1);
     expect(report.goals.supersededVersions).toBe(1);
+  });
+
+  it("attributes memory: recall hits, stale episodes, confidence, evidence chain, deviation breakdown", async () => {
+    const attrRoot = mkdtempSync(join(tmpdir(), "graphflow-attribution-"));
+    const attrConfigPath = join(attrRoot, "graphflow.config.json");
+    const attrStorePath = join(attrRoot, "graph.json");
+    writeFileSync(
+      attrConfigPath,
+      JSON.stringify({
+        ...configJson,
+        graphPolicy: {
+          ...configJson.graphPolicy,
+          workspaceRoot: attrRoot,
+          graphStorePath: attrStorePath,
+        },
+      })
+    );
+    const client = createGraphClient(
+      validateConfig(
+        JSON.parse(
+          JSON.stringify({
+            ...configJson,
+            graphPolicy: {
+              ...configJson.graphPolicy,
+              workspaceRoot: attrRoot,
+              graphStorePath: attrStorePath,
+            },
+          })
+        )
+      )
+    );
+
+    // Four episodes with explicit, strictly-increasing updatedAt so the
+    // recency ranking is deterministic: one pass with lessons, one fail
+    // (misread-requirement), one pending, one pending flagged staleGoal
+    // (goal versioning marks still-pending episodes on the node).
+    const base = 1_700_000_000_000;
+    const episodeNodes: GraphNode[] = [
+      {
+        id: "episode:pass",
+        type: "Decision",
+        content: "episode old pass episode with lessons",
+        metadata: {
+          kind: "episode",
+          record: JSON.stringify({
+            id: "episode:pass",
+            task: "old pass episode with lessons",
+            plan: [],
+            outcome: "pass",
+            keyDecisions: [],
+            lessons: ["keep steps small", "verify early"],
+            attempts: 1,
+            createdAt: base,
+            updatedAt: base,
+            deviation: "none",
+          }),
+        },
+      },
+      {
+        id: "episode:fail",
+        type: "Decision",
+        content: "episode fail episode misreading the requirement",
+        metadata: {
+          kind: "episode",
+          record: JSON.stringify({
+            id: "episode:fail",
+            task: "fail episode misreading the requirement",
+            plan: [],
+            outcome: "fail",
+            keyDecisions: [],
+            lessons: ["verify requirements first"],
+            attempts: 2,
+            createdAt: base + 1000,
+            updatedAt: base + 1000,
+            deviation: "misread-requirement",
+          }),
+        },
+      },
+      {
+        id: "episode:pending",
+        type: "Decision",
+        content: "episode recent pending episode awaiting report",
+        metadata: {
+          kind: "episode",
+          record: JSON.stringify({
+            id: "episode:pending",
+            task: "recent pending episode awaiting report",
+            plan: [],
+            outcome: "pending",
+            keyDecisions: [],
+            lessons: [],
+            attempts: 0,
+            createdAt: base + 2000,
+            updatedAt: base + 2000,
+          }),
+        },
+      },
+      {
+        id: "episode:stale",
+        type: "Decision",
+        content: "episode stale pending episode superseded by goal v2",
+        metadata: {
+          kind: "episode",
+          staleGoal: "goal:abc",
+          record: JSON.stringify({
+            id: "episode:stale",
+            task: "stale pending episode superseded by goal v2 which changed the success criteria and the core problem",
+            plan: [],
+            outcome: "pending",
+            keyDecisions: [],
+            lessons: [],
+            attempts: 1,
+            createdAt: base + 3000,
+            updatedAt: base + 3000,
+          }),
+        },
+      },
+    ];
+    await client.upsertNodes(episodeNodes);
+
+    const m = getFlywheelReport(attrConfigPath).memoryAttribution;
+
+    // Section shape: every attribution field present.
+    expect(m).toHaveProperty("memoryHits");
+    expect(m).toHaveProperty("staleEpisodes");
+    expect(m).toHaveProperty("confidence");
+    expect(m).toHaveProperty("topContributingMemories");
+    expect(m).toHaveProperty("deviationBreakdown");
+
+    // memoryHits: no per-run recall telemetry is persisted in episode
+    // records, so the fallback is episodes carrying lessons.
+    expect(m.memoryHits).toBe(2);
+
+    // staleEpisodes: only the goal-versioned pending episode counts.
+    expect(m.staleEpisodes).toBe(1);
+
+    // Confidence: pass/fail/pending distribution percentages.
+    expect(m.confidence).toEqual({ passPercent: 25, failPercent: 25, pendingPercent: 50 });
+
+    // Evidence chain: top 3 most-recent episodes, newest first, with
+    // truncated task, outcome, and lesson count.
+    expect(m.topContributingMemories).toHaveLength(3);
+    expect(m.topContributingMemories.map((e) => e.id)).toEqual([
+      "episode:stale",
+      "episode:pending",
+      "episode:fail",
+    ]);
+    expect(m.topContributingMemories.map((e) => e.lessonsCount)).toEqual([0, 0, 1]);
+    expect(m.topContributingMemories[0]!.outcome).toBe("pending");
+    expect(m.topContributingMemories[0]!.id).toBe("episode:stale");
+    // Long tasks are truncated to 60 chars in the evidence chain.
+    expect(m.topContributingMemories[0]!.task.length).toBe(60);
+    expect(m.topContributingMemories[0]!.task.endsWith("...")).toBe(true);
+
+    // Deviation breakdown aggregated per category across episode records.
+    expect(m.deviationBreakdown).toEqual({
+      none: 1,
+      misreadRequirement: 1,
+      scopeCreep: 0,
+      techDrift: 0,
+    });
+
+    rmSync(attrRoot, { recursive: true, force: true });
   });
 
   it("returns an empty report for a missing store (read-only, no indexing)", () => {
