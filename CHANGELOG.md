@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.9.5] - 2026-08-01
+
+### Fixed
+
+- **图谱索引排除 Agent 工具目录（P1）**：`IGNORED_DIRS` 新增 `.agent` / `.claude` / `.cursor` / `.gemini` / `.joycode` / `.trae` / `Cursor`——`.claude/worktrees` 为每个 worktree 保存完整仓库副本，此前被当作源码索引进图（本地实测 1421 个 File 节点中 1076 个来自 worktrees，占 76%），污染检索锚点、PageRank 与存储；修复后 `graph rebuild` 扫描文件数从 ~1500+ 降至 326，旧图可在下次增量/全量索引时自动清理
+- **增量索引剪枝批量删除（P1，读写放大修复的伴生问题）**：排除目录后首次增量索引需从缓存差集剪除大量过期节点，而 `pruneFileFromGraph` 逐节点 `deleteNode`（file 后端每次全量读写 JSON，实测 62MB 图 × 1000+ 节点 → 305s 挂起）；新增可选能力 `GraphClient.deleteNodes(ids)`（file 单次读+写、sqlite 单事务分块 IN、memory 批处理，均级联清理悬空边），剪枝改为单次快照读取 + 单次批量删除，mcp-http 试点保留逐节点回退路径
+- **测试 95 文件 / 656**（+2 walker 排除、+1 剪枝批量删除、+1 file 批量删除用例）
+
 ## [1.9.4] - 2026-08-01
 
 ### Changed
