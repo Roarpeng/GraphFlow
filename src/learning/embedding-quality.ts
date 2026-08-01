@@ -54,6 +54,8 @@ export function resetEmbeddingQualityStats(): void {
   delete state.lastError;
   delete state.lastCallAt;
   delete state.lastSample;
+  delete state.backend;
+  delete state.fallbackReason;
 }
 
 export function configureEmbeddingQualityMeta(meta: {

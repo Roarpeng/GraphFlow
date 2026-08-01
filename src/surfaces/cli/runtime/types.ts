@@ -147,6 +147,8 @@ export interface RoutingDiagnosisResult {
     model: string;
     embedded: boolean;
   };
+  /** Active embedding backend (P0-1): "semantic" (MiniLM/OpenAI vectors) or "off" (FNV-1a hash / none). */
+  embeddingBackend: "semantic" | "off";
   /** Lightweight embedding provider health / quality snapshot (in-process). */
   embeddingQuality?: {
     provider?: string;
