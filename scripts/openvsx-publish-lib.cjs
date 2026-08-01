@@ -20,7 +20,7 @@ function openVsxHasVersion(metadata, targetVersion) {
 function alignPackageJsonForNamespace(pkg, namespace) {
   const next = JSON.parse(JSON.stringify(pkg));
   const previousPublisher = String(next.publisher ?? "");
-  const name = String(next.name ?? "graphflow-tool");
+  const name = String(next.name ?? "graphflow");
   const previousChatId = `${previousPublisher}.${name}.graphflowAgent`;
   const nextChatId = `${namespace}.${name}.graphflowAgent`;
 

@@ -44,12 +44,12 @@ jobs:
       - name: Skip GraphFlow Tool marketplace publish
         if: steps.creds.outputs.mode == 'none' && github.event_name == 'workflow_dispatch'
         run: |
-          echo "::warning::Skipping GraphFlow Tool (graphflow-tool) marketplace publish: neither VSCE_PAT nor Azure credentials (AZURE_CLIENT_ID) are configured."
+          echo "::warning::Skipping GraphFlow Tool (graphflow) marketplace publish: neither VSCE_PAT nor Azure credentials (AZURE_CLIENT_ID) are configured."
 
       - name: Require marketplace credentials on tag push
         if: steps.creds.outputs.mode == 'none' && github.event_name == 'push'
         run: |
-          echo "::error::Cannot publish GraphFlow Tool (graphflow-tool): configure secret VSCE_PAT, or AZURE_CLIENT_ID + AZURE_TENANT_ID + AZURE_SUBSCRIPTION_ID."
+          echo "::error::Cannot publish GraphFlow Tool (graphflow): configure secret VSCE_PAT, or AZURE_CLIENT_ID + AZURE_TENANT_ID + AZURE_SUBSCRIPTION_ID."
           exit 1
 
       - name: Setup Node.js
