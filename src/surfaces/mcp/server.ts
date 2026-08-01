@@ -9,12 +9,22 @@ import {
   CallToolRequestSchema,
   ErrorCode,
   LATEST_PROTOCOL_VERSION,
+  ListResourcesRequestSchema,
   ListToolsRequestSchema,
   McpError,
+  ReadResourceRequestSchema,
   SetLevelRequestSchema,
   type CallToolResult,
   type LoggingLevel,
+  type ReadResourceResult,
 } from "@modelcontextprotocol/sdk/types.js";
+import {
+  diagnoseRoutingResult,
+  getFlywheelReport,
+  getTokenSavingsStats,
+  inspectGraph,
+} from "../cli/runtime";
+import { getRuntimeTimelineSummary } from "../../core/cancellation";
 import { ensureMcpWorkspaceEnv } from "../../config/discover-workspace.js";
 import { attachMcpLogSink } from "../../utils/logger.js";
 import { getToolDefinitions, type ToolDefinition } from "./tool-definitions.js";
@@ -57,6 +67,47 @@ interface JsonRpcNotification {
 /** Servers whose SDK transport is currently connected, so notifications can be emitted. */
 const connectedServers = new WeakSet<McpServer>();
 
+const DIAGNOSE_RESOURCE_URI = "graphflow://diagnose";
+
+const DIAGNOSE_RESOURCES = [
+  {
+    uri: DIAGNOSE_RESOURCE_URI,
+    name: "GraphFlow Diagnose",
+    description: "Provider health, graph statistics, token savings, and flywheel report for the bound workspace.",
+    mimeType: "application/json",
+  },
+];
+
+async function readDiagnoseResource(): Promise<unknown> {
+  const health = diagnoseRoutingResult(undefined);
+  const graph = await inspectGraph(undefined);
+  const stats = getTokenSavingsStats(undefined, undefined);
+  const flywheel = getFlywheelReport(undefined, undefined);
+  return {
+    health,
+    graph,
+    stats,
+    flywheel,
+    runtimeTimeline: getRuntimeTimelineSummary(),
+  };
+}
+
+async function readResource(uri: string): Promise<ReadResourceResult> {
+  if (uri !== DIAGNOSE_RESOURCE_URI) {
+    throw new McpError(ErrorCode.InvalidParams, `Unknown resource: ${uri}`);
+  }
+  const payload = await readDiagnoseResource();
+  return {
+    contents: [
+      {
+        uri,
+        mimeType: "application/json",
+        text: JSON.stringify(payload, null, 2),
+      },
+    ],
+  };
+}
+
 export interface McpServer {
   serverInfo: {
     name: string;
@@ -93,6 +144,7 @@ export function createMcpServer(
       capabilities: {
         tools: {},
         logging: {},
+        resources: {},
       },
     }
   );
@@ -142,6 +194,7 @@ export function createMcpServer(
               capabilities: {
                 tools: {},
                 logging: {},
+                resources: {},
               },
               serverInfo: wrapper.serverInfo,
             });
@@ -151,6 +204,13 @@ export function createMcpServer(
             return respond(request.id ?? null, { tools });
           case "tools/call":
             return respond(request.id ?? null, await callTool(request.params ?? {}));
+          case "resources/list":
+            return respond(request.id ?? null, { resources: DIAGNOSE_RESOURCES });
+          case "resources/read":
+            return respond(
+              request.id ?? null,
+              await readResource(readRequiredString((request.params ?? {}).uri, "uri"))
+            );
           default:
             throw new McpError(ErrorCode.MethodNotFound, `Method not found: ${request.method}`);
         }
@@ -179,6 +239,8 @@ export function createMcpServer(
   sdkServer.setRequestHandler(ListToolsRequestSchema, () => ({ tools }));
   sdkServer.setRequestHandler(CallToolRequestSchema, (request) => callTool(request.params as Record<string, unknown>));
   sdkServer.setRequestHandler(SetLevelRequestSchema, () => ({}));
+  sdkServer.setRequestHandler(ListResourcesRequestSchema, () => ({ resources: DIAGNOSE_RESOURCES }));
+  sdkServer.setRequestHandler(ReadResourceRequestSchema, (request) => readResource(request.params.uri));
 
   return wrapper;
 }
