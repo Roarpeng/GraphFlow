@@ -16,6 +16,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check version consistency (package.json / CHANGELOG / README)
+        run: node scripts/ci-version-check.cjs
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
