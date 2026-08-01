@@ -2,6 +2,31 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.9.0] - 2026-08-01
+
+技能质量与团队化版本:飞轮从「机制完整、效果未知」走向「A/B 实证 + 质量门禁 + 团队共享」。
+
+### Added
+
+- **语义 embedding 可选后端（P0）**：`graphPolicy.embeddingProvider: "fnv" | "transformers"`（默认 `fnv` 离线安全）；`transformers` 时经 `@huggingface/transformers` 懒加载 all-MiniLM-L6-v2，任何失败（缓存缺失/超时/加载错误）永久降级 FNV-1a 并告警；`graphflow_diagnose` 新增 `embeddingBackend: semantic | off` 上报活动后端
+- **技能结果分类（P0）**：单一分数升级为 `proven / correctable / anti-pattern / noise` 四类——noise 提取即拒、装载时清理（`cleanupNoiseSkills`）；仅 anti-pattern 记负分（消灭「首次失败即 -20 下沉」）；proven 需 ≥2 次使用或链接成功结局
+- **检索 golden set 26 → 132（P1）**：10 域覆盖（含 PLC），12 负样本断言 + 132 Top-K 位置断言（rank 稳定性门），每域 ≥8 查询护栏
+- **技能飞轮端到端 A/B 基准（P1）**：`npm run benchmark:ab` 以 golden 查询为任务集、真实学习路径跑双臂——实测飞轮开 **100.0% vs 关 61.5%**（救回 10 任务、0 受损），开销 33 tok/任务
+- **CI 版本一致性门禁（P1）**：`scripts/ci-version-check.cjs` 断言 package.json / CHANGELOG 最新条目 / README 徽章三源一致；CI 新增 skill A/B 基准 job（文件存在性守卫）
+- **skill sync 双向 merge（P2）**：导入改为按技能 ID 合并——同 ID 取较新 `updatedAt`、平手保本地、本地独有保留；`--force` 恢复覆盖；包 schema 1.1 新增 `goldenQueries`，团队 golden 集随包同步（合并去重写 `.graphflow/team-golden.json`）
+- **VS Code 飞轮贡献面板（P2）**：新增「Flywheel · 学习飞轮贡献」区块——技能正/中/负分布、topUsed、episodes pass/fail/pending 结果条；`runtime.getFlywheelReport()` 暴露数据
+- **Graphify mcp-http 团队后端试点（P2）**：`GraphifyMcpClient` 补齐完整 `GraphClient` 接口，所有操作 `withFallback` 失败降级本地 file 存储；端点校验 + 15s 超时 + `readSnapshot`/`ping`/`isDegraded`；README 试点说明
+- **PLC 索引器加固（P0）**：PLCopen XML POU `returnType`（嵌套/inline 双形态）提取为 `POU.return` 符号；ST 分析器 CASE 数值分支（`1:` / `1..10:`）不再被误判为跳转标签；45 测试 + 双 fixture
+
+### Changed
+
+- **测试 92 文件/489 用例 → 94 文件/646 用例**，全量 14.7s 通过
+- `vitest.config.ts` 排除 `.claude/worktrees/**`，根治多 worktree 并行时测试互扫污染（m50 假失败）
+
+### Fixed
+
+- skill 节点全负分（-2/fail）根因：浅层 n-gram 技能（update/readme）被提取——现按符号证据门禁拒绝
+
 ## [1.8.0] - 2026-07-28
 
 目标对齐（Goal Alignment）版本：让 Agent 在长时间、多步骤任务中始终记得为什么出发——治「需求理解不透」与「干着干着偏离」两大痛点。
