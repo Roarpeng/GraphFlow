@@ -112,8 +112,8 @@ describe("Bridge CLI learning loop", () => {
         runResult.episodeId!,
         true,
         [
-          "prefer CLI outcome report when MCP unavailable",
-          "submit insights before treating bridge plan as final",
+          "prefer CLI outcome report when MCP unavailable in bridge-cli.ts",
+          "submit insights before treating bridge plan as final in plan.ts",
         ],
         configPath
       );

@@ -70,7 +70,7 @@ describe("skill sync (git-based team sharing)", () => {
       },
     })));
     const seedClient = createGraphClient(seedConfig);
-    await applySkillLearning(seedClient, "refactor planner module and add tests", {
+    await applySkillLearning(seedClient, "refactor planner module in planner.ts and add tests", {
       status: "COMPLETED",
       attempts: 1,
       feedback: "done",
