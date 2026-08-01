@@ -350,22 +350,29 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   if (command === "skill" && args[0] === "sync") {
     // Git-based team sharing: export to / import from the committable
     // `.graphflow/skills/team-skills.json` (override with --path <file>).
+    // Import is a bidirectional MERGE: per-skill-id union, newer updatedAt
+    // wins, ties keep local, local-only skills preserved; --force restores
+    // overwrite semantics. Team golden queries ride along and merge into
+    // `.graphflow/team-golden.json` (dedupe by text, local-first order).
     const directionArg = args[1]?.trim().toLowerCase();
     if (directionArg !== "export" && directionArg !== "import") {
-      console.log("Usage: graphflow skill sync <export|import> [--path <file>]");
+      console.log("Usage: graphflow skill sync <export|import> [--path <file>] [--force]");
+      console.log("  import MERGES per-skill-id: newer updatedAt wins; ties keep local; --force overwrites.");
+      console.log("  team golden queries ride along -> .graphflow/team-golden.json (dedupe, local-first).");
       process.exitCode = 1;
       return undefined;
     }
     const pathIdx = args.indexOf("--path");
     const customPath = pathIdx >= 0 ? args[pathIdx + 1]?.trim() : undefined;
-    const data = await syncSkillPackageRuntime(configPath, directionArg, customPath);
+    const force = args.includes("--force");
+    const data = await syncSkillPackageRuntime(configPath, directionArg, customPath, { force });
     return {
       command: "skill-sync",
       data,
       legacyText:
         data.direction === "export"
-          ? `direction=export; path=${data.path}; skillCount=${data.skillCount}; bytes=${data.bytes}`
-          : `direction=import; path=${data.path}; imported=${data.imported}; skipped=${data.skipped}; total=${data.total}`,
+          ? `direction=export; path=${data.path}; skillCount=${data.skillCount}; bytes=${data.bytes}; goldenQueries=${data.goldenQueries ?? 0}`
+          : `direction=import; path=${data.path}; imported=${data.imported}; skipped=${data.skipped}; updated=${data.updated}; total=${data.total}; goldenQueries=${data.goldenQueries ?? 0}`,
     };
   }
 

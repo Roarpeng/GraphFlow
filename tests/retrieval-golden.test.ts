@@ -44,7 +44,11 @@ const SRC_DIR = join(process.cwd(), "src");
  * the query passes when ANY expected substring appears in the package output
  * (anchor node ids carry their source path, e.g. `file:src/core/orchestrator.ts`).
  */
-const GOLDEN_SET: ReadonlyArray<{ query: string; expectAny: string[] }> = [
+/**
+ * The canonical retrieval golden set, exported so `skill sync export` can
+ * bundle the team queries into the skill package (`goldenQueries` field).
+ */
+export const GOLDEN_SET: ReadonlyArray<{ query: string; expectAny: string[] }> = [
   { query: "orchestrate task routing", expectAny: ["orchestrator"] },
   { query: "dag execution engine", expectAny: ["dag-engine", "executedag"] },
   { query: "triage task classification simple complex", expectAny: ["triage"] },

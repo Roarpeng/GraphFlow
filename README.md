@@ -62,7 +62,7 @@ Agent 先调 `graphflow_context` 拿压缩上下文，再用 `graphflow_plan` �
 | **向量索引** | 进程内记忆化 + **磁盘持久化**（指纹校验，MCP 重启秒级恢复） |
 | **存储后端** | `file` / `memory` / `sqlite`（FTS5，**searchtext 分词增强**，camelCase 可检索）/ **`auto`（sqlite 优先自动切换）** / `mcp-http` |
 | **学习飞轮** | Episodic Memory、Reflection、Skill 节点（score ±1，bounded [-20,20]）、nightly 学习、技能衰减/剪枝、**飞轮贡献报告**（`skill report` / `graphflow_diagnose`，含偏离聚合与 Goal 统计） |
-| **团队共享** | **`skill sync`**：技能包导出/导入到可提交的 `.graphflow/skills/team-skills.json` |
+| **团队共享** | **`skill sync`**：技能包导出/导入到可提交的 `.graphflow/skills/team-skills.json`；导入为**双向 MERGE**（per-skill-id 并集，updatedAt 较新者胜、并列保留本地、本地独有技能保留；`--force` 覆盖）；golden 检索基准随包往返 → `.graphflow/team-golden.json` |
 | **效果基准** | [token 节省 98.7%](benchmarks/RESULTS.md)（独立复核）；[Skill A/B 基准](benchmarks/SKILL-AB-RESULTS.md)（注入率/召回率/开销，`npm run benchmark:skills`） |
 | **模型路由** | Smart / Economy 双 tier；多 provider 健康探测与 fallback（DeepSeek、OpenAI、Anthropic、百炼、豆包） |
 | **可观测性** | `graphflow_diagnose`：provider 健康 + 图统计 + token 节省 + **飞轮报告** |
@@ -99,8 +99,8 @@ graphflow plan "refactor planner" --json   # 规划
 graphflow run "update readme"              # 编排（Bridge）
 graphflow skill insights                   # 技能洞察
 graphflow skill report                     # 飞轮贡献报告
-graphflow skill sync export                # 导出团队技能包（git 共享）
-graphflow skill sync import                # 导入团队技能包
+graphflow skill sync export                # 导出团队技能包 + golden 查询集（git 共享）
+graphflow skill sync import                # 导入团队技能包（MERGE；--force 覆盖）＋ golden 合并到 .graphflow/team-golden.json
 graphflow route diagnose                   # 路由诊断
 graphflow learn nightly                    # 夜间学习
 graphflow doctor                           # 安装自检
