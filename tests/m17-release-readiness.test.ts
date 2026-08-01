@@ -144,7 +144,10 @@ describe("M17 release readiness", () => {
 
       expect(last.query).toBe("force a failure");
       expect(last.passed).toBe(false);
-      expect(last.retries).toBe(0);
+      // P2-3: unreachable mcp-http endpoints now degrade to the local file store
+      // instead of throwing, so indexing succeeds and the failing task is
+      // retried by the orchestrator before reaching HUMAN_REVIEW_REQUIRED.
+      expect(last.retries).toBeGreaterThan(0);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
