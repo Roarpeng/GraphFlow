@@ -20,6 +20,8 @@ export interface FileIndexerOptions {
   concurrency?: number;
   /** Optional embedding provider for attaching vector embeddings to nodes. */
   embeddingProvider?: EmbeddingProvider;
+  /** Optional per-batch progress callback, invoked with files processed so far and total scanned files. */
+  onProgress?: (processed: number, total: number) => void;
 }
 
 export interface ScannedFile {

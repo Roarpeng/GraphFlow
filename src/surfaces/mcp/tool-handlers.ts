@@ -27,14 +27,16 @@ import { join } from "node:path";
 export interface ToolCall {
   name: string;
   arguments?: Record<string, unknown>;
+  /** MCP progress token from the request's _meta, used to emit progress notifications. */
+  progressToken?: string | number;
 }
 
-export interface ToolCallResponse {
+export type ToolCallResponse = {
   content: Array<{
     type: "text";
     text: string;
   }>;
-}
+};
 
 export interface ExecutionHooks {
 }
@@ -43,10 +45,11 @@ export const MAX_STRING_FIELD_LENGTH = 100_000;
 
 export async function executeToolCall(
   call: ToolCall,
-  _server?: McpServer,
+  server?: McpServer,
   _hooks?: ExecutionHooks
 ): Promise<ToolCallResponse> {
   const args = call.arguments ?? {};
+  const onProgress = makeProgressCallback(server, call.progressToken);
 
   switch (call.name) {
     case "graphflow_run":
@@ -127,11 +130,19 @@ export async function executeToolCall(
       }
       if (mode === "full") {
         return textResponse(
-          await rebuildGraph(readOptionalString(args.rootDir), readOptionalString(args.configPath))
+          await rebuildGraph(
+            readOptionalString(args.rootDir),
+            readOptionalString(args.configPath),
+            onProgress ? { onProgress } : undefined
+          )
         );
       }
       return textResponse(
-        await indexGraph(readOptionalString(args.rootDir), readOptionalString(args.configPath))
+        await indexGraph(
+          readOptionalString(args.rootDir),
+          readOptionalString(args.configPath),
+          onProgress ? { onProgress } : undefined
+        )
       );
     }
     case "graphflow_insight": {
@@ -213,6 +224,18 @@ export async function executeToolCall(
     default:
       throw new Error(`Unknown tool: ${call.name}`);
   }
+}
+
+function makeProgressCallback(
+  server: McpServer | undefined,
+  progressToken: string | number | undefined
+): ((processed: number, total: number) => void) | undefined {
+  if (progressToken === undefined || !server) {
+    return undefined;
+  }
+  return (processed: number, total: number): void => {
+    server.sendProgress(progressToken, processed, total);
+  };
 }
 
 function getSkillGuide(section: string): string {
