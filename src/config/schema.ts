@@ -41,6 +41,15 @@ export interface GraphFlowConfig {
       l3: number;
     };
     /**
+     * Embedding backend for vector recall (P0-1). Default "fnv" is
+     * zero-config and offline-safe: deterministic FNV-1a bag-of-tokens
+     * embeddings, no downloads. Set "transformers" to lazily load
+     * all-MiniLM-L6-v2 via @huggingface/transformers (downloaded once, then
+     * cached) for semantic query + node embeddings; any failure (missing
+     * model cache, timeout, load error) transparently falls back to FNV-1a.
+     */
+    embeddingProvider?: "fnv" | "transformers";
+    /**
      * Context compression model selection. Compression (cluster summarization,
      * node densification) reuses the economy tier by default ("inherit"), so
      * no extra config is needed: whatever provider powers economy also powers

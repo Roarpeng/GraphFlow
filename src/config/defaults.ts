@@ -42,6 +42,9 @@ export function getDefaultConfig(): GraphFlowConfig {
       graphStorePath: `${DEFAULT_OUTPUT_DIR}/graphflow-graph.json`,
       maxContextTokens: 1500,
       layerQuota: { l1: 6, l2: 4, l3: 3 },
+      // P0-1: offline-safe default — FNV-1a hash embeddings, no model download.
+      // Opt into semantic recall by setting embeddingProvider: "transformers".
+      embeddingProvider: "fnv",
       compression: {
         enableGraphCompression: true,
         enableAdaptiveBudget: true,
