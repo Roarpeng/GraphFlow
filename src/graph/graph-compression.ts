@@ -107,22 +107,96 @@ export interface PageRankOptions {
 }
 
 /**
+ * PageRank caching: subgraph-scoped fingerprints + impact-area invalidation.
+ *
  * PageRank is recomputed on every context query over largely-identical graph
- * snapshots. Cache results keyed by a full fingerprint of (node ids, edges,
- * damping, iterations) so repeated previews on an unchanged graph skip the
- * 20-iteration O(E) loop. Small LRU: graph snapshots turn over on reindex.
+ * snapshots. The previous cache keyed on a *full-graph* fingerprint, so any
+ * unrelated node/edge change in a big workspace invalidated every entry and
+ * the O(E) edge hashing was paid per call. Two layers replace it:
+ *
+ * 1. 子图化指纹（正确性兜底）：PageRank 迭代本就只使用两端都在子图内的边，
+ *    指纹也只覆盖这些"相关边"——无关图变更不再误伤缓存条目，指纹哈希量从
+ *    O(E) 降为 O(E_sub)，且数值结果与旧实现完全一致。
+ * 2. 影响面标记（失效管理）：客户端写入/删除节点或边时调用 markGraphMutated()，
+ *    按触及的节点标记失效；快速路径命中可跳过整轮全图边扫描。未标记的变更
+ *    只要改变了相关边，指纹即会触发重算——指纹层保证任何路径都不会返回陈旧
+ *    数值。
  */
 const PAGE_RANK_CACHE_LIMIT = 8;
 const pageRankCache = new Map<string, Map<string, number>>();
 
-/** Test/diagnostic hook: cache hit/miss counters. */
-export const pageRankCacheStats = { hits: 0, misses: 0 };
+/** 快速路径条目：轻量键（子图 ids + 参数）→ 结果，附带影响面与失效刻度。 */
+interface PageRankCacheEntry {
+  lightKey: string;
+  /** 插入时的全局变更刻度。 */
+  tick: number;
+  /** 该条目结果所依赖的节点集合（影响面）。 */
+  covered: string[];
+  ranks: Map<string, number>;
+}
 
-/** Test hook: clear the PageRank cache. */
+/** 全局变更刻度：每次 markGraphMutated 递增。 */
+let mutationTick = 0;
+/** 无范围（全局）变更时的刻度：所有更早的条目作废。 */
+let unscopedEpoch = 0;
+/** 细粒度影响面：节点 → 最近一次被触及的刻度。 */
+const nodeEpochs = new Map<string, number>();
+/** 细粒度刻度表上限，溢出时退化为全局失效（防止旧条目被"复活"）。 */
+const NODE_EPOCH_LIMIT = 2048;
+
+const fastPageRankCache = new Map<string, PageRankCacheEntry>();
+
+/** Test/diagnostic hook: cache hit/miss counters (hits includes fast hits). */
+export const pageRankCacheStats = { hits: 0, misses: 0, fastHits: 0 };
+
+/** Test hook: clear the PageRank cache and mutation markers. */
 export function resetPageRankCache(): void {
   pageRankCache.clear();
+  fastPageRankCache.clear();
   pageRankCacheStats.hits = 0;
   pageRankCacheStats.misses = 0;
+  pageRankCacheStats.fastHits = 0;
+  mutationTick = 0;
+  unscopedEpoch = 0;
+  nodeEpochs.clear();
+}
+
+/**
+ * 标记图发生变更，作为 PageRank 缓存的影响面失效信号：
+ * - 不带 ids：影响面未知，全局失效（所有早于本次刻度的条目作废）；
+ * - 带 ids：仅触及这些节点的条目失效。
+ * 说明：该标记是"避免每次上下文打包全图重算"的优化手段；即使变更未被标记，
+ * 子图指纹仍会兜底保证数值正确性（相关边变了 → 指纹不同 → 重算）。
+ */
+export function markGraphMutated(ids?: Iterable<string>): void {
+  mutationTick += 1;
+  if (ids) {
+    const t = mutationTick;
+    for (const id of ids) {
+      nodeEpochs.set(id, t);
+    }
+    if (nodeEpochs.size > NODE_EPOCH_LIMIT) {
+      // 忘记细粒度信息时退化为全局失效，避免旧条目在信息丢失后被误判有效。
+      nodeEpochs.clear();
+      unscopedEpoch = t;
+    }
+  } else {
+    unscopedEpoch = mutationTick;
+    nodeEpochs.clear();
+  }
+}
+
+/** 条目是否仍有效：插入后未发生全局变更，且影响面内节点未被触及。 */
+function entryIsValid(entry: PageRankCacheEntry): boolean {
+  if (entry.tick < unscopedEpoch) {
+    return false;
+  }
+  for (const id of entry.covered) {
+    if ((nodeEpochs.get(id) ?? 0) > entry.tick) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function fnvMix(h: number, value: number): number {
@@ -130,15 +204,14 @@ function fnvMix(h: number, value: number): number {
   return Math.imul(h, 0x01000193);
 }
 
-function fingerprintPageRankInput(
+/** 轻量键：只覆盖子图节点 ids + 参数（快速路径查找用，O(|ids|)）。 */
+function fingerprintNodeSet(
   ids: string[],
-  edges: GraphEdge[],
   damping: number,
   iterations: number
 ): string {
   let h = 0x811c9dc5;
   h = fnvMix(h, ids.length);
-  h = fnvMix(h, edges.length);
   h = fnvMix(h, Math.round(damping * 1000));
   h = fnvMix(h, iterations);
   for (const id of ids) {
@@ -146,10 +219,30 @@ function fingerprintPageRankInput(
       h = fnvMix(h, id.charCodeAt(i));
     }
   }
-  // Full edge hash (not sampled): a stale hit would blend wrong centrality
-  // into ranking, so fingerprint correctness matters more than the O(E) cost,
-  // which is still ~20x cheaper than the PageRank iterations it replaces.
-  for (const edge of edges) {
+  return (h >>> 0).toString(36);
+}
+
+/**
+ * 子图化指纹：ids + 相关边（两端都在子图内）+ 参数。
+ * 相关边集合与迭代逻辑完全一致，因此数值结果与旧的全图指纹实现相同。
+ */
+function fingerprintSubgraph(
+  ids: string[],
+  relevantEdges: GraphEdge[],
+  damping: number,
+  iterations: number
+): string {
+  let h = 0x811c9dc5;
+  h = fnvMix(h, ids.length);
+  h = fnvMix(h, relevantEdges.length);
+  h = fnvMix(h, Math.round(damping * 1000));
+  h = fnvMix(h, iterations);
+  for (const id of ids) {
+    for (let i = 0; i < id.length; i += 1) {
+      h = fnvMix(h, id.charCodeAt(i));
+    }
+  }
+  for (const edge of relevantEdges) {
     for (let i = 0; i < edge.from.length; i += 1) h = fnvMix(h, edge.from.charCodeAt(i));
     for (let i = 0; i < edge.relation.length; i += 1) h = fnvMix(h, edge.relation.charCodeAt(i));
     for (let i = 0; i < edge.to.length; i += 1) h = fnvMix(h, edge.to.charCodeAt(i));
@@ -176,13 +269,51 @@ export function computePageRank(
   const n = ids.length;
   if (n === 0) return new Map();
 
-  const cacheKey = fingerprintPageRankInput(ids, edges, damping, iterations);
+  const fastPathActive = unscopedEpoch > 0 || nodeEpochs.size > 0;
+  const lightKey = fingerprintNodeSet(ids, damping, iterations);
+
+  // 影响面快速路径：自条目插入后该子图未被触及（图稳定），跳过全图边扫描。
+  if (fastPathActive) {
+    const fastEntry = fastPageRankCache.get(lightKey);
+    if (fastEntry && entryIsValid(fastEntry)) {
+      pageRankCacheStats.hits += 1;
+      pageRankCacheStats.fastHits += 1;
+      fastPageRankCache.delete(lightKey);
+      fastPageRankCache.set(lightKey, fastEntry);
+      return new Map(fastEntry.ranks);
+    }
+  }
+
+  // 子图化：先过滤出两端都在子图内的相关边（与迭代使用的边集完全一致）。
+  const relevantEdges: GraphEdge[] = [];
+  for (const edge of edges) {
+    if (idSet.has(edge.from) && idSet.has(edge.to)) {
+      relevantEdges.push(edge);
+    }
+  }
+
+  const cacheKey = fingerprintSubgraph(ids, relevantEdges, damping, iterations);
   const cached = pageRankCache.get(cacheKey);
   if (cached) {
     pageRankCacheStats.hits += 1;
     // Refresh LRU position.
     pageRankCache.delete(cacheKey);
     pageRankCache.set(cacheKey, cached);
+    // 顺带刷新快速路径条目（刻度和影响面都是当前值，结果仍然正确）。
+    if (fastPathActive && !fastPageRankCache.has(lightKey)) {
+      if (fastPageRankCache.size >= PAGE_RANK_CACHE_LIMIT) {
+        const oldest = fastPageRankCache.keys().next().value;
+        if (oldest !== undefined) {
+          fastPageRankCache.delete(oldest);
+        }
+      }
+      fastPageRankCache.set(lightKey, {
+        lightKey,
+        tick: mutationTick,
+        covered: ids,
+        ranks: cached,
+      });
+    }
     return new Map(cached);
   }
   pageRankCacheStats.misses += 1;
@@ -190,8 +321,7 @@ export function computePageRank(
   // Build weighted outbound adjacency.
   const outWeight = new Map<string, number>();
   const outEdges = new Map<string, { to: string; w: number }[]>();
-  for (const edge of edges) {
-    if (!idSet.has(edge.from) || !idSet.has(edge.to)) continue;
+  for (const edge of relevantEdges) {
     const w = weights[edge.relation] ?? 0.1;
     const list = outEdges.get(edge.from) ?? [];
     list.push({ to: edge.to, w });
@@ -238,6 +368,20 @@ export function computePageRank(
     }
   }
   pageRankCache.set(cacheKey, new Map(rank));
+
+  // 同步维护快速路径条目（影响面 = 子图 ids）。
+  if (fastPageRankCache.size >= PAGE_RANK_CACHE_LIMIT) {
+    const oldest = fastPageRankCache.keys().next().value;
+    if (oldest !== undefined) {
+      fastPageRankCache.delete(oldest);
+    }
+  }
+  fastPageRankCache.set(lightKey, {
+    lightKey,
+    tick: mutationTick,
+    covered: ids,
+    ranks: new Map(rank),
+  });
 
   return rank;
 }

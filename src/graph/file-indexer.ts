@@ -9,7 +9,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { createHash } from "node:crypto";
-import { hashTextHex as hashText } from "../utils/hash.js";
 import { logger } from "../utils/logger.js";
 import type { GraphEdge, GraphNode } from "../core/types.js";
 import type { GraphClient } from "./client-factory.js";
@@ -34,6 +33,7 @@ import type {
 } from "./file-indexer-nodes.js";
 import {
   moduleKey,
+  assignSymbolNodeIds,
   buildFileNodesAndEdges,
 } from "./file-indexer-nodes.js";
 import {
@@ -112,12 +112,8 @@ async function processFile(
 
   if (indexer) {
     const extracted = await indexer.extract(relPath, content);
-    declared = extracted.symbols
-      .filter((sym) => sym && typeof sym.name === "string")
-      .map((sym) => ({
-        ...sym,
-        nodeId: `symbol:${relPath}:${hashText(sym.name)}`,
-      }));
+    // 同文件同名符号在此统一消歧：首个保留旧 ID，冲突项追加确定性哈希段
+    declared = assignSymbolNodeIds(relPath, extracted.symbols);
     imports = extracted.imports.map((imp) => imp.module);
     fileCalls = extracted.calls ?? [];
     fileInherits = extracted.inherits ?? [];
@@ -333,12 +329,8 @@ export async function indexSingleFile(
 
   if (indexer) {
     const extracted = await indexer.extract(relPath, content);
-    declared = extracted.symbols
-      .filter((sym) => sym && typeof sym.name === "string")
-      .map((sym) => ({
-        ...sym,
-        nodeId: `symbol:${relPath}:${hashText(sym.name)}`,
-      }));
+    // 同文件同名符号在此统一消歧：首个保留旧 ID，冲突项追加确定性哈希段
+    declared = assignSymbolNodeIds(relPath, extracted.symbols);
     imports = extracted.imports.map((imp) => imp.module);
     fileCalls = extracted.calls ?? [];
     fileInherits = extracted.inherits ?? [];
