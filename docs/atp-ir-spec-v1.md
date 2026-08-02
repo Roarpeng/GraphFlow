@@ -1,7 +1,7 @@
 # ATP/IR — Agent Thinking Protocol Intermediate Representation
-## Public Specification v1.1
+## Public Specification v1.1 (v1.2 increment in §8)
 
-> Status: **Stable** ｜ Protocol version: `atp-ir/1.1` ｜ Reference implementation: GraphFlow (`@roarpeng/graphflow`) v1.8+
+> Status: **Stable** ｜ Protocol version: `atp-ir/1.1` (+ `atp-ir/1.2` additive increment) ｜ Reference implementation: GraphFlow (`@roarpeng/graphflow`) v1.8+
 >
 > This document is the **versioned public contract** for the Agent Thinking
 > Protocol IR and its agent-bridge submit/merge flow. Third-party tools may
@@ -11,6 +11,10 @@
 >
 > v1.1 is additive over v1.0: goal anchors, the clarification gate, the
 > alignment-check work item, deviation reporting, and goal versioning (§5.1).
+>
+> v1.2 is an additive increment over v1.1: memory/outcome auto-backfill and
+> the protocolized memory API (§8) add OPTIONAL work items only. No
+> required-ID changes; v1.0 / v1.1 implementations remain compatible.
 
 ---
 
@@ -134,6 +138,8 @@ The two sets MUST NOT be mixed in one merge: presence of any
 | --- | --- | --- |
 | `clarification` | clarification | conditional — required when intent confidence < 0.6 |
 | `alignment-check` | alignment | optional, post-execution |
+| `memory-recall` | memory | optional — **v1.2 increment** (see §8) |
+| `memory-backfill` | memory | optional — **v1.2 increment** (see §8) |
 
 ## 5. Submit / merge protocol
 
@@ -231,9 +237,98 @@ Both bindings share identical semantics; this document is the source of truth.
   absent (not an error) and MUST tolerate unparseable responses by falling
   back to heuristic plans.
 
+## 8. v1.2 increment — memory/outcome auto-backfill & protocolized memory API
+
+> **增量标注**: this section is the `atp-ir/1.2` additive increment over
+> v1.0/v1.1. It adds two OPTIONAL protocol-level work items (§4.3) and
+> protocolizes the memory behaviours the reference implementation already
+> performs. Consumers targeting v1.0/v1.1 are unaffected: per §7, unknown
+> optional items MUST be ignored, and all new behaviours degrade to no-ops
+> when a producer/agent does not emit them.
+
+### 8.1 Memory/outcome auto-backfill (`memory-backfill`)
+
+**Protocol.** After execution, `report_outcome(episodeId, success, lessons[],
+deviation?)` (see §5) **automatically backfills memory** — the host persists
+the episode record (task, outcome, lessons, deviation), applies skill-score
+updates, and refreshes the goal anchor's episode linkage without requiring an
+explicit insight submission. This closes the learning flywheel on the outcome
+path itself.
+
+**Registry.** `memory-backfill` is an OPTIONAL protocol-level work item (kind
+`memory`): producers MAY emit it as a machine-readable marker describing what
+was backfilled, and agents MUST NOT treat it as required or answerable.
+
+```jsonc
+{
+  "id": "memory-backfill",
+  "kind": "memory",
+  "prompt": "Outcome memory backfill marker (host-managed, no agent answer required)",
+  "expectedFormat": "json",
+  "responseSchema": { "backfilled": "boolean", "episodeId": "string", "fields": ["outcome|lessons|deviation|skillScores"] },
+  "optional": true
+}
+```
+
+**Semantics.** When present, the host SHOULD echo the backfill result (which
+fields were written, which were skipped) in the submit result of
+`report_outcome`. Absent/ignored `memory-backfill` = legacy v1.0/v1.1
+behaviour (memory still backfilled host-side; no marker in the registry).
+
+### 8.2 Protocolized memory API (`memory-recall`)
+
+**Protocol.** Memory becomes a first-class protocol concern: **recall** —
+similar past episodes (task similarity, lessons, outcomes) are injected into
+every packaged prompt context for a task; **store** — the auto-backfill in
+§8.1 is the store path. No separate handshake is required; recall is a
+passive injection and store is an automatic side effect of outcome reporting.
+
+**Registry.** `memory-recall` is an OPTIONAL protocol-level work item (kind
+`memory`): producers MAY emit it to declare the recall injection for a task
+(what memory was retrieved and why), so the consumer can audit what the agent
+saw.
+
+```jsonc
+{
+  "id": "memory-recall",
+  "kind": "memory",
+  "prompt": "Episodic-memory recall injection (host-managed, no agent answer required)",
+  "expectedFormat": "json",
+  "responseSchema": { "recalled": "number", "topEpisodes": [{ "id": "string", "outcome": "string", "lessonsCount": "number" }] },
+  "optional": true
+}
+```
+
+**Semantics.** Recall degrades gracefully: when the store is empty or the
+embedding provider is unavailable, the recall set is empty (Jaccard-only
+fallback) and `recalled: 0` — never an error.
+
+### 8.3 Transport bindings (v1.2)
+
+| Concern | Binding (existing, unchanged) | Notes |
+| --- | --- | --- |
+| Recall injection | `graphflow_context` (preview packages similar episodic memories into context) | v1.2: recall declaration MAY surface as a `memory-recall` item |
+| Store / backfill | `graphflow_report_outcome` (auto-backfills episode + skill scores) | v1.2: MAY surface as a `memory-backfill` item |
+| CLI | `graphflow outcome report <episodeId> <success> [--lessons ...]` | same semantics as MCP binding |
+
+A dedicated `graphflow_memory` binding is **reserved for a future minor
+version**; the tool surface is frozen in GraphFlow v1.9.5, so v1.2 exposes
+memory exclusively through the existing bindings above.
+
+### 8.4 Compatibility summary
+
+- **Additive-only**: two new OPTIONAL items, one new kind (`memory`); no
+  required-ID changes, no payload-shape changes to v1.0/v1.1 items.
+- **Backward compatible**: v1.0/v1.1 producers and consumers work unchanged;
+  v1.2 producers must still emit all v1.0/v1.1 required items.
+- **Graceful degradation**: recall/backfill no-ops when unsupported or empty
+  (§7 applies).
+
 ---
 
 *Reference implementation points: work-item construction
 (`src/core/agent-delegation.ts`), submit/merge (`src/core/submit-agent-insight.ts`,
 `src/core/merge-agent-insight.ts`), goal anchors (`src/core/goal-anchor.ts`),
-IR types (`src/agents/atp-schema.ts`).*
+IR types (`src/agents/atp-schema.ts`), episodic memory
+(`src/learning/episodic-memory.ts`: `recordEpisode`, `updateEpisodeOutcome`,
+`findSimilarEpisodes`, `summarizeEpisodeForPrompt`).*
