@@ -30,6 +30,7 @@ export interface GraphClient {
   deleteNodes?(ids: string[]): Promise<void>;
   deleteEdge?(from: string, to: string, relation: GraphEdge["relation"]): Promise<void>;
   vacuum?(): Promise<void> | void;
+  close?(): Promise<void> | void;
 }
 
 class InMemoryGraphClientAdapter implements GraphClient {
@@ -150,6 +151,11 @@ class MutationAwareGraphClient implements GraphClient {
 
   vacuum(): Promise<void> | void {
     return this.inner.vacuum?.();
+  }
+
+  close(): Promise<void> | void {
+    // sqlite 后端必须显式 close 释放文件句柄，否则 Windows 上删除/解锁会 EBUSY
+    return this.inner.close?.();
   }
 }
 

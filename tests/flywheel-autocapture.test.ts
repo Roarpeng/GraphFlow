@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { tmpdir } from "node:os";
@@ -19,7 +20,6 @@ import {
   uninstallClaudeCodeHooks,
 } from "../src/integrations/claude-code-hooks";
 
-const REPO_ROOT = join(__dirname, "..");
 const tempDirs: string[] = [];
 
 function makeTempRoot(prefix: string): string {
@@ -206,10 +206,12 @@ describe("Claude Code hooks generator", () => {
       settingsPath: "/tmp/settings.json",
     });
     expect(Object.keys(config.hooks).sort()).toEqual(["SessionEnd", "SessionStart", "Stop"]);
+    // 生成器用 path.join 拼接脚本路径，期望串需按当前平台分隔符构造（Windows 为反斜杠）
+    const scriptPath = join("/tmp/gf hooks", "session.sh");
     for (const entries of Object.values(config.hooks)) {
       // 带空格的脚本路径必须整体被单引号包裹（shell 安全拼接）
       expect(entries?.[0]?.command).toContain("'");
-      expect(entries?.[0]?.command).toContain("bash '/tmp/gf hooks/session.sh'");
+      expect(entries?.[0]?.command).toContain(`bash '${scriptPath}'`);
       expect(entries?.[0]?.timeout).toBeGreaterThan(0);
     }
     // SessionEnd 与 Stop 使用同一个 end 命令
@@ -326,14 +328,24 @@ describe("backfill-episodes", () => {
     const mod = await loadBackfill();
     const root = makeTempRoot("gf-backfill-git-");
     const storePath = join(root, "graphflow-out", "graphflow-graph.json");
-    // 显式指向不存在的 events 文件，强制走 git log 分支（仓库本身是 git 仓库）
+    // 显式指向不存在的 events 文件，强制走 git log 分支
     const missingEvents = join(root, ".graphflow", "learning-events.jsonl");
 
-    const first = mod.runBackfill({ root: REPO_ROOT, storePath, eventsPath: missingEvents, limit: 10 });
+    // 在临时目录初始化 git 仓库并造 10 个 commit，不依赖 CI 检出深度（shallow clone 下 REPO_ROOT 只有 1 条）
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    execFileSync("git", ["config", "user.name", "graphflow-test"], { cwd: root });
+    for (let i = 1; i <= 10; i += 1) {
+      writeFileSync(join(root, `sample-${i}.txt`), `commit ${i}`);
+      execFileSync("git", ["add", "-A"], { cwd: root });
+      execFileSync("git", ["commit", "-q", "-m", `sample commit ${i} with body detail ${i}`], { cwd: root });
+    }
+
+    const first = mod.runBackfill({ root, storePath, eventsPath: missingEvents, limit: 10 });
     expect(first.source).toContain("git-log");
     expect(first.added).toBe(10);
 
-    const second = mod.runBackfill({ root: REPO_ROOT, storePath, eventsPath: missingEvents, limit: 10 });
+    const second = mod.runBackfill({ root, storePath, eventsPath: missingEvents, limit: 10 });
     expect(second.added).toBe(0);
     expect(second.skipped).toBe(10);
   });
