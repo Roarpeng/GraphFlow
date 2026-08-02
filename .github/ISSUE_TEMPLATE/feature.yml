@@ -1,0 +1,52 @@
+name: 功能请求（Feature Request）
+description: 建议一个新功能或能力增强——请给出动机、方案与验收标准
+title: "[Feature] 简短的标题"
+labels: ["feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你的想法！先看看 [ROADMAP.md](https://github.com/Roarpeng/GraphFlow/blob/main/ROADMAP.md) 是否已在计划中；
+        不确定是否符合方向时，可先在 [Discussions](https://github.com/Roarpeng/GraphFlow/discussions) 讨论。
+  - type: textarea
+    id: motivation
+    attributes:
+      label: 动机（Motivation）
+      description: 要解决的痛点 / 使用场景；为什么现有能力（CLI / MCP / 配置）不够用
+      placeholder: 例如：在大仓库上每次建图都要数分钟，希望能增量监控文件变更并自动重建
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 方案（Proposed solution）
+      description: 建议的做法——接口形状（CLI 子命令 / MCP 工具 / 配置项）、与现有模块（graph / learning / surfaces）的关系、向后兼容考虑
+      placeholder: 例如：新增 `graphflow graph watch`，复用现有 file-watcher 做 debounce 增量索引
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 备选方案（Alternatives，可选）
+      description: 你考虑过的其他做法及取舍
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准（Acceptance criteria）
+      description: 可验证的完成标准——测试用例、命令、使用场景。新功能必须附带新测试（见 CONTRIBUTING.md）
+      placeholder: |
+        - [ ] `tests/<name>.test.ts` 新增覆盖用例
+        - [ ] 新行为默认关闭（feature flag）或严格向后兼容
+        - [ ] 未破坏 10 个 MCP 工具面
+    validations:
+      required: true
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: 参与方式
+      description: 你愿意如何参与？
+      options:
+        - label: 愿意自己实现并提交 PR（请先阅读 CONTRIBUTING.md）
+        - label: 仅提供想法，交给维护者评估

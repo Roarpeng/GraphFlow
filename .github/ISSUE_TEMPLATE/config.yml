@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions（提问与讨论）
+    url: https://github.com/Roarpeng/GraphFlow/discussions
+    about: 使用疑问、用法讨论、想法头脑风暴请先到 Discussions，而不是 issue。
+  - name: 项目路线图（ROADMAP）
+    url: https://github.com/Roarpeng/GraphFlow/blob/main/ROADMAP.md
+    about: 提交功能请求前，请先查看路线图中是否已计划或在推进。
+  - name: 安全漏洞报告（Security Advisories）
+    url: https://github.com/Roarpeng/GraphFlow/security/advisories/new
+    about: 安全问题请通过 Security Advisories 私密报告，不要公开提交 issue。
