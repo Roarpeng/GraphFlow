@@ -68,15 +68,83 @@ interface JsonRpcNotification {
 const connectedServers = new WeakSet<McpServer>();
 
 const DIAGNOSE_RESOURCE_URI = "graphflow://diagnose";
+const STATS_RESOURCE_URI = "graphflow://stats";
+const FLYWHEEL_RESOURCE_URI = "graphflow://flywheel";
+const ATP_IR_RESOURCE_URI = "graphflow://atp-ir";
 
-const DIAGNOSE_RESOURCES = [
+/**
+ * 资源面注册表（P2-1）：在 graphflow://diagnose 基础上新增 stats / flywheel /
+ * atp-ir 三个只读资源。资源面与工具面相互独立，10 个工具定义保持零改动；
+ * resources/list 的 name/description/mimeType 与 resources/read 返回保持一致。
+ */
+const GRAPHFLOW_RESOURCES = [
   {
     uri: DIAGNOSE_RESOURCE_URI,
     name: "GraphFlow Diagnose",
-    description: "Provider health, graph statistics, token savings, and flywheel report for the bound workspace.",
+    description:
+      "Provider health, graph statistics, token savings, and flywheel report for the bound workspace.",
     mimeType: "application/json",
   },
+  {
+    uri: STATS_RESOURCE_URI,
+    name: "GraphFlow Stats",
+    description:
+      "Graph statistics, cumulative run and token-savings statistics for the bound workspace.",
+    mimeType: "application/json",
+  },
+  {
+    uri: FLYWHEEL_RESOURCE_URI,
+    name: "GraphFlow Flywheel Report",
+    description:
+      "Skill flywheel report: skill distribution, episode outcomes, and memory attribution for the bound workspace.",
+    mimeType: "application/json",
+  },
+  {
+    uri: ATP_IR_RESOURCE_URI,
+    name: "GraphFlow ATP/IR Specification",
+    description:
+      "ATP/IR protocol version and work-item anchor reference for the agent-bridge submit/merge flow (static text).",
+    mimeType: "text/markdown",
+  },
 ];
+
+const resourceByUri = new Map(GRAPHFLOW_RESOURCES.map((resource) => [resource.uri, resource]));
+
+/** 静态文本资源：ATP/IR 规范版本与锚点说明（完整契约见 docs/atp-ir-spec-v1.md）。 */
+const ATP_IR_RESOURCE_TEXT = `# ATP/IR — Agent Thinking Protocol Intermediate Representation
+
+Protocol version: **atp-ir/1.2** (additive over v1.0 / v1.1)
+Reference implementation: GraphFlow (@roarpeng/graphflow) v1.8+
+
+## Roles
+- Producer: emits AgentWorkItem sets (GraphFlow graphflow_plan / graphflow_run / graphflow_insight)
+- Agent: answers work items with its own model, submits answers back
+- Consumer: validates completeness and merges answers into insight + final DAG plan
+
+## Work-item anchors (stable machine IDs)
+| ID | kind | required |
+| --- | --- | --- |
+| intent-analysis | intent | required (complex set) |
+| requirement-analysis | requirement | required (complex set) |
+| hat-1-white .. hat-6-blue | six-hats | required (complex set) |
+| why-1-white .. why-6-blue | five-whys | required (complex set) |
+| first-principles | first-principles | required (complex set) |
+| decision-matrix | decision-matrix | required (complex set) |
+| plan-refinement | plan-refinement | required (complex set) |
+| simple-plan-intent | intent | required (simple-plan set) |
+| simple-plan-decomposition | plan-refinement | required (simple-plan set) |
+| clarification | clarification | conditional (intent confidence < 0.6) |
+| alignment-check | alignment | optional (post-execution) |
+
+## Submit / merge flow
+producer: plan(task) -> { agentWorkItems, agentInstructions, status: "awaiting-agent" }
+agent:    insight submit { task, workItemId, response }  (per required item)
+agent:    insight merge { task }                         -> { plan, insight }
+agent:    report_outcome(episodeId, success, lessons[], deviation?)  (post-execution, closes the flywheel)
+
+## v1.2 increments (optional, see docs/atp-ir-spec-v1.md §8)
+- memory-recall: recall similar episodic memories into packaged context (auto-injected)
+- memory-backfill: report_outcome auto-backfills the episode record + skill scoring`;
 
 async function readDiagnoseResource(): Promise<unknown> {
   const health = diagnoseRoutingResult(undefined);
@@ -92,17 +160,45 @@ async function readDiagnoseResource(): Promise<unknown> {
   };
 }
 
+/** 图统计 + 运行/token 节省统计（与 graphflow_diagnose 同源，聚焦统计视图）。 */
+async function readStatsResource(): Promise<unknown> {
+  const graph = await inspectGraph(undefined);
+  const stats = getTokenSavingsStats(undefined, undefined);
+  return {
+    graph: {
+      transport: graph.transport,
+      nodeCount: graph.nodeCount,
+      edgeCount: graph.edgeCount,
+      nodeTypeCount: graph.nodeTypeCount,
+    },
+    runs: stats,
+  };
+}
+
 async function readResource(uri: string): Promise<ReadResourceResult> {
-  if (uri !== DIAGNOSE_RESOURCE_URI) {
+  const resource = resourceByUri.get(uri);
+  if (!resource) {
     throw new McpError(ErrorCode.InvalidParams, `Unknown resource: ${uri}`);
   }
-  const payload = await readDiagnoseResource();
+  if (uri === DIAGNOSE_RESOURCE_URI) {
+    return toResourceResult(uri, resource.mimeType, await readDiagnoseResource());
+  }
+  if (uri === STATS_RESOURCE_URI) {
+    return toResourceResult(uri, resource.mimeType, await readStatsResource());
+  }
+  if (uri === FLYWHEEL_RESOURCE_URI) {
+    return toResourceResult(uri, resource.mimeType, getFlywheelReport(undefined, undefined));
+  }
+  return toResourceResult(uri, resource.mimeType, ATP_IR_RESOURCE_TEXT);
+}
+
+function toResourceResult(uri: string, mimeType: string, payload: unknown): ReadResourceResult {
   return {
     contents: [
       {
         uri,
-        mimeType: "application/json",
-        text: JSON.stringify(payload, null, 2),
+        mimeType,
+        text: typeof payload === "string" ? payload : JSON.stringify(payload, null, 2),
       },
     ],
   };
@@ -205,7 +301,7 @@ export function createMcpServer(
           case "tools/call":
             return respond(request.id ?? null, await callTool(request.params ?? {}));
           case "resources/list":
-            return respond(request.id ?? null, { resources: DIAGNOSE_RESOURCES });
+            return respond(request.id ?? null, { resources: GRAPHFLOW_RESOURCES });
           case "resources/read":
             return respond(
               request.id ?? null,
@@ -239,7 +335,7 @@ export function createMcpServer(
   sdkServer.setRequestHandler(ListToolsRequestSchema, () => ({ tools }));
   sdkServer.setRequestHandler(CallToolRequestSchema, (request) => callTool(request.params as Record<string, unknown>));
   sdkServer.setRequestHandler(SetLevelRequestSchema, () => ({}));
-  sdkServer.setRequestHandler(ListResourcesRequestSchema, () => ({ resources: DIAGNOSE_RESOURCES }));
+  sdkServer.setRequestHandler(ListResourcesRequestSchema, () => ({ resources: GRAPHFLOW_RESOURCES }));
   sdkServer.setRequestHandler(ReadResourceRequestSchema, (request) => readResource(request.params.uri));
 
   return wrapper;
