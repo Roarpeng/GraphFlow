@@ -10,6 +10,8 @@ questions in this project:
 3. Read full files only when anchors point there or compressed context is insufficient.
 4. For multi-step or ambiguous work, call `graphflow_plan` before implementing.
 5. After project changes, call `graphflow_index` to keep the graph fresh.
+6. The flywheel auto-closes: pending episodes are backfilled by Claude Code
+   hooks (or `graphflow_report_outcome`) when GRAPHFLOW_AUTO_CAPTURE=1.
 
 When using Cursor `CallMcpTool`, always pass `server` + `toolName` + `arguments`
 (e.g. server `"graphflow"` / `"user-graphflow"`, toolName `"graphflow_context"`).
