@@ -26,9 +26,30 @@ export function dedupEdges(edges: GraphEdge[]): GraphEdge[] {
   return result;
 }
 
+/** 从符号节点 ID 取回所属文件（ID 形如 symbol:{relPath}:{hash}）。 */
+function symbolFileOf(nodeId: string): string {
+  if (!nodeId.startsWith("symbol:")) {
+    return "";
+  }
+  const rest = nodeId.slice("symbol:".length);
+  const idx = rest.indexOf(":");
+  return idx > 0 ? rest.slice(0, idx) : rest;
+}
+
 /**
  * Build cross-file reference edges from parsed files using the global symbol index.
  * Used by batch (full workspace) indexing.
+ *
+ * 复杂度（相对旧实现）：
+ * - 旧：每个标识符 token 做长度/黑名单/索引三次判断，且对每个候选定义做
+ *   一次字符串前缀比较（O(T × D)，T = 全工作区标识符 token 数，
+ *   D = 同名字定义数，前缀比较在热循环内）。
+ * - 新：一次性构建"标识符词表"（仅保留可解析名字：长度 >= 3 且不在黑名单），
+ *   热循环内每个 token 只做一次 O(1) 词表命中；定义按 (名字, 文件) 预分组
+ *   （一次性 O(ΣD)），本文件自己的定义按文件整体跳过（O(1)），不再逐定义做
+ *   字符串前缀比较。热循环变为 O(T) 词表查询 + O(T × D_cross) 出边
+ *   （D_cross = 跨文件定义数），所有字符串操作移出热循环。
+ * 产出的边集合与旧实现完全一致（golden 检索测试不受影响）。
  */
 export function buildBatchReferenceEdges(
   parsed: ParsedFile[],
@@ -43,11 +64,31 @@ export function buildBatchReferenceEdges(
     return { edges, referenceCount };
   }
 
+  // 标识符词表：把 per-token 的长度/黑名单/索引判断折叠为一次 Set 命中。
+  const vocabulary = new Set<string>();
+  for (const name of symbolIndex.keys()) {
+    if (name.length >= 3 && !REFERENCE_SKIPLIST.has(name)) {
+      vocabulary.add(name);
+    }
+  }
+
+  // 按 (name, file) 预分组定义：本文件定义整桶跳过，跨文件定义直接迭代。
+  const defsByFile = new Map<string, Map<string, IndexedSymbol[]>>();
+  for (const [name, defs] of symbolIndex) {
+    const byFile = new Map<string, IndexedSymbol[]>();
+    for (const def of defs) {
+      const file = symbolFileOf(def.nodeId);
+      const list = byFile.get(file) ?? [];
+      list.push(def);
+      byFile.set(file, list);
+    }
+    defsByFile.set(name, byFile);
+  }
+
   for (const file of parsed) {
     if (!file.scannable) {
       continue;
     }
-    const ownNames = new Set(file.declared.map((s) => s.name));
     const seenThisFile = new Set<string>();
     // matchAll iterates without materializing a giant intermediate array of
     // every identifier (large files can yield tens of thousands of matches).
@@ -56,24 +97,24 @@ export function buildBatchReferenceEdges(
       const name = match[0];
       if (seenIdent.has(name)) continue;
       seenIdent.add(name);
-      if (name.length < 3 || REFERENCE_SKIPLIST.has(name)) {
+      if (!vocabulary.has(name)) {
         continue;
       }
-      const defs = symbolIndex.get(name);
-      if (!defs || defs.length === 0) {
-        continue;
-      }
-      for (const def of defs) {
-        if (ownNames.has(name) && def.nodeId.startsWith(`symbol:${file.relPath}:`)) {
+      const byFile = defsByFile.get(name)!;
+      for (const [defFile, defs] of byFile) {
+        // 本文件内引用不连到本文件定义（旧实现：ownNames + 前缀比较，语义一致）
+        if (defFile === file.relPath) {
           continue;
         }
-        const key = `${file.fileNodeId}|${def.nodeId}`;
-        if (seenThisFile.has(key)) {
-          continue;
+        for (const def of defs) {
+          const key = `${file.fileNodeId}|${def.nodeId}`;
+          if (seenThisFile.has(key)) {
+            continue;
+          }
+          seenThisFile.add(key);
+          edges.push({ from: file.fileNodeId, to: def.nodeId, relation: "references" });
+          referenceCount += 1;
         }
-        seenThisFile.add(key);
-        edges.push({ from: file.fileNodeId, to: def.nodeId, relation: "references" });
-        referenceCount += 1;
       }
     }
   }
@@ -196,10 +237,18 @@ export function buildSingleFileReferenceEdges(
     symbolIndex.set(node.metadata.name as string, list);
   }
 
+  // 标识符词表：per-token 的长度/黑名单/索引判断折叠为一次 Set 命中。
+  const vocabulary = new Set<string>();
+  for (const name of symbolIndex.keys()) {
+    if (name.length >= 3 && !REFERENCE_SKIPLIST.has(name)) {
+      vocabulary.add(name);
+    }
+  }
+
   for (const name of matches) {
     if (seenIdent.has(name)) continue;
     seenIdent.add(name);
-    if (name.length < 3 || REFERENCE_SKIPLIST.has(name)) continue;
+    if (!vocabulary.has(name)) continue;
     if (ownNames.has(name)) continue;
     const defs = symbolIndex.get(name);
     if (!defs || defs.length === 0) continue;
