@@ -1,3 +1,4 @@
+import { maybeAutoCaptureEpisode } from "../hooks/auto-capture.js";
 import { syncGraphAfterRun } from "../hooks/post-run-sync.js";
 import {
   findSimilarEpisodes,
@@ -134,7 +135,32 @@ export async function finalizeEpisode(
     }
   }
 
+  // P0-1/P0-2 学习飞轮自动闭环：结局未知（DELEGATED / HUMAN_REVIEW_REQUIRED）的 run
+  // 自动生成 pending episode 并写入会话日志（.graphflow/session-journal.jsonl），由
+  // Claude Code hooks（SessionEnd / Stop，见 integrations/claude-code-hooks.ts）在会话
+  // 结束时自动调用 `graphflow outcome report <episodeId> <success>` 回填真实结局。
+  // 默认关闭（GRAPHFLOW_AUTO_CAPTURE=1 开启）；失败不阻断主流程。
+  const autoCapture = async (existingEpisodeId?: string): Promise<void> => {
+    if (!options?.graphClient) return;
+    try {
+      await maybeAutoCaptureEpisode(
+        options.graphClient,
+        {
+          task,
+          plan: plan.map((node) => ({ id: node.id, description: node.description })),
+          attempts: run.attempts,
+          status: run.status,
+          ...(existingEpisodeId ? { existingEpisodeId } : {}),
+        },
+        { workspaceRoot: process.cwd() }
+      );
+    } catch {
+      // 自动捕获失败不阻断主流程
+    }
+  };
+
   if (!options?.enableEpisodicMemory || !options.graphClient) {
+    await autoCapture();
     return run;
   }
 
@@ -160,6 +186,7 @@ export async function finalizeEpisode(
   };
 
   const episode = await recordEpisode(options.graphClient, recordInput, options.embeddingProvider);
+  await autoCapture(episode.id);
 
   const similarSummaries = similar.map((ep) => ({
     id: ep.id,
