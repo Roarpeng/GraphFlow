@@ -1,0 +1,58 @@
+name: Bug 报告（Bug Report）
+description: 报告一个可复现的问题——行为与文档或预期不符
+title: "[Bug] 简短的标题"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢报告问题！项目是单人维护，完整、可复现的最小信息能显著加快处理。
+        使用疑问请先到 [Discussions](https://github.com/Roarpeng/GraphFlow/discussions)，而非 issue。
+  - type: input
+    id: version
+    attributes:
+      label: 版本（Version）
+      description: 出问题的 @roarpeng/graphflow 版本（`npx @roarpeng/graphflow --version`）
+      placeholder: 例如 1.9.5
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 环境（Environment）
+      description: 操作系统 / Node 版本 / 接入方式（CLI / MCP / VS Code）与宿主 Agent（Cursor、Claude Code 等）
+      placeholder: 例如 Linux + Node 22 + Cursor 内 MCP
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤（Steps to reproduce）
+      description: 从干净状态开始的最小步骤序列；附上使用的命令 / MCP 调用 / 配置（注意脱敏，勿贴真实 API key）
+      placeholder: |
+        1. 新建空项目并 `npm install @roarpeng/graphflow@<version>`
+        2. 运行 `graphflow graph index .`
+        3. 调用 `graphflow context preview "..."` → 报错 / 结果异常
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为（Expected behavior）
+      description: 你期望发生什么
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为（Actual behavior）
+      description: 实际发生了什么——关键输出、报错堆栈、截图均可
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息（可选）
+      description: 相关日志、`graphflow-out/` 下的诊断产物（脱敏）、是否有 workaround 等
+    validations:
+      required: false

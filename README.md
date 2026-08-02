@@ -157,6 +157,15 @@ npx @roarpeng/graphflow init       # 写入最小项目配置
 
 [ATP/IR — Agent Thinking Protocol 公开规范 v1.0](docs/atp-ir-spec-v1.md)：work-item 注册表、submit/merge 契约、兼容性规则。第三方工具可实现兼容的 producer / consumer。
 
+## 社区
+
+GraphFlow 是单人维护项目（bus factor = 1），社区协作是降低单点风险的关键，欢迎参与：
+
+- [贡献指南](CONTRIBUTING.md)：开发环境、代码规范、测试要求与 PR 检查清单
+- [路线图](ROADMAP.md)：已完成里程碑与下一阶段计划（P0–P2）
+- [Issues](https://github.com/Roarpeng/GraphFlow/issues)：bug 报告与功能请求（请使用内置模板）
+- [Discussions](https://github.com/Roarpeng/GraphFlow/discussions)：使用疑问与想法讨论
+
 ## 开发
 
 ```bash
