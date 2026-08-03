@@ -92,6 +92,50 @@ export function resolveClaudeHome(env: NodeJS.ProcessEnv = process.env): string 
   return join(homedir(), ".claude");
 }
 
+/** Normalize path separators for cross-platform substring checks. */
+function normalizePathForMatch(value: string): string {
+  return value.replace(/\\/g, "/").toLowerCase();
+}
+
+/**
+ * True when settings.json references our session hook script.
+ * Parses JSON when possible so Windows paths survive JSON backslash escaping
+ * (`C:\\Users\\...` in file vs `C:\Users\...` in path.join).
+ */
+export function settingsReferenceHookScript(raw: string, scriptPath: string): boolean {
+  const needle = normalizePathForMatch(scriptPath);
+  if (!needle) return false;
+  try {
+    const parsed = JSON.parse(raw) as { hooks?: Record<string, unknown> };
+    const hooks = parsed.hooks;
+    if (hooks && typeof hooks === "object") {
+      for (const entries of Object.values(hooks)) {
+        if (!Array.isArray(entries)) continue;
+        for (const entry of entries) {
+          const command =
+            entry && typeof entry === "object" && typeof (entry as { command?: unknown }).command === "string"
+              ? (entry as { command: string }).command
+              : "";
+          if (command && normalizePathForMatch(command).includes(needle)) {
+            return true;
+          }
+        }
+      }
+    }
+  } catch {
+    // Fall through to raw substring checks for partially written files.
+  }
+  const quoted = shellQuote(scriptPath);
+  const jsonEscaped = scriptPath.replace(/\\/g, "\\\\");
+  return (
+    raw.includes(scriptPath) ||
+    raw.includes(quoted) ||
+    raw.includes(jsonEscaped) ||
+    raw.includes(shellQuote(jsonEscaped)) ||
+    normalizePathForMatch(raw).includes(needle)
+  );
+}
+
 function defaultHooksDir(claudeHome?: string): string {
   return join(claudeHome ?? resolveClaudeHome(), "graphflow-hooks");
 }
@@ -117,8 +161,7 @@ export function getClaudeCodeHooksStatus(
   if (detected && existsSync(scriptPath) && existsSync(settingsPath)) {
     try {
       const raw = readFileSync(settingsPath, "utf8");
-      const quoted = shellQuote(scriptPath);
-      installed = raw.includes(quoted) || raw.includes(scriptPath);
+      installed = settingsReferenceHookScript(raw, scriptPath);
     } catch {
       installed = false;
     }
