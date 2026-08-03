@@ -142,7 +142,7 @@ async function main() {
   await indexWorkspaceFiles(client, SRC_DIR, {
     ...GOLDEN_CONFIG.graphPolicy,
     embeddingProvider: undefined,
-  } as any);
+  } as unknown as Record<string, unknown>);
 
   const snapshot = await client.readSnapshot?.();
   const totalNodes = snapshot?.nodes.length ?? 0;
@@ -234,8 +234,8 @@ async function main() {
 
       // NDCG: 构建相关性向量（anchor 级别）
       // 相关 = anchor id 包含任一 expectAny 子串
-      const relevance = q.hitPositions.length > 0
-        ? q.hitPositions.map((pos) => 1) // 简化的二值相关性
+      const _relevance = q.hitPositions.length > 0
+        ? q.hitPositions.map((_pos) => 1) // 简化的二值相关性
         : [];
       // 为 NDCG 构建完整相关性向量（所有 anchor 位置）
       const fullRelevance: number[] = [];

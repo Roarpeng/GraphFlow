@@ -18,13 +18,12 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { encode } from "gpt-tokenizer/model/gpt-4o";
 
-import { getDefaultConfig } from "../src/config/defaults.js";
 import { validateConfig } from "../src/config/loader.js";
 import { createGraphClient, type GraphClient } from "../src/graph/client-factory.js";
 import { indexWorkspaceFiles } from "../src/graph/file-indexer.js";
@@ -32,7 +31,7 @@ import { buildEnhancedContextPackage } from "../src/graph/context-slicer.js";
 import { planTasks } from "../src/agents/planner.js";
 import { triageTaskExplain } from "../src/core/triage.js";
 import { executeDag } from "../src/core/dag-engine.js";
-import { recordEpisode, findSimilarEpisodes, type EpisodeRecord } from "../src/learning/episodic-memory.js";
+import { recordEpisode, findSimilarEpisodes } from "../src/learning/episodic-memory.js";
 import { suggestSkillHints, applySkillLearning } from "../src/learning/skill-flywheel.js";
 import { assignAgentsToTasks, buildAgentAssignments } from "../src/core/agent-assignment.js";
 import { GOLDEN_SET } from "./retrieval-golden-data.js";
@@ -130,7 +129,7 @@ async function runP1(client: GraphClient): Promise<P1Result> {
   await indexWorkspaceFiles(client, SRC_DIR, {
     ...BENCH_CONFIG.graphPolicy,
     embeddingProvider: undefined,
-  } as any);
+  } as unknown as Record<string, unknown>);
   const indexingTimeMs = Date.now() - t0;
 
   const snapshot = await client.readSnapshot?.();
@@ -359,7 +358,7 @@ function runP5(): P5Result {
     const plan = planTasks(task);
     const assignedPlan = assignAgentsToTasks(plan);
     const assignments = buildAgentAssignments(assignedPlan);
-    const specialtySet = new Set(assignments.map((a) => a.specialty));
+    const _specialtySet = new Set(assignments.map((a) => a.specialty));
     const coverage = assignedPlan.filter((n) => n.assignedAgent).length / (plan.length || 1);
 
     tasks.push({
