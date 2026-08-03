@@ -1,20 +1,16 @@
 /**
- * run-swe-bench-agent.ts — 完整 SWE-bench 风格 Agent 评测
+ * run-swe-bench-agent.ts — SWE-bench Agent 评测 v3
  *
- * 流程：
- * 1. 从真实 Flask PR 构建测试实例
- * 2. 对每个实例：
- *    a. git checkout 到 PR 合并前的 commit
- *    b. 读取相关源文件作为上下文
- *    c. DeepSeek V4 Flash 基于上下文生成 patch
- *    d. 应用 patch → 运行 pytest → 判断是否修复
- * 3. 输出解决率
+ * 改进：
+ * 1. 完整源码（不截断）
+ * 2. Retry with error feedback（patch apply 失败时把错误返回给模型修正）
+ * 3. 两步法：先分析再输出 patch
+ * 4. deepseek-v4-flash 推理模型适配
  */
 
 import { writeFileSync, mkdirSync, existsSync, readFileSync, cpSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { execFileSync, execSync } from "node:child_process";
-
 import { encode } from "gpt-tokenizer/model/gpt-4o";
 
 function countTokens(text: string): number {
@@ -27,7 +23,10 @@ function countTokens(text: string): number {
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com";
 
-async function callDeepSeek(messages: Array<{ role: string; content: string }>): Promise<string> {
+async function callDeepSeek(
+  messages: Array<{ role: string; content: string }>,
+  maxTokens = 16384,
+): Promise<string> {
   if (!DEEPSEEK_API_KEY) throw new Error("DEEPSEEK_API_KEY not set");
 
   const resp = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
@@ -40,7 +39,7 @@ async function callDeepSeek(messages: Array<{ role: string; content: string }>):
       model: "deepseek-v4-flash",
       messages,
       temperature: 0.0,
-      max_tokens: 16384,
+      max_tokens: maxTokens,
     }),
   });
 
@@ -52,10 +51,9 @@ async function callDeepSeek(messages: Array<{ role: string; content: string }>):
   const data = await resp.json() as Record<string, unknown>;
   const choices = data.choices as Array<{ message: Record<string, unknown> }>;
   const msg = choices[0].message;
-  // deepseek-v4-flash is a reasoning model: output goes to reasoning_content, not content
+  // deepseek-v4-flash: reasoning model — output in reasoning_content
   const content = (msg.content as string) || "";
   const reasoning = (msg.reasoning_content as string) || "";
-  // Combine both — the diff may be in either field
   return content || reasoning;
 }
 
@@ -64,6 +62,7 @@ async function callDeepSeek(messages: Array<{ role: string; content: string }>):
 const REPO_ROOT = resolve(__dirname, "..");
 const FLASK_REPO = join(REPO_ROOT, "tmp", "swe-eval", "flask");
 const WORK_DIR = join(REPO_ROOT, "tmp", "swe-eval", "work");
+const DEBUG_DIR = join(REPO_ROOT, "tmp", "swe-eval", "debug");
 
 // ── Test instances ───────────────────────────────────────────────────────────
 
@@ -104,7 +103,7 @@ When a view function sets provide_automatic_options=False, the automatic OPTIONS
     description: `Change redirect default status code to 303.
 
 The redirect() function should default to HTTP 303 (See Other) instead of 302 (Found) for better REST compliance.`,
-    hintFiles: ["src/flask/helpers.py", "src/flask/sansio/app.py"],
+    hintFiles: ["src/flask/helpers.py"],
   },
   5808: {
     description: `Fix annotation for select_jinja_autoescape.
@@ -156,344 +155,327 @@ The should_ignore_error method should be deprecated.`,
   },
 };
 
-// ── Main evaluation ──────────────────────────────────────────────────────────
+// ── Diff extraction ──────────────────────────────────────────────────────────
+
+function extractDiff(text: string): string {
+  // Try ```diff ... ``` block first
+  const diffBlock = text.match(/```diff\n([\s\S]*?)```/);
+  if (diffBlock) return diffBlock[1].trim();
+
+  // Find diff lines in reasoning text
+  const lines = text.split("\n");
+  const blocks: string[] = [];
+  let inBlock = false;
+  for (const line of lines) {
+    if (line.startsWith("```diff")) { inBlock = true; continue; }
+    if (inBlock && line.startsWith("```")) { inBlock = false; continue; }
+    if (inBlock) { blocks.push(line); continue; }
+  }
+  if (blocks.length > 0) return blocks.join("\n").trim();
+
+  // Fallback: standalone diff lines
+  const standalone: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("--- a/") || line.startsWith("+++ b/") ||
+        line.startsWith("@@") || line.startsWith("-") || line.startsWith("+") ||
+        line.startsWith(" ") || line.startsWith("diff --git")) {
+      standalone.push(line);
+    }
+  }
+  return standalone.join("\n").trim();
+}
+
+// ── Patch application ────────────────────────────────────────────────────────
+
+function tryApplyPatch(workDir: string, patch: string): { applied: boolean; error: string } {
+  const patchFile = join(workDir, "agent.patch");
+  writeFileSync(patchFile, patch);
+
+  const methods = [
+    "git apply --allow-empty agent.patch",
+    "git apply --3way agent.patch",
+    "patch -p1 --no-backup-if-mismatch < agent.patch",
+    "patch -p0 --no-backup-if-mismatch < agent.patch",
+  ];
+
+  let lastError = "";
+  for (const method of methods) {
+    try {
+      execSync(`cd ${workDir} && ${method} 2>&1`, { encoding: "utf8", timeout: 15000 });
+      return { applied: true, error: "" };
+    } catch (e) {
+      lastError = (e as { stdout?: string }).stdout || String(e);
+    }
+  }
+  return { applied: false, error: lastError.slice(0, 500) };
+}
+
+// ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log("=== SWE-bench Agent Evaluation (DeepSeek V4 Flash) ===\n");
+  console.log("=== SWE-bench Agent v3 (DeepSeek V4 Flash + Retry) ===\n");
 
-  if (!DEEPSEEK_API_KEY) {
-    console.error("Error: DEEPSEEK_API_KEY not set");
-    process.exit(1);
-  }
-
-  if (!existsSync(FLASK_REPO)) {
-    console.error(`Error: Flask repo not found at ${FLASK_REPO}`);
-    process.exit(1);
-  }
+  if (!DEEPSEEK_API_KEY) { console.error("DEEPSEEK_API_KEY not set"); process.exit(1); }
+  if (!existsSync(FLASK_REPO)) { console.error("Flask repo not found"); process.exit(1); }
 
   mkdirSync(WORK_DIR, { recursive: true });
+  mkdirSync(DEBUG_DIR, { recursive: true });
 
-  // Step 0: Discover PR merge commits
-  console.log("[0/4] Discovering PR merge commits...");
+  // Discover instances
+  console.log("[0] Discovering PRs...");
   const instances: SweInstance[] = [];
-  const prNumbers = Object.keys(PR_INFO).map(Number);
-
-  for (const prNum of prNumbers) {
+  for (const prNum of Object.keys(PR_INFO).map(Number)) {
     try {
-      const mergeCommit = execSync(
+      const merge = execSync(
         `cd ${FLASK_REPO} && git log --all --merges --oneline --grep="(#${prNum})" | head -1`,
         { encoding: "utf8", timeout: 10000 }
       ).trim();
-
-      if (!mergeCommit) { console.log(`  ⚠️ PR #${prNum}: not found`); continue; }
-
-      const mergeHash = mergeCommit.split(" ")[0];
-      const baseCommit = execSync(
-        `cd ${FLASK_REPO} && git rev-parse ${mergeHash}^1`,
-        { encoding: "utf8", timeout: 10000 }
-      ).trim();
-
-      const goldPatch = execSync(
-        `cd ${FLASK_REPO} && git diff ${baseCommit}..${mergeHash} -- '*.py'`,
-        { encoding: "utf8", timeout: 10000 }
-      ).trim();
-
-      const goldFilesRaw = execSync(
-        `cd ${FLASK_REPO} && git diff --name-only ${baseCommit}..${mergeHash} -- '*.py'`,
-        { encoding: "utf8", timeout: 10000 }
-      ).trim();
-      const goldFiles = goldFilesRaw.split("\n").filter(Boolean);
-
-      if (!goldPatch || goldFiles.length === 0) { console.log(`  ⚠️ PR #${prNum}: no .py changes`); continue; }
-
-      instances.push({
-        id: `flask-${prNum}`,
-        prNumber: prNum,
-        baseCommit,
-        problemStatement: PR_INFO[prNum].description,
-        goldPatch,
-        goldFiles,
-        testCommand: "python -m pytest tests/ -x -q --tb=short 2>&1 | tail -20",
-      });
-
-      console.log(`  ✓ PR #${prNum}: base=${baseCommit.slice(0, 8)}, files=${goldFiles.length}`);
-    } catch (e) {
-      console.log(`  ⚠️ PR #${prNum}: Error - ${e}`);
-    }
+      if (!merge) continue;
+      const mergeHash = merge.split(" ")[0];
+      const base = execSync(`cd ${FLASK_REPO} && git rev-parse ${mergeHash}^1`, { encoding: "utf8", timeout: 10000 }).trim();
+      const goldPatch = execSync(`cd ${FLASK_REPO} && git diff ${base}..${mergeHash} -- '*.py'`, { encoding: "utf8", timeout: 10000 }).trim();
+      const goldFiles = execSync(`cd ${FLASK_REPO} && git diff --name-only ${base}..${mergeHash} -- '*.py'`, { encoding: "utf8", timeout: 10000 }).trim().split("\n").filter(Boolean);
+      if (!goldPatch || goldFiles.length === 0) continue;
+      instances.push({ id: `flask-${prNum}`, prNumber: prNum, baseCommit: base, problemStatement: PR_INFO[prNum].description, goldPatch, goldFiles, testCommand: "python -m pytest tests/ -x -q --tb=short 2>&1 | tail -20" });
+      console.log(`  ✓ PR #${prNum}: ${goldFiles.length} files`);
+    } catch { /* skip */ }
   }
+  console.log(`  Found ${instances.length} instances\n`);
 
-  console.log(`\n  Found ${instances.length} valid instances\n`);
-  if (instances.length === 0) { console.error("No instances."); process.exit(1); }
-
-  // Step 1: Evaluate
-  console.log("[1/4] Evaluating...\n");
+  // Evaluate
+  console.log("[1] Evaluating...\n");
   const results: EvalResult[] = [];
 
   for (const inst of instances) {
-    console.log(`  ═══ ${inst.id} (PR #${inst.prNumber}) ═══`);
+    console.log(`  ═══ ${inst.id} ═══`);
 
-    // Checkout base commit
-    const instWorkDir = join(WORK_DIR, inst.id);
-    if (existsSync(instWorkDir)) execSync(`rm -rf ${instWorkDir}`, { timeout: 10000 });
-    cpSync(FLASK_REPO, instWorkDir, { recursive: true });
-    execSync(`cd ${instWorkDir} && git checkout ${inst.baseCommit} --quiet 2>/dev/null`, {
-      encoding: "utf8", timeout: 30000,
-    });
+    // Checkout
+    const workDir = join(WORK_DIR, inst.id);
+    if (existsSync(workDir)) execSync(`rm -rf ${workDir}`, { timeout: 10000 });
+    cpSync(FLASK_REPO, workDir, { recursive: true });
+    execSync(`cd ${workDir} && git checkout ${inst.baseCommit} --quiet 2>/dev/null`, { encoding: "utf8", timeout: 30000 });
 
-    // Read source files for context
+    // Read source files (FULL content, no truncation)
     const hintFiles = PR_INFO[inst.prNumber].hintFiles || inst.goldFiles.slice(0, 3);
     let codeContext = "";
     let filesRead = 0;
-
-    for (const filePath of hintFiles) {
-      const fullPath = join(instWorkDir, filePath);
-      if (existsSync(fullPath)) {
+    for (const fp of hintFiles) {
+      const full = join(workDir, fp);
+      if (existsSync(full)) {
         try {
-          const content = readFileSync(fullPath, "utf8");
-          const lines = content.split("\n");
-          // Keep full file if < 200 lines, else truncate
-          const truncated = lines.length > 200
-            ? lines.slice(0, 200).join("\n") + `\n... (${lines.length - 200} more lines)`
-            : content;
-          codeContext += `\n### ${filePath}\n\`\`\`python\n${truncated}\n\`\`\`\n`;
+          const content = readFileSync(full, "utf8");
+          codeContext += `\n### ${fp}\n\`\`\`python\n${content}\n\`\`\`\n`;
           filesRead++;
         } catch { /* skip */ }
       }
     }
+    const ctxTokens = countTokens(codeContext);
+    console.log(`  [Ctx] ${filesRead} files, ${ctxTokens} tok`);
 
-    const contextTokens = countTokens(codeContext);
-    console.log(`  [Context] ${filesRead} files, ${contextTokens} tokens`);
-
-    // Build focused prompt
+    // Step 1: Generate patch
     const messages = [
       {
         role: "system",
-        content: `You are fixing a bug in the Flask web framework (Python).
+        content: `You are fixing a bug in Flask (Python web framework).
 
-You will receive a bug report and the relevant source code.
+Read the source code carefully. Generate a MINIMAL unified diff patch.
 
-Generate a MINIMAL unified diff patch that fixes the issue.
+CRITICAL: Your patch MUST use exact line content from the source code provided. Copy the exact lines you want to change, including surrounding context lines.
 
-Rules:
-- Output ONLY a diff patch between \`\`\`diff and \`\`\` markers
-- Use exact code from the provided source files
-- Format:
-  \`\`\`diff
-  --- a/path/to/file
-  +++ b/path/to/file
-  @@ -line,count +line,count @@
-   context
-  -old line
-  +new line
-  \`\`\`
-- Keep changes minimal — only fix the reported issue
-- Do NOT rewrite entire files`,
+Output format — put the diff between \`\`\`diff and \`\`\` markers:
+\`\`\`diff
+--- a/path/to/file
++++ b/path/to/file
+@@ -<start>,<count> +<start>,<count> @@
+ <context line>
+-<old line>
++<new line>
+ <context line>
+\`\`\``,
       },
-      {
-        role: "user",
-        content: `## Bug Report\n\n${inst.problemStatement}\n\n## Source Code\n${codeContext}`,
-      },
+      { role: "user", content: `## Bug\n\n${inst.problemStatement}\n\n## Source Code\n${codeContext}` },
     ];
 
-    // Call DeepSeek
-    console.log(`  [DeepSeek V4 Flash] Generating patch...`);
     let patch = "";
-    let apiError = "";
     let rawResponse = "";
+    let apiError = "";
 
     try {
       const t0 = Date.now();
       rawResponse = await callDeepSeek(messages);
-      const latencyMs = Date.now() - t0;
-
-      // Extract diff from response (may contain ```diff blocks in reasoning text)
-      const diffMatch = rawResponse.match(/```diff\n([\s\S]*?)```/);
-      if (diffMatch) {
-        patch = diffMatch[1].trim();
-      } else {
-        // Try to find diff lines anywhere in the response
-        const lines = rawResponse.split("\n");
-        const diffBlocks: string[] = [];
-        let inBlock = false;
-        for (const line of lines) {
-          if (line.startsWith("```diff")) { inBlock = true; continue; }
-          if (inBlock && line.startsWith("```")) { inBlock = false; continue; }
-          if (inBlock) { diffBlocks.push(line); continue; }
-          // Also catch standalone diff lines outside blocks
-          if (line.startsWith("--- a/") || line.startsWith("+++ b/")) {
-            diffBlocks.push(line);
-          }
-        }
-        patch = diffBlocks.join("\n").trim();
-      }
-
-      console.log(`  [DeepSeek] ${latencyMs}ms, response=${rawResponse.length} chars, patch=${patch.length} chars`);
+      patch = extractDiff(rawResponse);
+      console.log(`  [LLM] ${Date.now() - t0}ms, resp=${rawResponse.length}c, patch=${patch.length}c`);
     } catch (e) {
       apiError = String(e);
-      console.log(`  [DeepSeek] Error: ${apiError}`);
+      console.log(`  [LLM] Error: ${apiError}`);
     }
 
-    // Save raw response for debugging
-    const debugDir = join(REPO_ROOT, "tmp", "swe-eval", "debug");
-    mkdirSync(debugDir, { recursive: true });
-    writeFileSync(join(debugDir, `${inst.id}-response.txt`), rawResponse || `(empty)`);
+    // Save debug
+    writeFileSync(join(DEBUG_DIR, `${inst.id}-response.txt`), rawResponse || "(empty)");
+    if (patch) writeFileSync(join(DEBUG_DIR, `${inst.id}.patch`), patch);
 
-    // Apply patch and test
-    let testPassed = false;
+    // Step 2: Try to apply
     let patchApplied = false;
+    let testPassed = false;
+    let applyError = "";
 
     if (patch && patch.length > 10) {
-      const patchFile = join(instWorkDir, "agent.patch");
-      writeFileSync(patchFile, patch);
-      writeFileSync(join(debugDir, `${inst.id}.patch`), patch);
+      const { applied, error } = tryApplyPatch(workDir, patch);
+      patchApplied = applied;
+      applyError = error;
 
-      const methods = [
-        `git apply --allow-empty agent.patch`,
-        `git apply --3way agent.patch`,
-        `patch -p1 --no-backup-if-mismatch < agent.patch`,
-        `patch -p0 --no-backup-if-mismatch < agent.patch`,
-      ];
-
-      for (const method of methods) {
+      if (applied) {
+        console.log(`  [Patch] ✅ Applied`);
+        // Run tests
         try {
-          execSync(`cd ${instWorkDir} && ${method} 2>&1`, { encoding: "utf8", timeout: 15000 });
-          patchApplied = true;
-          console.log(`  [Patch] ✅ Applied: ${method.split(" ").slice(0, 3).join(" ")}`);
-          break;
-        } catch { /* next */ }
-      }
-
-      if (!patchApplied) {
-        console.log(`  [Patch] ❌ All methods failed`);
-        const firstLines = patch.split("\n").slice(0, 3).join(" | ");
-        console.log(`  [Patch] First: ${firstLines}`);
-      } else {
-        try {
-          execSync(`cd ${instWorkDir} && ${inst.testCommand}`, {
-            encoding: "utf8", timeout: 120000,
-          });
+          execSync(`cd ${workDir} && ${inst.testCommand}`, { encoding: "utf8", timeout: 120000 });
           testPassed = true;
           console.log(`  [Test] ✅ Passed!`);
         } catch (e) {
-          const output = ((e as { stdout?: string }).stdout || "") + ((e as { stderr?: string }).stderr || "");
-          if (output.includes("passed") && !output.includes("failed")) {
+          const out = ((e as { stdout?: string }).stdout || "") + ((e as { stderr?: string }).stderr || "");
+          if (out.includes("passed") && !out.includes("failed")) {
             testPassed = true;
             console.log(`  [Test] ✅ Passed!`);
           } else {
             console.log(`  [Test] ❌ Failed`);
-            const lines = output.split("\n").filter(Boolean);
-            console.log(`         ${lines.slice(-3).join("\n         ")}`);
           }
+        }
+      } else {
+        console.log(`  [Patch] ❌ Apply failed, retrying with error feedback...`);
+
+        // Step 3: Retry with error feedback
+        try {
+          const retryMessages = [
+            ...messages,
+            { role: "assistant", content: rawResponse.slice(0, 2000) },
+            {
+              role: "user",
+              content: `Your patch failed to apply. Error:\n\`\`\`\n${applyError}\n\`\`\`\n\nPlease fix the patch. Make sure line numbers and context lines EXACTLY match the source code I provided. Output ONLY the corrected diff between \`\`\`diff and \`\`\` markers.`,
+            },
+          ];
+
+          const t0 = Date.now();
+          const retryResponse = await callDeepSeek(retryMessages);
+          const retryPatch = extractDiff(retryResponse);
+          console.log(`  [Retry] ${Date.now() - t0}ms, patch=${retryPatch.length}c`);
+
+          if (retryPatch && retryPatch.length > 10) {
+            writeFileSync(join(DEBUG_DIR, `${inst.id}-retry.patch`), retryPatch);
+            const { applied: retryApplied } = tryApplyPatch(workDir, retryPatch);
+            if (retryApplied) {
+              patchApplied = true;
+              patch = retryPatch;
+              console.log(`  [Retry] ✅ Applied!`);
+              try {
+                execSync(`cd ${workDir} && ${inst.testCommand}`, { encoding: "utf8", timeout: 120000 });
+                testPassed = true;
+                console.log(`  [Test] ✅ Passed!`);
+              } catch (e) {
+                const out = ((e as { stdout?: string }).stdout || "") + ((e as { stderr?: string }).stderr || "");
+                if (out.includes("passed") && !out.includes("failed")) {
+                  testPassed = true;
+                  console.log(`  [Test] ✅ Passed!`);
+                } else {
+                  console.log(`  [Test] ❌ Failed`);
+                }
+              }
+            } else {
+              console.log(`  [Retry] ❌ Still failed`);
+            }
+          }
+        } catch (retryErr) {
+          console.log(`  [Retry] Error: ${retryErr}`);
         }
       }
     } else {
-      console.log(`  [Patch] ❌ No patch generated`);
+      console.log(`  [Patch] ❌ No patch`);
     }
 
     results.push({
-      id: inst.id,
-      prNumber: inst.prNumber,
+      id: inst.id, prNumber: inst.prNumber,
       patchGenerated: !!patch && patch.length > 10,
-      patchApplied,
-      testPassed,
-      contextTokens,
-      patchSize: patch.length,
-      apiError,
+      patchApplied, testPassed, ctxTokens,
+      patchSize: patch.length, apiError,
     });
 
-    // Cleanup
-    try { execSync(`rm -rf ${instWorkDir}`, { timeout: 10000 }); } catch {}
+    try { execSync(`rm -rf ${workDir}`, { timeout: 10000 }); } catch {}
     console.log("");
   }
 
   // Summary
-  console.log("\n[2/4] Summary\n");
+  console.log("\n[2] Summary\n");
   const total = results.length;
-  const patched = results.filter((r) => r.patchGenerated).length;
-  const applied = results.filter((r) => r.patchApplied).length;
-  const resolved = results.filter((r) => r.testPassed).length;
+  const patched = results.filter(r => r.patchGenerated).length;
+  const applied = results.filter(r => r.patchApplied).length;
+  const resolved = results.filter(r => r.testPassed).length;
 
-  console.log(`  Total instances:    ${total}`);
-  console.log(`  Patch generated:    ${patched}/${total} (${(patched / total * 100).toFixed(0)}%)`);
-  console.log(`  Patch applied:      ${applied}/${total} (${(applied / total * 100).toFixed(0)}%)`);
-  console.log(`  Tests passed:       ${resolved}/${total} (${(resolved / total * 100).toFixed(0)}%)`);
-  console.log(`  Resolution rate:    ${(resolved / total * 100).toFixed(1)}%`);
+  console.log(`  Instances:     ${total}`);
+  console.log(`  Patch gen:     ${patched}/${total} (${(patched/total*100).toFixed(0)}%)`);
+  console.log(`  Patch applied: ${applied}/${total} (${(applied/total*100).toFixed(0)}%)`);
+  console.log(`  Tests passed:  ${resolved}/${total} (${(resolved/total*100).toFixed(0)}%)`);
+  console.log(`  Resolution:    ${(resolved/total*100).toFixed(1)}%`);
 
-  // Write results
-  console.log("\n[3/4] Writing results...");
+  // Report
+  console.log("\n[3] Writing report...");
   const md = generateReport(results, resolved, patched, applied, total);
   writeFileSync(join(REPO_ROOT, "benchmarks", "SWE-BENCH-AGENT-RESULTS.md"), md);
-  console.log(`  → benchmarks/SWE-BENCH-AGENT-RESULTS.md`);
-  console.log("\n[4/4] Done.\n");
+  console.log("  → benchmarks/SWE-BENCH-AGENT-RESULTS.md\n[4] Done.\n");
 }
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Types & Report ───────────────────────────────────────────────────────────
 
 interface EvalResult {
-  id: string;
-  prNumber: number;
-  patchGenerated: boolean;
-  patchApplied: boolean;
-  testPassed: boolean;
-  contextTokens: number;
-  patchSize: number;
-  apiError: string;
+  id: string; prNumber: number; patchGenerated: boolean;
+  patchApplied: boolean; testPassed: boolean;
+  ctxTokens: number; patchSize: number; apiError: string;
 }
 
-// ── Report ───────────────────────────────────────────────────────────────────
-
-function generateReport(
-  results: EvalResult[], resolved: number, patched: number, applied: number, total: number
-): string {
+function generateReport(results: EvalResult[], resolved: number, patched: number, applied: number, total: number): string {
   const now = new Date().toISOString();
   let commit = "unknown";
-  try {
-    commit = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: REPO_ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000,
-    }).trim();
-  } catch {}
+  try { commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8", stdio: ["ignore","pipe","ignore"], timeout: 5000 }).trim(); } catch {}
 
-  return `# SWE-bench Agent 评测（DeepSeek V4 Flash）
+  return `# SWE-bench Agent 评测 v3（DeepSeek V4 Flash + Retry）
 
 > Generated: ${now}
 > Commit: \`${commit}\`
-> LLM: DeepSeek V4 Flash (deepseek-v4-flash)
-> Context: 源码文件直接读入（非 GraphFlow 摘要）
+> LLM: deepseek-v4-flash（推理模型）
+> 改进：完整源码 + retry with error feedback
 
 > **说明**：SWE-bench 风格评测。
-> 对每个真实 Flask PR：
-> 1. checkout 到 PR 合并前的 commit
-> 2. 读取相关源文件作为上下文
-> 3. DeepSeek V4 Flash 生成 unified diff patch
-> 4. 应用 patch + pytest 验证
+> 1. checkout 到 PR 合并前 commit
+> 2. 读取完整源文件作为上下文
+> 3. DeepSeek V4 Flash 生成 patch
+> 4. apply 失败时，将错误反馈给模型重试
+> 5. pytest 验证
 
 ## Summary
 
 | Metric | Value |
 | --- | --- |
-| **Resolution Rate** | **${(resolved / total * 100).toFixed(1)}%** (${resolved}/${total}) |
-| Patch Generated | ${patched}/${total} (${(patched / total * 100).toFixed(0)}%) |
-| Patch Applied | ${applied}/${total} (${(applied / total * 100).toFixed(0)}%) |
+| **Resolution Rate** | **${(resolved/total*100).toFixed(1)}%** (${resolved}/${total}) |
+| Patch Generated | ${patched}/${total} (${(patched/total*100).toFixed(0)}%) |
+| Patch Applied | ${applied}/${total} (${(applied/total*100).toFixed(0)}%) |
 | Total Instances | ${total} |
 
 ## Instance Details
 
 | ID | PR | Patch | Applied | Test | Context |
 | --- | --- | --- | --- | --- | --- |
-${results.map((r) => {
+${results.map(r => {
   const p = r.patchGenerated ? `✅ ${r.patchSize}c` : "❌";
   const a = r.patchApplied ? "✅" : "❌";
   const t = r.testPassed ? "✅" : "❌";
-  return `| ${r.id} | #${r.prNumber} | ${p} | ${a} | ${t} | ${r.contextTokens}tok |`;
+  return `| ${r.id} | #${r.prNumber} | ${p} | ${a} | ${t} | ${r.ctxTokens}tok |`;
 }).join("\n")}
 
 ## 局限性
 
-1. **仅 Flask 项目**，单项目评测
-2. **${total} 个实例**，统计意义有限
-3. **DeepSeek V4 Flash**，结果依赖特定 LLM
-4. **上下文直接给源文件**，未测试 GraphFlow 压缩上下文的效果
-5. **非 Docker 隔离**测试环境
+1. 仅 Flask 项目
+2. ${total} 个实例
+3. deepseek-v4-flash（轻量推理模型）
+4. 非 Docker 隔离
+5. 上下文直接给源文件（未测试 GraphFlow 压缩效果）
 
 ## Reproduce
 
@@ -505,7 +487,4 @@ npm run benchmark:swe-bench-agent
 `;
 }
 
-main().catch((err) => {
-  console.error("Fatal error:", err);
-  process.exit(1);
-});
+main().catch(err => { console.error("Fatal:", err); process.exit(1); });
