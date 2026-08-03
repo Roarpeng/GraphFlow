@@ -63,7 +63,7 @@ Agent 先调 `graphflow_context` 拿压缩上下文，再用 `graphflow_plan` �
 | **存储后端** | `file` / `memory` / `sqlite`（FTS5，**searchtext 分词增强**，camelCase 可检索）/ **`auto`（sqlite 优先自动切换）** / `mcp-http` |
 | **学习飞轮** | Episodic Memory、Reflection、Skill 节点（score ±1，bounded [-20,20]）、nightly 学习、技能衰减/剪枝、**飞轮贡献报告**（`skill report` / `graphflow_diagnose`，含偏离聚合与 Goal 统计） |
 | **团队共享** | **`skill sync`**：技能包导出/导入到可提交的 `.graphflow/skills/team-skills.json`；导入为**双向 MERGE**（per-skill-id 并集，updatedAt 较新者胜、并列保留本地、本地独有技能保留；`--force` 覆盖）；golden 检索基准随包往返 → `.graphflow/team-golden.json` |
-| **效果基准** | [综合评测 92.9%](benchmarks/COMPREHENSIVE-RESULTS.md) · [独立评测 96.2%](benchmarks/INDEPENDENT-RESULTS.md) · [SWE-bench 100%](benchmarks/SWE-BENCH-RESULTS.md) · [Token 节省 98.2%](benchmarks/RESULTS.md) |
+| **效果基准** | [综合评测 92.9%](benchmarks/COMPREHENSIVE-RESULTS.md) · [独立评测 96.2%](benchmarks/INDEPENDENT-RESULTS.md) · [上下文就绪评测](benchmarks/SWE-BENCH-RESULTS.md) · [Token 节省 98.2%](benchmarks/RESULTS.md) |
 | **模型路由** | Smart / Economy 双 tier；多 provider 健康探测与 fallback（DeepSeek、OpenAI、Anthropic、百炼、豆包） |
 | **可观测性** | `graphflow_diagnose`：provider 健康 + 图统计 + token 节省 + **飞轮报告** |
 | **Agent 接入** | CLI `--json`；MCP stdio（10 工具）；自动安装 MCP 到 15+ Agent |
@@ -135,7 +135,7 @@ Endpoint 缺失/格式非法会在配置校验时直接报错；连接失败或�
 
 - **综合能力**：[COMPREHENSIVE-RESULTS.md](benchmarks/COMPREHENSIVE-RESULTS.md) — P1-P6 六维度评测，总体 **92.9%**（索引 100% / 压缩 64.9% / 规划 100% / 学习 100% / Bridge 100% / 性能 99.7%）
 - **独立评测**：[INDEPENDENT-RESULTS.md](benchmarks/INDEPENDENT-RESULTS.md) — CodeGraph 风格 5 域评测，Hit@5 **96%**、Token 节省 **96.6%**、总体 **96.2%**
-- **SWE-bench**：[SWE-BENCH-RESULTS.md](benchmarks/SWE-BENCH-RESULTS.md) — 12 实例端到端评测，上下文就绪率 **100%**（easy/medium/hard 全覆盖）
+- **SWE-bench 风格评测**：[SWE-BENCH-RESULTS.md](benchmarks/SWE-BENCH-RESULTS.md) — 12 实例上下文就绪评测（非真实 SWE-bench，仅测量压缩上下文是否包含任务所需文件/符号）
 - **Token 节省**：[RESULTS.md](benchmarks/RESULTS.md) — 8 个代表性查询，**98.2%** 节省，独立 gpt-tokenizer 复核
 - **检索质量**：[RETRIEVAL-EVAL-RESULTS.md](benchmarks/RETRIEVAL-EVAL-RESULTS.md) — 132 查询，Hit@5=100%、MRR=0.836、NDCG@5=0.601
 - **Skill 飞轮 A/B**：[SKILL-AB-RESULTS.md](benchmarks/SKILL-AB-RESULTS.md) — 注入率 100%、召回 100%、开销 25.6 tok/任务
