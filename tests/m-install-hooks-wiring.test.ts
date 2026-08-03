@@ -62,6 +62,26 @@ describe("Claude Code hooks status helper", () => {
     expect(after.scriptPath).toContain(SESSION_HOOK_SCRIPT);
     expect(readFileSync(after.scriptPath, "utf8")).toContain("outcome report");
   });
+
+  it("detects Windows-style JSON-escaped backslash paths in settings.json", () => {
+    const winScript = "C:\\Users\\runner\\.claude\\graphflow-hooks\\session.sh";
+    const settings = {
+      hooks: {
+        SessionEnd: [
+          {
+            type: "command",
+            command: `bash '${winScript}' end`,
+            timeout: 30,
+          },
+        ],
+      },
+    };
+    const raw = `${JSON.stringify(settings, null, 2)}\n`;
+    // File on disk contains escaped backslashes; path.join-style value uses singles.
+    expect(raw.includes("\\\\Users\\\\")).toBe(true);
+    expect(settingsReferenceHookScript(raw, winScript)).toBe(true);
+    expect(settingsReferenceHookScript(raw, "D:\\other\\session.sh")).toBe(false);
+  });
 });
 
 describe("install/doctor wire Claude Code hooks", () => {
