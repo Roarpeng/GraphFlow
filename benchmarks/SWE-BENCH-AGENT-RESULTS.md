@@ -1,48 +1,55 @@
-# SWE-bench Agent 评测（DeepSeek + GraphFlow）
+# SWE-bench Agent 评测（DeepSeek V4 Flash）
 
-> Generated: 2026-08-03T08:45:31.813Z
-> Commit: `10fa0f5e1399823f2396ef84d18575bf0dd1df50`
-> LLM: DeepSeek Chat (deepseek-chat)
-> Context: GraphFlow compressed context
+> Generated: 2026-08-03T10:07:29.819Z
+> Commit: `1753f6e2c81b9f6b0b1325f0c907146f2a17f695`
+> LLM: DeepSeek V4 Flash (deepseek-v4-flash)
+> Context: 源码文件直接读入（非 GraphFlow 摘要）
 
-> **说明**：这是完整的 SWE-bench 风格评测。
+> **说明**：SWE-bench 风格评测。
 > 对每个真实 Flask PR：
 > 1. checkout 到 PR 合并前的 commit
-> 2. GraphFlow 索引仓库并提供压缩上下文
-> 3. DeepSeek 基于上下文生成 patch
-> 4. 应用 patch 并运行 pytest
-> 5. 测试通过 = resolved
+> 2. 读取相关源文件作为上下文
+> 3. DeepSeek V4 Flash 生成 unified diff patch
+> 4. 应用 patch + pytest 验证
 
 ## Summary
 
 | Metric | Value |
 | --- | --- |
-| **Resolution Rate** | **0.0%** (0/2) |
-| Patch Generated | 2/2 |
-| Total Instances | 2 |
+| **Resolution Rate** | **25.0%** (3/12) |
+| Patch Generated | 8/12 (67%) |
+| Patch Applied | 3/12 (25%) |
+| Total Instances | 12 |
 
 ## Instance Details
 
-| ID | PR | Patch | Test | Context Tokens |
-| --- | --- | --- | --- | --- |
-| flask-6013 | #6013 | ✅ (358 chars) | ❌ | 814 |
-| flask-5928 | #5928 | ✅ (13396 chars) | ❌ | 1023 |
+| ID | PR | Patch | Applied | Test | Context |
+| --- | --- | --- | --- | --- | --- |
+| flask-5736 | #5736 | ✅ 761c | ❌ | ❌ | 1882tok |
+| flask-5777 | #5777 | ✅ 397c | ❌ | ❌ | 1556tok |
+| flask-5797 | #5797 | ✅ 135c | ✅ | ✅ | 1527tok |
+| flask-5799 | #5799 | ❌ | ❌ | ❌ | 1556tok |
+| flask-5808 | #5808 | ✅ 361c | ❌ | ❌ | 1907tok |
+| flask-5818 | #5818 | ❌ | ❌ | ❌ | 3281tok |
+| flask-5898 | #5898 | ✅ 281c | ❌ | ❌ | 3374tok |
+| flask-5899 | #5899 | ✅ 137c | ✅ | ✅ | 3727tok |
+| flask-5917 | #5917 | ❌ | ❌ | ❌ | 1898tok |
+| flask-5928 | #5928 | ✅ 211c | ✅ | ✅ | 1437tok |
+| flask-6013 | #6013 | ✅ 302c | ❌ | ❌ | 1898tok |
+| flask-6095 | #6095 | ❌ | ❌ | ❌ | 2031tok |
 
 ## 局限性
 
-1. **仅 Flask 项目**：单项目评测，不代表通用能力
-2. **实例数量少**：仅 2 个实例，统计意义有限
-3. **DeepSeek 模型**：结果依赖特定 LLM，换模型可能不同
-4. **PR 描述 ≠ Issue 描述**：PR 描述通常比真实 issue 更具体
-5. **测试环境**：本地 pytest，非 Docker 隔离
+1. **仅 Flask 项目**，单项目评测
+2. **12 个实例**，统计意义有限
+3. **DeepSeek V4 Flash**，结果依赖特定 LLM
+4. **上下文直接给源文件**，未测试 GraphFlow 压缩上下文的效果
+5. **非 Docker 隔离**测试环境
 
 ## Reproduce
 
 ```bash
-# 前置条件
 export DEEPSEEK_API_KEY=your-key
 git clone https://github.com/pallets/flask.git tmp/swe-eval/flask
-
-# 运行评测
 npm run benchmark:swe-bench-agent
 ```
