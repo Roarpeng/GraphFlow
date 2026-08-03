@@ -19,6 +19,12 @@ import {
   uninstallMcpFromDetectedAgents,
   type McpInstallResult,
 } from "../../integrations/agent-mcp-installer";
+import {
+  getClaudeCodeHooksStatus,
+  installClaudeCodeHooks,
+  uninstallClaudeCodeHooks,
+  type ClaudeCodeHooksResult,
+} from "../../integrations/claude-code-hooks";
 
 const isWindows = process.platform === "win32";
 
@@ -224,6 +230,8 @@ export interface InstallReport {
   };
   skills: SkillInstallSummary;
   mcp: McpInstallResult[];
+  /** Claude Code SessionStart/SessionEnd/Stop hooks for flywheel auto-close. */
+  claudeCodeHooks: ClaudeCodeHooksResult;
   /** Post-install doctor self-check (never silently skip failures). */
   doctor: DoctorReport;
   /** True when MCP install had no errors and doctor reports no missing items. */
@@ -249,6 +257,17 @@ export function buildInstallReport(
     installScope: "user",
     workspaceRoot,
   });
+  const hooksStatus = getClaudeCodeHooksStatus();
+  const claudeCodeHooks: ClaudeCodeHooksResult = hooksStatus.detected
+    ? installClaudeCodeHooks({
+        settingsPath: hooksStatus.settingsPath,
+        hooksDir: hooksStatus.hooksDir,
+      })
+    : {
+        status: "skipped",
+        filePath: hooksStatus.settingsPath,
+        message: "Claude Code not detected",
+      };
 
   if (bootstrapGraph) {
     void bootstrapGraphIndex(workspaceRoot).catch((error) => {
@@ -259,6 +278,7 @@ export function buildInstallReport(
 
   const doctor = buildDoctorReport(workspaceRoot);
   const mcpHasError = mcp.some((item) => item.status === "error");
+  const hooksHasError = claudeCodeHooks.status === "error";
   const skillHasError = [
     ...skills.traeSkills,
     ...skills.cursorRules,
@@ -267,7 +287,7 @@ export function buildInstallReport(
     ...skills.agentSkills,
     ...skills.projectRules,
   ].some((item) => item.status === "error");
-  const ok = doctor.ok && !mcpHasError && globalConfig.status !== "error";
+  const ok = doctor.ok && !mcpHasError && !hooksHasError && globalConfig.status !== "error";
   const remediation: string[] = [];
   if (!ok) {
     if (globalConfig.status === "error") {
@@ -277,6 +297,13 @@ export function buildInstallReport(
     }
     if (mcpHasError) {
       remediation.push("Re-run `graphflow install` after fixing MCP target paths for agents marked error.");
+    }
+    if (hooksHasError) {
+      remediation.push(
+        `Fix Claude Code hooks install at ${claudeCodeHooks.filePath ?? hooksStatus.settingsPath}${
+          claudeCodeHooks.message ? `: ${claudeCodeHooks.message}` : "."
+        }`
+      );
     }
     if (skillHasError) {
       remediation.push("Inspect skill/rules targets marked error and ensure agent directories are writable.");
@@ -293,6 +320,7 @@ export function buildInstallReport(
     },
     skills,
     mcp,
+    claudeCodeHooks,
     doctor,
     ok,
     remediation,
@@ -339,6 +367,16 @@ export function formatInstallLegacyText(report: InstallReport): string {
     const icon = result.status === "error" ? "[ERROR]" : result.status === "skipped" ? "[SKIP]" : "[OK]";
     lines.push(
       `${icon} MCP ${result.agentName} (${result.scope}): ${result.status} -> ${result.configPath}${result.message ? ` (${result.message})` : ""}`
+    );
+  }
+
+  {
+    const hooks = report.claudeCodeHooks;
+    const icon = hooks.status === "error" ? "[ERROR]" : hooks.status === "skipped" ? "[SKIP]" : "[OK]";
+    lines.push(
+      `${icon} Claude Code hooks: ${hooks.status}${hooks.filePath ? ` -> ${hooks.filePath}` : ""}${
+        hooks.message ? ` (${hooks.message})` : ""
+      }`
     );
   }
 
@@ -409,11 +447,21 @@ export function runUninstall() {
     console.log(`${icon} MCP ${result.agentName}: ${result.message}`);
   }
 
+  // 2. Remove Claude Code flywheel hooks when Claude Code is present
+  const hooksStatus = getClaudeCodeHooksStatus();
+  if (hooksStatus.detected) {
+    const hooksResult = uninstallClaudeCodeHooks(hooksStatus.settingsPath, hooksStatus.hooksDir);
+    const icon = hooksResult.status === "updated" ? "[REMOVED]" : "[SKIP]";
+    console.log(
+      `${icon} Claude Code hooks: ${hooksResult.message ?? hooksResult.status}`
+    );
+  }
+
   console.log("[FINISH] Uninstall complete.");
 }
 
 export type DoctorCheckStatus = "installed" | "missing" | "n/a";
-export type DoctorCheckCategory = "mcp" | "config" | "skill" | "instruction" | "project";
+export type DoctorCheckCategory = "mcp" | "config" | "skill" | "instruction" | "project" | "hooks";
 
 export interface DoctorCheckItem {
   category: DoctorCheckCategory;
@@ -522,6 +570,18 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
     });
   }
 
+  const hooksStatus = getClaudeCodeHooksStatus();
+  if (hooksStatus.detected) {
+    checks.push({
+      category: "hooks",
+      agent: hooksStatus.agent,
+      path: hooksStatus.settingsPath,
+      scope: "user",
+      status: toDoctorStatus(hooksStatus.installed, true),
+      detected: true,
+    });
+  }
+
   const installed = checks.filter((c) => c.status === "installed").length;
   const missing = checks.filter((c) => c.status === "missing").length;
   const na = checks.filter((c) => c.status === "n/a").length;
@@ -529,9 +589,9 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
   const remediation = ok
     ? []
     : [
-        "Run `graphflow install` to register MCP + Skills for detected agents.",
+        "Run `graphflow install` to register MCP + Skills (+ Claude Code hooks when detected).",
         "Re-run `graphflow doctor --json` and fix any remaining missing items.",
-        "Ensure target agent directories exist (e.g. ~/.cursor) so installers can detect them.",
+        "Ensure target agent directories exist (e.g. ~/.cursor / ~/.claude) so installers can detect them.",
       ];
 
   return {

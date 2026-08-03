@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **install/doctor 接入 Claude Code 飞轮 hooks**：`graphflow install` 在检测到 `~/.claude` 时自动调用 `installClaudeCodeHooks`（SessionStart / SessionEnd / Stop）；`doctor --json` 新增 `hooks` 类别自检；`uninstall` 同步卸载；InstallReport 增加 `claudeCodeHooks` 字段；`GRAPHFLOW_CLAUDE_HOME` 便于测试覆盖
+- **飞轮自动闭环文档对齐（此前代码已合入）**：pending episode auto-capture（`GRAPHFLOW_AUTO_CAPTURE=1`）+ Claude Code hooks 生成器 + `scripts/backfill-episodes.cjs`；见 `docs/flywheel-autocapture.md`；ROADMAP P0 标为进行中
+
+### Tests
+
+- `tests/m-install-hooks-wiring.test.ts`：hooks status + install/doctor 接线
+
 ## [1.9.5] - 2026-08-01
 
 ### Fixed

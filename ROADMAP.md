@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-08-02（随 v1.9.5）
+> 最后更新：2026-08-03（Bridge：install/doctor 接入 Claude Code hooks）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -25,7 +25,7 @@
 
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
-| **P0** | **飞轮自动闭环**：hook 式 outcome 自动捕获（任务完成 / 会话压缩时自动记录）+ 历史运行 backfill 脚本 | ⬜ | 现状：本仓库 600+ 次 context 运行 **0 次 outcome 回填、技能库 0 skill**——飞轮在自己的 dogfood 环境里从未闭环。竞品（claude-mem / Engram）用 hook 自动捕获会话记忆，主动调 `graphflow_report_outcome` 是结构性劣势。目标：让 `graphflow_diagnose` 出现真实 skill / episode |
+| **P0** | **飞轮自动闭环**：hook 式 outcome 自动捕获（任务完成 / 会话压缩时自动记录）+ 历史运行 backfill 脚本 | 🟡 | **基建已合入**（`src/hooks/auto-capture.ts` + Claude Code hooks + `scripts/backfill-episodes.cjs`，见 `docs/flywheel-autocapture.md`）；`graphflow install` / `doctor` 已注册/自检 Claude Code hooks。仍默认关闭（`GRAPHFLOW_AUTO_CAPTURE=1`），dogfood 图里 skill/episode 证据仍可能为 0——下一刀是默认开启策略或安装时写入启用提示，让 `graphflow_diagnose` 稳定出现真实 skill / episode |
 | **P1** | **独立 benchmark 公开复现**：token 节省 98.7%、skill A/B（100% vs 61.5%）、记忆 ROI（100% vs 56.5%）的方法学文档 + JSON 落盘，邀请第三方复现 | 🟡 | 基准基建已完备（`npm run benchmark` / `benchmark:skills` / `benchmark:memory`，golden set 已入 CI），但结论目前全部为自测；赛道硬通货是独立第三方数据（CodeGraph / grepai 均有独立实测） |
 | **P1** | **图噪声治理**：符号哈希冲突处理、引用边质量（Trie / 布隆过滤）、子图级 PageRank 缓存 | 🟡 | v1.9.5 已修复 worktrees 污染与剪枝读写放大；但黑帽分析指出「噪声图比无图更糟」——大仓库下边缺失 / 伪边 / 重构后过期仍会误导 agent，是头号质量风险 |
 | **P2** | **协议层占位**：ATP/IR 公开规范 v1.2 增量演进、MCP resources 完善（`graphflow://diagnose` 已上）、协议适配文档 | 🟡 | 对冲平台内置化（Claude Code Auto Memory 等）；resources 与路线图（本文档）已落地，ATP/IR v1.2 待办 |
