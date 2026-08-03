@@ -53,6 +53,7 @@
         "benchmark:independent": "tsx benchmarks/run-independent-bench.ts",
         "benchmark:swe-bench": "tsx benchmarks/run-swe-bench-eval.ts",
         "benchmark:swe-bench-real": "tsx benchmarks/run-swe-bench-real.ts",
+        "benchmark:swe-bench-agent": "tsx benchmarks/run-swe-bench-agent.ts",
     "lint": "eslint .",
     "build:extension": "npm --prefix vscode-extension run build",
     "test:extension": "npm --prefix vscode-extension run test:runtime",
