@@ -15,7 +15,7 @@
  * Run: npx tsx benchmarks/run-swe-bench-eval.ts
  */
 
-import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -319,7 +319,7 @@ async function main() {
   await indexWorkspaceFiles(client, SRC_DIR, {
     ...BENCH_CONFIG.graphPolicy,
     embeddingProvider: undefined,
-  } as any);
+  } as unknown as Record<string, unknown>);
   const indexMs = Date.now() - t0;
 
   const snapshot = await client.readSnapshot?.();

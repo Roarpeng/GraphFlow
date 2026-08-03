@@ -15,7 +15,7 @@
  * Run: npx tsx benchmarks/run-independent-bench.ts
  */
 
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -143,7 +143,7 @@ async function main() {
   await indexWorkspaceFiles(client, SRC_DIR, {
     ...BENCH_CONFIG.graphPolicy,
     embeddingProvider: undefined,
-  } as any);
+  } as unknown as Record<string, unknown>);
   const indexMs = Date.now() - t0;
 
   const snapshot = await client.readSnapshot?.();
@@ -194,14 +194,14 @@ async function main() {
         { enableGraphCompression: true, maxAnchors: 15 }
       );
       const gfText = pkg.summaryChannel.join("\n") + "\n" +
-        pkg.anchorChannel.map((a: any) => `${a.id} ${a.type} ${a.content || ""}`).join("\n");
+        pkg.anchorChannel.map((a) => `${a.id} ${a.type} ${"content" in a ? (a as Record<string, unknown>).content || "" : ""}`).join("\n");
       const gfTok = countTokens(gfText);
       totalGfTok += gfTok;
 
       // Check if results contain expected keywords
       const resultText = gfText.toLowerCase();
       const kwMatch = q.expectedKeywords.every(kw => resultText.includes(kw.toLowerCase()));
-      const anchorIds = pkg.anchorChannel.map((a: any) => a.id.toLowerCase()).join(" ");
+      const anchorIds = pkg.anchorChannel.map((a) => a.id.toLowerCase()).join(" ");
       const anchorMatch = domain.filePatterns.some(p => anchorIds.includes(p.replace(/\//g, "-").toLowerCase()));
       const matched = kwMatch || anchorMatch;
 
