@@ -22,6 +22,9 @@ describe("install JSON report for agent self-check", () => {
       },
       skills: expect.any(Object),
       mcp: expect.any(Array),
+      claudeCodeHooks: {
+        status: expect.stringMatching(/^(created|updated|skipped|error)$/),
+      },
       doctor: {
         command: "doctor",
         checks: expect.any(Array),
@@ -58,7 +61,11 @@ describe("install JSON report for agent self-check", () => {
     }
 
     // Install is only ok when post-install doctor finds no missing registrations.
-    expect(report.ok).toBe(report.doctor.ok && !report.mcp.some((m) => m.status === "error"));
+    expect(report.ok).toBe(
+      report.doctor.ok &&
+        !report.mcp.some((m) => m.status === "error") &&
+        report.claudeCodeHooks.status !== "error"
+    );
     if (!report.ok) {
       expect(report.remediation.length).toBeGreaterThan(0);
     }

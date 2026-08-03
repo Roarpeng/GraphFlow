@@ -32,7 +32,7 @@ describe("doctor JSON install self-check report", () => {
 
     for (const check of report.checks) {
       expect(check).toMatchObject({
-        category: expect.stringMatching(/^(mcp|config|skill|instruction|project)$/),
+        category: expect.stringMatching(/^(mcp|config|skill|instruction|project|hooks)$/),
         agent: expect.any(String),
         path: expect.any(String),
         status: expect.stringMatching(/^(installed|missing|n\/a)$/),
