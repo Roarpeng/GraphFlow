@@ -135,7 +135,7 @@ Endpoint 缺失/格式非法会在配置校验时直接报错；连接失败或�
 
 - **综合能力**：[COMPREHENSIVE-RESULTS.md](benchmarks/COMPREHENSIVE-RESULTS.md) — P1-P6 六维度评测，总体 **92.9%**（索引 100% / 压缩 64.9% / 规划 100% / 学习 100% / Bridge 100% / 性能 99.7%）
 - **独立评测**：[INDEPENDENT-RESULTS.md](benchmarks/INDEPENDENT-RESULTS.md) — CodeGraph 风格 5 域评测，Hit@5 **96%**、Token 节省 **96.6%**、总体 **96.2%**
-- **SWE-bench 风格评测**：[SWE-BENCH-RESULTS.md](benchmarks/SWE-BENCH-RESULTS.md) — 12 实例上下文就绪评测（非真实 SWE-bench，仅测量压缩上下文是否包含任务所需文件/符号）
+- **SWE-bench 风格评测**：[SWE-BENCH-RESULTS.md](benchmarks/SWE-BENCH-RESULTS.md) — 自建 12 实例上下文就绪评测；[SWE-BENCH-REAL-RESULTS.md](benchmarks/SWE-BENCH-REAL-RESULTS.md) — Flask 真实项目 10 实例文件召回率评测（48.3%）
 - **Token 节省**：[RESULTS.md](benchmarks/RESULTS.md) — 8 个代表性查询，**98.2%** 节省，独立 gpt-tokenizer 复核
 - **检索质量**：[RETRIEVAL-EVAL-RESULTS.md](benchmarks/RETRIEVAL-EVAL-RESULTS.md) — 132 查询，Hit@5=100%、MRR=0.836、NDCG@5=0.601
 - **Skill 飞轮 A/B**：[SKILL-AB-RESULTS.md](benchmarks/SKILL-AB-RESULTS.md) — 注入率 100%、召回 100%、开销 25.6 tok/任务
