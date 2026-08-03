@@ -14,6 +14,7 @@ All notable changes to this project are documented in this file.
 - **P1 Experience memory guide**: [docs/experience-memory.md](docs/experience-memory.md) — Storage → Reflection → Experience; artifact / memory-pack / skill-sync; Agent Plugin vs `install` matrix
 - **Experience memory pack**: `exportExperienceMemoryPack` + CLI `graphflow artifact export-memory` → `graphflow-out/memory-pack/{README,skills,episodes}.md`
 - README: Agent Plugins as **primary** install; `graphflow install` as Rules / multi-agent fallback; links to the two new docs
+- **install/doctor 接入 Claude Code 飞轮 hooks**：`graphflow install` 在检测到 Claude Code home 时自动调用 `installClaudeCodeHooks`（SessionStart / SessionEnd / Stop）；`doctor --json` 新增 `hooks` 类别自检；InstallReport 增加 `claudeCodeHooks`；`GRAPHFLOW_CLAUDE_HOME` 便于测试覆盖
 
 ### Changed
 
@@ -21,6 +22,11 @@ All notable changes to this project are documented in this file.
 - `package.json` `files` publishes `plugin.json`, `mcp.json`, and `skills/`
 - ROADMAP (2026-08-09): Experience-layer P0–P2 status (P1 ✅; P0/P2 🟡 on this branch)
 - **`graphflow uninstall`** now removes **MCP + Skills + Rules + hooks** (user + workspace MCP). After removing an Agent Plugin in Cursor, run `uninstall` so leftover `~/.cursor/skills/graphflow` cannot keep steering the agent.
+
+### Tests
+
+- `tests/m-install-hooks-wiring.test.ts`：hooks status + install/doctor 接线
+
 
 ## [1.9.11] - 2026-08-08
 
