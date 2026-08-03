@@ -16,6 +16,7 @@ import {
 } from "./graph-compression.js";
 import { buildRepoMap, formatRepoMapString } from "./repo-map.js";
 import { estimateContextBudget } from "./adaptive-budget.js";
+import { extractSymbolCandidates, fetchSymbolCandidates, collectImportRelatedFiles } from "./symbol-extract.js";
 
 // Re-export all public types and constants from sub-modules
 export type {
@@ -61,6 +62,7 @@ import {
   canUseLayer,
   markLayerUsed,
   deriveModuleId,
+  extractFileFromSymbolId,
 } from "./context-slicer-utils.js";
 
 // Import types for internal use
@@ -452,6 +454,16 @@ export async function buildEnhancedContextPackage(
   );
   let hits: GraphNode[] = keywordHits;
 
+  // Step 2b: Symbol-aware boosting — extract camelCase/PascalCase tokens from
+  // the task description and fetch matching symbol nodes to improve recall.
+  const symbolCandidates = extractSymbolCandidates(task);
+  if (symbolCandidates.length > 0) {
+    const symbolHits = await fetchSymbolCandidates(client, symbolCandidates, 8);
+    if (symbolHits.length > 0) {
+      hits = reciprocalRankFusion([hits, symbolHits]);
+    }
+  }
+
   if (options?.enableVectorRecall === true && options.embeddingProvider) {
     try {
       const queryEmbedding = await options.embeddingProvider.embed(query);
@@ -499,7 +511,8 @@ export async function buildEnhancedContextPackage(
     ...(snapshotNodes !== undefined ? { allNodes: snapshotNodes } : {}),
   });
 
-  // Step 4: Build layered package (existing logic).
+  // Step 4: Build layered package with anchor cap.
+  const maxAnchors = options?.maxAnchors ?? 15;
   const summaryChannel: string[] = [];
   const anchorChannel: ContextAnchorItem[] = [];
   let tokens = 0;
@@ -512,19 +525,17 @@ export async function buildEnhancedContextPackage(
   };
   const used = { l1: 0, l2: 0, l3: 0 };
   const added = new Set<string>();
+  const hitById = new Map<string, GraphNode>();
+  for (const hit of hits) hitById.set(hit.id, hit);
 
   for (const hit of hits) {
+    if (anchorChannel.length >= maxAnchors) { truncated = true; break; }
     const layer = classifyLayer(hit);
-    if (!canUseLayer(layer, quota, used)) {
-      continue;
-    }
+    if (!canUseLayer(layer, quota, used)) continue;
 
     const summary = `${hit.type}: ${hit.content}`;
     const estimate = estimateTokens(summary);
-    if (tokens + estimate > maxTokens) {
-      truncated = true;
-      break;
-    }
+    if (tokens + estimate > maxTokens) { truncated = true; break; }
 
     summaryChannel.push(summary);
     anchorChannel.push({ id: hit.id, type: hit.type, layer });
@@ -533,24 +544,137 @@ export async function buildEnhancedContextPackage(
     markLayerUsed(layer, used);
   }
 
-  // Step 5: Edge expansion (existing logic).
+  // Step 4b: L2 module injection — aggregate file/symbol hits into module overviews.
+  if (!truncated && anchorChannel.length < maxAnchors) {
+    const moduleIds = new Set<string>();
+    for (const anchor of anchorChannel) {
+      if (anchor.layer !== "L1" || (anchor.type !== "File" && anchor.type !== "Symbol")) continue;
+      const moduleId = deriveModuleId(anchor, hitById.get(anchor.id));
+      if (moduleId) moduleIds.add(moduleId);
+    }
+    let moduleNodes: GraphNode[] = [];
+    if (moduleIds.size > 0 && typeof client.getNodesByIds === "function") {
+      moduleNodes = await client.getNodesByIds(Array.from(moduleIds));
+    }
+    for (const moduleId of moduleIds) {
+      if (added.has(moduleId) || anchorChannel.length >= maxAnchors) break;
+      if (!canUseLayer("L2", quota, used)) break;
+      const node = moduleNodes.find((n) => n.id === moduleId) ??
+        ({ id: moduleId, type: "Module" as const, content: moduleId.slice("module:".length) });
+      const summary = `${node.type}: ${node.content}`;
+      const estimate = estimateTokens(summary);
+      if (tokens + estimate > maxTokens) { truncated = true; break; }
+      summaryChannel.push(summary);
+      anchorChannel.push({ id: node.id, type: node.type, layer: "L2" });
+      added.add(node.id);
+      tokens += estimate;
+      markLayerUsed("L2", used);
+    }
+  }
+
+  // Step 4c: L3 skill/decision injection — always-on when enableAlwaysOnLayers,
+  // otherwise only for architecture queries.
+  const archIntent = ARCHITECTURE_QUERY.test(composeContextQuery(query, options?.englishQuery));
+  if (!truncated && anchorChannel.length < maxAnchors && (options?.enableAlwaysOnLayers || archIntent)) {
+    const l3Candidates = rankNodesForContextQuery(
+      (await client.queryByKeyword(query)).filter(
+        (n) => n.type === "Skill" || n.type === "Decision"
+      ),
+      query,
+      {
+        scoreTokens: buildSearchScoreTokens(query, options?.englishQuery),
+        matchQueries: options?.englishQuery?.trim()
+          ? [query, options.englishQuery.trim()]
+          : [query],
+        ...(options?.englishQuery !== undefined ? { englishQuery: options.englishQuery } : {}),
+      }
+    );
+    let l3Added = 0;
+    for (const node of l3Candidates) {
+      if (l3Added >= 2 || anchorChannel.length >= maxAnchors) break;
+      if (added.has(node.id)) continue;
+      if (!canUseLayer("L3", quota, used)) break;
+      const summary = `${node.type}: ${node.content}`;
+      const estimate = estimateTokens(summary);
+      if (tokens + estimate > maxTokens) { truncated = true; break; }
+      summaryChannel.push(summary);
+      anchorChannel.push({ id: node.id, type: node.type, layer: "L3" });
+      added.add(node.id);
+      tokens += estimate;
+      markLayerUsed("L3", used);
+      l3Added += 1;
+    }
+  }
+
+  // Step 5: Import-based multi-hop expansion + same-file symbol boosting.
+  // Find files that import the anchored files, AND add symbols from anchored
+  // files to improve symbol-level recall.
+  if (!truncated && anchorChannel.length < maxAnchors) {
+    const seedFilePaths: string[] = [];
+    for (const anchor of anchorChannel) {
+      if (anchor.type === "File" && anchor.id.startsWith("file:")) {
+        seedFilePaths.push(anchor.id.slice("file:".length));
+      } else if (anchor.type === "Symbol") {
+        const fp = extractFileFromSymbolId(anchor.id);
+        if (fp) seedFilePaths.push(fp);
+      }
+    }
+
+    // 5a: Same-file symbol boosting — add symbols from anchored files
+    if (seedFilePaths.length > 0 && snapshotNodes) {
+      for (const node of snapshotNodes) {
+        if (added.has(node.id) || anchorChannel.length >= maxAnchors) continue;
+        if (node.type !== "Symbol") continue;
+        const nodeFile = extractFileFromSymbolId(node.id);
+        if (!nodeFile) continue;
+        const inSeedFile = seedFilePaths.some(sp =>
+          nodeFile.includes(sp.replace(/\.(ts|tsx|js|jsx|py|go|rs)$/, "")) ||
+          sp.replace(/\.(ts|tsx|js|jsx|py|go|rs)$/, "").includes(nodeFile.replace(/\.(ts|tsx|js|jsx|py|go|rs)$/, ""))
+        );
+        if (!inSeedFile) continue;
+        const layer = classifyLayer(node);
+        const summary = `${node.type}: ${node.content}`;
+        const estimate = estimateTokens(summary);
+        if (tokens + estimate > maxTokens) { truncated = true; break; }
+        summaryChannel.push(summary);
+        anchorChannel.push({ id: node.id, type: node.type, layer });
+        added.add(node.id);
+        tokens += estimate;
+        markLayerUsed(layer, used);
+      }
+    }
+
+    // 5b: Import-based expansion
+    if (seedFilePaths.length > 0 && anchorChannel.length < maxAnchors) {
+      const importHits = await collectImportRelatedFiles(client, seedFilePaths, 5);
+      for (const node of importHits) {
+        if (added.has(node.id) || anchorChannel.length >= maxAnchors) continue;
+        const layer = classifyLayer(node);
+        const summary = `${node.type}: ${node.content}`;
+        const estimate = estimateTokens(summary);
+        if (tokens + estimate > maxTokens) { truncated = true; break; }
+        summaryChannel.push(summary);
+        anchorChannel.push({ id: node.id, type: node.type, layer });
+        added.add(node.id);
+        tokens += estimate;
+        markLayerUsed(layer, used);
+      }
+    }
+  }
+
+  // Step 6: Edge expansion (respects anchor cap).
   const enableExpansion = options?.enableEdgeExpansion !== false;
-  if (enableExpansion && !truncated && typeof client.getNeighbors === "function") {
+  if (enableExpansion && !truncated && anchorChannel.length < maxAnchors && typeof client.getNeighbors === "function") {
     const seedIds = anchorChannel.slice(0, 5).map((a) => a.id);
     if (seedIds.length > 0) {
       const expanded = await expandSubgraph(client, seedIds, { hops: 1 });
       for (const node of expanded) {
-        if (added.has(node.id)) continue;
+        if (added.has(node.id) || anchorChannel.length >= maxAnchors) continue;
         const layer = classifyLayer(node);
         if (!canUseLayer(layer, quota, used)) continue;
-
         const summary = `${node.type}: ${node.content}`;
         const estimate = estimateTokens(summary);
-        if (tokens + estimate > maxTokens) {
-          truncated = true;
-          break;
-        }
-
+        if (tokens + estimate > maxTokens) { truncated = true; break; }
         summaryChannel.push(summary);
         anchorChannel.push({ id: node.id, type: node.type, layer });
         added.add(node.id);

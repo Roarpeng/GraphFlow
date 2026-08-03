@@ -1,6 +1,6 @@
 # GraphFlow
 
-[![npm version](https://img.shields.io/badge/npm-1.9.6-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.9.7-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **编码 Agent 的上下文与记忆层** — Local-first 代码知识图谱 + 上下文压缩 + 跨会话学习飞轮
 
@@ -58,16 +58,16 @@ Agent 先调 `graphflow_context` 拿压缩上下文，再用 `graphflow_plan` �
 | **目标对齐** | **Goal 锚点节点化**（intent 五元组固化为一等公民，每次打包自动注入原始需求）；**低置信度澄清门**（confidence < 0.6 不出 plan）；**alignment-check 执行期回检**；**deviation 偏离分类**（misread-requirement / scope-creep / tech-drift）；**Goal 版本链 + 变更 diff** |
 | **知识图谱** | 12 语言 AST 索引（TS/JS/Python/Rust/Go/C/C++/Java/Ruby/Kotlin/Swift/Dart）；File / Module / Symbol 节点 + 依赖/引用/定义/调用/继承边 |
 | **上下文压缩** | L1/L2/L3 分层锚点；图结构压缩（边权重 + PageRank，**LRU 缓存**）；**词干匹配召回**（orchestrate ↔ orchestration）；向量召回 + RRF；RepoMap 概览；自适应预算 |
-| **检索质量** | **Golden-set 回归门禁**（26 查询，CI 强制 ≥80% 召回，实测 100%） |
+| **检索质量** | **Golden-set 回归门禁**（132 查询，Hit@5=100%、MRR=0.836、NDCG@5=0.601） |
 | **向量索引** | 进程内记忆化 + **磁盘持久化**（指纹校验，MCP 重启秒级恢复） |
 | **存储后端** | `file` / `memory` / `sqlite`（FTS5，**searchtext 分词增强**，camelCase 可检索）/ **`auto`（sqlite 优先自动切换）** / `mcp-http` |
 | **学习飞轮** | Episodic Memory、Reflection、Skill 节点（score ±1，bounded [-20,20]）、nightly 学习、技能衰减/剪枝、**飞轮贡献报告**（`skill report` / `graphflow_diagnose`，含偏离聚合与 Goal 统计） |
 | **团队共享** | **`skill sync`**：技能包导出/导入到可提交的 `.graphflow/skills/team-skills.json`；导入为**双向 MERGE**（per-skill-id 并集，updatedAt 较新者胜、并列保留本地、本地独有技能保留；`--force` 覆盖）；golden 检索基准随包往返 → `.graphflow/team-golden.json` |
-| **效果基准** | [token 节省 98.7%](benchmarks/RESULTS.md)（独立复核）；[Skill A/B 基准](benchmarks/SKILL-AB-RESULTS.md)（注入率/召回率/开销，`npm run benchmark:skills`） |
+| **效果基准** | [综合评测 92.9%](benchmarks/COMPREHENSIVE-RESULTS.md) · [独立评测 96.2%](benchmarks/INDEPENDENT-RESULTS.md) · [SWE-bench 100%](benchmarks/SWE-BENCH-RESULTS.md) · [Token 节省 98.2%](benchmarks/RESULTS.md) |
 | **模型路由** | Smart / Economy 双 tier；多 provider 健康探测与 fallback（DeepSeek、OpenAI、Anthropic、百炼、豆包） |
 | **可观测性** | `graphflow_diagnose`：provider 健康 + 图统计 + token 节省 + **飞轮报告** |
 | **Agent 接入** | CLI `--json`；MCP stdio（10 工具）；自动安装 MCP 到 15+ Agent |
-| **工程质量** | TypeScript strict；**92 测试文件 / 455 tests**；`npm run ci` 含扩展打包与 smoke |
+| **工程质量** | TypeScript strict；**99 测试文件 / 692 tests**；`npm run ci` 含扩展打包与 smoke |
 
 ### 定位说明
 
@@ -133,9 +133,12 @@ Endpoint 缺失/格式非法会在配置校验时直接报错；连接失败或�
 
 ## 基准
 
-- **Token 节省**：[benchmarks/RESULTS.md](benchmarks/RESULTS.md) — 8 个代表性查询，230,069 → 2,893 tokens（**98.7%**），独立 gpt-tokenizer 复核，`npm run benchmark` 可复现。
-- **Skill 飞轮 A/B**：[benchmarks/SKILL-AB-RESULTS.md](benchmarks/SKILL-AB-RESULTS.md) — 注入率 100%、episode 召回 100%、平均开销 25.6 tokens/任务，`npm run benchmark:skills` 可复现。
-- **检索召回**：golden set（26 查询）纳入 CI 回归门禁，防止压缩/排序改动悄悄劣化召回。
+- **综合能力**：[COMPREHENSIVE-RESULTS.md](benchmarks/COMPREHENSIVE-RESULTS.md) — P1-P6 六维度评测，总体 **92.9%**（索引 100% / 压缩 64.9% / 规划 100% / 学习 100% / Bridge 100% / 性能 99.7%）
+- **独立评测**：[INDEPENDENT-RESULTS.md](benchmarks/INDEPENDENT-RESULTS.md) — CodeGraph 风格 5 域评测，Hit@5 **96%**、Token 节省 **96.6%**、总体 **96.2%**
+- **SWE-bench**：[SWE-BENCH-RESULTS.md](benchmarks/SWE-BENCH-RESULTS.md) — 12 实例端到端评测，上下文就绪率 **100%**（easy/medium/hard 全覆盖）
+- **Token 节省**：[RESULTS.md](benchmarks/RESULTS.md) — 8 个代表性查询，**98.2%** 节省，独立 gpt-tokenizer 复核
+- **检索质量**：[RETRIEVAL-EVAL-RESULTS.md](benchmarks/RETRIEVAL-EVAL-RESULTS.md) — 132 查询，Hit@5=100%、MRR=0.836、NDCG@5=0.601
+- **Skill 飞轮 A/B**：[SKILL-AB-RESULTS.md](benchmarks/SKILL-AB-RESULTS.md) — 注入率 100%、召回 100%、开销 25.6 tok/任务
 
 ## VS Code / Cursor 扩展
 
@@ -173,7 +176,7 @@ npm install
 npm run ci        # lint + build + 测试 + 扩展打包 + smoke
 ```
 
-要求 Node.js ≥ 20、npm ≥ 10。预期：lint 无错误、构建成功、455 测试通过。
+要求 Node.js ≥ 20、npm ≥ 10。预期：lint 无错误、构建成功、692 测试通过。
 
 ## 项目结构
 
@@ -188,8 +191,8 @@ GraphFlow/
 │   └── surfaces/
 │       ├── cli/        # CLI + runtime
 │       └── mcp/        # MCP server（10 工具）
-├── tests/              # 92 文件 / 455 tests（含检索 golden set、goal anchor）
-├── benchmarks/         # token 节省 + skill A/B 基准（可复现）
+├── tests/              # 99 文件 / 692 tests（含检索 golden set、bridge+DAG）
+├── benchmarks/         # 综合 + 独立 + SWE-bench + token 节省 + skill A/B（可复现）
 ├── docs/               # ATP v1.0 设计 + ATP/IR 公开规范
 ├── vscode-extension/   # VS Code 面板与命令
 └── CHANGELOG.md

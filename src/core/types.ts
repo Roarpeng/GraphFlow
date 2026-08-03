@@ -74,6 +74,13 @@ export interface TaskRunResult {
     /** 多 Agent 协作编排：每个任务节点建议的 agent 专业领域映射 */
     agentAssignments?: Array<{ taskId: string; specialty: AgentSpecialty }>;
   };
+  /** Bridge+DAG 混合模式：本地 DAG 执行结果摘要 */
+  localExecution?: {
+    completed: string[];
+    failed: string[];
+    blocked: string[];
+    rounds: string[][];
+  };
 }
 
 export interface TaskNode {
@@ -139,6 +146,16 @@ export interface OrchestrateOptions {
   enableRepoMapFallback?: boolean;
   /** Run Six Hats plan_insight before complex DAG planning. Default true for complex tasks. */
   enablePlanInsight?: boolean;
+  /**
+   * When true, bridge mode ALSO executes the DAG locally after producing the
+   * executionDescriptor. The local result is merged into the bridge output:
+   * - all DAG tasks succeed → status stays DELEGATED but `localExecution` field
+   *   carries the completed/blocked/failed breakdown.
+   * - some DAG tasks fail → status becomes HUMAN_REVIEW_REQUIRED with the
+   *   executionDescriptor still attached so the external agent can retry.
+   * Default false (pure bridge = no local execution).
+   */
+  enableBridgeDagExecution?: boolean;
 }
 
 export interface GraphNode {

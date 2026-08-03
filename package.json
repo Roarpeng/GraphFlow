@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "1.9.6",
+  "version": "1.9.7",
   "publishConfig": {
     "access": "public"
   },
@@ -48,6 +48,10 @@
     "benchmark:skills": "tsx benchmarks/run-skill-ab-benchmark.ts",
     "benchmark:ab": "tsx benchmarks/run-skill-ab.ts",
     "benchmark:memory": "tsx benchmarks/run-memory-ab.ts",
+    "benchmark:retrieval": "tsx benchmarks/run-retrieval-eval.ts",
+    "benchmark:comprehensive": "tsx benchmarks/run-comprehensive-bench.ts",
+        "benchmark:independent": "tsx benchmarks/run-independent-bench.ts",
+        "benchmark:swe-bench": "tsx benchmarks/run-swe-bench-eval.ts",
     "lint": "eslint .",
     "build:extension": "npm --prefix vscode-extension run build",
     "test:extension": "npm --prefix vscode-extension run test:runtime",

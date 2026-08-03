@@ -25,7 +25,8 @@ export function planTasks(task: string, skillHints?: string[]): TaskNode[] {
     return [
       toNode("task-1", withSkillHints(`分析与设计: ${baseTask}`, skillHints), []),
       toNode("task-2", withSkillHints(`实现: ${baseTask}`, skillHints), ["task-1"]),
-      toNode("task-3", withSkillHints(`测试与验证: ${baseTask}`, skillHints), ["task-2"]),
+      toNode("task-2b", withSkillHints(`测试设计: ${baseTask}`, skillHints), ["task-1"]),
+      toNode("task-3", withSkillHints(`验证: ${baseTask}`, skillHints), ["task-2", "task-2b"]),
     ];
   }
 
