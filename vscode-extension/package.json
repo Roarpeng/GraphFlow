@@ -4,7 +4,7 @@
   "displayName": "GraphFlow Context & Memory",
   "description": "Token-first code context, knowledge graph, MCP, planning and cross-session memory for VS Code/Cursor: memory audit CLI, flywheel attribution panel, semantic embeddings, skill sync.",
   "icon": "media/graphflow.png",
-  "version": "1.9.5",
+  "version": "1.9.6",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"
@@ -134,10 +134,11 @@
     "icon:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/generate-icon.ps1",
     "sync-runtime": "npm --prefix .. run build && node ./scripts/sync-runtime.mjs",
     "test:runtime": "node ./scripts/test-bundled-runtime.mjs",
+    "test:mcp": "node ./scripts/test-mcp-vendor.mjs",
     "bundle": "node ./scripts/bundle-extension.mjs",
     "typecheck": "tsc --noEmit -p ./tsconfig.json",
     "build": "npm run sync-runtime && npm run bundle",
-    "package": "npm run build && npm run test:runtime && node ./scripts/package-vsix.mjs"
+    "package": "npm run build && npm run test:runtime && npm run test:mcp && node ./scripts/package-vsix.mjs"
   },
   "devDependencies": {
     "@types/vscode": "^1.99.0",

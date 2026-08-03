@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.9.6] - 2026-08-03
+
+### Fixed
+
+- **Cursor/VS Code MCP 启动失败**：扩展 vendor 打包漏掉 `@modelcontextprotocol/sdk`，MCP launcher 加载 `vendor/graphflow/dist/surfaces/mcp/server.js` 时抛出 `Cannot find module '@modelcontextprotocol/sdk/server/index.js'`（Connection closed / -32000）。`sync-runtime.mjs` 已将 MCP SDK 纳入 `runtimeRoots`，并在同步后校验必选包存在；新增 `test:mcp` 烟雾测试防止回归
+
 ## [1.9.5] - 2026-08-01
 
 ### Fixed

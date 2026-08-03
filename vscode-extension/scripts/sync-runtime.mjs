@@ -147,13 +147,24 @@ const runtimeRoots = [
   "gpt-tokenizer",
   "web-tree-sitter",
   "pino",
-  // Installer surface is frozen; do not add more IDE-specific runtime targets
-  // or @xenova/transformers here (see note above).
+  // MCP stdio server (`dist/surfaces/mcp/server.js`) imports the official SDK.
+  // Omitting it produces MODULE_NOT_FOUND when Cursor/VS Code launches MCP.
+  "@modelcontextprotocol/sdk",
+  // Installer surface is frozen for heavy optional deps; do not add
+  // @xenova/transformers / @huggingface/transformers here (see note above).
 ];
 
 const visited = new Set();
 for (const dep of runtimeRoots) {
   bundlePackage(dep, join(repoRoot, "node_modules"), vendorNodeModules, visited);
+}
+
+for (const dep of runtimeRoots) {
+  if (!existsSync(packageDir(dep, vendorNodeModules))) {
+    throw new Error(
+      `[sync-runtime] required vendor package missing after sync: ${dep}`,
+    );
+  }
 }
 
 console.log(`Bundled ${visited.size} runtime packages into ${vendorNodeModules}`);
