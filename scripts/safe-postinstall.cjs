@@ -151,6 +151,31 @@ function getSkillSourceDir() {
   return null;
 }
 
+/**
+ * 获取 Qoder（含 CN 版）的用户级 Skill 目录列表。
+ * Qoder 国际版：~/.qoder/skills；Qoder CN 版：~/.qoder-cn/skills。
+ * @returns {Array<{name: string, skillsDir: string}>}
+ */
+function getQoderUserDirs() {
+  const { home } = resolveHomePaths();
+  const dirs = [];
+
+  if (existsSync(join(home, ".qoder"))) {
+    dirs.push({
+      name: "Qoder",
+      skillsDir: join(home, ".qoder", "skills"),
+    });
+  }
+  if (existsSync(join(home, ".qoder-cn"))) {
+    dirs.push({
+      name: "Qoder CN",
+      skillsDir: join(home, ".qoder-cn", "skills"),
+    });
+  }
+
+  return dirs;
+}
+
 function runMcpInstaller() {
   const installerPath = join(__dirname, "..", "dist", "integrations", "agent-mcp-installer.js");
   if (!existsSync(installerPath)) {
@@ -519,6 +544,16 @@ function main() {
       }
     }
 
+    // ─── Qoder Skill 安装（国际版 ~/.qoder/skills + CN 版 ~/.qoder-cn/skills） ───
+    const qoderDirs = getQoderUserDirs();
+    if (skillSourceDir && qoderDirs.length > 0) {
+      for (const qoder of qoderDirs) {
+        const result = installSkill(qoder.skillsDir, skillSourceDir);
+        skillResults.push({ agent: qoder.name, ...result });
+        console.log(`[GraphFlow] Skill for ${qoder.name}: ${result.status}${result.reason ? ` (${result.reason})` : ""}`);
+      }
+    }
+
     const mcpResult = runMcpInstaller();
     if (mcpResult.status === "installed" && Array.isArray(mcpResult.details)) {
       for (const item of mcpResult.details) {
@@ -561,4 +596,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { installSkill, detectTrae, getTraeUserDirs, getSkillSourceDir, readPreviousVersion, writeCurrentVersion, needsForceUpdate, VERSION_FILE };
+module.exports = { installSkill, detectTrae, getTraeUserDirs, getQoderUserDirs, getSkillSourceDir, readPreviousVersion, writeCurrentVersion, needsForceUpdate, VERSION_FILE };
