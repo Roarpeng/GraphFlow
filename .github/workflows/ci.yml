@@ -44,3 +44,65 @@ jobs:
           else
             echo "::warning::benchmarks/run-skill-ab.ts not present yet — skipping skill A/B benchmark"
           fi
+
+  comprehensive-benchmark:
+    runs-on: ubuntu-latest
+    needs: validate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Enable package manager
+        run: corepack enable
+
+      - name: Install root dependencies
+        run: npm ci --no-audit
+        env:
+          GRAPHFLOW_SKIP_POSTINSTALL: "1"
+
+      - name: Rebuild native modules
+        run: npm rebuild better-sqlite3
+
+      - name: Run comprehensive benchmark
+        env:
+          GRAPHFLOW_SKIP_EMBEDDING_WARMUP: "1"
+        run: npx tsx benchmarks/run-comprehensive-bench.ts
+
+  swe-bench-eval:
+    runs-on: ubuntu-latest
+    needs: validate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Enable package manager
+        run: corepack enable
+
+      - name: Install root dependencies
+        run: npm ci --no-audit
+        env:
+          GRAPHFLOW_SKIP_POSTINSTALL: "1"
+
+      - name: Rebuild native modules
+        run: npm rebuild better-sqlite3
+
+      - name: Run SWE-bench evaluation
+        env:
+          GRAPHFLOW_SKIP_EMBEDDING_WARMUP: "1"
+        run: npx tsx benchmarks/run-swe-bench-eval.ts

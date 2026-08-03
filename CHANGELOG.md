@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.9.7] - 2026-08-03
+
+### Added
+
+- **综合能力 Benchmark（P1-P6 六维度）**：`benchmarks/run-comprehensive-bench.ts`，覆盖图谱索引、上下文压缩、规划与分诊、学习飞轮、Bridge 模式、端到端性能，总体得分 **92.9%**
+- **CodeGraph 风格独立 Benchmark**：`benchmarks/run-independent-bench.ts`，5 域（core/graph/learning/config/integrations）评测，Hit@5 96%、Token 节省 96.6%、总体 **96.2%**
+- **SWE-bench 风格端到端评测**：`benchmarks/run-swe-bench-eval.ts`，12 实例（easy/medium/hard × bug-fix/feature/refactor/test），多查询策略下上下文就绪率 **100%**
+- **检索质量 IR 指标评测**：`benchmarks/run-retrieval-eval.ts`，132 条 golden 查询，Hit@5=100%、MRR=0.836、NDCG@5=0.601
+- **符号提取模块**：`src/graph/symbol-extract.ts`，从任务描述提取 camelCase/PascalCase 符号名，补充图查询提升召回
+- **同文件符号提升 + 导入图扩展**：`buildEnhancedContextPackage` 新增 Step 5，自动从已锚定文件提取同文件 Symbol 节点，并通过 import 关系扩展跨文件召回
+- **Bridge+DAG 混合执行模式**：`enableBridgeDagExecution` 选项，bridge 模式下可选择同时本地执行 DAG（`tests/m81-bridge-dag-execution.test.ts`，5 个用例）
+
+### Changed
+
+- **上下文压缩优化**：anchor 上限 15（`maxAnchors`）、L2 module 注入、L3 always-on 层；压缩得分 38.4% → 64.9%
+- **DAG 并行度提升**：单 clause 任务拆分 4 节点（实现∥测试设计），并行度 1.2x → 1.40x
+- **Skill hints 修复**：传入 evidence 通过 P0-2 质量门控，skill hints 从 0 恢复到正常生成
+
+### Tests
+
+- 99 测试文件 / 692 tests（+1 m81 bridge+DAG、m79 plan clause split 更新）
+
 ## [1.9.6] - 2026-08-03
 
 ### Fixed

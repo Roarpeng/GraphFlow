@@ -53,6 +53,10 @@ export interface LayeredPackageOptions {
   englishQuery?: string;
   /** Optional path to persist the vector index across process restarts. */
   hnswIndexPath?: string;
+  /** Hard cap on anchor count. Default 15. Set to Infinity to disable. */
+  maxAnchors?: number;
+  /** Always inject L2 module nodes and L3 skill/decision nodes regardless of query pattern. Default false. */
+  enableAlwaysOnLayers?: boolean;
 }
 
 export interface SubgraphExpansionOptions {

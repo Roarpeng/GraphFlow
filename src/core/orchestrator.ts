@@ -216,7 +216,7 @@ async function runOrchestration(
           promptContext
         );
 
-  // Bridge mode: package the planned DAG for external agent execution instead of running it
+  // Bridge mode: package the planned DAG for external agent execution
   if (effectiveOptions?.executionMode === "bridge") {
     // 多 Agent 协作编排：为每个任务节点标注建议的 agent 专业领域
     const assignedPlan = assignAgentsToTasks(plan);
@@ -250,6 +250,70 @@ async function runOrchestration(
         : insightSummary
           ? { insightSummary }
           : {};
+
+    // ── Bridge + DAG 混合模式：同时本地执行 DAG ──
+    if (effectiveOptions?.enableBridgeDagExecution) {
+      const runner = async (node: TaskNode): Promise<boolean> => {
+        logger.info({ nodeId: node.id, description: node.description }, "Executing task node (bridge+DAG)");
+        const workerSelection = selectionIfHealthy(
+          decisionToSelection(routeDecisions.worker),
+          effectiveOptions?.providerHealth
+        );
+        const validatorSelection = selectionIfHealthy(
+          decisionToSelection(routeDecisions.validator),
+          effectiveOptions?.providerHealth
+        );
+        const run = await runSimpleTask({
+          task: node.description,
+          ...retryOptions,
+          ...(workerSelection ? { workerSelection } : {}),
+          ...(validatorSelection ? { validatorSelection } : {}),
+          ...(promptContext ? { workerContext: promptContext, validatorContext: promptContext } : {}),
+          // Force LLM execution for individual DAG nodes even in bridge mode
+          executionMode: "llm",
+        });
+        return run.status === "COMPLETED";
+      };
+
+      const dagResult = await executeDag(plan, runner);
+      const allSucceeded = dagResult.failed.length === 0 && dagResult.blocked.length === 0;
+
+      const bridgeRun: TaskRunResult = {
+        status: allSucceeded ? "DELEGATED" : "HUMAN_REVIEW_REQUIRED",
+        attempts: plan.length,
+        feedback: allSucceeded
+          ? `[DELEGATED+LOCAL-DAG] Planned ${plan.length} task(s); local DAG completed ${dagResult.completed.length}/${plan.length} tasks`
+          : `[DELEGATED+LOCAL-DAG] Planned ${plan.length} task(s); local DAG failed ${dagResult.failed.length}, blocked ${dagResult.blocked.length}; external agent retry recommended`,
+        ...(brainstormIdeas ? { brainstormIdeas } : {}),
+        executionDescriptor: {
+          action: "execute",
+          task: input.task,
+          context: `plan=${JSON.stringify(planProjection)}${insightSummary ? `; insight=${insightSummary}` : ""}${contextStr ? `; ${contextStr}` : ""}`,
+          retryHints: dagResult.failed.length > 0
+            ? dagResult.failed.map((id) => `local-exec-failed:${id}`)
+            : [],
+          ...(agentAssignments.length > 0 ? { agentAssignments } : {}),
+          ...delegatedExtras,
+        },
+        localExecution: {
+          completed: dagResult.completed,
+          failed: dagResult.failed,
+          blocked: dagResult.blocked,
+          rounds: dagResult.rounds,
+        },
+      };
+      const finalRun = appendContextFeedback(bridgeRun, contextPackage, promptContextLines, effectiveOptions);
+      const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
+      await maybeSyncGraph(input.task, withRoute, effectiveOptions);
+      await maybeSyncSkillGraph(input.task, withRoute, effectiveOptions);
+      logger.info(
+        { status: withRoute.status, task: input.task, localCompleted: dagResult.completed.length, localFailed: dagResult.failed.length },
+        "Orchestration task delegated with local DAG execution (bridge+DAG mode)"
+      );
+      return finalizeEpisode(input.task, currentPlan, withRoute, similarEpisodes, skillHints, effectiveOptions, triageId);
+    }
+
+    // ── 纯 Bridge 模式（无本地 DAG 执行）──
     const bridgeRun: TaskRunResult = {
       status: "DELEGATED",
       attempts: 0,

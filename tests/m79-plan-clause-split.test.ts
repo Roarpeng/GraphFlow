@@ -12,13 +12,14 @@ describe("planTasks clause splitting", () => {
       "Critically evaluate reliability of look-down-init curriculum for copper tube FOV acquisition: assumptions、failure modes、validation gates、alternatives ranking.";
     const plan = planTasks(task);
 
-    // Single-intent analysis → design / implement / verify chain (3 nodes),
+    // Single-intent analysis → implement + test-design (parallel) → verify (4 nodes),
     // not parallel noun-phrase tasks like "failure modes".
-    expect(plan).toHaveLength(3);
+    expect(plan).toHaveLength(4);
     expect(plan.map((node) => node.description).join("\n")).not.toMatch(/^failure modes$/m);
     expect(plan.map((node) => node.description).join("\n")).not.toMatch(/^validation gates$/m);
     expect(plan[0]?.description).toContain("分析与设计");
-    expect(plan[2]?.dependencies).toEqual(["task-2"]);
+    // task-3 (验证) depends on both task-2 (实现) and task-2b (测试设计)
+    expect(plan[3]?.dependencies).toEqual(["task-2", "task-2b"]);
   });
 
   it("still splits independent work joined by and", () => {
