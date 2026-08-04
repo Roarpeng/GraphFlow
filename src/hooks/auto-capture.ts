@@ -16,8 +16,9 @@ import { logger } from "../utils/logger";
  * （SessionEnd / Stop，见 integrations/claude-code-hooks.ts）在会话结束时自动调用
  * `graphflow outcome report <episodeId> <success>` 更新为真实结局。
  *
- * 默认关闭（严格向后兼容）：设置环境变量 GRAPHFLOW_AUTO_CAPTURE=1（或 true/on/yes）开启，
- * 或在调用点显式传入 enabled: true。
+ * 默认开启（飞轮自证）：环境变量未设置或设置为 1/true/on/yes/enabled 时开启，
+ * 设置 GRAPHFLOW_AUTO_CAPTURE=0（或 false/off/no/disabled）时显式关闭，
+ * 或在调用点显式传入 enabled: false。
  */
 
 export const AUTO_CAPTURE_ENV = "GRAPHFLOW_AUTO_CAPTURE";
@@ -73,8 +74,9 @@ export interface AutoCaptureResult {
 }
 
 export function isAutoCaptureEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  // 默认开启：仅当显式设置为关闭值（0/false/off/no/disabled）时才关闭。
   const raw = env[AUTO_CAPTURE_ENV]?.trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "on" || raw === "yes" || raw === "enabled";
+  return !(raw === "0" || raw === "false" || raw === "off" || raw === "no" || raw === "disabled");
 }
 
 export function resolveSessionJournalPath(workspaceRoot?: string): string {

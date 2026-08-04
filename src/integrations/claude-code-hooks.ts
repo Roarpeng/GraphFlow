@@ -7,7 +7,8 @@ import { dirname, join } from "node:path";
  *
  * 生成 ~/.claude/settings.json 风格的 hooks 片段（SessionStart / SessionEnd / Stop），
  * 自动调用 graphflow CLI 记录 outcome/episode，让学习飞轮无需宿主 agent 主动调用
- * graphflow_report_outcome 也能自动闭环：
+ * graphflow_report_outcome 也能自动闭环（配套的 auto-capture 默认开启，
+ * 可通过 GRAPHFLOW_AUTO_CAPTURE=0 显式关闭）：
  *
  * 1. SessionStart → 初始化会话日志目录（不写图）。
  * 2. SessionEnd / Stop → 读取 src/hooks/auto-capture.ts 写入的最新 pending episode
