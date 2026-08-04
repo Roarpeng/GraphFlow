@@ -12,7 +12,7 @@ import {
   type IndexedSymbol,
   type ParsedFile,
 } from "../src/graph/file-indexer-nodes";
-import { buildBatchReferenceEdges } from "../src/graph/file-indexer-edges";
+import { buildBatchReferenceEdges, buildSingleFileReferenceEdges } from "../src/graph/file-indexer-edges";
 import {
   computePageRank,
   markGraphMutated,
@@ -209,6 +209,84 @@ describe("引用边构建优化", () => {
     // b.ts 内两个同名 handle 是不同符号 → a.ts 的引用产生两条互异边
     expect(toB).toHaveLength(2);
     expect(new Set(toB.map((e) => e.to)).size).toBe(2);
+  });
+
+  it("预过滤：内容不含任何词表符号的文件被整体跳过（无边产出）", () => {
+    const files = [
+      parseFixture("src/a.ts", "alpha definition here", ["alpha"]),
+      // 内容中不存在任何符号名（gam 仅为 gamma 的前缀，不构成子串命中）
+      parseFixture("src/z.ts", "gam tot unrelated text", ["gamma"]),
+    ];
+    const symbolIndex = buildSymbolIndex(files);
+    const { edges } = buildBatchReferenceEdges(files, symbolIndex);
+    expect(edges.some((e) => e.from === "file:src/z.ts")).toBe(false);
+  });
+
+  it("预过滤不误杀：包含词表符号的文件仍产出跨文件引用边", () => {
+    const files = [
+      parseFixture("src/a.ts", "alpha definition", ["alpha"]),
+      parseFixture("src/b.ts", "call alpha now", ["beta"]),
+    ];
+    const symbolIndex = buildSymbolIndex(files);
+    const { edges, referenceCount } = buildBatchReferenceEdges(files, symbolIndex);
+    expect(edges).toEqual([
+      { from: "file:src/b.ts", to: symbolId("src/a.ts", "alpha"), relation: "references" },
+    ]);
+    expect(referenceCount).toBe(1);
+  });
+
+  it("词边界：符号名仅作为更长标识符子串时不产生伪边（预过滤可放行但不误报）", () => {
+    const files = [
+      parseFixture("src/a.ts", "alpha definition", ["alpha"]),
+      // 包含子串 "alpha"（预过滤会放行），但 token 是 localpha/alphax → 无边
+      parseFixture("src/b.ts", "localpha and alphax only", ["beta"]),
+    ];
+    const symbolIndex = buildSymbolIndex(files);
+    const { edges } = buildBatchReferenceEdges(files, symbolIndex);
+    expect(edges.some((e) => e.from === "file:src/b.ts")).toBe(false);
+  });
+
+  it("单文件增量路径：预过滤短路（不存在）、命中（存在）、词边界三情形", () => {
+    const snapshotNodes: GraphNode[] = [
+      {
+        id: "symbol:src/b.ts:beta",
+        type: "Symbol",
+        content: "function betaFn() {}",
+        metadata: { name: "betaFn", file: "src/b.ts" },
+      },
+    ];
+
+    // 存在：内容引用 betaFn → 产出边
+    const hit = buildSingleFileReferenceEdges(
+      "file:src/a.ts",
+      "src/a.ts",
+      "call betaFn today",
+      [],
+      snapshotNodes
+    );
+    expect(hit.edges).toEqual([
+      { from: "file:src/a.ts", to: "symbol:src/b.ts:beta", relation: "references" },
+    ]);
+
+    // 不存在：内容无任何词表符号 → 预过滤短路，无边
+    const miss = buildSingleFileReferenceEdges(
+      "file:src/a.ts",
+      "src/a.ts",
+      "nothing related here",
+      [],
+      snapshotNodes
+    );
+    expect(miss.edges).toEqual([]);
+
+    // 词边界：betaFn 仅作为更长标识符的一部分 → 不产生伪边
+    const boundary = buildSingleFileReferenceEdges(
+      "file:src/a.ts",
+      "src/a.ts",
+      "xbetaFny only",
+      [],
+      snapshotNodes
+    );
+    expect(boundary.edges).toEqual([]);
   });
 });
 

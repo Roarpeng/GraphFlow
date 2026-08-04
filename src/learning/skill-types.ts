@@ -14,6 +14,40 @@ import type { GraphEdge } from "../core/types";
  */
 export type SkillOutcomeKind = "proven" | "correctable" | "anti-pattern" | "noise";
 
+/**
+ * 技能来源元数据（记忆投毒防护，P1-3）：
+ * - local:  本地学习/策划产生（旧数据无 provenance 字段时按 local 处理）。
+ * - sync:   经团队 skill sync / import 入库的外部技能，初始分类不得为
+ *           proven，须经本地成功使用后才可晋升。
+ * - import: 技能包导入（与 sync 同属外部来源，入库时统一标记为 sync）。
+ */
+export interface SkillProvenance {
+  source: "local" | "sync" | "import";
+  originRepo?: string;
+  capturedAt?: string;
+  episodeId?: string;
+}
+
+/** 归一化外部输入的 provenance：非法值回退 local，仅保留合法字段。 */
+export function normalizeSkillProvenance(
+  value: unknown
+): SkillProvenance | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const raw = value as Partial<SkillProvenance>;
+  const source =
+    raw.source === "local" || raw.source === "sync" || raw.source === "import"
+      ? raw.source
+      : "local";
+  return {
+    source,
+    ...(typeof raw.originRepo === "string" && raw.originRepo ? { originRepo: raw.originRepo } : {}),
+    ...(typeof raw.capturedAt === "string" && raw.capturedAt ? { capturedAt: raw.capturedAt } : {}),
+    ...(typeof raw.episodeId === "string" && raw.episodeId ? { episodeId: raw.episodeId } : {}),
+  };
+}
+
 export interface SkillState {
   id: string;
   name: string;
@@ -34,6 +68,8 @@ export interface SkillState {
   seeded?: boolean;
   /** Outcome taxonomy classification (persisted for observability). */
   outcomeKind?: SkillOutcomeKind;
+  /** 来源元数据；缺失按 local 处理（向后兼容旧数据）。 */
+  provenance?: SkillProvenance;
 }
 
 export interface CompositeSkillState {
@@ -53,6 +89,8 @@ export interface CompositeSkillState {
   seeded?: boolean;
   /** Outcome taxonomy classification (persisted for observability). */
   outcomeKind?: SkillOutcomeKind;
+  /** 来源元数据；缺失按 local 处理（向后兼容旧数据）。 */
+  provenance?: SkillProvenance;
 }
 
 export type EdgeRelation = GraphEdge["relation"];

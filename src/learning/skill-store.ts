@@ -9,6 +9,7 @@ import type {
 import {
   DEFAULT_COMPOSITE_MIN_COOCCUR,
   DEFAULT_COMPOSITE_MIN_SUCCESS,
+  normalizeSkillProvenance,
 } from "./skill-types";
 
 export function sanitizeAtom(skill: string): string {
@@ -53,6 +54,12 @@ export function parseSkillState(content: string): SkillState | undefined {
       ...(parsed.outcomeKind === "proven" || parsed.outcomeKind === "correctable" || parsed.outcomeKind === "anti-pattern" || parsed.outcomeKind === "noise"
         ? { outcomeKind: parsed.outcomeKind }
         : {}),
+      ...(() => {
+        const provenance = normalizeSkillProvenance(
+          (parsed as { provenance?: unknown }).provenance
+        );
+        return provenance ? { provenance } : {};
+      })(),
     };
   } catch (error) {
     logger.error({ error }, "Caught error");
@@ -86,6 +93,12 @@ export function parseCompositeState(content: string): CompositeSkillState | unde
       ...(parsed.outcomeKind === "proven" || parsed.outcomeKind === "correctable" || parsed.outcomeKind === "anti-pattern" || parsed.outcomeKind === "noise"
         ? { outcomeKind: parsed.outcomeKind }
         : {}),
+      ...(() => {
+        const provenance = normalizeSkillProvenance(
+          (parsed as { provenance?: unknown }).provenance
+        );
+        return provenance ? { provenance } : {};
+      })(),
     };
   } catch (error) {
     logger.error({ error }, "Caught error");

@@ -34,6 +34,8 @@ import { dirname } from "node:path";
 import { logger } from "../utils/logger";
 import type { GraphNode } from "../core/types";
 import type { GraphClient } from "../graph/client-factory";
+import { parseSkillState, parseCompositeState, serializeAtomic, serializeComposite } from "./skill-store";
+import type { SkillProvenance } from "./skill-types";
 
 /** 技能包版本（v1.1 起携带 goldenQueries 与 MERGE 导入语义） */
 const SKILL_PACKAGE_VERSION = "1.1" as const;
@@ -102,6 +104,81 @@ function skillUpdatedAt(node: SkillNode): number {
   }
   const meta = node.metadata?.updatedAt;
   return typeof meta === "number" ? meta : 0;
+}
+
+/**
+ * 记忆投毒防护（P1-3）：外部来源（sync/import）技能入库门禁。
+ *
+ * 1. 标记 provenance.source = "sync"（携带来源仓库/时间；包内自带
+ *    provenance 时保留 originRepo/episodeId，source 强制为 sync）。
+ * 2. 初始分类不得直接为 proven（也不得携带 anti-pattern 的负分历史）：
+ *    外部技能一律从 correctable 起步，清零 uses/linkedSuccess/failStreak
+ *    与分数，必须经本地成功使用（applySkillLearning 晋升路径）才可成为 proven。
+ * 3. 无法解析的 content 仅透传（结构校验在上层），不阻断导入。
+ */
+function markExternalSkillNode(node: SkillNode, originRepo?: string): SkillNode {
+  const capturedAt = new Date().toISOString();
+
+  const atomic = parseSkillState(node.content);
+  if (atomic) {
+    const provenance: SkillProvenance = {
+      source: "sync",
+      capturedAt,
+      ...(originRepo ? { originRepo } : {}),
+      ...(atomic.provenance?.episodeId ? { episodeId: atomic.provenance.episodeId } : {}),
+    };
+    const sanitized = serializeAtomic({
+      ...atomic,
+      // 外部技能不得携带本地策划基线豁免（seeded 直接判定 proven）。
+      seeded: false,
+      uses: 0,
+      score: 0,
+      failStreak: 0,
+      linkedSuccess: false,
+      lastOutcome: "pass",
+      outcomeKind: "correctable",
+      provenance,
+    });
+    return { ...node, content: sanitized };
+  }
+
+  const composite = parseCompositeState(node.content);
+  if (composite) {
+    const provenance: SkillProvenance = {
+      source: "sync",
+      capturedAt,
+      ...(originRepo ? { originRepo } : {}),
+      ...(composite.provenance?.episodeId ? { episodeId: composite.provenance.episodeId } : {}),
+    };
+    const sanitized = serializeComposite({
+      ...composite,
+      seeded: false,
+      coOccurCount: 0,
+      successCount: 0,
+      failureCount: 0,
+      score: 0,
+      uses: 0,
+      lastOutcome: "pass",
+      outcomeKind: "correctable",
+      provenance,
+    });
+    return { ...node, content: sanitized };
+  }
+
+  return node;
+}
+
+/** 从技能包元数据提取来源仓库标识（尽力而为，缺失时不携带）。 */
+function packageOriginRepo(pkg: SkillPackage): string | undefined {
+  const raw = (pkg as { originRepo?: unknown; source?: unknown }).originRepo;
+  if (typeof raw === "string" && raw.trim()) {
+    return raw.trim();
+  }
+  const source = (pkg as { source?: unknown }).source;
+  if (typeof source === "string" && source.trim()) {
+    return source.trim();
+  }
+  return undefined;
 }
 
 /**
@@ -232,6 +309,7 @@ export async function importSkillPackage(
   }
 
   const force = opts?.force === true;
+  const originRepo = packageOriginRepo(pkg);
   const toImport: SkillNode[] = [];
   let skipped = 0;
   let updated = 0;
@@ -241,23 +319,25 @@ export async function importSkillPackage(
       skipped += 1;
       continue;
     }
+    // 记忆投毒防护：外部技能一律标记 sync 来源并从 correctable 起步。
+    const external = markExternalSkillNode(skill, originRepo);
     const local = localById.get(skill.id);
     if (!local) {
-      toImport.push(skill);
-      localById.set(skill.id, skill);
+      toImport.push(external);
+      localById.set(skill.id, external);
       continue;
     }
     if (force) {
       // --force：覆盖语义，无条件写入
-      toImport.push(skill);
-      localById.set(skill.id, skill);
+      toImport.push(external);
+      localById.set(skill.id, external);
       continue;
     }
     // MERGE：updatedAt 较新者胜；并列或较旧保留本地
     if (skillUpdatedAt(skill) > skillUpdatedAt(local)) {
-      toImport.push(skill);
+      toImport.push(external);
       updated += 1;
-      localById.set(skill.id, skill);
+      localById.set(skill.id, external);
     } else {
       skipped += 1;
     }

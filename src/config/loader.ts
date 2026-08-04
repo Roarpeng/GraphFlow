@@ -229,7 +229,7 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
 
   const allowedTransports = new Set(["memory", "mcp-http", "file", "sqlite", "auto"]);
   if (!allowedTransports.has(input.graphPolicy.transport)) {
-    throw new Error(`Invalid config: graphPolicy.transport must be one of memory|mcp-http|file|sqlite.`);
+    throw new Error(`Invalid config: graphPolicy.transport must be one of memory|mcp-http|file|sqlite|auto.`);
   }
 
   if (input.graphPolicy.layerQuota) {

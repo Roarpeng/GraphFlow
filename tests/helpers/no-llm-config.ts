@@ -26,7 +26,7 @@ export function createNoLlmConfigPath(extra?: Record<string, unknown>): string {
       },
       // REQUIRED: validateConfig rejects configs without a positive runTokenCap
       // and without learningPolicy, in which case loadConfigSafe silently falls
-      // back to the DEFAULT config (embeddings on, file transport, auto-index
+      // back to the DEFAULT config (embeddings on, auto transport, auto-index
       // the real workspace) — defeating the whole point of this sandbox.
       budgetPolicy: { runTokenCap: 2000 },
       learningPolicy: {

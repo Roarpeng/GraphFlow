@@ -75,6 +75,46 @@ describe("M41 optimization hardening", () => {
     expect(config.graphPolicy.maxContextTokens).toBe(1500);
   });
 
+  it("defaults graph transport to auto (sqlite preferred, file fallback)", () => {
+    const config = getDefaultConfig();
+    expect(config.graphPolicy.transport).toBe("auto");
+    // auto 的默认存储路径为 .sqlite；sqlite 不可用时 client-factory 降级为同名 .json
+    expect(config.graphPolicy.graphStorePath).toMatch(/graphflow-graph\.sqlite$/);
+  });
+
+  it("keeps an explicitly configured file transport (no migration)", () => {
+    const root = createTempRoot("graphflow-explicit-file");
+    const storePath = path.join(root, "graphflow-out", "graphflow-graph.json");
+    const config = validateConfig({
+      ...getDefaultConfig(),
+      graphPolicy: {
+        ...getDefaultConfig().graphPolicy,
+        transport: "file",
+        graphStorePath: storePath,
+      },
+    });
+    expect(config.graphPolicy.transport).toBe("file");
+    expect(config.graphPolicy.graphStorePath).toBe(storePath);
+
+    // 磁盘上的用户配置显式写 "file" 时，loadConfigSafe 不得改写为 auto
+    const configPath = path.join(root, "graphflow.config.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        ...getDefaultConfig(),
+        graphPolicy: {
+          ...getDefaultConfig().graphPolicy,
+          transport: "file",
+          graphStorePath: storePath,
+        },
+      }),
+      "utf8"
+    );
+    const loaded = loadConfigSafe(configPath);
+    expect(loaded.usedFallback).toBe(false);
+    expect(loaded.config.graphPolicy.transport).toBe("file");
+  });
+
   it("upgrades legacy maxContextTokens 400 to 1500", () => {
     expect(resolveMaxContextTokens(LEGACY_MAX_CONTEXT_TOKENS)).toBe(1500);
     const config = validateConfig({
