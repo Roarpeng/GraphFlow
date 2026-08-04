@@ -10,7 +10,8 @@ GraphFlow 的飞轮（episode + skill）依赖宿主 agent 主动调用
 如果宿主 agent 忘了调用（或没有 MCP 连接），episode 永远停留在 `pending`，
 飞轮退化为只有 `context` 运行、没有任何学习回填的"空转"状态。
 
-本特性提供三条互补的自动闭环路径（全部默认关闭 / 一次性，严格向后兼容）：
+本特性提供三条互补的自动闭环路径（auto-capture 默认开启，
+`GRAPHFLOW_AUTO_CAPTURE=0` 可显式关闭；hooks 需安装、backfill 为一次性操作）：
 
 1. **自动记录（auto-capture）**：run 完成路径上自动生成 `pending` episode 并写入
    会话日志（`.graphflow/session-journal.jsonl`）。
@@ -24,7 +25,7 @@ GraphFlow 的飞轮（episode + skill）依赖宿主 agent 主动调用
 ```
 host agent ──(run/context 完成)──▶ orchestrator
                                       │
-                    maybeAutoCaptureEpisode (GRAPHFLOW_AUTO_CAPTURE=1 时)
+                    maybeAutoCaptureEpisode (默认开启，GRAPHFLOW_AUTO_CAPTURE=0 关闭)
                       ├─ 结局未知 (DELEGATED / HUMAN_REVIEW_REQUIRED)
                       │   └─ 写入 pending episode（绝不伪造 COMPLETED）
                       └─ 追加会话日志 .graphflow/session-journal.jsonl
@@ -38,8 +39,9 @@ Claude Code SessionEnd / Stop ──▶ session.sh ──▶ 读取最新一条 
 
 ### 自动记录（src/hooks/auto-capture.ts）
 
-- 开关：环境变量 `GRAPHFLOW_AUTO_CAPTURE=1`（接受 `1 / true / on / yes / enabled`），
-  或调用点显式传入 `enabled: true`。**默认关闭**。
+- 开关：**默认开启**。环境变量未设置或设置为 `1 / true / on / yes / enabled` 时开启；
+  设置 `GRAPHFLOW_AUTO_CAPTURE=0`（接受 `0 / false / off / no / disabled`）时关闭，
+  或在调用点显式传入 `enabled: false`。
 - 时机：`finalizeEpisode`（run 完成路径）对结局未知的 run（`DELEGATED`、
   `HUMAN_REVIEW_REQUIRED`）自动生成 `outcome: "pending"` 的 episode，
   并把 `{ episodeId, task, taskKey, status, createdAt }` 追加到
@@ -133,7 +135,7 @@ node scripts/backfill-episodes.cjs --events /path/events.jsonl   # 强制指定�
 | 现象 | 原因 | 解法 |
 | --- | --- | --- |
 | episode 全为 pending 且数量不变 | 宿主 agent 未调 report_outcome | 安装 Claude Code hooks（见上） |
-| 0 episode | 从未启用 episodic memory / 无回填 | `GRAPHFLOW_AUTO_CAPTURE=1` + hooks，或运行 backfill 脚本 |
+| 0 episode | 从未启用 episodic memory / 无回填 | 确认 `GRAPHFLOW_AUTO_CAPTURE` 未被设为 `0` + 安装 hooks，或运行 backfill 脚本 |
 | 0 skill | 飞轮无 episode 可学 | 同上，先有 episode 才有 skill 学习 |
 
 ## 局限与风险
@@ -144,5 +146,6 @@ node scripts/backfill-episodes.cjs --events /path/events.jsonl   # 强制指定�
   在会话正式结束时触发），两者共用 end 脚本，重复回填会被
   `updateEpisodeOutcome` 自然覆盖（幂等）。
 - backfill 的 git 分支把 commit 视为 `pass`，仅作为无事件数据时的兜底估计。
-- 本特性全部默认关闭，不改变既有行为；开启后也只新增 pending 记录与日志，
+- auto-capture 默认开启（飞轮自证）；如需恢复旧行为，设置
+  `GRAPHFLOW_AUTO_CAPTURE=0` 显式关闭。开启时也只新增 pending 记录与日志，
   不影响现有 episode/skill 语义。

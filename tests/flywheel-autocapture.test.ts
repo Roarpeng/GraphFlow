@@ -72,19 +72,27 @@ afterEach(() => {
   }
 });
 
-describe("auto-capture switch (default off)", () => {
-  it("isAutoCaptureEnabled is off by default and on for accepted values", () => {
-    expect(isAutoCaptureEnabled({})).toBe(false);
-    expect(isAutoCaptureEnabled({ GRAPHFLOW_AUTO_CAPTURE: "0" })).toBe(false);
-    expect(isAutoCaptureEnabled({ GRAPHFLOW_AUTO_CAPTURE: "false" })).toBe(false);
+describe("auto-capture switch (default on)", () => {
+  it("isAutoCaptureEnabled is on by default and off only for explicit disable values", () => {
+    // 未设置环境变量 → 默认开启
+    expect(isAutoCaptureEnabled({})).toBe(true);
+    expect(isAutoCaptureEnabled({ GRAPHFLOW_AUTO_CAPTURE: "" })).toBe(true);
+    // 显式开启值 → 开启
     expect(isAutoCaptureEnabled({ GRAPHFLOW_AUTO_CAPTURE: "1" })).toBe(true);
     expect(isAutoCaptureEnabled({ GRAPHFLOW_AUTO_CAPTURE: "true" })).toBe(true);
     expect(isAutoCaptureEnabled({ GRAPHFLOW_AUTO_CAPTURE: "on" })).toBe(true);
     expect(isAutoCaptureEnabled({ GRAPHFLOW_AUTO_CAPTURE: "YES" })).toBe(true);
+    expect(isAutoCaptureEnabled({ GRAPHFLOW_AUTO_CAPTURE: "enabled" })).toBe(true);
+    // 显式关闭值 → 关闭
+    expect(isAutoCaptureEnabled({ GRAPHFLOW_AUTO_CAPTURE: "0" })).toBe(false);
+    expect(isAutoCaptureEnabled({ GRAPHFLOW_AUTO_CAPTURE: "false" })).toBe(false);
+    expect(isAutoCaptureEnabled({ GRAPHFLOW_AUTO_CAPTURE: "off" })).toBe(false);
+    expect(isAutoCaptureEnabled({ GRAPHFLOW_AUTO_CAPTURE: "no" })).toBe(false);
+    expect(isAutoCaptureEnabled({ GRAPHFLOW_AUTO_CAPTURE: "DISABLED" })).toBe(false);
   });
 
-  it("records nothing when the flag is off (default, backward compatible)", async () => {
-    vi.stubEnv("GRAPHFLOW_AUTO_CAPTURE", "");
+  it("records nothing when explicitly disabled via GRAPHFLOW_AUTO_CAPTURE=0", async () => {
+    vi.stubEnv("GRAPHFLOW_AUTO_CAPTURE", "0");
     const client = makeClient();
     const root = makeTempRoot("gf-auto-off-");
     const result = await maybeAutoCaptureEpisode(
@@ -98,6 +106,24 @@ describe("auto-capture switch (default off)", () => {
     expect(existsSync(resolveSessionJournalPath(root))).toBe(false);
     const nodes = await client.queryByKeyword("episode");
     expect(nodes).toHaveLength(0);
+  });
+
+  it("records a pending episode when the env var is unset (default on)", async () => {
+    vi.stubEnv("GRAPHFLOW_AUTO_CAPTURE", "");
+    const client = makeClient();
+    const root = makeTempRoot("gf-auto-default-");
+    const result = await maybeAutoCaptureEpisode(
+      client,
+      { task: "ship the feature", status: "DELEGATED" },
+      { workspaceRoot: root }
+    );
+    expect(result.enabled).toBe(true);
+    expect(result.recorded).toBe(true);
+    expect(result.journaled).toBe(true);
+    expect(result.episodeId).toMatch(/^episode:/);
+    const entries = readJournalEntries(resolveSessionJournalPath(root));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.episodeId).toBe(result.episodeId);
   });
 });
 

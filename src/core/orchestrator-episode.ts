@@ -139,7 +139,7 @@ export async function finalizeEpisode(
   // 自动生成 pending episode 并写入会话日志（.graphflow/session-journal.jsonl），由
   // Claude Code hooks（SessionEnd / Stop，见 integrations/claude-code-hooks.ts）在会话
   // 结束时自动调用 `graphflow outcome report <episodeId> <success>` 回填真实结局。
-  // 默认关闭（GRAPHFLOW_AUTO_CAPTURE=1 开启）；失败不阻断主流程。
+  // 默认开启（GRAPHFLOW_AUTO_CAPTURE=0 关闭）；失败不阻断主流程。
   const autoCapture = async (existingEpisodeId?: string): Promise<void> => {
     if (!options?.graphClient) return;
     try {
