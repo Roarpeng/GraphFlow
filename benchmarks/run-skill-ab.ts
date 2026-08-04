@@ -57,6 +57,7 @@ import {
   recordEpisode,
   summarizeEpisodeForPrompt,
 } from "../src/learning/episodic-memory";
+import { benchMeta } from "./bench-meta";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BENCH_DIR = __dirname;
@@ -151,35 +152,37 @@ const GOLDEN_TASKS: readonly GoldenTaskFixture[] = [
 // appears verbatim (episode summaries / skill atoms carry it), plus one
 // unrelated decoy task that must never be injected for any golden task.
 
+// Task corpus carries project-symbol evidence (file names / camelCase) so the
+// anti-noise extraction gate (hasProjectSymbolEvidence) admits skill atoms.
 const HISTORY_TASKS: ReadonlyArray<{ task: string; lessons: string[] }> = [
-  { task: "fixed orchestrator routing deadlock", lessons: ["verify orchestrator state before dispatch"] },
-  { task: "dag-engine checkpoint recovery fix", lessons: ["include plan hash in checkpoint keys"] },
-  { task: "triage classifier threshold tuning", lessons: ["keep simple tasks off the llm path"] },
-  { task: "model-router provider fallback", lessons: ["fall back when provider probes fail"] },
-  { task: "provider-health fallback chain probing", lessons: ["mock provider health probes"] },
-  { task: "graph-compression pagerank tuning", lessons: ["use structural edges for centrality"] },
-  { task: "context-slicer layered budget allocation", lessons: ["prefer structural compression"] },
-  { task: "skill-flywheel scoring updates", lessons: ["bounded scores keep ranking stable"] },
-  { task: "episodic-memory lesson extraction", lessons: ["cap lessons per episode"] },
-  { task: "embeddings cosine similarity provider", lessons: ["hash embeddings as fallback"] },
-  { task: "filewatcher incremental index invalidation", lessons: ["invalidate on mtime and hash"] },
-  { task: "sqlite-client fts5 migration", lessons: ["version the schema"] },
-  { task: "repomap overview generation", lessons: ["keep overviews compact"] },
-  { task: "tokensavings statistics reporting", lessons: ["report independent tokenizer counts"] },
-  { task: "tool-definitions schema updates", lessons: ["keep tool count small"] },
-  { task: "formatcliresult json output handling", lessons: ["keep output stable across shells"] },
-  { task: "workitem bridge delegation", lessons: ["keep work items small"] },
-  { task: "brainstormer insight planning", lessons: ["use structured thinking artifacts"] },
-  { task: "hnsw index rebuild strategy", lessons: ["rebuild index on store change"] },
-  { task: "estimatecontextbudget token sizing", lessons: ["scale budget with task complexity"] },
-  { task: "artifact-manager export compression", lessons: ["gzip large snapshots"] },
-  { task: "nightly-trainer dataset runs", lessons: ["pin dataset versions"] },
-  { task: "reflector episode lessons", lessons: ["dedupe extracted lessons"] },
-  { task: "dag-checkpoint restore keys", lessons: ["checkpoint keys must include plan hash"] },
-  { task: "cancellation timeout handling", lessons: ["cancel timers on teardown"] },
-  { task: "language-indexers grammar updates", lessons: ["rebuild wasm grammars on change"] },
+  { task: "fixed orchestrator routing deadlock in orchestrator.ts", lessons: ["verify orchestrator state before dispatch"] },
+  { task: "dag-engine checkpoint recovery fix in dag-engine.ts", lessons: ["include plan hash in checkpoint keys"] },
+  { task: "triage classifier threshold tuning in triage.ts", lessons: ["keep simple tasks off the llm path"] },
+  { task: "model-router provider fallback in routing/model-router.ts", lessons: ["fall back when provider probes fail"] },
+  { task: "provider-health fallback chain probing in routing/provider-health.ts", lessons: ["mock provider health probes"] },
+  { task: "graph-compression pagerank tuning in graph-compression.ts", lessons: ["use structural edges for centrality"] },
+  { task: "context-slicer layered budget allocation in context-slicer.ts", lessons: ["prefer structural compression"] },
+  { task: "skill-flywheel scoring updates in skill-flywheel.ts", lessons: ["bounded scores keep ranking stable"] },
+  { task: "episodic-memory lesson extraction in episodic-memory.ts", lessons: ["cap lessons per episode"] },
+  { task: "embeddings cosine similarity provider in embedding-factory.ts", lessons: ["hash embeddings as fallback"] },
+  { task: "filewatcher incremental index invalidation in file-indexer.ts", lessons: ["invalidate on mtime and hash"] },
+  { task: "sqlite-client fts5 migration in sqlite-client.ts", lessons: ["version the schema"] },
+  { task: "repomap overview generation in repo-map.ts", lessons: ["keep overviews compact"] },
+  { task: "tokenSavings statistics reporting in token-savings.ts", lessons: ["report independent tokenizer counts"] },
+  { task: "tool-definitions schema updates in mcp/server.ts", lessons: ["keep tool count small"] },
+  { task: "formatCliResult json output handling in cli/output.ts", lessons: ["keep output stable across shells"] },
+  { task: "workitem bridge delegation in agent-delegation.ts", lessons: ["keep work items small"] },
+  { task: "brainstormer insight planning in agents/brainstormer.ts", lessons: ["use structured thinking artifacts"] },
+  { task: "hnsw index rebuild strategy in hnsw-store.ts", lessons: ["rebuild index on store change"] },
+  { task: "estimateContextBudget token sizing in graph-compression.ts", lessons: ["scale budget with task complexity"] },
+  { task: "artifact-manager export compression in artifact-manager.ts", lessons: ["gzip large snapshots"] },
+  { task: "nightly-trainer dataset runs in nightly-trainer.ts", lessons: ["pin dataset versions"] },
+  { task: "reflector episode lessons in reflector.ts", lessons: ["dedupe extracted lessons"] },
+  { task: "dag-checkpoint restore keys in dag-engine.ts", lessons: ["checkpoint keys must include plan hash"] },
+  { task: "cancellation timeout handling in orchestrator.ts", lessons: ["cancel timers on teardown"] },
+  { task: "language-indexers grammar updates in graph/language-indexers", lessons: ["rebuild wasm grammars on change"] },
   // Decoy history — unrelated topic; must never surface for golden tasks.
-  { task: "style vscode panel theme colors", lessons: ["keep contrast high"] },
+  { task: "style vscode panel theme colors in panels.ts", lessons: ["keep contrast high"] },
 ];
 
 // ── Decoy node ──────────────────────────────────────────────────────────────
@@ -574,7 +577,12 @@ async function main(): Promise<void> {
   const report = await runSkillAbBenchmark();
 
   mkdirSync(dirname(JSON_PATH), { recursive: true });
-  writeFileSync(JSON_PATH, JSON.stringify(report, null, 2), "utf8");
+  // Machine-readable artifact with reproducibility envelope (commit + date).
+  writeFileSync(
+    JSON_PATH,
+    JSON.stringify({ ...benchMeta("skill-ab-p1-2"), ...report }, null, 2),
+    "utf8"
+  );
   writeResultsMarkdown(renderMarkdown(report));
 
   const pct = (x: number) => `${(x * 100).toFixed(1)}%`;

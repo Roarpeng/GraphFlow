@@ -1,0 +1,49 @@
+name: Benchmarks
+
+on:
+  # Manual trigger for on-demand third-party-reproducible runs.
+  workflow_dispatch:
+  # Weekly cadence (Monday 06:00 UTC) to keep fresh numbers anchored to main.
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  retrieval-golden:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Enable package manager
+        run: corepack enable
+
+      - name: Install root dependencies
+        run: npm ci --no-audit
+        env:
+          GRAPHFLOW_SKIP_POSTINSTALL: "1"
+
+      - name: Rebuild native modules
+        run: npm rebuild better-sqlite3
+
+      - name: Run retrieval golden benchmark
+        env:
+          GRAPHFLOW_SKIP_EMBEDDING_WARMUP: "1"
+        run: npm run bench:retrieval
+
+      - name: Upload results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: retrieval-golden-results-${{ github.sha }}
+          path: |
+            benchmarks/.cache/retrieval-eval-results.json
+            benchmarks/RETRIEVAL-EVAL-RESULTS.md
+          if-no-files-found: error
+          retention-days: 90
