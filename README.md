@@ -2,25 +2,57 @@
 
 [![npm version](https://img.shields.io/badge/npm-1.9.7-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
-> **编码 Agent 的上下文与记忆层** — Local-first 代码知识图谱 + 上下文压缩 + 跨会话学习飞轮
+> **The memory & context harness for coding agents.** Local-first code knowledge graph · bounded context compression (~98% token savings) · cross-session learning flywheel.
 
-GraphFlow 为 Cursor / Claude Code 等编码 Agent 提供项目级的"感知与记忆"：把仓库索引成知识图谱，将 Agent 需要的上下文压缩 **90%+ token**（基准实测 98.7%），并通过 Episodic / Skill / Decision 三类节点让 Agent **跨会话复用项目经验**。规划与执行通过 Bridge 模式委托给宿主 Agent 完成——GraphFlow 不持有 LLM 也能完整闭环。
+The community is converging on an "agent harness" vocabulary: **memory + hooks + skills** are the harness primitives that turn a stateless model into a reliable long-running agent. GraphFlow implements all three for coding agents and ships them through a portable MCP surface (Cursor, Claude Code, 15+ agents):
 
-纯 TypeScript/Node 实现，CLI + MCP + VS Code 扩展三种形态，无 API key 即可离线运行。
+| Harness primitive | GraphFlow implementation |
+| --- | --- |
+| **Memory** | 12-language AST code graph + Episodic / Skill / Decision nodes — project knowledge *and* project experience persist across sessions |
+| **Hooks** | Outcome auto-capture (on by default) + Claude Code `SessionEnd` / `Stop` hooks close the learning loop automatically — no manual outcome reporting required |
+| **Skills** | A four-class flywheel (`proven` / `correctable` / `anti-pattern` / `noise`) with canary validation — skills are promoted by evidence, not by assertion |
 
-## 30 秒上手
+Pure TypeScript/Node. CLI + MCP + VS Code extension. Fully offline, no API key required.
 
-无需 API key（离线 AST 建图 + 图压缩）：
+## Why a harness, not another RAG
+
+Most "memory" products are either **static injection** (load `CLAUDE.md` / rules files in full on every session) or **plain RAG** (retrieve chunks, no learning). Both fail in long-lived projects:
+
+- Static injection pays the same token cost every session regardless of the task, and grows until it is truncated or ignored.
+- Plain RAG retrieves text but never accumulates *experience* — the thousandth task pays the same cost as the first.
+
+GraphFlow is a harness: **memory is dynamic and typed**. Each request retrieves only what the current decision needs — graph anchors, compressed summaries, similar past episodes, applicable skills — under an explicit token budget (L0–L3 layered compression, ~98% savings measured). What the agent learns (outcomes, lessons, skills) is written back through hooks, so the harness gets better with use.
+
+It is also **local-first and portable**: everything runs offline with no API key, and the whole surface is exposed over MCP, so the same memory travels across agents instead of being locked into one vendor's format.
+
+## Proof, not promises
+
+All headline numbers come from a **public, reproducible benchmark suite** ([benchmarks/README.md](benchmarks/README.md)) with published methodology ([docs/benchmark-standards.md](docs/benchmark-standards.md)) and machine-readable JSON dumps pinned to commits:
+
+- **~98% token savings** (8-query suite, 262,926 → 2,843 tokens; independently re-counted with `gpt-tokenizer`)
+- **132-query golden retrieval set** in CI (Hit@5 = 100%, MRR = 0.836, NDCG@5 = 0.601)
+- **Skill A/B: 100% vs 61.5%** task success with the flywheel on vs off (26 tasks)
+- **Memory ROI: 100% vs 56.5%** with episodic memory on vs off (62 tasks, with attribution chains)
+
+Results are commit-anchored so any number above can be checked out and re-run. Third-party reproduction is actively welcomed — see [ROADMAP.md](ROADMAP.md) for the open invitation.
+
+## Memory poisoning protection
+
+Shared and synced memory is only useful if it cannot be silently corrupted. Skills merged from external sources (e.g. `skill sync` imports) are **treated as unproven until validated locally**: imported skills carry provenance markers, never enter the `proven` class directly, must pass canary validation on real tasks before promotion, and `anti-pattern` skills are isolated rather than deleted so they can be audited. Promotion is gated by the four-class lifecycle, not by trust in the source. See [docs/team-memory-security.md](docs/team-memory-security.md).
+
+## Quick start
+
+No API key needed (offline AST indexing + graph compression):
 
 ```bash
-# 1. 离线建图（AST 索引，无需 LLM）
+# 1. Build the graph offline (AST indexing, no LLM)
 npx @roarpeng/graphflow graph index .
 
-# 2. 预览压缩上下文（锚点 + 摘要，节省 90%+ token）
+# 2. Preview compressed context (anchors + summaries, 90%+ token savings)
 npx @roarpeng/graphflow context preview "orchestrator" --json
 ```
 
-接入 MCP（Cursor / Claude Code 等）：
+Connect via MCP (Cursor / Claude Code / …):
 
 ```json
 {
@@ -33,171 +65,171 @@ npx @roarpeng/graphflow context preview "orchestrator" --json
 }
 ```
 
-Agent 先调 `graphflow_context` 拿压缩上下文，再用 `graphflow_plan` 规划；无 provider API key 时 GraphFlow 自动把 ATP 思考协议桥接给宿主 Agent 作答（agent-delegated 模式）。
+The agent calls `graphflow_context` for compressed context, then `graphflow_plan` to plan; without a provider API key GraphFlow automatically bridges the ATP thinking protocol to the host agent (agent-delegated mode).
 
-## 为什么是 GraphFlow
+## Why GraphFlow
 
-单点工具各有长项，GraphFlow 把"图谱 + 压缩 + 规划协议 + 学习记忆"合到一处：
+Single-purpose tools each do one thing well; GraphFlow combines graph + compression + planning protocol + learning memory in one place:
 
-| 能力 | **GraphFlow** | CodeGraph | Serena | Repomix |
+| Capability | **GraphFlow** | CodeGraph | Serena | Repomix |
 | --- | --- | --- | --- | --- |
-| 代码图谱 | 12 语言 AST 索引 | 更成熟 | LSP 符号级 | 无 |
-| 上下文压缩 | 分层 + 图压缩 + 向量召回 | 部分 | 部分 | 整库打包 |
-| 规划协议 | ATP IR + DAG + Agent 桥接 | 无 | 无 | 无 |
-| **学习记忆** | Episodic / Skill / Decision 飞轮 | 无 | 无 | 无 |
+| Code graph | 12-language AST index | more mature | LSP symbols | — |
+| Context compression | layered + graph compression + vector recall | partial | partial | whole-repo dump |
+| Planning protocol | ATP IR + DAG + agent bridge | — | — | — |
+| **Learning memory** | Episodic / Skill / Decision flywheel | — | — | — |
 | Local-first | ✅ | ✅ | ✅ | ✅ |
-| 协议开放 | [ATP/IR 公开规范](docs/atp-ir-spec-v1.md) | — | — | — |
+| Open protocol | [ATP/IR public spec](docs/atp-ir-spec-v1.md) | — | — | — |
 
-> 差异化核心是**学习飞轮**：图谱索引和 token 压缩都可复制，跨会话积累的项目私有经验（技能、教训、决策）不可复制——它随使用时长增值。
+> The differentiator is the **learning flywheel**: graph indexing and token compression are replicable; project-private experience (skills, lessons, decisions) accumulated across sessions is not — it compounds with use. Serena is a complement, not a competitor — see [GraphFlow + Serena: better together](docs/comparison.md#graphflow--serena-better-together联合方案).
 
-## 核心能力（v1.7.15+）
+## Core capabilities (v1.7.15+)
 
-| 模块 | 能力 |
+| Module | Capability |
 | --- | --- |
-| **规划协议** | ATP v1.1（Intent / Requirement / Six Hats / 5-Why / First Principles / Decision Matrix / Planning / Reflection）；simple / complex / insight 三种模式；无 LLM 时 agent-delegated 桥接；[ATP/IR 公开规范 v1.1](docs/atp-ir-spec-v1.md) |
-| **目标对齐** | **Goal 锚点节点化**（intent 五元组固化为一等公民，每次打包自动注入原始需求）；**低置信度澄清门**（confidence < 0.6 不出 plan）；**alignment-check 执行期回检**；**deviation 偏离分类**（misread-requirement / scope-creep / tech-drift）；**Goal 版本链 + 变更 diff** |
-| **知识图谱** | 12 语言 AST 索引（TS/JS/Python/Rust/Go/C/C++/Java/Ruby/Kotlin/Swift/Dart）；File / Module / Symbol 节点 + 依赖/引用/定义/调用/继承边 |
-| **上下文压缩** | L1/L2/L3 分层锚点；图结构压缩（边权重 + PageRank，**LRU 缓存**）；**词干匹配召回**（orchestrate ↔ orchestration）；向量召回 + RRF；RepoMap 概览；自适应预算 |
-| **检索质量** | **Golden-set 回归门禁**（132 查询，Hit@5=100%、MRR=0.836、NDCG@5=0.601） |
-| **向量索引** | 进程内记忆化 + **磁盘持久化**（指纹校验，MCP 重启秒级恢复） |
-| **存储后端** | `file` / `memory` / `sqlite`（FTS5，**searchtext 分词增强**，camelCase 可检索）/ **`auto`（sqlite 优先自动切换）** / `mcp-http` |
-| **学习飞轮** | Episodic Memory、Reflection、Skill 节点（score ±1，bounded [-20,20]）、nightly 学习、技能衰减/剪枝、**飞轮贡献报告**（`skill report` / `graphflow_diagnose`，含偏离聚合与 Goal 统计） |
-| **团队共享** | **`skill sync`**：技能包导出/导入到可提交的 `.graphflow/skills/team-skills.json`；导入为**双向 MERGE**（per-skill-id 并集，updatedAt 较新者胜、并列保留本地、本地独有技能保留；`--force` 覆盖）；golden 检索基准随包往返 → `.graphflow/team-golden.json` |
-| **效果基准** | [综合评测 92.9%](benchmarks/COMPREHENSIVE-RESULTS.md) · [独立评测 96.2%](benchmarks/INDEPENDENT-RESULTS.md) · [上下文就绪评测](benchmarks/SWE-BENCH-RESULTS.md) · [Token 节省 98.2%](benchmarks/RESULTS.md) |
-| **模型路由** | Smart / Economy 双 tier；多 provider 健康探测与 fallback（DeepSeek、OpenAI、Anthropic、百炼、豆包） |
-| **可观测性** | `graphflow_diagnose`：provider 健康 + 图统计 + token 节省 + **飞轮报告** |
-| **Agent 接入** | CLI `--json`；MCP stdio（10 工具）；自动安装 MCP 到 15+ Agent |
-| **工程质量** | TypeScript strict；**99 测试文件 / 692 tests**；`npm run ci` 含扩展打包与 smoke |
+| **Planning protocol** | ATP v1.1 (Intent / Requirement / Six Hats / 5-Why / First Principles / Decision Matrix / Planning / Reflection); simple / complex / insight modes; agent-delegated bridge without an LLM; [ATP/IR public spec v1.1](docs/atp-ir-spec-v1.md) |
+| **Goal alignment** | Goal anchor nodes (intent five-tuple as first-class citizen, original requirement auto-injected); low-confidence clarification gate (no plan below 0.6); runtime alignment-check; deviation classification (misread-requirement / scope-creep / tech-drift); goal version chain + diffs |
+| **Knowledge graph** | 12-language AST indexing (TS/JS/Python/Rust/Go/C/C++/Java/Ruby/Kotlin/Swift/Dart); File / Module / Symbol nodes + dependency/reference/definition/call/inheritance edges |
+| **Context compression** | L1/L2/L3 layered anchors; graph compression (edge weights + PageRank, LRU cache); stem-matching recall (orchestrate ↔ orchestration); vector recall + RRF; RepoMap overview; adaptive budget |
+| **Retrieval quality** | Golden-set regression gate (132 queries, Hit@5=100%, MRR=0.836, NDCG@5=0.601) |
+| **Vector index** | In-process memoization + disk persistence (fingerprint-checked, seconds to restore after MCP restart) |
+| **Storage backends** | `file` / `memory` / `sqlite` (FTS5, tokenizer-enhanced `searchtext`, camelCase searchable) / **`auto` (sqlite-first with fallback)** / `mcp-http` |
+| **Learning flywheel** | Episodic memory, reflection, skill nodes (score ±1, bounded [-20,20]), nightly training, skill decay/pruning, **auto-capture + Claude Code hooks (on by default)**, four-class skill lifecycle + canary validation, contribution reports (`skill report` / `graphflow_diagnose`) |
+| **Team sharing** | `skill sync`: export/import skill packs to a committable `.graphflow/skills/team-skills.json`; imports are a **bidirectional MERGE** (per-skill-id union, newer `updatedAt` wins, ties keep local, local-only skills preserved; `--force` to overwrite); golden retrieval queries round-trip via `.graphflow/team-golden.json`; [security model](docs/team-memory-security.md) |
+| **Benchmarks** | [Comprehensive 92.9%](benchmarks/COMPREHENSIVE-RESULTS.md) · [Independent-style 96.2%](benchmarks/INDEPENDENT-RESULTS.md) · [context-readiness eval](benchmarks/SWE-BENCH-RESULTS.md) · [98.2% token savings](benchmarks/RESULTS.md) |
+| **Model routing** | Smart / Economy tiers; multi-provider health probes and fallback (DeepSeek, OpenAI, Anthropic, Bailian, Doubao) |
+| **Observability** | `graphflow_diagnose`: provider health + graph stats + token savings + flywheel report |
+| **Agent surfaces** | CLI `--json`; MCP stdio (10 tools); auto-install into 15+ agents |
+| **Engineering quality** | TypeScript strict; 99 test files / 692 tests; `npm run ci` includes extension packaging and smoke tests |
 
-### 定位说明
+### Positioning
 
-> GraphFlow **不是编排执行器**——它是编码 Agent 的**上下文与记忆层**。任务执行通过 Bridge 模式交给宿主 coding agent（诚实语义，不伪造 COMPLETED）；GraphFlow 负责让它"看得准、记得住"。
+> GraphFlow is **not an orchestrating executor** — it is the **memory & context harness** for coding agents. Task execution is delegated to the host coding agent via bridge mode (honest semantics, no faked COMPLETED); GraphFlow's job is to make the agent see clearly and remember.
 
-## MCP 工具（10 个）
+## MCP tools (10)
 
-| 工具 | 功能 |
+| Tool | Function |
 | --- | --- |
-| `graphflow_context` | 压缩上下文包（query → 锚点 + 摘要；anchorId → 展开） |
-| `graphflow_plan` | 任务规划（mode='simple' 或 'insight'；无 LLM 时 agent-delegated） |
-| `graphflow_run` | 编排 + Bridge 执行描述符 |
-| `graphflow_report_outcome` | 结果回填（含 deviation 偏离分类），闭环学习飞轮 |
-| `graphflow_insight` | ATP 洞察 submit / merge（Agent 桥接协议） |
-| `graphflow_index` | 增量 / 全量索引 |
-| `graphflow_skill_insights` | 技能洞察 |
-| `graphflow_diagnose` | 诊断（provider + 图 + token 节省 + 飞轮） |
-| `graphflow_artifact` | 图谱 artifact 导入 / 导出 |
-| `graphflow_skill_guide` | GraphFlow Skill 使用指南 |
+| `graphflow_context` | Compressed context package (query → anchors + summaries; anchorId → expand) |
+| `graphflow_plan` | Task planning (mode='simple' or 'insight'; agent-delegated without an LLM) |
+| `graphflow_run` | Orchestration + bridge execution descriptor |
+| `graphflow_report_outcome` | Outcome backfill (incl. deviation classification), closes the learning flywheel |
+| `graphflow_insight` | ATP insight submit / merge (agent bridge protocol) |
+| `graphflow_index` | Incremental / full indexing |
+| `graphflow_skill_insights` | Skill insights |
+| `graphflow_diagnose` | Diagnostics (provider + graph + token savings + flywheel) |
+| `graphflow_artifact` | Graph artifact import / export |
+| `graphflow_skill_guide` | GraphFlow skill usage guide |
 
-**MCP 工作区解析**：自动从 MCP 客户端 `cwd` 发现工作区；也可用 `GRAPHFLOW_WORKSPACE_ROOT` 显式指定。
+**MCP workspace resolution**: the workspace is discovered automatically from the MCP client `cwd`; override with `GRAPHFLOW_WORKSPACE_ROOT`.
 
-## CLI 速查
+## CLI quick reference
 
 ```bash
-graphflow graph index .                    # 建图
-graphflow context preview "orchestrator"   # 上下文预览
-graphflow plan "refactor planner" --json   # 规划
-graphflow run "update readme"              # 编排（Bridge）
-graphflow skill insights                   # 技能洞察
-graphflow skill report                     # 飞轮贡献报告
-graphflow skill sync export                # 导出团队技能包 + golden 查询集（git 共享）
-graphflow skill sync import                # 导入团队技能包（MERGE；--force 覆盖）＋ golden 合并到 .graphflow/team-golden.json
-graphflow route diagnose                   # 路由诊断
-graphflow learn nightly                    # 夜间学习
-graphflow doctor                           # 安装自检
+graphflow graph index .                    # build the graph
+graphflow context preview "orchestrator"   # preview compressed context
+graphflow plan "refactor planner" --json   # plan
+graphflow run "update readme"              # orchestrate (bridge)
+graphflow skill insights                   # skill insights
+graphflow skill report                     # flywheel contribution report
+graphflow skill sync export                # export team skill pack + golden queries (share via git)
+graphflow skill sync import                # import team skill pack (MERGE; --force to overwrite) + golden merge into .graphflow/team-golden.json
+graphflow route diagnose                   # routing diagnostics
+graphflow learn nightly                    # nightly learning
+graphflow doctor                           # install self-check
 ```
 
-## 配置
+## Configuration
 
-三层合并：全局 `~/.graphflow.config.json` → 项目 `graphflow.config.json` → 项目 `.graphflow/config.json`。复制 [graphflow.config.example.json](graphflow.config.example.json) 起步。
+Three-layer merge: global `~/.graphflow.config.json` → project `graphflow.config.json` → project `.graphflow/config.json`. Copy [graphflow.config.example.json](graphflow.config.example.json) to get started.
 
-关键项：
+Key options:
 
-| 配置 | 说明 |
+| Option | Description |
 | --- | --- |
-| `graphPolicy.transport` | `file` / `memory` / `sqlite` / **`auto`（推荐：sqlite 优先，不可用自动降级 file）** / `mcp-http` |
-| `graphPolicy.maxContextTokens` | 上下文预算（默认 1500） |
-| `graphPolicy.autoIndexOnSave` | 保存时自动增量索引（默认 true） |
-| `embeddingPolicy.provider` | `transformers`（本地默认）/ `openai` / `hash` |
-| `embeddingPolicy.vectorStorePath` | 向量索引持久化路径（自动派生 `.hnsw`） |
-| `skillPolicy.enableSkillFlywheel` | 学习飞轮开关 |
+| `graphPolicy.transport` | `file` / `memory` / `sqlite` / **`auto` (recommended: sqlite-first, falls back to file)** / `mcp-http` |
+| `graphPolicy.maxContextTokens` | Context budget (default 1500) |
+| `graphPolicy.autoIndexOnSave` | Auto incremental index on save (default true) |
+| `embeddingPolicy.provider` | `transformers` (local default) / `openai` / `hash` |
+| `embeddingPolicy.vectorStorePath` | Vector index persistence path (`.hnsw` derived automatically) |
+| `skillPolicy.enableSkillFlywheel` | Learning flywheel switch |
 
-## Team backend pilot（团队后端试点）
+## Team backend pilot
 
-将 `graphPolicy.transport` 设为 `mcp-http` 即可把图谱托管到远程 Graphify 服务（团队共享），需配置 `graphPolicy.mcpEndpoint`（http(s) URL，可选 `mcpApiKey` bearer token）：
+Set `graphPolicy.transport` to `mcp-http` to host the graph on a remote Graphify service (shared by the team); requires `graphPolicy.mcpEndpoint` (http(s) URL, optional `mcpApiKey` bearer token):
 
 ```json
 { "graphPolicy": { "transport": "mcp-http", "mcpEndpoint": "http://graphify.team.internal:8080" } }
 ```
 
-Endpoint 缺失/格式非法会在配置校验时直接报错；连接失败或运行期请求失败则透明降级到本地 JSON 文件存储（`graphPolicy.graphStorePath`，默认 `graphflow-out/graphflow-graph.json`）并记录 `logger.warn`，与 sqlite→file 降级一致，不会中断 Agent 流程。试点协议暂不支持全量快照：`readSnapshot` 返回本地镜像文件（可能滞后）。
+A missing/malformed endpoint fails at config validation; connection or runtime request failures degrade transparently to local JSON storage (`graphPolicy.graphStorePath`, default `graphflow-out/graphflow-graph.json`) with a `logger.warn`, consistent with the sqlite→file fallback, never interrupting the agent. The pilot protocol does not yet support full snapshots: `readSnapshot` returns the local mirror file (possibly stale). For the team-sharing security model, see [docs/team-memory-security.md](docs/team-memory-security.md).
 
-## 基准
+## Benchmarks
 
-- **综合能力**：[COMPREHENSIVE-RESULTS.md](benchmarks/COMPREHENSIVE-RESULTS.md) — P1-P6 六维度评测，总体 **92.9%**（索引 100% / 压缩 64.9% / 规划 100% / 学习 100% / Bridge 100% / 性能 99.7%）
-- **独立评测**：[INDEPENDENT-RESULTS.md](benchmarks/INDEPENDENT-RESULTS.md) — CodeGraph 风格 5 域评测，Hit@5 **96%**、Token 节省 **96.6%**、总体 **96.2%**
-- **SWE-bench 风格评测**：[SWE-BENCH-RESULTS.md](benchmarks/SWE-BENCH-RESULTS.md) — 自建 12 实例上下文就绪评测；[SWE-BENCH-REAL-RESULTS.md](benchmarks/SWE-BENCH-REAL-RESULTS.md) — Flask 真实项目 10 实例文件召回率评测（48.3%）
-- **Token 节省**：[RESULTS.md](benchmarks/RESULTS.md) — 8 个代表性查询，**98.2%** 节省，独立 gpt-tokenizer 复核
-- **检索质量**：[RETRIEVAL-EVAL-RESULTS.md](benchmarks/RETRIEVAL-EVAL-RESULTS.md) — 132 查询，Hit@5=100%、MRR=0.836、NDCG@5=0.601
-- **Skill 飞轮 A/B**：[SKILL-AB-RESULTS.md](benchmarks/SKILL-AB-RESULTS.md) — 注入率 100%、召回 100%、开销 25.6 tok/任务
+- **Comprehensive**: [COMPREHENSIVE-RESULTS.md](benchmarks/COMPREHENSIVE-RESULTS.md) — P1–P6 six-dimension evaluation, overall **92.9%** (indexing 100% / compression 64.9% / planning 100% / learning 100% / bridge 100% / performance 99.7%)
+- **Independent-style**: [INDEPENDENT-RESULTS.md](benchmarks/INDEPENDENT-RESULTS.md) — CodeGraph-style 5-domain evaluation, Hit@5 **96%**, token savings **96.6%**, overall **96.2%**
+- **SWE-bench-style**: [SWE-BENCH-RESULTS.md](benchmarks/SWE-BENCH-RESULTS.md) — self-built 12-instance context-readiness eval; [SWE-BENCH-REAL-RESULTS.md](benchmarks/SWE-BENCH-REAL-RESULTS.md) — Flask real-project 10-instance file-recall eval (48.3%)
+- **Token savings**: [RESULTS.md](benchmarks/RESULTS.md) — 8 representative queries, **98.2%** savings, re-counted with independent gpt-tokenizer
+- **Retrieval quality**: [RETRIEVAL-EVAL-RESULTS.md](benchmarks/RETRIEVAL-EVAL-RESULTS.md) — 132 queries, Hit@5=100%, MRR=0.836, NDCG@5=0.601
+- **Skill flywheel A/B**: [SKILL-AB-RESULTS.md](benchmarks/SKILL-AB-RESULTS.md) — injection rate 100%, recall 100%, overhead 25.6 tok/task
 
-## VS Code / Cursor 扩展
+## VS Code / Cursor extension
 
-从 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases) 下载 `graphflow-<version>.vsix` 安装（或 Open VSX：`roarpeng.graphflow`）。
+Download `graphflow-<version>.vsix` from [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases) (or Open VSX: `roarpeng.graphflow`).
 
-命令：Settings / Show Graph（图谱可视化）/ Preview Context / Plan & Brainstorm / Run Task / Skill Insights / Install MCP；Chat Agent `@graphflow`（`/run` `/plan` `/graph` `/skills` `/diagnose` `/learn` `/history`）。
+Commands: Settings / Show Graph (graph visualization) / Preview Context / Plan & Brainstorm / Run Task / Skill Insights / Install MCP; chat agent `@graphflow` (`/run` `/plan` `/graph` `/skills` `/diagnose` `/learn` `/history`).
 
-## Agent 集成
+## Agent integrations
 
 ```bash
-npx @roarpeng/graphflow doctor     # 检测已安装的 Agent
-npx @roarpeng/graphflow install    # 自动安装 MCP + Skill + Rules
-npx @roarpeng/graphflow init       # 写入最小项目配置
+npx @roarpeng/graphflow doctor     # detect installed agents
+npx @roarpeng/graphflow install    # auto-install MCP + Skill + Rules
+npx @roarpeng/graphflow init       # write a minimal project config
 ```
 
-支持：Cursor、VS Code、Trae（含 CN）、Claude Code、Windsurf、Cline、Roo Code、Kilo Code、Gemini CLI、Codex、Antigravity、Opencode、Qoder、Amazon Q、Zed、Continue 等 15+。
+Supported: Cursor, VS Code, Trae (incl. CN), Claude Code, Windsurf, Cline, Roo Code, Kilo Code, Gemini CLI, Codex, Antigravity, Opencode, Qoder, Amazon Q, Zed, Continue, and more (15+).
 
-## 协议
+## Protocol
 
-[ATP/IR — Agent Thinking Protocol 公开规范 v1.0](docs/atp-ir-spec-v1.md)：work-item 注册表、submit/merge 契约、兼容性规则。第三方工具可实现兼容的 producer / consumer。
+[ATP/IR — Agent Thinking Protocol public specification v1.0](docs/atp-ir-spec-v1.md): work-item registry, submit/merge contract, compatibility rules. Third-party tools can implement compatible producers / consumers.
 
-## 社区
+## Community
 
-GraphFlow 是单人维护项目（bus factor = 1），社区协作是降低单点风险的关键，欢迎参与：
+GraphFlow is a single-maintainer project (bus factor = 1); community collaboration is the key to reducing single-point risk. Contributions welcome:
 
-- [贡献指南](CONTRIBUTING.md)：开发环境、代码规范、测试要求与 PR 检查清单
-- [路线图](ROADMAP.md)：已完成里程碑与下一阶段计划（P0–P2）
-- [Issues](https://github.com/Roarpeng/GraphFlow/issues)：bug 报告与功能请求（请使用内置模板）
-- [Discussions](https://github.com/Roarpeng/GraphFlow/discussions)：使用疑问与想法讨论
+- [Contributing guide](CONTRIBUTING.md): dev environment, code style, test requirements and PR checklist
+- [Roadmap](ROADMAP.md): completed milestones and next steps (P0–P2)
+- [Issues](https://github.com/Roarpeng/GraphFlow/issues): bug reports and feature requests (please use the built-in templates)
+- [Discussions](https://github.com/Roarpeng/GraphFlow/discussions): questions and ideas
 
-## 开发
+## Development
 
 ```bash
 npm install
-npm run ci        # lint + build + 测试 + 扩展打包 + smoke
+npm run ci        # lint + build + tests + extension packaging + smoke
 ```
 
-要求 Node.js ≥ 20、npm ≥ 10。预期：lint 无错误、构建成功、692 测试通过。
+Requires Node.js ≥ 20, npm ≥ 10. Expected: lint clean, build succeeds, 692 tests pass.
 
-## 项目结构
+## Project structure
 
 ```text
 GraphFlow/
 ├── src/
-│   ├── core/           # 编排核心：orchestrator, triage, dag-engine, agent-delegation
-│   ├── graph/          # 索引、上下文切片、图压缩、sqlite/auto 存储、snapshot
-│   ├── routing/        # 模型路由与健康探测（5 provider）
+│   ├── core/           # orchestration core: orchestrator, triage, dag-engine, agent-delegation
+│   ├── graph/          # indexing, context slicing, graph compression, sqlite/auto storage, snapshot
+│   ├── routing/        # model routing and health probes (5 providers)
 │   ├── learning/       # embeddings, episodic, skill-flywheel, hnsw, nightly
 │   ├── agents/         # ATP schema, planner, insight, brainstormer
 │   └── surfaces/
 │       ├── cli/        # CLI + runtime
-│       └── mcp/        # MCP server（10 工具）
-├── tests/              # 99 文件 / 692 tests（含检索 golden set、bridge+DAG）
-├── benchmarks/         # 综合 + 独立 + SWE-bench + token 节省 + skill A/B（可复现）
-├── docs/               # ATP v1.0 设计 + ATP/IR 公开规范
-├── vscode-extension/   # VS Code 面板与命令
+│       └── mcp/        # MCP server (10 tools)
+├── tests/              # 99 files / 692 tests (incl. retrieval golden set, bridge+DAG)
+├── benchmarks/         # comprehensive + independent + SWE-bench + token savings + skill A/B (reproducible)
+├── docs/               # ATP spec + comparisons + team memory security
+├── vscode-extension/   # VS Code panel and commands
 └── CHANGELOG.md
 ```
 
-## 历史变更
+## Changelog
 
-详细记录见 [CHANGELOG.md](CHANGELOG.md)。License：Apache-2.0。
+Full history in [CHANGELOG.md](CHANGELOG.md). License: Apache-2.0.

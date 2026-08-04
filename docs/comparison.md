@@ -42,7 +42,7 @@ GraphFlow 不是"又一个代码图谱"，而是把 **本地知识图谱 + 三�
 
 - **Serena 强在哪**：25.2k★、MIT，基于 LSP，覆盖 40+ 语言，提供**符号级精确定位、编辑、重构**，是"让 agent 精确改代码"的事实标准。语言覆盖与符号操作精度是它的护城河。
 - **GraphFlow 强在哪**：Serena 解决"精确符号操作"，但不做上下文压缩预算、不做任务规划、不做跨会话学习。GraphFlow 提供**带 token 预算的压缩上下文 + 规划 + 记忆**，并通过 bridge 模式把执行交给上层 agent（包括可与 Serena 这类符号工具互补）。
-- **怎么选**：核心诉求是"跨 40+ 语言做精确符号编辑 / 重构" → **选 Serena**。核心诉求是"在喂给 agent 前把上下文压到预算内、并带规划与历史经验" → **选 GraphFlow**。两者并非互斥，可叠加使用。
+- **怎么选**：核心诉求是"跨 40+ 语言做精确符号编辑 / 重构" → **选 Serena**。核心诉求是"在喂给 agent 前把上下文压到预算内、并带规划与历史经验" → **选 GraphFlow**。两者并非互斥，可叠加使用（见下文 [GraphFlow + Serena: better together](#graphflow--serena-better-together联合方案)）。
 
 ### GraphFlow vs Repomix（上下文打包之王）
 
@@ -61,6 +61,48 @@ GraphFlow 不是"又一个代码图谱"，而是把 **本地知识图谱 + 三�
 - **Augment 强在哪**：充足资本（融资 2.52 亿美元 / 估值约 9.77 亿）、本地 + 云双模式、企业级打磨、自报 70%+ 质量提升。资源与产品完成度是开源项目难及的。
 - **GraphFlow 强在哪**：Augment 闭源、其质量提升数据**未被独立复现**、有云端 / 商业绑定与成本。GraphFlow **Apache-2.0 完全开源、local-first、可审计、零厂商锁定**，架构透明可自托管。
 - **怎么选**：企业愿付费换托管、SLA 与成熟支持 → **选 Augment**。要开源、本地、可控、无锁定、可二次开发 → **选 GraphFlow**。
+
+---
+
+## GraphFlow + Serena: better together（联合方案）
+
+前文的对比框架是"二选一"，但两者实际是**补集关系**：Serena 管**符号级精确编辑**（LSP 定位、改名、重构），GraphFlow 管**喂给 agent 之前的上下文预算**（压缩上下文 + 规划）与**跨会话记忆**（Episodic / Skill / Decision 飞轮）。一个典型分工：
+
+| 阶段 | 负责方 | 做什么 |
+|---|---|---|
+| 任务启动 | **GraphFlow** | `graphflow_context` 返回带 token 预算的压缩上下文 + 相似历史 episode + 可用技能提示；`graphflow_plan` 产出任务 DAG |
+| 定位与修改 | **Serena** | LSP 符号级定位、精确编辑 / 重构（40+ 语言） |
+| 收尾沉淀 | **GraphFlow** | `graphflow_report_outcome` 回填结局（或 auto-capture hooks 自动捕获），教训与技能进入飞轮，下次任务直接受益 |
+
+并列的 MCP 配置示例（两个 server 同时挂载，agent 按需调用）：
+
+```json
+{
+  "mcpServers": {
+    "serena": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/oraios/serena",
+        "serena",
+        "start-mcp-server",
+        "--context",
+        "ide-assistant",
+        "--project",
+        "<your-project-path>"
+      ]
+    },
+    "graphflow": {
+      "command": "npx",
+      "args": ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"]
+    }
+  }
+}
+```
+
+> Serena 的启动命令与参数以其官方文档的最新说明为准；两者均为 local-first，互不冲突，工具名空间也不重叠。
+
+**怎么选这个组合**：如果你既需要"精确改代码"（Serena 的长项），又需要"任务上下文压缩 + 跨会话经验复用"（GraphFlow 的长项），两个 MCP server 并列就是当前最省事的组合——Serena 负责 hands，GraphFlow 负责 memory。
 
 ---
 
