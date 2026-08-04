@@ -37,6 +37,23 @@ function symbolFileOf(nodeId: string): string {
 }
 
 /**
+ * 廉价预过滤：在跑完整标识符正则前，先用一次 indexOf 扫描判定文件内容中
+ * 是否存在任何一个词表符号。大仓中绝大多数文件与跨文件符号无交集，跳过这些
+ * 文件可避免 O(文件大小) 的 matchAll 扫描。
+ *
+ * 正确性：\b\w{3,}\b 命中的 token 必然以完整子串形式出现在内容中，因此
+ * "内容不含任何词表符号子串" ⇒ "正则不会产生任何词表命中"，不会漏边。
+ */
+function containsAnySymbolName(content: string, vocabulary: Set<string>): boolean {
+  for (const name of vocabulary) {
+    if (content.includes(name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Build cross-file reference edges from parsed files using the global symbol index.
  * Used by batch (full workspace) indexing.
  *
@@ -87,6 +104,10 @@ export function buildBatchReferenceEdges(
 
   for (const file of parsed) {
     if (!file.scannable) {
+      continue;
+    }
+    // 廉价预过滤：文件中不存在任何词表符号时，跳过整个正则扫描（短路）。
+    if (!containsAnySymbolName(file.content, vocabulary)) {
       continue;
     }
     const seenThisFile = new Set<string>();
@@ -223,11 +244,7 @@ export function buildSingleFileReferenceEdges(
   const edges: GraphEdge[] = [];
   let referenceCount = 0;
   const ownNames = new Set(declared.map((s) => s.name));
-  const identifierRe = /\b\w{3,}\b/g;
-  const matches = content.match(identifierRe);
-  if (!matches) return { edges, referenceCount };
 
-  const seenIdent = new Set<string>();
   const symbolIndex = new Map<string, { nodeId: string; file: string }[]>();
   for (const node of snapshotNodes) {
     if (node.type !== "Symbol" || !node.metadata?.name) continue;
@@ -244,6 +261,17 @@ export function buildSingleFileReferenceEdges(
       vocabulary.add(name);
     }
   }
+
+  // 廉价预过滤：文件中不存在任何词表符号时，跳过整个正则扫描（短路）。
+  if (vocabulary.size === 0 || !containsAnySymbolName(content, vocabulary)) {
+    return { edges, referenceCount };
+  }
+
+  const identifierRe = /\b\w{3,}\b/g;
+  const matches = content.match(identifierRe);
+  if (!matches) return { edges, referenceCount };
+
+  const seenIdent = new Set<string>();
 
   for (const name of matches) {
     if (seenIdent.has(name)) continue;

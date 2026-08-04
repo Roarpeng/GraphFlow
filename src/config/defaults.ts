@@ -37,9 +37,11 @@ export function getDefaultConfig(): GraphFlowConfig {
       autoIndexOnSave: true,
       workspaceRoot: process.cwd(),
       includeExtensions: [...DEFAULT_INCLUDE_EXTENSIONS],
-      // 默认使用 file 后端，将知识图谱持久化到磁盘 JSON 文件，避免进程退出后图谱丢失
-      transport: "file",
-      graphStorePath: `${DEFAULT_OUTPUT_DIR}/graphflow-graph.json`,
+      // 默认使用 auto 后端：sqlite 优先（FTS5 索引，避免大仓库下整文件读写放大），
+      // better-sqlite3 可选依赖缺失时透明降级为 file JSON 存储（见 client-factory）。
+      // 用户配置中显式声明的 transport（包括 "file"）保持不变，不做迁移。
+      transport: "auto",
+      graphStorePath: `${DEFAULT_OUTPUT_DIR}/graphflow-graph.sqlite`,
       maxContextTokens: 1500,
       layerQuota: { l1: 6, l2: 4, l3: 3 },
       // P0-1: offline-safe default — FNV-1a hash embeddings, no model download.

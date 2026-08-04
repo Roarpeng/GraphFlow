@@ -490,6 +490,8 @@ export async function applySkillLearning(
       linkedSuccess,
       failStreak,
       outcomeKind,
+      // 来源元数据随本地学习延续（外部 sync 技能晋升 proven 后仍保留来源标记）。
+      ...(previous?.provenance ? { provenance: previous.provenance } : {}),
       // Pass clears soft-hide; fail preserves it if already set.
       ...(passed ? {} : previous?.hidden ? { hidden: true } : {}),
     };
@@ -536,6 +538,8 @@ export async function applySkillLearning(
         updatedAt: now,
         hasSymbolEvidence: true,
         ...(previous?.seeded === true ? { seeded: true } : {}),
+        // 来源元数据随共现更新延续（外部 sync 组合技能保留来源标记）。
+        ...(previous?.provenance ? { provenance: previous.provenance } : {}),
       };
       // P0-2 taxonomy: negative composite scores apply only to anti-pattern
       // pairs (>= 2 failures and more failures than successes); correctable /
