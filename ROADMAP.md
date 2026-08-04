@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-08-02（随 v1.9.5）
+> 最后更新：2026-08-04（随 v1.9.6+；新增团队记忆安全门控 / 第三方复现邀请 / 代码域检索评测数据集三项）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -29,6 +29,9 @@
 | **P1** | **独立 benchmark 公开复现**：token 节省 98.7%、skill A/B（100% vs 61.5%）、记忆 ROI（100% vs 56.5%）的方法学文档 + JSON 落盘，邀请第三方复现 | 🟡 | 基准基建已完备（`npm run benchmark` / `benchmark:skills` / `benchmark:memory`，golden set 已入 CI），但结论目前全部为自测；赛道硬通货是独立第三方数据（CodeGraph / grepai 均有独立实测） |
 | **P1** | **图噪声治理**：符号哈希冲突处理、引用边质量（Trie / 布隆过滤）、子图级 PageRank 缓存 | 🟡 | v1.9.5 已修复 worktrees 污染与剪枝读写放大；但黑帽分析指出「噪声图比无图更糟」——大仓库下边缺失 / 伪边 / 重构后过期仍会误导 agent，是头号质量风险 |
 | **P2** | **协议层占位**：ATP/IR 公开规范 v1.2 增量演进、MCP resources 完善（`graphflow://diagnose` 已上）、协议适配文档 | 🟡 | 对冲平台内置化（Claude Code Auto Memory 等）；resources 与路线图（本文档）已落地，ATP/IR v1.2 待办 |
+| **P1（新增）** | **团队共享记忆安全门控**：外部 sync 技能 provenance 标记、不直接进入 `proven`、canary 验证、anti-pattern 隔离（四分类晋升门控）；安全模型见 [docs/team-memory-security.md](docs/team-memory-security.md) | 🟡（in progress） | 背景：`skill sync` 双向 MERGE 已落地，但共享记忆 = 攻击面；设计原则：记忆即代码，信任决策放在晋升边界而非传输边界 |
+| **P1（新增）** | **第三方基准复现邀请**：公开可复现基准套件（[benchmarks/README.md](benchmarks/README.md)）+ 方法学（[docs/benchmark-standards.md](docs/benchmark-standards.md)），结果 commit 锚定 + JSON 落盘，欢迎第三方复现 token 节省 / skill A/B / 记忆 ROI 三套基准 | 🟡（in progress） | 与上文 P1「独立 benchmark 公开复现」同源；README 已按「Proof, not promises」叙事公开邀请；赛道硬通货是独立第三方数据 |
+| **P2（新增）** | **代码域检索评测公开数据集**：将 132 查询 golden set 与方法学开放为社区可用的代码域图谱检索评测数据集 | ⬜（planned） | 依据：GraphRAG 类图检索评测集中在文档域，代码域是空白（见 [ATP/IR 规范 Related Work](docs/atp-ir-spec-v1.md#9-related-work--references)）；golden set 已入 CI，开放成本低 |
 | **P2** | **社区化基建**：贡献指南（CONTRIBUTING）、公开路线图（本文档）、Issue 模板（bug / feature） | ✅ | 本文档与配套文件落地后即完成；后续价值取决于社区参与度——从修 bug、补测试、认领 ⬜ / 🟡 事项开始 |
 | **P3（前瞻）** | **MCP 2026-07-28 无状态规范适配（MCP 2.0）** | ⬜ | 业界称史上最大改版：移除 initialize 握手、新增 `server/discover`、每请求 `_meta` 携带协议信息、工具 schema 升级 JSON Schema 2020-12（`oneOf` 可用于 `graphflow_insight` 的条件必填）、`ping` / `logging` 移除但保留 12 个月兼容窗口。传输层已 SDK 化（v1.9.2+），升级 `@modelcontextprotocol/sdk` 即自动获得兼容；需复核 ping 依赖 |
 

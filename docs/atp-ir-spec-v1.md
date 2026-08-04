@@ -332,3 +332,38 @@ memory exclusively through the existing bindings above.
 IR types (`src/agents/atp-schema.ts`), episodic memory
 (`src/learning/episodic-memory.ts`: `recordEpisode`, `updateEpisodeOutcome`,
 `findSimilarEpisodes`, `summarizeEpisodeForPrompt`).*
+
+---
+
+## 9. Related Work / References
+
+The following lines of work inform the ATP/IR design and GraphFlow's memory
+flywheel. Descriptions are intentionally brief and limited to the relationship
+to this specification; refer to each work's primary source for details.
+
+- **SkillRL** (arXiv 2026, CoRR) — hierarchical skill-library distillation
+  with recursive evolution. Structurally isomorphic to GraphFlow's three skill
+  tiers (atomic → composite → evolved) and the canary-gated evolution path in
+  the reference implementation; SkillRL's recursion corresponds to the
+  flywheel's nightly re-distillation loop.
+- **Agent Workflow Memory** (arXiv:2409.07429) — induces reusable workflows
+  from agent trajectories. Related to the episodic → skill distillation path:
+  ATP/IR's `memory-backfill` (§8.1) is the store side and `memory-recall`
+  (§8.2) the retrieval side of an analogous trajectory-to-memory loop.
+- **MemGPT / Letta** — OS-style memory paging for agents. The L0–L3 layered
+  context packaging plays a similar role at the context level: only a working
+  set is kept in prompt budget, the rest lives in addressable external store.
+- **HippoRAG** — hierarchical graph-based retrieval. GraphFlow's retrieval
+  stack (graph anchors + PageRank compression + vector recall with RRF) is a
+  code-domain instance of the same graph-structured retrieval idea.
+- **Microsoft GraphRAG, "From Local to Global"** — graph plus community
+  summary retrieval over document corpora. Evaluation of graph-based
+  retrieval in the **code domain** remains largely an open gap; GraphFlow's
+  132-query golden set (`benchmarks/retrieval-golden-data.ts`, in CI) is an
+  attempt to contribute a reproducible measurement toward filling it.
+- **Bounded-memory contract** (2026-07 research trend in agentic long-horizon
+  systems) — inject only the typed information the current decision needs,
+  rather than unbounded history. This is the same design principle behind
+  L0–L3 layered compression and the explicit `maxContextTokens` budget: both
+  treat memory injection as a bounded, typed, auditable operation — which is
+  precisely what `memory-recall` (§8.2) makes declarable in the protocol.
