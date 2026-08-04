@@ -82,6 +82,7 @@ import {
   summarizeEpisodeForPrompt,
   type EpisodeRecord,
 } from "../src/learning/episodic-memory";
+import { benchMeta } from "./bench-meta";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BENCH_DIR = __dirname;
@@ -1032,7 +1033,12 @@ async function main(): Promise<void> {
   const report = await runMemoryAbBenchmark();
 
   mkdirSync(dirname(JSON_PATH), { recursive: true });
-  writeFileSync(JSON_PATH, JSON.stringify(report, null, 2), "utf8");
+  // Machine-readable artifact with reproducibility envelope (commit + date).
+  writeFileSync(
+    JSON_PATH,
+    JSON.stringify({ ...benchMeta("memory-ab-p3"), ...report }, null, 2),
+    "utf8"
+  );
   writeResultsMarkdown(renderMarkdown(report));
 
   const pct = (x: number) => `${(x * 100).toFixed(1)}%`;

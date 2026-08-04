@@ -37,9 +37,11 @@ import { encode } from "gpt-tokenizer/model/gpt-4o";
 import { GraphifyClient } from "../src/graph/graphify-client.js";
 import { applySkillLearning, suggestSkillHints } from "../src/learning/skill-flywheel.js";
 import { recordEpisode, findSimilarEpisodes } from "../src/learning/episodic-memory.js";
+import { benchMeta } from "./bench-meta.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const RESULTS_PATH = join(__dirname, "SKILL-AB-RESULTS.md");
+const JSON_PATH = join(__dirname, ".cache", "skill-injection-results.json");
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -234,7 +236,15 @@ async function main(): Promise<void> {
   const report = await runSkillAbBenchmark();
   mkdirSync(dirname(RESULTS_PATH), { recursive: true });
   writeFileSync(RESULTS_PATH, renderMarkdown(report), "utf8");
+  // Machine-readable artifact with reproducibility envelope (commit + date).
+  mkdirSync(dirname(JSON_PATH), { recursive: true });
+  writeFileSync(
+    JSON_PATH,
+    JSON.stringify({ ...benchMeta("skill-injection-recall"), ...report }, null, 2),
+    "utf8"
+  );
   console.log(`Skill A/B benchmark complete. Results written to ${RESULTS_PATH}`);
+  console.log(`JSON: ${JSON_PATH}`);
   console.log(
     `hintInjection=${(report.hintInjectionRate * 100).toFixed(0)}% ` +
       `episodeRecall=${(report.episodeRecallRate * 100).toFixed(0)}% ` +
