@@ -1,6 +1,6 @@
 import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index.js";
 import { parseFileIncremental } from "./incremental-parse.js";
-import type { TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
+import { walkTreeSitterAst } from "./tree-sitter-loader.js";
 
 /**
  * Rust indexer using tree-sitter AST (upgraded from line-level regex).
@@ -26,7 +26,7 @@ export const rustIndexer: LanguageIndexer = {
       return rustRegexFallback(filePath, content);
     }
 
-    const traverse = (node: TreeSitterSyntaxNode) => {
+    walkTreeSitterAst(tree.rootNode, (node) => {
       const lineNo = node.startPosition.row + 1;
       const hasPub = node.children?.some((c) => c.type === "visibility_modifier") ?? false;
 
@@ -169,13 +169,8 @@ export const rustIndexer: LanguageIndexer = {
           break;
         }
       }
+    });
 
-      for (const child of node.children ?? node.namedChildren) {
-        traverse(child);
-      }
-    };
-
-    traverse(tree.rootNode);
     return { symbols, imports };
   },
 };

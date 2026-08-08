@@ -1,5 +1,5 @@
 import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index.js";
-import { getTreeSitterParser, type TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
+import { getTreeSitterParser, walkTreeSitterAst, type TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
 
 function isPrivateName(name: string): boolean {
   return name.startsWith("_");
@@ -105,7 +105,7 @@ export const dartIndexer: LanguageIndexer = {
       return dartRegexFallback(filePath, content);
     }
 
-    const traverse = (node: TreeSitterSyntaxNode) => {
+    walkTreeSitterAst(tree.rootNode, (node) => {
       const lineNo = node.startPosition.row + 1;
 
       switch (node.type) {
@@ -179,13 +179,8 @@ export const dartIndexer: LanguageIndexer = {
           break;
         }
       }
+    });
 
-      for (const child of node.children ?? node.namedChildren) {
-        traverse(child);
-      }
-    };
-
-    traverse(tree.rootNode);
     return { symbols, imports };
   },
 };

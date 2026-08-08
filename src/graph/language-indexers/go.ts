@@ -1,6 +1,6 @@
 import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index.js";
 import { parseFileIncremental } from "./incremental-parse.js";
-import type { TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
+import { walkTreeSitterAst } from "./tree-sitter-loader.js";
 
 function isExported(name: string): boolean {
   if (!name) return false;
@@ -16,7 +16,7 @@ export const goIndexer: LanguageIndexer = {
     const imports: ImportTarget[] = [];
     const tree = await parseFileIncremental(filePath, "go", content);
 
-    const traverse = (node: TreeSitterSyntaxNode) => {
+    walkTreeSitterAst(tree.rootNode, (node) => {
       const lineNo = node.startPosition.row + 1;
 
       if (node.type === "package_clause") {
@@ -84,13 +84,8 @@ export const goIndexer: LanguageIndexer = {
           });
         }
       }
+    });
 
-      for (const child of node.children ?? node.namedChildren) {
-        traverse(child);
-      }
-    };
-
-    traverse(tree.rootNode);
     return { symbols, imports };
   },
 };

@@ -1,5 +1,5 @@
 import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index.js";
-import { getTreeSitterParser, type TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
+import { getTreeSitterParser, walkTreeSitterAst } from "./tree-sitter-loader.js";
 
 /**
  * Ruby indexer using tree-sitter AST.
@@ -29,7 +29,7 @@ export const rubyIndexer: LanguageIndexer = {
 
     let privateScope = false;
 
-    const traverse = (node: TreeSitterSyntaxNode) => {
+    walkTreeSitterAst(tree.rootNode, (node) => {
       const lineNo = node.startPosition.row + 1;
 
       switch (node.type) {
@@ -158,13 +158,8 @@ export const rubyIndexer: LanguageIndexer = {
           break;
         }
       }
+    });
 
-      for (const child of node.children ?? node.namedChildren) {
-        traverse(child);
-      }
-    };
-
-    traverse(tree.rootNode);
     return { symbols, imports };
   },
 };
