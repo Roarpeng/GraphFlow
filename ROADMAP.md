@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-08-08（随 v1.9.9；文档建图 anydoc + document-semantic bridge；CI walkFiles 路径长度修复）
+> 最后更新：2026-08-08（随 v1.9.10；跨层边 + Concept/Requirement；VSIX 不含 anydoc 说明）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -10,7 +10,7 @@
 - 🟡 进行中 / 部分完成
 - ⬜ 未开始（欢迎认领）
 
-## 已完成里程碑（v1.0 → v1.9.9）
+## 已完成里程碑（v1.0 → v1.9.10）
 
 | 版本 | 日期 | 里程碑 | 关键交付 | 状态 |
 | --- | --- | --- | --- | --- |
@@ -22,6 +22,7 @@
 | v1.9.5 | 2026-08-01 | **索引卫生** | 索引排除 Agent 工具目录；批量剪枝 `GraphClient.deleteNodes` | ✅ |
 | v1.9.8 | 2026-08-08 | **P0/P1 融合闭环** | 飞轮 diagnose 可观测 + backfill；Skill-conditioned DAG；SkillOpt-lite；Trie 引用预过滤；sync skill canary；Codex Windows NODE/NPX_CLI MCP | ✅ |
 | v1.9.9 | 2026-08-08 | **文档图谱** | CI walkFiles ENAMETOOLONG 修复；可选 `@firecrawl/anydoc` Office/PDF→MD 建图；`document-semantic` bridge | ✅ |
+| v1.9.10 | 2026-08-08 | **跨层 Engineering KG** | Concept/Requirement 节点；`documents`/`implements`/`derived_from`；document-semantic submit 落图；明确 VSIX 不含 anydoc | ✅ |
 
 ## 下一阶段
 

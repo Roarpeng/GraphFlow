@@ -164,7 +164,21 @@ export interface OrchestrateOptions {
 
 export interface GraphNode {
   id: string;
-  type: "File" | "Symbol" | "Module" | "TaskRun" | "Decision" | "Skill";
+  /**
+   * Logical domains (single store):
+   * - code: File / Symbol / Module
+   * - doc: Concept / Requirement (semantic nodes derived from documents)
+   * - experience: TaskRun / Decision / Skill
+   */
+  type:
+    | "File"
+    | "Symbol"
+    | "Module"
+    | "Concept"
+    | "Requirement"
+    | "TaskRun"
+    | "Decision"
+    | "Skill";
   content: string;
   metadata?: Record<string, unknown>;
 }
@@ -186,5 +200,11 @@ export interface GraphEdge {
     | "calls"
     | "inherits"
     | "part_of"
-    | "next_section";
+    | "next_section"
+    /** Doc File → Concept/Requirement (document describes this entity/claim). */
+    | "documents"
+    /** Code Symbol/File → Requirement (implementation fulfills requirement). */
+    | "implements"
+    /** Concept/Requirement → source File or insight Decision (provenance). */
+    | "derived_from";
 }

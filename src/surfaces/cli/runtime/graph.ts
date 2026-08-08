@@ -337,6 +337,8 @@ export async function inspectGraph(
     File: 0,
     Symbol: 0,
     Module: 0,
+    Concept: 0,
+    Requirement: 0,
     TaskRun: 0,
     Decision: 0,
     Skill: 0,

@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.9.10] - 2026-08-08
+
+### Added
+
+- **Engineering KG 跨层边**：`documents`（文档 File→Concept/Requirement）、`implements`（代码→Requirement）、`derived_from`（语义节点→来源 File/insight）
+- **文档域一等节点**：`Concept` / `Requirement`；`document-semantic` insight submit 自动写入并尝试用 `relatedCodeHints` 链接已有 File/Symbol
+- **说明**：VS Code/Cursor **VSIX 不会打包/自动安装** `@firecrawl/anydoc`（与 transformers 一样排除重型/原生可选依赖）；CLI/`npm i @roarpeng/graphflow` 才会装 optional anydoc。无 anydoc 时跳过 Office/PDF，源码索引不受影响
+
+### Changed
+
+- 逻辑三分（code / doc / experience）落在**单图 + type/domain + 跨层边**，不拆物理三库
+
 ## [1.9.9] - 2026-08-08
 
 ### Fixed
