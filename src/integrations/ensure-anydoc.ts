@@ -76,7 +76,7 @@ export function applyAnydocRequireEnv(nodeModules = resolveAnydocNodeModules()):
   }
   try {
     // Refresh Node's module search paths after NODE_PATH mutation.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+     
     const Module = require("node:module") as { _initPaths?: () => void };
     Module._initPaths?.();
   } catch {
