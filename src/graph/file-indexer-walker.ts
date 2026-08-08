@@ -7,6 +7,11 @@
 
 import { join, relative } from "node:path";
 import { ALL_LANGUAGE_EXTENSIONS } from "./language-indexers/index.js";
+import {
+  DEFAULT_DOCUMENT_MAX_FILE_SIZE,
+  isOfficeDocumentPath,
+  OFFICE_DOCUMENT_EXTENSIONS,
+} from "./document-convert.js";
 import { safeReaddirSync, safeStatSync } from "../utils/safe-fs.js";
 
 import type { EmbeddingProvider } from "../learning/embeddings.js";
@@ -33,7 +38,7 @@ export interface ScannedFile {
 
 const BASE_EXTENSIONS = [".md", ".json"];
 export const DEFAULT_EXTENSIONS = Array.from(
-  new Set([...ALL_LANGUAGE_EXTENSIONS, ...BASE_EXTENSIONS])
+  new Set([...ALL_LANGUAGE_EXTENSIONS, ...BASE_EXTENSIONS, ...OFFICE_DOCUMENT_EXTENSIONS])
 );
 export const DEFAULT_MAX_FILE_SIZE = 200_000;
 
@@ -64,7 +69,14 @@ export function walkScannableFiles(
 
   for (const absPath of files) {
     const stat = safeStatSync(absPath);
-    if (!stat || stat.size > maxFileSizeBytes) {
+    if (!stat) {
+      continue;
+    }
+    // Office/PDF docs often exceed source-file limits; allow a higher cap.
+    const sizeLimit = isOfficeDocumentPath(absPath)
+      ? Math.max(maxFileSizeBytes, DEFAULT_DOCUMENT_MAX_FILE_SIZE)
+      : maxFileSizeBytes;
+    if (stat.size > sizeLimit) {
       continue;
     }
     scanned.push({

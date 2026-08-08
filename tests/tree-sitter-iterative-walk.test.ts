@@ -100,8 +100,10 @@ describe("walkFiles iterative", () => {
   it("walks a deep directory tree without stack overflow", () => {
     const root = mkdtempSync(join(tmpdir(), "gf-deep-walk-"));
     try {
+      // Keep path length under macOS/APFS limits (~1024); 80 short segments is enough
+      // to prove iterative walk while avoiding ENAMETOOLONG on CI runners.
       let dir = root;
-      for (let i = 0; i < 400; i += 1) {
+      for (let i = 0; i < 80; i += 1) {
         dir = join(dir, `d${i}`);
         mkdirSync(dir);
       }

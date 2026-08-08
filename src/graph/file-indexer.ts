@@ -10,12 +10,24 @@ import { readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { createHash } from "node:crypto";
 import { logger } from "../utils/logger.js";
+import type { AgentWorkItem } from "../core/agent-delegation.js";
 import type { GraphEdge, GraphNode } from "../core/types.js";
 import type { GraphClient } from "./client-factory.js";
 import { getIndexerForFile } from "./language-indexers/index.js";
 import { buildDocumentEdges } from "./language-indexers/markdown.js";
+import { markdownIndexer } from "./language-indexers/markdown.js";
 import type { CallRelation, InheritRelation } from "./language-indexers/index.js";
 import { embedAndAttachNodes } from "../learning/embeddings.js";
+import {
+  convertDocumentToMarkdown,
+  DEFAULT_DOCUMENT_MAX_FILE_SIZE,
+  isOfficeDocumentPath,
+} from "./document-convert.js";
+import {
+  buildDocumentSemanticWorkItems,
+  outlineFromMarkdown,
+  type DocumentSemanticTarget,
+} from "./document-semantic-bridge.js";
 
 // ── Re-exports from sub-modules ──────────────────────────────────────
 export type { FileIndexerOptions } from "./file-indexer-walker.js";
@@ -55,6 +67,8 @@ interface FileProcessResult {
   fileEdges: GraphEdge[];
   parsedEntry: ParsedFile;
   cacheEntry: { mtimeMs: number; hash: string; numNodes: number };
+  /** Present when an office/PDF file was converted and structurally indexed. */
+  documentSemantic?: DocumentSemanticTarget;
 }
 
 /**
@@ -73,14 +87,21 @@ async function processFile(
   const relPath = file.relPath;
   const mtimeMs = file.mtimeMs;
   const prev = cacheState[relPath];
+  const officeDoc = isOfficeDocumentPath(relPath);
 
   let content = "";
   let currentHash = "";
   let isChanged = forceReindex;
+  let bytes: Buffer | undefined;
 
   if (!prev || prev.mtimeMs !== mtimeMs) {
-    content = readFileSync(file.absPath, "utf8");
-    currentHash = createHash("md5").update(content).digest("hex");
+    if (officeDoc) {
+      bytes = readFileSync(file.absPath);
+      currentHash = createHash("md5").update(bytes).digest("hex");
+    } else {
+      content = readFileSync(file.absPath, "utf8");
+      currentHash = createHash("md5").update(content).digest("hex");
+    }
     if (!prev || prev.hash !== currentHash) {
       isChanged = true;
     }
@@ -90,20 +111,45 @@ async function processFile(
     return null;
   }
 
+  let documentSemantic: DocumentSemanticTarget | undefined;
+
+  if (officeDoc) {
+    if (!bytes) {
+      bytes = readFileSync(file.absPath);
+      currentHash = createHash("md5").update(bytes).digest("hex");
+    }
+    const converted = await convertDocumentToMarkdown(file.absPath, bytes);
+    if (!converted.markdown) {
+      logger.info(
+        { relPath, reason: converted.skippedReason ?? "convert-failed" },
+        "skipping office/PDF document (no markdown)"
+      );
+      // Cache hash so we do not retry every index until the file changes.
+      cacheState[relPath] = { mtimeMs, hash: currentHash, numNodes: 0 };
+      return null;
+    }
+    content = converted.markdown;
+    documentSemantic = {
+      relPath,
+      outline: outlineFromMarkdown(content),
+      excerpt: content.slice(0, 6000),
+    };
+  } else if (!content) {
+    content = readFileSync(file.absPath, "utf8");
+    currentHash = createHash("md5").update(content).digest("hex");
+  }
+
   // 清理该文件在图存储中的旧节点（不同 relPath 的节点互不重叠，并行安全）
   if (client.deleteNode ?? client.deleteNodes) {
     await pruneFileFromGraph(client, [relPath]);
   }
 
-  if (!content) {
-    content = readFileSync(file.absPath, "utf8");
-    currentHash = createHash("md5").update(content).digest("hex");
-  }
-
   const fileNodeId = `file:${relPath}`;
   const moduleNodeId = `module:${moduleKey(relPath)}`;
-  const indexer = getIndexerForFile(relPath);
-  const language = indexer?.language ?? (extOf(relPath).replace(/^\./, "") || "text");
+  const indexer = officeDoc ? markdownIndexer : getIndexerForFile(relPath);
+  const language = officeDoc
+    ? "document"
+    : (indexer?.language ?? (extOf(relPath).replace(/^\./, "") || "text"));
 
   let declared: IndexedSymbol[] = [];
   let imports: string[] = [];
@@ -123,7 +169,16 @@ async function processFile(
     relPath, file.size, language, declared, imports
   );
 
-  if (language === "markdown" && declared.length > 0) {
+  if (officeDoc) {
+    const fileNode = fileNodes.find((n) => n.id === fileNodeId);
+    if (fileNode?.metadata) {
+      fileNode.metadata.sourceFormat = extOf(relPath).replace(/^\./, "") || "document";
+      fileNode.metadata.convertedVia = "anydoc";
+      fileNode.metadata.indexedAs = "markdown";
+    }
+  }
+
+  if ((language === "markdown" || language === "document") && declared.length > 0) {
     const docEdges = buildDocumentEdges(fileNodeId, declared);
     fileEdges.push(...docEdges);
   }
@@ -152,6 +207,7 @@ async function processFile(
       hash: currentHash,
       numNodes: fileNodes.length,
     },
+    ...(documentSemantic ? { documentSemantic } : {}),
   };
 }
 
@@ -159,7 +215,14 @@ export async function indexWorkspaceFiles(
   client: GraphClient,
   rootDir: string,
   options?: FileIndexerOptions & { signal?: AbortSignal }
-): Promise<{ indexedFiles: number; indexedSymbols: number; indexedReferences: number; cancelled?: boolean }> {
+): Promise<{
+  indexedFiles: number;
+  indexedSymbols: number;
+  indexedReferences: number;
+  cancelled?: boolean;
+  agentWorkItems?: AgentWorkItem[];
+  agentInstructions?: string;
+}> {
   const includeExtensions = options?.includeExtensions ?? DEFAULT_EXTENSIONS;
   const maxFileSizeBytes = options?.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE;
   const forceReindex = options?.forceReindex ?? false;
@@ -191,6 +254,7 @@ export async function indexWorkspaceFiles(
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const parsed: ParsedFile[] = [];
+  const documentTargets: DocumentSemanticTarget[] = [];
 
   let processedCount = 0;
   for (let i = 0; i < scanned.length; i += concurrency) {
@@ -220,6 +284,9 @@ export async function indexWorkspaceFiles(
         edges.push(...result.fileEdges);
         parsed.push(result.parsedEntry);
         cacheState[result.relPath] = result.cacheEntry;
+        if (result.documentSemantic) {
+          documentTargets.push(result.documentSemantic);
+        }
       }
       processedCount += 1;
       options?.onProgress?.(processedCount, scanned.length);
@@ -263,11 +330,27 @@ export async function indexWorkspaceFiles(
 
   saveCacheState(cachePath, cacheState);
 
-  return {
+  const agentWorkItems = buildDocumentSemanticWorkItems(documentTargets);
+  const result: {
+    indexedFiles: number;
+    indexedSymbols: number;
+    indexedReferences: number;
+    agentWorkItems?: AgentWorkItem[];
+    agentInstructions?: string;
+  } = {
     indexedFiles: nodes.filter((node) => node.type === "File").length,
     indexedSymbols: nodes.filter((node) => node.type === "Symbol").length,
     indexedReferences: referenceCount + callEdgeCount + inheritEdgeCount,
   };
+  if (agentWorkItems.length > 0) {
+    result.agentWorkItems = agentWorkItems;
+    result.agentInstructions = [
+      "Document semantic bridge: structural sections/chunks are already indexed.",
+      "Optional: answer each document-semantic-* work item with your model,",
+      'then graphflow_insight({ mode: "submit", workItemId, response }) to store key entities/claims.',
+    ].join(" ");
+  }
+  return result;
 }
 
 // ── Single-file incremental indexing ─────────────────────────────────
@@ -277,9 +360,21 @@ export async function indexSingleFile(
   rootDir: string,
   absPath: string,
   options?: { includeExtensions?: string[]; maxFileSizeBytes?: number; embeddingProvider?: import("../learning/embeddings.js").EmbeddingProvider }
-): Promise<{ indexedFiles: number; indexedSymbols: number; indexedReferences: number; skipped: boolean; reason?: string }> {
+): Promise<{
+  indexedFiles: number;
+  indexedSymbols: number;
+  indexedReferences: number;
+  skipped: boolean;
+  reason?: string;
+  agentWorkItems?: AgentWorkItem[];
+  agentInstructions?: string;
+}> {
   const includeExtensions = options?.includeExtensions ?? DEFAULT_EXTENSIONS;
   const maxFileSizeBytes = options?.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE;
+  const officeDoc = isOfficeDocumentPath(absPath);
+  const sizeLimit = officeDoc
+    ? Math.max(maxFileSizeBytes, DEFAULT_DOCUMENT_MAX_FILE_SIZE)
+    : maxFileSizeBytes;
 
   // Validate extension
   if (!includeExtensions.some((ext) => absPath.toLowerCase().endsWith(ext))) {
@@ -293,14 +388,39 @@ export async function indexSingleFile(
   } catch {
     return { indexedFiles: 0, indexedSymbols: 0, indexedReferences: 0, skipped: true, reason: "file stat failed" };
   }
-  if (stat.size > maxFileSizeBytes) {
+  if (stat.size > sizeLimit) {
     return { indexedFiles: 0, indexedSymbols: 0, indexedReferences: 0, skipped: true, reason: "file exceeds maxFileSizeBytes" };
   }
 
   const relPath = normalizePath(relative(rootDir, absPath));
   const mtimeMs = stat.mtimeMs;
-  const content = readFileSync(absPath, "utf8");
-  const currentHash = createHash("md5").update(content).digest("hex");
+  let content = "";
+  let currentHash = "";
+  let documentSemantic: DocumentSemanticTarget | undefined;
+
+  if (officeDoc) {
+    const bytes = readFileSync(absPath);
+    currentHash = createHash("md5").update(bytes).digest("hex");
+    const converted = await convertDocumentToMarkdown(absPath, bytes);
+    if (!converted.markdown) {
+      return {
+        indexedFiles: 0,
+        indexedSymbols: 0,
+        indexedReferences: 0,
+        skipped: true,
+        reason: converted.skippedReason ?? "document-convert-failed",
+      };
+    }
+    content = converted.markdown;
+    documentSemantic = {
+      relPath,
+      outline: outlineFromMarkdown(content),
+      excerpt: content.slice(0, 6000),
+    };
+  } else {
+    content = readFileSync(absPath, "utf8");
+    currentHash = createHash("md5").update(content).digest("hex");
+  }
 
   const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
   const cacheState = loadCacheState(cachePath, false);
@@ -319,8 +439,10 @@ export async function indexSingleFile(
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
 
-  const indexer = getIndexerForFile(relPath);
-  const language = indexer?.language ?? (relPath.split(".").pop() ?? "text");
+  const indexer = officeDoc ? markdownIndexer : getIndexerForFile(relPath);
+  const language = officeDoc
+    ? "document"
+    : (indexer?.language ?? (relPath.split(".").pop() ?? "text"));
 
   let declared: IndexedSymbol[] = [];
   let imports: string[] = [];
@@ -344,7 +466,16 @@ export async function indexSingleFile(
 
   const fileNodeId = `file:${relPath}`;
 
-  if (language === "markdown" && declared.length > 0) {
+  if (officeDoc) {
+    const fileNode = nodes.find((n) => n.id === fileNodeId);
+    if (fileNode?.metadata) {
+      fileNode.metadata.sourceFormat = extOf(relPath).replace(/^\./, "") || "document";
+      fileNode.metadata.convertedVia = "anydoc";
+      fileNode.metadata.indexedAs = "markdown";
+    }
+  }
+
+  if ((language === "markdown" || language === "document") && declared.length > 0) {
     const docEdges = buildDocumentEdges(fileNodeId, declared);
     edges.push(...docEdges);
   }
@@ -395,12 +526,28 @@ export async function indexSingleFile(
 
   logger.info({ relPath, symbols: declared.length, references: referenceCount }, "Single file indexed");
 
-  return {
+  const agentWorkItems = documentSemantic
+    ? buildDocumentSemanticWorkItems([documentSemantic])
+    : [];
+  const out: {
+    indexedFiles: number;
+    indexedSymbols: number;
+    indexedReferences: number;
+    skipped: boolean;
+    agentWorkItems?: AgentWorkItem[];
+    agentInstructions?: string;
+  } = {
     indexedFiles: 1,
     indexedSymbols: declared.length,
     indexedReferences: referenceCount,
     skipped: false,
   };
+  if (agentWorkItems.length > 0) {
+    out.agentWorkItems = agentWorkItems;
+    out.agentInstructions =
+      "Document semantic bridge: submit document-semantic-* via graphflow_insight to store key entities/claims.";
+  }
+  return out;
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────

@@ -75,6 +75,7 @@ external coding agent (Cursor, Claude Code, …) as the answering agent.
 | `plan-refinement` | Final DAG plan production (stages 8–9) |
 | `reflection` | Plan quality self-assessment (stage 10) |
 | `query-translate` | CJK→English query translation helper (non-ATP utility) |
+| `document-semantic` | Optional post-index extraction of document key entities/claims (non-ATP utility) |
 
 ### 3.2 `TaskNode` (DAG plan item)
 

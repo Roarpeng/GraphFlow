@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-08-08（随 v1.9.8；P0 飞轮闭环可观测 + P1 图噪声/canary/Skill-conditioned DAG/SkillOpt-lite）
+> 最后更新：2026-08-08（随 v1.9.9；文档建图 anydoc + document-semantic bridge；CI walkFiles 路径长度修复）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -10,7 +10,7 @@
 - 🟡 进行中 / 部分完成
 - ⬜ 未开始（欢迎认领）
 
-## 已完成里程碑（v1.0 → v1.9.8）
+## 已完成里程碑（v1.0 → v1.9.9）
 
 | 版本 | 日期 | 里程碑 | 关键交付 | 状态 |
 | --- | --- | --- | --- | --- |
@@ -21,6 +21,7 @@
 | v1.9.0–v1.9.4 | 2026-08-01 | **证据与团队化** | 检索 golden set 26→132；skill A/B 基准与记忆 ROI 基准；技能四分类；CI 版本一致性门禁；skill sync 双向 MERGE；MCP 官方 SDK 化；`graphflow://diagnose` | ✅ |
 | v1.9.5 | 2026-08-01 | **索引卫生** | 索引排除 Agent 工具目录；批量剪枝 `GraphClient.deleteNodes` | ✅ |
 | v1.9.8 | 2026-08-08 | **P0/P1 融合闭环** | 飞轮 diagnose 可观测 + backfill；Skill-conditioned DAG；SkillOpt-lite；Trie 引用预过滤；sync skill canary；Codex Windows NODE/NPX_CLI MCP | ✅ |
+| v1.9.9 | 2026-08-08 | **文档图谱** | CI walkFiles ENAMETOOLONG 修复；可选 `@firecrawl/anydoc` Office/PDF→MD 建图；`document-semantic` bridge | ✅ |
 
 ## 下一阶段
 
