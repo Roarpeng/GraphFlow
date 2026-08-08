@@ -62,7 +62,7 @@ function loadAnydoc(): AnydocModule | null {
   }
   anydocLoadAttempted = true;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+     
     anydocModule = requireFn("@firecrawl/anydoc") as AnydocModule;
   } catch (error) {
     logger.warn(
