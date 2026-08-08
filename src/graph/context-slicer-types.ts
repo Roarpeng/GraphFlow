@@ -77,6 +77,9 @@ export const DEFAULT_EXPANSION_RELATIONS: GraphEdge["relation"][] = [
   "prerequisite",
   "calls",
   "defines",
+  "documents",
+  "implements",
+  "derived_from",
 ];
 
 /**

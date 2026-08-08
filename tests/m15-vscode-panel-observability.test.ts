@@ -18,6 +18,8 @@ describe("M15 VS Code observability panels", () => {
         File: 1,
         Symbol: 1,
         Module: 1,
+        Concept: 0,
+        Requirement: 0,
         TaskRun: 1,
         Decision: 1,
         Skill: 0,

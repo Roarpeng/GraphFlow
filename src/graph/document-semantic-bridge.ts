@@ -49,9 +49,10 @@ export function buildDocumentSemanticWorkItems(
       relPath: `string — echo exactly: ${doc.relPath}`,
       title: "string — document title",
       summary: "string — 2-4 sentence semantic summary",
-      keyEntities: "string[] — people/orgs/systems/APIs/modules mentioned",
-      keyClaims: "string[] — important facts or requirements",
-      relatedCodeHints: "string[] — code symbols/files this doc likely relates to",
+      keyEntities: "string[] — people/orgs/systems/APIs/modules → Concept nodes",
+      requirements: "string[] — normative requirements (preferred over keyClaims)",
+      keyClaims: "string[] — fallback facts/requirements if requirements omitted",
+      relatedCodeHints: "string[] — code symbol names or relative file paths to link",
       tags: "string[] — short topic tags",
     },
   }));

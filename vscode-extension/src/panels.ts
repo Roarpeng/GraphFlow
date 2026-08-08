@@ -15,7 +15,10 @@ export interface GraphSnapshotResult {
   storePath?: string;
   nodeCount: number;
   edgeCount: number;
-  nodeTypeCount: Record<"File" | "Symbol" | "Module" | "TaskRun" | "Decision" | "Skill", number>;
+  nodeTypeCount: Record<
+    "File" | "Symbol" | "Module" | "Concept" | "Requirement" | "TaskRun" | "Decision" | "Skill",
+    number
+  >;
   topRelations: Array<{ relation: string; count: number }>;
   sampleNodes: GraphSnapshotSampleNode[];
   sampleEdges: Array<{ from: string; relation: string; to: string }>;

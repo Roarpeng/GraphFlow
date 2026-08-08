@@ -42,6 +42,9 @@ const SNAPSHOT_EDGE_PRIORITY: GraphEdge["relation"][] = [
   "depends_on",
   "references",
   "inherits",
+  "documents",
+  "implements",
+  "derived_from",
   "co_occurs",
   "improves",
   "prerequisite",
@@ -86,7 +89,11 @@ export function folderGroupFromPath(relPath: string, workspace?: SnapshotWorkspa
 }
 
 export function viewLayerForType(type: GraphNode["type"]): SnapshotViewLayer {
-  return type === "Skill" || type === "TaskRun" || type === "Decision" ? "learning" : "code";
+  if (type === "Skill" || type === "TaskRun" || type === "Decision") {
+    return "learning";
+  }
+  // Concept/Requirement are doc-domain but surface with code for unified engineering KG views.
+  return "code";
 }
 
 function isMetaFile(id: string): boolean {
@@ -179,6 +186,22 @@ export function enrichNodeForSnapshot(
     displayLabel =
       typeof meta.name === "string" ? meta.name : node.id.replace(/^skill:/, "") || "Skill";
     displayPath = node.id;
+  } else if (node.type === "Concept") {
+    displayLabel = compactPreview(node.content, 48) || "Concept";
+    const sourcePathMeta = typeof meta.sourcePath === "string" ? meta.sourcePath : undefined;
+    displayPath = sourcePathMeta;
+    sourcePath = sourcePathMeta;
+    if (sourcePathMeta) {
+      ({ folderGroup, workspacePackage } = applyPathSnapshotMetadata(sourcePathMeta, workspace));
+    }
+  } else if (node.type === "Requirement") {
+    displayLabel = compactPreview(node.content, 48) || "Requirement";
+    const sourcePathMeta = typeof meta.sourcePath === "string" ? meta.sourcePath : undefined;
+    displayPath = sourcePathMeta;
+    sourcePath = sourcePathMeta;
+    if (sourcePathMeta) {
+      ({ folderGroup, workspacePackage } = applyPathSnapshotMetadata(sourcePathMeta, workspace));
+    }
   } else if (node.type === "TaskRun") {
     displayLabel = compactPreview(node.content, 48) || node.id.replace(/^taskrun:/, "") || "TaskRun";
   } else if (node.type === "Decision") {

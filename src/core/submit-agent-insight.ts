@@ -10,6 +10,10 @@ import {
   type GoalUpsertResult,
 } from "./goal-anchor";
 import { hashText } from "../utils/hash";
+import {
+  ingestDocumentSemanticInsight,
+  isDocumentSemanticWorkItemId,
+} from "../graph/document-semantic-ingest.js";
 
 export interface SubmitAgentInsightInput {
   task: string;
@@ -40,6 +44,13 @@ export type SubmitAgentInsightResult =
         changedFields: string[];
         staleEpisodes: number;
         confidence?: number;
+      };
+      /** Present when document-semantic work items upsert Concept/Requirement nodes. */
+      documentGraph?: {
+        conceptIds: string[];
+        requirementIds: string[];
+        edgeCount: number;
+        linkedCodeNodeIds: string[];
       };
       /** True when the submitted intent confidence is below threshold. */
       needsClarification?: boolean;
@@ -145,6 +156,17 @@ export async function submitAgentInsight(
     nodeId,
     parsed: parsedResult.parsed,
   };
+
+  if (isDocumentSemanticWorkItemId(input.workItemId)) {
+    const documentGraph = await ingestDocumentSemanticInsight(
+      client,
+      parsedResult.parsed,
+      nodeId
+    );
+    if (documentGraph.conceptIds.length > 0 || documentGraph.requirementIds.length > 0) {
+      result.documentGraph = documentGraph;
+    }
+  }
 
   // P0/P4: intent submissions (and clarifications) maintain the goal anchor.
   const confidence = readConfidence(parsedResult.parsed);

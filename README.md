@@ -1,6 +1,6 @@
 # GraphFlow
 
-[![npm version](https://img.shields.io/badge/npm-1.9.9-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.9.10-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **The memory & context harness for coding agents.** Local-first code knowledge graph · bounded context compression (~98% token savings) · cross-session learning flywheel.
 
@@ -88,7 +88,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | --- | --- |
 | **Planning protocol** | ATP v1.1 (Intent / Requirement / Six Hats / 5-Why / First Principles / Decision Matrix / Planning / Reflection); simple / complex / insight modes; agent-delegated bridge without an LLM; **skill-conditioned DAG** (`skillRefs` / `avoidPatterns` on plan nodes); [ATP/IR public spec v1.1](docs/atp-ir-spec-v1.md) |
 | **Goal alignment** | Goal anchor nodes (intent five-tuple as first-class citizen, original requirement auto-injected); low-confidence clarification gate (no plan below 0.6); runtime alignment-check; deviation classification (misread-requirement / scope-creep / tech-drift); goal version chain + diffs |
-| **Knowledge graph** | 12-language AST indexing (TS/JS/Python/Rust/Go/C/C++/Java/Ruby/Kotlin/Swift/Dart); File / Module / Symbol nodes + dependency/reference/definition/call/inheritance edges; **Trie reference pre-filter** + subgraph PageRank cache; **Office/PDF → Markdown** (optional `@firecrawl/anydoc`) + document-semantic bridge |
+| **Knowledge graph** | 12-language AST indexing (TS/JS/Python/Rust/Go/C/C++/Java/Ruby/Kotlin/Swift/Dart); File / Module / Symbol + **Concept / Requirement** (doc domain); cross-layer edges `documents` / `implements` / `derived_from`; **Trie reference pre-filter** + subgraph PageRank cache; **Office/PDF → Markdown** (optional `@firecrawl/anydoc`, CLI/npm — **not bundled in VSIX**) + document-semantic bridge |
 | **Context compression** | L1/L2/L3 layered anchors; graph compression (edge weights + PageRank, LRU cache); stem-matching recall (orchestrate ↔ orchestration); vector recall + RRF; RepoMap overview; adaptive budget |
 | **Retrieval quality** | Golden-set regression gate (132 queries, Hit@5=100%, MRR=0.836, NDCG@5=0.601) |
 | **Vector index** | In-process memoization + disk persistence (fingerprint-checked, seconds to restore after MCP restart) |
