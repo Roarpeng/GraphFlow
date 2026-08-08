@@ -36,18 +36,53 @@ function symbolFileOf(nodeId: string): string {
   return idx > 0 ? rest.slice(0, idx) : rest;
 }
 
+/** Prefix trie over symbol vocabulary for O(|content|) pre-filter scans. */
+export interface SymbolTrieNode {
+  children: Map<string, SymbolTrieNode>;
+  end: boolean;
+}
+
+/** Build a deterministic prefix trie from the identifier vocabulary. */
+export function buildSymbolTrie(vocabulary: Iterable<string>): SymbolTrieNode {
+  const root: SymbolTrieNode = { children: new Map(), end: false };
+  for (const name of vocabulary) {
+    let node = root;
+    for (let i = 0; i < name.length; i += 1) {
+      const ch = name[i]!;
+      let next = node.children.get(ch);
+      if (!next) {
+        next = { children: new Map(), end: false };
+        node.children.set(ch, next);
+      }
+      node = next;
+    }
+    node.end = true;
+  }
+  return root;
+}
+
 /**
- * 廉价预过滤：在跑完整标识符正则前，先用一次 indexOf 扫描判定文件内容中
- * 是否存在任何一个词表符号。大仓中绝大多数文件与跨文件符号无交集，跳过这些
- * 文件可避免 O(文件大小) 的 matchAll 扫描。
+ * 廉价预过滤（前缀 Trie）：单次扫描判定内容是否包含任一词表符号子串。
+ * 相对逐符号 indexOf（O(|V|·|C|)），Trie 扫描为 O(|C|·L)（L 为最长符号名）。
  *
  * 正确性：\b\w{3,}\b 命中的 token 必然以完整子串形式出现在内容中，因此
  * "内容不含任何词表符号子串" ⇒ "正则不会产生任何词表命中"，不会漏边。
  */
-function containsAnySymbolName(content: string, vocabulary: Set<string>): boolean {
-  for (const name of vocabulary) {
-    if (content.includes(name)) {
-      return true;
+export function trieContainsAnySymbol(content: string, root: SymbolTrieNode): boolean {
+  if (root.children.size === 0 || content.length === 0) {
+    return false;
+  }
+  for (let i = 0; i < content.length; i += 1) {
+    let node: SymbolTrieNode = root;
+    for (let j = i; j < content.length; j += 1) {
+      const next = node.children.get(content[j]!);
+      if (!next) {
+        break;
+      }
+      if (next.end) {
+        return true;
+      }
+      node = next;
     }
   }
   return false;
@@ -88,6 +123,7 @@ export function buildBatchReferenceEdges(
       vocabulary.add(name);
     }
   }
+  const symbolTrie = buildSymbolTrie(vocabulary);
 
   // 按 (name, file) 预分组定义：本文件定义整桶跳过，跨文件定义直接迭代。
   const defsByFile = new Map<string, Map<string, IndexedSymbol[]>>();
@@ -106,8 +142,8 @@ export function buildBatchReferenceEdges(
     if (!file.scannable) {
       continue;
     }
-    // 廉价预过滤：文件中不存在任何词表符号时，跳过整个正则扫描（短路）。
-    if (!containsAnySymbolName(file.content, vocabulary)) {
+    // Trie 预过滤：文件中不存在任何词表符号时，跳过整个正则扫描（短路）。
+    if (!trieContainsAnySymbol(file.content, symbolTrie)) {
       continue;
     }
     const seenThisFile = new Set<string>();
@@ -262,8 +298,8 @@ export function buildSingleFileReferenceEdges(
     }
   }
 
-  // 廉价预过滤：文件中不存在任何词表符号时，跳过整个正则扫描（短路）。
-  if (vocabulary.size === 0 || !containsAnySymbolName(content, vocabulary)) {
+  // Trie 预过滤：文件中不存在任何词表符号时，跳过整个正则扫描（短路）。
+  if (vocabulary.size === 0 || !trieContainsAnySymbol(content, buildSymbolTrie(vocabulary))) {
     return { edges, referenceCount };
   }
 

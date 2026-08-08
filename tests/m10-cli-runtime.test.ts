@@ -152,7 +152,7 @@ describe("M10 CLI runtime", () => {
     }
   });
 
-  it("returns plan and brainstorm output for complex tasks", () => {
+  it("returns plan and brainstorm output for complex tasks", async () => {
     const configPath = join(tmpdir(), `gf-m10-plan-${Date.now()}.json`);
     writeFileSync(
       configPath,
@@ -165,7 +165,7 @@ describe("M10 CLI runtime", () => {
       "utf8"
     );
     try {
-      const output = planAndBrainstorm(
+      const output = await planAndBrainstorm(
         "update readme and add tests and refactor architecture module",
         configPath
       );

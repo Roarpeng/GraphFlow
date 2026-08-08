@@ -104,6 +104,10 @@ export interface TaskNode {
   outputs?: string[];
   /** ATP v1.0: 风险标签 */
   risks?: string[];
+  /** Skill flywheel: proven/correctable skills to review before this step. */
+  skillRefs?: string[];
+  /** Skill flywheel: anti-patterns to avoid on this step. */
+  avoidPatterns?: string[];
 }
 
 export interface OrchestrationInput {

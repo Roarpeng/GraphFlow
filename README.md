@@ -1,6 +1,6 @@
 # GraphFlow
 
-[![npm version](https://img.shields.io/badge/npm-1.9.7-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.9.8-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **The memory & context harness for coding agents.** Local-first code knowledge graph · bounded context compression (~98% token savings) · cross-session learning flywheel.
 
@@ -86,20 +86,20 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 
 | Module | Capability |
 | --- | --- |
-| **Planning protocol** | ATP v1.1 (Intent / Requirement / Six Hats / 5-Why / First Principles / Decision Matrix / Planning / Reflection); simple / complex / insight modes; agent-delegated bridge without an LLM; [ATP/IR public spec v1.1](docs/atp-ir-spec-v1.md) |
+| **Planning protocol** | ATP v1.1 (Intent / Requirement / Six Hats / 5-Why / First Principles / Decision Matrix / Planning / Reflection); simple / complex / insight modes; agent-delegated bridge without an LLM; **skill-conditioned DAG** (`skillRefs` / `avoidPatterns` on plan nodes); [ATP/IR public spec v1.1](docs/atp-ir-spec-v1.md) |
 | **Goal alignment** | Goal anchor nodes (intent five-tuple as first-class citizen, original requirement auto-injected); low-confidence clarification gate (no plan below 0.6); runtime alignment-check; deviation classification (misread-requirement / scope-creep / tech-drift); goal version chain + diffs |
-| **Knowledge graph** | 12-language AST indexing (TS/JS/Python/Rust/Go/C/C++/Java/Ruby/Kotlin/Swift/Dart); File / Module / Symbol nodes + dependency/reference/definition/call/inheritance edges |
+| **Knowledge graph** | 12-language AST indexing (TS/JS/Python/Rust/Go/C/C++/Java/Ruby/Kotlin/Swift/Dart); File / Module / Symbol nodes + dependency/reference/definition/call/inheritance edges; **Trie reference pre-filter** + subgraph PageRank cache |
 | **Context compression** | L1/L2/L3 layered anchors; graph compression (edge weights + PageRank, LRU cache); stem-matching recall (orchestrate ↔ orchestration); vector recall + RRF; RepoMap overview; adaptive budget |
 | **Retrieval quality** | Golden-set regression gate (132 queries, Hit@5=100%, MRR=0.836, NDCG@5=0.601) |
 | **Vector index** | In-process memoization + disk persistence (fingerprint-checked, seconds to restore after MCP restart) |
 | **Storage backends** | `file` / `memory` / `sqlite` (FTS5, tokenizer-enhanced `searchtext`, camelCase searchable) / **`auto` (sqlite-first with fallback)** / `mcp-http` |
-| **Learning flywheel** | Episodic memory, reflection, skill nodes (score ±1, bounded [-20,20]), nightly training, skill decay/pruning, **auto-capture + Claude Code hooks (on by default)**, four-class skill lifecycle + canary validation, contribution reports (`skill report` / `graphflow_diagnose`) |
+| **Learning flywheel** | Episodic memory, reflection, skill nodes (score ±1, bounded [-20,20]), nightly training, skill decay/pruning, **auto-capture + Claude Code hooks (on by default)**, **SkillOpt-lite** bounded guidance edits, four-class lifecycle + **canary gate for synced skills**, `npm run backfill:episodes`, contribution reports (`skill report` / `graphflow_diagnose` / `route diagnose`) |
 | **Team sharing** | `skill sync`: export/import skill packs to a committable `.graphflow/skills/team-skills.json`; imports are a **bidirectional MERGE** (per-skill-id union, newer `updatedAt` wins, ties keep local, local-only skills preserved; `--force` to overwrite); golden retrieval queries round-trip via `.graphflow/team-golden.json`; [security model](docs/team-memory-security.md) |
 | **Benchmarks** | [Comprehensive 92.9%](benchmarks/COMPREHENSIVE-RESULTS.md) · [Independent-style 96.2%](benchmarks/INDEPENDENT-RESULTS.md) · [context-readiness eval](benchmarks/SWE-BENCH-RESULTS.md) · [98.2% token savings](benchmarks/RESULTS.md) |
 | **Model routing** | Smart / Economy tiers; multi-provider health probes and fallback (DeepSeek, OpenAI, Anthropic, Bailian, Doubao) |
-| **Observability** | `graphflow_diagnose`: provider health + graph stats + token savings + flywheel report |
-| **Agent surfaces** | CLI `--json`; MCP stdio (10 tools); auto-install into 15+ agents |
-| **Engineering quality** | TypeScript strict; 99 test files / 692 tests; `npm run ci` includes extension packaging and smoke tests |
+| **Observability** | `graphflow_diagnose` / `route diagnose`: provider health + graph stats + token savings + **flywheel health** (auto-capture, episodes, skills by class, session journal) |
+| **Agent surfaces** | CLI `--json`; MCP stdio (10 tools); auto-install into 15+ agents (incl. **Codex Windows NODE/NPX_CLI short-path MCP**) |
+| **Engineering quality** | TypeScript strict; vitest suite; `npm run ci` includes extension packaging and smoke tests |
 
 ### Positioning
 

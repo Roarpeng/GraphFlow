@@ -54,12 +54,16 @@ export function parseSkillState(content: string): SkillState | undefined {
       ...(parsed.outcomeKind === "proven" || parsed.outcomeKind === "correctable" || parsed.outcomeKind === "anti-pattern" || parsed.outcomeKind === "noise"
         ? { outcomeKind: parsed.outcomeKind }
         : {}),
+      ...(parsed.canaryValidated === true ? { canaryValidated: true } : {}),
       ...(() => {
         const provenance = normalizeSkillProvenance(
           (parsed as { provenance?: unknown }).provenance
         );
         return provenance ? { provenance } : {};
       })(),
+      ...(typeof parsed.guidance === "string" && parsed.guidance.trim().length > 0
+        ? { guidance: parsed.guidance.trim() }
+        : {}),
     };
   } catch (error) {
     logger.error({ error }, "Caught error");
@@ -93,6 +97,7 @@ export function parseCompositeState(content: string): CompositeSkillState | unde
       ...(parsed.outcomeKind === "proven" || parsed.outcomeKind === "correctable" || parsed.outcomeKind === "anti-pattern" || parsed.outcomeKind === "noise"
         ? { outcomeKind: parsed.outcomeKind }
         : {}),
+      ...(parsed.canaryValidated === true ? { canaryValidated: true } : {}),
       ...(() => {
         const provenance = normalizeSkillProvenance(
           (parsed as { provenance?: unknown }).provenance

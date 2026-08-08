@@ -233,11 +233,11 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       return undefined;
     }
 
-    const data = planAndBrainstormResult(task);
+    const data = await planAndBrainstormResult(task);
     return {
       command,
       data,
-      legacyText: planAndBrainstorm(task),
+      legacyText: await planAndBrainstorm(task),
     };
   }
 

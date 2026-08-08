@@ -127,6 +127,16 @@ describe("flywheel contribution report", () => {
     expect(report.skills.total).toBeGreaterThan(0);
     expect(report.skills.positive).toBeGreaterThan(0);
     expect(report.skills.negative).toBeGreaterThan(0);
+    expect(report.skills.byOutcomeKind.proven).toBeGreaterThan(0);
+    expect(report.skills.byOutcomeKind["anti-pattern"]).toBeGreaterThan(0);
+    expect(typeof report.autoCaptureEnabled).toBe("boolean");
+    expect(report.sessionJournal).toEqual(
+      expect.objectContaining({
+        path: expect.stringContaining("session-journal.jsonl"),
+        exists: expect.any(Boolean),
+        pendingCount: expect.any(Number),
+      })
+    );
     expect(report.episodes.total).toBe(4);
     expect(report.episodes.pass).toBe(1);
     expect(report.episodes.fail).toBe(2);
@@ -320,6 +330,128 @@ describe("flywheel contribution report", () => {
     const report = getFlywheelReport(emptyConfigPath);
     expect(report.skills.total).toBe(0);
     expect(report.episodes.total).toBe(0);
+    expect(report.skills.byOutcomeKind).toEqual({
+      proven: 0,
+      correctable: 0,
+      "anti-pattern": 0,
+      noise: 0,
+    });
+    expect(typeof report.autoCaptureEnabled).toBe("boolean");
+    expect(report.sessionJournal.exists).toBe(false);
+    expect(report.sessionJournal.pendingCount).toBe(0);
     rmSync(emptyRoot, { recursive: true, force: true });
+  });
+
+  it("reports auto-capture health, skill outcomeKind counts, and session journal pending", async () => {
+    const healthRoot = mkdtempSync(join(tmpdir(), "graphflow-flywheel-health-"));
+    const healthConfigPath = join(healthRoot, "graphflow.config.json");
+    const healthStorePath = join(healthRoot, "graph.json");
+    writeFileSync(
+      healthConfigPath,
+      JSON.stringify({
+        ...configJson,
+        graphPolicy: {
+          ...configJson.graphPolicy,
+          workspaceRoot: healthRoot,
+          graphStorePath: healthStorePath,
+        },
+      })
+    );
+    const client = createGraphClient(
+      validateConfig(
+        JSON.parse(
+          JSON.stringify({
+            ...configJson,
+            graphPolicy: {
+              ...configJson.graphPolicy,
+              workspaceRoot: healthRoot,
+              graphStorePath: healthStorePath,
+            },
+          })
+        )
+      )
+    );
+
+    // Seed classified skills: proven (2× pass) and anti-pattern (2× fail).
+    await applySkillLearning(client, "refactor health planner in planner.ts", {
+      status: "COMPLETED",
+      attempts: 1,
+      feedback: "done",
+    });
+    await applySkillLearning(client, "refactor health planner in planner.ts", {
+      status: "COMPLETED",
+      attempts: 1,
+      feedback: "done",
+    });
+    await applySkillLearning(client, "fix health cache in cache-layer.ts", {
+      status: "FAILED",
+      attempts: 1,
+      feedback: "failed",
+    });
+    await applySkillLearning(client, "fix health cache in cache-layer.ts", {
+      status: "FAILED",
+      attempts: 1,
+      feedback: "failed",
+    });
+
+    await recordEpisode(client, {
+      task: "health pending episode",
+      plan: [],
+      outcome: "pending",
+      keyDecisions: [],
+      lessons: [],
+      attempts: 0,
+    });
+
+    // Write a session-journal pending entry under the workspace root.
+    mkdirSync(join(healthRoot, ".graphflow"), { recursive: true });
+    writeFileSync(
+      join(healthRoot, ".graphflow", "session-journal.jsonl"),
+      `${JSON.stringify({
+        version: 1,
+        kind: "pending-episode",
+        episodeId: "episode:journal-1",
+        task: "journaled task",
+        taskKey: "abc",
+        createdAt: Date.now(),
+      })}\n${JSON.stringify({
+        version: 1,
+        kind: "pending-episode",
+        episodeId: "episode:journal-2",
+        task: "another journaled task",
+        taskKey: "def",
+        createdAt: Date.now(),
+      })}\n`
+    );
+
+    const prev = process.env.GRAPHFLOW_AUTO_CAPTURE;
+    delete process.env.GRAPHFLOW_AUTO_CAPTURE;
+    try {
+      const report = getFlywheelReport(healthConfigPath);
+
+      expect(report.autoCaptureEnabled).toBe(true);
+      expect(report.sessionJournal.exists).toBe(true);
+      expect(report.sessionJournal.path).toContain("session-journal.jsonl");
+      expect(report.sessionJournal.pendingCount).toBe(2);
+      expect(report.episodes.total).toBe(1);
+      expect(report.episodes.pending).toBe(1);
+      expect(report.skills.byOutcomeKind.proven).toBeGreaterThan(0);
+      expect(report.skills.byOutcomeKind["anti-pattern"]).toBeGreaterThan(0);
+      expect(report.skills.byOutcomeKind).toEqual(
+        expect.objectContaining({
+          proven: expect.any(Number),
+          correctable: expect.any(Number),
+          "anti-pattern": expect.any(Number),
+          noise: expect.any(Number),
+        })
+      );
+
+      process.env.GRAPHFLOW_AUTO_CAPTURE = "0";
+      expect(getFlywheelReport(healthConfigPath).autoCaptureEnabled).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env.GRAPHFLOW_AUTO_CAPTURE;
+      else process.env.GRAPHFLOW_AUTO_CAPTURE = prev;
+      rmSync(healthRoot, { recursive: true, force: true });
+    }
   });
 });

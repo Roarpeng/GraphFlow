@@ -117,7 +117,7 @@ export async function executeToolCall(
         );
       }
       return textResponse(
-        planAndBrainstormResult(task, readOptionalString(args.configPath))
+        await planAndBrainstormResult(task, readOptionalString(args.configPath))
       );
     }
     case "graphflow_index": {

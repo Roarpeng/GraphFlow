@@ -55,10 +55,10 @@ describe("M80 simple plan agent bridge", () => {
     expect(result.agentWorkItems[1]?.prompt).toContain("Suggested local plan");
   });
 
-  it("planAndBrainstormResult bridges when no usable LLM", () => {
+  it("planAndBrainstormResult bridges when no usable LLM", async () => {
     const configPath = writeProvidersConfig({});
     try {
-      const result = planAndBrainstormResult(task, configPath);
+      const result = await planAndBrainstormResult(task, configPath);
       expect(result.mode).toBe("agent-delegated");
       expect(result.requiresAgentBridge).toBe(true);
       expect(result.status).toBe("awaiting-agent");
@@ -70,12 +70,12 @@ describe("M80 simple plan agent bridge", () => {
     }
   });
 
-  it("planAndBrainstormResult stays local when LLM credentials exist", () => {
+  it("planAndBrainstormResult stays local when LLM credentials exist", async () => {
     const configPath = writeProvidersConfig({
       openai: { apiKey: "sk-test-not-empty", baseUrl: "https://api.openai.com/v1" },
     });
     try {
-      const result = planAndBrainstormResult("update readme and add tests", configPath);
+      const result = await planAndBrainstormResult("update readme and add tests", configPath);
       expect(result.mode === "simple" || result.mode === "complex").toBe(true);
       expect(result.requiresAgentBridge).toBe(false);
       expect(result.complete).toBe(true);

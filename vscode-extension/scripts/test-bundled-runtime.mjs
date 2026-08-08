@@ -71,7 +71,7 @@ const checks = [
     return `nodes=${status.graphNodeCount}; overlay=${status.overlayKeys.length}`;
   }],
   ["planAndBrainstorm", async () => {
-    const output = runtime.planAndBrainstorm("health check");
+    const output = await runtime.planAndBrainstorm("health check");
     if (!output.includes("mode=")) {
       throw new Error(`unexpected plan output: ${output}`);
     }

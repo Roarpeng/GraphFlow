@@ -14,6 +14,12 @@ import { GraphFileWatcher } from "../../../graph/file-watcher.js";
 import { extractNodeSourcePath } from "../../../graph/graph-utils";
 import { sampleGraphForSnapshot } from "../../../graph/snapshot-view.js";
 import { getSavingsStats, resetSavingsStats, recordSavings } from "../../../graph/token-savings.js";
+import {
+  isAutoCaptureEnabled,
+  readJournalEntries,
+  resolveSessionJournalPath,
+} from "../../../hooks/auto-capture.js";
+import type { SkillOutcomeKind } from "../../../learning/skill-types.js";
 import { logger } from "../../../utils/logger.js";
 import { buildEmbeddingOptions,
 } from "./env.js";
@@ -40,6 +46,28 @@ import {
   buildQueryTranslateWorkItem,
   shouldDelegateQueryTranslation,
 } from "../../../graph/query-translate.js";
+
+function emptySkillOutcomeKindCounts(): Record<SkillOutcomeKind, number> {
+  return { proven: 0, correctable: 0, "anti-pattern": 0, noise: 0 };
+}
+
+/** Read outcomeKind from a Skill node content blob (atomic or composite). */
+function readSkillOutcomeKind(content: string): SkillOutcomeKind | undefined {
+  try {
+    const parsed = JSON.parse(content) as { outcomeKind?: unknown };
+    if (
+      parsed.outcomeKind === "proven" ||
+      parsed.outcomeKind === "correctable" ||
+      parsed.outcomeKind === "anti-pattern" ||
+      parsed.outcomeKind === "noise"
+    ) {
+      return parsed.outcomeKind;
+    }
+  } catch {
+    // ignore malformed skill payloads
+  }
+  return undefined;
+}
 
 function graphStoreNeedsIndexing(config: GraphFlowConfig): boolean {
   const storePath = resolveGraphStorePath(config);
@@ -415,11 +443,25 @@ export async function getSkillInsights(
 export interface FlywheelReport {
   transport: string;
   storePath: string;
+  /**
+   * P0 flywheel auto-capture health — whether pending episodes are written
+   * automatically on run/context completion (`GRAPHFLOW_AUTO_CAPTURE`).
+   */
+  autoCaptureEnabled: boolean;
+  /** Session journal used by hooks/backfill to resolve pending episodeIds. */
+  sessionJournal: {
+    path: string;
+    exists: boolean;
+    /** Count of pending-episode journal entries awaiting outcome backfill. */
+    pendingCount: number;
+  };
   skills: {
     total: number;
     positive: number;
     neutral: number;
     negative: number;
+    /** P0-2 four-class skill lifecycle distribution (hidden skills excluded). */
+    byOutcomeKind: Record<SkillOutcomeKind, number>;
     /** Most-used skills — what the flywheel actually injects most often. */
     topUsed: Array<{ name: string; score: number; uses: number }>;
   };
@@ -494,13 +536,36 @@ export interface FlywheelReport {
  * (pass/fail/pending + lessons) accumulate. Read-only; never triggers indexing.
  */
 export function getFlywheelReport(configPath?: string, rootDir?: string): FlywheelReport {
-  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
+  const resolved = resolveConfig(configPath);
+  // Preserve config/project workspaceRoot when rootDir is omitted; a bare
+  // bindRuntimeWorkspaceRoot(resolved) re-discovers from cwd and drops the
+  // explicit graphPolicy.workspaceRoot that resolveConfig already bound.
+  const config = bindRuntimeWorkspaceRoot(
+    resolved,
+    rootDir
+      ? { rootDir }
+      : resolved.graphPolicy.workspaceRoot
+        ? { projectWorkspaceRoot: resolved.graphPolicy.workspaceRoot }
+        : undefined
+  );
   const store = loadGraphStore(config);
+  const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
+  const journalPath = resolveSessionJournalPath(workspaceRoot);
+  const journalExists = existsSync(journalPath);
+  const journalPendingCount = journalExists ? readJournalEntries(journalPath).length : 0;
 
-  const skillItems = store.nodes
-    .filter((node) => node.type === "Skill")
-    .map((node) => parseSkillInsight(node))
-    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const byOutcomeKind = emptySkillOutcomeKindCounts();
+  const skillItems: Array<NonNullable<ReturnType<typeof parseSkillInsight>>> = [];
+  for (const node of store.nodes) {
+    if (node.type !== "Skill") continue;
+    const item = parseSkillInsight(node);
+    if (!item) continue;
+    skillItems.push(item);
+    const kind = readSkillOutcomeKind(node.content);
+    if (kind) {
+      byOutcomeKind[kind] += 1;
+    }
+  }
 
   const topUsed = [...skillItems]
     .sort((a, b) => b.uses - a.uses || b.score - a.score)
@@ -589,11 +654,18 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
   return {
     transport: config.graphPolicy.transport,
     storePath: resolveGraphStorePath(config),
+    autoCaptureEnabled: isAutoCaptureEnabled(),
+    sessionJournal: {
+      path: journalPath,
+      exists: journalExists,
+      pendingCount: journalPendingCount,
+    },
     skills: {
       total: skillItems.length,
       positive: skillItems.filter((s) => s.score > 0).length,
       neutral: skillItems.filter((s) => s.score === 0).length,
       negative: skillItems.filter((s) => s.score < 0).length,
+      byOutcomeKind,
       topUsed,
     },
     episodes: {

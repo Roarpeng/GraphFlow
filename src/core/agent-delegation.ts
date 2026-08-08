@@ -314,13 +314,64 @@ export type SimplePlanNode = {
   id: string;
   description: string;
   dependencies: string[];
+  /** Proven / correctable skill ids or names to review before executing this step. */
+  skillRefs?: string[];
+  /** Anti-pattern skill names to avoid while executing this step. */
+  avoidPatterns?: string[];
 };
+
+/** Optional skill flywheel conditioning for plan DAG / bridge prompts. */
+export type SkillConditionOptions = {
+  skillRefs?: string[];
+  avoidPatterns?: string[];
+};
+
+/**
+ * Attach matching skill refs / anti-patterns onto plan nodes (backward-compatible).
+ * Empty arrays are omitted so JSON stays lean for clients that ignore the fields.
+ */
+export function attachSkillConditionToPlanNodes<T extends SimplePlanNode>(
+  nodes: T[],
+  skillCondition?: SkillConditionOptions
+): T[] {
+  const skillRefs = (skillCondition?.skillRefs ?? []).filter((s) => s.trim().length > 0);
+  const avoidPatterns = (skillCondition?.avoidPatterns ?? []).filter((s) => s.trim().length > 0);
+  if (skillRefs.length === 0 && avoidPatterns.length === 0) {
+    return nodes;
+  }
+  return nodes.map((node) => ({
+    ...node,
+    ...(skillRefs.length > 0 ? { skillRefs: [...skillRefs] } : {}),
+    ...(avoidPatterns.length > 0 ? { avoidPatterns: [...avoidPatterns] } : {}),
+  }));
+}
+
+function formatSkillConditionBridgeLines(skillCondition?: SkillConditionOptions): string[] {
+  const skillRefs = (skillCondition?.skillRefs ?? []).filter((s) => s.trim().length > 0);
+  const avoidPatterns = (skillCondition?.avoidPatterns ?? []).filter((s) => s.trim().length > 0);
+  if (skillRefs.length === 0 && avoidPatterns.length === 0) {
+    return [];
+  }
+  const lines = ["", "Skill-conditioned DAG (from skill flywheel):"];
+  if (skillRefs.length > 0) {
+    lines.push(
+      `- Before implementing each step, review proven/correctable skills: ${skillRefs.join(", ")}`
+    );
+  }
+  if (avoidPatterns.length > 0) {
+    lines.push(`- Avoid known anti-patterns: ${avoidPatterns.join(", ")}`);
+  }
+  return lines;
+}
 
 /**
  * Compact agent-bridge for default graphflow_plan when GraphFlow has no LLM.
  * Local heuristic DAG is attached as a non-final suggestion only.
  */
-export function buildAgentDelegatedSimplePlan(task: string): {
+export function buildAgentDelegatedSimplePlan(
+  task: string,
+  skillCondition?: SkillConditionOptions
+): {
   mode: "agent-delegated";
   triageMode: "simple" | "complex";
   ideas: string[];
@@ -336,12 +387,16 @@ export function buildAgentDelegatedSimplePlan(task: string): {
 } {
   const triageMode = triageTask(task);
   const ideas = brainstormTask(task);
-  const suggestedNodes = planTasks(task).map((node) => ({
-    id: node.id,
-    description: node.description,
-    dependencies: node.dependencies,
-  }));
+  const suggestedNodes = attachSkillConditionToPlanNodes(
+    planTasks(task).map((node) => ({
+      id: node.id,
+      description: node.description,
+      dependencies: node.dependencies,
+    })),
+    skillCondition
+  );
   const suggestedJson = JSON.stringify(suggestedNodes, null, 2);
+  const skillBridgeLines = formatSkillConditionBridgeLines(skillCondition);
 
   const agentWorkItems: AgentWorkItem[] = [
     {
@@ -385,15 +440,24 @@ export function buildAgentDelegatedSimplePlan(task: string): {
         "- Max 8 tasks; each description must be actionable (verb + object)",
         "- Do NOT invent parallel noun-phrase tasks from punctuation lists",
         "- Prefer sequential design → implement → verify when the request is one analytical intent",
+        "- When suggested nodes include skillRefs / avoidPatterns, preserve them on matching steps",
+        "- Optional fields on each node: skillRefs?: string[], avoidPatterns?: string[]",
+        ...skillBridgeLines,
         "",
         "Suggested local plan (non-authoritative):",
         suggestedJson,
         "",
-        "Return ONLY a JSON array: [{id, description, dependencies}]",
+        "Return ONLY a JSON array: [{id, description, dependencies, skillRefs?, avoidPatterns?}]",
       ].join("\n"),
       expectedFormat: "json",
       responseSchema: {
-        items: { id: "string", description: "string", dependencies: "string[]" },
+        items: {
+          id: "string",
+          description: "string",
+          dependencies: "string[]",
+          skillRefs: "string[]?",
+          avoidPatterns: "string[]?",
+        },
       },
     },
     // P2: execution-time alignment check — optional, submitted after work is done.
@@ -414,6 +478,7 @@ export function buildAgentDelegatedSimplePlan(task: string): {
     "5. [OPTIONAL but RECOMMENDED] After finishing, submit an alignment-check against the goal anchor",
     '   (workItemId: "alignment-check"): does the output serve successDefinition without touching nonGoals?',
     "   Then graphflow_report_outcome with drift classification.",
+    ...skillBridgeLines,
     "",
     `Task: ${task}`,
     "",

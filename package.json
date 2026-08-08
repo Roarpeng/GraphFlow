@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "1.9.7",
+  "version": "1.9.8",
   "publishConfig": {
     "access": "public"
   },
@@ -59,6 +59,7 @@
     "bench:skill-ab": "tsx benchmarks/run-skill-ab-benchmark.ts && tsx benchmarks/run-skill-ab.ts",
     "bench:memory": "tsx benchmarks/run-memory-ab.ts",
     "bench:all": "npm run bench:retrieval && npm run bench:token && npm run bench:skill-ab && npm run bench:memory",
+    "backfill:episodes": "node scripts/backfill-episodes.cjs",
     "lint": "eslint .",
     "build:extension": "npm --prefix vscode-extension run build",
     "test:extension": "npm --prefix vscode-extension run test:runtime",
