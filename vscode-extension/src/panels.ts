@@ -1,3 +1,5 @@
+import { sharedPanelCss } from "./panel-styles";
+
 export interface GraphSnapshotSampleNode {
   id: string;
   type: string;
@@ -183,34 +185,18 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>GraphFlow 知识图谱</title>
   <style>
-    :root {
-      color-scheme: dark;
-      --bg: #0b1017;
-      --panel: #141b26;
-      --panel-soft: #1a2332;
-      --ink: #e6edf3;
-      --muted: #8b949e;
-      --line: #30363d;
-      --accent: #3fb950;
-      --accent-soft: rgba(63, 185, 80, 0.14);
-      --accent-2: #58a6ff;
-      --shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
-    }
-    * { box-sizing: border-box; }
+    ${sharedPanelCss("dark")}
     body {
-      margin: 0;
-      font-family: "Segoe UI", "PingFang SC", sans-serif;
-      color: var(--ink);
       background:
-        radial-gradient(circle at top right, rgba(88, 166, 255, 0.12), transparent 24%),
-        radial-gradient(circle at top left, rgba(63, 185, 80, 0.1), transparent 30%),
+        radial-gradient(circle at top right, rgba(88, 166, 255, 0.1), transparent 24%),
+        radial-gradient(circle at top left, rgba(63, 185, 80, 0.08), transparent 30%),
         var(--bg);
     }
     .shell { padding: 16px; display: grid; gap: 14px; }
     .hero {
       background: linear-gradient(135deg, rgba(20, 27, 38, 0.98), rgba(11, 16, 23, 0.96));
       border: 1px solid var(--line);
-      border-radius: 18px;
+      border-radius: var(--radius);
       padding: 16px;
       box-shadow: var(--shadow);
     }
@@ -218,7 +204,7 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
     .metric, .panel {
       background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: 16px;
+      border-radius: var(--radius);
       box-shadow: var(--shadow);
     }
     .metric { padding: 12px; }
@@ -285,6 +271,8 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
       padding: 10px;
       cursor: pointer;
       text-align: left;
+      color: inherit;
+      width: 100%;
     }
     .node-item.active { border-color: var(--accent); background: var(--accent-soft); }
     .node-meta { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
@@ -477,27 +465,11 @@ export function buildSkillInsightsHtml(insights: SkillInsightsResult, scriptUri:
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>GraphFlow Skill Insights</title>
   <style>
-    :root {
-      color-scheme: light;
-      --bg: #f6f1eb;
-      --panel: #fffdf8;
-      --ink: #1f2937;
-      --muted: #6b7280;
-      --line: #decdbb;
-      --accent: #0f766e;
-      --accent-soft: #d8f1ee;
-      --warn: #b45309;
-      --danger: #b91c1c;
-      --shadow: 0 14px 34px rgba(31, 41, 55, 0.08);
-    }
-    * { box-sizing: border-box; }
+    ${sharedPanelCss("light")}
     body {
-      margin: 0;
-      font-family: "Segoe UI", sans-serif;
-      color: var(--ink);
       background:
-        radial-gradient(circle at top right, rgba(15, 118, 110, 0.12), transparent 24%),
-        radial-gradient(circle at top left, rgba(180, 83, 9, 0.12), transparent 30%),
+        radial-gradient(circle at top right, rgba(13, 148, 136, 0.1), transparent 26%),
+        radial-gradient(circle at top left, rgba(37, 99, 235, 0.06), transparent 28%),
         var(--bg);
       padding: 16px;
     }
@@ -505,7 +477,7 @@ export function buildSkillInsightsHtml(insights: SkillInsightsResult, scriptUri:
     .meta, .toolbar, .panel {
       background: var(--panel);
       border: 1px solid var(--line);
-      border-radius: 16px;
+      border-radius: var(--radius);
       box-shadow: var(--shadow);
     }
     .meta, .toolbar { padding: 12px; }
@@ -520,25 +492,24 @@ export function buildSkillInsightsHtml(insights: SkillInsightsResult, scriptUri:
       border: 1px solid var(--line);
       padding: 10px 12px;
       font: inherit;
-      background: #fff;
+      background: var(--panel-soft);
       color: var(--ink);
     }
     .panel { overflow: hidden; }
     table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 12px 10px; border-bottom: 1px solid #ece2d7; text-align: left; font-size: 13px; }
-    th { background: #f9f3eb; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
-    tbody tr:hover { background: #fcf7ef; }
+    th, td { padding: 12px 10px; border-bottom: 1px solid var(--line); text-align: left; font-size: 13px; }
+    th { background: var(--panel-soft); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
     .score-pass { color: var(--accent); font-weight: 700; }
     .score-fail { color: var(--danger); font-weight: 700; }
     .summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-    .summary-card { padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+    .summary-card { padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel-soft); }
     .summary-card .label { color: var(--muted); font-size: 12px; }
     .summary-card .value { margin-top: 6px; font-size: 18px; font-weight: 700; }
     .empty { padding: 18px; color: var(--muted); }
     .fw-panel { padding: 14px; }
     .fw-panel h2 { margin: 0 0 12px; font-size: 14px; letter-spacing: 0.04em; color: var(--muted); }
     .fw-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
-    .fw-card { border: 1px solid var(--line); border-radius: 14px; padding: 12px; background: #fff; }
+    .fw-card { border: 1px solid var(--line); border-radius: 14px; padding: 12px; background: var(--panel-soft); }
     .fw-card .label { color: var(--muted); font-size: 12px; }
     .fw-counts { display: flex; gap: 14px; margin-top: 8px; flex-wrap: wrap; }
     .fw-count { display: grid; gap: 2px; }
@@ -547,16 +518,16 @@ export function buildSkillInsightsHtml(insights: SkillInsightsResult, scriptUri:
     .fw-count .num.fail { color: var(--danger); }
     .fw-count .num.pending { color: var(--warn); }
     .fw-count .num.neutral { color: var(--muted); }
-    .fw-count .num.insight { color: #6d28d9; }
+    .fw-count .num.insight { color: var(--accent-2); }
     .fw-count .tag { font-size: 11px; color: var(--muted); }
     .fw-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .fw-block { border: 1px solid var(--line); border-radius: 14px; padding: 12px; background: #fff; }
+    .fw-block { border: 1px solid var(--line); border-radius: 14px; padding: 12px; background: var(--panel-soft); }
     .fw-block-label { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
     .fw-top-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
-    .fw-top-skill { display: flex; justify-content: space-between; align-items: center; gap: 8px; border: 1px solid #ece2d7; border-radius: 10px; padding: 6px 10px; font-size: 13px; }
+    .fw-top-skill { display: flex; justify-content: space-between; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; font-size: 13px; }
     .fw-skill-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fw-skill-meta { font-size: 11px; color: var(--muted); white-space: nowrap; }
-    .fw-bar { display: flex; height: 14px; border-radius: 999px; overflow: hidden; border: 1px solid var(--line); background: #f3eadf; }
+    .fw-bar { display: flex; height: 14px; border-radius: 999px; overflow: hidden; border: 1px solid var(--line); background: var(--panel-soft); }
     .fw-bar-seg.pass { background: var(--accent); }
     .fw-bar-seg.fail { background: var(--danger); }
     .fw-bar-seg.pending { background: var(--warn); }
@@ -699,33 +670,34 @@ export function buildAgentWorkItemsHtml(result: AgentDelegationPanelResult, scri
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>GraphFlow Agent Work Items</title>
   <style>
-    body { margin: 0; padding: 16px; font-family: "Segoe UI", sans-serif; color: #1f2937; background: #f6f1eb; }
+    ${sharedPanelCss("light")}
+    body { padding: 16px; background: var(--bg); }
     .shell { display: grid; gap: 14px; max-width: 960px; }
-    .panel { background: #fffdf8; border: 1px solid #decdbb; border-radius: 16px; padding: 14px; box-shadow: 0 14px 34px rgba(31,41,55,.08); }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); }
     .header-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-    .badge { background: #d8f1ee; color: #0f766e; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+    .badge { background: var(--accent-soft); color: var(--accent); padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
     h1 { margin: 8px 0 0; font-size: 22px; line-height: 1.35; word-break: break-word; }
     h2 { margin: 0 0 10px; font-size: 16px; }
-    .reminder { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 12px; padding: 12px 14px; font-size: 13px; line-height: 1.55; }
-    .reminder code { background: #fde68a; padding: 2px 6px; border-radius: 6px; }
-    .work-item { border: 1px solid #eadccc; border-radius: 12px; padding: 12px; background: #fff; display: grid; gap: 8px; }
+    .reminder { background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line)); border-radius: 12px; padding: 12px 14px; font-size: 13px; line-height: 1.55; }
+    .reminder code { background: var(--panel-soft); padding: 2px 6px; border-radius: 6px; }
+    .work-item { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: var(--panel-soft); display: grid; gap: 8px; }
     .work-items { display: grid; gap: 10px; }
     .work-item-head { display: flex; align-items: flex-start; gap: 10px; }
-    .work-item-index { min-width: 28px; height: 28px; border-radius: 999px; background: #0f766e; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
+    .work-item-index { min-width: 28px; height: 28px; border-radius: 999px; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
     .work-item-title { flex: 1; min-width: 0; }
-    .work-item-meta { display: block; margin-top: 4px; font-size: 12px; color: #6b7280; }
-    .copy-btn { border: 1px solid #0f766e; background: #fff; color: #0f766e; border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; white-space: nowrap; }
-    .copy-btn.copied { background: #d8f1ee; }
-    .prompt-details summary { cursor: pointer; color: #0f766e; font-size: 13px; font-weight: 600; }
-    .prompt-block, .instructions-block { margin: 8px 0 0; padding: 10px; background: #f3eadf; border-radius: 10px; white-space: pre-wrap; word-break: break-word; font-family: Consolas, monospace; font-size: 12px; line-height: 1.5; }
+    .work-item-meta { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
+    .copy-btn { border: 1px solid var(--accent); background: var(--panel); color: var(--accent); border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+    .copy-btn.copied { background: var(--accent-soft); }
+    .prompt-details summary { cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 600; }
+    .prompt-block, .instructions-block { margin: 8px 0 0; padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; white-space: pre-wrap; word-break: break-word; font-family: Consolas, monospace; font-size: 12px; line-height: 1.5; }
     .plan-list { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
-    .plan-list .deps { display: block; font-size: 12px; color: #6b7280; margin-top: 2px; }
+    .plan-list .deps { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
     .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-    .metric { border: 1px solid #eadccc; border-radius: 12px; padding: 10px; background: #fff; }
-    .label { color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
-    .value { margin-top: 6px; font-size: 20px; font-weight: 700; color: #0f766e; }
-    .episode { margin: 8px 0 0; font-size: 13px; color: #6b7280; }
-    code { background: #f3eadf; padding: 2px 5px; border-radius: 6px; }
+    .metric { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--panel); }
+    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    .value { margin-top: 6px; font-size: 20px; font-weight: 700; color: var(--accent); }
+    .episode { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+    code { background: var(--panel-soft); padding: 2px 5px; border-radius: 6px; }
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
   </style>
 </head>
@@ -734,7 +706,7 @@ export function buildAgentWorkItemsHtml(result: AgentDelegationPanelResult, scri
     <section class="panel">
       <div class="header-row">
         <span class="badge">${modeLabel}</span>
-        <span class="badge" style="background:#ede9fe;color:#6d28d9;">${result.agentWorkItems.length} work items</span>
+        <span class="badge" style="background:var(--accent-soft);color:var(--accent-2);">${result.agentWorkItems.length} work items</span>
       </div>
       <h1>${escapeHtml(result.task)}</h1>
       ${episodeLine}
@@ -778,16 +750,17 @@ export function buildContextPreviewHtml(preview: ContextPreviewResult, scriptUri
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>GraphFlow Context Preview</title>
   <style>
-    body { margin: 0; padding: 16px; font-family: "Segoe UI", sans-serif; color: #1f2937; background: #f6f1eb; }
+    ${sharedPanelCss("light")}
+    body { padding: 16px; }
     .shell { display: grid; gap: 14px; }
-    .panel { background: #fffdf8; border: 1px solid #decdbb; border-radius: 16px; padding: 14px; box-shadow: 0 14px 34px rgba(31,41,55,.08); }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); }
     .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-    .metric { border: 1px solid #eadccc; border-radius: 12px; padding: 10px; background: #fff; }
-    .label { color: #6b7280; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
-    .value { margin-top: 6px; font-size: 20px; font-weight: 700; color: #0f766e; }
+    .metric { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--panel-soft); }
+    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    .value { margin-top: 6px; font-size: 20px; font-weight: 700; color: var(--accent); }
     table { width: 100%; border-collapse: collapse; }
-    td, th { padding: 8px; border-bottom: 1px solid #ece2d7; text-align: left; font-size: 13px; }
-    code { background: #f3eadf; padding: 2px 5px; border-radius: 6px; }
+    td, th { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; font-size: 13px; }
+    code { background: var(--panel-soft); padding: 2px 5px; border-radius: 6px; }
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -842,43 +815,33 @@ export function buildSettingsHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>GraphFlow Settings</title>
   <style>
-    :root {
-      --bg: #f4efe6;
-      --panel: #fffaf2;
-      --ink: #1f2937;
-      --muted: #6d7f88;
-      --line: #d8c9b7;
-      --accent: #116466;
-      --accent-blue: #1d4ed8;
-      --accent-green: #047857;
-    }
-    * { box-sizing: border-box; }
-    body { margin: 0; padding: 16px; font-family: "Segoe UI", "PingFang SC", sans-serif; color: var(--ink); background: var(--bg); }
+    ${sharedPanelCss("light")}
+    body { padding: 16px; }
     form { display: grid; gap: 12px; max-width: 980px; }
-    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px; box-shadow: 0 14px 34px rgba(33,53,71,.08); }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); }
     .panel h1, .panel h2 { margin: 0 0 8px; }
     .panel p { margin: 0; }
     .metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-    .metric { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: #fff; }
+    .metric { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--panel-soft); }
     .metric .label { font-size: 11px; color: var(--muted); }
     .metric .value { margin-top: 4px; font-weight: 700; font-size: 14px; }
-    .flow-box { background: #fdf5eb; border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-top: 10px; }
-    .flow-box h3 { margin: 0 0 8px; color: #b45309; font-size: 14px; }
-    .flow-box ol { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.6; color: #213547; }
+    .flow-box { background: var(--panel-soft); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-top: 10px; }
+    .flow-box h3 { margin: 0 0 8px; color: var(--accent); font-size: 14px; }
+    .flow-box ol { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.6; color: var(--ink); }
     .flow-hint { margin-top: 10px; font-size: 12px; color: var(--muted); }
     .tier-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-    .tier-card { border-radius: 14px; padding: 12px; display: grid; gap: 10px; }
-    .tier-card.smart { background: #faf5ff; border: 1px solid #ddd6fe; }
-    .tier-card.economy { background: #f0fdfa; border: 1px solid #99f6e4; }
+    .tier-card { border-radius: 14px; padding: 12px; display: grid; gap: 10px; border: 1px solid var(--line); background: var(--panel-soft); }
+    .tier-card.smart { background: color-mix(in srgb, var(--accent-2) 6%, var(--panel)); border-color: color-mix(in srgb, var(--accent-2) 25%, var(--line)); }
+    .tier-card.economy { background: color-mix(in srgb, var(--accent) 6%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 25%, var(--line)); }
     .tier-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
     .tier-badge { font-size: 10px; font-weight: 600; color: #fff; padding: 4px 8px; border-radius: 999px; }
-    .tier-badge.smart { background: #7c3aed; }
-    .tier-badge.economy { background: #0f766e; }
+    .tier-badge.smart { background: var(--accent-2); }
+    .tier-badge.economy { background: var(--accent); }
     .tier-hint { font-size: 11px; color: var(--muted); line-height: 1.4; }
     .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
-    input, select { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: inherit; color: #213547; background: #fff; width: 100%; }
-    .checks label { display: flex; flex-direction: row; align-items: center; gap: 8px; color: #213547; font-size: 13px; }
+    input, select { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: inherit; color: var(--ink); background: var(--panel); width: 100%; }
+    .checks label { display: flex; flex-direction: row; align-items: center; gap: 8px; color: var(--ink); font-size: 13px; }
     .checks input[type="checkbox"] { width: auto; }
     .advanced { display: none; gap: 12px; }
     .advanced.open { display: grid; }
@@ -886,13 +849,13 @@ export function buildSettingsHtml(
     .action-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     button { border: 0; border-radius: 12px; padding: 10px 18px; font: inherit; font-weight: 600; cursor: pointer; color: #fff; }
     .btn-save { background: var(--accent); }
-    .btn-route { background: var(--accent-green); }
-    .btn-route:disabled { background: #9ca3af; cursor: not-allowed; }
-    .btn-index { background: var(--accent-blue); }
-    .btn-index:disabled { background: #9ca3af; cursor: not-allowed; }
-    .route-panel { background: #ecfdf5; border-color: #6ee7b7; }
-    .route-panel h2 { color: var(--accent-green); }
-    .status-list { margin: 0; padding-left: 20px; font-size: 12px; line-height: 1.6; color: #334155; }
+    .btn-route { background: var(--accent); }
+    .btn-route:disabled { background: #94a3b8; cursor: not-allowed; }
+    .btn-index { background: var(--accent-2); }
+    .btn-index:disabled { background: #94a3b8; cursor: not-allowed; }
+    .route-panel { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+    .route-panel h2 { color: var(--accent); }
+    .status-list { margin: 0; padding-left: 20px; font-size: 12px; line-height: 1.6; color: var(--ink); }
     #settings-status { margin: 0; font-size: 12px; color: var(--muted); min-height: 18px; }
     .hidden-legacy { display: none; }
     @media (max-width: 800px) { .metrics, .tier-row, .grid-2 { grid-template-columns: 1fr; } }

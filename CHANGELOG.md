@@ -8,6 +8,7 @@ All notable changes to this project are documented in this file.
 
 - **VSIX 激活时按需下载 anydoc**：设置 `graphflow.downloadAnydoc`（默认 true）→ `npm install @firecrawl/anydoc` 到 `~/.graphflow/optional-deps`；MCP launcher / `document-convert` 经 `GRAPHFLOW_ANYDOC_NODE_MODULES` 加载。失败则跳过 Office/PDF，源码索引照常
 - README / 扩展 README 说明 VSIX 不内置、可自动下载、可关闭
+- **emilkowalski/skills**：项目安装 design-eng 等 skill；扩展 webview 面板统一 soft elevation、`:active` scale(0.97)、`--ease-out`、reduced-motion
 
 ## [1.9.10] - 2026-08-08
 
