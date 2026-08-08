@@ -17,7 +17,7 @@ export { isCompactAgentInsightTask, isResearchAnalysisTask } from "../agents/tas
 
 export interface AgentWorkItem {
   id: string;
-  kind: "six-hats" | "five-whys" | "plan-refinement" | "query-translate" | "intent" | "requirement" | "first-principles" | "decision-matrix" | "reflection" | "clarification" | "alignment";
+  kind: "six-hats" | "five-whys" | "plan-refinement" | "query-translate" | "intent" | "requirement" | "first-principles" | "decision-matrix" | "reflection" | "clarification" | "alignment" | "document-semantic";
   hat?: string;
   prompt: string;
   expectedFormat: "json";

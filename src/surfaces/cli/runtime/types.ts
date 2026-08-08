@@ -75,6 +75,8 @@ export interface GraphIndexResult {
   indexedSymbols: number;
   indexedReferences: number;
   cancelled?: boolean;
+  agentWorkItems?: AgentWorkItem[];
+  agentInstructions?: string;
 }
 
 export interface GraphRebuildResult extends GraphIndexResult {

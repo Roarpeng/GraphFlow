@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "1.9.8",
+  "version": "1.9.9",
   "publishConfig": {
     "access": "public"
   },
@@ -115,6 +115,7 @@
     "web-tree-sitter": "^0.25.10"
   },
   "optionalDependencies": {
+    "@firecrawl/anydoc": "^0.1.7",
     "better-sqlite3": "^12.10.0"
   }
 }

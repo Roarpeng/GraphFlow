@@ -1,7 +1,11 @@
 import { ALL_LANGUAGE_EXTENSIONS } from "../graph/language-indexers/index.js";
+import { OFFICE_DOCUMENT_EXTENSIONS } from "../graph/document-convert.js";
 
 /** Documentation/config files indexed alongside source code. */
 export const BASE_DOC_EXTENSIONS = [".md", ".json"] as const;
+
+/** Office/PDF documents converted to Markdown then indexed (optional @firecrawl/anydoc). */
+export const OFFICE_DOC_EXTENSIONS = OFFICE_DOCUMENT_EXTENSIONS;
 
 /**
  * Narrow extension list used in early GraphFlow releases and loader fallbacks.
@@ -16,9 +20,9 @@ export const LEGACY_WEB_ONLY_EXTENSIONS = [
   ".json",
 ] as const;
 
-/** Full default scan set: all language indexers plus common docs. */
+/** Full default scan set: all language indexers plus common docs and office/PDF. */
 export const DEFAULT_INCLUDE_EXTENSIONS: string[] = Array.from(
-  new Set([...ALL_LANGUAGE_EXTENSIONS, ...BASE_DOC_EXTENSIONS])
+  new Set([...ALL_LANGUAGE_EXTENSIONS, ...BASE_DOC_EXTENSIONS, ...OFFICE_DOC_EXTENSIONS])
 );
 
 function normalizeExtension(ext: string): string {

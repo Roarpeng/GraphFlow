@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.9.9] - 2026-08-08
+
+### Fixed
+
+- **CI macOS ENAMETOOLONG**：`walkFiles` 深度目录测试从 400 段降至 80 段，保留迭代遍历断言，避免 APFS 路径过长导致 Action 失败
+
+### Added
+
+- **Office/PDF 文档建图**：可选依赖 `@firecrawl/anydoc`，将 PDF/DOCX/PPTX/XLSX 等转为 Markdown 后走既有 markdown 章节/链接图谱；缺省扩展名已包含办公文档；单文件上限约 5MB
+- **Document semantic bridge**：索引成功后返回 optional `document-semantic-*` `agentWorkItems`，由宿主 Agent 抽取关键实体/主张并经 `graphflow_insight(mode=submit)` 回写
+
+### Research note
+
+文档→MD 选型：优先 Firecrawl **anydoc**（Node、多格式、本地）；备选 Microsoft MarkItDown（Python）、Pandoc（系统依赖）。npm 上无关的旧包 `anydoc` 勿用。
+
 ## [1.9.8] - 2026-08-08
 
 ### Added
