@@ -186,6 +186,30 @@ const env = {
   GRAPHFLOW_MCP_STDIO: "1",
   GRAPHFLOW_LOG_JSON: "1",
 };
+
+// Prefer extension-downloaded anydoc under ~/.graphflow/optional-deps (or env override).
+(function applyAnydocNodePath() {
+  try {
+    const home = os.homedir();
+    const candidate =
+      process.env.GRAPHFLOW_ANYDOC_NODE_MODULES?.trim() ||
+      path.join(home, ".graphflow", "optional-deps", "node_modules");
+    const pkg = path.join(candidate, "@firecrawl", "anydoc", "package.json");
+    if (!existsSync(pkg)) {
+      return;
+    }
+    env.GRAPHFLOW_ANYDOC_NODE_MODULES = candidate;
+    const delim = process.platform === "win32" ? ";" : ":";
+    const prev = env.NODE_PATH || "";
+    const parts = prev.split(delim).map((p) => p.trim()).filter(Boolean);
+    if (!parts.includes(candidate)) {
+      env.NODE_PATH = parts.length > 0 ? `${candidate}${delim}${parts.join(delim)}` : candidate;
+    }
+  } catch {
+    // ignore
+  }
+})();
+
 if (workspaceRoot) {
   env.GRAPHFLOW_WORKSPACE_ROOT = workspaceRoot;
 } else {

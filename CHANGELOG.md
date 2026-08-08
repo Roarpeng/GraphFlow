@@ -2,13 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.9.11] - 2026-08-08
+
+### Added
+
+- **VSIX 激活时按需下载 anydoc**：设置 `graphflow.downloadAnydoc`（默认 true）→ `npm install @firecrawl/anydoc` 到 `~/.graphflow/optional-deps`；MCP launcher / `document-convert` 经 `GRAPHFLOW_ANYDOC_NODE_MODULES` 加载。失败则跳过 Office/PDF，源码索引照常
+- README / 扩展 README 说明 VSIX 不内置、可自动下载、可关闭
+
 ## [1.9.10] - 2026-08-08
 
 ### Added
 
 - **Engineering KG 跨层边**：`documents`（文档 File→Concept/Requirement）、`implements`（代码→Requirement）、`derived_from`（语义节点→来源 File/insight）
 - **文档域一等节点**：`Concept` / `Requirement`；`document-semantic` insight submit 自动写入并尝试用 `relatedCodeHints` 链接已有 File/Symbol
-- **说明**：VS Code/Cursor **VSIX 不会打包/自动安装** `@firecrawl/anydoc`（与 transformers 一样排除重型/原生可选依赖）；CLI/`npm i @roarpeng/graphflow` 才会装 optional anydoc。无 anydoc 时跳过 Office/PDF，源码索引不受影响
+- **说明**：VS Code/Cursor **VSIX 不打包** `@firecrawl/anydoc`；自 v1.9.11 起扩展激活时可自动下载到 `~/.graphflow/optional-deps`（`graphflow.downloadAnydoc`）。CLI/`npm i` 仍可通过 optionalDependency 安装。无 anydoc 时跳过 Office/PDF，源码索引不受影响
 
 ### Changed
 

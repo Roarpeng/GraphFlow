@@ -4,7 +4,7 @@
   "displayName": "GraphFlow Context & Memory",
   "description": "Token-first code context, knowledge graph, MCP, planning and cross-session memory for VS Code/Cursor: memory audit CLI, flywheel attribution panel, semantic embeddings, skill sync.",
   "icon": "media/graphflow.png",
-  "version": "1.9.10",
+  "version": "1.9.11",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"
@@ -37,6 +37,11 @@
           "type": "string",
           "default": "GraphFlow: Settings",
           "description": "Use Command Palette and run this command to open the full GraphFlow settings panel."
+        },
+        "graphflow.downloadAnydoc": {
+          "type": "boolean",
+          "default": true,
+          "description": "On activation, download @firecrawl/anydoc (current OS native binary) into ~/.graphflow/optional-deps so Office/PDF documents can be indexed. Disable to skip the network download; source indexing still works."
         }
       }
     },

@@ -7,8 +7,14 @@
  */
 
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import { extname } from "node:path";
 import { logger } from "../utils/logger.js";
+import {
+  applyAnydocRequireEnv,
+  resolveAnydocNodeModules,
+  tryRequireAnydoc,
+} from "../integrations/ensure-anydoc.js";
 
 const requireFn = createRequire(__filename);
 
@@ -62,9 +68,24 @@ function loadAnydoc(): AnydocModule | null {
   }
   anydocLoadAttempted = true;
   try {
-     
+    applyAnydocRequireEnv(resolveAnydocNodeModules());
+    const loaded = tryRequireAnydoc();
+    if (loaded) {
+      anydocModule = loaded as AnydocModule;
+      return anydocModule;
+    }
     anydocModule = requireFn("@firecrawl/anydoc") as AnydocModule;
   } catch (error) {
+    const fromEnv = process.env.GRAPHFLOW_ANYDOC_NODE_MODULES?.trim();
+    if (fromEnv) {
+      try {
+        const req = createRequire(join(fromEnv, "@firecrawl", "anydoc", "package.json"));
+        anydocModule = req("@firecrawl/anydoc") as AnydocModule;
+        return anydocModule;
+      } catch {
+        // fall through to warn
+      }
+    }
     logger.warn(
       { err: error instanceof Error ? error.message : String(error) },
       "optional @firecrawl/anydoc not available — office/PDF documents will be skipped"
