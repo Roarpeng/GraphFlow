@@ -6,6 +6,8 @@ import {
   buildAgentProfiles,
   buildMcpServerNode,
   installMcpToDetectedAgents,
+  resolveWindowsNpxLaunch,
+  toWindowsPathFromWsl,
 } from "../src/integrations/agent-mcp-installer";
 import {
   getAntigravityInstallStatus,
@@ -215,5 +217,40 @@ describe("M63 Antigravity / Gemini / Copilot install", () => {
         "/wrong/project/root"
       );
     }
+  });
+
+  it("Codex Windows npx launch sets NODE and NPX_CLI short paths for MCP registration", () => {
+    const nodePath = "C:\\PROGRA~1\\nodejs\\node.exe";
+    const npxCli = "C:\\PROGRA~1\\nodejs\\node_modules\\npm\\bin\\npx-cli.js";
+    const launch = resolveWindowsNpxLaunch({
+      windowsHost: true,
+      windowsNodePath: nodePath,
+      windowsNpxCliPath: npxCli,
+    });
+    expect(launch).toBeDefined();
+    expect(launch!.command).toBe(nodePath);
+    expect(launch!.args[0]).toBe(npxCli);
+    expect(launch!.env.NODE).toBe(nodePath);
+    expect(launch!.env.NPX_CLI).toBe(npxCli);
+
+    const mcp = buildMcpServerNode({
+      strategy: "npx",
+      windowsHost: true,
+      windowsNodePath: nodePath,
+      windowsNpxCliPath: npxCli,
+      omitWorkspaceFolderPlaceholder: true,
+    });
+    expect(mcp.command).toBe(nodePath);
+    expect(mcp.args).toEqual([npxCli, "-y", "--package=@roarpeng/graphflow", "graphflow-mcp"]);
+    expect(mcp.env?.NODE).toBe(nodePath);
+    expect(mcp.env?.NPX_CLI).toBe(npxCli);
+    expect(mcp.env?.GRAPHFLOW_MCP_STDIO).toBe("1");
+    expect(mcp.env?.GRAPHFLOW_WORKSPACE_ROOT).toBeUndefined();
+  });
+
+  it("toWindowsPathFromWsl converts mount paths used when installing Codex from WSL", () => {
+    expect(toWindowsPathFromWsl("/mnt/c/PROGRA~1/nodejs/node.exe")).toBe(
+      "C:\\PROGRA~1\\nodejs\\node.exe"
+    );
   });
 });

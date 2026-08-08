@@ -128,7 +128,7 @@ export const graphflowSkills = {
     description: "Plan a coding task with graph context, producing structured task nodes with dependencies.",
     version: "1.0.0",
     async invoke(input: PlanTaskInput): Promise<PlanTaskOutput> {
-      const result = planAndBrainstormResult(input.task, input.configPath);
+      const result = await planAndBrainstormResult(input.task, input.configPath);
       return {
         success: true,
         mode: result.mode,

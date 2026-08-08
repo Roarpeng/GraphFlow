@@ -264,13 +264,16 @@ export function computePageRank(
   const iterations = options?.iterations ?? 20;
   const weights = { ...DEFAULT_EDGE_WEIGHTS, ...options?.edgeWeights };
 
+  // Keep presentation/iteration order from callers; fingerprints use a sorted
+  // node-id set hash so equivalent subgraphs share a cache key regardless of order.
   const ids = nodes.map((n) => n.id);
   const idSet = new Set(ids);
   const n = ids.length;
   if (n === 0) return new Map();
+  const sortedIds = [...ids].sort();
 
   const fastPathActive = unscopedEpoch > 0 || nodeEpochs.size > 0;
-  const lightKey = fingerprintNodeSet(ids, damping, iterations);
+  const lightKey = fingerprintNodeSet(sortedIds, damping, iterations);
 
   // 影响面快速路径：自条目插入后该子图未被触及（图稳定），跳过全图边扫描。
   if (fastPathActive) {
@@ -291,8 +294,15 @@ export function computePageRank(
       relevantEdges.push(edge);
     }
   }
+  const sortedRelevantEdges = [...relevantEdges].sort((a, b) => {
+    const fromCmp = a.from.localeCompare(b.from);
+    if (fromCmp !== 0) return fromCmp;
+    const relCmp = a.relation.localeCompare(b.relation);
+    if (relCmp !== 0) return relCmp;
+    return a.to.localeCompare(b.to);
+  });
 
-  const cacheKey = fingerprintSubgraph(ids, relevantEdges, damping, iterations);
+  const cacheKey = fingerprintSubgraph(sortedIds, sortedRelevantEdges, damping, iterations);
   const cached = pageRankCache.get(cacheKey);
   if (cached) {
     pageRankCacheStats.hits += 1;

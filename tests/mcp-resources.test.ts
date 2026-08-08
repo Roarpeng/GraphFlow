@@ -117,13 +117,33 @@ describe("P2-1 MCP resources extension", () => {
     const result = response.result as ReadResult;
     expect(result.contents[0].mimeType).toBe("application/json");
     const payload = JSON.parse(readText(result)) as {
-      skills: { total: number; positive: number; neutral: number; negative: number };
+      skills: {
+        total: number;
+        positive: number;
+        neutral: number;
+        negative: number;
+        byOutcomeKind: Record<string, number>;
+      };
       episodes: { total: number; pass: number; fail: number; pending: number };
+      autoCaptureEnabled: boolean;
+      sessionJournal: { path: string; exists: boolean; pendingCount: number };
       memoryAttribution: { memoryHits: number; staleEpisodes: number };
     };
     expect(typeof payload.skills.total).toBe("number");
     expect(typeof payload.skills.positive).toBe("number");
     expect(typeof payload.episodes.total).toBe("number");
+    expect(typeof payload.autoCaptureEnabled).toBe("boolean");
+    expect(typeof payload.sessionJournal.path).toBe("string");
+    expect(typeof payload.sessionJournal.exists).toBe("boolean");
+    expect(typeof payload.sessionJournal.pendingCount).toBe("number");
+    expect(payload.skills.byOutcomeKind).toEqual(
+      expect.objectContaining({
+        proven: expect.any(Number),
+        correctable: expect.any(Number),
+        "anti-pattern": expect.any(Number),
+        noise: expect.any(Number),
+      })
+    );
     expect(typeof payload.memoryAttribution.memoryHits).toBe("number");
     expect(typeof payload.memoryAttribution.staleEpisodes).toBe("number");
   });

@@ -45,12 +45,27 @@ export {
   buildAgentDelegatedPlanInsight,
   buildAgentDelegatedSimplePlan,
   buildAgentInsightWorkItems,
+  attachSkillConditionToPlanNodes,
   summarizeInsightForContext,
   SIMPLE_PLAN_BRIDGE_REQUIRED_IDS,
   type AgentDelegatedPlanInsight,
   type AgentDelegationMode,
   type AgentWorkItem,
+  type SimplePlanNode,
+  type SkillConditionOptions,
 } from "./core/agent-delegation";
+export {
+  suggestSkillConditionHints,
+  type SkillConditionHints,
+} from "./learning/skill-flywheel";
+export {
+  optimizeSkillLite,
+  defaultSkillOptScore,
+  type SkillOptEdit,
+  type SkillOptEditOp,
+  type SkillOptInput,
+  type SkillOptResult,
+} from "./learning/skill-opt-lite";
 export { planInsightResult, type PlanInsightResult } from "./surfaces/cli/runtime/routing";
 export {
   createGraphClient,

@@ -12,7 +12,7 @@ import {
   type IndexedSymbol,
   type ParsedFile,
 } from "../src/graph/file-indexer-nodes";
-import { buildBatchReferenceEdges, buildSingleFileReferenceEdges } from "../src/graph/file-indexer-edges";
+import { buildBatchReferenceEdges, buildSingleFileReferenceEdges, buildSymbolTrie, trieContainsAnySymbol } from "../src/graph/file-indexer-edges";
 import {
   computePageRank,
   markGraphMutated,
@@ -168,6 +168,14 @@ describe("符号哈希冲突消歧", () => {
 });
 
 describe("引用边构建优化", () => {
+  it("Trie 预过滤：词表命中 / 未命中确定性一致", () => {
+    const trie = buildSymbolTrie(["alpha", "betaFn"]);
+    expect(trieContainsAnySymbol("call alpha now", trie)).toBe(true);
+    expect(trieContainsAnySymbol("localpha only", trie)).toBe(true); // 子串命中（正则层再挡伪边）
+    expect(trieContainsAnySymbol("gam tot unrelated", trie)).toBe(false);
+    expect(trieContainsAnySymbol("", buildSymbolTrie([]))).toBe(false);
+  });
+
   it("优化后保持正确性：跨文件引用、本文件自身跳过、黑名单词跳过", () => {
     const files = [
       parseFixture("src/a.ts", "alpha calls beta and delta", ["alpha"]),
@@ -307,6 +315,19 @@ function makeEdges(nodes: GraphNode[]): GraphEdge[] {
 }
 
 describe("PageRank 缓存影响面失效", () => {
+  it("同节点集合不同顺序共享缓存键（set hash）", () => {
+    resetPageRankCache();
+    const nodes = makeNodes(6);
+    const edges = makeEdges(nodes);
+    const a = computePageRank(nodes, edges);
+    expect(pageRankCacheStats.misses).toBe(1);
+    const reversed = [...nodes].reverse();
+    const b = computePageRank(reversed, edges);
+    expect(pageRankCacheStats.hits).toBe(1);
+    expect(pageRankCacheStats.misses).toBe(1);
+    expect([...b.entries()].sort()).toEqual([...a.entries()].sort());
+  });
+
   it("无标记变更时按指纹重算（默认行为不变）", () => {
     resetPageRankCache();
     const nodes = makeNodes(10);

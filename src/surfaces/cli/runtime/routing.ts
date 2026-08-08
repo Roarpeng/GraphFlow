@@ -5,8 +5,10 @@ import { hasUsableLlmProvider } from "../../../config/llm-availability";
 import {
   buildAgentDelegatedPlanInsight,
   buildAgentDelegatedSimplePlan,
+  attachSkillConditionToPlanNodes,
   type AgentDelegationMode,
   type AgentWorkItem,
+  type SkillConditionOptions,
 } from "../../../core/agent-delegation";
 import { resolveConfig } from "../../../config/resolve";
 import { resolveLearningPath } from "../../../config/paths";
@@ -22,6 +24,7 @@ import {
   cleanupNoiseSkills,
   extractSkillAtoms,
   pruneFailedSkills,
+  suggestSkillConditionHints,
 } from "../../../learning/skill-flywheel";
 import {
   resolveModelForRole,
@@ -49,6 +52,7 @@ import { resolveActiveEmbeddingBackend } from "../../../config/embedding-factory
 import { buildEmbeddingOptions } from "./env.js";
 import { extractTokenCost } from "./helpers.js";
 import { hasIndexCache } from "../../../graph/file-indexer-cache";
+import { getFlywheelReport } from "./graph.js";
 import type {
   PlanPreviewResult,
   ReportOutcomeResult,
@@ -194,6 +198,22 @@ export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResu
     providerNames: providerEntries.map(([k]) => k),
   };
 
+  const flywheelReport = getFlywheelReport(configPath);
+  const flywheel = {
+    autoCaptureEnabled: flywheelReport.autoCaptureEnabled,
+    episodes: {
+      total: flywheelReport.episodes.total,
+      pass: flywheelReport.episodes.pass,
+      fail: flywheelReport.episodes.fail,
+      pending: flywheelReport.episodes.pending,
+    },
+    skills: {
+      total: flywheelReport.skills.total,
+      byOutcomeKind: { ...flywheelReport.skills.byOutcomeKind },
+    },
+    sessionJournal: { ...flywheelReport.sessionJournal },
+  };
+
   return {
     dynamicRouting: config.routingPolicy?.enableDynamicRouting ?? false,
     health,
@@ -221,6 +241,7 @@ export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResu
     graphFreshness,
     modelCache,
     connectivitySummary,
+    flywheel,
   };
 }
 
@@ -354,22 +375,46 @@ export async function probeRoutingConnectivity(
   ]);
 }
 
-export function planAndBrainstormResult(task: string, configPath?: string): PlanPreviewResult {
+export async function planAndBrainstormResult(
+  task: string,
+  configPath?: string
+): Promise<PlanPreviewResult> {
   const config = resolveConfig(configPath);
+
+  let skillCondition: SkillConditionOptions | undefined;
+  if (config.skillPolicy?.enableSkillFlywheel !== false) {
+    try {
+      const graphClient = createGraphClient(config);
+      const hints = await suggestSkillConditionHints(
+        graphClient,
+        task,
+        config.skillPolicy?.maxSkillHints ?? 3
+      );
+      if (hints.skillRefs.length > 0 || hints.avoidPatterns.length > 0) {
+        skillCondition = hints;
+      }
+    } catch {
+      // Skill conditioning is best-effort; plan packaging must not fail.
+    }
+  }
 
   // No GraphFlow LLM → bridge to connected coding agent for task decomposition.
   // Local heuristic DAG is attached as suggestedNodes only.
   if (!hasUsableLlmProvider(config)) {
-    return buildAgentDelegatedSimplePlan(task);
+    return buildAgentDelegatedSimplePlan(task, skillCondition);
   }
 
   const mode = triageTask(task);
   const ideas = brainstormTask(task);
-  const nodes = planTasks(task).map((node) => ({
-    id: node.id,
-    description: node.description,
-    dependencies: node.dependencies,
-  }));
+  const nodes = attachSkillConditionToPlanNodes(
+    planTasks(task, skillCondition?.skillRefs).map((node) => ({
+      id: node.id,
+      description: node.description,
+      dependencies: node.dependencies,
+      ...(node.skillRefs && node.skillRefs.length > 0 ? { skillRefs: node.skillRefs } : {}),
+    })),
+    skillCondition
+  );
 
   return {
     mode,
@@ -381,8 +426,8 @@ export function planAndBrainstormResult(task: string, configPath?: string): Plan
   };
 }
 
-export function planAndBrainstorm(task: string, configPath?: string): string {
-  const result = planAndBrainstormResult(task, configPath);
+export async function planAndBrainstorm(task: string, configPath?: string): Promise<string> {
+  const result = await planAndBrainstormResult(task, configPath);
   const planPart = result.nodes
     .map((node) => `${node.id}[${node.dependencies.join(",") || "-"}]:${node.description}`)
     .join(" | ");

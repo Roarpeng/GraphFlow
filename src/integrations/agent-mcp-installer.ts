@@ -40,6 +40,20 @@ export interface McpInstallOptions {
   serverName?: string;
   /** Test hook: override auto-detected agent ids. Empty array means no agents. */
   agentIdsOverride?: string[];
+  /**
+   * Force Windows-style MCP launch (`node.exe` + `npx-cli.js` + `NODE`/`NPX_CLI` env).
+   * Used for native Windows agents and WSL → Windows agent targets (e.g. Codex).
+   */
+  windowsHost?: boolean;
+  /** Test/injection hook: Windows `node.exe` path (Windows or WSL-mounted). */
+  windowsNodePath?: string;
+  /** Test/injection hook: Windows `npx-cli.js` path (Windows or WSL-mounted). */
+  windowsNpxCliPath?: string;
+  /**
+   * When true, omit GRAPHFLOW_WORKSPACE_ROOT=${workspaceFolder}.
+   * Codex does not expand VS Code/Cursor placeholders.
+   */
+  omitWorkspaceFolderPlaceholder?: boolean;
 }
 
 export interface DetectedAgent {
@@ -794,20 +808,58 @@ export function resolveMcpNodeLaunch(options: {
   return { command: "node", env: { ...MCP_STDIO_ENV } };
 }
 
+/** Convert `/mnt/c/foo` ↔ `C:\foo` for WSL ↔ Windows path bridging. */
+export function toWindowsPathFromWsl(pathValue: string): string {
+  const normalized = pathValue.replace(/\//g, "\\");
+  const mnt = normalized.match(/^\\mnt\\([A-Za-z])\\(.*)$/);
+  if (mnt?.[1] && mnt[2] !== undefined) {
+    return `${mnt[1].toUpperCase()}:\\${mnt[2]}`;
+  }
+  return pathValue.includes("/") ? pathValue.replace(/\//g, "\\") : pathValue;
+}
+
+export function toWslPathFromWindows(pathValue: string): string {
+  const match = pathValue.replace(/\//g, "\\").match(/^([A-Za-z]):\\(.*)$/);
+  if (match?.[1] && match[2] !== undefined) {
+    return `/mnt/${match[1].toLowerCase()}/${match[2].replace(/\\/g, "/")}`;
+  }
+  return pathValue;
+}
+
+function pathExistsOnWindowsHost(windowsPath: string): boolean {
+  if (isWindows()) {
+    return existsSync(windowsPath);
+  }
+  if (isWsl()) {
+    return existsSync(toWslPathFromWindows(windowsPath));
+  }
+  return false;
+}
+
 /**
- * On Windows, convert a long path containing spaces to its 8.3 short form.
- * Many MCP clients (e.g., TRAE) spawn the `command` field via cmd.exe without
- * quoting, so paths like "C:\Program Files\..." break with "'C:\Program' is not
- * recognized". The 8.3 short name (e.g., "C:\PROGRA~1\...") avoids this entirely.
+ * On Windows (or via cmd.exe from WSL), convert a long path containing spaces
+ * to its 8.3 short form. Many MCP clients (e.g., TRAE / Codex) spawn `command`
+ * without reliable quoting, so "C:\Program Files\..." breaks. Short names like
+ * "C:\PROGRA~1\..." avoid this. Codex on Windows also needs NODE/NPX_CLI env
+ * pointing at these short paths for npx-cli registration to succeed.
  */
 export function getWindowsShortPath(longPath: string): string | undefined {
-  if (!isWindows() || !longPath || !longPath.includes(" ")) {
+  if (!longPath) {
     return longPath;
   }
-  // Try cmd.exe first (faster, available on all Windows)
+  const windowsPath = isWsl() && longPath.startsWith("/mnt/")
+    ? toWindowsPathFromWsl(longPath)
+    : longPath;
+  if (!windowsPath.includes(" ")) {
+    return windowsPath;
+  }
+  if (!isWindows() && !isWsl()) {
+    return undefined;
+  }
+  // Try cmd.exe first (works on native Windows and from WSL)
   try {
     const result = execSync(
-      `for %A in ("${longPath}") do @echo %~sA`,
+      `for %A in ("${windowsPath}") do @echo %~sA`,
       {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
@@ -817,36 +869,38 @@ export function getWindowsShortPath(longPath: string): string | undefined {
     ).trim();
     const lines = result.split(/\r?\n/).filter((l) => l.trim());
     const shortPath = lines[lines.length - 1]?.trim();
-    if (shortPath && !shortPath.includes(" ") && existsSync(shortPath)) {
+    if (shortPath && !shortPath.includes(" ") && pathExistsOnWindowsHost(shortPath)) {
       return shortPath;
     }
   } catch {
     // fall through to PowerShell
   }
-  // Fallback: PowerShell with FileSystemObject COM
-  try {
-    const escaped = longPath.replace(/'/g, "''");
-    const result = execSync(
-      `$fso = New-Object -ComObject Scripting.FileSystemObject; if (Test-Path -LiteralPath '${escaped}') { if ((Get-Item -LiteralPath '${escaped}') -is [System.IO.DirectoryInfo]) { $fso.GetFolder('${escaped}').ShortPath } else { $fso.GetFile('${escaped}').ShortPath } }`,
-      {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: 5000,
-        shell: "powershell.exe",
+  // Fallback: PowerShell with FileSystemObject COM (native Windows only)
+  if (isWindows()) {
+    try {
+      const escaped = windowsPath.replace(/'/g, "''");
+      const result = execSync(
+        `$fso = New-Object -ComObject Scripting.FileSystemObject; if (Test-Path -LiteralPath '${escaped}') { if ((Get-Item -LiteralPath '${escaped}') -is [System.IO.DirectoryInfo]) { $fso.GetFolder('${escaped}').ShortPath } else { $fso.GetFile('${escaped}').ShortPath } }`,
+        {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+          timeout: 5000,
+          shell: "powershell.exe",
+        }
+      ).trim();
+      if (result && !result.includes(" ") && existsSync(result)) {
+        return result;
       }
-    ).trim();
-    if (result && !result.includes(" ") && existsSync(result)) {
-      return result;
+    } catch {
+      // 8.3 name generation may be disabled on some volumes
     }
-  } catch {
-    // 8.3 name generation may be disabled on some volumes
   }
   return undefined;
 }
 
 /** Prefer 8.3 short path on Windows when the input contains spaces; otherwise keep as-is. */
 export function preferSpaceFreeWindowsPath(pathValue: string): string {
-  if (!isWindows() || !pathValue.includes(" ")) {
+  if ((!isWindows() && !isWsl()) || !pathValue.includes(" ")) {
     return pathValue;
   }
   return getWindowsShortPath(pathValue) ?? pathValue;
@@ -1003,32 +1057,165 @@ export function repairUnsafeWindowsMcpCommands(
   return results;
 }
 
-function resolveWindowsNpxLaunch(): { command: string; args: string[] } | undefined {
-  const node = resolveSystemNodeCommand();
+function windowsDirname(windowsPath: string): string {
+  const normalized = windowsPath.replace(/\//g, "\\");
+  const idx = normalized.lastIndexOf("\\");
+  return idx >= 0 ? normalized.slice(0, idx) : ".";
+}
+
+function windowsJoin(...parts: string[]): string {
+  return parts
+    .map((p, i) => {
+      const n = p.replace(/\//g, "\\");
+      if (i === 0) {
+        return n.replace(/\\+$/g, "");
+      }
+      return n.replace(/^\\+|\\+$/g, "");
+    })
+    .filter((p) => p.length > 0)
+    .join("\\");
+}
+
+function resolveWindowsNodeCandidates(options?: {
+  windowsHost?: boolean;
+  windowsNodePath?: string;
+}): string[] {
+  const candidates: string[] = [];
+  if (options?.windowsNodePath?.trim()) {
+    candidates.push(options.windowsNodePath.trim());
+  }
+
+  const wantWindows = Boolean(options?.windowsHost) || isWindows();
+  if (!wantWindows) {
+    return candidates;
+  }
+
+  if (isWindows()) {
+    const system = resolveSystemNodeCommand();
+    if (system) {
+      candidates.push(system);
+    }
+    const programFiles = process.env.ProgramFiles ?? "C:\\Program Files";
+    candidates.push(windowsJoin(programFiles, "nodejs", "node.exe"));
+    candidates.push("C:\\PROGRA~1\\nodejs\\node.exe");
+    return candidates;
+  }
+
+  // WSL → Windows host: resolve via cmd.exe, then common mount points.
+  try {
+    const output = execFileSync("cmd.exe", ["/c", "where node"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 3000,
+    }).trim();
+    for (const line of output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)) {
+      if (/^[A-Za-z]:\\/.test(line) && !isIdeBundledNode(line)) {
+        candidates.push(line);
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  candidates.push(
+    "C:\\Program Files\\nodejs\\node.exe",
+    "C:\\PROGRA~1\\nodejs\\node.exe",
+    "/mnt/c/Program Files/nodejs/node.exe",
+    "/mnt/c/PROGRA~1/nodejs/node.exe"
+  );
+  return candidates;
+}
+
+export interface WindowsNpxLaunch {
+  command: string;
+  args: string[];
+  /** Codex / Windows npx shims require these for reliable MCP registration. */
+  env: { NODE: string; NPX_CLI: string };
+}
+
+/**
+ * Resolve `node.exe` + `npx-cli.js` with space-free (8.3) Windows paths and
+ * NODE/NPX_CLI env — required for Codex MCP registration on Windows.
+ */
+export function resolveWindowsNpxLaunch(options?: {
+  windowsHost?: boolean;
+  windowsNodePath?: string;
+  windowsNpxCliPath?: string;
+}): WindowsNpxLaunch | undefined {
+  const wantWindows = Boolean(options?.windowsHost) || isWindows();
+  if (!wantWindows) {
+    return undefined;
+  }
+
+  const explicitNode = options?.windowsNodePath?.trim();
+  const explicitNpxCli = options?.windowsNpxCliPath?.trim();
+  // Test / forced injection: trust caller paths (already short-form recommended).
+  if (explicitNode && explicitNpxCli) {
+    const node = explicitNode.startsWith("/mnt/")
+      ? toWindowsPathFromWsl(explicitNode)
+      : explicitNode.replace(/\//g, "\\");
+    const npxCli = explicitNpxCli.startsWith("/mnt/")
+      ? toWindowsPathFromWsl(explicitNpxCli)
+      : explicitNpxCli.replace(/\//g, "\\");
+    const shortNode = getWindowsShortPath(node) ?? node;
+    const shortNpxCli = getWindowsShortPath(npxCli) ?? npxCli;
+    if (shortNode.includes(" ") || shortNpxCli.includes(" ")) {
+      return undefined;
+    }
+    return {
+      command: shortNode,
+      args: [shortNpxCli, "-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
+      env: {
+        NODE: shortNode,
+        NPX_CLI: shortNpxCli,
+      },
+    };
+  }
+
+  const nodeCandidates = resolveWindowsNodeCandidates(options);
+  let node: string | undefined;
+  for (const candidate of nodeCandidates) {
+    const windowsStyle = candidate.startsWith("/mnt/")
+      ? toWindowsPathFromWsl(candidate)
+      : candidate;
+    if (pathExistsOnWindowsHost(windowsStyle) || pathExistsOnWindowsHost(candidate)) {
+      node = windowsStyle;
+      break;
+    }
+  }
   if (!node) {
     return undefined;
   }
-  const nodeDir = dirname(node);
-  const candidates = [
-    join(nodeDir, "node_modules", "npm", "bin", "npx-cli.js"),
-    join(nodeDir, "..", "lib", "node_modules", "npm", "bin", "npx-cli.js"),
+
+  const nodeDir = windowsDirname(node);
+  const npxCandidates = [
+    windowsJoin(nodeDir, "node_modules", "npm", "bin", "npx-cli.js"),
+    // Some installs put npm next to node under Program Files
+    windowsJoin(windowsDirname(nodeDir), "node_modules", "npm", "bin", "npx-cli.js"),
   ];
-  for (const npxCli of candidates) {
-    if (existsSync(npxCli)) {
-      // If paths contain spaces, try 8.3 short format to avoid quoting issues
-      // with MCP clients that don't properly quote the command (e.g., TRAE).
-      const shortNode = getWindowsShortPath(node) ?? node;
-      const shortNpxCli = getWindowsShortPath(npxCli) ?? npxCli;
-      if (shortNode.includes(" ") || shortNpxCli.includes(" ")) {
-        // Can't resolve to a space-free path; fall back to npx.cmd which
-        // relies on PATH resolution and handles quoting internally.
-        return undefined;
-      }
-      return {
-        command: shortNode,
-        args: [shortNpxCli, "-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
-      };
+
+  for (const npxCliRaw of npxCandidates) {
+    const npxCli = npxCliRaw.startsWith("/mnt/")
+      ? toWindowsPathFromWsl(npxCliRaw)
+      : npxCliRaw.replace(/\//g, "\\");
+    if (!pathExistsOnWindowsHost(npxCli) && !pathExistsOnWindowsHost(npxCliRaw)) {
+      continue;
     }
+    const shortNode = getWindowsShortPath(node) ?? node;
+    const shortNpxCli = getWindowsShortPath(npxCli) ?? npxCli;
+    if (shortNode.includes(" ") || shortNpxCli.includes(" ")) {
+      // Can't resolve to a space-free path; fall back to npx.cmd which
+      // relies on PATH resolution and handles quoting internally.
+      return undefined;
+    }
+    return {
+      command: shortNode,
+      args: [shortNpxCli, "-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
+      env: {
+        NODE: shortNode,
+        NPX_CLI: shortNpxCli,
+      },
+    };
   }
   return undefined;
 }
@@ -1109,23 +1296,28 @@ function buildMcpServerNodeRaw(options: McpInstallOptions): McpServerNode {
   // 写入 Cursor/VS Code 可展开的 ${workspaceFolder}，让 MCP 子进程拿到真实项目根。
   // 不支持插值的宿主会留下字面量；discover-workspace 会忽略 unresolved placeholder
   // 并回退到 WORKSPACE_FOLDER_PATHS / rootDir。
+  // Codex 不支持 ${workspaceFolder}，由 omitWorkspaceFolderPlaceholder 跳过。
   const npxEnv: Record<string, string> = {
     ...MCP_STDIO_ENV,
-    GRAPHFLOW_WORKSPACE_ROOT: "${workspaceFolder}",
   };
-
-  if (isWindows()) {
-    const winNpx = resolveWindowsNpxLaunch();
-    if (winNpx) {
-      return {
-        command: winNpx.command,
-        args: winNpx.args,
-        env: npxEnv,
-      };
-    }
+  if (!options.omitWorkspaceFolderPlaceholder) {
+    npxEnv.GRAPHFLOW_WORKSPACE_ROOT = "${workspaceFolder}";
   }
 
-  const npxCmd = isWindows() ? "npx.cmd" : "npx";
+  const winNpx = resolveWindowsNpxLaunch({
+    ...(options.windowsHost !== undefined ? { windowsHost: options.windowsHost } : {}),
+    ...(options.windowsNodePath !== undefined ? { windowsNodePath: options.windowsNodePath } : {}),
+    ...(options.windowsNpxCliPath !== undefined ? { windowsNpxCliPath: options.windowsNpxCliPath } : {}),
+  });
+  if (winNpx) {
+    return {
+      command: winNpx.command,
+      args: winNpx.args,
+      env: { ...npxEnv, ...winNpx.env },
+    };
+  }
+
+  const npxCmd = isWindows() || options.windowsHost ? "npx.cmd" : "npx";
   return {
     command: npxCmd,
     args: ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
@@ -1517,10 +1709,26 @@ export function installMcpToDetectedAgents(options: McpInstallOptions): McpInsta
   for (const target of targets) {
     try {
       const { workspaceRoot, ...restOptions } = options;
+      const windowsHost =
+        Boolean(restOptions.windowsHost) ||
+        isWindows() ||
+        target.agentId.endsWith("-windows");
+      const isCodex = target.configFormat === "codex-toml";
       const node = buildMcpServerNode(
         target.scope === "workspace" && workspaceRoot
-          ? { ...restOptions, workspaceRoot }
-          : restOptions
+          ? {
+              ...restOptions,
+              workspaceRoot,
+              windowsHost,
+              omitWorkspaceFolderPlaceholder:
+                Boolean(restOptions.omitWorkspaceFolderPlaceholder) || isCodex,
+            }
+          : {
+              ...restOptions,
+              windowsHost,
+              omitWorkspaceFolderPlaceholder:
+                Boolean(restOptions.omitWorkspaceFolderPlaceholder) || isCodex,
+            }
       );
       const status = injectIntoAgentConfig(
         target.configPath,
@@ -1648,6 +1856,7 @@ export function formatModelConfigGuide(workspaceRoot?: string): string {
     '> "使用 graphflow 预览当前项目的 orchestrator 相关上下文"',
     "",
     "Codex 配置写入 `~/.codex/config.toml` 的 `[mcp_servers.graphflow]`；Trae 写入 `User/mcp.json`。",
+    "Windows 上 Codex 使用 node.exe + npx-cli.js，并写入 NODE / NPX_CLI（优先 8.3 短路径，如 C:\\PROGRA~1\\nodejs\\...）。",
     "",
     "## 6. 验证路由",
     "运行 `GraphFlow: Settings` 保存后，在 Chat 输入 `@graphflow /diagnose` 查看 provider 健康状态。",

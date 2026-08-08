@@ -70,6 +70,17 @@ export interface SkillState {
   outcomeKind?: SkillOutcomeKind;
   /** 来源元数据；缺失按 local 处理（向后兼容旧数据）。 */
   provenance?: SkillProvenance;
+  /**
+   * Explicit canary validate hook (team-memory security).
+   * When true, external sync skills may promote to proven without waiting
+   * for DEFAULT_CANARY_LOCAL_SUCCESSES local applications.
+   */
+  canaryValidated?: boolean;
+  /**
+   * Optional free-text guidance refined by SkillOpt-lite from lessons/outcomes.
+   * Not required for scoring; used as agent-facing hints when present.
+   */
+  guidance?: string;
 }
 
 export interface CompositeSkillState {
@@ -91,6 +102,8 @@ export interface CompositeSkillState {
   outcomeKind?: SkillOutcomeKind;
   /** 来源元数据；缺失按 local 处理（向后兼容旧数据）。 */
   provenance?: SkillProvenance;
+  /** Explicit canary validate hook for external composite skills. */
+  canaryValidated?: boolean;
 }
 
 export type EdgeRelation = GraphEdge["relation"];

@@ -193,6 +193,21 @@ export interface RoutingDiagnosisResult {
     unhealthy: number;
     providerNames: string[];
   };
+  /** P0 flywheel observability — same source as `skill report` / graphflow_diagnose. */
+  flywheel?: {
+    autoCaptureEnabled: boolean;
+    episodes: { total: number; pass: number; fail: number; pending: number };
+    skills: {
+      total: number;
+      byOutcomeKind: {
+        proven: number;
+        correctable: number;
+        "anti-pattern": number;
+        noise: number;
+      };
+    };
+    sessionJournal: { path: string; exists: boolean; pendingCount: number };
+  };
 }
 
 export interface SettingsValidationIssue {
@@ -249,9 +264,21 @@ export interface PlanPreviewResult {
   /** Original triage classification (kept when mode is agent-delegated). */
   triageMode?: "simple" | "complex";
   ideas: string[];
-  nodes: Array<{ id: string; description: string; dependencies: string[] }>;
+  nodes: Array<{
+    id: string;
+    description: string;
+    dependencies: string[];
+    skillRefs?: string[];
+    avoidPatterns?: string[];
+  }>;
   /** Same as nodes when bridge suggests a local heuristic DAG. */
-  suggestedNodes?: Array<{ id: string; description: string; dependencies: string[] }>;
+  suggestedNodes?: Array<{
+    id: string;
+    description: string;
+    dependencies: string[];
+    skillRefs?: string[];
+    avoidPatterns?: string[];
+  }>;
   nodesStatus?: "suggested" | "final";
   agentWorkItems?: AgentWorkItem[];
   agentInstructions?: string;

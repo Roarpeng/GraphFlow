@@ -6,8 +6,13 @@ import { splitTaskClauses } from "./task-clauses";
 
 export { looksLikeActionableTaskClause, splitTaskClauses } from "./task-clauses";
 
-function toNode(id: string, description: string, dependencies: string[]): TaskNode {
-  return {
+function toNode(
+  id: string,
+  description: string,
+  dependencies: string[],
+  skillHints?: string[]
+): TaskNode {
+  const node: TaskNode = {
     id,
     description,
     dependencies,
@@ -15,6 +20,11 @@ function toNode(id: string, description: string, dependencies: string[]): TaskNo
     contextQuery: description,
     retryCount: 0,
   };
+  const skillRefs = (skillHints ?? []).filter((s) => s.trim().length > 0);
+  if (skillRefs.length > 0) {
+    node.skillRefs = skillRefs;
+  }
+  return node;
 }
 
 export function planTasks(task: string, skillHints?: string[]): TaskNode[] {
@@ -23,20 +33,21 @@ export function planTasks(task: string, skillHints?: string[]): TaskNode[] {
   if (parts.length <= 1) {
     const baseTask = task.trim();
     return [
-      toNode("task-1", withSkillHints(`分析与设计: ${baseTask}`, skillHints), []),
-      toNode("task-2", withSkillHints(`实现: ${baseTask}`, skillHints), ["task-1"]),
-      toNode("task-2b", withSkillHints(`测试设计: ${baseTask}`, skillHints), ["task-1"]),
-      toNode("task-3", withSkillHints(`验证: ${baseTask}`, skillHints), ["task-2", "task-2b"]),
+      toNode("task-1", withSkillHints(`分析与设计: ${baseTask}`, skillHints), [], skillHints),
+      toNode("task-2", withSkillHints(`实现: ${baseTask}`, skillHints), ["task-1"], skillHints),
+      toNode("task-2b", withSkillHints(`测试设计: ${baseTask}`, skillHints), ["task-1"], skillHints),
+      toNode("task-3", withSkillHints(`验证: ${baseTask}`, skillHints), ["task-2", "task-2b"], skillHints),
     ];
   }
 
   const parallelTasks = parts.map((part, index) =>
-    toNode(`task-${index + 1}`, withSkillHints(part, skillHints), [])
+    toNode(`task-${index + 1}`, withSkillHints(part, skillHints), [], skillHints)
   );
   const finalTask = toNode(
     `task-${parts.length + 1}`,
     withSkillHints(`integrate and verify: ${parts.join("; ")}`, skillHints),
-    parallelTasks.map((item) => item.id)
+    parallelTasks.map((item) => item.id),
+    skillHints
   );
 
   return [...parallelTasks, finalTask];
@@ -77,7 +88,7 @@ export async function planTasksLlm(task: string, options: PlanTasksLlmOptions): 
   }
 
   return parsed.slice(0, MAX_PLAN_NODES).map((item) =>
-    toNode(item.id, withSkillHints(item.description, options.skillHints), item.dependencies)
+    toNode(item.id, withSkillHints(item.description, options.skillHints), item.dependencies, options.skillHints)
   );
 }
 

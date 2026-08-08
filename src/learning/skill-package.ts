@@ -113,7 +113,7 @@ function skillUpdatedAt(node: SkillNode): number {
  *    provenance 时保留 originRepo/episodeId，source 强制为 sync）。
  * 2. 初始分类不得直接为 proven（也不得携带 anti-pattern 的负分历史）：
  *    外部技能一律从 correctable 起步，清零 uses/linkedSuccess/failStreak
- *    与分数，必须经本地成功使用（applySkillLearning 晋升路径）才可成为 proven。
+ *    与分数；晋升 proven 须经 canary 门控（本地成功 N 次或显式 validate）。
  * 3. 无法解析的 content 仅透传（结构校验在上层），不阻断导入。
  */
 function markExternalSkillNode(node: SkillNode, originRepo?: string): SkillNode {

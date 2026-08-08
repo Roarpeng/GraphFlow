@@ -175,6 +175,14 @@ function parsePlanItems(parsed: Record<string, unknown>): TaskNode[] {
     const dependencies = Array.isArray(depsRaw)
       ? depsRaw.filter((dep): dep is string => typeof dep === "string")
       : [];
+    const skillRefsRaw = entry.skillRefs;
+    const skillRefs = Array.isArray(skillRefsRaw)
+      ? skillRefsRaw.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+      : [];
+    const avoidRaw = entry.avoidPatterns;
+    const avoidPatterns = Array.isArray(avoidRaw)
+      ? avoidRaw.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+      : [];
     items.push({
       id,
       description,
@@ -182,6 +190,8 @@ function parsePlanItems(parsed: Record<string, unknown>): TaskNode[] {
       status: "PENDING",
       contextQuery: description,
       retryCount: 0,
+      ...(skillRefs.length > 0 ? { skillRefs } : {}),
+      ...(avoidPatterns.length > 0 ? { avoidPatterns } : {}),
     });
   }
   return items.length > 0 ? items.slice(0, 8) : [];

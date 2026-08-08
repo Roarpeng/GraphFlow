@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.9.8] - 2026-08-08
+
+### Added
+
+- **P0 飞轮可观测性**：`getFlywheelReport` / `skill report` / `graphflow_diagnose` / `route diagnose` 暴露 `autoCaptureEnabled`、`sessionJournal`、`skills.byOutcomeKind`；`npm run backfill:episodes` 包装历史回填脚本
+- **Skill-conditioned DAG**：plan 节点可选 `skillRefs` / `avoidPatterns`；bridge 指令要求执行前审阅 skills / 避开 anti-patterns
+- **SkillOpt-lite**：无 LLM 的有界 skill guidance 编辑（最多 3 次，严格提升才接受）；接入 `applySkillLearning` lessons 路径
+- **团队记忆 canary 门控**：`canary-gate.ts`——sync/import 技能须本地成功 N 次（或显式 validate）才可晋升 `proven`；anti-pattern 仅隔离
+- **Codex Windows MCP**：安装写入 `NODE` / `NPX_CLI` 8.3 短路径，修复 Codex 注册失败
+
+### Changed
+
+- **图噪声**：引用边前缀 Trie 预过滤；子图 PageRank LRU 缓存键按节点集排序哈希
+- **planAndBrainstorm** 异步化以在 flywheel 开启时注入 skill 条件
+
+### Tests
+
+- 新增 `tests/m81-skill-conditioned-dag.test.ts`、`tests/canary-gate.test.ts`；扩展 flywheel-report / graph-noise / mcp-resources / Codex MCP install
+
 ## [1.9.7] - 2026-08-03
 
 ### Added

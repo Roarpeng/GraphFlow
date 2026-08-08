@@ -26,10 +26,18 @@ import {
   dedupNodes,
   dedupEdges,
 } from "./skill-store";
+import { optimizeSkillLite } from "./skill-opt-lite";
+import { gateSkillPromotion } from "./canary-gate";
 
 // 兼容性重新导出，确保外部消费者完全兼容
 export type { SkillState, CompositeSkillState } from "./skill-types";
 export { composeSkillId, loadCompositeSkill } from "./skill-store";
+export {
+  canaryPassed,
+  gateSkillPromotion,
+  DEFAULT_CANARY_LOCAL_SUCCESSES,
+  shouldHardDeleteAntiPattern,
+} from "./canary-gate";
 
 const STOPWORDS = new Set([
   "update", "readme", "add", "fix", "file", "files",
@@ -193,6 +201,8 @@ export interface SkillLearningOptions {
  * - proven:       >= 2 uses or a linked successful outcome — the ONLY class
  *                 that accrues positive score. Curated seed skills count as
  *                 proven by design (baseline, never sinkable to negative).
+ *                 External (sync/import) skills additionally require canary
+ *                 (N local successes or canaryValidated) before proven.
  * - correctable:  symbol evidence present, not yet proven. Score stays put.
  */
 export function classifySkillOutcome(options: {
@@ -200,6 +210,10 @@ export function classifySkillOutcome(options: {
   failStreak: number;
   linkedSuccess: boolean;
   seeded?: boolean;
+  provenance?: SkillState["provenance"];
+  canaryValidated?: boolean;
+  /** Successful local applications for canary (defaults to uses). */
+  localSuccesses?: number;
 }): SkillOutcomeKind {
   if (options.seeded === true) {
     return "proven";
@@ -207,10 +221,47 @@ export function classifySkillOutcome(options: {
   if (options.failStreak >= 2) {
     return "anti-pattern";
   }
-  if (options.uses >= 2 || options.linkedSuccess) {
-    return "proven";
+  const candidate: SkillOutcomeKind =
+    options.uses >= 2 || options.linkedSuccess ? "proven" : "correctable";
+  return gateSkillPromotion({
+    outcomeKind: candidate,
+    localSuccesses: options.localSuccesses ?? options.uses,
+    ...(options.provenance ? { provenance: options.provenance } : {}),
+    ...(options.canaryValidated !== undefined
+      ? { validated: options.canaryValidated }
+      : {}),
+  });
+}
+
+/**
+ * Explicit canary validate hook: mark an atomic skill as canary-validated and
+ * re-run promotion classification (external skills may become proven immediately).
+ */
+export async function markSkillCanaryValidated(
+  client: GraphClient,
+  skillId: string
+): Promise<SkillState | undefined> {
+  const previous = await readSkillState(client, skillId);
+  if (!previous) {
+    return undefined;
   }
-  return "correctable";
+  const outcomeKind = classifySkillOutcome({
+    uses: previous.uses,
+    failStreak: previous.failStreak ?? 0,
+    linkedSuccess: previous.linkedSuccess === true,
+    localSuccesses: previous.uses,
+    canaryValidated: true,
+    ...(previous.seeded === true ? { seeded: true } : {}),
+    ...(previous.provenance ? { provenance: previous.provenance } : {}),
+  });
+  const next: SkillState = {
+    ...previous,
+    canaryValidated: true,
+    outcomeKind,
+    updatedAt: Date.now(),
+  };
+  await client.upsertNodes([{ id: next.id, type: "Skill", content: serializeAtomic(next) }]);
+  return next;
 }
 
 export interface PruneFailedSkillsOptions {
@@ -253,6 +304,7 @@ async function listSkillNodes(client: GraphClient): Promise<GraphNode[]> {
 /**
  * Soft-hide chronically failing low-score atomic skills so they stop polluting
  * insights and hint ranking. Prefer hide over delete (Decision history stays).
+ * Anti-patterns stay isolated for audit — never hard-deleted (canary policy).
  */
 export async function pruneFailedSkills(
   client: GraphClient,
@@ -468,7 +520,10 @@ export async function applySkillLearning(
       uses,
       failStreak,
       linkedSuccess,
+      localSuccesses: uses,
       ...(previous?.seeded === true ? { seeded: true } : {}),
+      ...(previous?.provenance ? { provenance: previous.provenance } : {}),
+      ...(previous?.canaryValidated === true ? { canaryValidated: true } : {}),
     });
     // Evidence gate: positive score accrues only for proven skills (>= 2 uses
     // or a linked successful outcome); negative scoring applies ONLY to
@@ -492,9 +547,28 @@ export async function applySkillLearning(
       outcomeKind,
       // 来源元数据随本地学习延续（外部 sync 技能晋升 proven 后仍保留来源标记）。
       ...(previous?.provenance ? { provenance: previous.provenance } : {}),
+      ...(previous?.canaryValidated === true ? { canaryValidated: true } : {}),
       // Pass clears soft-hide; fail preserves it if already set.
       ...(passed ? {} : previous?.hidden ? { hidden: true } : {}),
     };
+
+    // SkillOpt-lite: refine optional guidance from lessons when score improves.
+    if (lessonText.length > 0) {
+      const seedGuidance = previous?.guidance?.trim() || `- ${skill}`;
+      const optimized = optimizeSkillLite({
+        skillText: seedGuidance,
+        lessons: lessonText,
+        outcomes: [{ success: passed }],
+        maxEdits: 3,
+      });
+      if (optimized.improved && optimized.optimizedText.trim().length > 0) {
+        next.guidance = optimized.optimizedText.trim();
+      } else if (previous?.guidance) {
+        next.guidance = previous.guidance;
+      }
+    } else if (previous?.guidance) {
+      next.guidance = previous.guidance;
+    }
 
     nodes.push({ id, type: "Skill", content: serializeAtomic(next) });
     edges.push({
@@ -551,15 +625,27 @@ export async function applySkillLearning(
           ? composite.successCount - composite.failureCount
           : Math.max(0, composite.successCount - composite.failureCount)
       );
-      composite.outcomeKind = compositeAntiPattern
-        ? "anti-pattern"
-        : compositeGateMet(composite)
-          ? "proven"
-          : "correctable";
+      composite.outcomeKind = gateSkillPromotion({
+        outcomeKind: compositeAntiPattern
+          ? "anti-pattern"
+          : compositeGateMet(composite)
+            ? "proven"
+            : "correctable",
+        localSuccesses: composite.successCount,
+        ...(previous?.provenance ? { provenance: previous.provenance } : {}),
+        ...(previous?.canaryValidated === true ? { validated: true } : {}),
+      });
 
-      nodes.push({ id: compositeId, type: "Skill", content: serializeComposite(composite) });
+      nodes.push({
+        id: compositeId,
+        type: "Skill",
+        content: serializeComposite({
+          ...composite,
+          ...(previous?.canaryValidated === true ? { canaryValidated: true } : {}),
+        }),
+      });
 
-      if (compositeGateMet(composite)) {
+      if (composite.outcomeKind === "proven" && compositeGateMet(composite)) {
         edges.push({ from: skillNodeId(n1!), to: compositeId, relation: "prerequisite" });
         edges.push({ from: skillNodeId(n2!), to: compositeId, relation: "prerequisite" });
       }
@@ -576,11 +662,66 @@ export async function applySkillLearning(
   return learnedSkills.length;
 }
 
-export async function suggestSkillHints(
+/** Structured skill conditioning for plan DAG nodes / agent-bridge prompts. */
+export interface SkillConditionHints {
+  /** Proven / correctable skill names to apply while executing steps. */
+  skillRefs: string[];
+  /** Anti-pattern skill names the agent should avoid. */
+  avoidPatterns: string[];
+}
+
+type RankedSkillHint = {
+  name: string;
+  score: number;
+  uses: number;
+  isComposite: boolean;
+  outcomeKind?: SkillOutcomeKind;
+  state?: { kind: "composite" } & CompositeSkillState;
+};
+
+function rankSkillHint(a: RankedSkillHint, b: RankedSkillHint): number {
+  if (a.isComposite !== b.isComposite) {
+    return a.isComposite ? -1 : 1;
+  }
+  if (b.score !== a.score) {
+    return b.score - a.score;
+  }
+  if (b.uses !== a.uses) {
+    return b.uses - a.uses;
+  }
+  return a.name.localeCompare(b.name);
+}
+
+function resolveAtomicOutcomeKind(state: SkillState): SkillOutcomeKind {
+  if (state.outcomeKind) {
+    return state.outcomeKind;
+  }
+  return classifySkillOutcome({
+    uses: state.uses,
+    failStreak: state.failStreak ?? 0,
+    linkedSuccess: state.linkedSuccess === true,
+    ...(state.seeded === true ? { seeded: true } : {}),
+    ...(state.provenance ? { provenance: state.provenance } : {}),
+    ...(state.canaryValidated === true ? { canaryValidated: true } : {}),
+  });
+}
+
+function resolveCompositeOutcomeKind(state: CompositeSkillState): SkillOutcomeKind {
+  if (state.outcomeKind) {
+    return state.outcomeKind;
+  }
+  const anti =
+    state.failureCount >= 2 && state.failureCount > state.successCount;
+  if (anti) {
+    return "anti-pattern";
+  }
+  return compositeGateMet(state) ? "proven" : "correctable";
+}
+
+async function collectTaskSkillCandidates(
   client: GraphClient,
-  task: string,
-  maxHints: number
-): Promise<string[]> {
+  task: string
+): Promise<{ atoms: string[]; ranked: RankedSkillHint[]; avoid: RankedSkillHint[] }> {
   const atoms = extractSkillAtoms(task);
   const queries = dedup([task.toLowerCase(), ...atoms]).slice(0, 10);
   const resultSets = await Promise.all(queries.map((query) => client.queryByKeyword(query)));
@@ -602,50 +743,92 @@ export async function suggestSkillHints(
   }
 
   const atomSet = new Set(atoms);
-  const eligibleComposites = compositeStates.filter((composite) => {
-    if (!compositeGateMet(composite) || composite.score <= 0) {
-      return false;
-    }
+  const matchingComposites = compositeStates.filter((composite) => {
     const [n1, n2] = composite.name.split("+");
     return Boolean(n1 && n2 && atomSet.has(n1) && atomSet.has(n2));
   });
 
-  type Ranked = {
-    name: string;
-    score: number;
-    uses: number;
-    isComposite: boolean;
-    state?: { kind: "composite" } & CompositeSkillState;
-  };
-  const ranked: Ranked[] = [
+  const eligibleComposites = matchingComposites.filter(
+    (composite) => compositeGateMet(composite) && composite.score > 0
+  );
+
+  const ranked: RankedSkillHint[] = [
     ...eligibleComposites.map((c) => ({
       name: c.name,
       score: c.score,
       uses: c.uses,
-      isComposite: true,
-      state: { kind: "composite", ...c },
+      isComposite: true as const,
+      outcomeKind: resolveCompositeOutcomeKind(c),
+      state: { kind: "composite" as const, ...c },
     })),
-    ...atomicStates.map((a) => ({
-      name: a.name,
-      score: a.score,
-      uses: a.uses,
-      isComposite: false,
-    })),
+    ...atomicStates
+      .filter((a) => {
+        const kind = resolveAtomicOutcomeKind(a);
+        return kind === "proven" || kind === "correctable" || a.score > 0;
+      })
+      .map((a) => ({
+        name: a.name,
+        score: a.score,
+        uses: a.uses,
+        isComposite: false as const,
+        outcomeKind: resolveAtomicOutcomeKind(a),
+      })),
   ];
 
-  ranked.sort((a, b) => {
-    if (a.isComposite !== b.isComposite) {
-      return a.isComposite ? -1 : 1;
-    }
-    if (b.score !== a.score) {
-      return b.score - a.score;
-    }
-    if (b.uses !== a.uses) {
-      return b.uses - a.uses;
-    }
-    return a.name.localeCompare(b.name);
-  });
+  ranked.sort(rankSkillHint);
 
+  const avoid: RankedSkillHint[] = [
+    ...matchingComposites
+      .filter((c) => resolveCompositeOutcomeKind(c) === "anti-pattern" || c.score < 0)
+      .map((c) => ({
+        name: c.name,
+        score: c.score,
+        uses: c.uses,
+        isComposite: true as const,
+        outcomeKind: resolveCompositeOutcomeKind(c),
+      })),
+    ...atomicStates
+      .filter((a) => resolveAtomicOutcomeKind(a) === "anti-pattern" || a.score < 0)
+      .map((a) => ({
+        name: a.name,
+        score: a.score,
+        uses: a.uses,
+        isComposite: false as const,
+        outcomeKind: resolveAtomicOutcomeKind(a),
+      })),
+  ];
+  avoid.sort(rankSkillHint);
+
+  return { atoms, ranked, avoid };
+}
+
+/**
+ * Skill-conditioned DAG helper: returns proven/correctable refs plus anti-patterns
+ * to avoid, without bumping composite use counters (read-only for plan packaging).
+ */
+export async function suggestSkillConditionHints(
+  client: GraphClient,
+  task: string,
+  maxHints: number
+): Promise<SkillConditionHints> {
+  const { ranked, avoid } = await collectTaskSkillCandidates(client, task);
+  const skillRefs = ranked
+    .filter((item) => item.outcomeKind !== "anti-pattern")
+    .slice(0, Math.max(0, maxHints))
+    .map((item) => item.name);
+  const avoidPatterns = avoid
+    .slice(0, Math.max(0, maxHints))
+    .map((item) => item.name)
+    .filter((name) => !skillRefs.includes(name));
+  return { skillRefs, avoidPatterns };
+}
+
+export async function suggestSkillHints(
+  client: GraphClient,
+  task: string,
+  maxHints: number
+): Promise<string[]> {
+  const { ranked } = await collectTaskSkillCandidates(client, task);
   const chosen = ranked.slice(0, maxHints);
 
   const updates: GraphNode[] = [];
@@ -662,6 +845,10 @@ export async function suggestSkillHints(
         uses: item.state.uses + 1,
         lastOutcome: item.state.lastOutcome,
         updatedAt: Date.now(),
+        ...(item.state.hasSymbolEvidence === true ? { hasSymbolEvidence: true } : {}),
+        ...(item.state.seeded === true ? { seeded: true } : {}),
+        ...(item.state.outcomeKind ? { outcomeKind: item.state.outcomeKind } : {}),
+        ...(item.state.provenance ? { provenance: item.state.provenance } : {}),
       };
       updates.push({ id: updated.id, type: "Skill", content: serializeComposite(updated) });
     }
