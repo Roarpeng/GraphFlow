@@ -49,12 +49,20 @@ export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("GraphFlow");
   context.subscriptions.push(output);
 
-  void bootstrapExtension(context, workspaceRoot, output);
+  // Ensure anydoc (if enabled) before MCP bootstrap / auto-index so Office/PDF indexing works.
+  void (async () => {
+    await ensureAnydocForExtension(context, output);
+    await bootstrapExtension(context, workspaceRoot, output);
+    if (workspaceRoot) {
+      try {
+        await runGraphFlow(workspaceRoot, (runtime) => runtime.indexGraph(workspaceRoot));
+      } catch (err) {
+        console.error("GraphFlow auto-index on activate failed:", err);
+      }
+    }
+  })();
 
   if (workspaceRoot) {
-    runGraphFlow(workspaceRoot, (runtime) => runtime.indexGraph(workspaceRoot)).catch((err) => {
-      console.error("GraphFlow auto-index on activate failed:", err);
-    });
     registerDebouncedIndexOnSave(context, workspaceRoot);
   }
 
@@ -417,6 +425,62 @@ export function activate(context: vscode.ExtensionContext): void {
     installMcp,
     participant
   );
+}
+
+async function ensureAnydocForExtension(
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel
+): Promise<void> {
+  const enabled = vscode.workspace.getConfiguration("graphflow").get<boolean>("downloadAnydoc", true);
+  const ensurePath = join(
+    context.extensionPath,
+    "vendor",
+    "graphflow",
+    "dist",
+    "integrations",
+    "ensure-anydoc.js"
+  );
+  try {
+    const mod = (await import(pathToFileURL(ensurePath).href)) as {
+      ensureAnydocInstalled: (options?: {
+        enabled?: boolean;
+        logger?: (message: string) => void;
+      }) => Promise<{ status: string; message: string; nodeModules?: string }>;
+      applyAnydocRequireEnv: (nodeModules?: string) => boolean;
+      resolveAnydocNodeModules: () => string;
+      resetDocumentConverterCache?: () => void;
+    };
+    const result = await mod.ensureAnydocInstalled({
+      enabled,
+      logger: (message) => output.appendLine(message),
+    });
+    if (result.nodeModules) {
+      mod.applyAnydocRequireEnv(result.nodeModules);
+    } else {
+      mod.applyAnydocRequireEnv(mod.resolveAnydocNodeModules());
+    }
+    // Clear converter miss-cache if runtime already loaded in-process.
+    try {
+      const convertPath = join(
+        context.extensionPath,
+        "vendor",
+        "graphflow",
+        "dist",
+        "graph",
+        "document-convert.js"
+      );
+      const convertMod = (await import(pathToFileURL(convertPath).href)) as {
+        resetDocumentConverterCache?: () => void;
+      };
+      convertMod.resetDocumentConverterCache?.();
+    } catch {
+      // ignore
+    }
+    output.appendLine(`[GraphFlow] anydoc: ${result.status} — ${result.message}`);
+  } catch (err) {
+    const text = err instanceof Error ? err.message : String(err);
+    output.appendLine(`[GraphFlow] anydoc ensure skipped: ${text}`);
+  }
 }
 
 async function bootstrapExtension(

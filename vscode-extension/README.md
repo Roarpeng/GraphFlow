@@ -6,9 +6,17 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 
 ## 当前版本
 
-- Extension / runtime：**1.9.5**
+- Extension / runtime：**1.9.11**
 - 市场身份：`roarpeng.graphflow`（displayName **GraphFlow Context & Memory**）
-- 对应 VSIX：`../artifacts/graphflow-1.9.5.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
+- 对应 VSIX：`../artifacts/graphflow-1.9.11.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
+
+## Office/PDF 文档转换（anydoc）
+
+- VSIX **不内置** `@firecrawl/anydoc` 原生二进制（体积与多平台问题）。
+- 扩展激活时若设置 **`graphflow.downloadAnydoc`**（默认 `true`），会用本机 `npm` 把**当前系统**的 anydoc 下载到 `~/.graphflow/optional-deps`。
+- MCP launcher / 索引运行时通过 `GRAPHFLOW_ANYDOC_NODE_MODULES` 加载该目录。
+- 关闭设置或下载失败时：跳过 Office/PDF，**源码建图不受影响**。
+- 也可手动：`npm i -g @firecrawl/anydoc` 或在项目中安装 optional 依赖。
 
 ## v1.9.x 要点
 
@@ -69,6 +77,8 @@ cursor --install-extension graphflow-1.9.5.vsix
 > **无需 LLM** 即可使用：结构建图、Context Preview（FNV-1a hash 向量召回兜底）、知识图谱可视化、记忆审计、MCP 工具。
 >
 > **关于语义模型**：VSIX **不**捆绑 `@huggingface/transformers` 模型（约 100MB+）。默认 `fnv` 离线可用；启用 `transformers` 时模型懒加载，无缓存/失败会告警并自动降级回 FNV。
+>
+> **关于 anydoc**：VSIX **不**捆绑 Office/PDF 转换库；默认在激活时自动下载到 `~/.graphflow/optional-deps`（设置 `graphflow.downloadAnydoc`，可关）。
 
 ## 功能命令
 
