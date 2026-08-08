@@ -1,5 +1,5 @@
 import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index.js";
-import { getTreeSitterParser, type TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
+import { getTreeSitterParser, walkTreeSitterAst, type TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
 
 const FUNC_NAME_BLACKLIST = new Set([
   "if", "else", "for", "while", "switch", "return", "do", "case", "sizeof", "typeof",
@@ -37,7 +37,9 @@ export const cppIndexer: LanguageIndexer = {
     const symbols: DeclaredSymbol[] = [];
     const imports: ImportTarget[] = [];
 
-    const traverse = (node: TreeSitterSyntaxNode) => {
+    // Iterative walk — recursive DFS overflows on large C/C++ ASTs
+    // ("Maximum call stack size exceeded" when indexing big projects).
+    walkTreeSitterAst(tree.rootNode, (node) => {
       const lineNo = node.startPosition.row + 1;
 
       switch (node.type) {
@@ -201,22 +203,19 @@ export const cppIndexer: LanguageIndexer = {
           break;
         }
       }
+    });
 
-      for (const child of node.children ?? node.namedChildren) {
-        traverse(child);
-      }
-    };
-
-    traverse(tree.rootNode);
     return { symbols, imports };
   },
 };
 
 function isFunctionPrototype(node: TreeSitterSyntaxNode): boolean {
   // A declaration is a function prototype if it contains a parameter_list
-  // but no compound_statement (body).
-  const hasParams = node.children?.some((c) => c.type === "parameter_list") ?? false;
-  const hasBody = node.children?.some((c) => c.type === "compound_statement") ?? false;
+  // but no compound_statement (body). Prefer namedChildren to avoid walking
+  // every punctuation token on large declarators.
+  const kids = node.namedChildren;
+  const hasParams = kids.some((c) => c.type === "parameter_list");
+  const hasBody = kids.some((c) => c.type === "compound_statement");
   return hasParams && !hasBody;
 }
 
@@ -235,23 +234,29 @@ function extractFunctionName(node: TreeSitterSyntaxNode): string | null {
 }
 
 function findChildByType(node: TreeSitterSyntaxNode, type: string): TreeSitterSyntaxNode | null {
-  const children = node.children ?? node.namedChildren;
-  for (const child of children) {
+  for (const child of node.namedChildren) {
+    if (child.type === type) return child;
+  }
+  // Some grammars expose field-only nodes via children; fall back lightly.
+  for (const child of node.children ?? []) {
     if (child.type === type) return child;
   }
   return null;
 }
 
 function hasStorageClass(node: TreeSitterSyntaxNode, storageClass: string): boolean {
-  return node.children?.some((c) => c.type === "storage_class_specifier" && c.text === storageClass) ?? false;
+  return (
+    node.namedChildren.some((c) => c.type === "storage_class_specifier" && c.text === storageClass) ||
+    (node.children?.some((c) => c.type === "storage_class_specifier" && c.text === storageClass) ?? false)
+  );
 }
 
 function isClassDeclaration(node: TreeSitterSyntaxNode): boolean {
-  return node.children?.some((c) => c.type === "class_specifier") ?? false;
+  return (
+    node.namedChildren.some((c) => c.type === "class_specifier") ||
+    (node.children?.some((c) => c.type === "class_specifier") ?? false)
+  );
 }
-
-
-
 /**
  * Regex-based fallback used when tree-sitter WASM is unavailable.
  * Preserves the pre-upgrade behavior.

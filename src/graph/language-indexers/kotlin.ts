@@ -1,5 +1,5 @@
 import type { DeclaredSymbol, ExtractionResult, ImportTarget, LanguageIndexer } from "./index.js";
-import { getTreeSitterParser, type TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
+import { getTreeSitterParser, walkTreeSitterAst, type TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
 
 function kotlinSymbolName(node: TreeSitterSyntaxNode): string | undefined {
   const nameNode = node.childForFieldName("name");
@@ -56,7 +56,7 @@ export const kotlinIndexer: LanguageIndexer = {
       return kotlinRegexFallback(filePath, content);
     }
 
-    const traverse = (node: TreeSitterSyntaxNode) => {
+    walkTreeSitterAst(tree.rootNode, (node) => {
       const lineNo = node.startPosition.row + 1;
 
       switch (node.type) {
@@ -134,13 +134,8 @@ export const kotlinIndexer: LanguageIndexer = {
           break;
         }
       }
+    });
 
-      for (const child of node.children ?? node.namedChildren) {
-        traverse(child);
-      }
-    };
-
-    traverse(tree.rootNode);
     return { symbols, imports };
   },
 };

@@ -1,6 +1,6 @@
 import type { CallRelation, DeclaredSymbol, ExtractionResult, ImportTarget, InheritRelation, LanguageIndexer } from "./index.js";
 import { parseFileIncremental } from "./incremental-parse.js";
-import type { TreeSitterSyntaxNode } from "./tree-sitter-loader.js";
+import { walkTreeSitterAstWithState } from "./tree-sitter-loader.js";
 
 export const pythonIndexer: LanguageIndexer = {
   language: "python",
@@ -12,7 +12,7 @@ export const pythonIndexer: LanguageIndexer = {
     const inherits: InheritRelation[] = [];
     const tree = await parseFileIncremental(filePath, "python", content);
 
-    const traverse = (node: TreeSitterSyntaxNode, caller?: string) => {
+    walkTreeSitterAstWithState(tree.rootNode, undefined as string | undefined, (node, caller) => {
       const lineNo = node.startPosition.row + 1;
 
       if (node.type === "class_definition") {
@@ -123,12 +123,9 @@ export const pythonIndexer: LanguageIndexer = {
         }
       }
 
-      for (const child of node.children ?? node.namedChildren) {
-        traverse(child, caller);
-      }
-    };
+      return caller;
+    });
 
-    traverse(tree.rootNode);
     return { symbols, imports, calls, inherits };
   },
 };

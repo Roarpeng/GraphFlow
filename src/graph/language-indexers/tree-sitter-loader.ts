@@ -52,6 +52,58 @@ export interface TreeSitterParser {
 }
 
 /**
+ * Iterative DFS over a tree-sitter AST.
+ *
+ * Language indexers previously used recursive `traverse(child)` which blows
+ * the V8 call stack on large C/C++ translation units (deep templates, nested
+ * macros, generated headers) with "Maximum call stack size exceeded".
+ *
+ * Prefer `namedChildren` (default) — unnamed punctuation tokens are irrelevant
+ * for symbol extraction and inflate both depth and breadth.
+ */
+export function walkTreeSitterAst(
+  root: TreeSitterSyntaxNode,
+  visit: (node: TreeSitterSyntaxNode) => void,
+  options?: { namedOnly?: boolean }
+): void {
+  walkTreeSitterAstWithState(root, undefined, (node) => {
+    visit(node);
+    return undefined;
+  }, options);
+}
+
+/**
+ * Iterative DFS that threads per-frame state (e.g. current caller name for call edges).
+ * `visit` returns the state to pass to children; returning the same reference is fine.
+ */
+export function walkTreeSitterAstWithState<T>(
+  root: TreeSitterSyntaxNode,
+  initialState: T,
+  visit: (node: TreeSitterSyntaxNode, state: T) => T,
+  options?: { namedOnly?: boolean }
+): void {
+  const namedOnly = options?.namedOnly !== false;
+  const stack: Array<{ node: TreeSitterSyntaxNode; state: T }> = [
+    { node: root, state: initialState },
+  ];
+
+  while (stack.length > 0) {
+    const frame = stack.pop()!;
+    const childState = visit(frame.node, frame.state);
+    const children = namedOnly
+      ? frame.node.namedChildren
+      : (frame.node.children ?? frame.node.namedChildren);
+    // Reverse push so left-to-right child order is preserved.
+    for (let i = children.length - 1; i >= 0; i -= 1) {
+      const child = children[i];
+      if (child) {
+        stack.push({ node: child, state: childState });
+      }
+    }
+  }
+}
+
+/**
  * Supported tree-sitter languages.
  * Previously only python/go used tree-sitter; rust/c-cpp used regex.
  * Now all four use tree-sitter for consistent AST-level extraction.

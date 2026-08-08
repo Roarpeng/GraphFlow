@@ -79,29 +79,35 @@ export function walkScannableFiles(
 }
 
 /**
- * Recursively walk directories, skipping IGNORED_DIRS, returning files
+ * Iteratively walk directories, skipping IGNORED_DIRS, returning files
  * whose extension matches `includeExtensions`.
+ * (Iterative to avoid call-stack overflow on deeply nested monorepos.)
  */
 export function walkFiles(rootDir: string, includeExtensions: string[]): string[] {
-  const entries = safeReaddirSync(rootDir);
   const files: string[] = [];
+  const dirStack: string[] = [rootDir];
 
-  for (const entry of entries) {
-    const full = join(rootDir, entry.name);
-    if (entry.isSymbolicLink()) {
-      continue;
-    }
+  while (dirStack.length > 0) {
+    const current = dirStack.pop()!;
+    const entries = safeReaddirSync(current);
 
-    if (entry.isDirectory()) {
-      if (IGNORED_DIRS.has(entry.name)) {
+    for (const entry of entries) {
+      const full = join(current, entry.name);
+      if (entry.isSymbolicLink()) {
         continue;
       }
-      files.push(...walkFiles(full, includeExtensions));
-      continue;
-    }
 
-    if (includeExtensions.some((ext) => entry.name.endsWith(ext))) {
-      files.push(full);
+      if (entry.isDirectory()) {
+        if (IGNORED_DIRS.has(entry.name)) {
+          continue;
+        }
+        dirStack.push(full);
+        continue;
+      }
+
+      if (includeExtensions.some((ext) => entry.name.endsWith(ext))) {
+        files.push(full);
+      }
     }
   }
 
