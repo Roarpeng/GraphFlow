@@ -178,6 +178,26 @@ Download `graphflow-<version>.vsix` from [GitHub Releases](https://github.com/Ro
 
 Commands: Settings / Show Graph (graph visualization) / Preview Context / Plan & Brainstorm / Run Task / Skill Insights / Install MCP; chat agent `@graphflow` (`/run` `/plan` `/graph` `/skills` `/diagnose` `/learn` `/history`).
 
+## Agent Plugins 1.0
+
+GraphFlow ships as a portable [Agent Plugins](https://agent-plugins.org) package at the repository root:
+
+```text
+plugin.json              # Agent Plugins 1.0 manifest
+mcp.json                 # stdio MCP (type required by the spec)
+skills/graphflow/SKILL.md
+```
+
+**Install in Cursor (local):**
+
+```bash
+mkdir -p ~/.cursor/plugins/local
+ln -s /absolute/path/to/GraphFlow ~/.cursor/plugins/local/graphflow
+# then Restart Cursor / Developer: Reload Window
+```
+
+**Install via Team Marketplace / Git:** import this repository; clients discover `plugin.json`, then load `skills/` and `mcp.json`. Rules and multi-agent wiring still use `graphflow install` below.
+
 ## Agent integrations
 
 ```bash
@@ -214,6 +234,9 @@ Requires Node.js ≥ 20, npm ≥ 10. Expected: lint clean, build succeeds, 692 t
 
 ```text
 GraphFlow/
+├── plugin.json         # Agent Plugins 1.0 manifest
+├── mcp.json            # Agent Plugins MCP (stdio)
+├── skills/graphflow/   # portable Agent Skill (canonical SKILL.md)
 ├── src/
 │   ├── core/           # orchestration core: orchestrator, triage, dag-engine, agent-delegation
 │   ├── graph/          # indexing, context slicing, graph compression, sqlite/auto storage, snapshot

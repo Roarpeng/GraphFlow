@@ -243,7 +243,7 @@ function getSkillGuide(section: string): string {
   if (!skillPath) {
     return JSON.stringify({
       error: "SKILL.md not found",
-      message: "The GraphFlow SKILL.md file could not be located. This is bundled in the dist/surfaces/trae-skill/graphflow/ directory.",
+      message: "The GraphFlow SKILL.md file could not be located. This is bundled at skills/graphflow/ (Agent Plugins) or dist/surfaces/trae-skill/graphflow/.",
       guide: getBuiltInSkillGuide(),
     }, null, 2);
   }
@@ -261,6 +261,8 @@ function getSkillGuide(section: string): string {
 
 function resolveSkillPath(): string | undefined {
   const candidates = [
+    join(process.cwd(), "skills", "graphflow", "SKILL.md"),
+    join(__dirname, "..", "..", "..", "skills", "graphflow", "SKILL.md"),
     join(__dirname, "..", "..", "surfaces", "trae-skill", "graphflow", "SKILL.md"),
     join(__dirname, "..", "..", "..", "src", "surfaces", "trae-skill", "graphflow", "SKILL.md"),
     join(process.cwd(), "src", "surfaces", "trae-skill", "graphflow", "SKILL.md"),

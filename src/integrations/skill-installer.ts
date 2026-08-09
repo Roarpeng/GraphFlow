@@ -157,20 +157,24 @@ function getClaudeCodeDirs(): Array<{ name: string; claudeDir: string }> {
 /**
  * 解析 Trae Skill 源文件路径。
  * 支持以下候选路径（按优先级排序）：
- * 1. vendorRuntimeRoot（VS Code 扩展打包后 vendor/graphflow 路径）
- * 2. 标准的 dist/surfaces/ 路径
- * 3. src/surfaces/ 源码路径
+ * 1. Agent Plugins 1.0 `skills/graphflow/`（规范源）
+ * 2. vendorRuntimeRoot（VS Code 扩展打包后 vendor/graphflow 路径）
+ * 3. 兼容副本：dist/surfaces/trae-skill、src/surfaces/trae-skill
  */
 export function resolveSkillSourcePath(vendorRuntimeRoot?: string): string | undefined {
   const candidates: string[] = [
+    // Agent Plugins 1.0 fixed discovery path (canonical source)
+    join(process.cwd(), "skills", "graphflow"),
+    join(__dirname, "..", "..", "..", "skills", "graphflow"),
     // VS Code 扩展 vendor 路径（打包后）
     ...(vendorRuntimeRoot
       ? [
+          join(vendorRuntimeRoot, "skills", "graphflow"),
           join(vendorRuntimeRoot, "src", "surfaces", "trae-skill", "graphflow"),
           join(vendorRuntimeRoot, "dist", "surfaces", "trae-skill", "graphflow"),
         ]
       : []),
-    // 标准构建产物路径
+    // 兼容副本 / 标准构建产物路径
     join(__dirname, "..", "..", "surfaces", "trae-skill", "graphflow"),
     join(__dirname, "..", "..", "..", "src", "surfaces", "trae-skill", "graphflow"),
     join(process.cwd(), "src", "surfaces", "trae-skill", "graphflow"),

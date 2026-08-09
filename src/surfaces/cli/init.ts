@@ -60,6 +60,8 @@ function getTraeUserDirs(): Array<{ name: string; skillsDir: string }> {
 
 function resolveSkillSourcePath(): string | undefined {
   const candidates: string[] = [
+    join(process.cwd(), "skills", "graphflow"),
+    join(__dirname, "..", "..", "..", "skills", "graphflow"),
     join(__dirname, "..", "..", "surfaces", "trae-skill", "graphflow"),
     join(__dirname, "..", "..", "..", "src", "surfaces", "trae-skill", "graphflow"),
     join(process.cwd(), "src", "surfaces", "trae-skill", "graphflow"),

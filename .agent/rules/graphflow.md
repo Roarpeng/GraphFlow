@@ -1,4 +1,11 @@
-# GraphFlow Token-First Rule (Antigravity)
+---
+description: GraphFlow token-first — always call graphflow_context before code exploration, debugging, or edits.
+alwaysApply: true
+globs:
+  - "**/*"
+---
+
+# GraphFlow Token-First Rule (Trae)
 
 GraphFlow is a graph-based context and planning MCP service. **You MUST use it before broad file search or reading many files.**
 
@@ -39,7 +46,7 @@ graphflow_context({
 | `graphflow_plan` | Multi-step tasks |
 | `graphflow_index` | After significant edits |
 
-For the full 10-tool reference and workflows, use Skill **`graphflow`** in `~/.gemini/antigravity/skills/graphflow/SKILL.md` or `.agent/skills/graphflow/SKILL.md`.
+For the full 10-tool reference and workflows, use Skill **`#graphflow`** or `@skills/graphflow/SKILL.md`.
 
 ## Bridge mode
 

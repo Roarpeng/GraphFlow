@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "graphflow": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
+      "env": {
+        "GRAPHFLOW_MCP_STDIO": "1",
+        "GRAPHFLOW_LOG_JSON": "1"
+      }
+    }
+  }
+}

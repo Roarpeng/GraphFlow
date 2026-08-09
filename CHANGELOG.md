@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Agent Plugins 1.0** packaging at repo root: `plugin.json`, `mcp.json` (`type: stdio`), and canonical `skills/graphflow/SKILL.md`
+- README section for local plugin install (`~/.cursor/plugins/local`) and Team Marketplace / Git discovery
+- `npm run sync:surfaces` keeps `src/surfaces/trae-skill/graphflow/SKILL.md` aligned with the Agent Plugins skill source
+- Conformance test `tests/agent-plugins-1.0.test.ts`
+
+### Changed
+
+- Skill resolution (`resolveSkillSourcePath` / MCP `graphflow_skill_guide`) prefers `skills/graphflow` before legacy `trae-skill` paths
+- `package.json` `files` publishes `plugin.json`, `mcp.json`, and `skills/`
+
 ## [1.9.11] - 2026-08-08
 
 ### Added

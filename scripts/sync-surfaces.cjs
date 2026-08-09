@@ -7,6 +7,10 @@ const ROOT = path.resolve(__dirname, "..");
 
 const copyPairs = [
   {
+    source: "skills/graphflow/SKILL.md",
+    targets: ["src/surfaces/trae-skill/graphflow/SKILL.md"],
+  },
+  {
     source: "src/surfaces/trae-rules/graphflow.md",
     targets: [
       ".trae/rules/graphflow.md",

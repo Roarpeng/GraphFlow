@@ -1,0 +1,21 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "graphflow",
+  "version": "1.9.11",
+  "description": "A Context-Aware Multi-Agent Orchestration Engine — portable skills and MCP for graph-based context compression and task planning",
+  "author": {
+    "name": "Roarpeng",
+    "url": "https://github.com/Roarpeng"
+  },
+  "homepage": "https://github.com/Roarpeng/GraphFlow#readme",
+  "repository": "https://github.com/Roarpeng/GraphFlow",
+  "license": "Apache-2.0",
+  "keywords": [
+    "multi-agent",
+    "orchestration",
+    "mcp",
+    "context-engine",
+    "agent-plugins",
+    "skills"
+  ]
+}
