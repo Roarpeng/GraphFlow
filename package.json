@@ -8,6 +8,9 @@
     "dist",
     "wasm",
     "scripts/safe-postinstall.cjs",
+    "plugin.json",
+    "mcp.json",
+    "skills",
     "src/surfaces/trae-skill",
     "src/surfaces/trae-rules",
     "src/surfaces/cursor-rules",
@@ -80,6 +83,7 @@
     "orchestration",
     "mcp",
     "context-engine",
+    "agent-plugins",
     "cursor",
     "claude-code"
   ],
