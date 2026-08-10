@@ -4,6 +4,7 @@ import {
   diagnoseRouting,
   diagnoseRoutingResult,
   exportArtifact,
+  exportExperienceMemory,
   exportSkillPackageRuntime,
   getFlywheelReport,
   getSkillInsights,
@@ -27,6 +28,7 @@ import {
   runSkillDecay,
   runSkillReset,
   runSkillPrune,
+  runSkillConsolidatePlan,
   runTask,
   runTaskResult,
   submitAgentInsightResult,
@@ -416,6 +418,21 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
+  if (command === "skill" && args[0] === "consolidate") {
+    // Dry-run only: plan UPDATE/DELETE/ADD without mutating the graph.
+    const data = await runSkillConsolidatePlan(configPath);
+    return {
+      command: "skill-consolidate",
+      data,
+      legacyText: [
+        `updates=${data.summary.updates}`,
+        `deletes=${data.summary.deletes}`,
+        `adds=${data.summary.adds}`,
+        `actions=${data.actions.length}`,
+      ].join("; "),
+    };
+  }
+
   if (command === "skill" && args[0] === "report") {
     // Flywheel contribution report: skills health, most-used skills,
     // episode outcomes — makes the learning loop observable.
@@ -452,6 +469,16 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       command: "artifact-export",
       data,
       legacyText: `path=${data.path}; nodes=${data.nodeCount}; edges=${data.edgeCount}; bytes=${data.bytes}; uncompressedBytes=${data.uncompressedBytes}; compression=${data.compression}; sha256=${data.sha256.slice(0, 12)}...`,
+    };
+  }
+
+  if (command === "artifact" && args[0] === "export-memory") {
+    const outputDir = args[1]?.trim() || undefined;
+    const data = await exportExperienceMemory(configPath, outputDir);
+    return {
+      command: "artifact-export-memory",
+      data,
+      legacyText: `path=${data.path}; skills=${data.skillCount}; episodes=${data.episodeCount}; files=${data.files.join(",")}`,
     };
   }
 
