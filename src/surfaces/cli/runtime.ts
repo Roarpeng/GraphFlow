@@ -22,6 +22,7 @@ export {
   inspectGraph,
   getSkillInsights,
   exportArtifact,
+  exportExperienceMemory,
   importArtifact,
   exportSkillPackageRuntime,
   importSkillPackageRuntime,
@@ -56,6 +57,7 @@ export {
   runSkillDecay,
   runSkillReset,
   runSkillPrune,
+  runSkillConsolidatePlan,
   runLearnForget,
 } from "./runtime/learning.js";
 export {

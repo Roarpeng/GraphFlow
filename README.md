@@ -180,7 +180,7 @@ Commands: Settings / Show Graph (graph visualization) / Preview Context / Plan &
 
 ## Agent Plugins 1.0
 
-GraphFlow ships as a portable [Agent Plugins](https://agent-plugins.org) package at the repository root:
+**Primary install path** for hosts that support [Agent Plugins](https://agent-plugins.org). GraphFlow ships as a portable package at the repository root:
 
 ```text
 plugin.json              # Agent Plugins 1.0 manifest
@@ -196,9 +196,13 @@ ln -s /absolute/path/to/GraphFlow ~/.cursor/plugins/local/graphflow
 # then Restart Cursor / Developer: Reload Window
 ```
 
-**Install via Team Marketplace / Git:** import this repository; clients discover `plugin.json`, then load `skills/` and `mcp.json`. Rules and multi-agent wiring still use `graphflow install` below.
+**Install via Team Marketplace / Git:** import this repository; clients discover `plugin.json`, then load `skills/` and `mcp.json`.
+
+Docs: [Context Engineering contract](docs/context-contract.md) · [Experience memory](docs/experience-memory.md)
 
 ## Agent integrations
+
+Use **`npx @roarpeng/graphflow install` as the fallback** when you need Rules, multi-agent wiring, or a host that does not load Agent Plugins:
 
 ```bash
 npx @roarpeng/graphflow doctor     # detect installed agents
@@ -208,9 +212,14 @@ npx @roarpeng/graphflow init       # write a minimal project config
 
 Supported: Cursor, VS Code, Trae (incl. CN), Claude Code, Windsurf, Cline, Roo Code, Kilo Code, Gemini CLI, Codex, Antigravity, Opencode, Qoder, Amazon Q, Zed, Continue, and more (15+).
 
+| Path | When to use |
+| --- | --- |
+| **Agent Plugins** | Preferred single-host Skill + MCP discovery |
+| **`graphflow install`** | Rules / multi-agent / non-plugin hosts |
+
 ## Protocol
 
-[ATP/IR — Agent Thinking Protocol public specification v1.0](docs/atp-ir-spec-v1.md): work-item registry, submit/merge contract, compatibility rules. Third-party tools can implement compatible producers / consumers.
+[ATP/IR — Agent Thinking Protocol public specification v1.0](docs/atp-ir-spec-v1.md): work-item registry, submit/merge contract, compatibility rules. Third-party tools can implement compatible producers / consumers. Minimal Producer example: [`examples/atp-minimal-producer/`](examples/atp-minimal-producer/).
 
 ## Community
 
@@ -248,7 +257,7 @@ GraphFlow/
 │       └── mcp/        # MCP server (10 tools)
 ├── tests/              # 99 files / 692 tests (incl. retrieval golden set, bridge+DAG)
 ├── benchmarks/         # comprehensive + independent + SWE-bench + token savings + skill A/B (reproducible)
-├── docs/               # ATP spec + comparisons + team memory security
+├── docs/               # ATP spec + context contract + experience memory + comparisons
 ├── vscode-extension/   # VS Code panel and commands
 └── CHANGELOG.md
 ```

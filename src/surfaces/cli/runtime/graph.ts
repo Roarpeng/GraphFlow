@@ -530,6 +530,25 @@ export interface FlywheelReport {
       techDrift: number;
     };
   };
+  /**
+   * P0 Experience-layer evidence — conversion / coverage rates and a short
+   * consolidation tip. Additive-only for diagnose / skill report consumers.
+   */
+  experience: {
+    /**
+     * Skills per resolved episode: `skills.total / max(pass + fail, 1)`,
+     * capped at 1.0 so the metric reads as a 0–1 conversion rate (many skills
+     * per episode still count as “converted”). Denominator is pass+fail
+     * (not withLessons) because only resolved outcomes feed the flywheel.
+     */
+    episodeToSkillConversionRate: number;
+    /** `withLessons / max(episodes.total, 1)` — how often episodes carry extractable lessons. */
+    lessonsCoverageRate: number;
+    antiPatternCount: number;
+    provenSkillCount: number;
+    /** Short human tip when conversion is low or pending share is high. */
+    consolidationHint: string;
+  };
 }
 
 /**
@@ -653,6 +672,25 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
       updatedAt: e.updatedAt,
     }));
 
+  const resolvedEpisodes = Math.max(pass + fail, 1);
+  const episodeToSkillConversionRate = Math.min(1, skillItems.length / resolvedEpisodes);
+  const lessonsCoverageRate = withLessons / Math.max(episodeCount, 1);
+  const pendingShare = episodeCount === 0 ? 0 : pending / episodeCount;
+  let consolidationHint = "Experience flywheel looks healthy.";
+  if (episodeToSkillConversionRate < 0.2 && pass + fail > 0) {
+    consolidationHint =
+      "Low skill conversion — report outcomes with lessons so episodes crystallize into skills.";
+  } else if (pendingShare >= 0.5 && episodeCount > 0) {
+    consolidationHint =
+      "High pending episode share — call graphflow_report_outcome to close the flywheel loop.";
+  } else if (byOutcomeKind["anti-pattern"] > byOutcomeKind.proven && skillItems.length > 0) {
+    consolidationHint =
+      "Anti-patterns outnumber proven skills — review consolidation / prune noise before trusting hints.";
+  } else if (lessonsCoverageRate < 0.25 && episodeCount > 0) {
+    consolidationHint =
+      "Few episodes carry lessons — attach lessons on outcome report to grow Experience.";
+  }
+
   return {
     transport: config.graphPolicy.transport,
     storePath: resolveGraphStorePath(config),
@@ -699,6 +737,13 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
         techDrift: deviations.techDrift,
       },
     },
+    experience: {
+      episodeToSkillConversionRate,
+      lessonsCoverageRate,
+      antiPatternCount: byOutcomeKind["anti-pattern"],
+      provenSkillCount: byOutcomeKind.proven,
+      consolidationHint,
+    },
   };
 }
 
@@ -720,6 +765,21 @@ export async function exportArtifact(
   const graphClient = client ?? createGraphClient(config);
   const { exportGraphArtifact } = await import("../../../graph/artifact-manager.js");
   return exportGraphArtifact(config, outputPath, graphClient, options);
+}
+
+/** Export a human-readable Markdown experience-memory pack (skills + episodes). */
+export async function exportExperienceMemory(
+  configPath?: string,
+  outputDir?: string
+): Promise<{
+  path: string;
+  files: string[];
+  skillCount: number;
+  episodeCount: number;
+}> {
+  const config = resolveConfig(configPath);
+  const { exportExperienceMemoryPack } = await import("../../../graph/memory-pack.js");
+  return exportExperienceMemoryPack(config, outputDir);
 }
 
 export async function importArtifact(

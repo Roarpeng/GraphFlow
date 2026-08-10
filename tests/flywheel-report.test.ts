@@ -147,6 +147,22 @@ describe("flywheel contribution report", () => {
     expect(report.episodes.deviations.techDrift).toBe(0);
     expect(report.goals.active).toBe(1);
     expect(report.goals.supersededVersions).toBe(1);
+    expect(report.experience).toEqual(
+      expect.objectContaining({
+        episodeToSkillConversionRate: expect.any(Number),
+        lessonsCoverageRate: expect.any(Number),
+        antiPatternCount: expect.any(Number),
+        provenSkillCount: expect.any(Number),
+        consolidationHint: expect.any(String),
+      })
+    );
+    expect(report.experience.episodeToSkillConversionRate).toBeGreaterThanOrEqual(0);
+    expect(report.experience.episodeToSkillConversionRate).toBeLessThanOrEqual(1);
+    // 1 of 4 episodes carries lessons
+    expect(report.experience.lessonsCoverageRate).toBeCloseTo(0.25, 5);
+    expect(report.experience.antiPatternCount).toBe(report.skills.byOutcomeKind["anti-pattern"]);
+    expect(report.experience.provenSkillCount).toBe(report.skills.byOutcomeKind.proven);
+    expect(report.experience.consolidationHint.length).toBeGreaterThan(0);
   });
 
   it("attributes memory: recall hits, stale episodes, confidence, evidence chain, deviation breakdown", async () => {
@@ -335,6 +351,13 @@ describe("flywheel contribution report", () => {
       correctable: 0,
       "anti-pattern": 0,
       noise: 0,
+    });
+    expect(report.experience).toEqual({
+      episodeToSkillConversionRate: 0,
+      lessonsCoverageRate: 0,
+      antiPatternCount: 0,
+      provenSkillCount: 0,
+      consolidationHint: "Experience flywheel looks healthy.",
     });
     expect(typeof report.autoCaptureEnabled).toBe("boolean");
     expect(report.sessionJournal.exists).toBe(false);
