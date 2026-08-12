@@ -27,6 +27,7 @@ export {
   formatModelConfigGuide,
   installMcpToDetectedAgents,
   repairUnsafeWindowsMcpCommands,
+  repairStaleGraphFlowMcpLaunchers,
   runLearningNightly,
   runLearningNightlyResult,
   startFileWatcherIfEnabled,
