@@ -28,7 +28,7 @@ import {
   runSkillDecay,
   runSkillReset,
   runSkillPrune,
-  runSkillConsolidatePlan,
+  runSkillConsolidate,
   runTask,
   runTaskResult,
   submitAgentInsightResult,
@@ -419,16 +419,21 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   }
 
   if (command === "skill" && args[0] === "consolidate") {
-    // Dry-run only: plan UPDATE/DELETE/ADD without mutating the graph.
-    const data = await runSkillConsolidatePlan(configPath);
+    // Default dry-run; --apply / --execute opt-in mutates via applySkillConsolidation.
+    const apply = args.includes("--apply") || args.includes("--execute");
+    const data = await runSkillConsolidate(configPath, { apply });
+    const appliedCount = data.applied?.applied.length ?? 0;
+    const skippedCount = data.applied?.skipped.length ?? 0;
     return {
       command: "skill-consolidate",
       data,
       legacyText: [
+        `dryRun=${data.dryRun}`,
         `updates=${data.summary.updates}`,
         `deletes=${data.summary.deletes}`,
         `adds=${data.summary.adds}`,
         `actions=${data.actions.length}`,
+        ...(apply ? [`applied=${appliedCount}`, `skipped=${skippedCount}`] : []),
       ].join("; "),
     };
   }
@@ -444,6 +449,7 @@ async function executeCommand(command: string, args: string[], configPath?: stri
         `skills=${data.skills.total}(+${data.skills.positive}/0${data.skills.neutral}/-${data.skills.negative})`,
         `episodes=${data.episodes.total}(pass:${data.episodes.pass},fail:${data.episodes.fail},pending:${data.episodes.pending},lessons:${data.episodes.withLessons})`,
         `topUsed=${data.skills.topUsed.map((s) => `${s.name}:${s.uses}`).join(",") || "-"}`,
+        `experience=conv:${data.experience.episodeToSkillConversionRate.toFixed(2)},lessons:${data.experience.lessonsCoverageRate.toFixed(2)},consol:${data.experience.consolidation.actionable}`,
       ].join("; "),
     };
   }
