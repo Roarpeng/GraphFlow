@@ -46,7 +46,7 @@
 | **P1** | **第三方基准复现邀请** | ✅ | 与独立 benchmark 同源；README「Proof, not promises」 |
 | **P1（融合）** | **Skill-conditioned DAG + SkillOpt-lite** | ✅ | plan 节点 `skillRefs`/`avoidPatterns`；outcome 有界编辑 guidance |
 | **P2** | **协议层占位**：ATP/IR v1.2、MCP resources | 🟡 | resources 已落地；ATP/IR v1.2 待办 |
-| **P2** | **代码域检索评测公开数据集** | ⬜ | golden set 已入 CI，开放成本低 |
+| **P2** | **代码域检索评测公开数据集** | ✅ | [`benchmarks/datasets/retrieval-golden-v1.json`](benchmarks/datasets/retrieval-golden-v1.json)（+ JSONL）；`npm run dataset:retrieval` 从 TS 真源再生；`npm run bench:retrieval` |
 | **P2** | **社区化基建** | ✅ | CONTRIBUTING / ROADMAP / Issue 模板 |
 | **P3** | **MCP 2.0 无状态规范适配** | ⬜ | 升级 SDK 后复核 ping / schema |
 

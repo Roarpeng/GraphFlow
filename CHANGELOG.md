@@ -4,12 +4,9 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-### Fixed
-
-- **扩展升级后 MCP launcher 路径失效**：`repairStaleGraphFlowMcpLaunchers` 在扩展激活时扫描用户级与工作区 MCP 配置；若 `graphflow` 仍指向已删除的旧版 `mcp-launcher.cjs/.cmd`（如 `roarpeng.graphflow-1.9.6`），自动改写为当前扩展启动器。修复 Cursor Agents 依赖项目级 `.cursor/mcp.json` 而 IDE 仍可用的不一致。
-
 ### Added
 
+- **代码域检索评测公开数据集**：`benchmarks/datasets/retrieval-golden-v1.json`（+ `.jsonl`），含 schema / license / domainCounts / Hit@5·MRR·NDCG 映射说明；`npm run dataset:retrieval` 从 `benchmarks/retrieval-golden-data.ts` 再生，避免漂移
 - **Agent Plugins 1.0** packaging at repo root: `plugin.json`, `mcp.json` (`type: stdio`), and canonical `skills/graphflow/SKILL.md`
 - README section for local plugin install (`~/.cursor/plugins/local`) and Team Marketplace / Git discovery
 - `npm run sync:surfaces` keeps `src/surfaces/trae-skill/graphflow/SKILL.md` aligned with the Agent Plugins skill source
@@ -19,6 +16,10 @@ All notable changes to this project are documented in this file.
 - **Experience memory pack**: `exportExperienceMemoryPack` + CLI `graphflow artifact export-memory` → `graphflow-out/memory-pack/{README,skills,episodes}.md`
 - README: Agent Plugins as **primary** install; `graphflow install` as Rules / multi-agent fallback; links to the two new docs
 - **install/doctor 接入 Claude Code 飞轮 hooks**：`graphflow install` 在检测到 Claude Code home 时自动调用 `installClaudeCodeHooks`（SessionStart / SessionEnd / Stop）；`doctor --json` 新增 `hooks` 类别自检；InstallReport 增加 `claudeCodeHooks`；`GRAPHFLOW_CLAUDE_HOME` 便于测试覆盖
+
+### Fixed
+
+- **扩展升级后 MCP launcher 路径失效**：`repairStaleGraphFlowMcpLaunchers` 在扩展激活时扫描用户级与工作区 MCP 配置；若 `graphflow` 仍指向已删除的旧版 `mcp-launcher.cjs/.cmd`（如 `roarpeng.graphflow-1.9.6`），自动改写为当前扩展启动器。修复 Cursor Agents 依赖项目级 `.cursor/mcp.json` 而 IDE 仍可用的不一致。
 
 ### Changed
 
@@ -31,7 +32,7 @@ All notable changes to this project are documented in this file.
 
 - `tests/m-install-hooks-wiring.test.ts`：hooks status + install/doctor 接线
 - `tests/m-stale-mcp-launcher-repair.test.ts`：失效 mcp-launcher 路径检测与改写
-
+- `tests/retrieval-dataset.test.ts`：公开检索数据集与 TS 真源条目数/内容一致
 
 ## [1.9.11] - 2026-08-08
 
