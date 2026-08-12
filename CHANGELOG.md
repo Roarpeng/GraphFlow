@@ -6,6 +6,9 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- **Episode ↔ Engineering KG on outcome path**: `graphflow_report_outcome` / CLI `outcome report` accept optional `requirementIds` / `conceptIds` / `codeHints` and write episode → `derived_from` → eng nodes via `linkEpisodeToEngineeringNodes`
+- **Document-semantic insight ↔ episode provenance**: when `episodeId` is passed with a document-semantic submit, the same eng links are written for experience↔eng consistency
+- **ATP minimal producer atp-ir/1.2**: optional `memory-recall` / `memory-backfill` markers (host-managed); fixture + README updated; still runnable without GraphFlow MCP
 - **P0 skill consolidate apply**：`graphflow skill consolidate` 默认 dry-run；`--apply` / `--execute` 安全调用 `applySkillConsolidation`（未知 id skip）
 - **代码域检索评测公开数据集**：`benchmarks/datasets/retrieval-golden-v1.json`（+ `.jsonl`），含 schema / license / domainCounts / Hit@5·MRR·NDCG 映射说明；`npm run dataset:retrieval` 从 `benchmarks/retrieval-golden-data.ts` 再生，避免漂移
 - **Agent Plugins 1.0** packaging at repo root: `plugin.json`, `mcp.json` (`type: stdio`), and canonical `skills/graphflow/SKILL.md`
@@ -24,6 +27,8 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- ATP/IR spec status line marks **`atp-ir/1.2` Stable**; §5 / §8 document optional Engineering KG link fields on `report_outcome`
+- ROADMAP P2 rows (ATP producer + Engineering KG episode chain; ATP/IR v1.2 protocol) → ✅
 - **P0 Experience 飞轮可观测**：`getFlywheelReport` / `skill report` / `route diagnose` / `graphflow_diagnose` 的 `experience` 增加 dry-run `consolidation` 动作计数（UPDATE/DELETE/ADD）与建议 hint；ROADMAP P0 ✅
 - Skill resolution (`resolveSkillSourcePath` / MCP `graphflow_skill_guide`) prefers `skills/graphflow` before legacy `trae-skill` paths
 - `package.json` `files` publishes `plugin.json`, `mcp.json`, and `skills/`
@@ -34,6 +39,8 @@ All notable changes to this project are documented in this file.
 
 - `tests/m-install-hooks-wiring.test.ts`：hooks status + install/doctor 接线
 - `tests/m-stale-mcp-launcher-repair.test.ts`：失效 mcp-launcher 路径检测与改写
+- `tests/atp-ir-v1.2-conformance.test.ts`：ATP/IR v1.2 memory markers + producer protocol
+- `tests/report-outcome-engineering-links.test.ts`：outcome / insight eng-link wiring
 - `tests/retrieval-dataset.test.ts`：公开检索数据集与 TS 真源条目数/内容一致
 
 ## [1.9.11] - 2026-08-08

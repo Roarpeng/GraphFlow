@@ -140,7 +140,7 @@ Reference implementation: GraphFlow (@roarpeng/graphflow) v1.8+
 producer: plan(task) -> { agentWorkItems, agentInstructions, status: "awaiting-agent" }
 agent:    insight submit { task, workItemId, response }  (per required item)
 agent:    insight merge { task }                         -> { plan, insight }
-agent:    report_outcome(episodeId, success, lessons[], deviation?)  (post-execution, closes the flywheel)
+agent:    report_outcome(episodeId, success, lessons[], deviation?, requirementIds?, conceptIds?, codeHints?)  (post-execution, closes the flywheel; optional eng KG links)
 
 ## v1.2 increments (optional, see docs/atp-ir-spec-v1.md §8)
 - memory-recall: recall similar episodic memories into packaged context (auto-injected)

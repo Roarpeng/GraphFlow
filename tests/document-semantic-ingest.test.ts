@@ -111,6 +111,7 @@ describe("document semantic ingest (cross-layer KG)", () => {
       const result = await submitAgentInsight(client, {
         task: "index docs",
         workItemId: "document-semantic-1",
+        episodeId: "episode:doc-sem-1",
         response: JSON.stringify({
           relPath: "docs/spec.pdf",
           title: "Spec",
@@ -128,11 +129,22 @@ describe("document semantic ingest (cross-layer KG)", () => {
       expect(result.documentGraph?.requirementIds.length).toBeGreaterThan(0);
       expect(result.documentGraph?.conceptIds.length).toBeGreaterThan(0);
       expect(result.documentGraph?.edgeCount).toBeGreaterThan(0);
+      expect(result.engineeringLinks?.edgeCount).toBeGreaterThan(0);
 
       const snapshot = client.readSnapshot!();
       expect(snapshot.nodes.some((n) => n.type === "Requirement")).toBe(true);
       expect(snapshot.edges.some((e) => e.relation === "documents")).toBe(true);
       expect(snapshot.edges.some((e) => e.relation === "implements")).toBe(true);
+      expect(
+        snapshot.edges.some(
+          (e) =>
+            e.from === "episode:doc-sem-1" &&
+            e.relation === "derived_from" &&
+            (result.documentGraph?.requirementIds.includes(e.to) ||
+              result.documentGraph?.conceptIds.includes(e.to) ||
+              result.documentGraph?.linkedCodeNodeIds.includes(e.to))
+        )
+      ).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

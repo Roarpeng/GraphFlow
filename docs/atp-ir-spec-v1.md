@@ -1,7 +1,7 @@
 # ATP/IR — Agent Thinking Protocol Intermediate Representation
-## Public Specification v1.1 (v1.2 increment in §8)
+## Public Specification v1.2 (additive over v1.1 / v1.0)
 
-> Status: **Stable** ｜ Protocol version: `atp-ir/1.1` (+ `atp-ir/1.2` additive increment) ｜ Reference implementation: GraphFlow (`@roarpeng/graphflow`) v1.8+
+> Status: **Stable** ｜ Protocol version: `atp-ir/1.2` (additive over `atp-ir/1.1` / `atp-ir/1.0`) ｜ Reference implementation: GraphFlow (`@roarpeng/graphflow`) v1.8+
 >
 > This document is the **versioned public contract** for the Agent Thinking
 > Protocol IR and its agent-bridge submit/merge flow. Third-party tools may
@@ -15,6 +15,9 @@
 > v1.2 is an additive increment over v1.1: memory/outcome auto-backfill and
 > the protocolized memory API (§8) add OPTIONAL work items only. No
 > required-ID changes; v1.0 / v1.1 implementations remain compatible.
+> GraphFlow also accepts optional Engineering KG link fields on
+> `report_outcome` (`requirementIds` / `conceptIds` / `codeHints`) to write
+> episode → `derived_from` → Requirement/Concept/code edges.
 
 ---
 
@@ -168,8 +171,11 @@ consumer:  merge ──► { complete, submittedCount, missing[], insight, plan,
      `simple-plan-decomposition` when parseable, else the producer's
      heuristic suggestion.
 3. **Outcome reporting** is a separate concern: after execution, agents call
-   `report_outcome(episodeId, success, lessons[], deviation?)` so the learning
-   flywheel can score skills and update the episode (`pending → pass|fail`).
+   `report_outcome(episodeId, success, lessons[], deviation?, requirementIds?,
+   conceptIds?, codeHints?)` so the learning flywheel can score skills and
+   update the episode (`pending → pass|fail`). Optional Engineering KG ids /
+   code hints write episode → `derived_from` → Requirement/Concept/code edges
+   (same experience↔eng provenance as document-semantic insight ingest).
 
 ### 5.1 Goal anchors, clarification gate, and alignment checks (atp-ir/1.1)
 
@@ -252,11 +258,13 @@ Both bindings share identical semantics; this document is the source of truth.
 ### 8.1 Memory/outcome auto-backfill (`memory-backfill`)
 
 **Protocol.** After execution, `report_outcome(episodeId, success, lessons[],
-deviation?)` (see §5) **automatically backfills memory** — the host persists
-the episode record (task, outcome, lessons, deviation), applies skill-score
-updates, and refreshes the goal anchor's episode linkage without requiring an
-explicit insight submission. This closes the learning flywheel on the outcome
-path itself.
+deviation?, requirementIds?, conceptIds?, codeHints?)` (see §5) **automatically
+backfills memory** — the host persists the episode record (task, outcome,
+lessons, deviation), applies skill-score updates, and refreshes the goal
+anchor's episode linkage without requiring an explicit insight submission.
+Optional Engineering KG fields also upsert `derived_from` edges from the
+episode to Requirement / Concept / code nodes. This closes the learning
+flywheel on the outcome path itself.
 
 **Registry.** `memory-backfill` is an OPTIONAL protocol-level work item (kind
 `memory`): producers MAY emit it as a machine-readable marker describing what
@@ -311,8 +319,8 @@ fallback) and `recalled: 0` — never an error.
 | Concern | Binding (existing, unchanged) | Notes |
 | --- | --- | --- |
 | Recall injection | `graphflow_context` (preview packages similar episodic memories into context) | v1.2: recall declaration MAY surface as a `memory-recall` item |
-| Store / backfill | `graphflow_report_outcome` (auto-backfills episode + skill scores) | v1.2: MAY surface as a `memory-backfill` item |
-| CLI | `graphflow outcome report <episodeId> <success> [--lessons ...]` | same semantics as MCP binding |
+| Store / backfill | `graphflow_report_outcome` (auto-backfills episode + skill scores; optional `requirementIds` / `conceptIds` / `codeHints`) | v1.2: MAY surface as a `memory-backfill` item |
+| CLI | `graphflow outcome report <episodeId> <success> [--lessons ...] [--requirement-id ...] [--concept-id ...] [--code-hint ...]` | same semantics as MCP binding |
 
 A dedicated `graphflow_memory` binding is **reserved for a future minor
 version**; the tool surface is frozen in GraphFlow v1.9.5, so v1.2 exposes
