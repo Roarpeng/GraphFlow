@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "1.9.11",
+  "version": "1.9.12",
   "publishConfig": {
     "access": "public"
   },
@@ -53,10 +53,10 @@
     "benchmark:memory": "tsx benchmarks/run-memory-ab.ts",
     "benchmark:retrieval": "tsx benchmarks/run-retrieval-eval.ts",
     "benchmark:comprehensive": "tsx benchmarks/run-comprehensive-bench.ts",
-        "benchmark:independent": "tsx benchmarks/run-independent-bench.ts",
-        "benchmark:swe-bench": "tsx benchmarks/run-swe-bench-eval.ts",
-        "benchmark:swe-bench-real": "tsx benchmarks/run-swe-bench-real.ts",
-        "benchmark:swe-bench-agent": "tsx benchmarks/run-swe-bench-agent.ts",
+    "benchmark:independent": "tsx benchmarks/run-independent-bench.ts",
+    "benchmark:swe-bench": "tsx benchmarks/run-swe-bench-eval.ts",
+    "benchmark:swe-bench-real": "tsx benchmarks/run-swe-bench-real.ts",
+    "benchmark:swe-bench-agent": "tsx benchmarks/run-swe-bench-agent.ts",
     "bench:retrieval": "tsx benchmarks/run-retrieval-eval.ts",
     "bench:token": "tsx benchmarks/run-token-benchmark.ts",
     "bench:skill-ab": "tsx benchmarks/run-skill-ab-benchmark.ts && tsx benchmarks/run-skill-ab.ts",
