@@ -27,7 +27,7 @@
 
 ## 下一阶段
 
-### Experience 层（本分支 `feat/experience-layer-p0-p2`）
+### Experience 层（已合入 main）
 
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
