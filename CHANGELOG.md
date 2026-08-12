@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **扩展升级后 MCP launcher 路径失效**：`repairStaleGraphFlowMcpLaunchers` 在扩展激活时扫描用户级与工作区 MCP 配置；若 `graphflow` 仍指向已删除的旧版 `mcp-launcher.cjs/.cmd`（如 `roarpeng.graphflow-1.9.6`），自动改写为当前扩展启动器。修复 Cursor Agents 依赖项目级 `.cursor/mcp.json` 而 IDE 仍可用的不一致。
+
 ### Added
 
 - **Agent Plugins 1.0** packaging at repo root: `plugin.json`, `mcp.json` (`type: stdio`), and canonical `skills/graphflow/SKILL.md`
@@ -26,6 +30,7 @@ All notable changes to this project are documented in this file.
 ### Tests
 
 - `tests/m-install-hooks-wiring.test.ts`：hooks status + install/doctor 接线
+- `tests/m-stale-mcp-launcher-repair.test.ts`：失效 mcp-launcher 路径检测与改写
 
 
 ## [1.9.11] - 2026-08-08
