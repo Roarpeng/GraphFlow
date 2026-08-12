@@ -91,6 +91,16 @@ Claude Code SessionEnd / Stop ──▶ session.sh ──▶ 读取最新一条 
 
 #### 安装 / 卸载
 
+推荐一键注册（检测到 `~/.claude` 时自动写入 hooks，并由 `doctor` 自检）：
+
+```bash
+graphflow install --json   # InstallReport.claudeCodeHooks + doctor.checks[category=hooks]
+graphflow doctor --json    # missing hooks → ok=false + remediation
+graphflow uninstall        # 同步移除 GraphFlow 写入的 hooks 条目与 session.sh
+```
+
+也可直接调用 API：
+
 ```ts
 import { installClaudeCodeHooks, uninstallClaudeCodeHooks } from "@roarpeng/graphflow";
 
@@ -103,6 +113,7 @@ uninstallClaudeCodeHooks();  // 只移除本生成器写入的条目
 
 注意：hook 进程需要 `graphflow` CLI 在 PATH 中
 （`npm i -g @roarpeng/graphflow`），否则用 `GRAPHFLOW_HOOK_BIN` 指向绝对路径。
+开启 pending 自动记录仍需 `GRAPHFLOW_AUTO_CAPTURE=1`（hooks 只负责回填已有 pending）。
 
 ### 一次性回填（scripts/backfill-episodes.cjs）
 

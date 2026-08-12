@@ -20,9 +20,9 @@ import { dirname, join } from "node:path";
  */
 
 export const SESSION_HOOK_SCRIPT = "session.sh";
-const GRAPHFLOW_HOOKS_DIR = ".claude/graphflow-hooks";
-const GRAPHFLOW_SETTINGS = ".claude/settings.json";
 const JOURNAL_RELATIVE = ".graphflow/session-journal.jsonl";
+/** Test/override: when set, treat this directory as Claude Code home (`~/.claude`). */
+export const CLAUDE_HOME_ENV = "GRAPHFLOW_CLAUDE_HOME";
 
 export interface ClaudeCodeHooksOptions {
   /** graphflow CLI 可执行命令（默认 "graphflow"，须在 PATH 中，如 `npm i -g @roarpeng/graphflow`）。 */
@@ -39,6 +39,23 @@ export interface ClaudeCodeHooksOptions {
   defaultSuccess?: boolean;
   /** hook 超时秒数（默认 30）。 */
   timeoutSec?: number;
+}
+
+export interface ClaudeCodeHooksStatusOptions {
+  /** Override Claude Code home (default: GRAPHFLOW_CLAUDE_HOME or ~/.claude). */
+  claudeHome?: string;
+  settingsPath?: string;
+  hooksDir?: string;
+}
+
+export interface ClaudeCodeHooksStatus {
+  agent: string;
+  claudeHome: string;
+  settingsPath: string;
+  hooksDir: string;
+  scriptPath: string;
+  detected: boolean;
+  installed: boolean;
 }
 
 export interface ClaudeCodeHooksResult {
@@ -69,12 +86,96 @@ function shellFallback(value: string): string {
   return value.replace(/([\\$`"])/g, "\\$1");
 }
 
-function defaultHooksDir(): string {
-  return join(homedir(), GRAPHFLOW_HOOKS_DIR);
+/** Resolve Claude Code home (`~/.claude`), honoring GRAPHFLOW_CLAUDE_HOME for tests. */
+export function resolveClaudeHome(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env[CLAUDE_HOME_ENV]?.trim();
+  if (override) return override;
+  return join(homedir(), ".claude");
 }
 
-function defaultSettingsPath(): string {
-  return join(homedir(), GRAPHFLOW_SETTINGS);
+/** Normalize path separators for cross-platform substring checks. */
+function normalizePathForMatch(value: string): string {
+  return value.replace(/\\/g, "/").toLowerCase();
+}
+
+/**
+ * True when settings.json references our session hook script.
+ * Parses JSON when possible so Windows paths survive JSON backslash escaping
+ * (`C:\\Users\\...` in file vs `C:\Users\...` in path.join).
+ */
+export function settingsReferenceHookScript(raw: string, scriptPath: string): boolean {
+  const needle = normalizePathForMatch(scriptPath);
+  if (!needle) return false;
+  try {
+    const parsed = JSON.parse(raw) as { hooks?: Record<string, unknown> };
+    const hooks = parsed.hooks;
+    if (hooks && typeof hooks === "object") {
+      for (const entries of Object.values(hooks)) {
+        if (!Array.isArray(entries)) continue;
+        for (const entry of entries) {
+          const command =
+            entry && typeof entry === "object" && typeof (entry as { command?: unknown }).command === "string"
+              ? (entry as { command: string }).command
+              : "";
+          if (command && normalizePathForMatch(command).includes(needle)) {
+            return true;
+          }
+        }
+      }
+    }
+  } catch {
+    // Fall through to raw substring checks for partially written files.
+  }
+  const quoted = shellQuote(scriptPath);
+  const jsonEscaped = scriptPath.replace(/\\/g, "\\\\");
+  return (
+    raw.includes(scriptPath) ||
+    raw.includes(quoted) ||
+    raw.includes(jsonEscaped) ||
+    raw.includes(shellQuote(jsonEscaped)) ||
+    normalizePathForMatch(raw).includes(needle)
+  );
+}
+
+function defaultHooksDir(claudeHome?: string): string {
+  return join(claudeHome ?? resolveClaudeHome(), "graphflow-hooks");
+}
+
+function defaultSettingsPath(claudeHome?: string): string {
+  return join(claudeHome ?? resolveClaudeHome(), "settings.json");
+}
+
+/**
+ * Doctor/install status for Claude Code flywheel hooks.
+ * Detected when Claude Code home exists; installed when settings.json references
+ * our session script and the script file is on disk.
+ */
+export function getClaudeCodeHooksStatus(
+  options: ClaudeCodeHooksStatusOptions = {}
+): ClaudeCodeHooksStatus {
+  const claudeHome = options.claudeHome ?? resolveClaudeHome();
+  const settingsPath = options.settingsPath ?? defaultSettingsPath(claudeHome);
+  const hooksDir = options.hooksDir ?? defaultHooksDir(claudeHome);
+  const scriptPath = join(hooksDir, SESSION_HOOK_SCRIPT);
+  const detected = existsSync(claudeHome);
+  let installed = false;
+  if (detected && existsSync(scriptPath) && existsSync(settingsPath)) {
+    try {
+      const raw = readFileSync(settingsPath, "utf8");
+      installed = settingsReferenceHookScript(raw, scriptPath);
+    } catch {
+      installed = false;
+    }
+  }
+  return {
+    agent: "Claude Code hooks",
+    claudeHome,
+    settingsPath,
+    hooksDir,
+    scriptPath,
+    detected,
+    installed,
+  };
 }
 
 /**
@@ -130,7 +231,7 @@ export function buildSessionHookScript(options: ClaudeCodeHooksOptions = {}): st
 export function buildClaudeCodeHooksConfig(
   options: ClaudeCodeHooksOptions = {}
 ): ClaudeCodeHooksConfig {
-  const hooksDir = options.hooksDir ?? defaultHooksDir();
+  const hooksDir = options.hooksDir ?? defaultHooksDir(resolveClaudeHome());
   const scriptPath = join(hooksDir, SESSION_HOOK_SCRIPT);
   const quotedScript = shellQuote(scriptPath);
   const startCommand = `bash ${quotedScript} start`;
@@ -149,8 +250,9 @@ export function buildClaudeCodeHooksConfig(
 export function installClaudeCodeHooks(
   options: ClaudeCodeHooksOptions = {}
 ): ClaudeCodeHooksResult {
-  const hooksDir = options.hooksDir ?? defaultHooksDir();
-  const settingsPath = options.settingsPath ?? defaultSettingsPath();
+  const claudeHome = resolveClaudeHome();
+  const hooksDir = options.hooksDir ?? defaultHooksDir(claudeHome);
+  const settingsPath = options.settingsPath ?? defaultSettingsPath(claudeHome);
   const scriptPath = join(hooksDir, SESSION_HOOK_SCRIPT);
 
   // 1) 安装会话脚本（内容一致则跳过）
@@ -238,8 +340,9 @@ export function uninstallClaudeCodeHooks(
   settingsPath?: string,
   hooksDir?: string
 ): ClaudeCodeHooksResult {
-  const target = settingsPath ?? defaultSettingsPath();
-  const scriptPath = join(hooksDir ?? defaultHooksDir(), SESSION_HOOK_SCRIPT);
+  const claudeHome = resolveClaudeHome();
+  const target = settingsPath ?? defaultSettingsPath(claudeHome);
+  const scriptPath = join(hooksDir ?? defaultHooksDir(claudeHome), SESSION_HOOK_SCRIPT);
   if (!existsSync(target)) {
     return { status: "skipped", filePath: target, message: "settings.json not found" };
   }
