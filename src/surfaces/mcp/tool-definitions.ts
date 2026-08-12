@@ -43,6 +43,24 @@ export function getToolDefinitions(): ToolDefinition[] {
             description:
               "Optional drift classification vs the original goal anchor: did the work deviate because the requirement was misread, the scope crept, or the technical approach drifted? Use 'none' when it stayed aligned.",
           },
+          requirementIds: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Optional Engineering KG Requirement node ids to link from this episode via derived_from (experience↔eng provenance).",
+          },
+          conceptIds: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Optional Engineering KG Concept node ids to link from this episode via derived_from.",
+          },
+          codeHints: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Optional file paths, symbol names, or file:/symbol: ids resolved against the graph and linked from this episode via derived_from.",
+          },
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
         },
         required: ["episodeId", "success"],

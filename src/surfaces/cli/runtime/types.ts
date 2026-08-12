@@ -306,6 +306,16 @@ export interface ReportOutcomeResult {
   skillsUpdated?: number;
   /** P1 — drift classification echoed back when reported (none / misread-requirement / scope-creep / tech-drift). */
   deviation?: string;
+  /**
+   * Optional Engineering KG links written when callers pass requirementIds /
+   * conceptIds / codeHints (episode → derived_from → eng nodes).
+   */
+  engineeringLinks?: {
+    edgeCount: number;
+    linkedRequirementIds: string[];
+    linkedConceptIds: string[];
+    linkedCodeNodeIds: string[];
+  };
 }
 
 export interface ExpandAnchorResult {

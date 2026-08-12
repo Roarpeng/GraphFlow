@@ -140,19 +140,41 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     const episodeId = args[1]?.trim();
     const success = parseCliSuccess(args[2]);
     if (!episodeId || success === undefined) {
-      console.log("Usage: graphflow outcome report <episodeId> <success> [--lesson <text>]... [--deviation <none|misread-requirement|scope-creep|tech-drift>]");
+      console.log("Usage: graphflow outcome report <episodeId> <success> [--lesson <text>]... [--deviation <none|misread-requirement|scope-creep|tech-drift>] [--requirement-id <id>]... [--concept-id <id>]... [--code-hint <hint>]...");
       process.exitCode = 1;
       return undefined;
     }
     const lessons = collectCliFlagValues(args, "--lesson");
     const deviationRaw = readCliFlagValue(args, "--deviation");
     const deviation = isDeviationKind(deviationRaw) ? deviationRaw : undefined;
-    const data = await reportOutcome(episodeId, success, lessons, configPath, deviation);
+    const requirementIds = collectCliFlagValues(args, "--requirement-id");
+    const conceptIds = collectCliFlagValues(args, "--concept-id");
+    const codeHints = collectCliFlagValues(args, "--code-hint");
+    const hasEngHints =
+      requirementIds.length > 0 || conceptIds.length > 0 || codeHints.length > 0;
+    const data = await reportOutcome(
+      episodeId,
+      success,
+      lessons,
+      configPath,
+      deviation,
+      hasEngHints
+        ? {
+            ...(requirementIds.length > 0 ? { requirementIds } : {}),
+            ...(conceptIds.length > 0 ? { conceptIds } : {}),
+            ...(codeHints.length > 0 ? { codeHints } : {}),
+          }
+        : undefined
+    );
     return {
       command: "outcome-report",
       data,
       legacyText: data.ok
-        ? `ok=true; episodeId=${data.episodeId}; outcome=${data.outcome}; skillsUpdated=${data.skillsUpdated}`
+        ? `ok=true; episodeId=${data.episodeId}; outcome=${data.outcome}; skillsUpdated=${data.skillsUpdated}${
+            data.engineeringLinks
+              ? `; engLinks=${data.engineeringLinks.edgeCount}`
+              : ""
+          }`
         : `ok=false; reason=${data.reason ?? "unknown"}`,
     };
   }
