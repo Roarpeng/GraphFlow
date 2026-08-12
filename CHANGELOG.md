@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.9.12] - 2026-08-12
+
 ### Added
 
 - **Episode ↔ Engineering KG on outcome path**: `graphflow_report_outcome` / CLI `outcome report` accept optional `requirementIds` / `conceptIds` / `codeHints` and write episode → `derived_from` → eng nodes via `linkEpisodeToEngineeringNodes`
@@ -32,7 +34,7 @@ All notable changes to this project are documented in this file.
 - **P0 Experience 飞轮可观测**：`getFlywheelReport` / `skill report` / `route diagnose` / `graphflow_diagnose` 的 `experience` 增加 dry-run `consolidation` 动作计数（UPDATE/DELETE/ADD）与建议 hint；ROADMAP P0 ✅
 - Skill resolution (`resolveSkillSourcePath` / MCP `graphflow_skill_guide`) prefers `skills/graphflow` before legacy `trae-skill` paths
 - `package.json` `files` publishes `plugin.json`, `mcp.json`, and `skills/`
-- ROADMAP (2026-08-09): Experience-layer P0–P2 status (P1 ✅; P0/P2 🟡 on this branch)
+- ROADMAP (2026-08-12): Experience-layer P0–P2 ✅ (skill consolidate --apply; retrieval golden dataset; ATP/IR v1.2 + episode↔eng KG)
 - **`graphflow uninstall`** now removes **MCP + Skills + Rules + hooks** (user + workspace MCP). After removing an Agent Plugin in Cursor, run `uninstall` so leftover `~/.cursor/skills/graphflow` cannot keep steering the agent.
 
 ### Tests
