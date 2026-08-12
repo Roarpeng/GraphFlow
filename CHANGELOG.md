@@ -20,6 +20,7 @@ All notable changes to this project are documented in this file.
 - Skill resolution (`resolveSkillSourcePath` / MCP `graphflow_skill_guide`) prefers `skills/graphflow` before legacy `trae-skill` paths
 - `package.json` `files` publishes `plugin.json`, `mcp.json`, and `skills/`
 - ROADMAP (2026-08-09): Experience-layer P0–P2 status (P1 ✅; P0/P2 🟡 on this branch)
+- **`graphflow uninstall`** now removes **MCP + Skills + Rules + hooks** (user + workspace MCP). After removing an Agent Plugin in Cursor, run `uninstall` so leftover `~/.cursor/skills/graphflow` cannot keep steering the agent.
 
 ## [1.9.11] - 2026-08-08
 
