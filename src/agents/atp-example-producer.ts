@@ -1,6 +1,10 @@
 /**
  * Minimal ATP/IR producer helpers for third-party–compatible simple-plan work items.
  * Pure builders (no network / no GraphFlow LLM). See examples/atp-minimal-producer/.
+ *
+ * Emits atp-ir/1.1 required simple-plan items plus optional alignment-check and
+ * atp-ir/1.2 optional memory markers (memory-recall / memory-backfill). v1.1
+ * consumers ignore unknown optional items per spec §7.
  */
 
 import {
@@ -9,6 +13,9 @@ import {
 } from "../core/agent-delegation.js";
 
 export { SIMPLE_PLAN_BRIDGE_REQUIRED_IDS };
+
+/** Protocol version emitted by the reference minimal producer. */
+export const ATP_MINIMAL_PRODUCER_PROTOCOL = "atp-ir/1.2" as const;
 
 const INTENT_SCHEMA = {
   explicitIntent: "string",
@@ -37,13 +44,64 @@ const ALIGNMENT_SCHEMA = {
   correction: "string",
 } as const;
 
+const MEMORY_RECALL_SCHEMA = {
+  recalled: "number",
+  topEpisodes: [{ id: "string", outcome: "string", lessonsCount: "number" }],
+} as const;
+
+const MEMORY_BACKFILL_SCHEMA = {
+  backfilled: "boolean",
+  episodeId: "string",
+  fields: ["outcome|lessons|deviation|skillScores"],
+} as const;
+
+export type MinimalProducerOptions = {
+  /**
+   * Include atp-ir/1.2 optional memory-recall / memory-backfill markers.
+   * Default true. Set false for a pure v1.1 work-item set.
+   */
+  includeMemoryItems?: boolean;
+};
+
+/**
+ * Optional host-managed memory markers (atp-ir/1.2 §8). Agents MUST NOT treat
+ * these as required or answerable; consumers targeting v1.1 ignore them.
+ */
+export function buildOptionalMemoryWorkItems(): AgentWorkItem[] {
+  return [
+    {
+      id: "memory-recall",
+      kind: "memory",
+      optional: true,
+      prompt:
+        "Episodic-memory recall injection (host-managed, no agent answer required)",
+      expectedFormat: "json",
+      responseSchema: { ...MEMORY_RECALL_SCHEMA },
+    },
+    {
+      id: "memory-backfill",
+      kind: "memory",
+      optional: true,
+      prompt:
+        "Outcome memory backfill marker (host-managed, no agent answer required)",
+      expectedFormat: "json",
+      responseSchema: { ...MEMORY_BACKFILL_SCHEMA },
+    },
+  ];
+}
+
 /**
  * Build the documented simple-plan bridge work-item set (intent + decomposition
- * required; optional alignment-check). Stable machine IDs match docs/atp-ir-spec-v1.md §4.2.
+ * required; optional alignment-check; optional v1.2 memory markers).
+ * Stable machine IDs match docs/atp-ir-spec-v1.md §4.2 / §8.
  */
-export function buildMinimalSimplePlanWorkItems(task: string): AgentWorkItem[] {
+export function buildMinimalSimplePlanWorkItems(
+  task: string,
+  options?: MinimalProducerOptions
+): AgentWorkItem[] {
   const trimmed = task.trim() || "(untitled task)";
-  return [
+  const includeMemory = options?.includeMemoryItems !== false;
+  const items: AgentWorkItem[] = [
     {
       id: "simple-plan-intent",
       kind: "intent",
@@ -104,11 +162,15 @@ export function buildMinimalSimplePlanWorkItems(task: string): AgentWorkItem[] {
       responseSchema: { ...ALIGNMENT_SCHEMA },
     },
   ];
+  if (includeMemory) {
+    items.push(...buildOptionalMemoryWorkItems());
+  }
+  return items;
 }
 
-/** Required simple-plan IDs only (no optional alignment-check). */
+/** Required simple-plan IDs only (no optional alignment-check or memory markers). */
 export function buildRequiredSimplePlanWorkItems(task: string): AgentWorkItem[] {
-  return buildMinimalSimplePlanWorkItems(task).filter(
+  return buildMinimalSimplePlanWorkItems(task, { includeMemoryItems: false }).filter(
     (item) =>
       (SIMPLE_PLAN_BRIDGE_REQUIRED_IDS as readonly string[]).includes(item.id)
   );

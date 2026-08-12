@@ -20,6 +20,10 @@ import { indexWorkspaceFiles, hasPendingGraphIndexWork } from "../../../graph/fi
 import { appendFeedbackEvent } from "../../../learning/learning-events";
 import { updateEpisodeOutcome, type DeviationKind } from "../../../learning/episodic-memory";
 import {
+  linkEpisodeToEngineeringNodes,
+  type EngineeringLinkHints,
+} from "../../../graph/episode-engineering-links.js";
+import {
   applySkillLearning,
   cleanupNoiseSkills,
   extractSkillAtoms,
@@ -558,7 +562,9 @@ export async function reportOutcome(
   success: boolean,
   lessons: string[],
   configPath?: string,
-  deviation?: DeviationKind
+  deviation?: DeviationKind,
+  /** Optional episode → Requirement/Concept/code derived_from links (Engineering KG). */
+  engineeringHints?: EngineeringLinkHints
 ): Promise<ReportOutcomeResult> {
   const config = resolveConfig(configPath);
   const graphClient = createGraphClient(config);
@@ -621,12 +627,35 @@ export async function reportOutcome(
     await pruneFailedSkills(graphClient);
   }
 
+  let engineeringLinks: ReportOutcomeResult["engineeringLinks"];
+  const hints = engineeringHints ?? {};
+  const hasEngHints =
+    (hints.requirementIds?.length ?? 0) > 0 ||
+    (hints.conceptIds?.length ?? 0) > 0 ||
+    (hints.codeHints?.length ?? 0) > 0;
+  if (hasEngHints) {
+    try {
+      const linked = await linkEpisodeToEngineeringNodes(graphClient, updated.id, hints);
+      if (linked.edgeCount > 0) {
+        engineeringLinks = {
+          edgeCount: linked.edgeCount,
+          linkedRequirementIds: linked.linkedRequirementIds,
+          linkedConceptIds: linked.linkedConceptIds,
+          linkedCodeNodeIds: linked.linkedCodeNodeIds,
+        };
+      }
+    } catch {
+      // Engineering link failure must not block outcome reporting.
+    }
+  }
+
   return {
     ok: true,
     episodeId: updated.id,
     outcome: success ? "pass" : "fail",
     skillsUpdated,
     ...(updated.deviation !== undefined ? { deviation: updated.deviation } : {}),
+    ...(engineeringLinks ? { engineeringLinks } : {}),
   };
 }
 

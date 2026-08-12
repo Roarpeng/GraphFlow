@@ -77,8 +77,10 @@ export {
   type ConsolidateResult,
 } from "./learning/skill-consolidate";
 export {
+  ATP_MINIMAL_PRODUCER_PROTOCOL,
   buildMinimalSimplePlanWorkItems,
   buildRequiredSimplePlanWorkItems,
+  buildOptionalMemoryWorkItems,
 } from "./agents/atp-example-producer";
 export {
   linkEpisodeToEngineeringNodes,
