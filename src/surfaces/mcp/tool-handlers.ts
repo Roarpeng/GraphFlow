@@ -63,13 +63,23 @@ export async function executeToolCall(
         : [];
       const deviationRaw = readOptionalString(args.deviation);
       const deviation = isDeviationKind(deviationRaw) ? deviationRaw : undefined;
+      const requirementIds = readOptionalStringArray(args.requirementIds);
+      const conceptIds = readOptionalStringArray(args.conceptIds);
+      const codeHints = readOptionalStringArray(args.codeHints);
+      const engineeringHints = {
+        ...(requirementIds ? { requirementIds } : {}),
+        ...(conceptIds ? { conceptIds } : {}),
+        ...(codeHints ? { codeHints } : {}),
+      };
+      const hasEngHints = Boolean(requirementIds || conceptIds || codeHints);
       return textResponse(
         await reportOutcome(
           readRequiredString(args.episodeId, "episodeId"),
           typeof args.success === "boolean" ? args.success : false,
           lessons,
           readOptionalString(args.configPath),
-          deviation
+          deviation,
+          hasEngHints ? engineeringHints : undefined
         )
       );
     }
@@ -369,6 +379,17 @@ export function readRequiredString(value: unknown, field: string): string {
 
 function readOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function readOptionalStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const items = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  return items.length > 0 ? items : undefined;
 }
 
 function readOptionalNumber(value: unknown): number | undefined {

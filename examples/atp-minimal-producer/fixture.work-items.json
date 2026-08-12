@@ -1,5 +1,5 @@
 {
-  "protocol": "atp-ir/1.1",
+  "protocol": "atp-ir/1.2",
   "role": "producer",
   "mode": "simple-plan",
   "task": "Add a cache layer for the tokenizer and verify with unit tests",
@@ -46,9 +46,40 @@
         "drift": "none|misread-requirement|scope-creep|tech-drift",
         "correction": "string"
       }
+    },
+    {
+      "id": "memory-recall",
+      "kind": "memory",
+      "optional": true,
+      "prompt": "Episodic-memory recall injection (host-managed, no agent answer required)",
+      "expectedFormat": "json",
+      "responseSchema": {
+        "recalled": "number",
+        "topEpisodes": [
+          {
+            "id": "string",
+            "outcome": "string",
+            "lessonsCount": "number"
+          }
+        ]
+      }
+    },
+    {
+      "id": "memory-backfill",
+      "kind": "memory",
+      "optional": true,
+      "prompt": "Outcome memory backfill marker (host-managed, no agent answer required)",
+      "expectedFormat": "json",
+      "responseSchema": {
+        "backfilled": "boolean",
+        "episodeId": "string",
+        "fields": [
+          "outcome|lessons|deviation|skillScores"
+        ]
+      }
     }
   ],
-  "agentInstructions": "Answer each REQUIRED work item as JSON only.\nSubmit via a compatible consumer (GraphFlow: graphflow_insight mode=submit).\nAfter both required items are submitted, merge (GraphFlow: graphflow_insight mode=merge).\nOptional: submit alignment-check after execution, then report_outcome.",
+  "agentInstructions": "Answer each REQUIRED work item as JSON only.\nIgnore optional memory-* markers (host-managed; no agent answer required).\nSubmit via a compatible consumer (GraphFlow: graphflow_insight mode=submit).\nAfter both required items are submitted, merge (GraphFlow: graphflow_insight mode=merge).\nOptional: submit alignment-check after execution, then report_outcome\n(optionally with requirementIds / conceptIds / codeHints for Engineering KG links).",
   "status": "awaiting-agent",
   "requiresAgentBridge": true
 }

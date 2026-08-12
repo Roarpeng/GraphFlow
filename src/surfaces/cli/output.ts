@@ -26,7 +26,7 @@ export function buildCliUsage(): string {
     "  config init [--global]",
     "  config validate [--json] [--config <path>]",
     '  run "<task>" [--json] [--config <path>]',
-    "  outcome report <episodeId> <success> [--lesson <text>]... [--deviation <none|misread-requirement|scope-creep|tech-drift>] [--json] [--config <path>]",
+    "  outcome report <episodeId> <success> [--lesson <text>]... [--deviation <none|misread-requirement|scope-creep|tech-drift>] [--requirement-id <id>]... [--concept-id <id>]... [--code-hint <path|symbol|id>]... [--json] [--config <path>]",
     '  insight submit --task "<task>" --work-item-id <id> --response "<json>" [--episode-id <id>] [--json] [--config <path>]',
     '  insight merge --task "<task>" [--json] [--config <path>]',
     '  plan "<task>" [--json] [--config <path>]',

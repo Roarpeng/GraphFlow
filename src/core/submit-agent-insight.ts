@@ -14,6 +14,7 @@ import {
   ingestDocumentSemanticInsight,
   isDocumentSemanticWorkItemId,
 } from "../graph/document-semantic-ingest.js";
+import { linkEpisodeToEngineeringNodes } from "../graph/episode-engineering-links.js";
 
 export interface SubmitAgentInsightInput {
   task: string;
@@ -50,6 +51,16 @@ export type SubmitAgentInsightResult =
         conceptIds: string[];
         requirementIds: string[];
         edgeCount: number;
+        linkedCodeNodeIds: string[];
+      };
+      /**
+       * When episodeId is provided with document-semantic ingest, episode →
+       * derived_from → Requirement/Concept/code edges (same provenance as report_outcome).
+       */
+      engineeringLinks?: {
+        edgeCount: number;
+        linkedRequirementIds: string[];
+        linkedConceptIds: string[];
         linkedCodeNodeIds: string[];
       };
       /** True when the submitted intent confidence is below threshold. */
@@ -165,6 +176,28 @@ export async function submitAgentInsight(
     );
     if (documentGraph.conceptIds.length > 0 || documentGraph.requirementIds.length > 0) {
       result.documentGraph = documentGraph;
+    }
+    // Keep experience↔eng provenance consistent with report_outcome wiring:
+    // when the insight is tied to an episode, link episode → eng nodes.
+    if (
+      input.episodeId &&
+      (documentGraph.requirementIds.length > 0 ||
+        documentGraph.conceptIds.length > 0 ||
+        documentGraph.linkedCodeNodeIds.length > 0)
+    ) {
+      const linked = await linkEpisodeToEngineeringNodes(client, input.episodeId, {
+        requirementIds: documentGraph.requirementIds,
+        conceptIds: documentGraph.conceptIds,
+        codeHints: documentGraph.linkedCodeNodeIds,
+      });
+      if (linked.edgeCount > 0) {
+        result.engineeringLinks = {
+          edgeCount: linked.edgeCount,
+          linkedRequirementIds: linked.linkedRequirementIds,
+          linkedConceptIds: linked.linkedConceptIds,
+          linkedCodeNodeIds: linked.linkedCodeNodeIds,
+        };
+      }
     }
   }
 

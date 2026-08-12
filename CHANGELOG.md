@@ -4,12 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-### Fixed
-
-- **扩展升级后 MCP launcher 路径失效**：`repairStaleGraphFlowMcpLaunchers` 在扩展激活时扫描用户级与工作区 MCP 配置；若 `graphflow` 仍指向已删除的旧版 `mcp-launcher.cjs/.cmd`（如 `roarpeng.graphflow-1.9.6`），自动改写为当前扩展启动器。修复 Cursor Agents 依赖项目级 `.cursor/mcp.json` 而 IDE 仍可用的不一致。
-
 ### Added
 
+- **Episode ↔ Engineering KG on outcome path**: `graphflow_report_outcome` / CLI `outcome report` accept optional `requirementIds` / `conceptIds` / `codeHints` and write episode → `derived_from` → eng nodes via `linkEpisodeToEngineeringNodes`
+- **Document-semantic insight ↔ episode provenance**: when `episodeId` is passed with a document-semantic submit, the same eng links are written for experience↔eng consistency
+- **ATP minimal producer atp-ir/1.2**: optional `memory-recall` / `memory-backfill` markers (host-managed); fixture + README updated; still runnable without GraphFlow MCP
 - **Agent Plugins 1.0** packaging at repo root: `plugin.json`, `mcp.json` (`type: stdio`), and canonical `skills/graphflow/SKILL.md`
 - README section for local plugin install (`~/.cursor/plugins/local`) and Team Marketplace / Git discovery
 - `npm run sync:surfaces` keeps `src/surfaces/trae-skill/graphflow/SKILL.md` aligned with the Agent Plugins skill source
@@ -22,15 +21,23 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- ATP/IR spec status line marks **`atp-ir/1.2` Stable**; §5 / §8 document optional Engineering KG link fields on `report_outcome`
+- ROADMAP P2 rows (ATP producer + Engineering KG episode chain; ATP/IR v1.2 protocol) → ✅
 - Skill resolution (`resolveSkillSourcePath` / MCP `graphflow_skill_guide`) prefers `skills/graphflow` before legacy `trae-skill` paths
 - `package.json` `files` publishes `plugin.json`, `mcp.json`, and `skills/`
 - ROADMAP (2026-08-09): Experience-layer P0–P2 status (P1 ✅; P0/P2 🟡 on this branch)
 - **`graphflow uninstall`** now removes **MCP + Skills + Rules + hooks** (user + workspace MCP). After removing an Agent Plugin in Cursor, run `uninstall` so leftover `~/.cursor/skills/graphflow` cannot keep steering the agent.
 
+### Fixed
+
+- **扩展升级后 MCP launcher 路径失效**：`repairStaleGraphFlowMcpLaunchers` 在扩展激活时扫描用户级与工作区 MCP 配置；若 `graphflow` 仍指向已删除的旧版 `mcp-launcher.cjs/.cmd`（如 `roarpeng.graphflow-1.9.6`），自动改写为当前扩展启动器。修复 Cursor Agents 依赖项目级 `.cursor/mcp.json` 而 IDE 仍可用的不一致。
+
 ### Tests
 
 - `tests/m-install-hooks-wiring.test.ts`：hooks status + install/doctor 接线
 - `tests/m-stale-mcp-launcher-repair.test.ts`：失效 mcp-launcher 路径检测与改写
+- `tests/atp-ir-v1.2-conformance.test.ts`：ATP/IR v1.2 memory markers + producer protocol
+- `tests/report-outcome-engineering-links.test.ts`：outcome / insight eng-link wiring
 
 
 ## [1.9.11] - 2026-08-08
