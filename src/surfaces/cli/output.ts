@@ -49,7 +49,7 @@ export function buildCliUsage(): string {
     "  skill decay [--json] [--config <path>]",
     "  skill reset --name <name> [--json] [--config <path>]",
     "  skill prune [--json] [--config <path>]",
-    "  skill consolidate [--json] [--config <path>]  # dry-run QM-style consolidation plan (UPDATE/DELETE/ADD)",
+    "  skill consolidate [--apply|--execute] [--json] [--config <path>]  # dry-run QM plan (UPDATE/DELETE/ADD); --apply/--execute mutates graph",
     "  route diagnose [--json] [--config <path>]",
     "  learn nightly [--json] [--config <path>]",
     "  learn forget [--json] [--config <path>]",
