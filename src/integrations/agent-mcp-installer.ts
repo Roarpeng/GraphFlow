@@ -1763,6 +1763,8 @@ export interface McpRemoveOptions {
   /** 仅移除指定 agent 的 MCP 配置（不传则移除所有检测到的 agent） */
   agentId?: string;
   serverName?: string;
+  /** When set, also remove workspace-scoped MCP configs under this root. */
+  workspaceRoot?: string;
 }
 
 export interface McpRemoveResult {
@@ -1771,14 +1773,16 @@ export interface McpRemoveResult {
   configPath: string;
   removed: boolean;
   message?: string;
+  scope?: "user" | "workspace";
 }
 
-/** 从所有检测到的 agent 中移除 GraphFlow MCP 配置 */
+/** 从所有检测到的 agent 中移除 GraphFlow MCP 配置（user + optional workspace） */
 export function uninstallMcpFromDetectedAgents(options?: McpRemoveOptions): McpRemoveResult[] {
   const profiles = buildAgentProfiles();
   const detectedIds = new Set(detectInstalledAgents().map((agent) => agent.id));
   const serverName = options?.serverName ?? "graphflow";
   const targetAgentId = options?.agentId;
+  const workspaceRoot = options?.workspaceRoot?.trim() || process.cwd();
   const results: McpRemoveResult[] = [];
 
   for (const profile of profiles) {
@@ -1812,6 +1816,7 @@ export function uninstallMcpFromDetectedAgents(options?: McpRemoveOptions): McpR
           agentName: profile.name,
           configPath: userTarget.configPath,
           removed,
+          scope: "user",
           message: removed ? "已移除" : "未找到配置（可能已移除）",
         });
       } catch (error) {
@@ -1820,8 +1825,50 @@ export function uninstallMcpFromDetectedAgents(options?: McpRemoveOptions): McpR
           agentName: profile.name,
           configPath: userTarget.configPath,
           removed: false,
+          scope: "user",
           message: error instanceof Error ? error.message : String(error),
         });
+      }
+    }
+
+    if (workspaceRoot && profile.workspaceRelativePaths) {
+      for (const workspaceTarget of profile.workspaceRelativePaths) {
+        const configPath = join(workspaceRoot, workspaceTarget.relativePath);
+        const key = `${configPath}::${workspaceTarget.serversKey}::${workspaceTarget.configFormat ?? "json"}`;
+        if (seen.has(key)) {
+          continue;
+        }
+        seen.add(key);
+        if (!existsSync(configPath)) {
+          continue;
+        }
+        try {
+          let removed = false;
+          if (workspaceTarget.configFormat === "codex-toml") {
+            removed = removeCodexMcpEntry(configPath, serverName);
+          } else if (workspaceTarget.configFormat === "opencode") {
+            removed = removeOpencodeMcpEntry(configPath, serverName);
+          } else {
+            removed = removeMcpEntry(configPath, workspaceTarget.serversKey, serverName);
+          }
+          results.push({
+            agentId: profile.id,
+            agentName: `${profile.name} (workspace)`,
+            configPath,
+            removed,
+            scope: "workspace",
+            message: removed ? "已移除" : "未找到配置（可能已移除）",
+          });
+        } catch (error) {
+          results.push({
+            agentId: profile.id,
+            agentName: `${profile.name} (workspace)`,
+            configPath,
+            removed: false,
+            scope: "workspace",
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
     }
   }

@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-08-08（随 v1.9.11；VSIX 激活按需下载 anydoc）
+> 最后更新：2026-08-09（Experience 层 P0–P2：飞轮巩固 / Context 合同与 Plugin 主路径 / ATP 示例与 KG episode 链）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -26,6 +26,16 @@
 | v1.9.11 | 2026-08-08 | **VSIX 按需 anydoc** | 激活时自动下载当前 OS 的 `@firecrawl/anydoc` 到 `~/.graphflow/optional-deps`；设置 `graphflow.downloadAnydoc` | ✅ |
 
 ## 下一阶段
+
+### Experience 层（本分支 `feat/experience-layer-p0-p2`）
+
+| 优先级 | 事项 | 状态 | 说明与依据 |
+| --- | --- | --- | --- |
+| **P0** | **飞轮 Experience 指标 + QM 式 skill 巩固** | 🟡 | `skill-consolidate` 显式 MERGE/DELETE/ADD；`getFlywheelReport` / diagnose 暴露巩固与 Experience 指标（本分支落地中） |
+| **P1** | **Context 合同产品化 + Agent Plugin 主路径 + memory pack** | ✅ | [docs/context-contract.md](docs/context-contract.md)；[docs/experience-memory.md](docs/experience-memory.md)；Plugin 为首选安装，`install` 为 Rules/多 Agent 回退；`artifact export-memory` Markdown 包 |
+| **P2** | **ATP 兼容示例 producer + Engineering KG episode 链** | 🟡 | `examples/atp-minimal-producer/`；episode↔Requirement/Concept 边（本分支落地中） |
+
+### 既有 backlog
 
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |

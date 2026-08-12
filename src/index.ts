@@ -66,6 +66,24 @@ export {
   type SkillOptInput,
   type SkillOptResult,
 } from "./learning/skill-opt-lite";
+export {
+  planSkillConsolidation,
+  applySkillConsolidation,
+  planFromRequest,
+  toConsolidateResult,
+  type ConsolidateAction,
+  type ConsolidateRequest,
+  type ConsolidateResult,
+} from "./learning/skill-consolidate";
+export {
+  buildMinimalSimplePlanWorkItems,
+  buildRequiredSimplePlanWorkItems,
+} from "./agents/atp-example-producer";
+export {
+  linkEpisodeToEngineeringNodes,
+  type EngineeringLinkHints,
+  type LinkEpisodeResult,
+} from "./graph/episode-engineering-links";
 export { planInsightResult, type PlanInsightResult } from "./surfaces/cli/runtime/routing";
 export {
   createGraphClient,

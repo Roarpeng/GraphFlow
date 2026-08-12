@@ -4,12 +4,14 @@ import { join } from "node:path";
 import { ensureGlobalGraphFlowConfig } from "../../config/scaffold";
 import {
   installAllSkills,
+  uninstallAllSkillsAndRules,
   getTraeInstallStatus,
   getAntigravityInstallStatus,
   getCopilotInstallStatus,
   getAgentInstructionStatus,
   getAgentSkillStatus,
   type SkillInstallSummary,
+  type SkillUninstallResult,
 } from "../../integrations/skill-installer";
 import {
   detectInstalledAgents,
@@ -18,7 +20,9 @@ import {
   installMcpToDetectedAgents,
   uninstallMcpFromDetectedAgents,
   type McpInstallResult,
+  type McpRemoveResult,
 } from "../../integrations/agent-mcp-installer";
+import { uninstallClaudeCodeHooks } from "../../integrations/claude-code-hooks";
 
 const isWindows = process.platform === "win32";
 
@@ -401,17 +405,47 @@ export function runInit() {
   console.log("[HINT] To run init on npm install, set GRAPHFLOW_ENABLE_POSTINSTALL=1");
 }
 
-export function runUninstall() {
-  console.log("[START] Uninstalling GraphFlow...");
+export function runUninstall(workspaceRoot: string = process.cwd()) {
+  console.log("[START] Uninstalling GraphFlow (MCP + Skills + Rules + hooks)...");
 
-  // 1. Remove MCP configs from detected agents
-  const mcpResults = uninstallMcpFromDetectedAgents();
+  // 1. Remove MCP configs from detected agents (user + workspace)
+  const mcpResults = uninstallMcpFromDetectedAgents({ workspaceRoot });
   for (const result of mcpResults) {
     const icon = result.removed ? "[REMOVED]" : "[SKIP]";
-    console.log(`${icon} MCP ${result.agentName}: ${result.message}`);
+    const scope = result.scope ? ` (${result.scope})` : "";
+    console.log(`${icon} MCP ${result.agentName}${scope}: ${result.message}`);
+  }
+
+  // 2. Remove Skills / Rules / managed instruction blocks
+  const skillResults = uninstallAllSkillsAndRules(workspaceRoot);
+  let skillRemoved = 0;
+  for (const result of skillResults) {
+    if (!result.removed) continue;
+    skillRemoved += 1;
+    console.log(`[REMOVED] ${result.target}: ${result.path}`);
+  }
+  console.log(`[INFO] Skills/Rules removed: ${skillRemoved}/${skillResults.length} targets`);
+
+  // 3. Remove Claude Code SessionStart/End/Stop hooks written by GraphFlow
+  try {
+    const hooksResult = uninstallClaudeCodeHooks();
+    const icon = hooksResult.status === "updated" || hooksResult.status === "created" ? "[REMOVED]" : "[SKIP]";
+    console.log(`${icon} Claude Code hooks: ${hooksResult.message ?? hooksResult.status}`);
+  } catch (error) {
+    console.log(`[SKIP] Claude Code hooks: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   console.log("[FINISH] Uninstall complete.");
+  console.log("[HINT] If you also installed the Agent Plugin, remove it in Cursor Customize / Plugins,");
+  console.log("       and delete any local symlink under ~/.cursor/plugins/local/graphflow.");
+}
+
+export interface UninstallReport {
+  command: "uninstall";
+  mcp: McpRemoveResult[];
+  skills: SkillUninstallResult[];
+  hooks?: { status: string; message?: string };
+  ok: boolean;
 }
 
 export type DoctorCheckStatus = "installed" | "missing" | "n/a";

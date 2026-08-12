@@ -212,6 +212,7 @@ export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResu
       byOutcomeKind: { ...flywheelReport.skills.byOutcomeKind },
     },
     sessionJournal: { ...flywheelReport.sessionJournal },
+    experience: { ...flywheelReport.experience },
   };
 
   return {

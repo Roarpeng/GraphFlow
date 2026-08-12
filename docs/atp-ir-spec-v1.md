@@ -46,6 +46,8 @@ Design goals:
 A single deployment may be both producer and consumer (GraphFlow), with an
 external coding agent (Cursor, Claude Code, …) as the answering agent.
 
+**Non-GraphFlow reference producer:** [`examples/atp-minimal-producer/`](../examples/atp-minimal-producer/) emits a valid simple-plan work-item set (intent + decomposition) as JSON with no network — useful for third-party Producer implementations that target this IR.
+
 ## 3. Core data types
 
 ### 3.1 `AgentWorkItem`

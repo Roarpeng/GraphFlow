@@ -10,11 +10,17 @@ All notable changes to this project are documented in this file.
 - README section for local plugin install (`~/.cursor/plugins/local`) and Team Marketplace / Git discovery
 - `npm run sync:surfaces` keeps `src/surfaces/trae-skill/graphflow/SKILL.md` aligned with the Agent Plugins skill source
 - Conformance test `tests/agent-plugins-1.0.test.ts`
+- **P1 Context Engineering contract**: [docs/context-contract.md](docs/context-contract.md) — budget fields, L0–L3 anchors/refill, positioning vs platform indexing / RL; links MCP `graphflow_context` and Agent Plugins
+- **P1 Experience memory guide**: [docs/experience-memory.md](docs/experience-memory.md) — Storage → Reflection → Experience; artifact / memory-pack / skill-sync; Agent Plugin vs `install` matrix
+- **Experience memory pack**: `exportExperienceMemoryPack` + CLI `graphflow artifact export-memory` → `graphflow-out/memory-pack/{README,skills,episodes}.md`
+- README: Agent Plugins as **primary** install; `graphflow install` as Rules / multi-agent fallback; links to the two new docs
 
 ### Changed
 
 - Skill resolution (`resolveSkillSourcePath` / MCP `graphflow_skill_guide`) prefers `skills/graphflow` before legacy `trae-skill` paths
 - `package.json` `files` publishes `plugin.json`, `mcp.json`, and `skills/`
+- ROADMAP (2026-08-09): Experience-layer P0–P2 status (P1 ✅; P0/P2 🟡 on this branch)
+- **`graphflow uninstall`** now removes **MCP + Skills + Rules + hooks** (user + workspace MCP). After removing an Agent Plugin in Cursor, run `uninstall` so leftover `~/.cursor/skills/graphflow` cannot keep steering the agent.
 
 ## [1.9.11] - 2026-08-08
 
