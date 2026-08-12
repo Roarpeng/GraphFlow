@@ -30,7 +30,7 @@ It is also **local-first and portable**: everything runs offline with no API key
 All headline numbers come from a **public, reproducible benchmark suite** ([benchmarks/README.md](benchmarks/README.md)) with published methodology ([docs/benchmark-standards.md](docs/benchmark-standards.md)) and machine-readable JSON dumps pinned to commits:
 
 - **~98% token savings** (8-query suite, 262,926 → 2,843 tokens; independently re-counted with `gpt-tokenizer`)
-- **132-query golden retrieval set** in CI (Hit@5 = 100%, MRR = 0.836, NDCG@5 = 0.601)
+- **132-query golden retrieval set** in CI (Hit@5 = 100%, MRR = 0.836, NDCG@5 = 0.601); downloadable open dataset: [`benchmarks/datasets/retrieval-golden-v1.json`](benchmarks/datasets/retrieval-golden-v1.json) — run `npm run bench:retrieval`
 - **Skill A/B: 100% vs 61.5%** task success with the flywheel on vs off (26 tasks)
 - **Memory ROI: 100% vs 56.5%** with episodic memory on vs off (62 tasks, with attribution chains)
 
