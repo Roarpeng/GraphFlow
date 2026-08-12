@@ -154,6 +154,12 @@ describe("flywheel contribution report", () => {
         antiPatternCount: expect.any(Number),
         provenSkillCount: expect.any(Number),
         consolidationHint: expect.any(String),
+        consolidation: expect.objectContaining({
+          updates: expect.any(Number),
+          deletes: expect.any(Number),
+          adds: expect.any(Number),
+          actionable: expect.any(Number),
+        }),
       })
     );
     expect(report.experience.episodeToSkillConversionRate).toBeGreaterThanOrEqual(0);
@@ -163,6 +169,11 @@ describe("flywheel contribution report", () => {
     expect(report.experience.antiPatternCount).toBe(report.skills.byOutcomeKind["anti-pattern"]);
     expect(report.experience.provenSkillCount).toBe(report.skills.byOutcomeKind.proven);
     expect(report.experience.consolidationHint.length).toBeGreaterThan(0);
+    expect(report.experience.consolidation.actionable).toBe(
+      report.experience.consolidation.updates +
+        report.experience.consolidation.deletes +
+        report.experience.consolidation.adds
+    );
   });
 
   it("attributes memory: recall hits, stale episodes, confidence, evidence chain, deviation breakdown", async () => {
@@ -358,6 +369,7 @@ describe("flywheel contribution report", () => {
       antiPatternCount: 0,
       provenSkillCount: 0,
       consolidationHint: "Experience flywheel looks healthy.",
+      consolidation: { updates: 0, deletes: 0, adds: 0, actionable: 0 },
     });
     expect(typeof report.autoCaptureEnabled).toBe("boolean");
     expect(report.sessionJournal.exists).toBe(false);
@@ -476,5 +488,76 @@ describe("flywheel contribution report", () => {
       else process.env.GRAPHFLOW_AUTO_CAPTURE = prev;
       rmSync(healthRoot, { recursive: true, force: true });
     }
+  });
+
+  it("exposes consolidation action counts and surfaces them via diagnose", async () => {
+    const consolRoot = mkdtempSync(join(tmpdir(), "graphflow-flywheel-consol-"));
+    const consolConfigPath = join(consolRoot, "graphflow.config.json");
+    const consolStorePath = join(consolRoot, "graph.json");
+    writeFileSync(
+      consolConfigPath,
+      JSON.stringify({
+        ...configJson,
+        graphPolicy: {
+          ...configJson.graphPolicy,
+          workspaceRoot: consolRoot,
+          graphStorePath: consolStorePath,
+        },
+      })
+    );
+    const client = createGraphClient(
+      validateConfig(
+        JSON.parse(
+          JSON.stringify({
+            ...configJson,
+            graphPolicy: {
+              ...configJson.graphPolicy,
+              workspaceRoot: consolRoot,
+              graphStorePath: consolStorePath,
+            },
+          })
+        )
+      )
+    );
+
+    const survivor = {
+      id: "skill:cache-layer",
+      name: "Cache Layer",
+      score: 4,
+      uses: 3,
+      lastOutcome: "pass" as const,
+      updatedAt: 1,
+      outcomeKind: "proven" as const,
+      guidance: "keep keys",
+    };
+    const duplicate = {
+      id: "skill:cache_layer",
+      name: "cache_layer",
+      score: 1,
+      uses: 1,
+      lastOutcome: "pass" as const,
+      updatedAt: 1,
+      outcomeKind: "correctable" as const,
+      guidance: "invalidate",
+    };
+    await client.upsertNodes([
+      { id: survivor.id, type: "Skill", content: JSON.stringify(survivor) },
+      { id: duplicate.id, type: "Skill", content: JSON.stringify(duplicate) },
+    ]);
+
+    const report = getFlywheelReport(consolConfigPath);
+    expect(report.experience.consolidation.updates).toBeGreaterThanOrEqual(1);
+    expect(report.experience.consolidation.deletes).toBeGreaterThanOrEqual(1);
+    expect(report.experience.consolidation.actionable).toBeGreaterThan(0);
+    expect(report.experience.consolidationHint).toMatch(/Consolidation suggested|skill consolidate/i);
+
+    const { diagnoseRoutingResult } = await import("../src/surfaces/cli/runtime");
+    const diagnosis = diagnoseRoutingResult(consolConfigPath);
+    expect(diagnosis.flywheel?.experience?.consolidation?.actionable).toBe(
+      report.experience.consolidation.actionable
+    );
+    expect(diagnosis.flywheel?.experience?.consolidationHint).toBe(report.experience.consolidationHint);
+
+    rmSync(consolRoot, { recursive: true, force: true });
   });
 });

@@ -1,5 +1,5 @@
 import { resolveConfig } from "../../../config/resolve";
-import { createGraphClient } from "../../../graph/client-factory";
+import { createGraphClient, type GraphClient } from "../../../graph/client-factory";
 import { runNightlyLearning, type NightlyLearningSummary } from "../../../learning/nightly-trainer";
 import {
   maybeDecaySkills,
@@ -8,8 +8,10 @@ import {
   pruneLowSkills,
 } from "../../../learning/skill-flywheel";
 import {
+  applySkillConsolidation,
   planSkillConsolidation,
   toConsolidateResult,
+  type ApplySkillConsolidationResult,
   type ConsolidateResult,
   type ConsolidateSkillInput,
 } from "../../../learning/skill-consolidate";
@@ -18,6 +20,37 @@ import { forgetEpisodes } from "../../../learning/episodic-memory";
 
 export interface LearningNightlyResult extends NightlyLearningSummary {}
 export type { SkillDecayResult };
+
+/** CLI / runtime result for `skill consolidate` (dry-run by default). */
+export interface SkillConsolidateRuntimeResult extends ConsolidateResult {
+  /** True when the graph was not mutated (default). */
+  dryRun: boolean;
+  /** Present only when `--apply` / `--execute` ran successfully against the plan. */
+  applied?: ApplySkillConsolidationResult;
+}
+
+async function loadConsolidateSkillInputs(
+  graphClient: GraphClient
+): Promise<ConsolidateSkillInput[]> {
+  const nodes = graphClient.readSnapshot
+    ? graphClient.readSnapshot().nodes.filter((n) => n.type === "Skill")
+    : (await graphClient.queryByKeyword("skill")).filter((n) => n.type === "Skill");
+
+  const skills: ConsolidateSkillInput[] = [];
+  for (const node of nodes) {
+    const state = parseSkillState(node.content);
+    if (!state || state.hidden === true) continue;
+    skills.push({
+      id: state.id,
+      name: state.name,
+      score: state.score,
+      uses: state.uses,
+      ...(state.outcomeKind ? { outcomeKind: state.outcomeKind } : {}),
+      ...(state.guidance ? { guidance: state.guidance } : {}),
+    });
+  }
+  return skills;
+}
 
 export function runLearningNightly(configPath?: string): string {
   const config = resolveConfig(configPath);
@@ -55,30 +88,32 @@ export async function runSkillPrune(configPath?: string): Promise<{ pruned: numb
 }
 
 /**
+ * Plan (and optionally apply) QM-style skill consolidation (UPDATE/DELETE/ADD).
+ * Default is dry-run — pass `{ apply: true }` only for opt-in mutation.
+ */
+export async function runSkillConsolidate(
+  configPath?: string,
+  options?: { apply?: boolean }
+): Promise<SkillConsolidateRuntimeResult> {
+  const config = resolveConfig(configPath);
+  const graphClient = createGraphClient(config);
+  const skills = await loadConsolidateSkillInputs(graphClient);
+  const plan = toConsolidateResult(planSkillConsolidation(skills));
+
+  if (!options?.apply) {
+    return { ...plan, dryRun: true };
+  }
+
+  const applied = await applySkillConsolidation(graphClient, plan.actions);
+  return { ...plan, dryRun: false, applied };
+}
+
+/**
  * Dry-run skill consolidation plan (QM-style UPDATE/DELETE/ADD) — does not mutate the graph.
  */
 export async function runSkillConsolidatePlan(configPath?: string): Promise<ConsolidateResult> {
-  const config = resolveConfig(configPath);
-  const graphClient = createGraphClient(config);
-  const nodes = graphClient.readSnapshot
-    ? graphClient.readSnapshot().nodes.filter((n) => n.type === "Skill")
-    : (await graphClient.queryByKeyword("skill")).filter((n) => n.type === "Skill");
-
-  const skills: ConsolidateSkillInput[] = [];
-  for (const node of nodes) {
-    const state = parseSkillState(node.content);
-    if (!state || state.hidden === true) continue;
-    skills.push({
-      id: state.id,
-      name: state.name,
-      score: state.score,
-      uses: state.uses,
-      ...(state.outcomeKind ? { outcomeKind: state.outcomeKind } : {}),
-      ...(state.guidance ? { guidance: state.guidance } : {}),
-    });
-  }
-
-  return toConsolidateResult(planSkillConsolidation(skills));
+  const result = await runSkillConsolidate(configPath);
+  return { actions: result.actions, summary: result.summary };
 }
 
 export async function runLearnForget(configPath?: string): Promise<{ removed: number }> {

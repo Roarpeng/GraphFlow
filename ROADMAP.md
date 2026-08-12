@@ -31,7 +31,7 @@
 
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
-| **P0** | **飞轮 Experience 指标 + QM 式 skill 巩固** | 🟡 | `skill-consolidate` 显式 MERGE/DELETE/ADD；`getFlywheelReport` / diagnose 暴露巩固与 Experience 指标 |
+| **P0** | **飞轮 Experience 指标 + QM 式 skill 巩固** | ✅ | `skill consolidate` dry-run + `--apply`/`--execute`；`getFlywheelReport` / diagnose / skill report 暴露 `experience`（含 consolidation 动作计数与 hint） |
 | **P1** | **Context 合同产品化 + Agent Plugin 主路径 + memory pack** | ✅ | [docs/context-contract.md](docs/context-contract.md)；[docs/experience-memory.md](docs/experience-memory.md)；Plugin 为首选安装，`install` 为 Rules/多 Agent 回退；`artifact export-memory` Markdown 包 |
 | **P2** | **ATP 兼容示例 producer + Engineering KG episode 链** | ✅ | `examples/atp-minimal-producer/`（atp-ir/1.2 + memory-*）；`report_outcome` / insight document-semantic 接线 episode↔Requirement/Concept `derived_from` |
 
@@ -46,7 +46,7 @@
 | **P1** | **第三方基准复现邀请** | ✅ | 与独立 benchmark 同源；README「Proof, not promises」 |
 | **P1（融合）** | **Skill-conditioned DAG + SkillOpt-lite** | ✅ | plan 节点 `skillRefs`/`avoidPatterns`；outcome 有界编辑 guidance |
 | **P2** | **协议层占位**：ATP/IR v1.2、MCP resources | ✅ | MCP resources 已落地；ATP/IR v1.2 Stable（§8 memory-* + outcome eng-link 字段）；最小 producer / 一致性测试 |
-| **P2** | **代码域检索评测公开数据集** | ⬜ | golden set 已入 CI，开放成本低 |
+| **P2** | **代码域检索评测公开数据集** | ✅ | [`benchmarks/datasets/retrieval-golden-v1.json`](benchmarks/datasets/retrieval-golden-v1.json)（+ JSONL）；`npm run dataset:retrieval` 从 TS 真源再生；`npm run bench:retrieval` |
 | **P2** | **社区化基建** | ✅ | CONTRIBUTING / ROADMAP / Issue 模板 |
 | **P3** | **MCP 2.0 无状态规范适配** | ⬜ | 升级 SDK 后复核 ping / schema |
 

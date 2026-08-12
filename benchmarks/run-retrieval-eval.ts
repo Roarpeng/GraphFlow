@@ -21,7 +21,7 @@ import { validateConfig } from "../src/config/loader.js";
 import { createGraphClient, type GraphClient } from "../src/graph/client-factory.js";
 import { indexWorkspaceFiles } from "../src/graph/file-indexer.js";
 import { buildEnhancedContextPackage } from "../src/graph/context-slicer.js";
-import { GOLDEN_SET } from "./retrieval-golden-data.js";
+import { GOLDEN_SET, NEGATIVE_SAMPLES } from "./retrieval-golden-data.js";
 import { getCommitHash } from "./bench-meta.js";
 
 const SRC_DIR = join(process.cwd(), "src");
@@ -45,22 +45,6 @@ const GOLDEN_CONFIG = validateConfig({
     exportPath: "graphflow-out/learning-dataset.jsonl",
   },
 });
-
-/** 负样本：查询 + 不应出现的 decoy */
-const NEGATIVE_SAMPLES: ReadonlyArray<{ query: string; mustNotContain: string[] }> = [
-  { query: "plcopen xml pou variables", mustNotContain: ["agent-profiles", "provider-adapters"] },
-  { query: "cli init scaffold", mustNotContain: ["plcopen", "language-indexers"] },
-  { query: "anthropic provider adapter", mustNotContain: ["language-indexers", "surfaces/mcp"] },
-  { query: "skill store persistence", mustNotContain: ["model-router"] },
-  { query: "config secrets redact", mustNotContain: ["dag-engine", "plcopen"] },
-  { query: "mcp tool handlers", mustNotContain: ["agent-profiles"] },
-  { query: "java indexer classes", mustNotContain: ["surfaces/mcp", "model-router"] },
-  { query: "goal anchor alignment deviation", mustNotContain: ["plcopen", "surfaces/mcp"] },
-  { query: "windsurf agent profile", mustNotContain: ["context-slicer", "sqlite"] },
-  { query: "provider executor calls", mustNotContain: ["skill-flywheel", "language-indexers"] },
-  { query: "config schema validation", mustNotContain: ["plcopen"] },
-  { query: "atp protocol schema", mustNotContain: ["language-indexers"] },
-];
 
 interface PerQueryResult {
   query: string;

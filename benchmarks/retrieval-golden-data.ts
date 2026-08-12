@@ -1,8 +1,14 @@
 /**
- * retrieval-golden-data.ts — Golden set 数据（与 tests/retrieval-golden.test.ts 同步）
+ * retrieval-golden-data.ts — Retrieval golden set (source of truth for the
+ * published open dataset under `benchmarks/datasets/`).
  *
- * 本文件是纯数据，不依赖 vitest，供 benchmark 脚本导入。
- * 当 tests/retrieval-golden.test.ts 的 GOLDEN_SET 变更时，需同步更新此处。
+ * Single source of truth for:
+ *   - `npm run dataset:retrieval` → `benchmarks/datasets/retrieval-golden-v1.{json,jsonl}`
+ *   - `npm run bench:retrieval` / comprehensive benches
+ *
+ * Keep in sync with `tests/retrieval-golden.test.ts` GOLDEN_SET / NEGATIVE_SAMPLES
+ * (CI regression suite; that file may duplicate for vitest isolation).
+ * After editing this file, run `npm run dataset:retrieval` so the JSON cannot drift.
  */
 
 export interface GoldenEntry {
@@ -11,6 +17,12 @@ export interface GoldenEntry {
   domain: string;
   topK?: number;
   mustNotContain?: string[];
+}
+
+/** Negative samples: query must NOT surface decoy path substrings. */
+export interface NegativeSample {
+  query: string;
+  mustNotContain: string[];
 }
 
 export const GOLDEN_SET: ReadonlyArray<GoldenEntry> = [
@@ -155,4 +167,24 @@ export const GOLDEN_SET: ReadonlyArray<GoldenEntry> = [
   { query: "trae agent profile", expectAny: ["profiles/trae"], domain: "integrations", topK: 3 },
   { query: "opencode profile skills", expectAny: ["opencode"], domain: "integrations", topK: 4 },
   { query: "antigravity profile", expectAny: ["antigravity"], domain: "integrations", topK: 3 },
+];
+
+/**
+ * Negative-sample assertions: these queries must NOT surface the decoy file
+ * (path substring) in the package output. Decoys are drawn from unrelated
+ * domains; a hit here means retrieval over-bleeds across domains.
+ */
+export const NEGATIVE_SAMPLES: ReadonlyArray<NegativeSample> = [
+  { query: "plcopen xml pou variables", mustNotContain: ["agent-profiles", "provider-adapters"] },
+  { query: "cli init scaffold", mustNotContain: ["plcopen", "language-indexers"] },
+  { query: "anthropic provider adapter", mustNotContain: ["language-indexers", "surfaces/mcp"] },
+  { query: "skill store persistence", mustNotContain: ["model-router"] },
+  { query: "config secrets redact", mustNotContain: ["dag-engine", "plcopen"] },
+  { query: "mcp tool handlers", mustNotContain: ["agent-profiles"] },
+  { query: "java indexer classes", mustNotContain: ["surfaces/mcp", "model-router"] },
+  { query: "goal anchor alignment deviation", mustNotContain: ["plcopen", "surfaces/mcp"] },
+  { query: "windsurf agent profile", mustNotContain: ["context-slicer", "sqlite"] },
+  { query: "provider executor calls", mustNotContain: ["skill-flywheel", "language-indexers"] },
+  { query: "config schema validation", mustNotContain: ["plcopen"] },
+  { query: "atp protocol schema", mustNotContain: ["language-indexers"] },
 ];
