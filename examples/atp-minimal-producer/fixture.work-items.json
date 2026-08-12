@@ -1,0 +1,54 @@
+{
+  "protocol": "atp-ir/1.1",
+  "role": "producer",
+  "mode": "simple-plan",
+  "task": "Add a cache layer for the tokenizer and verify with unit tests",
+  "agentWorkItems": [
+    {
+      "id": "simple-plan-intent",
+      "kind": "intent",
+      "prompt": "Task: Add a cache layer for the tokenizer and verify with unit tests\n\nBefore splitting into subtasks, understand the task as ONE intent.\nDo NOT treat colon-list evaluation dimensions as separate work items.\nReturn ONLY a JSON object:\n{\n  \"explicitIntent\": \"what the user explicitly asked for\",\n  \"implicitIntent\": \"the underlying need\",\n  \"coreProblem\": \"the core problem to solve\",\n  \"nonGoals\": [\"things out of scope\"],\n  \"successDefinition\": \"how to know the task is done\",\n  \"confidence\": \"0.0-1.0 — below 0.6 requires clarification\"\n}",
+      "expectedFormat": "json",
+      "responseSchema": {
+        "explicitIntent": "string",
+        "implicitIntent": "string",
+        "coreProblem": "string",
+        "nonGoals": "string[]",
+        "successDefinition": "string",
+        "confidence": "number 0.0-1.0"
+      }
+    },
+    {
+      "id": "simple-plan-decomposition",
+      "kind": "plan-refinement",
+      "prompt": "Task: Add a cache layer for the tokenizer and verify with unit tests\n\nProduce the FINAL DAG task plan using your model.\nRules:\n- Max 8 tasks; each description must be actionable (verb + object)\n- Prefer sequential design → implement → verify when the request is one analytical intent\n- Optional fields on each node: skillRefs?: string[], avoidPatterns?: string[]\n\nReturn ONLY a JSON array: [{id, description, dependencies, skillRefs?, avoidPatterns?}]",
+      "expectedFormat": "json",
+      "responseSchema": {
+        "items": {
+          "id": "string",
+          "description": "string",
+          "dependencies": "string[]",
+          "skillRefs": "string[]?",
+          "avoidPatterns": "string[]?"
+        }
+      }
+    },
+    {
+      "id": "alignment-check",
+      "kind": "alignment",
+      "optional": true,
+      "prompt": "Task: Add a cache layer for the tokenizer and verify with unit tests\n\n[EXECUTION-TIME CHECK — submit after completing work]\nCheck output against the ORIGINAL goal anchor (successDefinition / nonGoals).\nReturn ONLY a JSON object:\n{\n  \"aligned\": true|false,\n  \"servedSuccessCriteria\": [\"...\"],\n  \"violatedNonGoals\": [],\n  \"drift\": \"none|misread-requirement|scope-creep|tech-drift\",\n  \"correction\": \"\"\n}",
+      "expectedFormat": "json",
+      "responseSchema": {
+        "aligned": "boolean",
+        "servedSuccessCriteria": "string[]",
+        "violatedNonGoals": "string[]",
+        "drift": "none|misread-requirement|scope-creep|tech-drift",
+        "correction": "string"
+      }
+    }
+  ],
+  "agentInstructions": "Answer each REQUIRED work item as JSON only.\nSubmit via a compatible consumer (GraphFlow: graphflow_insight mode=submit).\nAfter both required items are submitted, merge (GraphFlow: graphflow_insight mode=merge).\nOptional: submit alignment-check after execution, then report_outcome.",
+  "status": "awaiting-agent",
+  "requiresAgentBridge": true
+}

@@ -6,7 +6,7 @@
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 // ── 类型定义 ──────────────────────────────────────────────────────────
 
@@ -1277,4 +1277,154 @@ function _rimraf(dirPath: string): void {
     }
   }
   try { rmdirSync(dirPath); } catch { /* ignore */ }
+}
+
+function removeFileIfExists(filePath: string): boolean {
+  if (!existsSync(filePath)) return false;
+  try {
+    rmSync(filePath, { force: true });
+    return !existsSync(filePath);
+  } catch {
+    return false;
+  }
+}
+
+/** True when content looks like a GraphFlow-owned install (not a lightly annotated user file). */
+export function looksLikeGraphFlowOwnedContent(content: string): boolean {
+  if (!content.includes("graphflow_context")) return false;
+  return (
+    content.includes(INSTRUCTION_BEGIN) ||
+    content.includes("Token-First Rule") ||
+    content.includes("10 MCP tools") ||
+    content.includes("graphflow-mcp") ||
+    content.includes("A Context-Aware Multi-Agent Orchestration Engine") ||
+    /^\s*#\s*GraphFlow\b/m.test(content)
+  );
+}
+
+/**
+ * Remove a GraphFlow-owned file:
+ * - `graphflow.md` / `graphflow.mdc` → delete
+ * - managed-marker files → strip block
+ * - known instruction filenames that are wholly GraphFlow content → delete
+ */
+export function removeGraphFlowOwnedFile(filePath: string): boolean {
+  if (!existsSync(filePath)) return false;
+  const name = basename(filePath);
+  if (/^graphflow\.(md|mdc)$/i.test(name)) {
+    return removeFileIfExists(filePath);
+  }
+  if (removeManagedBlock(filePath)) {
+    return true;
+  }
+  try {
+    const content = readFileSync(filePath, "utf8");
+    const whollyOwnedNames = new Set([
+      "CLAUDE.md",
+      "AGENTS.md",
+      "GEMINI.md",
+      ".windsurfrules",
+      "copilot-instructions.md",
+      "global_rules.md",
+    ]);
+    if (whollyOwnedNames.has(name) && looksLikeGraphFlowOwnedContent(content)) {
+      // Prefer strip if markers exist (already tried). Otherwise delete only when
+      // the file is clearly a GraphFlow template, not a mixed user doc.
+      const mostlyOurs =
+        content.includes(INSTRUCTION_BEGIN) ||
+        /^\s*#\s*GraphFlow\b/m.test(content) ||
+        content.includes("A Context-Aware Multi-Agent Orchestration Engine");
+      if (mostlyOurs) {
+        return removeFileIfExists(filePath);
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+export interface SkillUninstallResult {
+  target: string;
+  path: string;
+  removed: boolean;
+  message?: string;
+}
+
+/**
+ * Uninstall all GraphFlow Skills, Rules, and managed instruction blocks
+ * written by `graphflow install` / `installAllSkills`.
+ *
+ * Call this together with MCP uninstall so Agent Plugin / IDE uninstall
+ * leftovers cannot keep guiding agents toward GraphFlow tools.
+ */
+export function uninstallAllSkillsAndRules(workspaceRoot?: string): SkillUninstallResult[] {
+  const results: SkillUninstallResult[] = [];
+  const root = workspaceRoot?.trim() ? workspaceRoot : process.cwd();
+
+  const push = (target: string, path: string, removed: boolean, message?: string) => {
+    results.push({ target, path, removed, ...(message ? { message } : {}) });
+  };
+
+  // 1) User-level agent skills (~/.cursor/skills/graphflow, etc.)
+  for (const target of getAgentSkillTargets()) {
+    const skillDir = join(target.skillsRoot, "graphflow");
+    const removed = removeAgentSkill(target.skillsRoot);
+    push(`${target.agent} skill`, skillDir, removed, removed ? "removed" : "not found");
+  }
+
+  // 2) Trae user skills
+  for (const trae of getTraeUserDirs()) {
+    const skillDir = join(trae.skillsDir, "graphflow");
+    const removed = removeAgentSkill(trae.skillsDir);
+    push(`${trae.name} skill`, skillDir, removed, removed ? "removed" : "not found");
+  }
+
+  // 3) Cursor user rules
+  for (const cursor of getCursorRulesDirs()) {
+    const filePath = join(cursor.rulesDir, "graphflow.mdc");
+    const removed = removeFileIfExists(filePath);
+    push(`${cursor.name} rules`, filePath, removed, removed ? "removed" : "not found");
+  }
+
+  // 4) Claude Code user CLAUDE.md
+  for (const claude of getClaudeCodeDirs()) {
+    const filePath = join(claude.claudeDir, "CLAUDE.md");
+    const removed = removeGraphFlowOwnedFile(filePath);
+    push(`${claude.name} CLAUDE.md`, filePath, removed, removed ? "removed" : "not found / kept (user content)");
+  }
+
+  // 5) Global agent instruction targets
+  for (const target of getAgentInstructionTargets()) {
+    const removed = removeGraphFlowOwnedFile(target.filePath);
+    push(`${target.agent} instructions`, target.filePath, removed, removed ? "removed" : "not found / kept");
+  }
+
+  // 6) Project-level rules / skills / instruction files
+  for (const target of getProjectLevelRuleTargets(root)) {
+    if (
+      target.sourceType === "trae-skill-file" ||
+      target.sourceType === "antigravity-skill-file"
+    ) {
+      // destDir is .../skills/graphflow — parent is the skills root
+      const skillsRoot = dirname(target.destDir);
+      const ok = removeAgentSkill(skillsRoot);
+      push(target.agent, target.destDir, ok, ok ? "removed" : "not found");
+      continue;
+    }
+    const removed = removeGraphFlowOwnedFile(target.filePath);
+    push(target.agent, target.filePath, removed, removed ? "removed" : "not found / kept");
+  }
+
+  // 7) Workspace fallback skill cache
+  const workspaceSkillParent = join(root, ".graphflow", "skills");
+  const wsRemoved = removeAgentSkill(workspaceSkillParent);
+  push("Workspace .graphflow/skills", join(workspaceSkillParent, "graphflow"), wsRemoved, wsRemoved ? "removed" : "not found");
+
+  // 8) Project GEMINI.md managed block / owned file
+  const geminiPath = join(root, "GEMINI.md");
+  const geminiRemoved = removeGraphFlowOwnedFile(geminiPath);
+  push("Project GEMINI.md", geminiPath, geminiRemoved, geminiRemoved ? "removed" : "not found / kept");
+
+  return results;
 }

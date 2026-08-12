@@ -38,6 +38,21 @@ export {
   DEFAULT_CANARY_LOCAL_SUCCESSES,
   shouldHardDeleteAntiPattern,
 } from "./canary-gate";
+export {
+  planSkillConsolidation,
+  applySkillConsolidation,
+  planFromRequest,
+  toConsolidateResult,
+  normalizeSkillNameKey,
+  type ConsolidateAction,
+  type ConsolidateActionKind,
+  type ConsolidateRequest,
+  type ConsolidateResult,
+  type ConsolidateSkillInput,
+  type ConsolidateCandidate,
+  type PlanSkillConsolidationOptions,
+  type ApplySkillConsolidationResult,
+} from "./skill-consolidate";
 
 const STOPWORDS = new Set([
   "update", "readme", "add", "fix", "file", "files",

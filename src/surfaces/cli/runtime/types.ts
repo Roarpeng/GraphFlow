@@ -209,6 +209,14 @@ export interface RoutingDiagnosisResult {
       };
     };
     sessionJournal: { path: string; exists: boolean; pendingCount: number };
+    /** P0 Experience-layer rates + consolidation tip (additive). */
+    experience?: {
+      episodeToSkillConversionRate: number;
+      lessonsCoverageRate: number;
+      antiPatternCount: number;
+      provenSkillCount: number;
+      consolidationHint: string;
+    };
   };
 }
 

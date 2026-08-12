@@ -7,6 +7,13 @@ import {
   resetSkillScore,
   pruneLowSkills,
 } from "../../../learning/skill-flywheel";
+import {
+  planSkillConsolidation,
+  toConsolidateResult,
+  type ConsolidateResult,
+  type ConsolidateSkillInput,
+} from "../../../learning/skill-consolidate";
+import { parseSkillState } from "../../../learning/skill-store";
 import { forgetEpisodes } from "../../../learning/episodic-memory";
 
 export interface LearningNightlyResult extends NightlyLearningSummary {}
@@ -45,6 +52,33 @@ export async function runSkillPrune(configPath?: string): Promise<{ pruned: numb
   const config = resolveConfig(configPath);
   const graphClient = createGraphClient(config);
   return pruneLowSkills(graphClient);
+}
+
+/**
+ * Dry-run skill consolidation plan (QM-style UPDATE/DELETE/ADD) — does not mutate the graph.
+ */
+export async function runSkillConsolidatePlan(configPath?: string): Promise<ConsolidateResult> {
+  const config = resolveConfig(configPath);
+  const graphClient = createGraphClient(config);
+  const nodes = graphClient.readSnapshot
+    ? graphClient.readSnapshot().nodes.filter((n) => n.type === "Skill")
+    : (await graphClient.queryByKeyword("skill")).filter((n) => n.type === "Skill");
+
+  const skills: ConsolidateSkillInput[] = [];
+  for (const node of nodes) {
+    const state = parseSkillState(node.content);
+    if (!state || state.hidden === true) continue;
+    skills.push({
+      id: state.id,
+      name: state.name,
+      score: state.score,
+      uses: state.uses,
+      ...(state.outcomeKind ? { outcomeKind: state.outcomeKind } : {}),
+      ...(state.guidance ? { guidance: state.guidance } : {}),
+    });
+  }
+
+  return toConsolidateResult(planSkillConsolidation(skills));
 }
 
 export async function runLearnForget(configPath?: string): Promise<{ removed: number }> {
