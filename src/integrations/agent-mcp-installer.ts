@@ -1,6 +1,6 @@
 import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { homedir, release } from "node:os";
 
 export type McpServersKey = "mcpServers" | "servers" | "context_servers" | "mcp";
@@ -1048,6 +1048,183 @@ export function repairUnsafeWindowsMcpCommands(
         repaired: true,
         beforeCommand: previous.command,
         afterCommand: sanitized.command,
+      });
+    } catch {
+      // Config may be malformed; skip — install path will recreate.
+    }
+  }
+
+  return results;
+}
+
+/** True when a path looks like GraphFlow's extension mcp-launcher script. */
+export function isGraphFlowMcpLauncherPath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, "/");
+  const base = basename(normalized).toLowerCase();
+  return base === "mcp-launcher.cjs" || base === "mcp-launcher.cmd";
+}
+
+/**
+ * Find a missing GraphFlow mcp-launcher path referenced by an MCP server node.
+ * Returns the stale path when the node points at a launcher that is not on disk.
+ */
+export function findMissingGraphFlowMcpLauncher(node: McpServerNode): string | undefined {
+  const candidates: string[] = [];
+  if (typeof node.command === "string" && isGraphFlowMcpLauncherPath(node.command)) {
+    candidates.push(node.command);
+  }
+  if (Array.isArray(node.args)) {
+    for (const arg of node.args) {
+      if (typeof arg === "string" && isGraphFlowMcpLauncherPath(arg)) {
+        candidates.push(arg);
+      }
+    }
+  }
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+export interface McpStaleLauncherRepairResult {
+  agentId: string;
+  agentName: string;
+  configPath: string;
+  repaired: boolean;
+  beforeCommand?: string;
+  afterCommand?: string;
+  beforeLauncher?: string;
+  afterLauncher?: string;
+}
+
+export interface RepairStaleGraphFlowMcpLaunchersOptions {
+  /** Absolute path to the current extension mcp-launcher.cjs / .cmd. */
+  launcherPath: string;
+  /** Command used to run the launcher (node / electron). Default: "node". */
+  command?: string;
+  serverName?: string;
+  /** When set, also scan workspace-relative MCP configs (e.g. .cursor/mcp.json). */
+  workspaceRoot?: string;
+  /** Optional cwd for the MCP server entry (vendor runtime root). */
+  cwd?: string;
+  /** Test/injection hook — override scanned targets. */
+  targets?: Array<{
+    agentId: string;
+    agentName: string;
+    configPath: string;
+    serversKey: McpServersKey;
+  }>;
+}
+
+/**
+ * After VSIX upgrades, user/workspace MCP configs often still point at the previous
+ * extension folder (`…/roarpeng.graphflow-1.9.6/mcp-launcher.cjs`). Cursor Agents
+ * Window prefers project MCP and fails hard when that file is gone, while the IDE
+ * may still work via a newer user-level entry. Rewrite missing launcher refs to the
+ * active extension launcher on activate (and when Install MCP runs).
+ */
+export function repairStaleGraphFlowMcpLaunchers(
+  options: RepairStaleGraphFlowMcpLaunchersOptions
+): McpStaleLauncherRepairResult[] {
+  const launcherPath = options.launcherPath?.trim();
+  if (!launcherPath || !existsSync(launcherPath)) {
+    return [];
+  }
+
+  const serverName = options.serverName ?? "graphflow";
+  const results: McpStaleLauncherRepairResult[] = [];
+  const seen = new Set<string>();
+
+  const targets =
+    options.targets ??
+    buildAgentProfiles().flatMap((profile) => {
+      const user = profile.userTargets
+        .filter((t) => (t.configFormat ?? "json") !== "codex-toml" && (t.configFormat ?? "json") !== "opencode")
+        .map((t) => ({
+          agentId: profile.id,
+          agentName: profile.name,
+          configPath: t.configPath,
+          serversKey: t.serversKey,
+        }));
+      const workspace =
+        options.workspaceRoot && profile.workspaceRelativePaths
+          ? profile.workspaceRelativePaths
+              .filter((t) => (t.configFormat ?? "json") !== "codex-toml" && (t.configFormat ?? "json") !== "opencode")
+              .map((t) => ({
+                agentId: profile.id,
+                agentName: `${profile.name} (workspace)`,
+                configPath: join(options.workspaceRoot!, t.relativePath),
+                serversKey: t.serversKey,
+              }))
+          : [];
+      return [...user, ...workspace];
+    });
+
+  for (const target of targets) {
+    const key = `${target.configPath}::${target.serversKey}`;
+    if (seen.has(key) || !existsSync(target.configPath)) {
+      continue;
+    }
+    seen.add(key);
+
+    try {
+      const json = readJsonConfig(target.configPath);
+      const servers = (json[target.serversKey] as Record<string, McpServerNode> | undefined) ?? {};
+      const previous = servers[serverName];
+      if (!previous || typeof previous.command !== "string") {
+        continue;
+      }
+
+      const missingLauncher = findMissingGraphFlowMcpLauncher({
+        ...previous,
+        args: Array.isArray(previous.args) ? previous.args : [],
+      });
+      if (!missingLauncher) {
+        results.push({
+          agentId: target.agentId,
+          agentName: target.agentName,
+          configPath: target.configPath,
+          repaired: false,
+          beforeCommand: previous.command,
+          afterCommand: previous.command,
+          beforeLauncher: Array.isArray(previous.args)
+            ? previous.args.find((a) => typeof a === "string" && isGraphFlowMcpLauncherPath(a))
+            : undefined,
+          afterLauncher: Array.isArray(previous.args)
+            ? previous.args.find((a) => typeof a === "string" && isGraphFlowMcpLauncherPath(a))
+            : undefined,
+        });
+        continue;
+      }
+
+      const explicitCommand = options.command?.trim();
+      const nextCommand =
+        explicitCommand ||
+        (previous.command &&
+        !isGraphFlowMcpLauncherPath(previous.command) &&
+        existsSync(previous.command)
+          ? previous.command
+          : "node");
+      const next: McpServerNode = {
+        command: nextCommand,
+        args: [launcherPath],
+        ...(previous.cwd || options.cwd ? { cwd: options.cwd ?? previous.cwd } : {}),
+        ...(previous.env ? { env: { ...previous.env } } : {}),
+      };
+      servers[serverName] = next;
+      json[target.serversKey] = servers;
+      writeJsonConfig(target.configPath, json);
+      results.push({
+        agentId: target.agentId,
+        agentName: target.agentName,
+        configPath: target.configPath,
+        repaired: true,
+        beforeCommand: previous.command,
+        afterCommand: next.command,
+        beforeLauncher: missingLauncher,
+        afterLauncher: launcherPath,
       });
     } catch {
       // Config may be malformed; skip — install path will recreate.

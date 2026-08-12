@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import { resolveRuntimeCwd, requireWorkspaceFolder } from "./workspace";
@@ -498,6 +498,10 @@ async function bootstrapExtension(
   // before (re)install, so Trae Solo works without a manual "Install MCP" click.
   await runMcpWindowsSpaceRepair(workspaceRoot, output);
 
+  // After VSIX upgrades, rewrite missing mcp-launcher paths (old extension folder)
+  // so Cursor Agents Window / project .cursor/mcp.json keep working.
+  await runMcpStaleLauncherRepair(context, workspaceRoot, output);
+
   await runMcpBootstrap(context, workspaceRoot, output, { forceNotify: isFreshInstall, isFreshInstall });
 
   // MCP 安装成功后，安装用户级 Skill / Rules（项目级文件仅在显式 "Install MCP" 时写入）
@@ -552,6 +556,51 @@ async function runMcpWindowsSpaceRepair(
   } catch (err) {
     const text = err instanceof Error ? err.message : String(err);
     output.appendLine(`[GraphFlow] MCP path auto-repair skipped: ${text}`);
+  }
+}
+
+async function runMcpStaleLauncherRepair(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string | undefined,
+  output: vscode.OutputChannel
+): Promise<void> {
+  const cwdRoot = workspaceRoot ?? process.cwd();
+  const extensionPath = context.extensionPath;
+  const launcherPath =
+    process.platform === "win32"
+      ? join(extensionPath, "mcp-launcher.cmd")
+      : join(extensionPath, "mcp-launcher.cjs");
+  if (!existsSync(launcherPath)) {
+    output.appendLine(`[GraphFlow] Stale MCP launcher repair skipped: missing ${launcherPath}`);
+    return;
+  }
+
+  try {
+    const repairs = await runGraphFlow(cwdRoot, (runtime) => {
+      const repair = runtime.repairStaleGraphFlowMcpLaunchers;
+      if (typeof repair !== "function") {
+        return Promise.resolve([]);
+      }
+      return Promise.resolve(
+        repair({
+          launcherPath,
+          ...(workspaceRoot ? { workspaceRoot } : {}),
+        })
+      );
+    });
+    const fixed = repairs.filter((r) => r.repaired);
+    if (fixed.length === 0) {
+      return;
+    }
+    output.appendLine("[GraphFlow] Auto-repaired stale MCP launcher paths:");
+    for (const item of fixed) {
+      output.appendLine(
+        `- ${item.agentName}: ${item.beforeLauncher} → ${item.afterLauncher} (${item.configPath})`
+      );
+    }
+  } catch (err) {
+    const text = err instanceof Error ? err.message : String(err);
+    output.appendLine(`[GraphFlow] Stale MCP launcher auto-repair skipped: ${text}`);
   }
 }
 
