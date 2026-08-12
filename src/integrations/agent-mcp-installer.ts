@@ -1182,35 +1182,38 @@ export function repairStaleGraphFlowMcpLaunchers(
         args: Array.isArray(previous.args) ? previous.args : [],
       });
       if (!missingLauncher) {
-        results.push({
+        const existingLauncher = Array.isArray(previous.args)
+          ? previous.args.find(
+              (a): a is string => typeof a === "string" && isGraphFlowMcpLauncherPath(a)
+            )
+          : undefined;
+        const unrepaired: McpStaleLauncherRepairResult = {
           agentId: target.agentId,
           agentName: target.agentName,
           configPath: target.configPath,
           repaired: false,
           beforeCommand: previous.command,
           afterCommand: previous.command,
-          beforeLauncher: Array.isArray(previous.args)
-            ? previous.args.find((a) => typeof a === "string" && isGraphFlowMcpLauncherPath(a))
-            : undefined,
-          afterLauncher: Array.isArray(previous.args)
-            ? previous.args.find((a) => typeof a === "string" && isGraphFlowMcpLauncherPath(a))
-            : undefined,
-        });
+        };
+        if (existingLauncher) {
+          unrepaired.beforeLauncher = existingLauncher;
+          unrepaired.afterLauncher = existingLauncher;
+        }
+        results.push(unrepaired);
         continue;
       }
 
       const explicitCommand = options.command?.trim();
       const nextCommand =
         explicitCommand ||
-        (previous.command &&
-        !isGraphFlowMcpLauncherPath(previous.command) &&
-        existsSync(previous.command)
+        (previous.command && !isGraphFlowMcpLauncherPath(previous.command)
           ? previous.command
           : "node");
+      const nextCwd = options.cwd ?? previous.cwd;
       const next: McpServerNode = {
         command: nextCommand,
         args: [launcherPath],
-        ...(previous.cwd || options.cwd ? { cwd: options.cwd ?? previous.cwd } : {}),
+        ...(nextCwd ? { cwd: nextCwd } : {}),
         ...(previous.env ? { env: { ...previous.env } } : {}),
       };
       servers[serverName] = next;
