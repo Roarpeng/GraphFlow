@@ -1206,9 +1206,7 @@ export function repairStaleGraphFlowMcpLaunchers(
       const explicitCommand = options.command?.trim();
       const nextCommand =
         explicitCommand ||
-        (previous.command &&
-        !isGraphFlowMcpLauncherPath(previous.command) &&
-        existsSync(previous.command)
+        (previous.command && !isGraphFlowMcpLauncherPath(previous.command)
           ? previous.command
           : "node");
       const nextCwd = options.cwd ?? previous.cwd;
