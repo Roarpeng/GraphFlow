@@ -74,4 +74,5 @@ export {
   formatModelConfigGuide,
   installMcpToDetectedAgents,
   repairUnsafeWindowsMcpCommands,
+  repairStaleGraphFlowMcpLaunchers,
 } from "../../integrations/agent-mcp-installer";
