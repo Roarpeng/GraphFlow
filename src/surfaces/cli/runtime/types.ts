@@ -216,6 +216,12 @@ export interface RoutingDiagnosisResult {
       antiPatternCount: number;
       provenSkillCount: number;
       consolidationHint: string;
+      consolidation?: {
+        updates: number;
+        deletes: number;
+        adds: number;
+        actionable: number;
+      };
     };
   };
 }

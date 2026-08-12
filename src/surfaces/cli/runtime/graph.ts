@@ -20,6 +20,12 @@ import {
   resolveSessionJournalPath,
 } from "../../../hooks/auto-capture.js";
 import type { SkillOutcomeKind } from "../../../learning/skill-types.js";
+import {
+  planSkillConsolidation,
+  toConsolidateResult,
+  type ConsolidateSkillInput,
+} from "../../../learning/skill-consolidate.js";
+import { parseSkillState } from "../../../learning/skill-store.js";
 import { logger } from "../../../utils/logger.js";
 import { buildEmbeddingOptions,
 } from "./env.js";
@@ -531,8 +537,9 @@ export interface FlywheelReport {
     };
   };
   /**
-   * P0 Experience-layer evidence — conversion / coverage rates and a short
-   * consolidation tip. Additive-only for diagnose / skill report consumers.
+   * P0 Experience-layer evidence — conversion / coverage rates, a short
+   * consolidation tip, and a dry-run consolidation action summary.
+   * Additive-only for diagnose / skill report consumers.
    */
   experience: {
     /**
@@ -548,6 +555,17 @@ export interface FlywheelReport {
     provenSkillCount: number;
     /** Short human tip when conversion is low or pending share is high. */
     consolidationHint: string;
+    /**
+     * Dry-run QM consolidation plan counts (UPDATE/DELETE/ADD) over current skills.
+     * Never mutates the graph — use `graphflow skill consolidate --apply` to execute.
+     */
+    consolidation: {
+      updates: number;
+      deletes: number;
+      adds: number;
+      /** updates + deletes + adds (excludes NONE). */
+      actionable: number;
+    };
   };
 }
 
@@ -577,6 +595,7 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
 
   const byOutcomeKind = emptySkillOutcomeKindCounts();
   const skillItems: Array<NonNullable<ReturnType<typeof parseSkillInsight>>> = [];
+  const consolidateInputs: ConsolidateSkillInput[] = [];
   for (const node of store.nodes) {
     if (node.type !== "Skill") continue;
     const item = parseSkillInsight(node);
@@ -585,6 +604,17 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
     const kind = readSkillOutcomeKind(node.content);
     if (kind) {
       byOutcomeKind[kind] += 1;
+    }
+    const state = parseSkillState(node.content);
+    if (state && state.hidden !== true) {
+      consolidateInputs.push({
+        id: state.id,
+        name: state.name,
+        score: state.score,
+        uses: state.uses,
+        ...(state.outcomeKind ? { outcomeKind: state.outcomeKind } : {}),
+        ...(state.guidance ? { guidance: state.guidance } : {}),
+      });
     }
   }
 
@@ -676,6 +706,9 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
   const episodeToSkillConversionRate = Math.min(1, skillItems.length / resolvedEpisodes);
   const lessonsCoverageRate = withLessons / Math.max(episodeCount, 1);
   const pendingShare = episodeCount === 0 ? 0 : pending / episodeCount;
+  const consolidationSummary = toConsolidateResult(planSkillConsolidation(consolidateInputs)).summary;
+  const consolidationActionable =
+    consolidationSummary.updates + consolidationSummary.deletes + consolidationSummary.adds;
   let consolidationHint = "Experience flywheel looks healthy.";
   if (episodeToSkillConversionRate < 0.2 && pass + fail > 0) {
     consolidationHint =
@@ -689,6 +722,8 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
   } else if (lessonsCoverageRate < 0.25 && episodeCount > 0) {
     consolidationHint =
       "Few episodes carry lessons — attach lessons on outcome report to grow Experience.";
+  } else if (consolidationActionable > 0) {
+    consolidationHint = `Consolidation suggested (${consolidationSummary.updates} UPDATE / ${consolidationSummary.deletes} DELETE / ${consolidationSummary.adds} ADD) — dry-run: graphflow skill consolidate; apply: --apply.`;
   }
 
   return {
@@ -743,6 +778,12 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
       antiPatternCount: byOutcomeKind["anti-pattern"],
       provenSkillCount: byOutcomeKind.proven,
       consolidationHint,
+      consolidation: {
+        updates: consolidationSummary.updates,
+        deletes: consolidationSummary.deletes,
+        adds: consolidationSummary.adds,
+        actionable: consolidationActionable,
+      },
     },
   };
 }
