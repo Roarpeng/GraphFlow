@@ -1,0 +1,144 @@
+{"type":"query","id":"q001","query":"orchestrate task routing","expectAny":["orchestrator"],"domain":"orchestrator","topK":4}
+{"type":"query","id":"q002","query":"dag execution engine","expectAny":["dag-engine","executedag"],"domain":"orchestrator","topK":3}
+{"type":"query","id":"q003","query":"triage task classification simple complex","expectAny":["triage"],"domain":"orchestrator","topK":3}
+{"type":"query","id":"q004","query":"agent delegation work items bridge","expectAny":["agent-delegation","workitem"],"domain":"orchestrator","topK":3}
+{"type":"query","id":"q005","query":"dag checkpoint recovery taskrun","expectAny":["dag-checkpoint","checkpoint"],"domain":"orchestrator","topK":3}
+{"type":"query","id":"q006","query":"cancellation timeout controller","expectAny":["cancellation","runtime-controller"],"domain":"orchestrator","topK":4}
+{"type":"query","id":"q007","query":"six hats insight planning","expectAny":["insight","sixhats","brainstormer"],"domain":"orchestrator","topK":3}
+{"type":"query","id":"q008","query":"state machine transition lifecycle","expectAny":["state-machine"],"domain":"orchestrator","topK":3}
+{"type":"query","id":"q009","query":"goal anchor alignment deviation","expectAny":["goal-anchor"],"domain":"orchestrator","topK":3}
+{"type":"query","id":"q010","query":"planner decompose plan steps","expectAny":["planner"],"domain":"orchestrator","topK":3}
+{"type":"query","id":"q011","query":"worker executes tasks","expectAny":["worker"],"domain":"orchestrator","topK":3}
+{"type":"query","id":"q012","query":"validator checks task results","expectAny":["validator"],"domain":"orchestrator","topK":3}
+{"type":"query","id":"q013","query":"orchestrator route episode context","expectAny":["orchestrator-route","orchestrator-episode","orchestrator-context"],"domain":"orchestrator","topK":5}
+{"type":"query","id":"q014","query":"agent assignment skill match","expectAny":["agent-assignment"],"domain":"orchestrator","topK":3}
+{"type":"query","id":"q015","query":"error taxonomy recovery","expectAny":["errors"],"domain":"orchestrator","topK":4}
+{"type":"query","id":"q016","query":"task profile capabilities","expectAny":["task-profile"],"domain":"orchestrator","topK":3}
+{"type":"query","id":"q017","query":"task clauses split plan","expectAny":["task-clauses"],"domain":"orchestrator","topK":3}
+{"type":"query","id":"q018","query":"decision engine tradeoffs","expectAny":["decision-engine"],"domain":"orchestrator","topK":4}
+{"type":"query","id":"q019","query":"submit agent insight","expectAny":["submit-agent-insight"],"domain":"orchestrator","topK":3}
+{"type":"query","id":"q020","query":"merge agent insight conflicts","expectAny":["merge-agent-insight"],"domain":"orchestrator","topK":3}
+{"type":"query","id":"q021","query":"atp protocol schema","expectAny":["atp-schema"],"domain":"orchestrator","topK":4}
+{"type":"query","id":"q022","query":"brainstorm ideas alternatives agent","expectAny":["brainstormer"],"domain":"orchestrator","topK":3}
+{"type":"query","id":"q023","query":"graph compression pagerank centrality","expectAny":["graph-compression","pagerank"],"domain":"context","topK":3}
+{"type":"query","id":"q024","query":"context slicer layered package","expectAny":["context-slicer"],"domain":"context","topK":3}
+{"type":"query","id":"q025","query":"repo map module overview","expectAny":["repo-map","repomap"],"domain":"context","topK":3}
+{"type":"query","id":"q026","query":"token savings statistics","expectAny":["token-savings","tokensavings"],"domain":"context","topK":3}
+{"type":"query","id":"q027","query":"adaptive token budget estimation","expectAny":["adaptive-budget","estimatecontextbudget"],"domain":"context","topK":3}
+{"type":"query","id":"q028","query":"context cache invalidation","expectAny":["context-cache"],"domain":"context","topK":3}
+{"type":"query","id":"q029","query":"hit diversification source files","expectAny":["hit-diversify"],"domain":"context","topK":3}
+{"type":"query","id":"q030","query":"query expansion synonyms rrf","expectAny":["query-expand"],"domain":"context","topK":4}
+{"type":"query","id":"q031","query":"query translation english","expectAny":["query-translate"],"domain":"context","topK":3}
+{"type":"query","id":"q032","query":"snapshot view graph state","expectAny":["snapshot-view"],"domain":"context","topK":3}
+{"type":"query","id":"q033","query":"graph analysis metrics","expectAny":["graph-analysis"],"domain":"context","topK":4}
+{"type":"query","id":"q034","query":"context slicer utils module derive","expectAny":["context-slicer-utils"],"domain":"context","topK":3}
+{"type":"query","id":"q035","query":"layered package types","expectAny":["context-slicer-types"],"domain":"context","topK":3}
+{"type":"query","id":"q036","query":"graphify client query","expectAny":["graphify-client"],"domain":"context","topK":4}
+{"type":"query","id":"q037","query":"file watcher incremental index on save","expectAny":["file-watcher","filewatcher"],"domain":"indexers","topK":4}
+{"type":"query","id":"q038","query":"sqlite graph storage fts5","expectAny":["sqlite-client","sqlite"],"domain":"indexers","topK":3}
+{"type":"query","id":"q039","query":"language indexers tree sitter wasm","expectAny":["language-indexers","tree-sitter","tree_sitter"],"domain":"indexers","topK":3}
+{"type":"query","id":"q040","query":"plcopen xml pou variables","expectAny":["plcopen"],"domain":"indexers","topK":3}
+{"type":"query","id":"q041","query":"structured text case statement st","expectAny":["st-analyzer"],"domain":"indexers","topK":3}
+{"type":"query","id":"q042","query":"c cpp indexer symbols","expectAny":["c-cpp"],"domain":"indexers","topK":4}
+{"type":"query","id":"q043","query":"dart language indexer","expectAny":["dart"],"domain":"indexers","topK":3}
+{"type":"query","id":"q044","query":"go indexer functions","expectAny":["go"],"domain":"indexers","topK":3}
+{"type":"query","id":"q045","query":"java indexer classes","expectAny":["java"],"domain":"indexers","topK":3}
+{"type":"query","id":"q046","query":"kotlin swift indexer","expectAny":["kotlin","swift"],"domain":"indexers","topK":4}
+{"type":"query","id":"q047","query":"markdown docs indexer","expectAny":["markdown"],"domain":"indexers","topK":3}
+{"type":"query","id":"q048","query":"python indexer defs","expectAny":["python"],"domain":"indexers","topK":3}
+{"type":"query","id":"q049","query":"ruby indexer methods","expectAny":["ruby"],"domain":"indexers","topK":3}
+{"type":"query","id":"q050","query":"rust indexer","expectAny":["rust"],"domain":"indexers","topK":3}
+{"type":"query","id":"q051","query":"typescript indexer exports","expectAny":["typescript"],"domain":"indexers","topK":3}
+{"type":"query","id":"q052","query":"incremental parse diff","expectAny":["incremental-parse"],"domain":"indexers","topK":3}
+{"type":"query","id":"q053","query":"tree sitter loader wasm","expectAny":["tree-sitter-loader","tree_sitter"],"domain":"indexers","topK":3}
+{"type":"query","id":"q054","query":"file indexer walker","expectAny":["file-indexer-walker"],"domain":"indexers","topK":4}
+{"type":"query","id":"q055","query":"file indexer edges imports","expectAny":["file-indexer-edges"],"domain":"indexers","topK":4}
+{"type":"query","id":"q056","query":"file indexer nodes symbols","expectAny":["file-indexer-nodes"],"domain":"indexers","topK":4}
+{"type":"query","id":"q057","query":"file indexer cache","expectAny":["file-indexer-cache"],"domain":"indexers","topK":3}
+{"type":"query","id":"q058","query":"include extensions glob","expectAny":["include-extensions"],"domain":"indexers","topK":3}
+{"type":"query","id":"q059","query":"framework routes detection","expectAny":["framework-routes"],"domain":"indexers","topK":3}
+{"type":"query","id":"q060","query":"skill flywheel hints scoring","expectAny":["skill-flywheel","skillflywheel"],"domain":"learning","topK":3}
+{"type":"query","id":"q061","query":"episodic memory similar episodes","expectAny":["episodic-memory","episodicmemory"],"domain":"learning","topK":3}
+{"type":"query","id":"q062","query":"embedding cosine similarity vector","expectAny":["embeddings","cosine"],"domain":"learning","topK":3}
+{"type":"query","id":"q063","query":"hnsw approximate nearest neighbor index","expectAny":["hnsw"],"domain":"learning","topK":3}
+{"type":"query","id":"q064","query":"nightly learning trainer","expectAny":["nightly-trainer","nightlytrainer"],"domain":"learning","topK":3}
+{"type":"query","id":"q065","query":"reflect episodes extract lessons","expectAny":["reflector","reflect"],"domain":"learning","topK":3}
+{"type":"query","id":"q066","query":"skill store persistence","expectAny":["skill-store"],"domain":"learning","topK":3}
+{"type":"query","id":"q067","query":"skill package export","expectAny":["skill-package"],"domain":"learning","topK":4}
+{"type":"query","id":"q068","query":"skill types interfaces","expectAny":["skill-types"],"domain":"learning","topK":4}
+{"type":"query","id":"q069","query":"seed skills bootstrap","expectAny":["seed-skills"],"domain":"learning","topK":4}
+{"type":"query","id":"q070","query":"feedback collector outcomes","expectAny":["feedback-collector"],"domain":"learning","topK":4}
+{"type":"query","id":"q071","query":"learning events stream","expectAny":["learning-events"],"domain":"learning","topK":3}
+{"type":"query","id":"q072","query":"sample builder dataset","expectAny":["sample-builder"],"domain":"learning","topK":3}
+{"type":"query","id":"q073","query":"exporter jsonl dataset","expectAny":["exporter"],"domain":"learning","topK":4}
+{"type":"query","id":"q074","query":"triage telemetry stats","expectAny":["triage-telemetry"],"domain":"learning","topK":4}
+{"type":"query","id":"q075","query":"embedding quality check","expectAny":["embedding-quality"],"domain":"learning","topK":3}
+{"type":"query","id":"q076","query":"skill health check","expectAny":["skill-health"],"domain":"learning","topK":3}
+{"type":"query","id":"q077","query":"model router provider selection","expectAny":["model-router","modelrouter"],"domain":"routing","topK":3}
+{"type":"query","id":"q078","query":"provider health fallback chain","expectAny":["provider-health","providerhealth"],"domain":"routing","topK":3}
+{"type":"query","id":"q079","query":"provider executor calls","expectAny":["provider-executor"],"domain":"routing","topK":4}
+{"type":"query","id":"q080","query":"role capabilities tier","expectAny":["role-capabilities"],"domain":"routing","topK":4}
+{"type":"query","id":"q081","query":"deepseek tools schema","expectAny":["deepseek-tools"],"domain":"routing","topK":3}
+{"type":"query","id":"q082","query":"anthropic provider adapter","expectAny":["anthropic"],"domain":"routing","topK":4}
+{"type":"query","id":"q083","query":"openai provider adapter","expectAny":["openai"],"domain":"routing","topK":4}
+{"type":"query","id":"q084","query":"bailian provider adapter","expectAny":["bailian"],"domain":"routing","topK":4}
+{"type":"query","id":"q085","query":"doubao provider adapter","expectAny":["doubao"],"domain":"routing","topK":4}
+{"type":"query","id":"q086","query":"deepseek provider adapter","expectAny":["deepseek"],"domain":"routing","topK":4}
+{"type":"query","id":"q087","query":"embedding factory provider","expectAny":["embedding-factory"],"domain":"routing","topK":4}
+{"type":"query","id":"q088","query":"llm availability check","expectAny":["llm-availability"],"domain":"routing","topK":3}
+{"type":"query","id":"q089","query":"cli output json formatting","expectAny":["output","formatcliresult"],"domain":"cli","topK":3}
+{"type":"query","id":"q090","query":"cli init scaffold","expectAny":["cli/init"],"domain":"cli","topK":3}
+{"type":"query","id":"q091","query":"cli runtime facade","expectAny":["runtime/facade","runtime-facade"],"domain":"cli","topK":4}
+{"type":"query","id":"q092","query":"cli runtime graph commands","expectAny":["runtime/graph"],"domain":"cli","topK":4}
+{"type":"query","id":"q093","query":"cli runtime learning commands","expectAny":["runtime/learning"],"domain":"cli","topK":4}
+{"type":"query","id":"q094","query":"cli runtime routing commands","expectAny":["runtime/routing"],"domain":"cli","topK":5}
+{"type":"query","id":"q095","query":"cli runtime settings","expectAny":["runtime/settings"],"domain":"cli","topK":5}
+{"type":"query","id":"q096","query":"cli runtime panel","expectAny":["runtime/panel"],"domain":"cli","topK":4}
+{"type":"query","id":"q097","query":"cli env vars","expectAny":["runtime/env"],"domain":"cli","topK":3}
+{"type":"query","id":"q098","query":"vscode extension panel","expectAny":["vscode/extension"],"domain":"cli","topK":3}
+{"type":"query","id":"q099","query":"cli help flags","expectAny":["surfaces/cli"],"domain":"cli","topK":3}
+{"type":"query","id":"q100","query":"mcp server tool definitions","expectAny":["tool-definitions","mcp"],"domain":"mcp","topK":3}
+{"type":"query","id":"q101","query":"mcp transport stdio session","expectAny":["surfaces/mcp/server","mcp/server"],"domain":"mcp","topK":3}
+{"type":"query","id":"q102","query":"mcp tool handlers","expectAny":["tool-handlers"],"domain":"mcp","topK":3}
+{"type":"query","id":"q103","query":"mcp tool handler dispatch","expectAny":["tool-handlers","handlers"],"domain":"mcp","topK":3}
+{"type":"query","id":"q104","query":"mcp version header","expectAny":["surfaces/mcp/version"],"domain":"mcp","topK":3}
+{"type":"query","id":"q105","query":"graphify mcp client","expectAny":["graphify-mcp-client"],"domain":"mcp","topK":3}
+{"type":"query","id":"q106","query":"mcp server initialize request","expectAny":["surfaces/mcp/server"],"domain":"mcp","topK":4}
+{"type":"query","id":"q107","query":"mcp tool schema json definitions","expectAny":["tool-definitions"],"domain":"mcp","topK":3}
+{"type":"query","id":"q108","query":"config loader merge defaults","expectAny":["config/loader"],"domain":"config","topK":4}
+{"type":"query","id":"q109","query":"config schema validation","expectAny":["config/schema"],"domain":"config","topK":5}
+{"type":"query","id":"q110","query":"config merge deep","expectAny":["config/merge"],"domain":"config","topK":3}
+{"type":"query","id":"q111","query":"config resolve tiers","expectAny":["config/resolve"],"domain":"config","topK":5}
+{"type":"query","id":"q112","query":"config defaults","expectAny":["config/defaults"],"domain":"config","topK":3}
+{"type":"query","id":"q113","query":"config paths workspace","expectAny":["config/paths"],"domain":"config","topK":3}
+{"type":"query","id":"q114","query":"provider env api key","expectAny":["provider-env"],"domain":"config","topK":5}
+{"type":"query","id":"q115","query":"config secrets redact","expectAny":["config/secrets"],"domain":"config","topK":3}
+{"type":"query","id":"q116","query":"config scaffold generate","expectAny":["config/scaffold"],"domain":"config","topK":3}
+{"type":"query","id":"q117","query":"workspace packages detection","expectAny":["workspace-packages"],"domain":"config","topK":3}
+{"type":"query","id":"q118","query":"workspace root discovery","expectAny":["workspace-root"],"domain":"config","topK":4}
+{"type":"query","id":"q119","query":"discover workspace config","expectAny":["discover-workspace"],"domain":"config","topK":4}
+{"type":"query","id":"q120","query":"agent mcp installer","expectAny":["agent-mcp-installer"],"domain":"integrations","topK":4}
+{"type":"query","id":"q121","query":"skill installer copy","expectAny":["skill-installer"],"domain":"integrations","topK":3}
+{"type":"query","id":"q122","query":"agent profile registry","expectAny":["agent-profiles/registry"],"domain":"integrations","topK":3}
+{"type":"query","id":"q123","query":"claude code agent profile","expectAny":["profiles/claude-code"],"domain":"integrations","topK":3}
+{"type":"query","id":"q124","query":"cursor agent profile","expectAny":["profiles/cursor"],"domain":"integrations","topK":3}
+{"type":"query","id":"q125","query":"codex agent profile","expectAny":["profiles/codex"],"domain":"integrations","topK":4}
+{"type":"query","id":"q126","query":"gemini agent profile","expectAny":["profiles/gemini"],"domain":"integrations","topK":3}
+{"type":"query","id":"q127","query":"windsurf agent profile","expectAny":["profiles/windsurf"],"domain":"integrations","topK":3}
+{"type":"query","id":"q128","query":"cline agent profile","expectAny":["profiles/cline"],"domain":"integrations","topK":3}
+{"type":"query","id":"q129","query":"roo code profile","expectAny":["roo-code"],"domain":"integrations","topK":3}
+{"type":"query","id":"q130","query":"trae agent profile","expectAny":["profiles/trae"],"domain":"integrations","topK":3}
+{"type":"query","id":"q131","query":"opencode profile skills","expectAny":["opencode"],"domain":"integrations","topK":4}
+{"type":"query","id":"q132","query":"antigravity profile","expectAny":["antigravity"],"domain":"integrations","topK":3}
+{"type":"negative","id":"n001","query":"plcopen xml pou variables","mustNotContain":["agent-profiles","provider-adapters"]}
+{"type":"negative","id":"n002","query":"cli init scaffold","mustNotContain":["plcopen","language-indexers"]}
+{"type":"negative","id":"n003","query":"anthropic provider adapter","mustNotContain":["language-indexers","surfaces/mcp"]}
+{"type":"negative","id":"n004","query":"skill store persistence","mustNotContain":["model-router"]}
+{"type":"negative","id":"n005","query":"config secrets redact","mustNotContain":["dag-engine","plcopen"]}
+{"type":"negative","id":"n006","query":"mcp tool handlers","mustNotContain":["agent-profiles"]}
+{"type":"negative","id":"n007","query":"java indexer classes","mustNotContain":["surfaces/mcp","model-router"]}
+{"type":"negative","id":"n008","query":"goal anchor alignment deviation","mustNotContain":["plcopen","surfaces/mcp"]}
+{"type":"negative","id":"n009","query":"windsurf agent profile","mustNotContain":["context-slicer","sqlite"]}
+{"type":"negative","id":"n010","query":"provider executor calls","mustNotContain":["skill-flywheel","language-indexers"]}
+{"type":"negative","id":"n011","query":"config schema validation","mustNotContain":["plcopen"]}
+{"type":"negative","id":"n012","query":"atp protocol schema","mustNotContain":["language-indexers"]}
