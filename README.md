@@ -200,6 +200,14 @@ ln -s /absolute/path/to/GraphFlow ~/.cursor/plugins/local/graphflow
 
 Docs: [Context Engineering contract](docs/context-contract.md) · [Experience memory](docs/experience-memory.md)
 
+**Uninstall:** Removing the Agent Plugin in Cursor only drops the plugin package. Skills/Rules/MCP written by `graphflow install` remain and will keep steering the agent — run:
+
+```bash
+npx @roarpeng/graphflow uninstall
+```
+
+That removes user + workspace MCP entries, `skills/graphflow` folders, GraphFlow rules/instruction blocks, and Claude Code hooks. Also delete any local symlink under `~/.cursor/plugins/local/graphflow` if you used one.
+
 ## Agent integrations
 
 Use **`npx @roarpeng/graphflow install` as the fallback** when you need Rules, multi-agent wiring, or a host that does not load Agent Plugins:
@@ -207,6 +215,7 @@ Use **`npx @roarpeng/graphflow install` as the fallback** when you need Rules, m
 ```bash
 npx @roarpeng/graphflow doctor     # detect installed agents
 npx @roarpeng/graphflow install    # auto-install MCP + Skill + Rules
+npx @roarpeng/graphflow uninstall  # remove MCP + Skill + Rules + hooks
 npx @roarpeng/graphflow init       # write a minimal project config
 ```
 
@@ -216,6 +225,7 @@ Supported: Cursor, VS Code, Trae (incl. CN), Claude Code, Windsurf, Cline, Roo C
 | --- | --- |
 | **Agent Plugins** | Preferred single-host Skill + MCP discovery |
 | **`graphflow install`** | Rules / multi-agent / non-plugin hosts |
+| **`graphflow uninstall`** | After removing a plugin (or anytime) — clears leftover Skill/MCP/Rules |
 
 ## Protocol
 

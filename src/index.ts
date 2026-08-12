@@ -76,13 +76,13 @@ export {
   type ConsolidateResult,
 } from "./learning/skill-consolidate";
 export {
-  buildSimplePlanWorkItems,
-  type SimplePlanProducerOptions,
+  buildMinimalSimplePlanWorkItems,
+  buildRequiredSimplePlanWorkItems,
 } from "./agents/atp-example-producer";
 export {
   linkEpisodeToEngineeringNodes,
-  type EpisodeEngineeringLinkHints,
-  type EpisodeEngineeringLinkResult,
+  type EngineeringLinkHints,
+  type LinkEpisodeResult,
 } from "./graph/episode-engineering-links";
 export { planInsightResult, type PlanInsightResult } from "./surfaces/cli/runtime/routing";
 export {
