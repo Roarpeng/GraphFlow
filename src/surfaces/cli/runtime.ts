@@ -58,6 +58,7 @@ export {
   runSkillReset,
   runSkillPrune,
   runSkillConsolidatePlan,
+  runSkillConsolidate,
   runLearnForget,
 } from "./runtime/learning.js";
 export {

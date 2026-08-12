@@ -31,7 +31,7 @@
 
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
-| **P0** | **飞轮 Experience 指标 + QM 式 skill 巩固** | 🟡 | `skill-consolidate` 显式 MERGE/DELETE/ADD；`getFlywheelReport` / diagnose 暴露巩固与 Experience 指标 |
+| **P0** | **飞轮 Experience 指标 + QM 式 skill 巩固** | ✅ | `skill consolidate` dry-run + `--apply`/`--execute`；`getFlywheelReport` / diagnose / skill report 暴露 `experience`（含 consolidation 动作计数与 hint） |
 | **P1** | **Context 合同产品化 + Agent Plugin 主路径 + memory pack** | ✅ | [docs/context-contract.md](docs/context-contract.md)；[docs/experience-memory.md](docs/experience-memory.md)；Plugin 为首选安装，`install` 为 Rules/多 Agent 回退；`artifact export-memory` Markdown 包 |
 | **P2** | **ATP 兼容示例 producer + Engineering KG episode 链** | 🟡 | `examples/atp-minimal-producer/`；episode↔Requirement/Concept 边 |
 

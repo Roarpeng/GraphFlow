@@ -295,6 +295,7 @@ function computeModelCacheDiagnosis() {
 
 export function diagnoseRouting(configPath?: string): string {
   const result = diagnoseRoutingResult(configPath);
+  const experience = result.flywheel?.experience;
   return [
     `dynamicRouting=${result.dynamicRouting ? "on" : "off"}`,
     `health=openai:${result.health.openai},anthropic:${result.health.anthropic},bailian:${result.health.bailian},doubao:${result.health.doubao},deepseek:${result.health.deepseek}`,
@@ -304,6 +305,11 @@ export function diagnoseRouting(configPath?: string): string {
     `validator=${result.validator.provider}/${result.validator.model}${result.validator.fallbackApplied ? ":fallback" : ""}`,
     `compression=${result.compression.backend}:${result.compression.provider}/${result.compression.model}${result.compression.embedded ? ":embedded" : ""}`,
     `embeddings=${result.embeddingBackend}`,
+    ...(experience
+      ? [
+          `experience=conv:${experience.episodeToSkillConversionRate.toFixed(2)},lessons:${experience.lessonsCoverageRate.toFixed(2)},consol:${experience.consolidation?.actionable ?? 0}`,
+        ]
+      : []),
   ].join("; ");
 }
 

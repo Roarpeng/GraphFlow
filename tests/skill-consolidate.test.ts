@@ -216,3 +216,93 @@ describe("applySkillConsolidation", () => {
     expect(updated?.guidance).toContain("invalidate");
   });
 });
+
+describe("runSkillConsolidate runtime (dry-run vs apply)", () => {
+  it("dry-runs by default and applies only when apply:true", async () => {
+    const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { validateConfig } = await import("../src/config/loader");
+    const { createGraphClient } = await import("../src/graph/client-factory");
+    const { runSkillConsolidate } = await import("../src/surfaces/cli/runtime/learning");
+
+    const root = mkdtempSync(join(tmpdir(), "graphflow-skill-consol-rt-"));
+    const configPath = join(root, "graphflow.config.json");
+    const storePath = join(root, "graph.json");
+    const configJson = {
+      providers: {},
+      tiers: {
+        smart: { provider: "openai", model: "gpt-4.1" },
+        economy: { provider: "openai", model: "gpt-4.1-mini" },
+      },
+      budgetPolicy: { runTokenCap: 2000 },
+      graphPolicy: {
+        enableAutoBuild: true,
+        workspaceRoot: root,
+        transport: "file",
+        graphStorePath: storePath,
+        maxContextTokens: 200,
+      },
+      learningPolicy: {
+        enableFlywheel: true,
+        trainingCadence: "nightly",
+        exportPath: join(root, "learning.jsonl"),
+      },
+      embeddingPolicy: { enabled: false },
+    };
+    writeFileSync(configPath, JSON.stringify(configJson));
+
+    const client = createGraphClient(validateConfig(JSON.parse(JSON.stringify(configJson))));
+    const survivor: SkillState = {
+      id: "skill:cache-layer",
+      name: "Cache Layer",
+      score: 2,
+      uses: 2,
+      lastOutcome: "pass",
+      updatedAt: 1,
+      outcomeKind: "proven",
+      guidance: "keep keys",
+    };
+    const duplicate: SkillState = {
+      id: "skill:cache_layer",
+      name: "cache_layer",
+      score: 1,
+      uses: 1,
+      lastOutcome: "pass",
+      updatedAt: 1,
+      outcomeKind: "correctable",
+      guidance: "invalidate",
+    };
+    await client.upsertNodes([
+      { id: survivor.id, type: "Skill", content: serializeAtomic(survivor) },
+      { id: duplicate.id, type: "Skill", content: serializeAtomic(duplicate) },
+    ]);
+
+    const dry = await runSkillConsolidate(configPath);
+    expect(dry.dryRun).toBe(true);
+    expect(dry.applied).toBeUndefined();
+    expect(dry.summary.updates).toBeGreaterThanOrEqual(1);
+    expect(dry.summary.deletes).toBeGreaterThanOrEqual(1);
+    // Graph unchanged after dry-run (re-plan still sees both skills)
+    const stillPlanned = await runSkillConsolidate(configPath);
+    expect(stillPlanned.summary.deletes).toBeGreaterThanOrEqual(1);
+
+    const applied = await runSkillConsolidate(configPath, { apply: true });
+    expect(applied.dryRun).toBe(false);
+    expect(applied.applied?.applied.length).toBeGreaterThan(0);
+
+    const after = await runSkillConsolidate(configPath);
+    expect(after.summary.deletes).toBe(0);
+    expect(after.summary.updates).toBe(0);
+
+    const verifyClient = createGraphClient(validateConfig(JSON.parse(JSON.stringify(configJson))));
+    const snapshot = verifyClient.readSnapshot?.();
+    expect(snapshot?.nodes.find((n) => n.id === duplicate.id)).toBeUndefined();
+    const updated = parseSkillState(
+      snapshot?.nodes.find((n) => n.id === survivor.id)?.content ?? "{}"
+    );
+    expect(updated?.uses).toBe(3);
+
+    rmSync(root, { recursive: true, force: true });
+  });
+});

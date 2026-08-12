@@ -10,6 +10,7 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- **P0 skill consolidate apply**：`graphflow skill consolidate` 默认 dry-run；`--apply` / `--execute` 安全调用 `applySkillConsolidation`（未知 id skip）
 - **Agent Plugins 1.0** packaging at repo root: `plugin.json`, `mcp.json` (`type: stdio`), and canonical `skills/graphflow/SKILL.md`
 - README section for local plugin install (`~/.cursor/plugins/local`) and Team Marketplace / Git discovery
 - `npm run sync:surfaces` keeps `src/surfaces/trae-skill/graphflow/SKILL.md` aligned with the Agent Plugins skill source
@@ -22,6 +23,7 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- **P0 Experience 飞轮可观测**：`getFlywheelReport` / `skill report` / `route diagnose` / `graphflow_diagnose` 的 `experience` 增加 dry-run `consolidation` 动作计数（UPDATE/DELETE/ADD）与建议 hint；ROADMAP P0 ✅
 - Skill resolution (`resolveSkillSourcePath` / MCP `graphflow_skill_guide`) prefers `skills/graphflow` before legacy `trae-skill` paths
 - `package.json` `files` publishes `plugin.json`, `mcp.json`, and `skills/`
 - ROADMAP (2026-08-09): Experience-layer P0–P2 status (P1 ✅; P0/P2 🟡 on this branch)
