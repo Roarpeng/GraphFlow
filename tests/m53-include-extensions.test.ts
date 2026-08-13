@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_INCLUDE_EXTENSIONS,
+  applyDocumentIndexScope,
+  hasMarkdownIndex,
+  hasOfficeIndex,
   isLegacyWebOnlyExtensions,
   LEGACY_WEB_ONLY_EXTENSIONS,
   resolveIncludeExtensions,
@@ -30,5 +33,21 @@ describe("include-extensions resolver", () => {
 
   it("preserves explicit single-extension subsets", () => {
     expect(resolveIncludeExtensions([".ts"])).toEqual([".ts"]);
+  });
+
+  it("toggles markdown and office document indexing without dropping languages", () => {
+    const withDocs = applyDocumentIndexScope([".ts", ".md", ".pdf"], { markdown: true, office: true });
+    expect(withDocs).toContain(".ts");
+    expect(withDocs).toContain(".md");
+    expect(withDocs).toContain(".pdf");
+    expect(hasMarkdownIndex(withDocs)).toBe(true);
+    expect(hasOfficeIndex(withDocs)).toBe(true);
+
+    const codeOnly = applyDocumentIndexScope(withDocs, { markdown: false, office: false });
+    expect(codeOnly).toContain(".ts");
+    expect(codeOnly).not.toContain(".md");
+    expect(codeOnly).not.toContain(".pdf");
+    expect(hasMarkdownIndex(codeOnly)).toBe(false);
+    expect(hasOfficeIndex(codeOnly)).toBe(false);
   });
 });

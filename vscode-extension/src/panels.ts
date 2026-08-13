@@ -128,10 +128,14 @@ export interface GraphFlowSettings {
   enableNearLosslessMode: boolean;
   autoIndexOnPreview: boolean;
   autoIndexOnRun: boolean;
-  autoIndexOnSave?: boolean;
+  autoIndexOnSave: boolean;
   autoRunOnIndex: boolean;
-  transport: "memory" | "mcp-http" | "file" | "sqlite";
+  transport: "memory" | "mcp-http" | "file" | "sqlite" | "auto";
   graphStorePath: string;
+  indexMarkdown?: boolean;
+  indexOfficeDocs?: boolean;
+  embeddingProvider?: "fnv" | "transformers";
+  downloadAnydoc?: boolean;
 }
 
 export interface SettingsPanelStatus {
@@ -142,6 +146,8 @@ export interface SettingsPanelStatus {
   diagnoseSummary: string;
   overlayKeys: string[];
   baseConfigPath: string;
+  anydocReady?: boolean;
+  anydocVersion?: string;
   mcpAgents: Array<{
     agentId: string;
     agentName: string;
@@ -807,6 +813,13 @@ export function buildSettingsHtml(
     ? escapeHtml(new Date(status.graphLastModified).toLocaleString())
     : "尚未索引";
   const mcpStatusLines = renderMcpStatusLines(status?.mcpAgents ?? []);
+  const indexMarkdown = settings.indexMarkdown !== false;
+  const indexOfficeDocs = settings.indexOfficeDocs !== false;
+  const embeddingProvider = settings.embeddingProvider === "transformers" ? "transformers" : "fnv";
+  const anydocReady = Boolean(status?.anydocReady);
+  const anydocLabel = anydocReady
+    ? `就绪${status?.anydocVersion ? ` ${escapeHtml(status.anydocVersion)}` : ""}`
+    : "未安装";
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -817,18 +830,18 @@ export function buildSettingsHtml(
   <style>
     ${sharedPanelCss("light")}
     body { padding: 16px; }
-    form { display: grid; gap: 12px; max-width: 980px; }
-    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); }
-    .panel h1, .panel h2 { margin: 0 0 8px; }
+    form { display: grid; gap: 12px; max-width: 720px; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); }
+    .panel h1 { margin: 0; font-size: 20px; }
+    .panel h2 { margin: 0 0 10px; font-size: 15px; }
     .panel p { margin: 0; }
-    .metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-    .metric { border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--panel-soft); }
-    .metric .label { font-size: 11px; color: var(--muted); }
-    .metric .value { margin-top: 4px; font-weight: 700; font-size: 14px; }
-    .flow-box { background: var(--panel-soft); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-top: 10px; }
-    .flow-box h3 { margin: 0 0 8px; color: var(--accent); font-size: 14px; }
-    .flow-box ol { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.6; color: var(--ink); }
-    .flow-hint { margin-top: 10px; font-size: 12px; color: var(--muted); }
+    .hero { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+    .metrics { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .metric { border: 1px solid var(--line); border-radius: 999px; padding: 6px 10px; background: var(--panel-soft); font-size: 12px; color: var(--muted); }
+    .metric strong { color: var(--ink); font-weight: 600; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .chip { background: var(--panel-soft); color: var(--ink); border: 1px solid var(--line); padding: 8px 12px; font-weight: 600; font-size: 12px; }
+    .flow-hint { margin-top: 8px; font-size: 12px; color: var(--muted); }
     .tier-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     .tier-card { border-radius: 14px; padding: 12px; display: grid; gap: 10px; border: 1px solid var(--line); background: var(--panel-soft); }
     .tier-card.smart { background: color-mix(in srgb, var(--accent-2) 6%, var(--panel)); border-color: color-mix(in srgb, var(--accent-2) 25%, var(--line)); }
@@ -841,126 +854,126 @@ export function buildSettingsHtml(
     .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
     input, select { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font: inherit; color: var(--ink); background: var(--panel); width: 100%; }
+    .checks { display: grid; gap: 8px; }
     .checks label { display: flex; flex-direction: row; align-items: center; gap: 8px; color: var(--ink); font-size: 13px; }
     .checks input[type="checkbox"] { width: auto; }
-    .advanced { display: none; gap: 12px; }
+    .inline-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+    .status-pill { font-size: 12px; font-weight: 600; }
+    .status-pill.ok { color: #047857; }
+    .status-pill.warn { color: var(--warn); }
+    .advanced { display: none; gap: 12px; margin-top: 10px; }
     .advanced.open { display: grid; }
     .advanced-toggle { background: none; border: 0; padding: 0; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; text-align: left; }
-    .action-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    button { border: 0; border-radius: 12px; padding: 10px 18px; font: inherit; font-weight: 600; cursor: pointer; color: #fff; }
+    .action-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+    button { border: 0; border-radius: 12px; padding: 10px 16px; font: inherit; font-weight: 600; cursor: pointer; color: #fff; }
     .btn-save { background: var(--accent); }
     .btn-route { background: var(--accent); }
-    .btn-route:disabled { background: #94a3b8; cursor: not-allowed; }
+    .btn-route:disabled, .btn-index:disabled, .btn-ghost:disabled { background: #94a3b8; color: #fff; cursor: not-allowed; }
     .btn-index { background: var(--accent-2); }
-    .btn-index:disabled { background: #94a3b8; cursor: not-allowed; }
-    .route-panel { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
-    .route-panel h2 { color: var(--accent); }
-    .status-list { margin: 0; padding-left: 20px; font-size: 12px; line-height: 1.6; color: var(--ink); }
+    .btn-ghost { background: var(--panel-soft); color: var(--ink); border: 1px solid var(--line); }
+    .status-list { margin: 8px 0 0; padding-left: 20px; font-size: 12px; line-height: 1.6; color: var(--ink); }
     #settings-status { margin: 0; font-size: 12px; color: var(--muted); min-height: 18px; }
     .hidden-legacy { display: none; }
-    @media (max-width: 800px) { .metrics, .tier-row, .grid-2 { grid-template-columns: 1fr; } }
+    @media (max-width: 800px) { .tier-row, .grid-2 { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <form id="settings-form">
     <section class="panel">
-      <h1>GraphFlow 初次配置</h1>
-      <p class="flow-hint">配置保存至 <code>${escapeHtml(settings.configPath)}</code> · 一次配置，所有项目可用</p>
+      <div class="hero">
+        <div>
+          <h1>GraphFlow</h1>
+          <p class="flow-hint">全部配置与功能都在这一页 · <code>${escapeHtml(settings.configPath)}</code></p>
+        </div>
+      </div>
       ${
         status
-          ? `<div class="metrics" style="margin-top: 12px;">
-        <div class="metric"><div class="label">Extension</div><div class="value">v${escapeHtml(status.extensionVersion)}</div></div>
-        <div class="metric"><div class="label">图谱规模</div><div class="value">${status.graphNodeCount} 节点 / ${status.graphEdgeCount} 边</div></div>
-        <div class="metric"><div class="label">上次索引</div><div class="value">${graphModified}</div></div>
+          ? `<div class="metrics">
+        <span class="metric">v<strong>${escapeHtml(status.extensionVersion)}</strong></span>
+        <span class="metric">图谱 <strong>${status.graphNodeCount}</strong> 节点 / <strong>${status.graphEdgeCount}</strong> 边</span>
+        <span class="metric">索引 <strong>${graphModified}</strong></span>
+        <span class="metric">anydoc <strong id="settings-anydoc-metric">${anydocLabel}</strong></span>
       </div>`
           : ""
       }
-      <div class="flow-box">
-        <h3>v${escapeHtml(status?.extensionVersion ?? "1.9.4")} 本版亮点</h3>
-        <ol>
-          <li><strong>Goal 锚点</strong>：intent 五元组固化为图一等公民，每次打包自动注入原始需求——执行全程记得为什么出发。</li>
-          <li><strong>低置信度澄清门</strong>：intent <code>confidence &lt; 0.6</code> 不出 plan，先澄清再定稿。</li>
-          <li><strong>alignment-check 回检</strong>：执行后对照目标锚点检查产出是否服务 successDefinition、是否触碰 nonGoals。</li>
-          <li><strong>deviation 偏离分类</strong>：<code>report_outcome</code> 记录 misread-requirement / scope-creep / tech-drift，飞轮报告聚合可度量。</li>
-          <li><strong>Goal 版本链</strong>：需求变更自动版本化 + changedFields diff，pending episodes 标记 staleGoal；ATP/IR 规范升级 v1.1。</li>
-        </ol>
-        <p class="flow-hint">工具调用请传 <code>rootDir</code>（项目绝对路径）。若 MCP 日志提示 unsafe workspace root from discovery，重新执行「安装 / 更新 MCP」并 Reload Window。</p>
-      </div>
-      <div class="flow-box">
-        <h3>快速上手</h3>
-        <ol>
-          <li>填写图谱存储路径，点击「建立图谱」—— 无需 LLM 即可索引代码结构。</li>
-          <li>（可选）配置 Smart / Economy 两层模型，分别用于规划推理与轻量摘要。</li>
-          <li>保存后运行「测试路由」，验证模型连通性并可选语义增强。</li>
-        </ol>
-        <p class="flow-hint">提示：API Key 可填环境变量名（如 <code>DEEPSEEK_API_KEY</code>）或直接填 <code>sk-...</code></p>
+      <div class="chips" id="settings-feature-chips">
+        <button type="button" class="chip" data-command="graphflow.showGraph">图谱</button>
+        <button type="button" class="chip" data-command="graphflow.previewContext">上下文</button>
+        <button type="button" class="chip" data-command="graphflow.showSkills">技能</button>
+        <button type="button" class="chip" data-command="graphflow.planTask">规划</button>
+        <button type="button" class="chip" data-command="graphflow.runTask">运行</button>
       </div>
     </section>
 
     <section class="panel">
-      <h2>MCP 自动配置</h2>
-      <p class="flow-hint" style="margin-bottom: 10px;">安装扩展时会自动将 GraphFlow MCP 写入本机已检测到的 AI Agent / IDE 用户级配置（含 Cursor <code>${"${workspaceFolder}"}</code> 插值）。配置后请<strong>重启对应工具 / Reload Window</strong>以加载 MCP。</p>
-      <ul id="settings-mcp-status-list" class="status-list">${mcpStatusLines}</ul>
-      <div style="margin-top: 10px;">
-        <button id="settings-install-mcp" type="button" class="btn-index">安装 / 更新 MCP 到已检测 Agent</button>
+      <h2>图谱</h2>
+      <div class="checks">
+        <label><input id="settings-index-markdown" name="indexMarkdown" type="checkbox" ${indexMarkdown ? "checked" : ""} /> Markdown（.md）</label>
+        <label><input id="settings-index-office" name="indexOfficeDocs" type="checkbox" ${indexOfficeDocs ? "checked" : ""} /> Office / PDF（anydoc 解析）</label>
+        <label><input id="settings-auto-index-save" name="autoIndexOnSave" type="checkbox" ${settings.autoIndexOnSave ? "checked" : ""} /> 保存后自动索引</label>
+        <label><input id="settings-auto-run-on-index" name="autoRunOnIndex" type="checkbox" ${settings.autoRunOnIndex ? "checked" : ""} /> 索引后语义提取（Economy）</label>
       </div>
-      <p id="settings-mcp-action-status" class="flow-hint" style="margin-top: 8px;"></p>
-    </section>
-
-    <section class="panel">
-      <h2>LLM 配置（可选）</h2>
-      <p class="flow-hint" style="margin-bottom: 12px;">Smart 用于规划与复杂推理；Economy 用于语义摘要与轻量任务。两层可独立选择 Provider、API Key 与模型。</p>
-      <div class="tier-row">
-        ${renderSettingsTierCard("smart", "Smart 层", "规划 / 推理", settings)}
-        ${renderSettingsTierCard("economy", "Economy 层", "摘要 / 轻量", settings)}
+      <div class="inline-status">
+        <span id="settings-anydoc-pill" class="status-pill ${anydocReady ? "ok" : "warn"}">解析器 ${anydocLabel}</span>
+        <button type="button" class="btn-ghost" id="settings-ensure-anydoc">安装解析器</button>
       </div>
-    </section>
-
-    <section class="panel">
-      <h2>图谱与索引</h2>
-      <p class="flow-hint" style="margin-bottom: 12px;">无需 LLM 即可建立结构图谱。语义摘要依赖 Economy 层配置。</p>
-      <div class="grid-2">
-        <label>Graph Store Path
-          <input id="settings-graph-store-path" name="graphStorePath" value="${escapeHtml(settings.graphStorePath)}" />
-        </label>
-        <label>Transport
-          <select id="settings-transport" name="transport">
-            ${renderTransportOption("file", settings.transport)}
-            ${renderTransportOption("sqlite", settings.transport)}
-            ${renderTransportOption("memory", settings.transport)}
-            ${renderTransportOption("mcp-http", settings.transport)}
-          </select>
-        </label>
+      <div class="action-row" style="margin-top: 10px;">
+        <button id="settings-index-graph" type="button" class="btn-index">建立图谱</button>
       </div>
-      <div class="checks" style="margin-top: 10px;">
-        <label><input id="settings-auto-index-save" name="autoIndexOnSave" type="checkbox" ${settings.autoIndexOnSave ? "checked" : ""} /> 保存文件后自动索引（防抖）</label>
-        <label><input id="settings-auto-run-on-index" name="autoRunOnIndex" type="checkbox" ${settings.autoRunOnIndex ? "checked" : ""} /> 索引完成后自动语义提取（使用 Economy 层）</label>
-      </div>
-      <button type="button" class="advanced-toggle" id="settings-advanced-toggle" style="margin-top: 10px;">▸ 高级选项：Max Context Tokens · L1/L2/L3 Anchors</button>
+      <ul id="settings-graph-index-list" class="status-list" style="display: none;"></ul>
+      <button type="button" class="advanced-toggle" id="settings-advanced-toggle" style="margin-top: 12px;">▸ 存储与召回</button>
       <div class="advanced" id="settings-advanced-panel">
         <div class="grid-2">
+          <label>Graph Store Path
+            <input id="settings-graph-store-path" name="graphStorePath" value="${escapeHtml(settings.graphStorePath)}" />
+          </label>
+          <label>Transport
+            <select id="settings-transport" name="transport">
+              ${renderTransportOption("auto", settings.transport)}
+              ${renderTransportOption("file", settings.transport)}
+              ${renderTransportOption("sqlite", settings.transport)}
+              ${renderTransportOption("memory", settings.transport)}
+              ${renderTransportOption("mcp-http", settings.transport)}
+            </select>
+          </label>
+          <label>语义召回
+            <select id="settings-embedding-provider" name="embeddingProvider">
+              <option value="fnv"${embeddingProvider === "fnv" ? " selected" : ""}>FNV（离线）</option>
+              <option value="transformers"${embeddingProvider === "transformers" ? " selected" : ""}>transformers（本地语义）</option>
+            </select>
+          </label>
           <label>Max Context Tokens <input id="settings-max-context-tokens" name="maxContextTokens" type="number" min="1" value="${settings.maxContextTokens}" /></label>
           <label>L1 Anchors <input id="settings-layer-l1" name="l1" type="number" min="0" value="${settings.layerQuota.l1}" /></label>
           <label>L2 Anchors <input id="settings-layer-l2" name="l2" type="number" min="0" value="${settings.layerQuota.l2}" /></label>
           <label>L3 Anchors <input id="settings-layer-l3" name="l3" type="number" min="0" value="${settings.layerQuota.l3}" /></label>
         </div>
       </div>
-      <div style="margin-top: 12px;">
-        <button id="settings-index-graph" type="button" class="btn-index">建立图谱（无需 LLM）</button>
-      </div>
-      <ul id="settings-graph-index-list" class="status-list" style="display: none;"></ul>
     </section>
 
-    <section class="panel route-panel" id="settings-routing-panel">
-      <h2>路由连通性测试（可选）</h2>
-      <p class="flow-hint" style="margin-bottom: 10px;">配置 Smart / Economy 任一层后，可一键测试模型连通性；通过后自动索引并可选语义增强。</p>
+    <section class="panel">
+      <h2>Agent</h2>
+      <p class="flow-hint" style="margin-bottom: 10px;">把 GraphFlow MCP 写进本机已检测到的 IDE。完成后 Reload Window。</p>
+      <ul id="settings-mcp-status-list" class="status-list">${mcpStatusLines}</ul>
+      <div class="action-row">
+        <button id="settings-install-mcp" type="button" class="btn-index">安装 / 更新 MCP</button>
+      </div>
+      <p id="settings-mcp-action-status" class="flow-hint"></p>
+    </section>
+
+    <section class="panel">
+      <h2>模型（可选）</h2>
+      <p class="flow-hint" style="margin-bottom: 12px;">Smart 规划，Economy 摘要。Key 可填环境变量名或 <code>sk-...</code></p>
+      <div class="tier-row">
+        ${renderSettingsTierCard("smart", "Smart", "规划", settings)}
+        ${renderSettingsTierCard("economy", "Economy", "摘要", settings)}
+      </div>
       <ul id="settings-tier-readiness-list" class="status-list"></ul>
       <ul id="settings-diagnose-list" class="status-list">${diagnoseLines}</ul>
       <ul id="settings-route-test-list" class="status-list" style="display: none;"></ul>
     </section>
 
     <div class="action-row">
-      <button id="settings-save" type="submit" class="btn-save">Save Settings</button>
+      <button id="settings-save" type="submit" class="btn-save">保存</button>
       <button id="settings-test-routing" type="button" class="btn-route" disabled>测试路由</button>
     </div>
     <p id="settings-status"></p>
@@ -1332,7 +1345,7 @@ function renderSettingsTierCard(
   badge: string,
   settings: GraphFlowSettings
 ): string {
-  const provider = tier === "smart" ? settings.smartProvider : settings.economyProvider;
+  const provider = (tier === "smart" ? settings.smartProvider : settings.economyProvider) || settings.provider;
   const apiKey = tier === "smart" ? settings.smartApiKey : settings.economyApiKey;
   const model = tier === "smart" ? settings.smartModel : settings.economyModel;
   const baseUrl = tier === "smart" ? settings.smartBaseUrl : settings.economyBaseUrl;
@@ -1369,7 +1382,7 @@ function renderMcpStatusLines(
   agents: SettingsPanelStatus["mcpAgents"]
 ): string {
   if (agents.length === 0) {
-    return '<li style="color: #b45309;">未检测到本机 AI Agent / IDE。可手动运行命令面板中的「GraphFlow: Install MCP to Agents」。</li>';
+        return '<li style="color: #b45309;">未检测到本机 AI Agent / IDE。点下方「安装 / 更新 MCP」重试。</li>';
   }
 
   return agents

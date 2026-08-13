@@ -427,11 +427,16 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 }
 
-async function ensureAnydocForExtension(
-  context: vscode.ExtensionContext,
-  output: vscode.OutputChannel
-): Promise<void> {
-  const enabled = vscode.workspace.getConfiguration("graphflow").get<boolean>("downloadAnydoc", true);
+async function loadEnsureAnydocModule(context: vscode.ExtensionContext): Promise<{
+  ensureAnydocInstalled: (options?: {
+    enabled?: boolean;
+    logger?: (message: string) => void;
+  }) => Promise<{ status: string; message: string; nodeModules?: string; version?: string }>;
+  applyAnydocRequireEnv: (nodeModules?: string) => boolean;
+  resolveAnydocNodeModules: () => string;
+  inspectAnydocStatus?: () => { ready: boolean; version?: string; nodeModules: string };
+  resetDocumentConverterCache?: () => void;
+}> {
   const ensurePath = join(
     context.extensionPath,
     "vendor",
@@ -440,16 +445,38 @@ async function ensureAnydocForExtension(
     "integrations",
     "ensure-anydoc.js"
   );
+  return (await import(pathToFileURL(ensurePath).href)) as Awaited<ReturnType<typeof loadEnsureAnydocModule>>;
+}
+
+async function inspectAnydocForExtension(
+  context: vscode.ExtensionContext
+): Promise<{ ready: boolean; version?: string }> {
   try {
-    const mod = (await import(pathToFileURL(ensurePath).href)) as {
-      ensureAnydocInstalled: (options?: {
-        enabled?: boolean;
-        logger?: (message: string) => void;
-      }) => Promise<{ status: string; message: string; nodeModules?: string }>;
-      applyAnydocRequireEnv: (nodeModules?: string) => boolean;
-      resolveAnydocNodeModules: () => string;
-      resetDocumentConverterCache?: () => void;
-    };
+    const mod = await loadEnsureAnydocModule(context);
+    if (typeof mod.inspectAnydocStatus === "function") {
+      return mod.inspectAnydocStatus();
+    }
+    return { ready: false };
+  } catch {
+    return { ready: false };
+  }
+}
+
+async function persistDownloadAnydoc(enabled: boolean): Promise<void> {
+  await vscode.workspace.getConfiguration("graphflow").update(
+    "downloadAnydoc",
+    enabled,
+    vscode.ConfigurationTarget.Global
+  );
+}
+
+async function ensureAnydocForExtension(
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel,
+  enabled = vscode.workspace.getConfiguration("graphflow").get<boolean>("downloadAnydoc", true)
+): Promise<{ ready: boolean; version?: string; message: string }> {
+  try {
+    const mod = await loadEnsureAnydocModule(context);
     const result = await mod.ensureAnydocInstalled({
       enabled,
       logger: (message) => output.appendLine(message),
@@ -459,7 +486,6 @@ async function ensureAnydocForExtension(
     } else {
       mod.applyAnydocRequireEnv(mod.resolveAnydocNodeModules());
     }
-    // Clear converter miss-cache if runtime already loaded in-process.
     try {
       const convertPath = join(
         context.extensionPath,
@@ -477,9 +503,12 @@ async function ensureAnydocForExtension(
       // ignore
     }
     output.appendLine(`[GraphFlow] anydoc: ${result.status} — ${result.message}`);
+    const ready = result.status === "already" || result.status === "installed";
+    return { ready, ...(result.version ? { version: result.version } : {}), message: result.message };
   } catch (err) {
     const text = err instanceof Error ? err.message : String(err);
     output.appendLine(`[GraphFlow] anydoc ensure skipped: ${text}`);
+    return { ready: false, message: text };
   }
 }
 
@@ -880,13 +909,20 @@ async function openGraphFlowSettings(
     const status = await runtime.getSettingsPanelStatus();
     return [loaded, status] as const;
   });
+  const downloadAnydoc = vscode.workspace.getConfiguration("graphflow").get<boolean>("downloadAnydoc", true);
+  const anydoc = await inspectAnydocForExtension(context);
   const extensionVersion = context.extension.packageJSON.version?.toString() ?? "unknown";
   showSettingsPanel(
     context,
-    settings,
+    {
+      ...settings,
+      downloadAnydoc,
+    },
     {
       ...panelStatus,
       extensionVersion,
+      anydocReady: anydoc.ready,
+      ...(anydoc.version ? { anydocVersion: anydoc.version } : {}),
     },
     workspaceRoot,
     output
@@ -1161,7 +1197,9 @@ function registerDebouncedIndexOnSave(context: vscode.ExtensionContext, workspac
     });
   };
 
-  const watcher = vscode.workspace.createFileSystemWatcher("**/*.{ts,tsx,js,jsx,md,json}");
+  const watcher = vscode.workspace.createFileSystemWatcher(
+    "**/*.{ts,tsx,js,jsx,md,json,pdf,doc,docx,ppt,pptx,xls,xlsx,odt,ods,odp,rtf,epub,csv}"
+  );
   watcher.onDidChange(scheduleIndex);
   watcher.onDidCreate(scheduleIndex);
   watcher.onDidDelete(scheduleIndex);
@@ -1191,6 +1229,32 @@ function showSettingsPanel(
   );
   panel.webview.html = buildSettingsHtml(settings, scriptUri.toString(), status);
   panel.webview.onDidReceiveMessage(async (message) => {
+    if (message?.type === "openCommand") {
+      const command = String(message.command ?? "");
+      if (command.startsWith("graphflow.")) {
+        await vscode.commands.executeCommand(command);
+      }
+      return;
+    }
+
+    if (message?.type === "ensureAnydoc") {
+      try {
+        await persistDownloadAnydoc(true);
+        const result = await ensureAnydocForExtension(context, output, true);
+        panel.webview.postMessage({
+          type: "anydocStatus",
+          payload: result,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : String(err);
+        panel.webview.postMessage({
+          type: "anydocStatus",
+          payload: { ready: false, message: text },
+        });
+      }
+      return;
+    }
+
     if (message?.type === "installMcp") {
       try {
         const bootstrap = await runMcpBootstrap(context, workspaceRoot, output, { forceNotify: false });
@@ -1227,6 +1291,7 @@ function showSettingsPanel(
       }
       const payload = message.payload as Omit<GraphFlowSettings, "configPath">;
       try {
+        await persistDownloadAnydoc(Boolean(payload.downloadAnydoc ?? payload.indexOfficeDocs ?? true));
         output.appendLine("[GraphFlow] Building knowledge graph (structural index, LLM optional)...");
         output.show(true);
 
@@ -1273,6 +1338,7 @@ function showSettingsPanel(
       }
       const payload = message.payload as Omit<GraphFlowSettings, "configPath">;
       try {
+        await persistDownloadAnydoc(Boolean(payload.downloadAnydoc ?? payload.indexOfficeDocs ?? true));
         output.appendLine("[GraphFlow] Testing routing connectivity (planner + worker)...");
         output.show(true);
 
@@ -1331,6 +1397,12 @@ function showSettingsPanel(
 
     try {
       const payload = message.payload as Omit<GraphFlowSettings, "configPath">;
+      const downloadAnydoc = payload.downloadAnydoc ?? payload.indexOfficeDocs ?? true;
+      await persistDownloadAnydoc(Boolean(downloadAnydoc));
+      if (downloadAnydoc) {
+        const anydoc = await ensureAnydocForExtension(context, output, true);
+        panel.webview.postMessage({ type: "anydocStatus", payload: anydoc });
+      }
 
       const saved = await runGraphFlow(workspaceRoot, (runtime) =>
         Promise.resolve(runtime.saveGraphFlowSettings(payload))

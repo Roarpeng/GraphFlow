@@ -66,6 +66,14 @@ export interface GraphFlowSettings {
   autoRunOnIndex: boolean;
   transport: GraphFlowConfig["graphPolicy"]["transport"];
   graphStorePath: string;
+  /** Index Markdown files (`.md`). */
+  indexMarkdown?: boolean;
+  /** Index Office/PDF after anydoc conversion. */
+  indexOfficeDocs?: boolean;
+  /** Vector backend: `fnv` (offline) or `transformers` (local semantic). */
+  embeddingProvider?: "fnv" | "transformers";
+  /** Extension-only: download @firecrawl/anydoc on activate. */
+  downloadAnydoc?: boolean;
 }
 
 export type GraphFlowSettingsInput = Omit<GraphFlowSettings, "configPath">;
