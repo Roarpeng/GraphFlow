@@ -107,6 +107,46 @@ describe("M10 CLI runtime", () => {
     }
   });
 
+  it("persists markdown/office index flags and embedding provider from settings", () => {
+    const root = mkdtempSync(join(tmpdir(), "graphflow-settings-docs-"));
+    const configPath = join(root, "graphflow.config.json");
+    try {
+      saveGraphFlowSettings(
+        {
+          provider: "openai",
+          smartModel: "gpt-4.1",
+          economyModel: "gpt-4.1-mini",
+          maxContextTokens: 1500,
+          layerQuota: { l1: 6, l2: 4, l3: 3 },
+          enableNearLosslessMode: true,
+          autoIndexOnPreview: true,
+          autoIndexOnRun: true,
+          autoIndexOnSave: true,
+          autoRunOnIndex: true,
+          transport: "file",
+          graphStorePath: "graphflow-out/graphflow-graph.json",
+          indexMarkdown: true,
+          indexOfficeDocs: false,
+          embeddingProvider: "fnv",
+        },
+        configPath
+      );
+      const persisted = JSON.parse(readFileSync(configPath, "utf8")) as {
+        graphPolicy?: { includeExtensions?: string[]; embeddingProvider?: string };
+      };
+      expect(persisted.graphPolicy?.includeExtensions).toContain(".md");
+      expect(persisted.graphPolicy?.includeExtensions).not.toContain(".pdf");
+      expect(persisted.graphPolicy?.embeddingProvider).toBe("fnv");
+
+      const loaded = getGraphFlowSettings(configPath);
+      expect(loaded.indexMarkdown).toBe(true);
+      expect(loaded.indexOfficeDocs).toBe(false);
+      expect(loaded.embeddingProvider).toBe("fnv");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("indexes graph from a workspace path", async () => {
     const root = mkdtempSync(join(tmpdir(), "graphflow-cli-index-"));
     const configPath = join(root, "graphflow.config.json");

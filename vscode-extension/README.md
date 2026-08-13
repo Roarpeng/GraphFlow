@@ -6,17 +6,13 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 
 ## 当前版本
 
-- Extension / runtime：**1.9.11**
+- Extension / runtime：**1.9.13**
 - 市场身份：`roarpeng.graphflow`（displayName **GraphFlow Context & Memory**）
-- 对应 VSIX：`../artifacts/graphflow-1.9.11.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
+- 对应 VSIX：`../artifacts/graphflow-1.9.13.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
 
 ## Office/PDF 文档转换（anydoc）
 
-- VSIX **不内置** `@firecrawl/anydoc` 原生二进制（体积与多平台问题）。
-- 扩展激活时若设置 **`graphflow.downloadAnydoc`**（默认 `true`），会用本机 `npm` 把**当前系统**的 anydoc 下载到 `~/.graphflow/optional-deps`。
-- MCP launcher / 索引运行时通过 `GRAPHFLOW_ANYDOC_NODE_MODULES` 加载该目录。
-- 关闭设置或下载失败时：跳过 Office/PDF，**源码建图不受影响**。
-- 也可手动：`npm i -g @firecrawl/anydoc` 或在项目中安装 optional 依赖。
+在 **GraphFlow: Settings** 的「图谱」区块勾选 **Office / PDF**，需要时点 **安装解析器**。扩展会把 `@firecrawl/anydoc` 下到 `~/.graphflow/optional-deps`。关掉该项会跳过 Office/PDF，源码建图不受影响。
 
 ## v1.9.x 要点
 
@@ -67,10 +63,10 @@ cursor --install-extension graphflow-1.9.5.vsix
 
 1. 重启 VS Code / Cursor，等待提示 **GraphFlow MCP 已安装到: …**（扩展会自动写入本机 Agent MCP 配置）
 2. 打开任意项目文件夹作为工作区
-3. 命令面板 → **GraphFlow: Show Settings**
-4. 确认 Graph Store Path（默认 `graphflow-out/graphflow-graph.json`）→ **Save Settings**
-5. 点击 **建立图谱（无需 LLM）** — 纯 AST 结构索引，无需 API Key
-6. （可选）配置 Provider / Smart·Economy 模型 → **测试路由**；或设 `graphPolicy.embeddingProvider: "transformers"` 启用本地语义召回
+3. 命令面板 → **GraphFlow: Settings**
+4. 在同一页完成：勾选 Markdown / Office·PDF → **建立图谱** →（可选）安装 MCP、填模型
+5. 顶部芯片可打开图谱、上下文、技能、规划、运行
+6. （可选）配置 Provider / Smart·Economy 模型 → **测试路由**；存储与召回里可改 `embeddingProvider`
 7. 命令面板 → **GraphFlow: Preview Context** 或 **GraphFlow: Show Graph** 验证
 8. 使用一段时间后打开 **GraphFlow: Skill Insights** 查看飞轮贡献与记忆归因
 
@@ -78,13 +74,13 @@ cursor --install-extension graphflow-1.9.5.vsix
 >
 > **关于语义模型**：VSIX **不**捆绑 `@huggingface/transformers` 模型（约 100MB+）。默认 `fnv` 离线可用；启用 `transformers` 时模型懒加载，无缓存/失败会告警并自动降级回 FNV。
 >
-> **关于 anydoc**：VSIX **不**捆绑 Office/PDF 转换库；默认在激活时自动下载到 `~/.graphflow/optional-deps`（设置 `graphflow.downloadAnydoc`，可关）。
+> **关于 anydoc**：在 **GraphFlow: Settings** 勾选 Office / PDF；解析器下载到 `~/.graphflow/optional-deps`。
 
 ## 功能命令
 
 | 命令 | 说明 |
 | --- | --- |
-| GraphFlow: Show Settings | 配置、建图、路由测试、本版亮点 |
+| GraphFlow: Show Settings | 全部配置与功能：图谱、文档解析、MCP、模型、快捷入口 |
 | GraphFlow: Show Graph | 知识图谱可视化 |
 | GraphFlow: Preview Context | 上下文压缩与 Token Budget |
 | GraphFlow: Plan & Brainstorm | 任务规划 |
@@ -176,7 +172,7 @@ npm run package:extension
 
 **图谱为空 / Preview 0 anchors**
 
-- Settings → **建立图谱（无需 LLM）**
+- Settings → **建立图谱**
 - 或 MCP：`graphflow_index`（传入 `rootDir` 为项目绝对路径）
 
 **MCP 报错 `unsafe workspace root from discovery: /home/...`**

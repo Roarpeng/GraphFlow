@@ -30,6 +30,33 @@ function normalizeExtension(ext: string): string {
   return trimmed.startsWith(".") ? trimmed : `.${trimmed}`;
 }
 
+const OFFICE_EXTENSION_SET = new Set<string>(OFFICE_DOC_EXTENSIONS);
+
+export function hasMarkdownIndex(extensions: string[] | undefined): boolean {
+  return resolveIncludeExtensions(extensions).includes(".md");
+}
+
+export function hasOfficeIndex(extensions: string[] | undefined): boolean {
+  return resolveIncludeExtensions(extensions).some((ext) => OFFICE_EXTENSION_SET.has(ext));
+}
+
+/** Apply Settings-page document toggles without dropping language extensions. */
+export function applyDocumentIndexScope(
+  configured: string[] | undefined,
+  scope: { markdown: boolean; office: boolean }
+): string[] {
+  const current = resolveIncludeExtensions(configured);
+  const withoutDocs = current.filter((ext) => ext !== ".md" && !OFFICE_EXTENSION_SET.has(ext));
+  const next = [...withoutDocs];
+  if (scope.markdown) {
+    next.push(".md");
+  }
+  if (scope.office) {
+    next.push(...OFFICE_DOC_EXTENSIONS);
+  }
+  return Array.from(new Set(next.map(normalizeExtension)));
+}
+
 /** True when the configured list exactly matches the legacy 6-item web-only default. */
 export function isLegacyWebOnlyExtensions(extensions: string[]): boolean {
   const normalized = Array.from(new Set(extensions.map(normalizeExtension))).sort();
