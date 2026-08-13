@@ -59,6 +59,17 @@ export function isAnydocPresent(nodeModules = resolveAnydocNodeModules()): boole
   return existsSync(join(nodeModules, "@firecrawl", "anydoc", "package.json"));
 }
 
+export function inspectAnydocStatus(home = homedir()): {
+  ready: boolean;
+  version?: string;
+  nodeModules: string;
+} {
+  const nodeModules = resolveAnydocNodeModules(home);
+  const version = readInstalledAnydocVersion(resolveAnydocOptionalDepsRoot(home));
+  const ready = Boolean(tryRequireAnydoc() || isAnydocPresent(nodeModules));
+  return { ready, ...(version ? { version } : {}), nodeModules };
+}
+
 /**
  * Point Node resolution at the optional-deps node_modules (extension + MCP child).
  */

@@ -2,6 +2,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { validateConfig } from "../../../config/loader";
 import { DEFAULT_OUTPUT_DIR } from "../../../config/defaults";
+import {
+  applyDocumentIndexScope,
+  hasMarkdownIndex,
+  hasOfficeIndex,
+} from "../../../config/include-extensions.js";
 import { formatApiKeyForConfig, formatApiKeyForSettings, resolveConfigSecret } from "../../../config/secrets";
 import { resolveConfig, resolveConfigPath, resolveWritableConfigPath } from "../../../config/resolve";
 import { resolveGlobalConfigPath } from "../../../config/scaffold";
@@ -105,6 +110,9 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
     transport: config.graphPolicy.transport,
     graphStorePath: config.graphPolicy.graphStorePath ?? `${DEFAULT_OUTPUT_DIR}/graphflow-graph.json`,
     autoRunOnIndex: true,
+    indexMarkdown: hasMarkdownIndex(config.graphPolicy.includeExtensions),
+    indexOfficeDocs: hasOfficeIndex(config.graphPolicy.includeExtensions),
+    embeddingProvider: config.graphPolicy.embeddingProvider ?? "fnv",
   };
 }
 
@@ -161,6 +169,15 @@ export function saveGraphFlowSettings(
         l2: Math.max(0, Math.floor(settings.layerQuota.l2)),
         l3: Math.max(0, Math.floor(settings.layerQuota.l3)),
       },
+      ...(settings.indexMarkdown !== undefined || settings.indexOfficeDocs !== undefined
+        ? {
+            includeExtensions: applyDocumentIndexScope(current.graphPolicy.includeExtensions, {
+              markdown: settings.indexMarkdown ?? hasMarkdownIndex(current.graphPolicy.includeExtensions),
+              office: settings.indexOfficeDocs ?? hasOfficeIndex(current.graphPolicy.includeExtensions),
+            }),
+          }
+        : {}),
+      ...(settings.embeddingProvider ? { embeddingProvider: settings.embeddingProvider } : {}),
     },
     learningPolicy: {
       ...current.learningPolicy,
