@@ -13,6 +13,9 @@
   const installMcpButton = document.getElementById("settings-install-mcp");
   const mcpStatusList = document.getElementById("settings-mcp-status-list");
   const mcpActionStatus = document.getElementById("settings-mcp-action-status");
+  const ensureAnydocButton = document.getElementById("settings-ensure-anydoc");
+  const anydocPill = document.getElementById("settings-anydoc-pill");
+  const anydocMetric = document.getElementById("settings-anydoc-metric");
 
   function getNumber(id) {
     const value = Number(document.getElementById(id).value);
@@ -67,6 +70,10 @@
       autoRunOnIndex: getChecked("settings-auto-run-on-index"),
       transport: getString("settings-transport"),
       graphStorePath: getString("settings-graph-store-path"),
+      indexMarkdown: getChecked("settings-index-markdown"),
+      indexOfficeDocs: getChecked("settings-index-office"),
+      embeddingProvider: getString("settings-embedding-provider") || "fnv",
+      downloadAnydoc: getChecked("settings-index-office"),
     };
   }
 
@@ -226,9 +233,7 @@
       return;
     }
     const open = advancedPanel.classList.toggle("open");
-    advancedToggle.textContent = open
-      ? "▾ 高级选项：Max Context Tokens · L1/L2/L3 Anchors"
-      : "▸ 高级选项：Max Context Tokens · L1/L2/L3 Anchors";
+    advancedToggle.textContent = open ? "▾ 存储与召回" : "▸ 存储与召回";
   });
 
   function renderMcpStatus(agents) {
@@ -237,7 +242,7 @@
     }
     if (!Array.isArray(agents) || agents.length === 0) {
       mcpStatusList.innerHTML =
-        '<li style="color: #b45309;">未检测到本机 AI Agent / IDE。可点击下方按钮重试，或运行命令面板中的「GraphFlow: Install MCP to Agents」。</li>';
+        '<li style="color: #b45309;">未检测到本机 AI Agent / IDE。点下方按钮重试。</li>';
       return;
     }
     mcpStatusList.innerHTML = agents
@@ -249,6 +254,46 @@
       })
       .join("");
   }
+
+  function renderAnydocStatus(ready, version, message) {
+    const label = ready ? `就绪${version ? ` ${version}` : ""}` : "未安装";
+    if (anydocPill) {
+      anydocPill.textContent = `解析器 ${label}`;
+      anydocPill.className = `status-pill ${ready ? "ok" : "warn"}`;
+    }
+    if (anydocMetric) {
+      anydocMetric.textContent = label;
+    }
+    if (message && status) {
+      status.textContent = message;
+    }
+  }
+
+  document.getElementById("settings-feature-chips")?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const command = target.getAttribute("data-command");
+    if (!command) {
+      return;
+    }
+    vscode?.postMessage({ type: "openCommand", command });
+  });
+
+  ensureAnydocButton?.addEventListener("click", () => {
+    const office = document.getElementById("settings-index-office");
+    if (office) {
+      office.checked = true;
+    }
+    if (ensureAnydocButton) {
+      ensureAnydocButton.disabled = true;
+    }
+    if (status) {
+      status.textContent = "正在安装 Office/PDF 解析器…";
+    }
+    vscode?.postMessage({ type: "ensureAnydoc", payload: collectPayload() });
+  });
 
   installMcpButton?.addEventListener("click", () => {
     if (mcpActionStatus) {
@@ -436,8 +481,16 @@
       }
     }
 
+    if (message?.type === "anydocStatus") {
+      const result = message.payload || {};
+      if (ensureAnydocButton) {
+        ensureAnydocButton.disabled = false;
+      }
+      renderAnydocStatus(Boolean(result.ready), result.version, result.message);
+    }
+
     if (message?.type === "settingsSaved") {
-      status.textContent = "已保存。可点击「建立图谱」或「测试路由」。";
+      status.textContent = "已保存。";
       renderReadiness();
     }
     if (message?.type === "settingsError") {

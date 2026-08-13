@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.9.13] - 2026-08-13
+
+### Changed
+
+- **GraphFlow: Settings 收成一页**：文档解析（Markdown / Office·PDF）、anydoc 安装状态、语义召回、MCP、模型、建图与功能入口都在同一面板配置；不再依赖 VS Code Settings 里的 `graphflow.downloadAnydoc` 作为主入口
+- Settings 去掉「本版亮点」长文，保留状态条 + 芯片入口（图谱 / 上下文 / 技能 / 规划 / 运行）
+
+### Tests
+
+- `tests/m53-include-extensions.test.ts`：Markdown / Office 索引开关
+- `tests/m10-cli-runtime.test.ts`：settings 持久化 document flags + embeddingProvider
+- `tests/m15-vscode-panel-observability.test.ts`：Settings 新布局断言
+
 ## [1.9.12] - 2026-08-12
 
 ### Added
