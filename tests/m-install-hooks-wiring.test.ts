@@ -92,6 +92,7 @@ describe("install/doctor wire Claude Code hooks", () => {
     });
     const text = formatInstallLegacyText(report);
     expect(text).toMatch(/Claude Code hooks/i);
+    expect(text).toMatch(/DeepSeek Harness/i);
   });
 
   it("doctor reports hooks check when Claude Code is detected", () => {
