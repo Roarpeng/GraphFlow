@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **DeepSeek Harness (`dsh`) plugin**：`@roarpeng/graphflow` 声明 `dsh.bundle` + 根目录 `cordis.patch.yml`，可通过 `dsh plugin --profile <name> add @roarpeng/graphflow` 装入 profile；MCP 经 in-box `@deepseek-ai/dsh-mcp-client` 暴露为 `mcp__graphflow__graphflow_*`
+- 中文 README（[README.zh.md](README.zh.md)）与 `plugin.json` / Skill 写明 dsh 用法与 10 项能力
+- `graphflow install` 在检测到 `$DSH_HOME` / `~/.dsh` 时写入 home 级 `cordis.patch.yml` overlay，并把 Skill 装到 `~/.dsh/skills/graphflow/SKILL.md`
+- `graphflow uninstall` / `doctor` 同步清理与自检该 overlay
+
 ## [1.9.13] - 2026-08-13
 
 ### Changed

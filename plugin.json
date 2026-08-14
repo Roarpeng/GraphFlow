@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "graphflow",
-  "version": "1.9.11",
-  "description": "A Context-Aware Multi-Agent Orchestration Engine — portable skills and MCP for graph-based context compression and task planning",
+  "version": "1.9.13",
+  "description": "图谱上下文压缩与任务规划插件（10 个 MCP 工具）。能力：压缩上下文、DAG 规划、增量建图、技能飞轮、诊断与产物导入导出。DeepSeek Harness：dsh plugin --profile web add @roarpeng/graphflow；工具名为 mcp__graphflow__graphflow_*。先调 graphflow_context（传 rootDir），复杂任务再 plan，改完代码后 index。",
   "author": {
     "name": "Roarpeng",
     "url": "https://github.com/Roarpeng"
@@ -16,6 +16,29 @@
     "mcp",
     "context-engine",
     "agent-plugins",
-    "skills"
-  ]
+    "skills",
+    "dsh-plugin",
+    "deepseek-harness"
+  ],
+  "extensions": {
+    "dsh": {
+      "bundle": "./cordis.patch.yml",
+      "install": "dsh plugin --profile web add @roarpeng/graphflow",
+      "installHome": "npx @roarpeng/graphflow install",
+      "toolsPrefix": "mcp__graphflow__",
+      "usage": "先 mcp__graphflow__graphflow_context（rootDir=仓库绝对路径），复杂任务 graphflow_plan，改完 graphflow_index；graphflow_run 之后必须 graphflow_report_outcome。",
+      "capabilities": [
+        "graphflow_context",
+        "graphflow_plan",
+        "graphflow_run",
+        "graphflow_report_outcome",
+        "graphflow_insight",
+        "graphflow_index",
+        "graphflow_skill_insights",
+        "graphflow_diagnose",
+        "graphflow_artifact",
+        "graphflow_skill_guide"
+      ]
+    }
+  }
 }

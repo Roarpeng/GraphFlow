@@ -68,7 +68,8 @@ graphflow skill sync import   # newer updatedAt wins; --force overwrites
 | Path | Primary use | What you get |
 | --- | --- | --- |
 | **Agent Plugins 1.0** (`plugin.json` / `mcp.json` / `skills/`) | **Preferred** single-host install (e.g. Cursor local plugins / marketplace) | MCP + canonical Skill discovered together |
-| **`npx @roarpeng/graphflow install`** | Fallback / multi-agent / Rules | MCP + Skill + Rules across 15+ detected agents |
+| **DeepSeek Harness bundle** (`dsh.bundle` + `cordis.patch.yml`) | `dsh plugin add @roarpeng/graphflow` | MCP via `@deepseek-ai/dsh-mcp-client` (`mcp__graphflow__*`) |
+| **`npx @roarpeng/graphflow install`** | Fallback / multi-agent / Rules | MCP + Skill + Rules across 15+ detected agents (incl. `~/.dsh`) |
 | **`graphflow doctor`** | Diagnostics | Which agents are installed / wired |
 
 Rules and multi-agent wiring still use `install` when the host does not consume Agent Plugins. Context packaging itself is unchanged — always start with `graphflow_context` ([context-contract.md](context-contract.md)).

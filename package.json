@@ -10,6 +10,7 @@
     "scripts/safe-postinstall.cjs",
     "plugin.json",
     "mcp.json",
+    "cordis.patch.yml",
     "skills",
     "src/surfaces/trae-skill",
     "src/surfaces/trae-rules",
@@ -17,6 +18,7 @@
     "src/surfaces/antigravity-rules",
     "src/surfaces/copilot-instructions",
     "README.md",
+    "README.zh.md",
     "LICENSE",
     "CHANGELOG.md",
     "AGENTS.md",
@@ -86,8 +88,15 @@
     "context-engine",
     "agent-plugins",
     "cursor",
-    "claude-code"
+    "claude-code",
+    "dsh-plugin",
+    "deepseek-harness"
   ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "author": "Roarpeng",
   "license": "Apache-2.0",
   "bugs": {
