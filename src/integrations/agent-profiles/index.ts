@@ -18,6 +18,7 @@ import "./profiles/zed";
 import "./profiles/continue";
 import "./profiles/qoder";
 import "./profiles/opencode";
+import "./profiles/dsh";
 
 import "./skills/cursor";
 import "./skills/claude-code";
@@ -27,3 +28,4 @@ import "./skills/kilocode";
 import "./skills/antigravity";
 import "./skills/qoder";
 import "./skills/opencode";
+import "./skills/dsh";

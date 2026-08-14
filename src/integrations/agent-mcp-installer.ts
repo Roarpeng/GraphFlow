@@ -2,6 +2,7 @@ import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { homedir, release } from "node:os";
+import { resolveDshHome } from "./dsh-harness-installer";
 
 export type McpServersKey = "mcpServers" | "servers" | "context_servers" | "mcp";
 
@@ -565,6 +566,13 @@ export function buildAgentProfiles(): AgentProfile[] {
         },
       ],
       workspaceRelativePaths: [{ relativePath: join(".qoder", "mcp.json"), serversKey: "mcpServers" }],
+    },
+    {
+      id: "deepseek-harness",
+      name: "DeepSeek Harness",
+      markerPaths: [resolveDshHome()],
+      // MCP is a YAML cordis.patch.yml overlay, not JSON mcpServers — see dsh-harness-installer.
+      userTargets: [],
     },
   ];
 

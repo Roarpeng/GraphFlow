@@ -1,6 +1,6 @@
 ---
 name: "graphflow"
-description: "Graph-based code context compression, task planning, and knowledge graph orchestration (10 MCP tools). Invoke before ANY code question, bug fix, debugging, file reading, Chinese/CJK query, refactor, or multi-step edit — ALWAYS call graphflow_context MCP first when GraphFlow is connected."
+description: "图谱上下文压缩、任务规划与知识图谱编排（10 个 MCP 工具）。任何读代码、改代码、排错、中文问题之前必须先调 graphflow_context。DeepSeek Harness 下工具名为 mcp__graphflow__graphflow_*。"
 ---
 
 # GraphFlow Skill
@@ -90,6 +90,41 @@ Run `npx @roarpeng/graphflow install` from the project root. Do **not** hardcode
 | `~/.config/Code/User/mcp.json` | User MCP (`servers.graphflow`) |
 | `.vscode/mcp.json` | Project MCP (optional, team-shared) |
 | `.github/copilot-instructions.md` | Repo-level Copilot instructions |
+
+### DeepSeek Harness（`dsh`）插件：用法与能力
+
+GraphFlow 是 DeepSeek Harness 的 `dsh-plugin`。装入后模型看到的工具名带前缀 `mcp__graphflow__`。
+
+**能力**
+
+| 能力 | 工具（dsh 名） |
+|------|----------------|
+| 压缩上下文（先调用） | `mcp__graphflow__graphflow_context` |
+| 任务规划 DAG | `mcp__graphflow__graphflow_plan` |
+| 桥接执行包 | `mcp__graphflow__graphflow_run` |
+| 回填飞轮 | `mcp__graphflow__graphflow_report_outcome` |
+| ATP insight | `mcp__graphflow__graphflow_insight` |
+| 增量/全量建图 | `mcp__graphflow__graphflow_index` |
+| 技能洞察 | `mcp__graphflow__graphflow_skill_insights` |
+| 诊断 | `mcp__graphflow__graphflow_diagnose` |
+| 图谱产物 | `mcp__graphflow__graphflow_artifact` |
+| 技能指南 | `mcp__graphflow__graphflow_skill_guide` |
+
+**安装**
+
+```sh
+dsh plugin --profile web add @roarpeng/graphflow
+# 或已有 ~/.dsh 时：
+npx @roarpeng/graphflow install
+```
+
+| 路径 | 作用 |
+|------|------|
+| 包内 `cordis.patch.yml` | `dsh plugin add` 插入的 bundle 层 |
+| `$DSH_HOME/cordis.patch.yml`（默认 `~/.dsh`） | `graphflow install` 写的 home overlay |
+| `$DSH_HOME/skills/graphflow/SKILL.md` | 本 Skill |
+
+**用法：** 每次 `graphflow_context` / `graphflow_plan` 传仓库绝对路径 `rootDir`。不要在 patch 里写死 `GRAPHFLOW_WORKSPACE_ROOT`。走了 `graphflow_run` 后必须 `graphflow_report_outcome`。
 
 ---
 

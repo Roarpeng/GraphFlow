@@ -55,6 +55,35 @@ describe("Agent Plugins 1.0 packaging", () => {
     }
   });
 
+  it("plugin.json documents DeepSeek Harness usage and capabilities", () => {
+    const plugin = readJson("plugin.json") as {
+      description?: string;
+      keywords?: string[];
+      extensions?: {
+        dsh?: {
+          bundle?: string;
+          install?: string;
+          capabilities?: string[];
+          usage?: string;
+        };
+      };
+    };
+    expect(plugin.description).toMatch(/MCP/);
+    expect(plugin.keywords).toContain("dsh-plugin");
+    expect(plugin.extensions?.dsh?.bundle).toBe("./cordis.patch.yml");
+    expect(plugin.extensions?.dsh?.install).toContain("dsh plugin");
+    expect(plugin.extensions?.dsh?.usage).toMatch(/graphflow_context/);
+    expect(plugin.extensions?.dsh?.capabilities).toEqual(
+      expect.arrayContaining([
+        "graphflow_context",
+        "graphflow_plan",
+        "graphflow_index",
+        "graphflow_report_outcome",
+      ])
+    );
+    expect(plugin.extensions?.dsh?.capabilities).toHaveLength(10);
+  });
+
   it("mcp.json declares stdio graphflow with matching schema version", () => {
     const mcp = readJson("mcp.json") as Record<string, unknown>;
 

@@ -7,6 +7,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { resolveDshHome } from "./dsh-harness-installer";
 
 // ── 类型定义 ──────────────────────────────────────────────────────────
 
@@ -684,6 +685,11 @@ export function getAgentSkillTargets(): Array<{
       agent: "Qoder CN",
       markerDir: join(home, ".qoder-cn"),
       skillsRoot: join(home, ".qoder-cn", "skills"),
+    },
+    {
+      agent: "DeepSeek Harness",
+      markerDir: resolveDshHome(),
+      skillsRoot: join(resolveDshHome(), "skills"),
     },
   ];
 }

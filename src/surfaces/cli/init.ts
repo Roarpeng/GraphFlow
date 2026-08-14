@@ -28,6 +28,12 @@ import {
   uninstallClaudeCodeHooks,
   type ClaudeCodeHooksResult,
 } from "../../integrations/claude-code-hooks";
+import {
+  getDshHarnessStatus,
+  installDshHarness,
+  uninstallDshHarness,
+  type DshHarnessInstallResult,
+} from "../../integrations/dsh-harness-installer";
 
 const isWindows = process.platform === "win32";
 
@@ -237,6 +243,8 @@ export interface InstallReport {
   mcp: McpInstallResult[];
   /** Claude Code SessionStart/SessionEnd/Stop hooks for flywheel auto-close. */
   claudeCodeHooks: ClaudeCodeHooksResult;
+  /** DeepSeek Harness home-level cordis.patch.yml MCP overlay. */
+  dshHarness: DshHarnessInstallResult;
   /** Post-install doctor self-check (never silently skip failures). */
   doctor: DoctorReport;
   /** True when MCP install had no errors and doctor reports no missing items. */
@@ -273,6 +281,7 @@ export function buildInstallReport(
         filePath: hooksStatus.settingsPath,
         message: "Claude Code not detected",
       };
+  const dshHarness = installDshHarness();
 
   if (bootstrapGraph) {
     void bootstrapGraphIndex(workspaceRoot).catch((error) => {
@@ -284,6 +293,7 @@ export function buildInstallReport(
   const doctor = buildDoctorReport(workspaceRoot);
   const mcpHasError = mcp.some((item) => item.status === "error");
   const hooksHasError = claudeCodeHooks.status === "error";
+  const dshHasError = dshHarness.status === "error";
   const skillHasError = [
     ...skills.traeSkills,
     ...skills.cursorRules,
@@ -292,7 +302,7 @@ export function buildInstallReport(
     ...skills.agentSkills,
     ...skills.projectRules,
   ].some((item) => item.status === "error");
-  const ok = doctor.ok && !mcpHasError && !hooksHasError && globalConfig.status !== "error";
+  const ok = doctor.ok && !mcpHasError && !hooksHasError && !dshHasError && globalConfig.status !== "error";
   const remediation: string[] = [];
   if (!ok) {
     if (globalConfig.status === "error") {
@@ -307,6 +317,13 @@ export function buildInstallReport(
       remediation.push(
         `Fix Claude Code hooks install at ${claudeCodeHooks.filePath ?? hooksStatus.settingsPath}${
           claudeCodeHooks.message ? `: ${claudeCodeHooks.message}` : "."
+        }`
+      );
+    }
+    if (dshHasError) {
+      remediation.push(
+        `Fix DeepSeek Harness overlay at ${dshHarness.filePath ?? ""}${
+          dshHarness.message ? `: ${dshHarness.message}` : "."
         }`
       );
     }
@@ -326,6 +343,7 @@ export function buildInstallReport(
     skills,
     mcp,
     claudeCodeHooks,
+    dshHarness,
     doctor,
     ok,
     remediation,
@@ -381,6 +399,16 @@ export function formatInstallLegacyText(report: InstallReport): string {
     lines.push(
       `${icon} Claude Code hooks: ${hooks.status}${hooks.filePath ? ` -> ${hooks.filePath}` : ""}${
         hooks.message ? ` (${hooks.message})` : ""
+      }`
+    );
+  }
+
+  {
+    const dsh = report.dshHarness;
+    const icon = dsh.status === "error" ? "[ERROR]" : dsh.status === "skipped" ? "[SKIP]" : "[OK]";
+    lines.push(
+      `${icon} DeepSeek Harness: ${dsh.status}${dsh.filePath ? ` -> ${dsh.filePath}` : ""}${
+        dsh.message ? ` (${dsh.message})` : ""
       }`
     );
   }
@@ -475,6 +503,16 @@ export function runUninstall(workspaceRoot: string = process.cwd()) {
     }
   } else {
     console.log("[SKIP] Claude Code hooks: Claude Code not detected");
+  }
+
+  // 4. Remove DeepSeek Harness home-level cordis.patch.yml overlay
+  const dshStatus = getDshHarnessStatus();
+  if (dshStatus.detected) {
+    const dshResult = uninstallDshHarness();
+    const icon = dshResult.status === "updated" ? "[REMOVED]" : "[SKIP]";
+    console.log(`${icon} DeepSeek Harness: ${dshResult.message ?? dshResult.status}`);
+  } else {
+    console.log("[SKIP] DeepSeek Harness: not detected");
   }
 
   console.log("[FINISH] Uninstall complete.");
@@ -612,6 +650,18 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
     });
   }
 
+  const dshStatus = getDshHarnessStatus();
+  if (dshStatus.detected) {
+    checks.push({
+      category: "mcp",
+      agent: dshStatus.agent,
+      path: dshStatus.patchPath,
+      scope: "user",
+      status: toDoctorStatus(dshStatus.installed, true),
+      detected: true,
+    });
+  }
+
   const installed = checks.filter((c) => c.status === "installed").length;
   const missing = checks.filter((c) => c.status === "missing").length;
   const na = checks.filter((c) => c.status === "n/a").length;
@@ -619,9 +669,9 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
   const remediation = ok
     ? []
     : [
-        "Run `graphflow install` to register MCP + Skills (+ Claude Code hooks when detected).",
+        "Run `graphflow install` to register MCP + Skills (+ Claude Code hooks / DeepSeek Harness when detected).",
         "Re-run `graphflow doctor --json` and fix any remaining missing items.",
-        "Ensure target agent directories exist (e.g. ~/.cursor / ~/.claude) so installers can detect them.",
+        "Ensure target agent directories exist (e.g. ~/.cursor / ~/.claude / ~/.dsh) so installers can detect them.",
       ];
 
   return {
