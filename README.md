@@ -1,5 +1,7 @@
 # GraphFlow
 
+English | [中文](README.zh.md)
+
 [![npm version](https://img.shields.io/badge/npm-1.9.13-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **The memory & context harness for coding agents.** Local-first code knowledge graph · bounded context compression (~98% token savings) · cross-session learning flywheel.
@@ -206,7 +208,29 @@ Docs: [Context Engineering contract](docs/context-contract.md) · [Experience me
 npx @roarpeng/graphflow uninstall
 ```
 
-That removes user + workspace MCP entries, `skills/graphflow` folders, GraphFlow rules/instruction blocks, and Claude Code hooks. Also delete any local symlink under `~/.cursor/plugins/local/graphflow` if you used one.
+That removes user + workspace MCP entries, `skills/graphflow` folders, GraphFlow rules/instruction blocks, Claude Code hooks, and the DeepSeek Harness `cordis.patch.yml` overlay. Also delete any local symlink under `~/.cursor/plugins/local/graphflow` if you used one.
+
+## DeepSeek Harness 插件（用法与能力）
+
+GraphFlow 是 [DeepSeek Harness](https://github.com/Roarpeng/deepseek-harness) 的 [`dsh-plugin`](https://github.com/topics/dsh-plugin)。包内 `dsh.bundle` + `cordis.patch.yml` 会把 GraphFlow MCP 挂到内置 `@deepseek-ai/dsh-mcp-client`。模型看到的工具名是 `mcp__graphflow__graphflow_*`。中文说明见 [README.zh.md](README.zh.md)。
+
+**能力（10 个工具）：** 压缩上下文、任务规划 DAG、桥接执行描述、结果回填飞轮、ATP insight、增量/全量建图、技能洞察、诊断、图谱产物、技能指南。
+
+**装进某个 profile：**
+
+```bash
+dsh plugin --profile web add @roarpeng/graphflow
+```
+
+**或在已有 `~/.dsh` 时写 home 级 overlay（对所有 profile 生效）：**
+
+```bash
+npx @roarpeng/graphflow install
+```
+
+会写入 `$DSH_HOME/cordis.patch.yml` 与 `$DSH_HOME/skills/graphflow/SKILL.md`。卸载：`npx @roarpeng/graphflow uninstall`，或 `dsh plugin --profile web remove @roarpeng/graphflow`。
+
+**用法：** 先 `mcp__graphflow__graphflow_context`（传入 `rootDir`），复杂任务再 `graphflow_plan`；改完代码后 `graphflow_index`；若走了 `graphflow_run`，结束后必须 `graphflow_report_outcome`。不要在 patch 里写死 `GRAPHFLOW_WORKSPACE_ROOT`。
 
 ## Agent integrations
 
@@ -219,7 +243,7 @@ npx @roarpeng/graphflow uninstall  # remove MCP + Skill + Rules + hooks
 npx @roarpeng/graphflow init       # write a minimal project config
 ```
 
-Supported: Cursor, VS Code, Trae (incl. CN), Claude Code, Windsurf, Cline, Roo Code, Kilo Code, Gemini CLI, Codex, Antigravity, Opencode, Qoder, Amazon Q, Zed, Continue, and more (15+).
+Supported: Cursor, VS Code, Trae (incl. CN), Claude Code, Windsurf, Cline, Roo Code, Kilo Code, Gemini CLI, Codex, Antigravity, Opencode, Qoder, Amazon Q, Zed, Continue, DeepSeek Harness (`dsh`), and more (15+).
 
 | Path | When to use |
 | --- | --- |
@@ -255,6 +279,7 @@ Requires Node.js ≥ 20, npm ≥ 10. Expected: lint clean, build succeeds, 692 t
 GraphFlow/
 ├── plugin.json         # Agent Plugins 1.0 manifest
 ├── mcp.json            # Agent Plugins MCP (stdio)
+├── cordis.patch.yml    # DeepSeek Harness (dsh) bundle layer
 ├── skills/graphflow/   # portable Agent Skill (canonical SKILL.md)
 ├── src/
 │   ├── core/           # orchestration core: orchestrator, triage, dag-engine, agent-delegation
