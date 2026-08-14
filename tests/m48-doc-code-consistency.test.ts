@@ -28,12 +28,22 @@ function readJson(rel: string): Record<string, unknown> {
 const DOC_FILES = [
   "AGENTS.md",
   "README.md",
+  "README.zh.md",
   ".cursor/rules/graphflow.mdc",
   "src/surfaces/cursor-rules/graphflow.mdc",
   "src/surfaces/trae-rules/graphflow.md",
   "src/surfaces/trae-skill/graphflow/SKILL.md",
   "CLAUDE.md",
 ];
+
+function canonicalizeToolMention(raw: string): string | undefined {
+  // DeepSeek Harness public names: mcp__graphflow__graphflow_context
+  const name = raw.startsWith("graphflow__") ? raw.slice("graphflow__".length) : raw;
+  if (name === "graphflow_" || /^graphflow_+$/.test(name)) {
+    return undefined;
+  }
+  return name;
+}
 
 describe("Doc/code consistency", () => {
   const toolNames = getToolDefinitions().map((t) => t.name);
@@ -44,10 +54,12 @@ describe("Doc/code consistency", () => {
       if (!existsSync(join(root, file))) continue;
       const content = read(file);
       const mentioned = content.match(/graphflow_[a-z_]+/g) ?? [];
-      for (const name of new Set(mentioned)) {
+      for (const raw of new Set(mentioned)) {
+        const name = canonicalizeToolMention(raw);
+        if (!name) continue;
         expect(
           toolNameSet.has(name),
-          `${file} references "${name}" which is not a real MCP tool. ` +
+          `${file} references "${raw}" which is not a real MCP tool. ` +
             `Real tools: ${toolNames.join(", ")}`
         ).toBe(true);
       }
