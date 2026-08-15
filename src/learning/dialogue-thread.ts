@@ -197,10 +197,11 @@ export async function recordDialogueTurn(
   };
 
   await persistSession(client, nextSession);
+  const previousTipId = jumped ? tip?.id : undefined;
   await persistTurn(client, turn, nextSession, {
     linkParent: true,
     jumped,
-    previousTipId: jumped ? tip?.id : undefined,
+    ...(previousTipId ? { previousTipId } : {}),
     relatedNodeIds: turn.relatedNodeIds,
   });
 
