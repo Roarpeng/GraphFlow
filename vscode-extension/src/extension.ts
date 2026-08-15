@@ -16,7 +16,9 @@ import {
   type GraphFlowSettings,
   type SettingsPanelStatus,
   type SkillInsightsResult,
+  type WorkbenchOutlineNode,
 } from "./panels";
+import { WorkbenchTreeProvider, type WorkbenchTreeItem } from "./workbench-tree";
 import type { GraphFlowRuntime } from "./runtime-types";
 
 interface RunRecord {
@@ -239,7 +241,33 @@ export function activate(context: vscode.ExtensionContext): void {
       runtime.inspectGraph(undefined, { nodeLimit: 120, edgeLimit: 200 })
     );
     showGraphSnapshotPanel(context, snapshot);
+    workbenchTree.refresh();
   });
+
+  const workbenchTree = new WorkbenchTreeProvider(async () => {
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) return [];
+    const snapshot = await runGraphFlow(workspaceRoot, (runtime) =>
+      runtime.inspectGraph(undefined, { nodeLimit: 8, edgeLimit: 8 })
+    );
+    return snapshot.workbenchOutline ?? [];
+  });
+  const workbenchView = vscode.window.createTreeView("graphflow.workbench", {
+    treeDataProvider: workbenchTree,
+    showCollapseAll: true,
+  });
+  const showWorkbench = vscode.commands.registerCommand("graphflow.showWorkbench", async () => {
+    workbenchTree.refresh();
+    await vscode.commands.executeCommand("graphflow.workbench.focus");
+  });
+  const resumeWorkbenchTopic = vscode.commands.registerCommand(
+    "graphflow.resumeWorkbenchTopic",
+    async (node?: WorkbenchOutlineNode | WorkbenchTreeItem) => {
+      const topic = node && "kind" in node ? node : node && "outlineNode" in node ? node.outlineNode : undefined;
+      if (!topic?.id) return;
+      await copyWorkbenchResumePrompt(topic.id, topic.title, topic.lastUserPreview);
+    }
+  );
 
   const showSkills = vscode.commands.registerCommand("graphflow.showSkills", async () => {
     const workspaceRoot = getWorkspaceRoot();
@@ -326,6 +354,15 @@ export function activate(context: vscode.ExtensionContext): void {
           runtime.inspectGraph(undefined, { nodeLimit: 24, edgeLimit: 36 })
         );
         stream.markdown(formatGraphSnapshotMarkdown(snapshot));
+        return;
+      }
+
+      if (command === "tree") {
+        const snapshot = await runGraphFlow(workspaceRoot, (runtime) =>
+          runtime.inspectGraph(undefined, { nodeLimit: 8, edgeLimit: 8 })
+        );
+        workbenchTree.refresh();
+        stream.markdown(formatWorkbenchOutlineMarkdown(snapshot.workbenchOutline));
         return;
       }
 
@@ -421,6 +458,9 @@ export function activate(context: vscode.ExtensionContext): void {
     previewContextCommand,
     showSettings,
     showGraph,
+    showWorkbench,
+    resumeWorkbenchTopic,
+    workbenchView,
     showSkills,
     installMcp,
     participant
@@ -840,7 +880,7 @@ async function withWorkspaceCwd<T>(workspaceRoot: string, action: () => Promise<
 
 function detectInlineCommand(
   prompt: string
-): "run" | "plan" | "plan-insight" | "history" | "context" | "settings" | "diagnose" | "learn" | "graph" | "skills" {
+): "run" | "plan" | "plan-insight" | "history" | "context" | "settings" | "diagnose" | "learn" | "graph" | "tree" | "skills" {
   if (prompt.startsWith("/plan-insight") || prompt.startsWith("/insight")) {
     return "plan-insight";
   }
@@ -869,6 +909,10 @@ function detectInlineCommand(
     return "learn";
   }
 
+  if (prompt.startsWith("/tree") || prompt.startsWith("/workbench")) {
+    return "tree";
+  }
+
   if (prompt.startsWith("/graph")) {
     return "graph";
   }
@@ -884,7 +928,7 @@ function stripInlineCommand(prompt: string): string {
   return prompt
     .replace(/^\/plan-insight\s*/i, "")
     .replace(/^\/insight\s*/i, "")
-    .replace(/^\/(run|plan|history|context|settings|diagnose|learn|graph|skills)\s*/i, "")
+    .replace(/^\/(run|plan|history|context|settings|diagnose|learn|graph|tree|workbench|skills)\s*/i, "")
     .trim();
 }
 
@@ -945,7 +989,39 @@ function formatGraphSnapshotMarkdown(snapshot: GraphSnapshotResult): string {
     `- nodeTypes: ${typeLine}`,
     `- topRelations: ${relationLine}`,
     ...(snapshot.storePath ? [`- store: ${snapshot.storePath}`] : []),
+    ...formatWorkbenchOutlineMarkdown(snapshot.workbenchOutline).split("\n"),
   ].join("\n");
+}
+
+function formatWorkbenchOutlineMarkdown(outlines: GraphSnapshotResult["workbenchOutline"]): string {
+  if (!outlines || outlines.length === 0) {
+    return ["Workbench tree:", "- empty — call graphflow_plan to seed the function DAG."].join("\n");
+  }
+  const lines = ["Workbench tree:"];
+  for (const outline of outlines) {
+    lines.push(`- ${outline.task}`);
+    for (const node of outline.nodes) {
+      lines.push(`  - ${node.kind === "side" ? "旁支" : "主线"}${node.active ? " [active]" : ""}: ${node.title} (\`${node.id}\`)`);
+      for (const child of node.children) {
+        lines.push(`    - 旁支${child.active ? " [active]" : ""}: ${child.title} (\`${child.id}\`)`);
+      }
+    }
+    lines.push(`- resume: graphflow_context({ topicId: "${outline.activeTopicId}" })`);
+  }
+  return lines.join("\n");
+}
+
+async function copyWorkbenchResumePrompt(topicId: string, label?: string, preview?: string): Promise<void> {
+  const prompt = [
+    `请回到工作台节点继续细化，不要带着旁支上下文。`,
+    `调用 graphflow_context 时传入 topicId: "${topicId}"`,
+    label ? `节点: ${label}` : "",
+    preview ? `概要: ${preview}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  await vscode.env.clipboard.writeText(prompt);
+  void vscode.window.showInformationMessage("已复制「在此节点继续」提示词，粘贴后会回到该功能节点。");
 }
 
 function formatSkillInsightsMarkdown(insights: SkillInsightsResult): string {
@@ -1501,6 +1577,35 @@ function wireGraphSnapshotPanel(
         const text = error instanceof Error ? error.message : String(error);
         void vscode.window.showErrorMessage(`无法打开源文件 ${message.path}: ${text}`);
       }
+      return;
+    }
+    if (message?.type === "resumeDialogue") {
+      const topicId = typeof message.topicId === "string" ? message.topicId : "";
+      const turnId = typeof message.turnId === "string" ? message.turnId : "";
+      if (!topicId && !turnId) {
+        return;
+      }
+      const prompt = topicId
+        ? [
+            `请回到工作台节点继续细化，不要带着旁支上下文。`,
+            `调用 graphflow_context 时传入 topicId: "${topicId}"`,
+            message.label ? `节点: ${message.label}` : "",
+            message.preview ? `概要: ${message.preview}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n")
+        : [
+            `请从这次对话继续深挖，不要脱离主线。`,
+            `调用 graphflow_context 时传入 resumeFromTurnId: "${turnId}"`,
+            message.label ? `节点: ${message.label}` : "",
+            message.preview ? `上下文: ${message.preview}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n");
+      await vscode.env.clipboard.writeText(prompt);
+      void vscode.window.showInformationMessage(
+        topicId ? "已复制「在此节点继续」提示词，粘贴后会回到该功能节点。" : "已复制「从此处继续」提示词，粘贴到对话即可沿这条主线深挖。"
+      );
     }
   });
 

@@ -2,6 +2,7 @@ import {
   diagnoseRoutingResult,
   exportArtifact,
   expandAnchor,
+  captureAssistantReply,
   getSkillInsights,
   getFlywheelReport,
   getTokenSavingsStats,
@@ -17,6 +18,7 @@ import {
   runTaskResult,
   submitAgentInsightResult,
   mergeAgentInsightResult,
+  type PreviewDialogueOptions,
 } from "../cli/runtime";
 import { getRuntimeTimelineSummary } from "../../core/cancellation";
 import { isDeviationKind } from "../../learning/episodic-memory";
@@ -86,6 +88,7 @@ export async function executeToolCall(
     case "graphflow_context": {
       const query = readOptionalString(args.query);
       const anchorId = readOptionalString(args.anchorId);
+      const assistantReply = readOptionalString(args.assistantReply);
       if (anchorId && !query) {
         return textResponse(
           await expandAnchor(
@@ -95,13 +98,24 @@ export async function executeToolCall(
           )
         );
       }
+      if (!query && !anchorId && assistantReply) {
+        return textResponse(
+          await captureAssistantReply(
+            assistantReply,
+            readOptionalString(args.configPath),
+            readOptionalString(args.rootDir),
+            buildDialogueOptions(args)
+          )
+        );
+      }
       if (query && !anchorId) {
         return textResponse(
           await previewContext(
             query,
             readOptionalString(args.configPath),
             readOptionalString(args.rootDir),
-            readOptionalString(args.englishQuery)
+            readOptionalString(args.englishQuery),
+            buildDialogueOptions(args)
           )
         );
       }
@@ -112,11 +126,12 @@ export async function executeToolCall(
             query,
             readOptionalString(args.configPath),
             readOptionalString(args.rootDir),
-            readOptionalString(args.englishQuery)
+            readOptionalString(args.englishQuery),
+            buildDialogueOptions(args)
           )
         );
       }
-      throw new Error("Either 'query' or 'anchorId' must be provided for graphflow_context.");
+      throw new Error("Either 'query', 'anchorId', or 'assistantReply' must be provided for graphflow_context.");
     }
     case "graphflow_plan": {
       const mode = readOptionalString(args.mode) || "simple";
@@ -409,6 +424,28 @@ function buildInspectOptions(args: Record<string, unknown>): {
     ...(nodeLimit !== undefined ? { nodeLimit } : {}),
     ...(edgeLimit !== undefined ? { edgeLimit } : {}),
     ...(rootDir !== undefined ? { rootDir } : {}),
+  };
+}
+
+function readOptionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function buildDialogueOptions(args: Record<string, unknown>): PreviewDialogueOptions | undefined {
+  const topicId = readOptionalString(args.topicId);
+  const sessionId = readOptionalString(args.sessionId);
+  const resumeFromTurnId = readOptionalString(args.resumeFromTurnId);
+  const assistantReply = readOptionalString(args.assistantReply);
+  const recordDialogue = readOptionalBoolean(args.recordDialogue);
+  if (!topicId && !sessionId && !resumeFromTurnId && !assistantReply && recordDialogue === undefined) {
+    return undefined;
+  }
+  return {
+    ...(topicId ? { topicId } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(resumeFromTurnId ? { resumeFromTurnId } : {}),
+    ...(assistantReply ? { assistantReply } : {}),
+    ...(recordDialogue !== undefined ? { recordDialogue } : {}),
   };
 }
 

@@ -173,13 +173,16 @@ Step 1: graphflow_context(query: "<your question>")
 Step 2: Read summary + anchors as primary context
 Step 3: Expand specific anchors with graphflow_context(anchorId: "...") when needed
 Step 4: Read full files only when exact edits required
+Step 5: After answering, graphflow_context({ assistantReply: "<original answer>" }) to fill the pending turn
 ```
 
 **Input - context (preview):**
 ```typescript
 {
-  query: string;           // Required for preview - user question (Chinese OK)
+  query?: string;          // User question (Chinese OK). Omit when only filling assistantReply.
   englishQuery?: string;   // Agent-translated English code search terms (recommended for CJK)
+  topicId?: string;        // Click a workbench function node to refine / return to mainline
+  assistantReply?: string; // Original assistant answer to store on the pending turn/topic
   configPath?: string;
   rootDir?: string;
 }
@@ -245,9 +248,11 @@ Step 2: graphflow_plan(task: "<task description>")
     (simple-plan-intent, simple-plan-decomposition) and optional suggestedNodes.
     MUST submit/merge via graphflow_insight before treating the DAG as final.
   - Local suggestedNodes are heuristic hints only.
-Step 3: Review plan steps and dependencies
-Step 4: Execute step by step, using GraphFlow context for each step
-Step 5: graphflow_index() after major changes
+  - Result includes workbench.topics and workbench.outline (mainline DAG + side branches).
+Step 3: Review workbench.outline (function nodes), not chat turns. Wake later with graphflow workbench tree or graphflow_diagnose (graph.workbenchOutline).
+Step 4: Refine a node: graphflow_context({ query, topicId: "<topic:...>" })
+Step 5: If the conversation drifted, click a 主线 node (same topicId) to restore trunk context
+Step 6: graphflow_index() after major changes
 ```
 
 **Input:**

@@ -5,6 +5,7 @@ import type { AgentWorkItem } from "../../../core/agent-delegation";
 
 export type { GraphSnapshotSampleEdge, GraphSnapshotSampleNode };
 import type { GraphFlowConfig } from "../../../config/schema";
+import type { DialogueThreadView } from "../../../learning/dialogue-thread";
 
 export interface ContextPreviewResult {
   query: string;
@@ -39,6 +40,41 @@ export interface ContextPreviewResult {
     responseSchema?: Record<string, unknown>;
   }>;
   agentInstructions?: string;
+  /** Connected conversation spine (user Q + LLM A) for staying on the main thread. */
+  dialogueThread?: DialogueThreadView;
+  /** Active workbench topic container (function node on the canvas). */
+  workbench?: import("../../../learning/workbench-topic").WorkbenchContextView;
+  /** What this preview wrote into the dialogue/workbench graph. */
+  dialogueCapture?: DialogueCapture;
+}
+
+export interface DialogueCapture {
+  kind: "workbench" | "turn";
+  id: string;
+  /** True when the user question is stored but the assistant answer is still missing. */
+  pendingReply: boolean;
+  forked?: boolean;
+  filled?: boolean;
+}
+
+export interface CaptureAssistantReplyResult {
+  ok: boolean;
+  filled: boolean;
+  capture?: DialogueCapture;
+  reason?: string;
+}
+
+export interface PreviewDialogueOptions {
+  /** Click this workbench topic to refine / return to the mainline. */
+  topicId?: string;
+  /** Logical session name (hashed with workspace root). Default "main". */
+  sessionId?: string;
+  /** Continue from a previously recorded dialogue turn (click-to-resume). */
+  resumeFromTurnId?: string;
+  /** Original assistant answer to store on the pending turn/topic. Not an extracted abstract. */
+  assistantReply?: string;
+  /** Set false to skip recording this preview as a dialogue turn. */
+  recordDialogue?: boolean;
 }
 
 export interface GraphFlowSettings {
@@ -101,6 +137,7 @@ export interface GraphSnapshotResult {
   topRelations: Array<{ relation: GraphEdge["relation"]; count: number }>;
   sampleNodes: GraphSnapshotSampleNode[];
   sampleEdges: GraphSnapshotSampleEdge[];
+  workbenchOutline?: import("../../../learning/workbench-topic").WorkbenchOutline[];
 }
 
 export interface SkillInsightItem {
@@ -309,6 +346,13 @@ export interface PlanPreviewResult {
   status?: "awaiting-agent" | "complete";
   complete?: boolean;
   requiresAgentBridge?: boolean;
+  /** Topic-container canvas seeded from this plan (click a topicId to refine). */
+  workbench?: {
+    rootId: string;
+    activeTopicId: string;
+    topics: Array<{ id: string; title: string; mainline: boolean; isolated: boolean }>;
+    outline?: import("../../../learning/workbench-topic").WorkbenchOutline;
+  };
 }
 
 export interface ReportOutcomeResult {
@@ -340,6 +384,8 @@ export interface ExpandAnchorResult {
   sourceLine?: number;
   sourceSnippet?: string;
   metadata?: Record<string, unknown>;
+  /** When expanding a dialogue-turn node: the session spine so the agent can resume. */
+  dialogueThread?: DialogueThreadView;
 }
 
 export interface LearningNightlyResult {
