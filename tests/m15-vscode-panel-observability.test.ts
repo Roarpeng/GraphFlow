@@ -66,6 +66,71 @@ describe("M15 VS Code observability panels", () => {
     expect(html).toContain('id="graph-layer-tabs"');
     expect(html).toContain("index.ts");
     expect(html).toContain('id="graph-open-source"');
+    expect(html).toContain("工作台脉络");
+    expect(html).toContain("<details class=\"workbench-outline\">");
+    expect(html).not.toContain("<details class=\"workbench-outline\" open");
+  });
+
+  it("renders a collapsed workbench outline with click-to-resume topic buttons", () => {
+    const html = buildGraphSnapshotHtml(
+      {
+        transport: "file",
+        storePath: "graphflow-out/graphflow-graph.json",
+        nodeCount: 2,
+        edgeCount: 1,
+        nodeTypeCount: {
+          File: 0,
+          Symbol: 0,
+          Module: 0,
+          Concept: 0,
+          Requirement: 0,
+          TaskRun: 0,
+          Decision: 2,
+          Skill: 0,
+        },
+        topRelations: [{ relation: "depends_on", count: 1 }],
+        sampleNodes: [],
+        sampleEdges: [],
+        workbenchOutline: [
+          {
+            rootId: "workbench:abc",
+            task: "KUKA EtherCAT 回零",
+            activeTopicId: "topic:abc:side-1",
+            nodes: [
+              {
+                id: "topic:abc:io",
+                title: "实现 GVL 与 IO 表",
+                kind: "mainline",
+                active: false,
+                messageCount: 2,
+                pendingReply: false,
+                lastUserPreview: "先把 IO 表列出来",
+                children: [
+                  {
+                    id: "topic:abc:side-1",
+                    title: "Ubuntu 虚拟机磁盘怎么扩容",
+                    kind: "side",
+                    active: true,
+                    messageCount: 1,
+                    pendingReply: true,
+                    lastUserPreview: "Ubuntu 虚拟机磁盘怎么扩容",
+                    children: [],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      "https://example.vscode-cdn.net/media/graph-snapshot.js"
+    );
+
+    expect(html).toContain("工作台脉络（按需展开，不打断日常对话）");
+    expect(html).not.toContain("<details class=\"workbench-outline\" open");
+    expect(html).toContain("主线: 实现 GVL 与 IO 表");
+    expect(html).toContain("旁支 · 当前: Ubuntu 虚拟机磁盘怎么扩容");
+    expect(html).toContain('data-topic-id="topic:abc:io"');
+    expect(html).toContain("在此继续");
   });
 
   it("renders skill insights controls for sorting and outcome filtering", () => {

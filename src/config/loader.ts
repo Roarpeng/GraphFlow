@@ -268,6 +268,7 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       autoIndexOnPreview: input.graphPolicy.autoIndexOnPreview ?? true,
       autoIndexOnRun: input.graphPolicy.autoIndexOnRun ?? true,
       autoIndexOnSave: input.graphPolicy.autoIndexOnSave ?? true,
+      enableDialogueThread: input.graphPolicy.enableDialogueThread !== false,
       maxContextTokens: resolveMaxContextTokens(input.graphPolicy.maxContextTokens),
       workspaceRoot,
       graphStorePath:

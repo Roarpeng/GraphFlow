@@ -87,7 +87,10 @@ Step 1: graphflow_context(query: "<your question>")
 Step 2: Read summary + anchors as primary context
 Step 3: Expand specific anchors with graphflow_context(anchorId: "...") when needed
 Step 4: Read full files only when exact edits required
+Step 5: After answering, graphflow_context({ assistantReply: "<original answer>" }) to fill the pending turn
 ```
+
+Each `graphflow_context` preview records the user question into the graph (workbench topic if a plan DAG exists, otherwise a dialogue-turn). After answering, call again with `assistantReply` (query optional) so the original answer is stored. Workbench titles are display labels only — do not replace stored messages with an extracted abstract.
 
 ### Workflow 2: Plan Before Coding (complex tasks)
 
@@ -96,10 +99,13 @@ Step 4: Read full files only when exact edits required
 ```
 Step 1: graphflow_context(query: "<task>")
 Step 2: graphflow_plan(task: "<task description>")
-Step 3: Review plan steps and dependencies
-Step 4: Execute step by step, using GraphFlow context for each step
-Step 5: graphflow_index() after major changes
+Step 3: Review workbench.topics (function nodes on the canvas). Wake the outline later with graphflow workbench tree / graphflow_diagnose.graph.workbenchOutline.
+Step 4: Refine a node with graphflow_context({ query, topicId })
+Step 5: If the chat drifted, click a 主线 node (same topicId) to return
+Step 6: graphflow_index() after major changes
 ```
+
+Each `graphflow_plan` seeds a **workbench** of topic containers (function nodes). Click a node and pass `topicId` to `graphflow_context` to refine that function. Drift auto-forks an isolated side node; click a 主线 node to return. Messages stay inside the topic — the canvas is not one-turn-one-node. Wake the outline with `graphflow workbench tree`, VS Code **GraphFlow: Workbench Tree**, or chat `/tree`. The tree stays collapsed until you open it.
 
 ### Workflow 3: Deep Analysis (complex/ambiguous tasks)
 
@@ -131,6 +137,7 @@ If MCP is unavailable, use the CLI fallback and always request JSON output:
 graphflow --json context preview "<query>"
 graphflow --json plan "<task>"
 graphflow --json graph inspect
+graphflow --json workbench tree
 graphflow --json skill insights
 graphflow --json route diagnose
 ```

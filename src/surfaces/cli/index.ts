@@ -15,10 +15,12 @@ import {
   indexFile,
   indexGraph,
   inspectGraph,
+  listWorkbenchOutline,
   planAndBrainstorm,
   planAndBrainstormResult,
   planInsightResult,
   previewContext,
+  captureAssistantReply,
   rebuildGraph,
   reportOutcome,
   resetTokenSavingsStats,
@@ -36,9 +38,12 @@ import {
   listEpisodes,
   searchEpisodes,
   forgetEpisode,
+  listDialogueTurnsRuntime,
+  recordDialogueTurnRuntime,
   type MemoryEpisodeItem,
   type MemorySearchHit,
   type MemoryOutcome,
+  type DialogueListItem,
 } from "./runtime";
 import { validateConfigDetailed, type ConfigValidationResult } from "../../config/loader.js";
 import { isDeviationKind } from "../../learning/episodic-memory";
@@ -266,14 +271,50 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   }
 
   if (command === "context" && args[0] === "preview") {
-    const query = args.slice(1).join(" ").trim();
+    const query = args
+      .slice(1)
+      .filter((part, index, all) => {
+        if (part.startsWith("--")) return false;
+        const prev = all[index - 1];
+        if (prev === "--session" || prev === "--resume-from" || prev === "--reply" || prev === "--config" || prev === "--topic-id") {
+          return false;
+        }
+        return true;
+      })
+      .join(" ")
+      .trim();
     if (!query) {
-      console.log("Context query is required.");
-      process.exitCode = 1;
-      return undefined;
+      const replyOnly = readCliFlagValue(args, "--reply");
+      if (!replyOnly) {
+        console.log("Context query is required (or pass --reply to fill the pending assistant answer).");
+        process.exitCode = 1;
+        return undefined;
+      }
+      const sessionId = readCliFlagValue(args, "--session");
+      const topicId = readCliFlagValue(args, "--topic-id");
+      const data = await captureAssistantReply(replyOnly, configPath, undefined, {
+        ...(sessionId ? { sessionId } : {}),
+        ...(topicId ? { topicId } : {}),
+      });
+      return {
+        command: "context-capture-reply",
+        data,
+        legacyText: data.ok
+          ? `filled=${data.filled}; kind=${data.capture?.kind ?? "-"}; id=${data.capture?.id ?? "-"}`
+          : `ok=false; reason=${data.reason ?? "unknown"}`,
+      };
     }
 
-    const data = await previewContext(query, configPath);
+    const sessionId = readCliFlagValue(args, "--session");
+    const topicId = readCliFlagValue(args, "--topic-id");
+    const resumeFrom = readCliFlagValue(args, "--resume-from");
+    const reply = readCliFlagValue(args, "--reply");
+    const data = await previewContext(query, configPath, undefined, undefined, {
+      ...(sessionId ? { sessionId } : {}),
+      ...(topicId ? { topicId } : {}),
+      ...(resumeFrom ? { resumeFromTurnId: resumeFrom } : {}),
+      ...(reply ? { assistantReply: reply } : {}),
+    });
     return {
       command: "context-preview",
       data,
@@ -339,7 +380,17 @@ async function executeCommand(command: string, args: string[], configPath?: stri
           .map(([type, count]) => `${type}:${count}`)
           .join(",")}`,
         `relations=${data.topRelations.map((item) => `${item.relation}:${item.count}`).join(",")}`,
+        `workbench=${data.workbenchOutline?.length ?? 0}`,
       ].join("; "),
+    };
+  }
+
+  if (command === "workbench" && (args[0] === "tree" || args[0] === "outline" || !args[0])) {
+    const data = await listWorkbenchOutline(configPath);
+    return {
+      command: "workbench-tree",
+      data,
+      legacyText: data.lines.join("\n"),
     };
   }
 
@@ -641,6 +692,75 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
+  if (command === "dialogue" && args[0] === "list") {
+    const limitRaw = readCliFlagValue(args, "--limit");
+    const limit = limitRaw ? Number(limitRaw) : undefined;
+    if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
+      console.log("Usage: graphflow dialogue list [--session <name|id>] [--limit N] [--json] [--config <path>]");
+      process.exitCode = 1;
+      return undefined;
+    }
+    const sessionId = readCliFlagValue(args, "--session");
+    const data = await listDialogueTurnsRuntime(configPath, {
+      ...(sessionId ? { sessionId } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    });
+    return {
+      command: "dialogue-list",
+      data,
+      legacyText: formatDialogueList(data),
+    };
+  }
+
+  if (command === "dialogue" && args[0] === "record") {
+    const query =
+      readCliFlagValue(args, "--query") ??
+      args
+        .slice(1)
+        .filter((part) => !part.startsWith("--"))
+        .join(" ")
+        .trim();
+    if (!query) {
+      const replyOnly = readCliFlagValue(args, "--reply");
+      if (!replyOnly) {
+        console.log(
+          'Usage: graphflow dialogue record --query "<text>" [--reply "<text>"] [--resume-from <turnId>] [--session <name>] [--json] [--config <path>]\n       graphflow dialogue record --reply "<text>"  (fill pending assistant answer)'
+        );
+        process.exitCode = 1;
+        return undefined;
+      }
+      const sessionId = readCliFlagValue(args, "--session");
+      const data = await recordDialogueTurnRuntime("", {
+        ...(configPath ? { configPath } : {}),
+        assistantReply: replyOnly,
+        ...(sessionId ? { sessionId } : {}),
+      });
+      return {
+        command: "dialogue-record",
+        data,
+        legacyText: data
+          ? `id=${data.id}; seq=${data.seq}; filled=true; q=${data.userQuery}`
+          : "skipped",
+      };
+    }
+    const reply = readCliFlagValue(args, "--reply");
+    const sessionId = readCliFlagValue(args, "--session");
+    const resumeFrom = readCliFlagValue(args, "--resume-from");
+    const data = await recordDialogueTurnRuntime(query, {
+      ...(configPath ? { configPath } : {}),
+      ...(reply ? { assistantReply: reply } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      ...(resumeFrom ? { resumeFromTurnId: resumeFrom } : {}),
+    });
+    return {
+      command: "dialogue-record",
+      data,
+      legacyText: data
+        ? `id=${data.id}; seq=${data.seq}; jumped=${data.jumped}; q=${data.userQuery}`
+        : "skipped",
+    };
+  }
+
   console.log(buildCliUsage());
   process.exitCode = 1;
   return undefined;
@@ -662,6 +782,17 @@ function formatMemorySearch(hits: MemorySearchHit[]): string {
   for (const hit of hits) {
     lines.push(
       `id=${hit.id}; score=${hit.score.toFixed(3)}; outcome=${hit.outcome}; task=${hit.task}`
+    );
+  }
+  return lines.join("\n");
+}
+
+function formatDialogueList(items: DialogueListItem[]): string {
+  const lines: string[] = [`count=${items.length}`];
+  for (const item of items) {
+    const jump = item.jumped ? `; jump←${item.parentTurnId ?? "?"}` : "";
+    lines.push(
+      `id=${item.id}; seq=${item.seq}${jump}; q=${item.userQuery}; a=${item.assistantReply || "(pending)"}`
     );
   }
   return lines.join("\n");

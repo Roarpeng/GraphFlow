@@ -5,6 +5,8 @@ import {
   packageLabelForPath,
   workspacePackageForPath,
 } from "../config/workspace-packages.js";
+import { isDialogueSessionNode, isDialogueTurnNode, parseDialogueTurn } from "../learning/dialogue-thread.js";
+import { isWorkbenchTopicNode, parseWorkbenchTopic } from "../learning/workbench-topic.js";
 
 export type SnapshotViewLayer = "code" | "learning";
 
@@ -26,6 +28,10 @@ export interface GraphSnapshotSampleNode {
   sourcePath?: string;
   sourceLine?: number;
   viewLayer: SnapshotViewLayer;
+  /** Dialogue-turn id to pass as resumeFromTurnId on the next context preview. */
+  resumeFromTurnId?: string;
+  /** Workbench topic id to pass as topicId when continuing from this canvas node. */
+  resumeFromTopicId?: string;
 }
 
 export interface GraphSnapshotSampleEdge {
@@ -45,6 +51,8 @@ const SNAPSHOT_EDGE_PRIORITY: GraphEdge["relation"][] = [
   "documents",
   "implements",
   "derived_from",
+  "next_section",
+  "part_of",
   "co_occurs",
   "improves",
   "prerequisite",
@@ -205,7 +213,22 @@ export function enrichNodeForSnapshot(
   } else if (node.type === "TaskRun") {
     displayLabel = compactPreview(node.content, 48) || node.id.replace(/^taskrun:/, "") || "TaskRun";
   } else if (node.type === "Decision") {
-    displayLabel = compactPreview(node.content, 48) || node.id.replace(/^decision:/, "") || "Decision";
+    const topic = isWorkbenchTopicNode(node) ? parseWorkbenchTopic(node) : undefined;
+    const turn = isDialogueTurnNode(node) ? parseDialogueTurn(node) : undefined;
+    if (topic) {
+      displayLabel = `${topic.isolated ? "旁支" : "主线"}: ${compactPreview(topic.title, 32)}`;
+      folderGroup = "workbench";
+      displayPath = topic.id;
+    } else if (turn) {
+      displayLabel = `对话#${turn.seq}: ${compactPreview(turn.userQuery, 36)}`;
+      folderGroup = "dialogue";
+      displayPath = turn.id;
+    } else if (isDialogueSessionNode(node)) {
+      displayLabel = compactPreview(node.content, 48) || "对话主线";
+      folderGroup = "dialogue";
+    } else {
+      displayLabel = compactPreview(node.content, 48) || node.id.replace(/^decision:/, "") || "Decision";
+    }
   }
 
   return {
@@ -219,6 +242,8 @@ export function enrichNodeForSnapshot(
     ...(workspacePackage ? { workspacePackage } : {}),
     ...(sourcePath ? { sourcePath } : {}),
     ...(sourceLine !== undefined ? { sourceLine } : {}),
+    ...(isDialogueTurnNode(node) ? { resumeFromTurnId: node.id } : {}),
+    ...(isWorkbenchTopicNode(node) ? { resumeFromTopicId: node.id } : {}),
   };
 }
 
@@ -329,7 +354,15 @@ export function sampleGraphForSnapshot(
     }
   }
 
-  const sortedLearning = [...learningNodes].sort((a, b) => degree(b.id) - degree(a.id));
+  const sortedLearning = [...learningNodes].sort((a, b) => {
+    const aTopic = isWorkbenchTopicNode(a) ? 2 : isDialogueTurnNode(a) ? 1 : 0;
+    const bTopic = isWorkbenchTopicNode(b) ? 2 : isDialogueTurnNode(b) ? 1 : 0;
+    if (aTopic !== bTopic) return bTopic - aTopic;
+    const aSeq = typeof a.metadata?.seq === "number" ? a.metadata.seq : 0;
+    const bSeq = typeof b.metadata?.seq === "number" ? b.metadata.seq : 0;
+    if (aSeq !== bSeq) return bSeq - aSeq;
+    return degree(b.id) - degree(a.id);
+  });
   for (const node of sortedLearning) {
     if (countLayer("learning") >= learningBudget || selected.length >= nodeLimit) {
       break;

@@ -321,6 +321,7 @@ describe("M10 CLI runtime", () => {
       expect(snapshot.edgeCount).toBeGreaterThan(0);
       expect(snapshot.sampleNodes.length).toBeGreaterThan(0);
       expect(snapshot.topRelations.length).toBeGreaterThan(0);
+      expect(Array.isArray(snapshot.workbenchOutline)).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
