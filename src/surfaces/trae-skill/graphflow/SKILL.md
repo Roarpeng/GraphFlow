@@ -173,8 +173,11 @@ Step 1: graphflow_context(query: "<your question>")
 Step 2: Read summary + anchors as primary context
 Step 3: Expand specific anchors with graphflow_context(anchorId: "...") when needed
 Step 4: Read full files only when exact edits required
-Step 5: After answering, graphflow_context({ assistantReply: "<original answer>" }) to fill the pending turn
+Step 5: After answering the user, call graphflow_context({ assistantReply: "<original answer>" })
+        (query optional). This fills the pending turn/topic. Store original text, not an extracted abstract.
 ```
+
+Complex tasks: `graphflow_plan` seeds a **workbench** of topic containers (function nodes on the canvas). Pass `topicId` to refine a node or return to the mainline. Drift auto-forks an isolated side node; messages stay inside the topic — the canvas is not one-turn-one-node. Without a workbench, previews still record as dialogue-turn nodes (`resumeFromTurnId`). Workbench titles/Path labels are **display only**; next-turn context is Goal + path titles + local original Q/A.
 
 **Input - context (preview):**
 ```typescript
@@ -182,6 +185,8 @@ Step 5: After answering, graphflow_context({ assistantReply: "<original answer>"
   query?: string;          // User question (Chinese OK). Omit when only filling assistantReply.
   englishQuery?: string;   // Agent-translated English code search terms (recommended for CJK)
   topicId?: string;        // Click a workbench function node to refine / return to mainline
+  sessionId?: string;      // Dialogue session name (default "main")
+  resumeFromTurnId?: string; // Continue from a clicked dialogue-turn node (legacy, no workbench)
   assistantReply?: string; // Original assistant answer to store on the pending turn/topic
   configPath?: string;
   rootDir?: string;
