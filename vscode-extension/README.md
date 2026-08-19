@@ -6,9 +6,9 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 
 ## 当前版本
 
-- Extension / runtime：**1.9.13**
+- Extension / runtime：**1.9.14**
 - 市场身份：`roarpeng.graphflow`（displayName **GraphFlow Context & Memory**）
-- 对应 VSIX：`../artifacts/graphflow-1.9.13.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
+- 对应 VSIX：`../artifacts/graphflow-1.9.14.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
 
 ## Office/PDF 文档转换（anydoc）
 
@@ -16,6 +16,8 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 
 ## v1.9.x 要点
 
+- **工作台脉络（v1.9.14）**：复杂任务先 `graphflow_plan`，画布上是功能节点而不是一轮一节点。活动栏 **工作台脉络** 默认收起；**GraphFlow: Workbench Tree** / Chat `/tree` 唤醒。点击「在此继续」复制 `topicId`，下一轮 `graphflow_context` 带回该功能原文。偏离自动 Fork 旁支。
+- **DeepSeek Harness 插件（v1.9.14）**：`dsh plugin --profile web add @roarpeng/graphflow`
 - **记忆透明化（Memory Transparency）**：跨会话记忆可度量、可审计、可归因
   - **记忆审计**：`graphflow memory list|search|forget`（CLI / runtime 均可）——按结局过滤、相似度排序检索、单条记忆删除；每条记忆带来源任务、结局、lessons、staleGoal 标记
   - **记忆 ROI 基准**：`npm run benchmark:memory` 实测记忆开 100.0% vs 关 56.5%（62 任务，救回 27、0 受损），含「哪条记忆救了哪个任务」归因链
@@ -65,7 +67,7 @@ cursor --install-extension graphflow-1.9.5.vsix
 2. 打开任意项目文件夹作为工作区
 3. 命令面板 → **GraphFlow: Settings**
 4. 在同一页完成：勾选 Markdown / Office·PDF → **建立图谱** →（可选）安装 MCP、填模型
-5. 顶部芯片可打开图谱、上下文、技能、规划、运行
+5. 顶部芯片可打开图谱、上下文、技能、规划、运行；需要跳转主线时打开 **GraphFlow: Workbench Tree**（默认收起）
 6. （可选）配置 Provider / Smart·Economy 模型 → **测试路由**；存储与召回里可改 `embeddingProvider`
 7. 命令面板 → **GraphFlow: Preview Context** 或 **GraphFlow: Show Graph** 验证
 8. 使用一段时间后打开 **GraphFlow: Skill Insights** 查看飞轮贡献与记忆归因
@@ -82,6 +84,8 @@ cursor --install-extension graphflow-1.9.5.vsix
 | --- | --- |
 | GraphFlow: Show Settings | 全部配置与功能：图谱、文档解析、MCP、模型、快捷入口 |
 | GraphFlow: Show Graph | 知识图谱可视化 |
+| GraphFlow: Workbench Tree | 按需唤醒工作台脉络（主线 DAG + 旁支，默认收起） |
+| GraphFlow: Continue From Workbench Topic | 复制「在此节点继续」的 topicId 提示词 |
 | GraphFlow: Preview Context | 上下文压缩与 Token Budget |
 | GraphFlow: Plan & Brainstorm | 任务规划 |
 | GraphFlow: Plan Insight (Six Hats) | 六顶思考帽深度规划 |
@@ -89,7 +93,7 @@ cursor --install-extension graphflow-1.9.5.vsix
 | GraphFlow: Skill Insights | 技能飞轮 + **记忆归因面板** |
 | GraphFlow: Install MCP to Agents | 手动重试 MCP 自动安装 |
 
-Chat Agent（`@graphflow`）：`/run`、`/plan`、`/graph`、`/skills`、`/diagnose`、`/learn`、`/history`
+Chat Agent（`@graphflow`）：`/run`、`/plan`、`/graph`、`/tree`、`/workbench`、`/skills`、`/diagnose`、`/learn`、`/history`
 
 ## Agent 对话框
 
@@ -100,6 +104,7 @@ Chat Agent（`@graphflow`）：`/run`、`/plan`、`/graph`、`/skills`、`/diagn
 | `/run <task>` | `/run update readme and add tests` |
 | `/plan <task>` | `/plan refactor architecture and add tests` |
 | `/graph` | 输出图谱快照统计 |
+| `/tree` / `/workbench` | 唤醒工作台脉络（主线 + 旁支 + 当前 topicId） |
 | `/skills` | 技能飞轮 Top 洞察 + 记忆归因 |
 | `/diagnose` | 路由健康诊断 |
 | `/learn` | 触发 nightly 学习 |

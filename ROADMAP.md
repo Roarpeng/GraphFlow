@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-08-13（v1.9.13：Settings 一页配置）
+> 最后更新：2026-08-15（v1.9.14：工作台脉络 + dsh 插件）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -10,7 +10,7 @@
 - 🟡 进行中 / 部分完成
 - ⬜ 未开始（欢迎认领）
 
-## 已完成里程碑（v1.0 → v1.9.13）
+## 已完成里程碑（v1.0 → v1.9.14）
 
 | 版本 | 日期 | 里程碑 | 关键交付 | 状态 |
 | --- | --- | --- | --- | --- |
@@ -26,6 +26,7 @@
 | v1.9.11 | 2026-08-08 | **VSIX 按需 anydoc** | 激活时自动下载当前 OS 的 `@firecrawl/anydoc` 到 `~/.graphflow/optional-deps`；设置 `graphflow.downloadAnydoc` | ✅ |
 | v1.9.12 | 2026-08-12 | **Experience P0/P2 收口** | skill consolidate `--apply`；retrieval golden dataset；ATP/IR v1.2 Stable + episode↔Engineering KG | ✅ |
 | v1.9.13 | 2026-08-13 | **Settings 一页配置** | GraphFlow: Settings 集成文档解析、anydoc、语义召回、MCP、模型与功能入口 | ✅ |
+| v1.9.14 | 2026-08-15 | **工作台脉络** | 计划 DAG 播种功能主题容器；按需唤醒大纲；`topicId` / `assistantReply` 续聊；DeepSeek Harness 插件 | ✅ |
 
 ## 下一阶段
 
