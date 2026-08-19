@@ -10,6 +10,8 @@ export interface GraphSnapshotSampleNode {
   sourcePath?: string;
   sourceLine?: number;
   viewLayer: "code" | "learning";
+  resumeFromTurnId?: string;
+  resumeFromTopicId?: string;
 }
 
 export interface GraphSnapshotResult {
@@ -24,6 +26,25 @@ export interface GraphSnapshotResult {
   topRelations: Array<{ relation: string; count: number }>;
   sampleNodes: GraphSnapshotSampleNode[];
   sampleEdges: Array<{ from: string; relation: string; to: string }>;
+  workbenchOutline?: WorkbenchOutline[];
+}
+
+export interface WorkbenchOutlineNode {
+  id: string;
+  title: string;
+  kind: "mainline" | "side";
+  active: boolean;
+  messageCount: number;
+  pendingReply: boolean;
+  lastUserPreview?: string;
+  children: WorkbenchOutlineNode[];
+}
+
+export interface WorkbenchOutline {
+  rootId: string;
+  task: string;
+  activeTopicId: string;
+  nodes: WorkbenchOutlineNode[];
 }
 
 export interface SkillInsightsResult {
@@ -156,6 +177,51 @@ export interface SettingsPanelStatus {
     detected: boolean;
     installed: boolean;
   }>;
+}
+
+function renderWorkbenchOutlineHtml(outlines: WorkbenchOutline[] | undefined): string {
+  if (!outlines || outlines.length === 0) {
+    return `<section class="panel panel-body">
+      <details class="workbench-outline">
+        <summary>工作台脉络（按需展开）</summary>
+        <p class="empty">尚无功能节点。复杂任务先 graphflow_plan，主线 DAG 会出现在这里；日常对话保持收起。</p>
+      </details>
+    </section>`;
+  }
+  const trees = outlines
+    .map((outline) => {
+      const items = outline.nodes.map((node) => renderWorkbenchOutlineNode(node)).join("");
+      return `<div>
+        <div class="workbench-title">${escapeHtml(outline.task)}</div>
+        <ul class="workbench-tree">${items}</ul>
+      </div>`;
+    })
+    .join("");
+  return `<section class="panel panel-body">
+    <details class="workbench-outline">
+      <summary>工作台脉络（按需展开，不打断日常对话）</summary>
+      ${trees}
+    </details>
+  </section>`;
+}
+
+function renderWorkbenchOutlineNode(node: WorkbenchOutlineNode): string {
+  const kids =
+    node.children.length > 0
+      ? `<ul>${node.children.map((child) => renderWorkbenchOutlineNode(child)).join("")}</ul>`
+      : "";
+  const mark = node.kind === "side" ? "旁支" : "主线";
+  const extra = node.active ? " · 当前" : node.pendingReply ? " · 待回填" : "";
+  return `<li>
+    <div class="workbench-row ${node.kind}${node.active ? " active" : ""}">
+      <div class="workbench-meta">
+        <div class="workbench-title">${escapeHtml(`${mark}${extra}: ${node.title}`)}</div>
+        ${node.lastUserPreview ? `<div class="workbench-preview">${escapeHtml(node.lastUserPreview)}</div>` : ""}
+      </div>
+      <button type="button" class="secondary workbench-resume" data-topic-id="${escapeHtml(node.id)}" data-topic-label="${escapeHtml(node.title)}" data-topic-preview="${escapeHtml(node.lastUserPreview ?? "")}">在此继续</button>
+    </div>
+    ${kids}
+  </li>`;
 }
 
 export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri: string): string {
@@ -364,6 +430,30 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
     .pill { background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 4px 10px; font-size: 12px; }
     .empty { color: var(--muted); font-size: 13px; }
     .empty-guide { padding: 24px; text-align: center; color: var(--muted); line-height: 1.6; }
+    .workbench-outline { margin: 0; }
+    .workbench-outline > summary {
+      cursor: pointer;
+      font-weight: 700;
+      color: var(--ink);
+    }
+    .workbench-tree { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+    .workbench-tree ul { list-style: none; margin: 6px 0 0 16px; padding: 0; display: grid; gap: 4px; }
+    .workbench-tree li { display: grid; gap: 4px; }
+    .workbench-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: var(--panel-soft);
+    }
+    .workbench-row.side { border-style: dashed; }
+    .workbench-row.active { border-color: var(--accent); }
+    .workbench-meta { min-width: 0; }
+    .workbench-title { font-size: 13px; font-weight: 600; }
+    .workbench-preview { font-size: 11px; color: var(--muted); }
     @media (max-width: 1100px) {
       .layout { grid-template-columns: 1fr; }
       .toolbar, .hero-grid { grid-template-columns: 1fr; }
@@ -382,6 +472,7 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
       </div>
       <div class="legend-row">${typeLegend}</div>
     </section>
+    ${renderWorkbenchOutlineHtml(snapshot.workbenchOutline)}
     <section class="panel panel-body">
       <div class="toolbar">
         <div class="field">
@@ -436,6 +527,7 @@ export function buildGraphSnapshotHtml(snapshot: GraphSnapshotResult, scriptUri:
             </div>
             <div class="detail-actions">
               <button id="graph-open-source" type="button" class="secondary" disabled>打开源文件</button>
+      <button id="graph-resume-dialogue" type="button" class="secondary" disabled>在此节点继续</button>
             </div>
           </div>
           <div class="detail-card">

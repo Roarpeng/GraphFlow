@@ -4,7 +4,7 @@
   "displayName": "GraphFlow Context & Memory",
   "description": "Token-first code context, knowledge graph, MCP, planning and cross-session memory for VS Code/Cursor: memory audit CLI, flywheel attribution panel, semantic embeddings, skill sync.",
   "icon": "media/graphflow.png",
-  "version": "1.9.13",
+  "version": "1.9.14",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"
@@ -23,6 +23,7 @@
     "onCommand:graphflow.previewContext",
     "onCommand:graphflow.showSettings",
     "onCommand:graphflow.showGraph",
+    "onCommand:graphflow.showWorkbench",
     "onCommand:graphflow.showSkills",
     "onCommand:graphflow.installMcp",
     "onStartupFinished",
@@ -75,12 +76,44 @@
         "title": "GraphFlow: Graph Snapshot"
       },
       {
+        "command": "graphflow.showWorkbench",
+        "title": "GraphFlow: Workbench Tree"
+      },
+      {
+        "command": "graphflow.resumeWorkbenchTopic",
+        "title": "GraphFlow: Continue From Workbench Topic"
+      },
+      {
         "command": "graphflow.showSkills",
         "title": "GraphFlow: Skill Insights"
       },
       {
         "command": "graphflow.installMcp",
         "title": "GraphFlow: Install MCP to Agents"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "graphflow",
+          "title": "GraphFlow",
+          "icon": "media/graphflow.png"
+        }
+      ]
+    },
+    "views": {
+      "graphflow": [
+        {
+          "id": "graphflow.workbench",
+          "name": "工作台脉络",
+          "visibility": "collapsed"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "graphflow.workbench",
+        "contents": "日常 Chat 保持静默。复杂任务先 graphflow_plan，主线功能节点会出现在这里；点击节点复制 topicId 即可回到该功能继续。\n[打开工作台脉络](command:graphflow.showWorkbench)"
       }
     ],
     "chatParticipants": [
@@ -122,6 +155,14 @@
           {
             "name": "graph",
             "description": "Show graph snapshot summary"
+          },
+          {
+            "name": "tree",
+            "description": "Show the on-demand workbench outline (mainline DAG + side branches)"
+          },
+          {
+            "name": "workbench",
+            "description": "Alias of /tree — wake the collapsed workbench outline"
           },
           {
             "name": "skills",

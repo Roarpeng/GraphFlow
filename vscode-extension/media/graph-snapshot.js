@@ -75,6 +75,7 @@
   const nodeCards = document.getElementById("graph-node-cards");
   const detailBody = document.getElementById("graph-detail-body");
   const openSourceButton = document.getElementById("graph-open-source");
+  const resumeDialogueButton = document.getElementById("graph-resume-dialogue");
   const neighborList = document.getElementById("graph-neighbors");
   const graphFilterState = document.getElementById("graph-filter-state");
   const canvasStats = document.getElementById("graph-canvas-stats");
@@ -101,6 +102,9 @@
     changes: "变更",
     validates: "校验",
     conflicts_with: "冲突",
+    next_section: "下一轮",
+    part_of: "属于",
+    derived_from: "来自",
   };
 
   const nodeColors = {
@@ -477,6 +481,9 @@
       if (openSourceButton) {
         openSourceButton.disabled = true;
       }
+      if (resumeDialogueButton) {
+        resumeDialogueButton.disabled = true;
+      }
       return;
     }
     if (!selectedId) {
@@ -486,6 +493,9 @@
 
     if (openSourceButton) {
       openSourceButton.disabled = !activeNode.sourcePath;
+    }
+    if (resumeDialogueButton) {
+      resumeDialogueButton.disabled = !activeNode.resumeFromTopicId && !activeNode.resumeFromTurnId;
     }
 
     detailBody.innerHTML =
@@ -590,6 +600,34 @@
       openSourceForNode(activeNode);
     });
   }
+
+  if (resumeDialogueButton) {
+    resumeDialogueButton.addEventListener("click", () => {
+      const activeNode = allNodes.find((node) => node.id === selectedId);
+      if (!vscode || (!activeNode?.resumeFromTopicId && !activeNode?.resumeFromTurnId)) return;
+      vscode.postMessage({
+        type: "resumeDialogue",
+        topicId: activeNode.resumeFromTopicId || "",
+        turnId: activeNode.resumeFromTurnId || "",
+        label: activeNode.displayLabel || activeNode.id,
+        preview: activeNode.contentPreview || "",
+      });
+    });
+  }
+
+  document.addEventListener("click", (event) => {
+    const button = event.target && event.target.closest ? event.target.closest(".workbench-resume") : null;
+    if (!vscode || !button) return;
+    const topicId = button.getAttribute("data-topic-id") || "";
+    if (!topicId) return;
+    vscode.postMessage({
+      type: "resumeDialogue",
+      topicId,
+      turnId: "",
+      label: button.getAttribute("data-topic-label") || topicId,
+      preview: button.getAttribute("data-topic-preview") || "",
+    });
+  });
 
   document.getElementById("graph-reset").addEventListener("click", () => {
     searchInput.value = "";

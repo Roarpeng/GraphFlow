@@ -108,4 +108,59 @@ describe("M42 snapshot view enrichment", () => {
     expect(sample.sampleNodes.length).toBeGreaterThan(0);
     expect(sample.sampleEdges.length).toBeGreaterThan(0);
   });
+
+  it("labels workbench topic nodes as mainline or side branch", () => {
+    const topic: GraphNode = {
+      id: "topic:abc:task-1",
+      type: "Decision",
+      content: "workbench-topic 主线 IO 映射",
+      metadata: {
+        kind: "workbench-topic",
+        record: JSON.stringify({
+          id: "topic:abc:task-1",
+          rootId: "workbench:abc",
+          title: "实现 GVL 与 IO 表",
+          description: "实现 GVL 与 IO 表",
+          mainline: true,
+          isolated: false,
+          messages: [],
+          createdAt: 1,
+          updatedAt: 1,
+        }),
+      },
+    };
+    const enriched = enrichNodeForSnapshot(topic);
+    expect(enriched.viewLayer).toBe("learning");
+    expect(enriched.displayLabel).toContain("主线");
+    expect(enriched.resumeFromTopicId).toBe("topic:abc:task-1");
+    expect(enriched.folderGroup).toBe("workbench");
+  });
+
+  it("labels dialogue-turn nodes for click-to-resume in the learning layer", () => {
+    const turn: GraphNode = {
+      id: "dialogue:abc:0001",
+      type: "Decision",
+      content: "dialogue-turn #1 Q: 确定性输入 | A: 不能保证",
+      metadata: {
+        kind: "dialogue-turn",
+        seq: 1,
+        record: JSON.stringify({
+          id: "dialogue:abc:0001",
+          sessionId: "dialogue-session:abc",
+          seq: 1,
+          userQuery: "确定性输入还能保证吗",
+          assistantReply: "索引层可以，打包层不能。",
+          jumped: false,
+          relatedNodeIds: [],
+          createdAt: 1,
+          updatedAt: 1,
+        }),
+      },
+    };
+    const enriched = enrichNodeForSnapshot(turn);
+    expect(enriched.viewLayer).toBe("learning");
+    expect(enriched.displayLabel).toContain("对话#1");
+    expect(enriched.resumeFromTurnId).toBe("dialogue:abc:0001");
+    expect(enriched.folderGroup).toBe("dialogue");
+  });
 });

@@ -35,6 +35,7 @@ export function getDefaultConfig(): GraphFlowConfig {
       autoIndexOnPreview: true,
       autoIndexOnRun: true,
       autoIndexOnSave: true,
+      enableDialogueThread: true,
       workspaceRoot: process.cwd(),
       includeExtensions: [...DEFAULT_INCLUDE_EXTENSIONS],
       // 默认使用 auto 后端：sqlite 优先（FTS5 索引，避免大仓库下整文件读写放大），

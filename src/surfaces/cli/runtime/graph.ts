@@ -27,6 +27,24 @@ import {
 } from "../../../learning/skill-consolidate.js";
 import { parseSkillState } from "../../../learning/skill-store.js";
 import { logger } from "../../../utils/logger.js";
+import {
+  formatDialogueThreadLines,
+  isDialogueTurnNode,
+  loadDialogueThread,
+  parseDialogueTurn,
+  recordDialogueTurn,
+  scoreTopicOverlap,
+} from "../../../learning/dialogue-thread.js";
+import {
+  appendTopicMessage,
+  buildWorkbenchOutlines,
+  formatWorkbenchOutlineLines,
+  isWorkbenchTopicNode,
+  loadWorkbenchContext,
+  loadWorkbenchOutlines,
+  parseWorkbenchTopic,
+  topicPendingReply,
+} from "../../../learning/workbench-topic.js";
 import { buildEmbeddingOptions,
 } from "./env.js";
 import {
@@ -38,11 +56,13 @@ import {
   resolveGraphStoreAfterIndex,
 } from "./helpers.js";
 import type {
+  CaptureAssistantReplyResult,
   ContextPreviewResult,
   ExpandAnchorResult,
   GraphIndexResult,
   GraphRebuildResult,
   GraphSnapshotResult,
+  PreviewDialogueOptions,
   SkillInsightItem,
   SkillInsightsResult,
 } from "./types.js";
@@ -108,18 +128,18 @@ export async function previewContext(
   query: string,
   configPath?: string,
   rootDir?: string,
-  englishQuery?: string
+  englishQuery?: string,
+  dialogue?: PreviewDialogueOptions
 ): Promise<ContextPreviewResult> {
   const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
   const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
 
   const { getCachedContext, cacheContextResult } = await import("../../../graph/context-cache.js");
   const cached = getCachedContext(query, workspaceRoot);
-  if (cached) {
-    return cached;
-  }
-
   const graphClient = createGraphClient(config);
+  if (cached) {
+    return attachWorkbenchThenDialogue(cached, graphClient, config, query, dialogue);
+  }
 
   if (config.graphPolicy.autoIndexOnPreview) {
     const root = config.graphPolicy.workspaceRoot ?? process.cwd();
@@ -240,7 +260,218 @@ export async function previewContext(
 
   cacheContextResult(query, workspaceRoot, result);
 
-  return result;
+  return attachWorkbenchThenDialogue(result, graphClient, config, query, dialogue);
+}
+
+async function attachWorkbenchThenDialogue(
+  result: ContextPreviewResult,
+  client: GraphClient,
+  config: GraphFlowConfig,
+  query: string,
+  dialogue?: PreviewDialogueOptions
+): Promise<ContextPreviewResult> {
+  if (dialogue?.recordDialogue === false) {
+    return result;
+  }
+  const withWorkbench = await attachWorkbenchTopic(result, client, config, query, dialogue);
+  if (withWorkbench.workbench) {
+    return withWorkbench;
+  }
+  return attachDialogueThread(result, client, config, query, dialogue);
+}
+
+async function attachWorkbenchTopic(
+  result: ContextPreviewResult,
+  client: GraphClient,
+  config: GraphFlowConfig,
+  query: string,
+  dialogue?: PreviewDialogueOptions
+): Promise<ContextPreviewResult> {
+  try {
+    const appended = await appendTopicMessage(client, {
+      query,
+      ...(config.graphPolicy.workspaceRoot ? { workspaceRoot: config.graphPolicy.workspaceRoot } : {}),
+      ...(dialogue?.topicId ? { topicId: dialogue.topicId } : {}),
+      ...(dialogue?.assistantReply ? { assistantReply: dialogue.assistantReply } : {}),
+      allowAutoFork: !dialogue?.topicId,
+    });
+    if (!appended) {
+      return result;
+    }
+    const view = await loadWorkbenchContext(client, appended.topic.id);
+    if (!view) {
+      return result;
+    }
+    const promptLines = [...view.promptLines];
+    if (appended.forked) {
+      promptLines.splice(
+        1,
+        0,
+        `Forked: 当前问法偏离主线，已挂到孤立旁支。点回主线 topicId 可恢复主干。`
+      );
+    }
+    return {
+      ...result,
+      summary: [...promptLines, ...result.summary],
+      summaryCount: result.summaryCount + promptLines.length,
+      workbench: { ...view, promptLines },
+      dialogueCapture: {
+        kind: "workbench",
+        id: appended.topic.id,
+        pendingReply: topicPendingReply(appended.topic),
+        forked: appended.forked,
+        filled: appended.filled,
+      },
+    };
+  } catch (error) {
+    logger.warn({ error }, "Workbench topic attach failed");
+    return result;
+  }
+}
+
+async function attachDialogueThread(
+  result: ContextPreviewResult,
+  client: GraphClient,
+  config: GraphFlowConfig,
+  query: string,
+  dialogue?: PreviewDialogueOptions
+): Promise<ContextPreviewResult> {
+  if (config.graphPolicy.enableDialogueThread === false) {
+    return result;
+  }
+  try {
+    const workspaceRoot = config.graphPolicy.workspaceRoot;
+    const recorded = dialogue?.recordDialogue !== false
+      ? await recordDialogueTurn(client, {
+          userQuery: query,
+          ...(workspaceRoot ? { workspaceRoot } : {}),
+          ...(dialogue?.sessionId ? { sessionName: dialogue.sessionId } : {}),
+          ...(dialogue?.resumeFromTurnId ? { resumeFromTurnId: dialogue.resumeFromTurnId } : {}),
+          ...(dialogue?.assistantReply ? { assistantReply: dialogue.assistantReply } : {}),
+          relatedNodeIds: result.anchors
+            .filter((anchor) => anchor.layer === "L1")
+            .slice(0, 6)
+            .map((anchor) => anchor.id),
+        })
+      : undefined;
+    const thread = await loadDialogueThread(client, {
+      ...(workspaceRoot ? { workspaceRoot } : {}),
+      ...(dialogue?.sessionId ? { sessionName: dialogue.sessionId } : {}),
+    });
+    if (!thread) {
+      return result;
+    }
+    const priorTokens = thread.turns
+      .slice(0, -1)
+      .flatMap((turn) => turn.userQuery.toLowerCase().split(/[^a-z0-9_\u4e00-\u9fff]+/))
+      .filter((token) => token.length >= 2);
+    const overlap = scoreTopicOverlap(priorTokens, query);
+    const jumped = thread.jumped || (thread.turns.length > 1 && overlap < 0.2);
+    const promptLines = formatDialogueThreadLines({ ...thread, jumped, overlap });
+    if (jumped && thread.turns.length > 1) {
+      promptLines.splice(
+        1,
+        0,
+        `Alignment: overlap=${Math.round(overlap * 100)}% — 已链入图谱，问法偏离主线。传入 resumeFromTurnId 可从某次对话继续深挖。`
+      );
+    }
+    const injectSpine = thread.turns.length >= 2;
+    const tip = thread.turns[thread.turns.length - 1];
+    return {
+      ...result,
+      ...(injectSpine
+        ? {
+            summary: [...promptLines, ...result.summary],
+            summaryCount: result.summaryCount + promptLines.length,
+          }
+        : {}),
+      dialogueThread: { ...thread, jumped, overlap, promptLines },
+      ...(tip
+        ? {
+            dialogueCapture: {
+              kind: "turn" as const,
+              id: tip.id,
+              pendingReply: !tip.assistantReply.trim(),
+              filled: recorded?.reused === true && Boolean(dialogue?.assistantReply?.trim()),
+            },
+          }
+        : {}),
+    };
+  } catch (error) {
+    logger.warn({ error }, "Dialogue thread attach failed");
+    return result;
+  }
+}
+
+/**
+ * Write the original assistant answer onto the pending user turn/topic.
+ * Does not run context packaging and does not invent an LLM summary node.
+ */
+export async function captureAssistantReply(
+  assistantReply: string,
+  configPath?: string,
+  rootDir?: string,
+  dialogue?: PreviewDialogueOptions
+): Promise<CaptureAssistantReplyResult> {
+  const reply = assistantReply.trim();
+  if (reply.length < 1) {
+    return { ok: false, filled: false, reason: "reply-empty" };
+  }
+  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
+  const client = createGraphClient(config);
+  const workspaceRoot = config.graphPolicy.workspaceRoot;
+
+  try {
+    const appended = await appendTopicMessage(client, {
+      query: "",
+      assistantReply: reply,
+      ...(workspaceRoot ? { workspaceRoot } : {}),
+      ...(dialogue?.topicId ? { topicId: dialogue.topicId } : {}),
+      allowAutoFork: false,
+    });
+    if (appended) {
+      return {
+        ok: true,
+        filled: appended.filled,
+        capture: {
+          kind: "workbench",
+          id: appended.topic.id,
+          pendingReply: topicPendingReply(appended.topic),
+          filled: appended.filled,
+        },
+      };
+    }
+  } catch (error) {
+    logger.warn({ error }, "Workbench reply capture failed");
+  }
+
+  if (config.graphPolicy.enableDialogueThread === false) {
+    return { ok: false, filled: false, reason: "no-pending-turn" };
+  }
+  try {
+    const recorded = await recordDialogueTurn(client, {
+      userQuery: "",
+      assistantReply: reply,
+      ...(workspaceRoot ? { workspaceRoot } : {}),
+      ...(dialogue?.sessionId ? { sessionName: dialogue.sessionId } : {}),
+    });
+    if (recorded.recorded && recorded.turn) {
+      return {
+        ok: true,
+        filled: recorded.reused,
+        capture: {
+          kind: "turn",
+          id: recorded.turn.id,
+          pendingReply: !recorded.turn.assistantReply.trim(),
+          filled: recorded.reused,
+        },
+      };
+    }
+    return { ok: false, filled: false, reason: recorded.skipped ?? "no-pending-turn" };
+  } catch (error) {
+    logger.warn({ error }, "Dialogue reply capture failed");
+    return { ok: false, filled: false, reason: "capture-failed" };
+  }
 }
 
 export async function indexGraph(
@@ -360,6 +591,7 @@ export async function inspectGraph(
       topRelations: [],
       sampleNodes: [],
       sampleEdges: [],
+      workbenchOutline: [],
     };
   }
 
@@ -402,7 +634,21 @@ export async function inspectGraph(
       edgeLimit,
       config.graphPolicy.workspaceRoot ?? process.cwd()
     ),
+    workbenchOutline: buildWorkbenchOutlines(store.nodes, store.edges),
   };
+}
+
+export async function listWorkbenchOutline(
+  configPath?: string,
+  rootDir?: string
+): Promise<{
+  outlines: import("../../../learning/workbench-topic").WorkbenchOutline[];
+  lines: string[];
+}> {
+  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
+  const client = createGraphClient(config);
+  const outlines = await loadWorkbenchOutlines(client);
+  return { outlines, lines: formatWorkbenchOutlineLines(outlines) };
 }
 
 export async function getSkillInsights(
@@ -1067,7 +1313,7 @@ export async function expandAnchor(
     }
   }
 
-  return {
+  const expanded: ExpandAnchorResult = {
     anchorId: node.id,
     type: node.type,
     content: node.content,
@@ -1076,6 +1322,37 @@ export async function expandAnchor(
     ...(sourceSnippet ? { sourceSnippet } : {}),
     ...(node.metadata ? { metadata: node.metadata } : {}),
   };
+
+  if (isWorkbenchTopicNode(node)) {
+    const topic = parseWorkbenchTopic(node);
+    const view = topic ? await loadWorkbenchContext(graphClient, topic.id) : undefined;
+    if (view) {
+      expanded.content = view.promptLines.join("\n");
+      expanded.metadata = {
+        ...(expanded.metadata ?? {}),
+        workbench: view,
+        topicId: view.active.id,
+      };
+    }
+  } else if (isDialogueTurnNode(node)) {
+    const turn = parseDialogueTurn(node);
+    const thread = await loadDialogueThread(graphClient, {
+      ...(turn?.sessionId ? { sessionId: turn.sessionId } : {}),
+      ...(config.graphPolicy.workspaceRoot ? { workspaceRoot: config.graphPolicy.workspaceRoot } : {}),
+    });
+    if (thread) {
+      expanded.dialogueThread = thread;
+      expanded.content = [
+        `Dialogue turn #${turn?.seq ?? "?"} (${turn?.jumped ? "jump" : "mainline"})`,
+        `Q: ${turn?.userQuery ?? node.content}`,
+        `A: ${turn?.assistantReply?.trim() ? turn.assistantReply : "(pending)"}`,
+        `resumeFromTurnId: ${node.id}`,
+        ...thread.promptLines,
+      ].join("\n");
+    }
+  }
+
+  return expanded;
 }
 
 /**

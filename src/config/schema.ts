@@ -28,6 +28,12 @@ export interface GraphFlowConfig {
     autoIndexOnPreview?: boolean;
     autoIndexOnRun?: boolean;
     autoIndexOnSave?: boolean;
+    /**
+     * Record each context preview as a dialogue-turn graph node (user question
+     * + optional LLM reply) and inject the thread spine into later previews.
+     * Default true. Set false to disable.
+     */
+    enableDialogueThread?: boolean;
     workspaceRoot?: string;
     includeExtensions?: string[];
     transport: "memory" | "mcp-http" | "file" | "sqlite" | "auto";
