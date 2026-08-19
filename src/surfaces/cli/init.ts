@@ -29,6 +29,7 @@ import {
   type ClaudeCodeHooksResult,
 } from "../../integrations/claude-code-hooks";
 import {
+  DSH_GLUE_ROW_ID,
   getDshHarnessStatus,
   installDshHarness,
   uninstallDshHarness,
@@ -660,6 +661,14 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
       status: toDoctorStatus(dshStatus.installed, true),
       detected: true,
     });
+    checks.push({
+      category: "hooks",
+      agent: "DeepSeek Harness glue",
+      path: `${dshStatus.patchPath}#${DSH_GLUE_ROW_ID}`,
+      scope: "user",
+      status: toDoctorStatus(dshStatus.glueInstalled, true),
+      detected: true,
+    });
   }
 
   const installed = checks.filter((c) => c.status === "installed").length;
@@ -669,7 +678,7 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
   const remediation = ok
     ? []
     : [
-        "Run `graphflow install` to register MCP + Skills (+ Claude Code hooks / DeepSeek Harness when detected).",
+        "Run `graphflow install` to register MCP + Skills (+ Claude Code hooks / DeepSeek Harness overlay+glue when detected). Primary dsh path: `dsh plugin --profile web add @roarpeng/graphflow`.",
         "Re-run `graphflow doctor --json` and fix any remaining missing items.",
         "Ensure target agent directories exist (e.g. ~/.cursor / ~/.claude / ~/.dsh) so installers can detect them.",
       ];

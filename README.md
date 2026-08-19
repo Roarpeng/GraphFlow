@@ -11,7 +11,7 @@ The community is converging on an "agent harness" vocabulary: **memory + hooks +
 | Harness primitive | GraphFlow implementation |
 | --- | --- |
 | **Memory** | 12-language AST code graph + Episodic / Skill / Decision nodes — project knowledge *and* project experience persist across sessions |
-| **Hooks** | Outcome auto-capture (on by default) + Claude Code `SessionEnd` / `Stop` hooks close the learning loop automatically — no manual outcome reporting required |
+| **Hooks** | Outcome auto-capture (on by default) + Claude Code `SessionEnd` / `Stop` and DeepSeek Harness `agent/disposed` glue close the learning loop automatically — no manual outcome reporting required |
 | **Skills** | A four-class flywheel (`proven` / `correctable` / `anti-pattern` / `noise`) with canary validation — skills are promoted by evidence, not by assertion |
 
 Pure TypeScript/Node. CLI + MCP + VS Code extension. Fully offline, no API key required.
@@ -228,14 +228,26 @@ That removes user + workspace MCP entries, `skills/graphflow` folders, GraphFlow
 
 ## DeepSeek Harness 插件（用法与能力）
 
-GraphFlow 是 [DeepSeek Harness](https://github.com/Roarpeng/deepseek-harness) 的 [`dsh-plugin`](https://github.com/topics/dsh-plugin)。包内 `dsh.bundle` + `cordis.patch.yml` 会把 GraphFlow MCP 挂到内置 `@deepseek-ai/dsh-mcp-client`。模型看到的工具名是 `mcp__graphflow__graphflow_*`。中文说明见 [README.zh.md](README.zh.md)。
+GraphFlow 是 [DeepSeek Harness](https://www.deepseek.com/harness/en/) 的 [`dsh-plugin`](https://github.com/topics/dsh-plugin)。包内 `dsh.bundle` + `cordis.patch.yml` 会把 GraphFlow MCP 挂到内置 `@deepseek-ai/dsh-mcp-client`，并把 `@roarpeng/graphflow/dsh` glue 插入插件树。模型看到的工具名是 `mcp__graphflow__graphflow_*`。中文说明见 [README.zh.md](README.zh.md)。
 
-**能力（10 个工具）：** 压缩上下文、任务规划 DAG、桥接执行描述、结果回填飞轮、ATP insight、增量/全量建图、技能洞察、诊断、图谱产物、技能指南。
+**在 dsh 上能工作 vs 不能工作：**
 
-**装进某个 profile：**
+| 能力 | dsh |
+| --- | --- |
+| 10 个 MCP 工具（`mcp__graphflow__graphflow_*`），stdio `cwd` = 会话工作区 | 是 |
+| Skill（on-demand `skill({name:"graphflow"})`；bundle glue 注册，不必先 `graphflow install`） | 是 |
+| 会话结束飞轮：`agent/disposed` 关闭 pending episode（`GRAPHFLOW_AUTO_CAPTURE=0` 可关） | 是 |
+| 首轮短 hint：先调 `graphflow_context`（`rootDir` = cwd） | 是 |
+| Workbench 数据（`topicId` / outline）经 MCP `graphflow_context` / `graphflow_diagnose` | 是 |
+| VS Code/Cursor 图谱面板、Settings webview、Workbench Tree、`@graphflow` chat | **否**（宿主 UI，不移植） |
+| Cursor Agent Plugins 1.0 发现 | **否**（dsh 用 `dsh.bundle`） |
+| Claude Code `SessionStart/End/Stop` **文件** hooks | **否**（dsh analog 是上面的 glue） |
+
+**装进某个 profile（推荐）：**
 
 ```bash
 dsh plugin --profile web add @roarpeng/graphflow
+npx @deepseek-ai/dsh web
 ```
 
 **或在已有 `~/.dsh` 时写 home 级 overlay（对所有 profile 生效）：**
@@ -244,9 +256,9 @@ dsh plugin --profile web add @roarpeng/graphflow
 npx @roarpeng/graphflow install
 ```
 
-会写入 `$DSH_HOME/cordis.patch.yml` 与 `$DSH_HOME/skills/graphflow/SKILL.md`。卸载：`npx @roarpeng/graphflow uninstall`，或 `dsh plugin --profile web remove @roarpeng/graphflow`。
+会写入 `$DSH_HOME/cordis.patch.yml`（MCP + glue）与 `$DSH_HOME/skills/graphflow/SKILL.md`。卸载：`npx @roarpeng/graphflow uninstall`，或 `dsh plugin --profile web remove @roarpeng/graphflow`。`graphflow doctor` 会检查 overlay、glue、skill。
 
-**用法：** 先 `mcp__graphflow__graphflow_context`（传入 `rootDir`），复杂任务再 `graphflow_plan`；改完代码后 `graphflow_index`；若走了 `graphflow_run`，结束后必须 `graphflow_report_outcome`。不要在 patch 里写死 `GRAPHFLOW_WORKSPACE_ROOT`。
+**用法：** 第一轮先 `mcp__graphflow__graphflow_context`（传入 `rootDir` = 仓库绝对路径），复杂任务再 `graphflow_plan`；改完代码后 `graphflow_index`；若走了 `graphflow_run`，结束后必须 `graphflow_report_outcome`。不要在 patch 里写死 `GRAPHFLOW_WORKSPACE_ROOT`。
 
 ## Agent integrations
 
@@ -295,7 +307,8 @@ Requires Node.js ≥ 20, npm ≥ 10. Expected: lint clean, build succeeds, 692 t
 GraphFlow/
 ├── plugin.json         # Agent Plugins 1.0 manifest
 ├── mcp.json            # Agent Plugins MCP (stdio)
-├── cordis.patch.yml    # DeepSeek Harness (dsh) bundle layer
+├── cordis.patch.yml    # DeepSeek Harness (dsh) bundle layer (MCP + glue)
+├── dsh/plugin.mjs      # dsh ESM glue: skill register + session-end capture
 ├── skills/graphflow/   # portable Agent Skill (canonical SKILL.md)
 ├── src/
 │   ├── core/           # orchestration core: orchestrator, triage, dag-engine, agent-delegation

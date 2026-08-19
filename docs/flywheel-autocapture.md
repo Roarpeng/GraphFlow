@@ -10,14 +10,16 @@ GraphFlow 的飞轮（episode + skill）依赖宿主 agent 主动调用
 如果宿主 agent 忘了调用（或没有 MCP 连接），episode 永远停留在 `pending`，
 飞轮退化为只有 `context` 运行、没有任何学习回填的"空转"状态。
 
-本特性提供三条互补的自动闭环路径（auto-capture 默认开启，
+本特性提供四条互补的自动闭环路径（auto-capture 默认开启，
 `GRAPHFLOW_AUTO_CAPTURE=0` 可显式关闭；hooks 需安装、backfill 为一次性操作）：
 
 1. **自动记录（auto-capture）**：run 完成路径上自动生成 `pending` episode 并写入
    会话日志（`.graphflow/session-journal.jsonl`）。
 2. **Claude Code hooks**：`SessionStart / SessionEnd / Stop` 时自动调用
    `graphflow outcome report <episodeId> <success>` 回填真实结局。
-3. **一次性回填（backfill）**：从历史事件（learning-events.jsonl）或 git log
+3. **DeepSeek Harness glue**（`dsh/plugin.mjs`）：`agent/disposed`（及 live
+   `session/flush`）时 spawn 同一条 `graphflow outcome report`，不发明第二套飞轮。
+4. **一次性回填（backfill）**：从历史事件（learning-events.jsonl）或 git log
    挖掘 episode 记录，补上此前"没回填"的数据。
 
 ## 机制
@@ -113,7 +115,18 @@ uninstallClaudeCodeHooks();  // 只移除本生成器写入的条目
 
 注意：hook 进程需要 `graphflow` CLI 在 PATH 中
 （`npm i -g @roarpeng/graphflow`），否则用 `GRAPHFLOW_HOOK_BIN` 指向绝对路径。
-开启 pending 自动记录仍需 `GRAPHFLOW_AUTO_CAPTURE=1`（hooks 只负责回填已有 pending）。
+开启 pending 自动记录仍需 `GRAPHFLOW_AUTO_CAPTURE` 未被设为 `0`（hooks 只负责回填已有 pending）。
+
+### DeepSeek Harness glue（dsh/plugin.mjs）
+
+DSH 没有 Claude Code 的 SessionEnd **文件** hook。Bundle 行 `id: graphflow-dsh`
+（`name: '@roarpeng/graphflow/dsh'`）在 `agent/disposed` 时读取同一份
+`.graphflow/session-journal.jsonl`，spawn `graphflow outcome report <episodeId> true`。
+失败吞掉，不进入 harness 循环。`GRAPHFLOW_AUTO_CAPTURE=0` 时跳过。
+
+`dsh plugin --profile web add @roarpeng/graphflow` 即挂上该 glue（不必先
+`graphflow install`）。`graphflow install` 仍会把同一 insert 写入
+`$DSH_HOME/cordis.patch.yml`，供已有 `~/.dsh` 的用户做 home overlay。
 
 ### 一次性回填（scripts/backfill-episodes.cjs）
 
@@ -145,7 +158,7 @@ node scripts/backfill-episodes.cjs --events /path/events.jsonl   # 强制指定�
 
 | 现象 | 原因 | 解法 |
 | --- | --- | --- |
-| episode 全为 pending 且数量不变 | 宿主 agent 未调 report_outcome | 安装 Claude Code hooks（见上） |
+| episode 全为 pending 且数量不变 | 宿主 agent 未调 report_outcome | 安装 Claude Code hooks 或 dsh glue（见上） |
 | 0 episode | 从未启用 episodic memory / 无回填 | 确认 `GRAPHFLOW_AUTO_CAPTURE` 未被设为 `0` + 安装 hooks，或运行 backfill 脚本 |
 | 0 skill | 飞轮无 episode 可学 | 同上，先有 episode 才有 skill 学习 |
 

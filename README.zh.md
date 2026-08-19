@@ -47,7 +47,7 @@ graphflow context preview --reply "助手原文回答"
 
 ## DeepSeek Harness 插件
 
-GraphFlow 本身就是一个 **dsh 插件包**（topic：`dsh-plugin`）。`package.json` 声明 `dsh.bundle`，根目录 `cordis.patch.yml` 把 GraphFlow MCP 插入 Harness 的插件树。
+GraphFlow 本身就是一个 **dsh 插件包**（topic：`dsh-plugin`）。`package.json` 声明 `dsh.bundle`，根目录 `cordis.patch.yml` 把 GraphFlow MCP 与 ESM glue 插入 Harness 的插件树。
 
 ### 能力
 
@@ -64,7 +64,15 @@ GraphFlow 本身就是一个 **dsh 插件包**（topic：`dsh-plugin`）。`pack
 | 产物 | 图谱 import / export | `mcp__graphflow__graphflow_artifact` |
 | 技能指南 | 给已连接 Agent 的用法说明 | `mcp__graphflow__graphflow_skill_guide` |
 
-核心价值：本地 AST 知识图谱、L1–L3 分层压缩（实测约 98% token 节省）、跨会话 Episodic / Skill 飞轮。GraphFlow **不执行代码**，只给宿主 Agent 压缩上下文和计划。
+| 在 dsh 上 | 状态 |
+| --- | --- |
+| 上述 10 个 MCP 工具（stdio `cwd` = 会话工作区） | 支持 |
+| Skill（bundle glue 注册；`dsh plugin add` 即可） | 支持 |
+| 会话结束飞轮（`agent/disposed` → `outcome report`） | 支持 |
+| VS Code/Cursor 图谱面板、Settings、Workbench Tree、`@graphflow` chat | **不移植** |
+| Cursor Agent Plugins 发现 / Claude Code Session* **文件** hooks | **不移植**（dsh 用 bundle + glue） |
+
+核心价值：本地 AST 知识图谱、L1–L3 分层压缩（实测约 98% token 节省）、跨会话 Episodic / Skill 飞轮。GraphFlow **不执行代码**，只给宿主 Agent 压缩上下文和计划。Workbench 数据走 MCP `graphflow_context` / `graphflow_diagnose` 即可。
 
 ### 安装
 
@@ -72,7 +80,7 @@ GraphFlow 本身就是一个 **dsh 插件包**（topic：`dsh-plugin`）。`pack
 
 ```bash
 dsh plugin --profile web add @roarpeng/graphflow
-dsh --profile web
+npx @deepseek-ai/dsh web
 ```
 
 **方式 B：home 级 overlay（所有 profile 生效）**
@@ -87,8 +95,8 @@ npx @roarpeng/graphflow install
 
 | 路径 | 作用 |
 | --- | --- |
-| `$DSH_HOME/cordis.patch.yml` | 插入 `mcp-graphflow` 行（stdio 拉起 `graphflow-mcp`） |
-| `$DSH_HOME/skills/graphflow/SKILL.md` | Skill 目录，教模型何时、如何调用上述工具 |
+| `$DSH_HOME/cordis.patch.yml` | 插入 `mcp-graphflow`（`cwd: process.cwd()`）与 `graphflow-dsh` glue |
+| `$DSH_HOME/skills/graphflow/SKILL.md` | Skill 目录（`graphflow install`）；bundle glue 也会在运行时 `ctx.skills.register` |
 
 开发态也可：
 

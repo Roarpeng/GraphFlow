@@ -4,9 +4,10 @@
  * GraphFlow ships as a dsh bundle (`dsh.bundle` + `cordis.patch.yml`). Users can:
  *   dsh plugin --profile web add @roarpeng/graphflow
  *
- * `graphflow install` also writes the same MCP insert into `$DSH_HOME/cordis.patch.yml`
+ * `graphflow install` also writes the same MCP + glue insert into `$DSH_HOME/cordis.patch.yml`
  * (shared by every profile) when ~/.dsh (or DSH_HOME / GRAPHFLOW_DSH_HOME) exists.
- * Skills go to `$DSH_HOME/skills/graphflow/SKILL.md` via skill-installer targets.
+ * Skills go to `$DSH_HOME/skills/graphflow/SKILL.md` via skill-installer targets;
+ * the bundle glue also registers the skill at runtime so `dsh plugin add` is enough.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -14,6 +15,8 @@ import { dirname, join } from "node:path";
 
 export const DSH_HOME_ENV = "GRAPHFLOW_DSH_HOME";
 export const DSH_MCP_ROW_ID = "mcp-graphflow";
+export const DSH_GLUE_ROW_ID = "graphflow-dsh";
+export const DSH_GLUE_PACKAGE = "@roarpeng/graphflow/dsh";
 export const DSH_PATCH_BEGIN = "# GRAPHFLOW-DSH-BEGIN";
 export const DSH_PATCH_END = "# GRAPHFLOW-DSH-END";
 
@@ -28,10 +31,11 @@ export interface DshHarnessStatus {
   agent: string;
   detected: boolean;
   installed: boolean;
+  glueInstalled: boolean;
+  skillInstalled: boolean;
   dshHome: string;
   patchPath: string;
   skillPath: string;
-  skillInstalled: boolean;
 }
 
 export interface DshHarnessInstallResult {
@@ -83,7 +87,10 @@ export function buildGraphFlowDshInsertPatch(): string {
     "        env:",
     "          GRAPHFLOW_MCP_STDIO: '1'",
     "          GRAPHFLOW_LOG_JSON: '1'",
+    "        cwd: !!js process.cwd()",
     "        failOnStartupError: false",
+    `    - id: ${DSH_GLUE_ROW_ID}`,
+    `      name: '${DSH_GLUE_PACKAGE}'`,
     "",
   ].join("\n");
 }
@@ -97,6 +104,13 @@ export function patchContainsGraphFlowDsh(content: string): boolean {
     return true;
   }
   return new RegExp(`^\\s*-\\s*id:\\s*${DSH_MCP_ROW_ID}\\s*$`, "m").test(content);
+}
+
+export function patchContainsGraphFlowDshGlue(content: string): boolean {
+  if (content.includes(DSH_GLUE_PACKAGE)) {
+    return true;
+  }
+  return new RegExp(`^\\s*-\\s*id:\\s*${DSH_GLUE_ROW_ID}\\s*$`, "m").test(content);
 }
 
 function upsertManagedPatch(existing: string, managed: string): { next: string; changed: boolean; kind: "created" | "updated" | "skipped" } {
@@ -136,21 +150,26 @@ export function getDshHarnessStatus(options: { dshHome?: string } = {}): DshHarn
   const paths = getDshHarnessPaths(resolveDshHome(options.dshHome));
   const detected = existsSync(paths.dshHome);
   let installed = false;
+  let glueInstalled = false;
   if (detected && existsSync(paths.patchPath)) {
     try {
-      installed = patchContainsGraphFlowDsh(readFileSync(paths.patchPath, "utf8"));
+      const content = readFileSync(paths.patchPath, "utf8");
+      installed = patchContainsGraphFlowDsh(content);
+      glueInstalled = patchContainsGraphFlowDshGlue(content);
     } catch {
       installed = false;
+      glueInstalled = false;
     }
   }
   return {
     agent: "DeepSeek Harness",
     detected,
     installed,
+    glueInstalled,
+    skillInstalled: existsSync(paths.skillPath),
     dshHome: paths.dshHome,
     patchPath: paths.patchPath,
     skillPath: paths.skillPath,
-    skillInstalled: existsSync(paths.skillPath),
   };
 }
 
@@ -204,7 +223,7 @@ export function uninstallDshHarness(options: { dshHome?: string } = {}): DshHarn
     } else {
       writeFileSync(paths.patchPath, next.endsWith("\n") ? next : `${next}\n`, "utf8");
     }
-    return { status: "updated", filePath: paths.patchPath, message: "removed GraphFlow MCP insert" };
+    return { status: "updated", filePath: paths.patchPath, message: "removed GraphFlow MCP+glue insert" };
   } catch (error) {
     return {
       status: "error",

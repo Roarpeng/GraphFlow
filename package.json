@@ -11,6 +11,7 @@
     "plugin.json",
     "mcp.json",
     "cordis.patch.yml",
+    "dsh",
     "skills",
     "src/surfaces/trae-skill",
     "src/surfaces/trae-rules",
@@ -32,6 +33,14 @@
   "description": "A Context-Aware Multi-Agent Orchestration Engine",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./dsh": "./dsh/plugin.mjs",
+    "./package.json": "./package.json"
+  },
   "bin": {
     "graphflow": "dist/surfaces/cli/index.js",
     "graphflow-mcp": "dist/surfaces/mcp/server.js"

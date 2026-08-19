@@ -68,7 +68,7 @@ graphflow skill sync import   # newer updatedAt wins; --force overwrites
 | Path | Primary use | What you get |
 | --- | --- | --- |
 | **Agent Plugins 1.0** (`plugin.json` / `mcp.json` / `skills/`) | **Preferred** single-host install (e.g. Cursor local plugins / marketplace) | MCP + canonical Skill discovered together |
-| **DeepSeek Harness bundle** (`dsh.bundle` + `cordis.patch.yml`) | `dsh plugin add @roarpeng/graphflow` | MCP via `@deepseek-ai/dsh-mcp-client` (`mcp__graphflow__*`) |
+| **DeepSeek Harness bundle** (`dsh.bundle` + `cordis.patch.yml` + `dsh/plugin.mjs`) | `dsh plugin add @roarpeng/graphflow` then `npx @deepseek-ai/dsh web` | MCP (`mcp__graphflow__*`，cwd=工作区）+ runtime skill + `agent/disposed` 飞轮关闭。无 VS Code UI |
 | **`npx @roarpeng/graphflow install`** | Fallback / multi-agent / Rules | MCP + Skill + Rules across 15+ detected agents (incl. `~/.dsh`) |
 | **`graphflow doctor`** | Diagnostics | Which agents are installed / wired |
 
