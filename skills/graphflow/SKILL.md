@@ -114,17 +114,18 @@ GraphFlow 是 DeepSeek Harness 的 `dsh-plugin`。装入后模型看到的工具
 
 ```sh
 dsh plugin --profile web add @roarpeng/graphflow
-# 或已有 ~/.dsh 时：
+npx @deepseek-ai/dsh web
+# 或已有 ~/.dsh 时写 home overlay + skill 文件：
 npx @roarpeng/graphflow install
 ```
 
 | 路径 | 作用 |
 |------|------|
-| 包内 `cordis.patch.yml` | `dsh plugin add` 插入的 bundle 层 |
+| 包内 `cordis.patch.yml` | `dsh plugin add` 插入的 bundle 层：MCP（`cwd: process.cwd()`）+ `@roarpeng/graphflow/dsh` glue |
 | `$DSH_HOME/cordis.patch.yml`（默认 `~/.dsh`） | `graphflow install` 写的 home overlay |
-| `$DSH_HOME/skills/graphflow/SKILL.md` | 本 Skill |
+| `$DSH_HOME/skills/graphflow/SKILL.md` | 本 Skill（install 复制）；glue 也会在运行时 `ctx.skills.register` |
 
-**用法：** 每次 `graphflow_context` / `graphflow_plan` 传仓库绝对路径 `rootDir`。不要在 patch 里写死 `GRAPHFLOW_WORKSPACE_ROOT`。走了 `graphflow_run` 后必须 `graphflow_report_outcome`。
+**用法：** 第一轮先 `mcp__graphflow__graphflow_context`（`rootDir` = 仓库绝对路径）。不要在 patch 里写死 `GRAPHFLOW_WORKSPACE_ROOT`。走了 `graphflow_run` 后必须 `graphflow_report_outcome`。会话结束时 glue 会 best-effort 关闭 pending episode（`GRAPHFLOW_AUTO_CAPTURE=0` 可关）。VS Code 图谱面板 / Workbench Tree 不在 dsh 上。
 
 ---
 

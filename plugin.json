@@ -26,7 +26,7 @@
       "install": "dsh plugin --profile web add @roarpeng/graphflow",
       "installHome": "npx @roarpeng/graphflow install",
       "toolsPrefix": "mcp__graphflow__",
-      "usage": "先 mcp__graphflow__graphflow_context（rootDir=仓库绝对路径），复杂任务 graphflow_plan，改完 graphflow_index；graphflow_run 之后必须 graphflow_report_outcome。",
+      "usage": "先 mcp__graphflow__graphflow_context（rootDir=仓库绝对路径），复杂任务 graphflow_plan，改完 graphflow_index；graphflow_run 之后必须 graphflow_report_outcome。启动：npx @deepseek-ai/dsh web。",
       "capabilities": [
         "graphflow_context",
         "graphflow_plan",
