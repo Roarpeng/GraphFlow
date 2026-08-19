@@ -197,6 +197,7 @@ describe("dsh ESM glue plugin", () => {
 
     expect(typeof handlers["agent/pre-step"]).toBe("function");
     expect(typeof handlers["agent/disposed"]).toBe("function");
+    expect(handlers["session/flush"]).toBeUndefined();
     const next = (): { kind: string } => ({ kind: "enter" });
     const decision = handlers["agent/pre-step"]?.({ agent, cwd: workspace }, next);
     expect(decision).toEqual({ kind: "enter" });
@@ -212,6 +213,35 @@ describe("dsh ESM glue plugin", () => {
       expect.arrayContaining(["graphflow", "outcome", "report", "ep-dsh-1", "true"])
     );
     expect(spawned[0]?.cwd).toBe(workspace);
+  });
+
+  it("does not close pending episodes on session/flush", () => {
+    const handlers: Record<string, (...args: unknown[]) => unknown> = {};
+    const spawned: unknown[] = [];
+    const workspace = makeTempRoot("gf-dsh-glue-flush-");
+    mkdirSync(join(workspace, ".graphflow"), { recursive: true });
+    writeFileSync(
+      join(workspace, ".graphflow", "session-journal.jsonl"),
+      `${JSON.stringify({ episodeId: "ep-flush", task: "still-working", createdAt: Date.now() })}\n`,
+      "utf8"
+    );
+    apply(
+      {
+        skills: { register() {} },
+        on(event: string, handler: (...args: unknown[]) => unknown) {
+          handlers[event] = handler;
+        },
+      },
+      {
+        cwd: workspace,
+        spawn: ((..._args: unknown[]) => {
+          spawned.push(_args);
+          return { unref() {} };
+        }) as typeof import("node:child_process").spawn,
+      }
+    );
+    expect(handlers["session/flush"]).toBeUndefined();
+    expect(spawned).toHaveLength(0);
   });
 
   it("skips outcome spawn when GRAPHFLOW_AUTO_CAPTURE is off", () => {
