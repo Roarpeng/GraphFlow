@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-[![npm version](https://img.shields.io/badge/npm-1.9.13-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.9.14-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **The memory & context harness for coding agents.** Local-first code knowledge graph · bounded context compression (~98% token savings) · cross-session learning flywheel.
 
@@ -99,7 +99,8 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | **Team sharing** | `skill sync`: export/import skill packs to a committable `.graphflow/skills/team-skills.json`; imports are a **bidirectional MERGE** (per-skill-id union, newer `updatedAt` wins, ties keep local, local-only skills preserved; `--force` to overwrite); golden retrieval queries round-trip via `.graphflow/team-golden.json`; [security model](docs/team-memory-security.md) |
 | **Benchmarks** | [Comprehensive 92.9%](benchmarks/COMPREHENSIVE-RESULTS.md) · [Independent-style 96.2%](benchmarks/INDEPENDENT-RESULTS.md) · [context-readiness eval](benchmarks/SWE-BENCH-RESULTS.md) · [98.2% token savings](benchmarks/RESULTS.md) |
 | **Model routing** | Smart / Economy tiers; multi-provider health probes and fallback (DeepSeek, OpenAI, Anthropic, Bailian, Doubao) |
-| **Observability** | `graphflow_diagnose` / `route diagnose`: provider health + graph stats + token savings + **flywheel health** (auto-capture, episodes, skills by class, session journal) |
+| **Workbench** | Plan DAG seeds function-topic containers; collapsed outline; click `topicId` to resume; drift forks a side branch; original Q/A stored via `assistantReply` |
+| **Observability** | `graphflow_diagnose` / `route diagnose`: provider health + graph stats + token savings + **flywheel health** (auto-capture, episodes, skills by class, session journal) + workbench outline |
 | **Agent surfaces** | CLI `--json`; MCP stdio (10 tools); auto-install into 15+ agents (incl. **Codex Windows NODE/NPX_CLI short-path MCP**) |
 | **Engineering quality** | TypeScript strict; vitest suite; `npm run ci` includes extension packaging and smoke tests |
 
@@ -111,25 +112,40 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 
 | Tool | Function |
 | --- | --- |
-| `graphflow_context` | Compressed context package (query → anchors + summaries; anchorId → expand) |
-| `graphflow_plan` | Task planning (mode='simple' or 'insight'; agent-delegated without an LLM) |
+| `graphflow_context` | Compressed context package (query → anchors + summaries; `topicId` / `assistantReply` to resume a workbench node or fill the pending answer; anchorId → expand) |
+| `graphflow_plan` | Task planning (mode='simple' or 'insight'; seeds `workbench.topics` + `workbench.outline`; agent-delegated without an LLM) |
 | `graphflow_run` | Orchestration + bridge execution descriptor |
 | `graphflow_report_outcome` | Outcome backfill (incl. deviation classification), closes the learning flywheel |
 | `graphflow_insight` | ATP insight submit / merge (agent bridge protocol) |
 | `graphflow_index` | Incremental / full indexing |
 | `graphflow_skill_insights` | Skill insights |
-| `graphflow_diagnose` | Diagnostics (provider + graph + token savings + flywheel) |
+| `graphflow_diagnose` | Diagnostics (provider + graph + token savings + flywheel + `graph.workbenchOutline`) |
 | `graphflow_artifact` | Graph artifact import / export |
 | `graphflow_skill_guide` | GraphFlow skill usage guide |
 
 **MCP workspace resolution**: the workspace is discovered automatically from the MCP client `cwd`; override with `GRAPHFLOW_WORKSPACE_ROOT`.
+
+## Workbench navigation (v1.9.14)
+
+Everyday chat stays a single thread. Complex work seeds a **workbench of function-topic containers** from `graphflow_plan` — one canvas node per plan step, not one node per turn. Click a node and pass `topicId` to `graphflow_context` to refine that function or return to the mainline. Drift auto-forks an isolated side branch (`co_occurs`); the trunk is not overwritten. After answering, call `graphflow_context({ assistantReply })` so the original reply is stored. Outline titles are display labels only; next-turn context is Goal + ancestor titles + the node's original Q/A.
+
+Wake the collapsed outline when you need it (still 10 MCP tools):
+
+```bash
+graphflow workbench tree --json            # CLI
+# VS Code / Cursor: GraphFlow: Workbench Tree (Activity Bar, default collapsed) or chat /tree
+# MCP: graphflow_diagnose → graph.workbenchOutline
+graphflow context preview --topic-id "<topic:...>" "continue from this node"
+graphflow context preview --reply "original assistant answer"
+```
 
 ## CLI quick reference
 
 ```bash
 graphflow graph index .                    # build the graph
 graphflow context preview "orchestrator"   # preview compressed context
-graphflow plan "refactor planner" --json   # plan
+graphflow plan "refactor planner" --json   # plan (also seeds workbench topics)
+graphflow workbench tree --json            # on-demand function DAG + side branches
 graphflow run "update readme"              # orchestrate (bridge)
 graphflow skill insights                   # skill insights
 graphflow skill report                     # flywheel contribution report

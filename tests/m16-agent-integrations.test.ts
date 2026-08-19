@@ -51,6 +51,17 @@ describe("M16 agent integrations", () => {
       "graphflow_artifact",
       "graphflow_skill_guide",
     ]);
+    const contextTool = getToolDefinitions().find((tool) => tool.name === "graphflow_context");
+    expect(contextTool?.inputSchema.properties).toMatchObject({
+      topicId: expect.any(Object),
+      resumeFromTurnId: expect.any(Object),
+      assistantReply: expect.any(Object),
+      sessionId: expect.any(Object),
+    });
+    const planTool = getToolDefinitions().find((tool) => tool.name === "graphflow_plan");
+    expect(planTool?.description).toContain("workbench.outline");
+    const diagnoseTool = getToolDefinitions().find((tool) => tool.name === "graphflow_diagnose");
+    expect(diagnoseTool?.description).toContain("workbenchOutline");
   });
 
   it("executes MCP tool calls and returns text content", async () => {

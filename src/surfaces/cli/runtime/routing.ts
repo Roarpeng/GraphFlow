@@ -57,6 +57,7 @@ import { buildEmbeddingOptions } from "./env.js";
 import { extractTokenCost } from "./helpers.js";
 import { hasIndexCache } from "../../../graph/file-indexer-cache";
 import { getFlywheelReport } from "./graph.js";
+import { buildWorkbenchOutlines, seedWorkbenchFromPlan } from "../../../learning/workbench-topic.js";
 import type {
   PlanPreviewResult,
   ReportOutcomeResult,
@@ -412,7 +413,10 @@ export async function planAndBrainstormResult(
   // No GraphFlow LLM → bridge to connected coding agent for task decomposition.
   // Local heuristic DAG is attached as suggestedNodes only.
   if (!hasUsableLlmProvider(config)) {
-    return buildAgentDelegatedSimplePlan(task, skillCondition);
+    const delegated = buildAgentDelegatedSimplePlan(task, skillCondition);
+    const steps = delegated.suggestedNodes ?? delegated.nodes;
+    const workbench = await maybeSeedWorkbench(task, steps, configPath);
+    return workbench ? { ...delegated, workbench } : delegated;
   }
 
   const mode = triageTask(task);
@@ -427,14 +431,16 @@ export async function planAndBrainstormResult(
     skillCondition
   );
 
-  return {
+  const result = {
     mode,
     ideas,
     nodes,
-    nodesStatus: "final",
+    nodesStatus: "final" as const,
     complete: true,
     requiresAgentBridge: false,
   };
+  const workbench = await maybeSeedWorkbench(task, nodes, configPath);
+  return workbench ? { ...result, workbench } : result;
 }
 
 export async function planAndBrainstorm(task: string, configPath?: string): Promise<string> {
@@ -691,7 +697,49 @@ export async function mergeAgentInsightResult(
     rootDir ? { rootDir } : undefined
   );
   const graphClient = createGraphClient(config);
-  return mergeAgentInsightsFromGraph(graphClient, task);
+  const merged = await mergeAgentInsightsFromGraph(graphClient, task);
+  if (merged.complete && merged.plan.length > 0) {
+    await maybeSeedWorkbench(task, merged.plan, configPath, rootDir);
+  }
+  return merged;
+}
+
+async function maybeSeedWorkbench(
+  task: string,
+  steps: Array<{ id: string; description: string; dependencies: string[] }>,
+  configPath?: string,
+  rootDir?: string
+): Promise<PlanPreviewResult["workbench"] | undefined> {
+  if (steps.length === 0) return undefined;
+  try {
+    const config = bindRuntimeWorkspaceRoot(
+      resolveConfig(configPath),
+      rootDir ? { rootDir } : undefined
+    );
+    const client = createGraphClient(config);
+    const seeded = await seedWorkbenchFromPlan(client, {
+      task,
+      steps,
+      ...(config.graphPolicy.workspaceRoot ? { workspaceRoot: config.graphPolicy.workspaceRoot } : {}),
+    });
+    const snapshot = client.readSnapshot?.();
+    const outline = snapshot
+      ? buildWorkbenchOutlines(snapshot.nodes, snapshot.edges).find((item) => item.rootId === seeded.root.id)
+      : undefined;
+    return {
+      rootId: seeded.root.id,
+      activeTopicId: seeded.root.activeTopicId,
+      topics: seeded.topics.map((topic) => ({
+        id: topic.id,
+        title: topic.title,
+        mainline: topic.mainline,
+        isolated: topic.isolated,
+      })),
+      ...(outline ? { outline } : {}),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 export type { SubmitAgentInsightResult } from "../../../core/submit-agent-insight";

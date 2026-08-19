@@ -69,7 +69,8 @@ export function getToolDefinitions(): ToolDefinition[] {
     },
     {
       name: "graphflow_context",
-      description: "[Core] Preview near-lossless context packaging OR expand a context anchor to full content. Pass 'query' to preview context for a question; pass 'anchorId' (and no query) to expand a specific anchor returned by a previous preview call.",
+      description:
+        "[Core] Preview near-lossless context packaging OR expand a context anchor. Pass 'query' to preview; pass 'anchorId' (and no query) to expand. After you answer the user, call again with assistantReply (query optional) to write the original answer onto the pending turn/topic. Titles on the workbench are display labels only — do not replace stored messages with an extracted abstract.",
       inputSchema: {
         type: "object",
         properties: {
@@ -78,6 +79,27 @@ export function getToolDefinitions(): ToolDefinition[] {
           englishQuery: {
             type: "string",
             description: "Optional English code-search keywords when query is Chinese/CJK.",
+          },
+          topicId: {
+            type: "string",
+            description: "Workbench topic id to refine or return to (click a function node on the canvas). Activates that topic container and appends this query to it.",
+          },
+          sessionId: {
+            type: "string",
+            description: "Optional dialogue session name. Turns in the same session are chained on the graph (default: main).",
+          },
+          resumeFromTurnId: {
+            type: "string",
+            description: "Optional dialogue-turn id to continue from (click-to-resume). Links this question to that turn even if the topic jumped.",
+          },
+          assistantReply: {
+            type: "string",
+            description:
+              "Original assistant answer to store on the pending user turn/topic (clipped). Call after answering; query may be omitted. Do not substitute an extracted 80-char abstract for the original.",
+          },
+          recordDialogue: {
+            type: "boolean",
+            description: "Record this preview as a dialogue-turn / workbench message. Default true.",
           },
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
           rootDir: { type: "string", description: "Optional workspace root override." },
@@ -88,7 +110,7 @@ export function getToolDefinitions(): ToolDefinition[] {
     {
       name: "graphflow_plan",
       description:
-        "[Core] Generate a DAG-style task plan. mode='simple' (default) for planning; mode='insight' for Six Hats + 5-Why. Without a GraphFlow LLM API key, BOTH modes bridge to you (the coding agent): simple returns mode='agent-delegated' with lightweight simple-plan-* work items plus optional suggestedNodes (heuristic, non-final); insight returns the full Six Hats work-item set. MUST answer via graphflow_insight (submit then merge). Do not treat suggested/placeholder plan as final.",
+        "[Core] Generate a DAG-style task plan and seed a workbench of function-topic nodes (workbench.topics + workbench.outline). Click a topic and pass topicId to graphflow_context to refine or return to the mainline. Wake the collapsed outline later via graphflow_diagnose (graph.workbenchOutline) or CLI `graphflow workbench tree`. mode='simple' (default) for planning; mode='insight' for Six Hats + 5-Why. Without a GraphFlow LLM API key, BOTH modes bridge to you (the coding agent): simple returns mode='agent-delegated' with lightweight simple-plan-* work items plus optional suggestedNodes (heuristic, non-final); insight returns the full Six Hats work-item set. MUST answer via graphflow_insight (submit then merge). Do not treat suggested/placeholder plan as final.",
       inputSchema: {
         type: "object",
         properties: {
@@ -147,7 +169,8 @@ export function getToolDefinitions(): ToolDefinition[] {
     },
     {
       name: "graphflow_diagnose",
-      description: "[Maintenance] Return provider health, graph statistics, and token savings.",
+      description:
+        "[Maintenance] Return provider health, graph statistics, token savings, and the on-demand workbench outline (graph.workbenchOutline: mainline DAG + side branches). Click a topicId and pass it to graphflow_context to resume. Does not add an 11th tool.",
       inputSchema: {
         type: "object",
         properties: {

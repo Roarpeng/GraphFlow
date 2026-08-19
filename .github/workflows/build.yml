@@ -76,16 +76,15 @@ jobs:
           NOTES="GraphFlow VS Code/Cursor extension **v${VERSION}**.
 
           ## Highlights
-          - Painless Trae/Windows MCP: auto-repair spaced Program Files commands on extension activate
-          - Trae/Windows: MCP install writes space-free node paths (fixes 'C:\\Program' is not recognized)
-          - Resilient embedding: hash fallback when Xenova is unavailable
-          - Retrieval denoise + optional full-graph vector recall
-          - Offline MiniLM cache via GRAPHFLOW_EMBEDDING_CACHE_DIR
+          - Workbench navigation: \`graphflow_plan\` seeds function-topic containers; collapsed outline; click topicId to resume; drift forks a side branch
+          - \`graphflow_context\` \`topicId\` / \`assistantReply\` two-beat capture (original Q/A, not LLM abstracts)
+          - DeepSeek Harness (dsh) plugin: \`dsh plugin --profile web add @roarpeng/graphflow\`
+          - Settings is a single page (graph, Office/PDF, embeddings, MCP, models)
           - VSIX does **not** bundle @xenova/transformers
 
           ## Install
           Download \`graphflow-${VERSION}.vsix\` → **Extensions → Install from VSIX** → reload.
-          MCP path repair runs automatically on activate (no manual Install required for the Program Files fix).
+          After a complex \`graphflow_plan\`, open **GraphFlow: Workbench Tree** (collapsed by default) or chat \`/tree\`.
 
           Built on Windows from commit ${GITHUB_SHA::7}."
 

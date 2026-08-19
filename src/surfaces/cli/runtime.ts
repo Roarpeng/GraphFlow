@@ -16,6 +16,8 @@ export {
 export {
   previewContext,
   expandAnchor,
+  captureAssistantReply,
+  listWorkbenchOutline,
   indexGraph,
   indexFile,
   rebuildGraph,
@@ -70,6 +72,11 @@ export {
   type MemorySearchHit,
   type MemoryForgetResult,
 } from "./runtime/memory.js";
+export {
+  listDialogueTurnsRuntime,
+  recordDialogueTurnRuntime,
+  type DialogueListItem,
+} from "./runtime/dialogue.js";
 export {
   detectInstalledAgents,
   formatModelConfigGuide,
