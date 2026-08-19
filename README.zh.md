@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.9.13-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.9.14-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（约 98% token 节省） · 跨会话学习飞轮。
 
@@ -30,6 +30,20 @@ MCP 入口：
 ```
 
 Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `graphflow_plan`。没有 LLM API Key 时会桥接到宿主 Agent（agent-delegated）。
+
+## 工作台脉络（v1.9.14）
+
+日常 Chat 仍是单线。复杂任务用 `graphflow_plan` 播种**功能主题容器**（画布上是计划步骤，不是一轮一节点）。点击节点，把 `topicId` 传给 `graphflow_context` 即可在该功能上继续或回到主线。问法跑偏会 Fork 孤立旁支，主线不被刷脏。答完再调 `graphflow_context({ assistantReply })` 回填原文。树上的标题只用于显示；下一轮必读是 Goal + 祖先标题 + 该节点原文 Q/A。
+
+按需唤醒（仍是 10 个 MCP 工具，不新增）：
+
+```bash
+graphflow workbench tree --json
+# VS Code / Cursor：GraphFlow: Workbench Tree（活动栏默认收起）或 Chat /tree
+# MCP：graphflow_diagnose → graph.workbenchOutline
+graphflow context preview --topic-id "<topic:...>" "在此节点继续"
+graphflow context preview --reply "助手原文回答"
+```
 
 ## DeepSeek Harness 插件
 
@@ -86,10 +100,11 @@ dsh plugin --profile web add /absolute/path/to/GraphFlow
 
 1. 任何读代码、改代码、排错之前，先调 `mcp__graphflow__graphflow_context`，并传入当前仓库绝对路径 `rootDir`。
 2. 用返回的 `summary` / `anchors` / `tokenBudget` 当第一上下文；不够再按 `anchorId` 展开。
-3. 跨多文件或范围不清时，再调 `graphflow_plan`。
+3. 跨多文件或范围不清时，再调 `graphflow_plan`；结果里的 `workbench.topics` 是功能节点。之后可用 `topicId` 细化，或 `graphflow_diagnose.graph.workbenchOutline` / `graphflow workbench tree` 唤醒脉络树。
 4. 改完文件后调 `graphflow_index`（单文件可传 `filePath`）。
 5. 若走了 `graphflow_run`，结束后必须 `graphflow_report_outcome`（`episodeId` + `success`）。
-6. 中文问题请同时传 `englishQuery`（英文文件名 / 符号名），不要只用泛化中文词检索。
+6. 回答用户后应再调 `graphflow_context({ assistantReply })` 回填原文。
+7. 中文问题请同时传 `englishQuery`（英文文件名 / 符号名），不要只用泛化中文词检索。
 
 不要在 `cordis.patch.yml` 里写死 `GRAPHFLOW_WORKSPACE_ROOT`。
 

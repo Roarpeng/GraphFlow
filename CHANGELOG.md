@@ -4,12 +4,25 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.9.14] - 2026-08-15
+
 ### Added
 
+- **工作台脉络**：`graphflow_plan` 按计划 DAG 播种功能主题容器（`workbench.topics`），画布单位是功能而不是一轮一节点；偏离主线时 Fork 孤立旁支；点击 `topicId` 注入 Goal + 祖先标题 + 该节点原文
+- 按需唤醒大纲（默认收起）：CLI `graphflow workbench tree`、VS Code 活动栏 **GraphFlow: Workbench Tree** / Chat `/tree`、MCP `graphflow_diagnose.graph.workbenchOutline`（不新增第 11 个工具）
+- `graphflow_context` 支持 `topicId` / `assistantReply`（可省略 query）两拍入图：提问记 Q，答完回填原文 A；标题只用于显示，不写入下一轮必读上下文
+- 无计划时仍将对话记为 `dialogue-turn`；有工作台则写入当前主题容器
 - **DeepSeek Harness (`dsh`) plugin**：`@roarpeng/graphflow` 声明 `dsh.bundle` + 根目录 `cordis.patch.yml`，可通过 `dsh plugin --profile <name> add @roarpeng/graphflow` 装入 profile；MCP 经 in-box `@deepseek-ai/dsh-mcp-client` 暴露为 `mcp__graphflow__graphflow_*`
 - 中文 README（[README.zh.md](README.zh.md)）与 `plugin.json` / Skill 写明 dsh 用法与 10 项能力
 - `graphflow install` 在检测到 `$DSH_HOME` / `~/.dsh` 时写入 home 级 `cordis.patch.yml` overlay，并把 Skill 装到 `~/.dsh/skills/graphflow/SKILL.md`
 - `graphflow uninstall` / `doctor` 同步清理与自检该 overlay
+
+### Tests
+
+- `tests/workbench-topic.test.ts`：主线 DAG 拓扑序、旁支嵌套、原文注入不含 Summary
+- `tests/dialogue-thread.test.ts`：对话入图与 pending 回填
+- `tests/m15-vscode-panel-observability.test.ts`：快照「工作台脉络」默认收起 + 在此继续
+- `tests/m16-agent-integrations.test.ts`：MCP `topicId` / `workbench.outline` 描述
 
 ## [1.9.13] - 2026-08-13
 

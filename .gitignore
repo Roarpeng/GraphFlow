@@ -29,6 +29,7 @@ vscode-extension/vendor/
 .joycode/
 tsc_output.txt
 .gemini/
+.codex/
 Cursor/
 .mcp.json
 benchmarks/.cache/
