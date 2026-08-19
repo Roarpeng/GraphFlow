@@ -206,16 +206,11 @@ export function apply(ctx, config = {}) {
   };
 
   try {
+    // Claude Code SessionEnd analog. Do not close on session/flush — that is a
+    // live durability checkpoint, not session end; reporting true there would
+    // mark the flywheel successful while the agent is still working.
     listen(ctx, "agent/disposed", (payload) => {
       closeFromPayload(payload);
-    });
-  } catch {
-    // event bus missing
-  }
-
-  try {
-    listen(ctx, "session/flush", (session) => {
-      closeFromPayload({ session });
     });
   } catch {
     // event bus missing

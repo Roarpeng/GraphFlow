@@ -68,7 +68,7 @@ GraphFlow 本身就是一个 **dsh 插件包**（topic：`dsh-plugin`）。`pack
 | --- | --- |
 | 上述 10 个 MCP 工具（stdio `cwd` = 会话工作区） | 支持 |
 | Skill（bundle glue 注册；`dsh plugin add` 即可） | 支持 |
-| 会话结束飞轮（`agent/disposed` → `outcome report`） | 支持 |
+| 会话结束飞轮（仅 `agent/disposed` → `outcome report`；不是 live `session/flush`） | 支持 |
 | VS Code/Cursor 图谱面板、Settings、Workbench Tree、`@graphflow` chat | **不移植** |
 | Cursor Agent Plugins 发现 / Claude Code Session* **文件** hooks | **不移植**（dsh 用 bundle + glue） |
 

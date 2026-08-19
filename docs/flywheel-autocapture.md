@@ -17,8 +17,9 @@ GraphFlow 的飞轮（episode + skill）依赖宿主 agent 主动调用
    会话日志（`.graphflow/session-journal.jsonl`）。
 2. **Claude Code hooks**：`SessionStart / SessionEnd / Stop` 时自动调用
    `graphflow outcome report <episodeId> <success>` 回填真实结局。
-3. **DeepSeek Harness glue**（`dsh/plugin.mjs`）：`agent/disposed`（及 live
-   `session/flush`）时 spawn 同一条 `graphflow outcome report`，不发明第二套飞轮。
+3. **DeepSeek Harness glue**（`dsh/plugin.mjs`）：仅在 `agent/disposed`
+   （Claude Code SessionEnd 对应）时 spawn 同一条 `graphflow outcome report`。
+   DSH 的 `session/flush` 是 live checkpoint，不是会话结束，不能在此 `outcome report true`。
 4. **一次性回填（backfill）**：从历史事件（learning-events.jsonl）或 git log
    挖掘 episode 记录，补上此前"没回填"的数据。
 
@@ -120,8 +121,10 @@ uninstallClaudeCodeHooks();  // 只移除本生成器写入的条目
 ### DeepSeek Harness glue（dsh/plugin.mjs）
 
 DSH 没有 Claude Code 的 SessionEnd **文件** hook。Bundle 行 `id: graphflow-dsh`
-（`name: '@roarpeng/graphflow/dsh'`）在 `agent/disposed` 时读取同一份
+（`name: '@roarpeng/graphflow/dsh'`）只在 `agent/disposed` 时读取同一份
 `.graphflow/session-journal.jsonl`，spawn `graphflow outcome report <episodeId> true`。
+**不**监听 `session/flush`：那是进行中的耐久性 checkpoint，不是会话结束；此时
+`outcome report true` 会把飞轮标成成功，而 agent 还在工作。
 失败吞掉，不进入 harness 循环。`GRAPHFLOW_AUTO_CAPTURE=0` 时跳过。
 
 `dsh plugin --profile web add @roarpeng/graphflow` 即挂上该 glue（不必先

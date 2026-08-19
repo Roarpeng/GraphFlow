@@ -6,7 +6,7 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
-- **DeepSeek Harness 缺口收口**：MCP 行 `cwd: !!js process.cwd()`（不写死 `GRAPHFLOW_WORKSPACE_ROOT`）；bundle ESM glue `@roarpeng/graphflow/dsh` 在 `dsh plugin add` 时 `ctx.skills.register` GraphFlow skill，并在 `agent/disposed`（及 live `session/flush`）best-effort 关闭 pending episode（复用既有 `graphflow outcome report` 飞轮）；首轮 `agent/pre-step` 注入一句 `graphflow_context` hint
+- **DeepSeek Harness 缺口收口**：MCP 行 `cwd: !!js process.cwd()`（不写死 `GRAPHFLOW_WORKSPACE_ROOT`）；bundle ESM glue `@roarpeng/graphflow/dsh` 在 `dsh plugin add` 时 `ctx.skills.register` GraphFlow skill，并在 `agent/disposed`（Claude Code SessionEnd 对应；**不**在 live `session/flush` 上关闭，以免 agent 仍在工作时把飞轮标成成功）best-effort 关闭 pending episode（复用既有 `graphflow outcome report` 飞轮）；首轮 `agent/pre-step` 注入一句 `graphflow_context` hint
 - `graphflow install` / `doctor` / `uninstall` 同步检测 home overlay、glue 行、`$DSH_HOME/skills/graphflow/SKILL.md`
 
 ### Docs
