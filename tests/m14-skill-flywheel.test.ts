@@ -6,8 +6,9 @@ import {
   extractSkillAtoms,
   suggestSkillHints,
 } from "../src/learning/skill-flywheel";
-import { skillNodeId, serializeAtomic, parseSkillState } from "../src/learning/skill-store";
-import type { SkillState } from "../src/learning/skill-types";
+import { skillNodeId, serializeAtomic, serializeComposite, parseSkillState } from "../src/learning/skill-store";
+import type { CompositeSkillState, SkillState } from "../src/learning/skill-types";
+import { admitSkillToProven } from "../src/learning/skill-admission";
 import { orchestrate } from "../src/core/orchestrator";
 import { createNoLlmConfigPath } from "./helpers/no-llm-config";
 
@@ -92,41 +93,63 @@ describe("M14 skill flywheel", () => {
       expect(state.outcomeKind).toBe("anti-pattern");
     }
 
-    // Unlinked success: still only 2 uses — proven, +1 from -1 → 0.
+    // Unlinked success: generic atoms stay correctable (admission blocks proven).
     await applySkillLearning(client, task, run("COMPLETED"));
     skills = client.snapshot().nodes.filter((n) => n.type === "Skill" && !n.id.includes("composite"));
     for (const node of skills) {
       const state = parseSkillState(node.content)!;
-      expect(state.score).toBe(0);
-      expect(state.outcomeKind).toBe("proven");
-    }
-
-    // Second success: proven again, +1 → 1.
-    await applySkillLearning(client, task, run("COMPLETED"));
-    skills = client.snapshot().nodes.filter((n) => n.type === "Skill" && !n.id.includes("composite"));
-    for (const node of skills) {
-      const state = parseSkillState(node.content)!;
-      expect(state.score).toBe(1);
+      expect(state.failStreak ?? 0).toBe(0);
+      if (admitSkillToProven(state.name).ok) {
+        expect(state.outcomeKind).toBe("proven");
+      } else {
+        expect(state.outcomeKind).toBe("correctable");
+        expect(state.score).toBe(-1);
+      }
     }
   });
 
-  it("counts a linked successful outcome as evidence for immediate positive accrual", async () => {
+  it("promotes golden-overlapping atoms to proven; generic names stay correctable", async () => {
+    const client = new GraphifyClient();
+    const task = "refactor planner module in planner.ts and add tests";
+    const run = { status: "COMPLETED" as const, attempts: 1, feedback: "done" };
+    await applySkillLearning(client, task, run);
+    await applySkillLearning(client, task, run);
+
+    const skills = client
+      .snapshot()
+      .nodes.filter((n) => n.type === "Skill" && !n.id.includes("composite"))
+      .map((n) => parseSkillState(n.content)!)
+      .filter(Boolean);
+    const proven = skills.filter((s) => s.outcomeKind === "proven");
+    const blocked = skills.filter((s) => !admitSkillToProven(s.name).ok);
+    expect(proven.length).toBeGreaterThan(0);
+    expect(proven.every((s) => admitSkillToProven(s.name).ok)).toBe(true);
+    for (const state of blocked) {
+      expect(state.outcomeKind).not.toBe("proven");
+    }
+  });
+
+  it("counts a linked successful outcome as evidence for immediate positive accrual when admitted", async () => {
     const client = new GraphifyClient();
     await applySkillLearning(
       client,
-      "refactor planner.ts and add tests",
+      "refactor planner module in planner.ts and add tests",
       { status: "COMPLETED", attempts: 1, feedback: "done" },
       undefined,
-      { linked: true }
+      { linked: true, episodeId: "ep-skill-p0" }
     );
     const skills = client.snapshot().nodes.filter(
       (n) => n.type === "Skill" && !n.id.includes("composite")
     );
-    for (const node of skills) {
-      const state = parseSkillState(node.content)!;
+    const admitted = skills
+      .map((n) => parseSkillState(n.content)!)
+      .filter((s) => admitSkillToProven(s.name).ok);
+    expect(admitted.length).toBeGreaterThan(0);
+    for (const state of admitted) {
       expect(state.score).toBe(1);
       expect(state.linkedSuccess).toBe(true);
       expect(state.outcomeKind).toBe("proven");
+      expect(state.provenance).toEqual({ source: "local", episodeId: "ep-skill-p0" });
     }
   });
 
@@ -190,19 +213,102 @@ describe("M14 skill flywheel", () => {
     expect(second.pruned).toBe(0);
   });
 
-  it("injects learned skill hints into orchestrator feedback and planning", async () => {
+  it("prunes generic/readme+update names even when hasSymbolEvidence was wrongly true", async () => {
+    const client = new GraphifyClient();
+    const now = Date.now();
+    const lie: SkillState = {
+      id: skillNodeId("readme"),
+      name: "readme",
+      score: 4,
+      uses: 8,
+      lastOutcome: "pass",
+      updatedAt: now,
+      hasSymbolEvidence: true,
+      outcomeKind: "proven",
+    };
+    const fusion: CompositeSkillState = {
+      id: "skill:composite:readme__update",
+      name: "readme+update",
+      parents: [skillNodeId("readme"), skillNodeId("update")],
+      coOccurCount: 4,
+      successCount: 3,
+      failureCount: 0,
+      score: 3,
+      uses: 3,
+      lastOutcome: "pass",
+      updatedAt: now,
+      hasSymbolEvidence: true,
+      outcomeKind: "proven",
+    };
+    await client.upsertNodes([
+      { id: lie.id, type: "Skill", content: serializeAtomic(lie) },
+      { id: fusion.id, type: "Skill", content: serializeComposite(fusion) },
+    ]);
+
+    const result = await cleanupNoiseSkills(client);
+    expect(result.ids).toContain(lie.id);
+    expect(result.ids).toContain(fusion.id);
+    const remaining = client.snapshot().nodes.filter((n) => n.type === "Skill").map((n) => n.id);
+    expect(remaining).not.toContain(lie.id);
+    expect(remaining).not.toContain(fusion.id);
+  });
+
+  it("prunes legacy evolution-kind readme/update skills that parseSkillState used to skip", async () => {
+    const client = new GraphifyClient();
+    const id = "skill:evolution:28d8e8bd";
+    await client.upsertNodes([
+      {
+        id,
+        type: "Skill",
+        content: JSON.stringify({
+          kind: "evolution",
+          id,
+          name: "构建 readme 与 update 融合高阶技能",
+          score: 8,
+          uses: 23,
+          lastOutcome: "pass",
+          updatedAt: Date.now(),
+        }),
+      },
+    ]);
+    expect(parseSkillState((await client.queryByKeyword(id))[0]?.content ?? "")?.name).toContain("readme");
+    const result = await cleanupNoiseSkills(client);
+    expect(result.ids).toContain(id);
+    expect(client.snapshot().nodes.some((n) => n.id === id)).toBe(false);
+  });
+
+  it("does not fuse composite skills unless both parents are symbolic", async () => {
     const client = new GraphifyClient();
     await applySkillLearning(client, "refactor planner.ts and add tests", {
       status: "COMPLETED",
       attempts: 1,
       feedback: "done",
     });
+    const snapshot = client.snapshot();
+    expect(snapshot.edges.some((edge) => edge.relation === "co_occurs")).toBe(true);
+    expect(snapshot.nodes.some((node) => node.type === "Skill" && node.id.includes("composite"))).toBe(
+      false
+    );
+    for (const node of snapshot.nodes.filter((n) => n.type === "Skill")) {
+      const state = parseSkillState(node.content);
+      if (!state) continue;
+      expect(state.hasSymbolEvidence === true).toBe(false);
+    }
+  });
 
-    const hints = await suggestSkillHints(client, "refactor planner.ts and add tests", 3);
+  it("injects learned skill hints into orchestrator feedback and planning", async () => {
+    const client = new GraphifyClient();
+    await applySkillLearning(client, "wire compose_skill_id in planner.ts", {
+      status: "COMPLETED",
+      attempts: 1,
+      feedback: "done",
+    });
+
+    const hints = await suggestSkillHints(client, "wire compose_skill_id in planner.ts", 3);
     expect(hints.length).toBeGreaterThan(0);
 
     const run = await orchestrate(
-      { task: "refactor planner.ts and add tests and improve architecture module" },
+      { task: "wire compose_skill_id in planner.ts and improve architecture module" },
       {
         graphClient: client,
         enableSkillFlywheel: true,

@@ -7,6 +7,7 @@ import { orchestrate } from "../src/core/orchestrator";
 import { recordEpisode, updateEpisodeOutcome, findSimilarEpisodes } from "../src/learning/episodic-memory";
 import { applySkillLearning, suggestSkillHints } from "../src/learning/skill-flywheel";
 import { reportOutcome, runTaskResult, getSkillInsights } from "../src/surfaces/cli/runtime";
+import { shouldApplySkillLearningFromOutcome } from "../src/surfaces/cli/runtime/routing";
 import { createNoLlmConfigPath } from "./helpers/no-llm-config";
 
 describe("M48 bridge mode outcome feedback loop", () => {
@@ -153,6 +154,53 @@ describe("M48 bridge mode outcome feedback loop", () => {
     // Skill hints should now be available for similar tasks
     const hints = await suggestSkillHints(client, "refactor planner.ts and add tests", 3);
     expect(hints.length).toBeGreaterThan(0);
+  });
+
+  it("shouldApplySkillLearningFromOutcome skips pass without quality lessons", () => {
+    expect(shouldApplySkillLearningFromOutcome(true, "refactor planner.ts and add tests", [])).toBe(
+      false
+    );
+    expect(
+      shouldApplySkillLearningFromOutcome(true, "refactor planner.ts and add tests", [
+        "keep planner.ts small",
+      ])
+    ).toBe(true);
+    expect(shouldApplySkillLearningFromOutcome(false, "refactor planner.ts and add tests", [])).toBe(
+      false
+    );
+  });
+
+  it("reportOutcome pass without lessons records pass but does not apply skill learning", async () => {
+    const previousTimeout = process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS;
+    process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS = "1000";
+    const root = mkdtempSync(join(tmpdir(), "graphflow-report-outcome-nolearn-"));
+    const storePath = join(root, "graph-store.json");
+    const configPath = createNoLlmConfigPath({
+      skillPolicy: { enableSkillFlywheel: true, maxSkillHints: 4 },
+      graphPolicy: {
+        transport: "file",
+        graphStorePath: storePath,
+        autoIndexOnRun: false,
+        autoIndexOnPreview: false,
+        autoIndexOnSave: false,
+        workspaceRoot: root,
+      },
+    });
+    try {
+      const runResult = await runTaskResult("refactor planner.ts and add tests", configPath);
+      expect(runResult.episodeId).toBeDefined();
+      const reported = await reportOutcome(runResult.episodeId!, true, [], configPath);
+      expect(reported.ok).toBe(true);
+      expect(reported.outcome).toBe("pass");
+      expect(reported.skillsUpdated ?? 0).toBe(0);
+    } finally {
+      if (previousTimeout === undefined) {
+        delete process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS;
+      } else {
+        process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS = previousTimeout;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   // ── Task 5b: reportOutcome path seeds skills from lessons ──────────

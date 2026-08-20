@@ -57,11 +57,18 @@ export {
 } from "./core/agent-delegation";
 export {
   suggestSkillConditionHints,
+  admitSkillToProven,
+  isSymbolicSkillName,
+  wouldDegradeLibrary,
   type SkillConditionHints,
 } from "./learning/skill-flywheel";
+export type { PlaybookBullet } from "./learning/skill-types";
+export type { SkillAdmissionResult } from "./learning/skill-admission";
 export {
   optimizeSkillLite,
   defaultSkillOptScore,
+  applyPlaybookDelta,
+  seedPlaybookFromGuidance,
   type SkillOptEdit,
   type SkillOptEditOp,
   type SkillOptInput,
@@ -76,6 +83,12 @@ export {
   type ConsolidateRequest,
   type ConsolidateResult,
 } from "./learning/skill-consolidate";
+export {
+  distillWorkflowFromEpisode,
+  quarantineSkillsFromEpisode,
+  workflowSkillId,
+} from "./learning/workflow-skill";
+export { forgetEpisode as forgetEpisodeRecord } from "./learning/episodic-memory";
 export {
   ATP_MINIMAL_PRODUCER_PROTOCOL,
   buildMinimalSimplePlanWorkItems,

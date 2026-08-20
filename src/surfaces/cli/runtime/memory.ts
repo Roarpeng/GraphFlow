@@ -4,6 +4,7 @@ import { createGraphClient } from "../../../graph/client-factory";
 import {
   extractTaskTokens,
   findSimilarEpisodes,
+  forgetEpisode as forgetEpisodeRecord,
   parseEpisodes,
   type EpisodeRecord,
 } from "../../../learning/episodic-memory";
@@ -12,8 +13,8 @@ import {
  * Memory audit runtime (v1.9+): cross-session episodic memory must be
  * "evidence, not judge" — auditable and attributable. These functions expose
  * the raw evidence records (list), a semantic similarity view (search), and a
- * single-record deletion path (forget) so the graph store stays transparent
- * and controllable from the CLI or any other runtime surface.
+ * single-record forget path (quarantine descendant skills, then prune the
+ * episode) so the graph store stays transparent and controllable.
  */
 
 /** Outcomes surfaced by the audit CLI. "human_review" is shown as pending, matching the flywheel report. */
@@ -42,6 +43,9 @@ export interface MemorySearchHit {
 export interface MemoryForgetResult {
   found: boolean;
   removed: boolean;
+  /** Skills soft-hidden via provenance.episodeId (SkillJack descendant revoke). */
+  skillsHidden: number;
+  skillIds: string[];
   reason?: string;
 }
 
@@ -127,10 +131,8 @@ export async function searchEpisodes(
 }
 
 /**
- * Delete a single episode record from the store (physical deleteNode when the
- * client supports it, soft-delete via pruned marker otherwise — same paths as
- * pruneExpiredEpisodes / cleanupNoiseSkills). Unknown ids are a clean no-op:
- * the result reports found=false instead of throwing.
+ * Forget one episode: quarantine skills derived from it, then prune the
+ * episode node (auditable, not hard-delete). Unknown ids are a clean no-op.
  */
 export async function forgetEpisode(
   episodeId: string,
@@ -139,26 +141,18 @@ export async function forgetEpisode(
   const config = resolveConfig(configPath);
   const graphClient = createGraphClient(config);
 
-  const hits = await graphClient.queryByKeyword(episodeId);
-  const node = hits.find((candidate) => candidate.id === episodeId);
-  if (!node) {
-    return { found: false, removed: false, reason: "not-found" };
-  }
-  if (!node.id.startsWith("episode:")) {
-    return { found: false, removed: false, reason: "not-an-episode" };
+  if (!episodeId.startsWith("episode:")) {
+    return { found: false, removed: false, skillsHidden: 0, skillIds: [], reason: "not-an-episode" };
   }
 
-  if (graphClient.deleteNode) {
-    await graphClient.deleteNode(node.id);
-    return { found: true, removed: true };
-  }
-
-  // Fallback for clients without deleteNode: soft-delete (parseEpisodes and
-  // findSimilarEpisodes both skip pruned nodes).
-  await graphClient.upsertNodes([
-    { ...node, metadata: { ...node.metadata, pruned: true } },
-  ]);
-  return { found: true, removed: true };
+  const result = await forgetEpisodeRecord(graphClient, episodeId);
+  return {
+    found: result.found,
+    removed: result.pruned,
+    skillsHidden: result.hidden,
+    skillIds: result.ids,
+    ...(result.found ? {} : { reason: "not-found" }),
+  };
 }
 
 function normalizeOutcome(outcome: EpisodeRecord["outcome"]): MemoryOutcome {

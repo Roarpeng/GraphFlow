@@ -12,7 +12,9 @@ import {
   serializeAtomic,
   skillNodeId,
 } from "./skill-store";
-import type { SkillOutcomeKind, SkillState } from "./skill-types";
+import type { PlaybookBullet, SkillOutcomeKind, SkillState } from "./skill-types";
+import { serializePlaybookGuidance } from "./skill-types";
+import { isReadmeUpdateNoise, isStopwordOnlyName, isSymbolicSkillName } from "./skill-admission";
 
 /** QM-style consolidation verbs — no free-form edits. */
 export type ConsolidateActionKind = "UPDATE" | "DELETE" | "ADD" | "NONE";
@@ -24,6 +26,8 @@ export interface ConsolidateSkillInput {
   uses: number;
   outcomeKind?: SkillOutcomeKind;
   guidance?: string;
+  playbook?: PlaybookBullet[];
+  seeded?: boolean;
 }
 
 export interface ConsolidateCandidate {
@@ -46,6 +50,7 @@ export interface ConsolidateAction {
     uses?: number;
     guidance?: string;
     outcomeKind?: SkillOutcomeKind;
+    playbook?: PlaybookBullet[];
   };
   reason: string;
   /** Related skill ids (e.g. merge duplicates deleted alongside survivor UPDATE). */
@@ -114,6 +119,23 @@ function pickSurvivor(group: ConsolidateSkillInput[]): ConsolidateSkillInput {
   })[0]!;
 }
 
+function mergePlaybook(
+  ...parts: Array<PlaybookBullet[] | undefined>
+): PlaybookBullet[] | undefined {
+  const seen = new Set<string>();
+  const bullets: PlaybookBullet[] = [];
+  for (const part of parts) {
+    if (!part) continue;
+    for (const bullet of part) {
+      const key = bullet.text.trim().toLowerCase().replace(/^[-*•]\s+/, "");
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      bullets.push({ ...bullet });
+    }
+  }
+  return bullets.length > 0 ? bullets : undefined;
+}
+
 function mergeGuidance(...parts: Array<string | undefined>): string | undefined {
   const seen = new Set<string>();
   const lines: string[] = [];
@@ -126,6 +148,16 @@ function mergeGuidance(...parts: Array<string | undefined>): string | undefined 
     lines.push(trimmed);
   }
   return lines.length > 0 ? lines.join("\n") : undefined;
+}
+
+function guidanceFromSkill(skill: {
+  guidance?: string;
+  playbook?: PlaybookBullet[];
+}): string | undefined {
+  if (skill.playbook && skill.playbook.length > 0) {
+    return serializePlaybookGuidance(skill.playbook);
+  }
+  return skill.guidance;
 }
 
 /**
@@ -157,7 +189,13 @@ export function planSkillConsolidation(
     const duplicates = group.filter((s) => s.id !== survivor.id);
     const mergedUses = group.reduce((sum, s) => sum + s.uses, 0);
     const mergedScore = Math.max(...group.map((s) => s.score));
-    const mergedGuidance = mergeGuidance(survivor.guidance, ...duplicates.map((d) => d.guidance));
+    const mergedPlaybook = mergePlaybook(survivor.playbook, ...duplicates.map((d) => d.playbook));
+    const mergedGuidance = mergedPlaybook
+      ? serializePlaybookGuidance(mergedPlaybook)
+      : mergeGuidance(
+          guidanceFromSkill(survivor),
+          ...duplicates.map((d) => guidanceFromSkill(d))
+        );
     const outcomeKind =
       group.find((s) => s.outcomeKind === "proven")?.outcomeKind ??
       survivor.outcomeKind ??
@@ -172,6 +210,7 @@ export function planSkillConsolidation(
         score: mergedScore,
         uses: mergedUses,
         ...(mergedGuidance ? { guidance: mergedGuidance } : {}),
+        ...(mergedPlaybook ? { playbook: mergedPlaybook } : {}),
         ...(outcomeKind ? { outcomeKind } : {}),
       },
       reason: `merge ${duplicates.length} near-duplicate name(s) into survivor`,
@@ -213,6 +252,21 @@ export function planSkillConsolidation(
         skillId: skill.id,
         name: skill.name,
         reason: `unused skill with very low score (<= ${veryLowScore})`,
+      });
+      consumed.add(skill.id);
+      continue;
+    }
+
+    if (
+      skill.seeded !== true &&
+      !isSymbolicSkillName(skill.name) &&
+      (skill.name.includes("+") || isStopwordOnlyName(skill.name) || isReadmeUpdateNoise(skill.name))
+    ) {
+      actions.push({
+        action: "DELETE",
+        skillId: skill.id,
+        name: skill.name,
+        reason: "non-symbolic composite fusion (readme+update style)",
       });
       consumed.add(skill.id);
     }
@@ -357,6 +411,10 @@ export async function applySkillConsolidation(
         skipped.push({ action, reason: `skill already exists: ${id}` });
         continue;
       }
+      const playbook = action.patch?.playbook;
+      const guidance = playbook && playbook.length > 0
+        ? serializePlaybookGuidance(playbook)
+        : action.patch?.guidance;
       const state: SkillState = {
         id,
         name,
@@ -364,7 +422,8 @@ export async function applySkillConsolidation(
         uses: action.patch?.uses ?? 0,
         lastOutcome: "pass",
         updatedAt: Date.now(),
-        ...(action.patch?.guidance ? { guidance: action.patch.guidance } : {}),
+        ...(guidance ? { guidance } : {}),
+        ...(playbook && playbook.length > 0 ? { playbook } : {}),
         ...(action.patch?.outcomeKind ? { outcomeKind: action.patch.outcomeKind } : {}),
       };
       await graphClient.upsertNodes([{ id, type: "Skill", content: serializeAtomic(state) }]);
@@ -412,17 +471,23 @@ export async function applySkillConsolidation(
       skipped.push({ action, reason: `unparseable skill for UPDATE: ${id}` });
       continue;
     }
+    const playbook = action.patch?.playbook ?? atomic.playbook;
+    const guidanceFromPlaybook =
+      playbook && playbook.length > 0 ? serializePlaybookGuidance(playbook) : undefined;
     const next: SkillState = {
       ...atomic,
       name: action.patch?.name ?? atomic.name,
       score: action.patch?.score ?? atomic.score,
       uses: action.patch?.uses ?? atomic.uses,
       updatedAt: Date.now(),
+      ...(playbook && playbook.length > 0 ? { playbook } : {}),
       ...(action.patch?.guidance !== undefined
-        ? { guidance: action.patch.guidance }
-        : atomic.guidance
-          ? { guidance: atomic.guidance }
-          : {}),
+        ? { guidance: guidanceFromPlaybook ?? action.patch.guidance }
+        : guidanceFromPlaybook
+          ? { guidance: guidanceFromPlaybook }
+          : atomic.guidance
+            ? { guidance: atomic.guidance }
+            : {}),
       ...(action.patch?.outcomeKind !== undefined
         ? { outcomeKind: action.patch.outcomeKind }
         : atomic.outcomeKind

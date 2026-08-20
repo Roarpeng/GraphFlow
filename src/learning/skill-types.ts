@@ -28,6 +28,25 @@ export interface SkillProvenance {
   episodeId?: string;
 }
 
+/** ACE-style playbook item: incremental helpful/harmful counters, never wholesale-rewritten. */
+export interface PlaybookBullet {
+  id: string;
+  text: string;
+  helpful: number;
+  harmful: number;
+}
+
+/** Serialize playbook bullets as markdown lines for backward-compatible `guidance`. */
+export function serializePlaybookGuidance(playbook: PlaybookBullet[]): string {
+  return playbook
+    .map((bullet) => {
+      const text = bullet.text.replace(/^[-*•]\s+/, "").trim();
+      return text ? `- ${text}` : "";
+    })
+    .filter((line) => line.length > 0)
+    .join("\n");
+}
+
 /** 归一化外部输入的 provenance：非法值回退 local，仅保留合法字段。 */
 export function normalizeSkillProvenance(
   value: unknown
@@ -79,8 +98,14 @@ export interface SkillState {
   /**
    * Optional free-text guidance refined by SkillOpt-lite from lessons/outcomes.
    * Not required for scoring; used as agent-facing hints when present.
+   * When `playbook` exists, this is a derived serialization (`- text` lines).
    */
   guidance?: string;
+  /**
+   * Itemized playbook bullets with helpful/harmful counters (ACE / SkillOpt-lite).
+   * Guidance is derived from these bullets when present.
+   */
+  playbook?: PlaybookBullet[];
 }
 
 export interface CompositeSkillState {

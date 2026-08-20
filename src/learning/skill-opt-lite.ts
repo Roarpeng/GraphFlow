@@ -1,7 +1,14 @@
 /**
  * SkillOpt-lite: bounded heuristic edits over skill guidance text.
  * Pure local optimizer — no external LLM.
+ *
+ * Playbook path (Experience v2): {@link applyPlaybookDelta} applies incremental
+ * helpful/harmful counters and appends lessons. It never wholesale-rewrites
+ * existing bullet text.
  */
+
+import type { PlaybookBullet } from "./skill-types";
+import { serializePlaybookGuidance } from "./skill-types";
 
 export type SkillOptEditOp = "add" | "delete" | "replace";
 
@@ -157,6 +164,122 @@ export function defaultSkillOptScore(text: string): number {
   }
   return score;
 }
+
+const DEFAULT_MAX_PLAYBOOK_BULLETS = 8;
+
+function stripBulletPrefix(raw: string): string {
+  return raw.trim().replace(/^[-*•]\s+/, "").trim();
+}
+
+function playbookBulletKey(text: string): string {
+  return stripBulletPrefix(text).toLowerCase().replace(/\s+/g, " ");
+}
+
+function bulletsAreSimilar(a: string, b: string): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (a.length >= 12 && b.length >= 12 && (a.includes(b) || b.includes(a))) {
+    return true;
+  }
+  return false;
+}
+
+function makePlaybookId(key: string, index: number): string {
+  const slug = key.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  return `pb:${slug || index}`;
+}
+
+function playbookFromGuidance(guidance: string | undefined): PlaybookBullet[] {
+  if (!guidance?.trim()) {
+    return [];
+  }
+  const bullets: PlaybookBullet[] = [];
+  const seen = new Set<string>();
+  for (const line of splitLines(guidance)) {
+    const text = stripBulletPrefix(line);
+    if (!text) {
+      continue;
+    }
+    const key = playbookBulletKey(text);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    bullets.push({
+      id: makePlaybookId(key, bullets.length),
+      text,
+      helpful: 0,
+      harmful: 0,
+    });
+  }
+  return bullets;
+}
+
+/**
+ * Incremental playbook update: count helpful/harmful on matching bullets and
+ * append new lessons. Never replaces the whole array unless it was empty.
+ * Dedupes similar texts. Caps at ~8 bullets by dropping the worst score.
+ */
+export function applyPlaybookDelta(
+  playbook: PlaybookBullet[] | undefined,
+  lessons: string[],
+  passed: boolean,
+  maxBullets = DEFAULT_MAX_PLAYBOOK_BULLETS
+): PlaybookBullet[] {
+  const existing = playbook ?? [];
+  const next: PlaybookBullet[] =
+    existing.length > 0
+      ? existing.map((bullet) => ({ ...bullet }))
+      : [];
+  const cleanedLessons = lessons.map((lesson) => lesson.trim()).filter((lesson) => lesson.length > 0);
+
+  for (const lesson of cleanedLessons) {
+    const key = playbookBulletKey(lesson);
+    if (!key) {
+      continue;
+    }
+    const match = next.find((bullet) => bulletsAreSimilar(playbookBulletKey(bullet.text), key));
+    if (match) {
+      if (passed) {
+        match.helpful += 1;
+      } else {
+        match.harmful += 1;
+      }
+      continue;
+    }
+    next.push({
+      id: makePlaybookId(key, next.length),
+      text: stripBulletPrefix(lesson),
+      helpful: passed ? 1 : 0,
+      harmful: passed ? 0 : 1,
+    });
+  }
+
+  const cap = Math.max(1, maxBullets);
+  while (next.length > cap) {
+    let worstIndex = 0;
+    let worstScore = next[0]!.helpful - next[0]!.harmful;
+    for (let i = 1; i < next.length; i += 1) {
+      const score = next[i]!.helpful - next[i]!.harmful;
+      if (score < worstScore) {
+        worstScore = score;
+        worstIndex = i;
+      }
+    }
+    next.splice(worstIndex, 1);
+  }
+  return next;
+}
+
+/**
+ * Seed a playbook from legacy guidance text when no bullets exist yet.
+ */
+export function seedPlaybookFromGuidance(guidance: string | undefined): PlaybookBullet[] {
+  return playbookFromGuidance(guidance);
+}
+
+export { serializePlaybookGuidance };
 
 function proposeEdits(input: SkillOptInput, lines: string[]): SkillOptEdit[] {
   const proposals: SkillOptEdit[] = [];

@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-08-15（v1.9.14：工作台脉络 + dsh 插件）
+> 最后更新：2026-08-20（v1.9.15：Experience v2 + dsh glue 发版）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -10,7 +10,7 @@
 - 🟡 进行中 / 部分完成
 - ⬜ 未开始（欢迎认领）
 
-## 已完成里程碑（v1.0 → v1.9.14）
+## 已完成里程碑（v1.0 → v1.9.15）
 
 | 版本 | 日期 | 里程碑 | 关键交付 | 状态 |
 | --- | --- | --- | --- | --- |
@@ -27,8 +27,23 @@
 | v1.9.12 | 2026-08-12 | **Experience P0/P2 收口** | skill consolidate `--apply`；retrieval golden dataset；ATP/IR v1.2 Stable + episode↔Engineering KG | ✅ |
 | v1.9.13 | 2026-08-13 | **Settings 一页配置** | GraphFlow: Settings 集成文档解析、anydoc、语义召回、MCP、模型与功能入口 | ✅ |
 | v1.9.14 | 2026-08-15 | **工作台脉络** | 计划 DAG 播种功能主题容器；按需唤醒大纲；`topicId` / `assistantReply` 续聊；DeepSeek Harness 插件 | ✅ |
+| v1.9.15 | 2026-08-20 | **Experience v2 + dsh glue** | 噪声清理、outcome 不默认成功、保真度拆分、File expand 全文、准入/playbook、workflow 蒸馏与撤销；dsh `plugin.mjs` + `agent/disposed` 飞轮 | ✅ |
 
 ## 下一阶段
+
+### Experience v2（v1.9.15 已发版）
+
+冻结模型权重 θ，只演化图上的 Σ（轨迹、playbook、workflow、准入）。
+
+| 优先级 | 事项 | 状态 | 说明与依据 |
+| --- | --- | --- | --- |
+| **P0** | **噪声技能清理** | ✅ | `cleanupNoiseSkills` 按名字清泛化/`readme+update`（即使旧 `hasSymbolEvidence` 为真）；组合技能要求双亲都是符号名；`skill consolidate` DELETE 融合噪声 |
+| **P0** | **outcome 不默认成功** | ✅ | SessionEnd `$2` 为空则保持 pending；`reportOutcome` 无质量 lessons 不写 skill 学习；`FlywheelReport.fidelity.pendingRatio` |
+| **P0** | **savings ≠ 保真度 + File expand 全文** | ✅ | `explainSavings()`；File expand 上限 20 万字符；Symbol 窗口 `GRAPHFLOW_EXPAND_SYMBOL_*`；见 [docs/context-contract.md](docs/context-contract.md) |
+| **P1** | **held-out 准入 + ACE playbook** | ✅ | `admitSkillToProven` golden overlap；`applyPlaybookDelta` 只增量计数/追加，不整段改写 `guidance` |
+| **P1** | **成功 DAG → workflow skill** | ✅ | `distillWorkflowFromEpisode`；`plan.skillRefs` |
+| **P2** | **descendant 撤销 + L3 pin** | ✅ | `forgetEpisode` / `quarantineSkillsFromEpisode` 按 `provenance.episodeId` 软隐藏；L3 钉住 goal/alignment/deviation |
+| **P2** | **DeepSeek Harness 插件持续支持** | ✅ | `dsh plugin add @roarpeng/graphflow`；`dsh/plugin.mjs` + `cordis.patch.yml` 打进 npm `files`；`agent/disposed` 不默认 pass |
 
 ### Experience 层（已合入 main）
 

@@ -13,7 +13,14 @@ import { indexWorkspaceFiles, clearGraphIndexArtifacts, hasPendingGraphIndexWork
 import { GraphFileWatcher } from "../../../graph/file-watcher.js";
 import { extractNodeSourcePath } from "../../../graph/graph-utils";
 import { sampleGraphForSnapshot } from "../../../graph/snapshot-view.js";
-import { getSavingsStats, resetSavingsStats, recordSavings } from "../../../graph/token-savings.js";
+import {
+  explainSavings,
+  getSavingsStats,
+  recordSavings,
+  resetSavingsStats,
+  SAVINGS_NOT_FIDELITY_NOTE,
+  type SavingsStats,
+} from "../../../graph/token-savings.js";
 import {
   isAutoCaptureEnabled,
   readJournalEntries,
@@ -57,6 +64,7 @@ import {
 } from "./helpers.js";
 import type {
   CaptureAssistantReplyResult,
+  ContextFidelityMetrics,
   ContextPreviewResult,
   ExpandAnchorResult,
   GraphIndexResult,
@@ -813,6 +821,11 @@ export interface FlywheelReport {
       actionable: number;
     };
   };
+  /**
+   * Split metrics: `estimatedSavingsPercent` is packaging ROI, not body
+   * fidelity. Pending/unknown outcomes are ratios, not Hit@k.
+   */
+  fidelity?: ContextFidelityMetrics;
 }
 
 /**
@@ -1031,6 +1044,12 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
         actionable: consolidationActionable,
       },
     },
+    fidelity: {
+      estimatedSavingsPercent: getSavingsStats(config).averageSavingsPercent,
+      pendingRatio: pendingShare,
+      unknownOutcomeRatio: pendingShare,
+      note: SAVINGS_NOT_FIDELITY_NOTE,
+    },
   };
 }
 
@@ -1230,25 +1249,19 @@ export async function syncSkillPackageRuntime(
   return { direction: "import", ...result };
 }
 
-export function getTokenSavingsStats(configPath?: string, rootDir?: string): {
-  totalRuns: number;
-  totalRawTokens: number;
-  totalCompressedTokens: number;
-  totalSavedTokens: number;
-  averageSavingsPercent: number;
-  firstRunAt: string | null;
-  lastRunAt: string | null;
-  recentRecords: Array<{
-    timestamp: string;
-    query: string;
-    rawTokens: number;
-    compressedTokens: number;
-    savingsPercent: number;
-    source: string;
-  }>;
+export function getTokenSavingsStats(configPath?: string, rootDir?: string): SavingsStats & {
+  explanation: string;
 } {
-  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
-  return getSavingsStats(config);
+  const resolved = resolveConfig(configPath);
+  const config = bindRuntimeWorkspaceRoot(
+    resolved,
+    rootDir
+      ? { rootDir }
+      : resolved.graphPolicy.workspaceRoot
+        ? { projectWorkspaceRoot: resolved.graphPolicy.workspaceRoot }
+        : undefined
+  );
+  return { ...getSavingsStats(config), explanation: explainSavings() };
 }
 
 export function resetTokenSavingsStats(configPath?: string): { path: string; reset: boolean } {
@@ -1256,13 +1269,40 @@ export function resetTokenSavingsStats(configPath?: string): { path: string; res
   return resetSavingsStats(config);
 }
 
+const MAX_EXPAND_FILE_CHARS = 200_000;
+
+function isFileAnchor(node: GraphNode): boolean {
+  return node.type === "File" || node.id.startsWith("file:");
+}
+
+function readExpandWindowEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return parsed;
+}
+
+function readWorkspaceSource(workspaceRoot: string, sourcePath: string): string | undefined {
+  const absPath = join(workspaceRoot, sourcePath);
+  if (!existsSync(absPath)) {
+    return undefined;
+  }
+  try {
+    return readFileSync(absPath, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Expand a context anchor to its full content.
  *
- * Context anchors returned by `previewContext` are lightweight pointers
- * (id/type/layer). This function resolves an anchor id back to its full
- * GraphNode content and, for Symbol nodes, optionally reads the surrounding
- * source code lines from the original file.
+ * Preview anchors are lightweight pointers. File anchors return the entire
+ * source file (capped). Symbol anchors return a configurable line window
+ * (`GRAPHFLOW_EXPAND_SYMBOL_BEFORE` default 3, `GRAPHFLOW_EXPAND_SYMBOL_AFTER`
+ * default 20 — about 24 lines). Exact edits still require this expand or a
+ * full-file Read — preview summaries are not the source body.
  *
  * @param anchorId  The anchor id (e.g. "symbol:src/foo.ts:abc123")
  * @param configPath Optional config path
@@ -1292,23 +1332,24 @@ export async function expandAnchor(
 
   const sourcePath = extractNodeSourcePath(node);
   const sourceLine = typeof node.metadata?.line === "number" ? node.metadata.line : undefined;
+  const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
 
-  // For Symbol nodes, try to read the surrounding source code
   let sourceSnippet: string | undefined;
-  if (sourcePath && sourceLine !== undefined) {
-    const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
-    const absPath = join(workspaceRoot, sourcePath);
-    if (existsSync(absPath)) {
-      try {
-        const fileContent = readFileSync(absPath, "utf8");
+  if (sourcePath) {
+    const fileContent = readWorkspaceSource(workspaceRoot, sourcePath);
+    if (fileContent !== undefined) {
+      if (isFileAnchor(node)) {
+        sourceSnippet =
+          fileContent.length > MAX_EXPAND_FILE_CHARS
+            ? fileContent.slice(0, MAX_EXPAND_FILE_CHARS)
+            : fileContent;
+      } else if (sourceLine !== undefined) {
+        const before = readExpandWindowEnv("GRAPHFLOW_EXPAND_SYMBOL_BEFORE", 3);
+        const after = readExpandWindowEnv("GRAPHFLOW_EXPAND_SYMBOL_AFTER", 20);
         const lines = fileContent.split(/\r?\n/);
-        // Read a window of lines around the symbol: 3 lines before to 20 lines after
-        const startLine = Math.max(0, sourceLine - 4);
-        const endLine = Math.min(lines.length, sourceLine + 20);
-        const snippet = lines.slice(startLine, endLine).join("\n");
-        sourceSnippet = snippet;
-      } catch {
-        // Ignore read errors — source file may not be accessible
+        const startLine = Math.max(0, sourceLine - 1 - before);
+        const endLine = Math.min(lines.length, sourceLine + after);
+        sourceSnippet = lines.slice(startLine, endLine).join("\n");
       }
     }
   }

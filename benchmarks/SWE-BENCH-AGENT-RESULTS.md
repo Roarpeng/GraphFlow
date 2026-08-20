@@ -5,9 +5,11 @@
 > LLM: deepseek-v4-flash（推理模型）
 > 改进：完整源码 + retry with error feedback
 
+> **Disclaimer:** This 91.7% resolution rate used **uncompressed full source files** as context. It is **not** a GraphFlow compression / token-savings result, and it does **not** measure information fidelity of preview summaries. Agent score ≠ lossless body coverage.
+
 > **说明**：SWE-bench 风格评测。
 > 1. checkout 到 PR 合并前 commit
-> 2. 读取完整源文件作为上下文
+> 2. 读取完整源文件作为上下文（未压缩；不是 GraphFlow preview）
 > 3. DeepSeek V4 Flash 生成 patch
 > 4. apply 失败时，将错误反馈给模型重试
 > 5. pytest 验证

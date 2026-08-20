@@ -7,6 +7,7 @@
  */
 
 import type { SkillOutcomeKind, SkillProvenance } from "./skill-types.js";
+import { admitSkillToProven } from "./skill-admission.js";
 
 /** Successful local uses required before an external skill may become proven. */
 export const DEFAULT_CANARY_LOCAL_SUCCESSES = 2;
@@ -43,11 +44,14 @@ export interface GateSkillPromotionOptions {
   localSuccesses: number;
   validated?: boolean;
   minLocalSuccesses?: number;
+  /** When set, proven is held at correctable unless the held-out admission gate passes. */
+  skillName?: string;
 }
 
 /**
- * Gate proven promotion for external skills. Other classes pass through.
- * Proven is held at correctable until canaryPassed.
+ * Gate proven promotion for external skills and the held-out admission gate.
+ * Other classes pass through. Proven is held at correctable until canaryPassed
+ * and (when skillName is provided) admitSkillToProven.
  */
 export function gateSkillPromotion(options: GateSkillPromotionOptions): SkillOutcomeKind {
   if (options.outcomeKind !== "proven") {
@@ -61,7 +65,13 @@ export function gateSkillPromotion(options: GateSkillPromotionOptions): SkillOut
       ? { minLocalSuccesses: options.minLocalSuccesses }
       : {}),
   };
-  return canaryPassed(check) ? "proven" : "correctable";
+  if (!canaryPassed(check)) {
+    return "correctable";
+  }
+  if (options.skillName && !admitSkillToProven(options.skillName).ok) {
+    return "correctable";
+  }
+  return "proven";
 }
 
 /**

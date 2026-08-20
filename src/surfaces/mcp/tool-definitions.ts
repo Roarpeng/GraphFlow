@@ -26,7 +26,7 @@ export function getToolDefinitions(): ToolDefinition[] {
     },
     {
       name: "graphflow_report_outcome",
-      description: "[Core] Report the real execution outcome of a bridge-mode task back to GraphFlow. After an external coding agent executes the executionDescriptor returned by graphflow_run, it calls this tool to close the learning loop: updates the episode record and applies skill score updates that were skipped during delegation.",
+      description: "[Core] Report the real execution outcome of a bridge-mode task back to GraphFlow. After an external coding agent executes the executionDescriptor returned by graphflow_run, it calls this tool to close the learning loop: updates the episode record (pass/fail). Skill score updates require quality lessons; a pass without lessons records the episode but does not apply skill learning. SessionEnd auto-capture does not call this unless success is an explicit argument (pending stays pending).",
       inputSchema: {
         type: "object",
         properties: {

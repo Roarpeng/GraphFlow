@@ -60,7 +60,10 @@ describe("Claude Code hooks status helper", () => {
     const after = getClaudeCodeHooksStatus({ claudeHome, settingsPath, hooksDir });
     expect(after.installed).toBe(true);
     expect(after.scriptPath).toContain(SESSION_HOOK_SCRIPT);
-    expect(readFileSync(after.scriptPath, "utf8")).toContain("outcome report");
+    const script = readFileSync(after.scriptPath, "utf8");
+    expect(script).toContain("outcome report");
+    expect(script).not.toContain('SUCCESS="${2:-true}"');
+    expect(script).toContain('SUCCESS="${2:-}"');
   });
 
   it("detects Windows-style JSON-escaped backslash paths in settings.json", () => {

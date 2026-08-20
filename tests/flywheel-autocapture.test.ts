@@ -15,10 +15,12 @@ import {
 import { parseEpisodes, updateEpisodeOutcome } from "../src/learning/episodic-memory";
 import {
   buildClaudeCodeHooksConfig,
+  buildSessionHookScript,
   installClaudeCodeHooks,
   shellQuote,
   uninstallClaudeCodeHooks,
 } from "../src/integrations/claude-code-hooks";
+import { shouldApplySkillLearningFromOutcome } from "../src/surfaces/cli/runtime/routing";
 
 const tempDirs: string[] = [];
 
@@ -226,6 +228,40 @@ describe("pending auto-capture", () => {
 });
 
 describe("Claude Code hooks generator", () => {
+  it("buildSessionHookScript defaults defaultSuccess to false and skips report when $2 is missing", () => {
+    const script = buildSessionHookScript();
+    expect(script).not.toContain('SUCCESS="${2:-true}"');
+    expect(script).toContain('SUCCESS="${2:-}"');
+    expect(script).toContain('[ -n "$SUCCESS" ] || exit 0');
+    expect(script).toContain("true|false)");
+    expect(script).toContain('ARGS=(outcome report "$EPID" "$SUCCESS")');
+    expect(script).toMatch(/Does not default pending episodes to success/);
+    expect(script.toLowerCase()).not.toMatch(/成功默认 true|成功值默认 true/);
+    expect(buildSessionHookScript({ defaultSuccess: false })).toContain('SUCCESS="${2:-}"');
+  });
+
+  it("buildSessionHookScript reports explicit true/false and never auto-reports true when success is false", () => {
+    const script = buildSessionHookScript({ defaultSuccess: false });
+    expect(script).not.toContain('SUCCESS="${2:-true}"');
+    expect(script).toContain('ARGS=(outcome report "$EPID" "$SUCCESS")');
+    expect(script).not.toContain('outcome report "$EPID" true');
+    expect(script).not.toContain("outcome report $EPID true");
+  });
+
+  it("shouldApplySkillLearningFromOutcome skips pass without quality lessons (defaultSuccess=false path)", () => {
+    expect(shouldApplySkillLearningFromOutcome(true, "refactor planner.ts and add tests", [])).toBe(
+      false
+    );
+    expect(
+      shouldApplySkillLearningFromOutcome(true, "refactor planner.ts and add tests", [
+        "keep planner.ts small",
+      ])
+    ).toBe(true);
+    expect(shouldApplySkillLearningFromOutcome(false, "refactor planner.ts and add tests", [])).toBe(
+      false
+    );
+  });
+
   it("builds settings.json-style hooks with shell-quoted commands", () => {
     const config = buildClaudeCodeHooksConfig({
       hooksDir: "/tmp/gf hooks",

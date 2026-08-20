@@ -13,8 +13,9 @@ import { logger } from "../utils/logger";
  * 背景：飞轮依赖宿主 agent 主动调用 `graphflow_report_outcome` 才回填 episode/skill。
  * 本模块在 run/context 完成路径上自动生成 `pending` episode 记录（绝不伪造 COMPLETED），
  * 并把 episodeId 写入会话日志（.graphflow/session-journal.jsonl）；由 Claude Code hooks
- * （SessionEnd / Stop，见 integrations/claude-code-hooks.ts）在会话结束时自动调用
- * `graphflow outcome report <episodeId> <success>` 更新为真实结局。
+ * （SessionEnd / Stop，见 integrations/claude-code-hooks.ts）在会话结束时读取 pending。
+ * 仅当成功值作为显式参数传入时才调用 `graphflow outcome report <episodeId> <success>`；
+ * 缺省成功值时不回填，episode 保持 pending（绝不默认 success）。
  *
  * 默认开启（飞轮自证）：环境变量未设置或设置为 1/true/on/yes/enabled 时开启，
  * 设置 GRAPHFLOW_AUTO_CAPTURE=0（或 false/off/no/disabled）时显式关闭，

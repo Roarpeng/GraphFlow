@@ -18,8 +18,10 @@ GraphFlow 的飞轮（episode + skill）依赖宿主 agent 主动调用
 2. **Claude Code hooks**：`SessionStart / SessionEnd / Stop` 时自动调用
    `graphflow outcome report <episodeId> <success>` 回填真实结局。
 3. **DeepSeek Harness glue**（`dsh/plugin.mjs`）：仅在 `agent/disposed`
-   （Claude Code SessionEnd 对应）时 spawn 同一条 `graphflow outcome report`。
-   DSH 的 `session/flush` 是 live checkpoint，不是会话结束，不能在此 `outcome report true`。
+   （Claude Code SessionEnd 对应）时尝试关闭 pending episode。默认**不**报
+   success；只有 `GRAPHFLOW_HOOK_SUCCESS=true|false` 才 spawn
+   `graphflow outcome report`。DSH 的 `session/flush` 是 live checkpoint，
+   不是会话结束，不监听、更不能在此默认 `outcome report true`。
 4. **一次性回填（backfill）**：从历史事件（learning-events.jsonl）或 git log
    挖掘 episode 记录，补上此前"没回填"的数据。
 
@@ -35,9 +37,10 @@ host agent ──(run/context 完成)──▶ orchestrator
                                             │
 Claude Code SessionEnd / Stop ──▶ session.sh ──▶ 读取最新一条 pending
                                             │
-                          graphflow outcome report <episodeId> true
+                          $2 为空 ──▶ 跳过回填（episode 保持 pending）
+                          $2 为 true/false ──▶ graphflow outcome report <episodeId> <success>
                                             │
-                    updateEpisodeOutcome(pending → pass/fail) + applySkillLearning
+                    updateEpisodeOutcome(pending → pass/fail)；有质量 lessons 才 applySkillLearning
 ```
 
 ### 自动记录（src/hooks/auto-capture.ts）
@@ -83,10 +86,11 @@ Claude Code SessionEnd / Stop ──▶ session.sh ──▶ 读取最新一条 
 行为：
 
 - `start`：仅准备会话日志目录（不写图）。
-- `end` / `Stop`：读取日志中最新一条 `pending-episode`，调用
+- `end` / `Stop`：读取日志中最新一条 `pending-episode`。成功值**不默认 true**：
+  `$2` 为空则跳过回填、episode 保持 pending；显式 `true`/`false` 才调用
   `graphflow outcome report <episodeId> <success>` 回填（与手动 report_outcome
-  完全等价：pending → pass/fail + skill 分数更新）。成功值默认 `true`，
-  可传第二个参数覆盖：`session.sh end false`。
+  等价：pending → pass/fail；skill 分数更新还需质量 lessons）：
+  `session.sh end true` / `session.sh end false`。
 - 安全：脚本内所有路径/命令均做 shell 转义（单引号包裹 + 双引号内 fallback 转义）；
   合并 settings.json 时**保留用户已有 hooks**；JSON 损坏时拒绝覆盖。
 - 运行时覆盖（无需重新生成）：`GRAPHFLOW_HOOK_JOURNAL`、`GRAPHFLOW_HOOK_BIN`、
@@ -161,7 +165,8 @@ node scripts/backfill-episodes.cjs --events /path/events.jsonl   # 强制指定�
 
 | 现象 | 原因 | 解法 |
 | --- | --- | --- |
-| episode 全为 pending 且数量不变 | 宿主 agent 未调 report_outcome | 安装 Claude Code hooks 或 dsh glue（见上） |
+| episode 全为 pending 且数量不变 | 宿主 agent 未调 report_outcome，或 SessionEnd / dsh `agent/disposed` 未传入显式 success | 显式 `graphflow_report_outcome` / `session.sh end true|false`；dsh 不默认 pass |
+| `pendingPercent` / `fidelity.pendingRatio` 高 | 大量 episode 仍待显式结局 | diagnose/flywheel 的 `memoryAttribution.confidence.pendingPercent` 与 `fidelity.pendingRatio` |
 | 0 episode | 从未启用 episodic memory / 无回填 | 确认 `GRAPHFLOW_AUTO_CAPTURE` 未被设为 `0` + 安装 hooks，或运行 backfill 脚本 |
 | 0 skill | 飞轮无 episode 可学 | 同上，先有 episode 才有 skill 学习 |
 
