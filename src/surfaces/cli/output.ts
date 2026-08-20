@@ -56,7 +56,7 @@ export function buildCliUsage(): string {
     "  learn forget [--json] [--config <path>]",
     "  memory list [--limit N] [--outcome pass|fail|pending] [--json] [--config <path>]  # audit episodic memory: evidence records (id, task, outcome, lessons, staleGoal, updatedAt) sorted by updatedAt desc",
     '  memory search "<query>" [--limit N] [--json] [--config <path>]  # semantic similarity over episodes (FNV fallback); per-hit id, task, score, outcome',
-    "  memory forget <episodeId> [--json] [--config <path>]  # delete a single episode record; unknown id is a clean no-op",
+    "  memory forget <episodeId> [--json] [--config <path>]  # prune episode + hide descendant skills; unknown id is a clean no-op",
     "  dialogue list [--session <name|id>] [--limit N] [--json] [--config <path>]  # list conversation-turn graph nodes",
     '  dialogue record --query "<text>" [--reply "<text>"] [--resume-from <turnId>] [--session <name>] [--json] [--config <path>]',
     "  help | --help | -h",

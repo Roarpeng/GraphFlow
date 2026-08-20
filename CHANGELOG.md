@@ -4,14 +4,28 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.9.15] - 2026-08-20
+
 ### Added
 
-- **DeepSeek Harness 缺口收口**：MCP 行 `cwd: !!js process.cwd()`（不写死 `GRAPHFLOW_WORKSPACE_ROOT`）；bundle ESM glue `@roarpeng/graphflow/dsh` 在 `dsh plugin add` 时 `ctx.skills.register` GraphFlow skill，并在 `agent/disposed`（Claude Code SessionEnd 对应；**不**在 live `session/flush` 上关闭，以免 agent 仍在工作时把飞轮标成成功）best-effort 关闭 pending episode（复用既有 `graphflow outcome report` 飞轮）；首轮 `agent/pre-step` 注入一句 `graphflow_context` hint
-- `graphflow install` / `doctor` / `uninstall` 同步检测 home overlay、glue 行、`$DSH_HOME/skills/graphflow/SKILL.md`
+- **Experience v2**：噪声技能按名字清理（含 legacy `kind: evolution` / `readme+update` 融合）；held-out golden overlap 准入；ACE 式 playbook 增量计数；成功 DAG 蒸馏为 workflow skill；`forgetEpisode` 按 `provenance.episodeId` 软隐藏派生技能；L3 钉住 goal/alignment/deviation
+- **DeepSeek Harness glue 收口**：MCP 行 `cwd: !!js process.cwd()`；bundle ESM `@roarpeng/graphflow/dsh`（`dsh/plugin.mjs` 打进 npm `files` + `exports`）；`dsh plugin add` 时 `ctx.skills.register`；`graphflow install` / `doctor` / `uninstall` 检测 home overlay、glue 行、`$DSH_HOME/skills/graphflow/SKILL.md`
+- File expand 返回全文（上限 20 万字符）；`FlywheelReport.fidelity` 拆开 packaging ROI 与 `pendingRatio`
+
+### Changed
+
+- SessionEnd / dsh `agent/disposed` **不默认把 pending episode 标成成功**。Claude Code 空 `$2`、dsh 未设 `GRAPHFLOW_HOOK_SUCCESS` 时保持 pending；显式 `true`/`false` 才调用 `graphflow outcome report`
+- Token savings 不再冒充信息保真度（`explainSavings()` / `kind: tokens-not-fidelity`）
 
 ### Docs
 
 - README 诚实矩阵：dsh 上 MCP 10 工具 + skill + 会话结束捕获可用；VS Code/Cursor UI 与 Claude Code Session* 文件 hooks 不移植
+- [docs/context-contract.md](docs/context-contract.md) 写明 preview 是指针，精确编辑要 expand File
+
+### Tests
+
+- `tests/dsh-plugin-glue.test.ts`：glue 不监听 `session/flush`；无 `GRAPHFLOW_HOOK_SUCCESS` 不默认 pass
+- `tests/m-skill-admission.test.ts` / `m-playbook-delta.test.ts` / `m-workflow-skill.test.ts` / `m-skill-revoke.test.ts` / `m-context-fidelity.test.ts` / `m-l3-constraint-pin.test.ts`
 
 ## [1.9.14] - 2026-08-15
 

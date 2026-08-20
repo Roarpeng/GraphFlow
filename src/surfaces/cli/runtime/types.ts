@@ -244,6 +244,11 @@ export interface RoutingDiagnosisResult {
   flywheel?: {
     autoCaptureEnabled: boolean;
     episodes: { total: number; pass: number; fail: number; pending: number };
+    /**
+     * Token savings vs outcome-unknown rates. `estimatedSavingsPercent` is
+     * packaging ROI — not retrieval Hit@k or body coverage.
+     */
+    fidelity?: ContextFidelityMetrics;
     skills: {
       total: number;
       byOutcomeKind: {
@@ -374,6 +379,17 @@ export interface ReportOutcomeResult {
     linkedConceptIds: string[];
     linkedCodeNodeIds: string[];
   };
+}
+
+/**
+ * Split metrics: token packaging savings is not information fidelity.
+ * Retrieval Hit@k and body coverage are separate; expand File for full source.
+ */
+export interface ContextFidelityMetrics {
+  estimatedSavingsPercent: number;
+  pendingRatio: number;
+  unknownOutcomeRatio: number;
+  note: string;
 }
 
 export interface ExpandAnchorResult {

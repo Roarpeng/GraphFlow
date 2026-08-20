@@ -114,17 +114,18 @@ GraphFlow 是 DeepSeek Harness 的 `dsh-plugin`。装入后模型看到的工具
 
 ```sh
 dsh plugin --profile web add @roarpeng/graphflow
-# 或已有 ~/.dsh 时：
+npx @deepseek-ai/dsh web
+# 或已有 ~/.dsh 时写 home overlay + skill 文件：
 npx @roarpeng/graphflow install
 ```
 
 | 路径 | 作用 |
 |------|------|
-| 包内 `cordis.patch.yml` | `dsh plugin add` 插入的 bundle 层 |
+| 包内 `cordis.patch.yml` | `dsh plugin add` 插入的 bundle 层：MCP（`cwd: process.cwd()`）+ `@roarpeng/graphflow/dsh` glue |
 | `$DSH_HOME/cordis.patch.yml`（默认 `~/.dsh`） | `graphflow install` 写的 home overlay |
-| `$DSH_HOME/skills/graphflow/SKILL.md` | 本 Skill |
+| `$DSH_HOME/skills/graphflow/SKILL.md` | 本 Skill（install 复制）；glue 也会在运行时 `ctx.skills.register` |
 
-**用法：** 每次 `graphflow_context` / `graphflow_plan` 传仓库绝对路径 `rootDir`。不要在 patch 里写死 `GRAPHFLOW_WORKSPACE_ROOT`。走了 `graphflow_run` 后必须 `graphflow_report_outcome`。
+**用法：** 第一轮先 `mcp__graphflow__graphflow_context`（`rootDir` = 仓库绝对路径）。不要在 patch 里写死 `GRAPHFLOW_WORKSPACE_ROOT`。走了 `graphflow_run` 后必须 `graphflow_report_outcome`。会话结束时 glue 会 best-effort 关闭 pending episode（`GRAPHFLOW_AUTO_CAPTURE=0` 可关）。VS Code 图谱面板 / Workbench Tree 不在 dsh 上。
 
 ---
 
@@ -173,13 +174,21 @@ Step 1: graphflow_context(query: "<your question>")
 Step 2: Read summary + anchors as primary context
 Step 3: Expand specific anchors with graphflow_context(anchorId: "...") when needed
 Step 4: Read full files only when exact edits required
+Step 5: After answering the user, call graphflow_context({ assistantReply: "<original answer>" })
+        (query optional). This fills the pending turn/topic. Store original text, not an extracted abstract.
 ```
+
+Complex tasks: `graphflow_plan` seeds a **workbench** of topic containers (function nodes on the canvas). Pass `topicId` to refine a node or return to the mainline. Drift auto-forks an isolated side node; messages stay inside the topic — the canvas is not one-turn-one-node. Without a workbench, previews still record as dialogue-turn nodes (`resumeFromTurnId`). Workbench titles/Path labels are **display only**; next-turn context is Goal + path titles + local original Q/A.
 
 **Input - context (preview):**
 ```typescript
 {
-  query: string;           // Required for preview - user question (Chinese OK)
+  query?: string;          // User question (Chinese OK). Omit when only filling assistantReply.
   englishQuery?: string;   // Agent-translated English code search terms (recommended for CJK)
+  topicId?: string;        // Click a workbench function node to refine / return to mainline
+  sessionId?: string;      // Dialogue session name (default "main")
+  resumeFromTurnId?: string; // Continue from a clicked dialogue-turn node (legacy, no workbench)
+  assistantReply?: string; // Original assistant answer to store on the pending turn/topic
   configPath?: string;
   rootDir?: string;
 }
@@ -245,9 +254,11 @@ Step 2: graphflow_plan(task: "<task description>")
     (simple-plan-intent, simple-plan-decomposition) and optional suggestedNodes.
     MUST submit/merge via graphflow_insight before treating the DAG as final.
   - Local suggestedNodes are heuristic hints only.
-Step 3: Review plan steps and dependencies
-Step 4: Execute step by step, using GraphFlow context for each step
-Step 5: graphflow_index() after major changes
+  - Result includes workbench.topics and workbench.outline (mainline DAG + side branches).
+Step 3: Review workbench.outline (function nodes), not chat turns. Wake later with graphflow workbench tree or graphflow_diagnose (graph.workbenchOutline).
+Step 4: Refine a node: graphflow_context({ query, topicId: "<topic:...>" })
+Step 5: If the conversation drifted, click a 主线 node (same topicId) to restore trunk context
+Step 6: graphflow_index() after major changes
 ```
 
 **Input:**

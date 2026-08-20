@@ -688,7 +688,7 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     return {
       command: "memory-forget",
       data,
-      legacyText: `found=${data.found}; removed=${data.removed}${data.reason ? `; reason=${data.reason}` : ""}`,
+      legacyText: `found=${data.found}; removed=${data.removed}; skillsHidden=${data.skillsHidden}${data.reason ? `; reason=${data.reason}` : ""}`,
     };
   }
 

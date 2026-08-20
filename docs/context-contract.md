@@ -40,6 +40,20 @@ Package: summary[] + anchors[] + tokenBudget
 
 **Refill:** after a preview, call `graphflow_context` again with `anchorId` to expand one L1 (or related) anchor instead of dumping whole files. Prefer refill when `budgetUsedPercent` is still low.
 
+## Preview vs expand (fidelity)
+
+Preview is a **pointer package**: `summary[]` + `anchors[]` under a token budget. It is not the source body and is not lossless.
+
+| Metric | What it measures | What it is not |
+| --- | --- | --- |
+| `estimatedSavingsPercent` | Packaging ROI: estimated-raw tokens vs compressed payload | Information fidelity, Hit@k, or body coverage |
+| Retrieval Hit@k | Whether the right File/Symbol anchors were retrieved | Token savings |
+| Body coverage | Whether expand (or Read) returned the full file/symbol window | Compression ratio |
+
+**Exact edits:** expand a **File** anchor (`graphflow_context` with `anchorId`) to get the full source (capped), or Read the file. Symbol expand uses a configurable window: `GRAPHFLOW_EXPAND_SYMBOL_BEFORE` (default 3) and `GRAPHFLOW_EXPAND_SYMBOL_AFTER` (default 20), about 24 lines. Do not treat preview summaries as the file to patch.
+
+L3 packing **pins** Decision/goal nodes whose id starts with `goal:` or whose content/metadata mentions alignment, deviation, or goal, so budget truncation cannot drop those constraints.
+
 ## Contract fields (`graphflow_context` preview)
 
 Returned `tokenBudget` (and related) form the **context contract** between GraphFlow and the host agent:
@@ -49,7 +63,7 @@ Returned `tokenBudget` (and related) form the **context contract** between Graph
 | `maxContextTokens` | Configured packaging budget (from `graphPolicy.maxContextTokens`) |
 | `estimatedRawTokens` | Estimated cost of reading relevant sources without compression |
 | `compressedTokens` | Tokens in the packaged summary / anchors payload |
-| `estimatedSavingsPercent` | `(raw − compressed) / raw × 100` (when raw > 0) |
+| `estimatedSavingsPercent` | `(raw − compressed) / raw × 100` (when raw > 0). Packaging ROI only — not Hit@k or body coverage. |
 | `budgetUsedPercent` | `compressed / maxContextTokens × 100` |
 | `anchors` | Expandable handles: `{ id, type, layer: "L1" \| "L2" \| "L3" }` |
 
@@ -59,7 +73,7 @@ Also expect `summary: string[]` (compressed lines) and, for CJK low-match cases,
 
 1. Prefer the package over recursive repo scans.
 2. Expand anchors by id when the summary is insufficient.
-3. Report savings to humans when useful (`estimatedSavingsPercent`, raw vs compressed).
+3. Report savings to humans when useful (`estimatedSavingsPercent`, raw vs compressed). Do not present savings as body fidelity; expand File for full source.
 4. Pass `englishQuery` for Chinese/CJK queries (code symbols are usually English).
 
 ## MCP entry point

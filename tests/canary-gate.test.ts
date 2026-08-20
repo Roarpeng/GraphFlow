@@ -15,6 +15,7 @@ import {
   markSkillCanaryValidated,
   shouldHardDeleteAntiPattern,
 } from "../src/learning/skill-flywheel";
+import { admitSkillToProven } from "../src/learning/skill-admission";
 import { parseSkillState, serializeAtomic, skillNodeId } from "../src/learning/skill-store";
 import type { SkillState } from "../src/learning/skill-types";
 import {
@@ -22,6 +23,13 @@ import {
   gateSkillPromotion,
   DEFAULT_CANARY_LOCAL_SUCCESSES,
 } from "../src/learning/canary-gate";
+
+function pickAdmissibleAtom(task: string): string {
+  const atoms = extractSkillAtoms(task);
+  const hit = atoms.find((atom) => admitSkillToProven(atom).ok);
+  expect(hit).toBeTruthy();
+  return hit!;
+}
 
 function atomicContent(partial: Partial<SkillState> & { id: string; name: string }): string {
   return serializeAtomic({
@@ -98,14 +106,30 @@ describe("canary-gate（团队记忆安全）", () => {
     ).toBe("proven");
   });
 
+  it("admission gate holds generic proven candidates at correctable", () => {
+    expect(
+      gateSkillPromotion({
+        outcomeKind: "proven",
+        localSuccesses: 4,
+        skillName: "readme+update",
+      })
+    ).toBe("correctable");
+    expect(
+      gateSkillPromotion({
+        outcomeKind: "proven",
+        localSuccesses: 4,
+        skillName: "skill-flywheel.ts",
+      })
+    ).toBe("proven");
+  });
+
   it("sync 技能经 applySkillLearning：一次成功仍 correctable，两次后 proven", async () => {
     const root = mkdtempSync(join(tmpdir(), "graphflow-canary-"));
     const pkgPath = join(root, "team-skills.json");
     try {
       const task = "refactor planner module in planner.ts and add tests";
-      const atoms = extractSkillAtoms(task);
-      expect(atoms.length).toBeGreaterThan(0);
-      const externalId = skillNodeId(atoms[0]!);
+      const atom = pickAdmissibleAtom(task);
+      const externalId = skillNodeId(atom);
       writeFileSync(
         pkgPath,
         JSON.stringify({
@@ -116,7 +140,7 @@ describe("canary-gate（团队记忆安全）", () => {
               externalId,
               atomicContent({
                 id: externalId,
-                name: atoms[0]!,
+                name: atom,
                 outcomeKind: "proven",
                 uses: 99,
                 hasSymbolEvidence: true,
@@ -150,8 +174,8 @@ describe("canary-gate（团队记忆安全）", () => {
     const pkgPath = join(root, "team-skills.json");
     try {
       const task = "refactor planner module in planner.ts and add tests";
-      const atoms = extractSkillAtoms(task);
-      const externalId = skillNodeId(atoms[0]!);
+      const atom = pickAdmissibleAtom(task);
+      const externalId = skillNodeId(atom);
       writeFileSync(
         pkgPath,
         JSON.stringify({
@@ -162,7 +186,7 @@ describe("canary-gate（团队记忆安全）", () => {
               externalId,
               atomicContent({
                 id: externalId,
-                name: atoms[0]!,
+                name: atom,
                 hasSymbolEvidence: true,
               })
             ),

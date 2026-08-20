@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { resolveConfig } from "../src/config/resolve";
 import { createGraphClient, type GraphClient } from "../src/graph/client-factory";
-import { recordEpisode, type EpisodeRecord } from "../src/learning/episodic-memory";
+import { recordEpisode, updateEpisodeOutcome, type EpisodeRecord } from "../src/learning/episodic-memory";
+import { parseSkillState } from "../src/learning/skill-store";
+import { workflowSkillId } from "../src/learning/workflow-skill";
 import {
   forgetEpisode,
   listEpisodes,
@@ -255,7 +257,7 @@ describe("M-memory CLI audit", () => {
       expect(before).toHaveLength(2);
 
       const result = await forgetEpisode(pass.id, sandbox.configPath);
-      expect(result).toEqual({ found: true, removed: true });
+      expect(result).toMatchObject({ found: true, removed: true });
 
       const after = await listEpisodes(sandbox.configPath);
       expect(after).toHaveLength(1);
@@ -278,12 +280,49 @@ describe("M-memory CLI audit", () => {
       });
 
       const result = await forgetEpisode("episode:does-not-exist", sandbox.configPath);
-      expect(result).toEqual({ found: false, removed: false, reason: "not-found" });
+      expect(result).toMatchObject({ found: false, removed: false, reason: "not-found" });
 
       // Store untouched: nothing was removed and the remaining episode is intact.
       const items = await listEpisodes(sandbox.configPath);
       expect(items).toHaveLength(1);
       expect(items[0]?.outcome).toBe("pass");
+    } finally {
+      sandbox.cleanup();
+    }
+  });
+
+  it("CLI forget quarantines workflow skills distilled from the episode", async () => {
+    const sandbox = makeSandbox();
+    try {
+      const episode = await recordEpisode(makeClient(sandbox.configPath), {
+        task: "refactor orchestrator.ts and add tests",
+        plan: [
+          { id: "s1", description: "change orchestrator.ts routing" },
+          { id: "s2", description: "add tests for bridgeDagExecution" },
+        ],
+        outcome: "pending",
+        keyDecisions: ["keep bridge mode"],
+        lessons: [],
+        attempts: 1,
+      });
+      const closed = await updateEpisodeOutcome(
+        makeClient(sandbox.configPath),
+        episode.id,
+        "pass",
+        ["report outcome after DAG"]
+      );
+      expect(closed?.outcome).toBe("pass");
+
+      const result = await forgetEpisode(episode.id, sandbox.configPath);
+      expect(result.found).toBe(true);
+      expect(result.removed).toBe(true);
+      expect(result.skillsHidden).toBeGreaterThanOrEqual(1);
+
+      const skillId = workflowSkillId(episode.plan);
+      const nodes = await makeClient(sandbox.configPath).queryByKeyword(skillId);
+      const skill = nodes.find((node) => node.id === skillId);
+      expect(skill).toBeDefined();
+      expect(parseSkillState(skill!.content)?.hidden).toBe(true);
     } finally {
       sandbox.cleanup();
     }

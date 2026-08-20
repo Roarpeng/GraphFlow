@@ -11,7 +11,14 @@ import type { GraphFlowConfig } from "../config/schema";
  *
  * Stats are persisted to graphflow-out/token-savings.json as a simple
  * append-only log with aggregate counters.
+ *
+ * `savingsPercent` is packaging ROI (estimated-raw vs compressed tokens).
+ * It is not retrieval Hit@k, body coverage, or lossless source fidelity —
+ * see `explainSavings()` and record `kind: "tokens-not-fidelity"`.
  */
+
+export const SAVINGS_NOT_FIDELITY_NOTE =
+  "savings is not body fidelity; expand File for full source";
 
 export interface SavingsRecord {
   timestamp: string;
@@ -20,6 +27,8 @@ export interface SavingsRecord {
   compressedTokens: number;
   savingsPercent: number;
   source: "preview_context" | "run";
+  /** Distinguishes token ROI from information fidelity (Hit@k / body coverage). */
+  kind?: "tokens-not-fidelity";
 }
 
 export interface SavingsStats {
@@ -27,10 +36,23 @@ export interface SavingsStats {
   totalRawTokens: number;
   totalCompressedTokens: number;
   totalSavedTokens: number;
+  /** Packaging ROI only — not retrieval Hit@k or source-body coverage. */
   averageSavingsPercent: number;
   firstRunAt: string | null;
   lastRunAt: string | null;
   recentRecords: SavingsRecord[];
+}
+
+/**
+ * Explain that token savings is not information fidelity.
+ * Preview summaries are pointers; expand File (or Read) for full source.
+ */
+export function explainSavings(): string {
+  return (
+    "savingsPercent is token packaging ROI (estimated-raw vs compressed), " +
+    "not retrieval Hit@k or source-body coverage. Preview is pointers; " +
+    `${SAVINGS_NOT_FIDELITY_NOTE}.`
+  );
 }
 
 const MAX_RECENT_RECORDS = 50;
@@ -95,19 +117,23 @@ function saveStats(statsPath: string, stats: SavingsStats): void {
 export function recordSavings(config: GraphFlowConfig, record: SavingsRecord): void {
   const statsPath = resolveStatsPath(config);
   const stats = loadStats(statsPath);
+  const stored: SavingsRecord = {
+    ...record,
+    kind: record.kind ?? "tokens-not-fidelity",
+  };
 
   stats.totalRuns += 1;
-  stats.totalRawTokens += record.rawTokens;
-  stats.totalCompressedTokens += record.compressedTokens;
-  stats.totalSavedTokens += record.rawTokens - record.compressedTokens;
+  stats.totalRawTokens += stored.rawTokens;
+  stats.totalCompressedTokens += stored.compressedTokens;
+  stats.totalSavedTokens += stored.rawTokens - stored.compressedTokens;
   stats.averageSavingsPercent =
     stats.totalRawTokens > 0
       ? Math.round((stats.totalSavedTokens / stats.totalRawTokens) * 100)
       : 0;
-  stats.firstRunAt = stats.firstRunAt ?? record.timestamp;
-  stats.lastRunAt = record.timestamp;
+  stats.firstRunAt = stats.firstRunAt ?? stored.timestamp;
+  stats.lastRunAt = stored.timestamp;
 
-  stats.recentRecords.unshift(record);
+  stats.recentRecords.unshift(stored);
   if (stats.recentRecords.length > MAX_RECENT_RECORDS) {
     stats.recentRecords = stats.recentRecords.slice(0, MAX_RECENT_RECORDS);
   }

@@ -16,8 +16,16 @@ import { GraphifyClient } from "../src/graph/graphify-client";
 import type { GraphClient } from "../src/graph/client-factory";
 import { importSkillPackage } from "../src/learning/skill-package";
 import { applySkillLearning, extractSkillAtoms } from "../src/learning/skill-flywheel";
+import { admitSkillToProven } from "../src/learning/skill-admission";
 import { parseSkillState, serializeAtomic, skillNodeId } from "../src/learning/skill-store";
 import type { SkillState } from "../src/learning/skill-types";
+
+function pickAdmissibleAtom(task: string): string {
+  const atoms = extractSkillAtoms(task);
+  const hit = atoms.find((atom) => admitSkillToProven(atom).ok);
+  expect(hit).toBeTruthy();
+  return hit!;
+}
 
 function atomicContent(partial: Partial<SkillState> & { id: string; name: string }): string {
   return serializeAtomic({
@@ -123,7 +131,8 @@ describe("外部技能入库门禁（记忆投毒防护）", () => {
 
     const atoms = extractSkillAtoms(task);
     expect(atoms.length).toBeGreaterThan(0);
-    const state = await readSkill(client, skillNodeId(atoms[0]!));
+    const atom = pickAdmissibleAtom(task);
+    const state = await readSkill(client, skillNodeId(atom));
     expect(state).toBeDefined();
     // 本地技能：>=2 次使用晋升 proven，且不携带 sync 来源标记
     expect(state?.outcomeKind).toBe("proven");
@@ -136,12 +145,11 @@ describe("外部技能入库门禁（记忆投毒防护）", () => {
     try {
       const task = "refactor planner module in planner.ts and add tests";
       // 以真实提取路径确定外部技能 id（确保导入后可被本地再次学习命中）
-      const atoms = extractSkillAtoms(task);
-      expect(atoms.length).toBeGreaterThan(0);
-      const externalId = skillNodeId(atoms[0]!);
+      const atom = pickAdmissibleAtom(task);
+      const externalId = skillNodeId(atom);
       const external = atomicContent({
         id: externalId,
-        name: atoms[0]!,
+        name: atom,
         uses: 99,
         score: 20,
         hasSymbolEvidence: true,

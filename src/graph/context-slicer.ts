@@ -27,11 +27,91 @@ export type {
   LayeredPackageOptions,
   SubgraphExpansionOptions,
   ContextRefillManager,
+  L3PinKind,
 } from "./context-slicer-types.js";
 export {
   DEFAULT_EXPANSION_RELATIONS,
   ARCHITECTURE_QUERY,
 } from "./context-slicer-types.js";
+
+const L3_PIN_HINT = /alignment|deviation|goal/i;
+
+/**
+ * Governance pins for L3: Decision/goal nodes that packing must prefer so
+ * budget truncation cannot drop alignment / deviation / goal constraints.
+ */
+export function isPinnedL3Node(node: GraphNode): boolean {
+  if (node.id.startsWith("goal:")) {
+    return true;
+  }
+  if (node.type !== "Decision") {
+    return false;
+  }
+  if (L3_PIN_HINT.test(node.content)) {
+    return true;
+  }
+  if (node.metadata && L3_PIN_HINT.test(JSON.stringify(node.metadata))) {
+    return true;
+  }
+  return false;
+}
+
+function collectPinnedL3Nodes(
+  ranked: GraphNode[],
+  snapshotNodes: GraphNode[] | undefined,
+  added: Set<string>
+): GraphNode[] {
+  const pins: GraphNode[] = [];
+  const seen = new Set<string>();
+  const consider = (node: GraphNode): void => {
+    if (added.has(node.id) || seen.has(node.id) || !isPinnedL3Node(node)) {
+      return;
+    }
+    seen.add(node.id);
+    pins.push(node);
+  };
+  for (const node of ranked) consider(node);
+  if (snapshotNodes) {
+    for (const node of snapshotNodes) consider(node);
+  }
+  return pins;
+}
+
+function tryAppendL3Node(
+  node: GraphNode,
+  ctx: {
+    summaryChannel: string[];
+    anchorChannel: ContextAnchorItem[];
+    added: Set<string>;
+    quota: { l1: number; l2: number; l3: number };
+    used: { l1: number; l2: number; l3: number };
+    maxTokens: number;
+    maxAnchors?: number;
+  },
+  acc: { tokens: number; truncated: boolean }
+): "packed" | "budget" | "skip" {
+  if (ctx.maxAnchors !== undefined && ctx.anchorChannel.length >= ctx.maxAnchors) {
+    return "skip";
+  }
+  if (ctx.added.has(node.id)) {
+    return "skip";
+  }
+  if (!canUseLayer("L3", ctx.quota, ctx.used)) {
+    return "skip";
+  }
+  const summary = `${node.type}: ${node.content}`;
+  const estimate = estimateTokens(summary);
+  if (acc.tokens + estimate > ctx.maxTokens) {
+    acc.truncated = true;
+    return "budget";
+  }
+  ctx.summaryChannel.push(summary);
+  ctx.anchorChannel.push({ id: node.id, type: node.type, layer: "L3" });
+  ctx.added.add(node.id);
+  acc.tokens += estimate;
+  markLayerUsed("L3", ctx.used);
+  return "packed";
+}
 
 // Re-export utility functions that were previously exported
 export {
@@ -293,7 +373,8 @@ export async function buildLayeredContextPackage(
     }
   }
 
-  if (!truncated && ARCHITECTURE_QUERY.test(composeContextQuery(query, options?.englishQuery))) {
+  const archIntent = ARCHITECTURE_QUERY.test(composeContextQuery(query, options?.englishQuery));
+  if (options?.enableAlwaysOnLayers || archIntent) {
     const l3Candidates = rankNodesForContextQuery(
       (await client.queryByKeyword(query)).filter(
         (n) => n.type === "Skill" || n.type === "Decision"
@@ -307,25 +388,26 @@ export async function buildLayeredContextPackage(
         ...(options?.englishQuery !== undefined ? { englishQuery: options.englishQuery } : {}),
       }
     );
-    let l3Added = 0;
-    for (const node of l3Candidates) {
-      if (l3Added >= 2) break;
-      if (added.has(node.id)) continue;
-      if (!canUseLayer("L3", quota, used)) break;
-
-      const summary = `${node.type}: ${node.content}`;
-      const estimate = estimateTokens(summary);
-      if (tokens + estimate > maxTokens) {
-        truncated = true;
-        break;
+    const snapshotForPins = client.readSnapshot?.()?.nodes;
+    const acc = { tokens, truncated };
+    const packCtx = { summaryChannel, anchorChannel, added, quota, used, maxTokens };
+    const pins = collectPinnedL3Nodes(l3Candidates, snapshotForPins, added);
+    for (const node of pins) {
+      if (tryAppendL3Node(node, packCtx, acc) === "budget") break;
+    }
+    tokens = acc.tokens;
+    truncated = acc.truncated;
+    if (!truncated) {
+      let l3Added = pins.filter((n) => added.has(n.id)).length;
+      for (const node of l3Candidates) {
+        if (l3Added >= 2) break;
+        if (isPinnedL3Node(node)) continue;
+        const result = tryAppendL3Node(node, packCtx, acc);
+        if (result === "budget") break;
+        if (result === "packed") l3Added += 1;
       }
-
-      summaryChannel.push(summary);
-      anchorChannel.push({ id: node.id, type: node.type, layer: "L3" });
-      added.add(node.id);
-      tokens += estimate;
-      markLayerUsed("L3", used);
-      l3Added += 1;
+      tokens = acc.tokens;
+      truncated = acc.truncated;
     }
   }
 
@@ -573,9 +655,10 @@ export async function buildEnhancedContextPackage(
   }
 
   // Step 4c: L3 skill/decision injection — always-on when enableAlwaysOnLayers,
-  // otherwise only for architecture queries.
+  // otherwise only for architecture queries. Pin goal/alignment/deviation
+  // Decision nodes first so budget truncation cannot drop them.
   const archIntent = ARCHITECTURE_QUERY.test(composeContextQuery(query, options?.englishQuery));
-  if (!truncated && anchorChannel.length < maxAnchors && (options?.enableAlwaysOnLayers || archIntent)) {
+  if (anchorChannel.length < maxAnchors && (options?.enableAlwaysOnLayers || archIntent)) {
     const l3Candidates = rankNodesForContextQuery(
       (await client.queryByKeyword(query)).filter(
         (n) => n.type === "Skill" || n.type === "Decision"
@@ -589,20 +672,33 @@ export async function buildEnhancedContextPackage(
         ...(options?.englishQuery !== undefined ? { englishQuery: options.englishQuery } : {}),
       }
     );
-    let l3Added = 0;
-    for (const node of l3Candidates) {
-      if (l3Added >= 2 || anchorChannel.length >= maxAnchors) break;
-      if (added.has(node.id)) continue;
-      if (!canUseLayer("L3", quota, used)) break;
-      const summary = `${node.type}: ${node.content}`;
-      const estimate = estimateTokens(summary);
-      if (tokens + estimate > maxTokens) { truncated = true; break; }
-      summaryChannel.push(summary);
-      anchorChannel.push({ id: node.id, type: node.type, layer: "L3" });
-      added.add(node.id);
-      tokens += estimate;
-      markLayerUsed("L3", used);
-      l3Added += 1;
+    const acc = { tokens, truncated };
+    const packCtx = {
+      summaryChannel,
+      anchorChannel,
+      added,
+      quota,
+      used,
+      maxTokens,
+      maxAnchors,
+    };
+    const pins = collectPinnedL3Nodes(l3Candidates, snapshotNodes, added);
+    for (const node of pins) {
+      if (tryAppendL3Node(node, packCtx, acc) === "budget") break;
+    }
+    tokens = acc.tokens;
+    truncated = acc.truncated;
+    if (!truncated) {
+      let l3Added = pins.filter((n) => added.has(n.id)).length;
+      for (const node of l3Candidates) {
+        if (l3Added >= 2 || anchorChannel.length >= maxAnchors) break;
+        if (isPinnedL3Node(node)) continue;
+        const result = tryAppendL3Node(node, packCtx, acc);
+        if (result === "budget") break;
+        if (result === "packed") l3Added += 1;
+      }
+      tokens = acc.tokens;
+      truncated = acc.truncated;
     }
   }
 

@@ -6,6 +6,12 @@ import {
   extractEmbedding,
   type EmbeddingProvider,
 } from "./embeddings";
+import {
+  distillWorkflowFromEpisode,
+  quarantineSkillsFromEpisode,
+} from "./workflow-skill";
+
+export { quarantineSkillsFromEpisode };
 
 export interface EpisodeRecord {
   id: string;
@@ -139,7 +145,74 @@ export async function updateEpisodeOutcome(
     metadata: { ...node.metadata, record: serialize(updated) },
   };
   await client.upsertNodes([updatedNode]);
+  if (outcome === "pass" && updated.plan.length >= 2) {
+    try {
+      await distillWorkflowFromEpisode(client, updated);
+    } catch {
+      // Distillation must never block outcome reporting.
+    }
+  }
   return updated;
+}
+
+/**
+ * Load a single episode record (including its plan) by node id.
+ */
+export async function loadEpisode(
+  client: GraphClient,
+  episodeId: string
+): Promise<EpisodeRecord | undefined> {
+  const node = await loadEpisodeNode(client, episodeId);
+  if (!node) return undefined;
+  return deserialize(node);
+}
+
+/**
+ * Forget one episode: quarantine descendant skills (SkillJack hide, not
+ * delete), then mark the episode pruned so it stays auditable.
+ */
+export async function forgetEpisode(
+  client: GraphClient,
+  episodeId: string
+): Promise<{ found: boolean; hidden: number; ids: string[]; pruned: boolean }> {
+  const { hidden, ids } = await quarantineSkillsFromEpisode(client, episodeId);
+  const node = await loadEpisodeNode(client, episodeId);
+  if (!node) {
+    return { found: false, hidden, ids, pruned: false };
+  }
+
+  const rec = deserialize(node);
+  const lessons = rec
+    ? ["forgotten", ...rec.lessons.filter((lesson) => lesson !== "forgotten")].slice(0, 4)
+    : ["forgotten"];
+  const updatedRecord = rec
+    ? { ...rec, lessons, updatedAt: Date.now() }
+    : undefined;
+
+  await client.upsertNodes([
+    {
+      ...node,
+      metadata: {
+        ...node.metadata,
+        pruned: true,
+        ...(updatedRecord ? { record: serialize(updatedRecord) } : {}),
+      },
+    },
+  ]);
+  return { found: true, hidden, ids, pruned: true };
+}
+
+async function loadEpisodeNode(
+  client: GraphClient,
+  episodeId: string
+): Promise<GraphNode | undefined> {
+  if (client.getNodesByIds) {
+    const nodes = await client.getNodesByIds([episodeId]);
+    const node = nodes.find((candidate) => candidate.id === episodeId);
+    if (node && isEpisodeNode(node)) return node;
+  }
+  const hits = await client.queryByKeyword(episodeId);
+  return hits.find((candidate) => candidate.id === episodeId && isEpisodeNode(candidate));
 }
 
 export async function findSimilarEpisodes(

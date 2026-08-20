@@ -55,9 +55,16 @@ export interface LayeredPackageOptions {
   hnswIndexPath?: string;
   /** Hard cap on anchor count. Default 15. Set to Infinity to disable. */
   maxAnchors?: number;
-  /** Always inject L2 module nodes and L3 skill/decision nodes regardless of query pattern. Default false. */
+  /**
+   * Always inject L2 module nodes and L3 skill/decision nodes regardless of query pattern.
+   * When packing L3, Decision/goal alignment/deviation nodes are pinned so budget
+   * truncation cannot drop them (Governance Decay). Default false.
+   */
   enableAlwaysOnLayers?: boolean;
 }
+
+/** Governance pin kinds for L3 Decision/goal nodes. */
+export type L3PinKind = "alignment" | "deviation" | "goal";
 
 export interface SubgraphExpansionOptions {
   hops?: number;

@@ -124,7 +124,84 @@ export function processData(data: string): string {
       expect(result!.type).toBe("File");
       expect(result!.content).toContain("constants.ts");
       expect(result!.sourcePath).toBe("constants.ts");
+      expect(result!.sourceSnippet).toBe(code);
     } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("should return the entire File body, not a symbol-sized window", async () => {
+    const tmpDir = join(tmpdir(), `graphflow-m50-fullfile-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+
+    const lines = Array.from({ length: 80 }, (_, i) => `export const line${i} = ${i};`);
+    const code = `${lines.join("\n")}\n`;
+    writeFileSync(join(tmpDir, "long-file.ts"), code);
+    const configPath = join(tmpDir, "graphflow.config.json");
+    writeFileSync(configPath, JSON.stringify(makeConfig(tmpDir)));
+
+    try {
+      const config = resolveConfig(configPath);
+      const client = createGraphClient(config);
+      await indexWorkspaceFiles(client, tmpDir);
+
+      const snapshot = client.readSnapshot?.() ?? { nodes: [], edges: [] };
+      const fileNode = snapshot.nodes.find(
+        (n) => n.type === "File" && n.id === "file:long-file.ts"
+      );
+      expect(fileNode).toBeDefined();
+
+      const result = await expandAnchor(fileNode!.id, configPath);
+      expect(result).toBeDefined();
+      expect(result!.sourceSnippet).toBe(code);
+      expect(result!.sourceSnippet).toContain("export const line0 = 0;");
+      expect(result!.sourceSnippet).toContain("export const line79 = 79;");
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("should respect GRAPHFLOW_EXPAND_SYMBOL_BEFORE / AFTER for Symbol windows", async () => {
+    const tmpDir = join(tmpdir(), `graphflow-m50-window-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+
+    const header = Array.from({ length: 10 }, (_, i) => `const padBefore${i} = ${i};`);
+    const target = "export function windowTarget(): number {\n  return 7;\n}";
+    const footer = Array.from({ length: 20 }, (_, i) => `const padAfter${i} = ${i};`);
+    const code = `${header.join("\n")}\n${target}\n${footer.join("\n")}\n`;
+    writeFileSync(join(tmpDir, "window.ts"), code);
+    const configPath = join(tmpDir, "graphflow.config.json");
+    writeFileSync(configPath, JSON.stringify(makeConfig(tmpDir)));
+
+    const prevBefore = process.env.GRAPHFLOW_EXPAND_SYMBOL_BEFORE;
+    const prevAfter = process.env.GRAPHFLOW_EXPAND_SYMBOL_AFTER;
+    process.env.GRAPHFLOW_EXPAND_SYMBOL_BEFORE = "1";
+    process.env.GRAPHFLOW_EXPAND_SYMBOL_AFTER = "1";
+
+    try {
+      const config = resolveConfig(configPath);
+      const client = createGraphClient(config);
+      await indexWorkspaceFiles(client, tmpDir);
+
+      const snapshot = client.readSnapshot?.() ?? { nodes: [], edges: [] };
+      const symbolNode = snapshot.nodes.find(
+        (n) => n.type === "Symbol" && n.metadata?.name === "windowTarget"
+      );
+      expect(symbolNode).toBeDefined();
+
+      const result = await expandAnchor(symbolNode!.id, configPath);
+      expect(result).toBeDefined();
+      expect(result!.sourceSnippet).toBeDefined();
+      const snippetLines = result!.sourceSnippet!.split(/\r?\n/);
+      expect(snippetLines.length).toBeLessThanOrEqual(3);
+      expect(result!.sourceSnippet).toContain("windowTarget");
+      expect(result!.sourceSnippet).not.toContain("padBefore0");
+      expect(result!.sourceSnippet).not.toContain("padAfter19");
+    } finally {
+      if (prevBefore === undefined) delete process.env.GRAPHFLOW_EXPAND_SYMBOL_BEFORE;
+      else process.env.GRAPHFLOW_EXPAND_SYMBOL_BEFORE = prevBefore;
+      if (prevAfter === undefined) delete process.env.GRAPHFLOW_EXPAND_SYMBOL_AFTER;
+      else process.env.GRAPHFLOW_EXPAND_SYMBOL_AFTER = prevAfter;
       rmSync(tmpDir, { recursive: true, force: true });
     }
   });

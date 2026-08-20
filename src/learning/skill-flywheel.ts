@@ -26,8 +26,10 @@ import {
   dedupNodes,
   dedupEdges,
 } from "./skill-store";
-import { optimizeSkillLite } from "./skill-opt-lite";
+import { applyPlaybookDelta, seedPlaybookFromGuidance } from "./skill-opt-lite";
 import { gateSkillPromotion } from "./canary-gate";
+import { admitSkillToProven, isSymbolicSkillName } from "./skill-admission";
+import { serializePlaybookGuidance } from "./skill-types";
 
 // 兼容性重新导出，确保外部消费者完全兼容
 export type { SkillState, CompositeSkillState } from "./skill-types";
@@ -38,6 +40,7 @@ export {
   DEFAULT_CANARY_LOCAL_SUCCESSES,
   shouldHardDeleteAntiPattern,
 } from "./canary-gate";
+export { admitSkillToProven, isSymbolicSkillName, wouldDegradeLibrary } from "./skill-admission";
 export {
   planSkillConsolidation,
   applySkillConsolidation,
@@ -206,6 +209,8 @@ export interface SkillLearningOptions {
   /** True when the outcome was reported back through the episode outcome loop
    *  (bridge reportOutcome) — counts as a "linked successful outcome". */
   linked?: boolean;
+  /** Episode id from bridge report_outcome; stamped on newly created local skills. */
+  episodeId?: string;
 }
 
 /**
@@ -229,6 +234,8 @@ export function classifySkillOutcome(options: {
   canaryValidated?: boolean;
   /** Successful local applications for canary (defaults to uses). */
   localSuccesses?: number;
+  /** When set, proven is held at correctable unless the admission gate passes. */
+  skillName?: string;
 }): SkillOutcomeKind {
   if (options.seeded === true) {
     return "proven";
@@ -245,6 +252,7 @@ export function classifySkillOutcome(options: {
     ...(options.canaryValidated !== undefined
       ? { validated: options.canaryValidated }
       : {}),
+    ...(options.skillName ? { skillName: options.skillName } : {}),
   });
 }
 
@@ -266,6 +274,7 @@ export async function markSkillCanaryValidated(
     linkedSuccess: previous.linkedSuccess === true,
     localSuccesses: previous.uses,
     canaryValidated: true,
+    skillName: previous.name,
     ...(previous.seeded === true ? { seeded: true } : {}),
     ...(previous.provenance ? { provenance: previous.provenance } : {}),
   });
@@ -367,19 +376,11 @@ export interface CleanupNoiseSkillsResult {
 }
 
 /**
- * A legacy skill name carries project-symbol evidence when it contains a
- * file reference, slash path, camelCase or snake_case token. Bare generic
- * tokens ("update", "readme", "create", "fix") never qualify.
- */
-function isSymbolicSkillName(name: string): boolean {
-  return hasProjectSymbolEvidence(name.replace(/\+/g, " "));
-}
-
-/**
  * P0-2 load-time cleanup: reclassify / prune existing pure-noise skill nodes.
  * Nodes learned by older versions have no symbol evidence (shallow n-grams
- * like "update" at score=-2). Curated seed nodes (seeded: true) and nodes
- * whose names carry symbol evidence are kept; everything else is pruned.
+ * like "update" at score=-2). Curated seed nodes (seeded: true) are kept.
+ * Non-symbolic names (including readme+update fusions) are pruned even when
+ * `hasSymbolEvidence` was wrongly set true (legacy lie).
  * Runs at graph load (orchestration start / outcome report) — idempotent.
  */
 export async function cleanupNoiseSkills(
@@ -393,21 +394,18 @@ export async function cleanupNoiseSkills(
   for (const node of skillNodes) {
     const atomic = parseSkillState(node.content);
     if (atomic) {
-      // Explicit extraction-time evidence (new versions) or curated seed.
-      if (atomic.hasSymbolEvidence === true || atomic.seeded === true) {
+      if (atomic.seeded === true) {
         continue;
       }
       if (isSymbolicSkillName(atomic.name)) {
-        // Legacy node whose name carries symbol evidence: keep, but tag it
-        // explicitly so future loads skip re-inspection.
-        if (atomic.outcomeKind !== "correctable") {
+        if (atomic.hasSymbolEvidence !== true) {
           updates.push({
             id: atomic.id,
             type: "Skill",
             content: serializeAtomic({
               ...atomic,
               hasSymbolEvidence: true,
-              outcomeKind: "correctable",
+              outcomeKind: atomic.outcomeKind ?? "correctable",
               updatedAt: Date.now(),
             }),
           });
@@ -435,18 +433,18 @@ export async function cleanupNoiseSkills(
 
     const composite = parseCompositeState(node.content);
     if (composite) {
-      if (composite.hasSymbolEvidence === true || composite.seeded === true) {
+      if (composite.seeded === true) {
         continue;
       }
       if (isSymbolicSkillName(composite.name)) {
-        if (composite.outcomeKind !== "correctable") {
+        if (composite.hasSymbolEvidence !== true) {
           updates.push({
             id: composite.id,
             type: "Skill",
             content: serializeComposite({
               ...composite,
               hasSymbolEvidence: true,
-              outcomeKind: "correctable",
+              outcomeKind: composite.outcomeKind ?? "correctable",
               updatedAt: Date.now(),
             }),
           });
@@ -531,15 +529,24 @@ export async function applySkillLearning(
     const failStreak = passed ? 0 : (previous?.failStreak ?? 0) + 1;
     const linkedSuccess =
       (passed && linked) || previous?.linkedSuccess === true;
-    const outcomeKind = classifySkillOutcome({
+    let outcomeKind = classifySkillOutcome({
       uses,
       failStreak,
       linkedSuccess,
       localSuccesses: uses,
+      skillName: skill,
       ...(previous?.seeded === true ? { seeded: true } : {}),
       ...(previous?.provenance ? { provenance: previous.provenance } : {}),
       ...(previous?.canaryValidated === true ? { canaryValidated: true } : {}),
     });
+    // Held-out admission: proven candidates without golden overlap stay correctable.
+    if (
+      outcomeKind === "proven" &&
+      previous?.seeded !== true &&
+      !admitSkillToProven(skill).ok
+    ) {
+      outcomeKind = "correctable";
+    }
     // Evidence gate: positive score accrues only for proven skills (>= 2 uses
     // or a linked successful outcome); negative scoring applies ONLY to
     // anti-pattern outcomes (>= 2 consecutive failures).
@@ -549,6 +556,10 @@ export async function applySkillLearning(
     } else if (!passed && outcomeKind === "anti-pattern") {
       score -= 1;
     }
+    const newLocalProvenance =
+      !previous?.provenance && options?.episodeId
+        ? { source: "local" as const, episodeId: options.episodeId }
+        : undefined;
     const next: SkillState = {
       id,
       name: skill,
@@ -556,31 +567,38 @@ export async function applySkillLearning(
       uses,
       lastOutcome: passed ? "pass" : "fail",
       updatedAt: now,
-      hasSymbolEvidence: true,
+      hasSymbolEvidence: isSymbolicSkillName(skill),
       linkedSuccess,
       failStreak,
       outcomeKind,
       // 来源元数据随本地学习延续（外部 sync 技能晋升 proven 后仍保留来源标记）。
-      ...(previous?.provenance ? { provenance: previous.provenance } : {}),
+      ...(previous?.provenance
+        ? { provenance: previous.provenance }
+        : newLocalProvenance
+          ? { provenance: newLocalProvenance }
+          : {}),
       ...(previous?.canaryValidated === true ? { canaryValidated: true } : {}),
+      ...(previous?.seeded === true ? { seeded: true } : {}),
       // Pass clears soft-hide; fail preserves it if already set.
       ...(passed ? {} : previous?.hidden ? { hidden: true } : {}),
     };
 
-    // SkillOpt-lite: refine optional guidance from lessons when score improves.
+    // SkillOpt-lite playbook: incremental helpful/harmful counts + append lessons.
     if (lessonText.length > 0) {
-      const seedGuidance = previous?.guidance?.trim() || `- ${skill}`;
-      const optimized = optimizeSkillLite({
-        skillText: seedGuidance,
-        lessons: lessonText,
-        outcomes: [{ success: passed }],
-        maxEdits: 3,
-      });
-      if (optimized.improved && optimized.optimizedText.trim().length > 0) {
-        next.guidance = optimized.optimizedText.trim();
+      const seedPlaybook =
+        previous?.playbook && previous.playbook.length > 0
+          ? previous.playbook
+          : seedPlaybookFromGuidance(previous?.guidance);
+      const playbook = applyPlaybookDelta(seedPlaybook, lessonText, passed);
+      if (playbook.length > 0) {
+        next.playbook = playbook;
+        next.guidance = serializePlaybookGuidance(playbook);
       } else if (previous?.guidance) {
         next.guidance = previous.guidance;
       }
+    } else if (previous?.playbook && previous.playbook.length > 0) {
+      next.playbook = previous.playbook;
+      next.guidance = previous.guidance ?? serializePlaybookGuidance(previous.playbook);
     } else if (previous?.guidance) {
       next.guidance = previous.guidance;
     }
@@ -612,11 +630,19 @@ export async function applySkillLearning(
       });
 
       const [n1, n2] = [a, b].sort();
+      if (!isSymbolicSkillName(n1!) || !isSymbolicSkillName(n2!)) {
+        continue;
+      }
       const compositeId = composeSkillId(n1!, n2!);
       const previous = await loadCompositeSkill(client, compositeId);
+      const compositeName = `${n1}+${n2}`;
+      const newCompositeProvenance =
+        !previous?.provenance && options?.episodeId
+          ? { source: "local" as const, episodeId: options.episodeId }
+          : undefined;
       const composite: CompositeSkillState = {
         id: compositeId,
-        name: `${n1}+${n2}`,
+        name: compositeName,
         parents: [skillNodeId(n1!), skillNodeId(n2!)],
         coOccurCount: (previous?.coOccurCount ?? 0) + 1,
         successCount: (previous?.successCount ?? 0) + (passed ? 1 : 0),
@@ -625,10 +651,14 @@ export async function applySkillLearning(
         uses: previous?.uses ?? 0,
         lastOutcome: passed ? "pass" : "fail",
         updatedAt: now,
-        hasSymbolEvidence: true,
+        hasSymbolEvidence: isSymbolicSkillName(compositeName),
         ...(previous?.seeded === true ? { seeded: true } : {}),
         // 来源元数据随共现更新延续（外部 sync 组合技能保留来源标记）。
-        ...(previous?.provenance ? { provenance: previous.provenance } : {}),
+        ...(previous?.provenance
+          ? { provenance: previous.provenance }
+          : newCompositeProvenance
+            ? { provenance: newCompositeProvenance }
+            : {}),
       };
       // P0-2 taxonomy: negative composite scores apply only to anti-pattern
       // pairs (>= 2 failures and more failures than successes); correctable /
@@ -647,6 +677,7 @@ export async function applySkillLearning(
             ? "proven"
             : "correctable",
         localSuccesses: composite.successCount,
+        skillName: compositeName,
         ...(previous?.provenance ? { provenance: previous.provenance } : {}),
         ...(previous?.canaryValidated === true ? { validated: true } : {}),
       });

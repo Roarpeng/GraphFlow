@@ -526,7 +526,7 @@ export { planInsight } from "../../../agents/insight";
  *
  * 1. Updates the episode record from "pending" → "pass"/"fail".
  * 2. Applies skill score updates that were skipped during delegation
- *    (failure learning is dampened without quality lessons).
+ *    (pass and fail both skip learning without quality lessons).
  * 3. Soft-prunes chronically failing atomic skills from insight surfaces.
  */
 const MAX_OUTCOME_LESSONS = 4;
@@ -548,16 +548,21 @@ function countQualityLessons(lessons: string[]): number {
 
 /**
  * Decide whether bridge outcome should drive skill score updates.
- * Success runs when task+lessons yield atoms; failure requires quality lessons (>=8 chars).
+ * Pass and fail both require quality lessons (>=8 chars). Pass without lessons
+ * still records the episode as pass; it just skips skill learning. Failure
+ * without quality lessons skips penalty spam. Success additionally needs
+ * task+lessons to yield skill atoms.
  */
 export function shouldApplySkillLearningFromOutcome(
   success: boolean,
   task: string,
   sanitizedLessons: string[]
 ): boolean {
+  if (countQualityLessons(sanitizedLessons) === 0) {
+    return false;
+  }
   if (!success) {
-    // Failure without quality lessons: skip penalty spam.
-    return countQualityLessons(sanitizedLessons) > 0;
+    return true;
   }
   const corpus = [task, ...sanitizedLessons].filter(Boolean).join(" and ");
   return extractSkillAtoms(corpus).length > 0;
@@ -626,6 +631,7 @@ export async function reportOutcome(
         // This success is linked to the episode via reportOutcome: counts as a
         // "linked successful outcome" for the proven classification.
         linked: true,
+        episodeId: updated.id,
       }
     );
   } else if (config.skillPolicy?.enableSkillFlywheel) {

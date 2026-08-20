@@ -141,6 +141,11 @@ describe("flywheel contribution report", () => {
     expect(report.episodes.pass).toBe(1);
     expect(report.episodes.fail).toBe(2);
     expect(report.episodes.pending).toBe(1);
+    // pendingRatio is the pending/total share (also mirrored as pendingPercent).
+    expect(report.fidelity?.pendingRatio).toBeCloseTo(report.episodes.pending / report.episodes.total, 5);
+    expect(report.memoryAttribution.confidence.pendingPercent).toBe(
+      Math.round((report.fidelity?.pendingRatio ?? 0) * 100)
+    );
     expect(report.episodes.withLessons).toBe(1);
     expect(report.episodes.deviations.misreadRequirement).toBe(1);
     expect(report.episodes.deviations.scopeCreep).toBe(1);
@@ -294,7 +299,8 @@ describe("flywheel contribution report", () => {
     ];
     await client.upsertNodes(episodeNodes);
 
-    const m = getFlywheelReport(attrConfigPath).memoryAttribution;
+    const report = getFlywheelReport(attrConfigPath);
+    const m = report.memoryAttribution;
 
     // Section shape: every attribution field present.
     expect(m).toHaveProperty("memoryHits");
@@ -311,7 +317,10 @@ describe("flywheel contribution report", () => {
     expect(m.staleEpisodes).toBe(1);
 
     // Confidence: pass/fail/pending distribution percentages.
+    // pendingRatio (pending / total) is the obvious pending share: 2/4 = 50%.
     expect(m.confidence).toEqual({ passPercent: 25, failPercent: 25, pendingPercent: 50 });
+    expect(report.fidelity?.pendingRatio).toBeCloseTo(0.5, 5);
+    expect(m.confidence.pendingPercent).toBe(Math.round((report.fidelity?.pendingRatio ?? 0) * 100));
 
     // Evidence chain: top 3 most-recent episodes, newest first, with
     // truncated task, outcome, and lesson count.

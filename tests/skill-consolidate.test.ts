@@ -107,6 +107,81 @@ describe("planSkillConsolidation", () => {
     expect(deletes[0]?.skillId).toBe("skill:stale-noise");
   });
 
+  it("deletes readme+update composite fusions that fail isSymbolicSkillName", () => {
+    const skills = [
+      skill({
+        id: "skill:composite:readme__update",
+        name: "readme+update",
+        score: 3,
+        uses: 4,
+        outcomeKind: "proven",
+      }),
+      skill({
+        id: "skill:compose-skill-id",
+        name: "compose_skill_id",
+        score: 2,
+        uses: 2,
+        outcomeKind: "correctable",
+      }),
+    ];
+    const actions = planSkillConsolidation(skills);
+    const deletes = actions.filter((a) => a.action === "DELETE");
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0]?.skillId).toBe("skill:composite:readme__update");
+    expect(actions.some((a) => a.skillId === "skill:compose-skill-id" && a.action === "DELETE")).toBe(
+      false
+    );
+  });
+
+  it("deletes Chinese readme/update fusion names that lack + but fail isSymbolicSkillName", () => {
+    const skills = [
+      skill({
+        id: "skill:evolution:readme-zh",
+        name: "构建 readme 与 update 融合高阶技能",
+        score: 8,
+        uses: 23,
+        outcomeKind: "proven",
+      }),
+    ];
+    const actions = planSkillConsolidation(skills);
+    const deletes = actions.filter((a) => a.action === "DELETE");
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0]?.skillId).toBe("skill:evolution:readme-zh");
+  });
+
+  it("UPDATE survivor guidance is derived from playbook when present", () => {
+    const skills = [
+      skill({
+        id: "skill:cache-layer",
+        name: "Cache Layer",
+        score: 4,
+        uses: 3,
+        outcomeKind: "proven",
+        playbook: [
+          { id: "pb:a", text: "keep cache keys stable", helpful: 2, harmful: 0 },
+        ],
+      }),
+      skill({
+        id: "skill:cache_layer",
+        name: "cache_layer",
+        score: 1,
+        uses: 1,
+        outcomeKind: "correctable",
+        playbook: [
+          { id: "pb:b", text: "invalidate on write", helpful: 1, harmful: 0 },
+        ],
+      }),
+    ];
+    const actions = planSkillConsolidation(skills);
+    const update = actions.find((a) => a.action === "UPDATE");
+    expect(update?.patch?.playbook?.map((b) => b.text)).toEqual([
+      "keep cache keys stable",
+      "invalidate on write",
+    ]);
+    expect(update?.patch?.guidance).toContain("- keep cache keys stable");
+    expect(update?.patch?.guidance).toContain("- invalidate on write");
+  });
+
   it("suggests ADD only when candidates are provided", () => {
     const skills = [
       skill({ id: "skill:existing", name: "existing.ts", score: 2, uses: 2, outcomeKind: "proven" }),

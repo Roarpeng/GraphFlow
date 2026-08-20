@@ -5,11 +5,13 @@ import type {
   SkillState,
   CompositeSkillState,
   SkillEdge,
+  PlaybookBullet,
 } from "./skill-types";
 import {
   DEFAULT_COMPOSITE_MIN_COOCCUR,
   DEFAULT_COMPOSITE_MIN_SUCCESS,
   normalizeSkillProvenance,
+  serializePlaybookGuidance,
 } from "./skill-types";
 
 export function sanitizeAtom(skill: string): string {
@@ -18,6 +20,33 @@ export function sanitizeAtom(skill: string): string {
 
 export function skillNodeId(skill: string): string {
   return `skill:${sanitizeAtom(skill)}`;
+}
+
+function parsePlaybook(value: unknown): PlaybookBullet[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const bullets: PlaybookBullet[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const raw = item as Partial<PlaybookBullet>;
+    if (typeof raw.id !== "string" || typeof raw.text !== "string") {
+      continue;
+    }
+    const text = raw.text.trim();
+    if (!text) {
+      continue;
+    }
+    bullets.push({
+      id: raw.id,
+      text,
+      helpful: typeof raw.helpful === "number" && Number.isFinite(raw.helpful) ? raw.helpful : 0,
+      harmful: typeof raw.harmful === "number" && Number.isFinite(raw.harmful) ? raw.harmful : 0,
+    });
+  }
+  return bullets.length > 0 ? bullets : undefined;
 }
 
 export function serializeAtomic(state: SkillState): string {
@@ -34,7 +63,9 @@ export function parseSkillState(content: string): SkillState | undefined {
     if (!parsed.id || !parsed.name) {
       return undefined;
     }
-    if (parsed.kind && parsed.kind !== "atomic") {
+    // Legacy evolution/triple skills are atomic-shaped JSON with a different
+    // `kind`. Only composites must take the composite parser.
+    if (parsed.kind === "composite") {
       return undefined;
     }
 
@@ -61,9 +92,22 @@ export function parseSkillState(content: string): SkillState | undefined {
         );
         return provenance ? { provenance } : {};
       })(),
-      ...(typeof parsed.guidance === "string" && parsed.guidance.trim().length > 0
-        ? { guidance: parsed.guidance.trim() }
-        : {}),
+      ...(() => {
+        const playbook = parsePlaybook((parsed as { playbook?: unknown }).playbook);
+        if (!playbook) {
+          return typeof parsed.guidance === "string" && parsed.guidance.trim().length > 0
+            ? { guidance: parsed.guidance.trim() }
+            : {};
+        }
+        const guidance =
+          typeof parsed.guidance === "string" && parsed.guidance.trim().length > 0
+            ? parsed.guidance.trim()
+            : serializePlaybookGuidance(playbook);
+        return {
+          playbook,
+          ...(guidance.length > 0 ? { guidance } : {}),
+        };
+      })(),
     };
   } catch (error) {
     logger.error({ error }, "Caught error");

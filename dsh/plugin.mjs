@@ -34,6 +34,18 @@ export function isAutoCaptureEnabled(env = process.env) {
   return !(raw === "0" || raw === "false" || raw === "off" || raw === "no" || raw === "disabled");
 }
 
+/**
+ * Explicit success only — same contract as Claude Code SessionEnd `$2`.
+ * Missing GRAPHFLOW_HOOK_SUCCESS leaves the episode pending.
+ * @returns {boolean|undefined}
+ */
+export function resolveExplicitSuccess(env = process.env) {
+  const raw = env.GRAPHFLOW_HOOK_SUCCESS?.trim().toLowerCase();
+  if (raw === "true" || raw === "1" || raw === "yes") return true;
+  if (raw === "false" || raw === "0" || raw === "no") return false;
+  return undefined;
+}
+
 export function resolveSessionJournalPath(workspaceRoot) {
   const override = process.env.GRAPHFLOW_HOOK_JOURNAL?.trim();
   if (override) return override;
@@ -121,7 +133,8 @@ function buildOutcomeArgs(episodeId, success) {
 /**
  * Best-effort close of the latest pending episode for `cwd`.
  * Reuses `graphflow outcome report` (same flywheel as Claude Code SessionEnd).
- * Never throws.
+ * Does not default pending episodes to success: GRAPHFLOW_HOOK_SUCCESS must be
+ * an explicit true/false. Never throws.
  */
 export function closePendingEpisodeForCwd(cwd, config = {}) {
   try {
@@ -135,9 +148,13 @@ export function closePendingEpisodeForCwd(cwd, config = {}) {
     if (!episodeId) {
       return { attempted: false, reason: "no-pending-episode" };
     }
+    const success = resolveExplicitSuccess(env);
+    if (success === undefined) {
+      return { attempted: false, reason: "no-explicit-success", episodeId };
+    }
     const spawnFn = typeof config.spawn === "function" ? config.spawn : spawn;
     const bin = env.GRAPHFLOW_HOOK_BIN?.trim() || "npx";
-    spawnFn(bin, buildOutcomeArgs(episodeId, true), {
+    spawnFn(bin, buildOutcomeArgs(episodeId, success), {
       cwd: workspace,
       env,
       stdio: "ignore",

@@ -208,11 +208,40 @@ describe("dsh ESM glue plugin", () => {
     expect(hint.content[0]?.text.length).toBeLessThan(240);
 
     handlers["agent/disposed"]?.({ agent, cwd: workspace });
+    expect(spawned).toHaveLength(0);
+  });
+
+  it("reports outcome on agent/disposed only when GRAPHFLOW_HOOK_SUCCESS is explicit", () => {
+    const handlers: Record<string, (...args: unknown[]) => unknown> = {};
+    const spawned: Array<{ args: string[] }> = [];
+    const workspace = makeTempRoot("gf-dsh-glue-success-");
+    mkdirSync(join(workspace, ".graphflow"), { recursive: true });
+    writeFileSync(
+      join(workspace, ".graphflow", "session-journal.jsonl"),
+      `${JSON.stringify({ episodeId: "ep-dsh-1", task: "demo", createdAt: Date.now() })}\n`,
+      "utf8"
+    );
+    apply(
+      {
+        skills: { register() {} },
+        on(event: string, handler: (...args: unknown[]) => unknown) {
+          handlers[event] = handler;
+        },
+      },
+      {
+        cwd: workspace,
+        env: { GRAPHFLOW_HOOK_SUCCESS: "true" },
+        spawn: ((_bin: string, args: string[]) => {
+          spawned.push({ args });
+          return { unref() {} };
+        }) as typeof import("node:child_process").spawn,
+      }
+    );
+    handlers["agent/disposed"]?.({ cwd: workspace });
     expect(spawned).toHaveLength(1);
     expect(spawned[0]?.args).toEqual(
       expect.arrayContaining(["graphflow", "outcome", "report", "ep-dsh-1", "true"])
     );
-    expect(spawned[0]?.cwd).toBe(workspace);
   });
 
   it("does not close pending episodes on session/flush", () => {
@@ -262,6 +291,28 @@ describe("dsh ESM glue plugin", () => {
     });
     expect(result.attempted).toBe(false);
     expect(result.reason).toBe("auto-capture-off");
+    expect(spawned).toHaveLength(0);
+  });
+
+  it("skips outcome spawn when GRAPHFLOW_HOOK_SUCCESS is unset", () => {
+    const spawned: unknown[] = [];
+    const workspace = makeTempRoot("gf-dsh-glue-pending-");
+    mkdirSync(join(workspace, ".graphflow"), { recursive: true });
+    writeFileSync(
+      join(workspace, ".graphflow", "session-journal.jsonl"),
+      `${JSON.stringify({ episodeId: "ep-pending", task: "x", createdAt: 1 })}\n`,
+      "utf8"
+    );
+    const result = closePendingEpisodeForCwd(workspace, {
+      env: {},
+      spawn: ((..._args: unknown[]) => {
+        spawned.push(_args);
+        return { unref() {} };
+      }) as typeof import("node:child_process").spawn,
+    });
+    expect(result.attempted).toBe(false);
+    expect(result.reason).toBe("no-explicit-success");
+    expect(result.episodeId).toBe("ep-pending");
     expect(spawned).toHaveLength(0);
   });
 
