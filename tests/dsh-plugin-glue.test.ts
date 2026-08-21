@@ -327,3 +327,211 @@ describe("dsh ESM glue plugin", () => {
     expect(latestPendingEpisodeId(journal)).toBeUndefined();
   });
 });
+
+describe("inbox auto-record (dialogue turn capture)", () => {
+  it("isUserOriginatedMessage filters harness/system injections", async () => {
+    const { isUserOriginatedMessage } = await import("../dsh/plugin.mjs");
+    expect(isUserOriginatedMessage({ source: { kind: "user" }, content: [] })).toBe(true);
+    expect(isUserOriginatedMessage({ source: { kind: "plugin", plugin: "x" }, content: [] })).toBe(false);
+    expect(isUserOriginatedMessage({ source: { kind: "tool", callId: "c" }, content: [] })).toBe(false);
+    expect(isUserOriginatedMessage({ source: { kind: "model" }, content: [] })).toBe(false);
+    // unknown/missing source falls back to role
+    expect(isUserOriginatedMessage({ role: "user", content: [] })).toBe(true);
+    expect(isUserOriginatedMessage({ role: "system", content: [] })).toBe(false);
+    expect(isUserOriginatedMessage(undefined)).toBe(false);
+  });
+
+  it("recordDialogueFromInbox skips non-user messages without spawning", async () => {
+    const spawned: unknown[][] = [];
+    const fakeSpawn = ((...args: unknown[]) => {
+      spawned.push(args);
+      return { unref() {} };
+    }) as unknown as typeof import("node:child_process").spawn;
+    const { recordDialogueFromInbox } = await import("../dsh/plugin.mjs");
+
+    const injected = recordDialogueFromInbox(
+      { source: { kind: "plugin", plugin: "harness" }, content: [{ type: "text", text: "background job bash-1 finished" }] },
+      "/tmp/ws",
+      { spawn: fakeSpawn, env: {} }
+    );
+    expect(injected.attempted).toBe(false);
+    expect(injected.reason).toBe("not-user-message");
+
+    const tool = recordDialogueFromInbox(
+      { source: { kind: "tool", callId: "c1" }, content: [{ type: "text", text: "tool result text" }] },
+      "/tmp/ws",
+      { spawn: fakeSpawn, env: {} }
+    );
+    expect(tool.attempted).toBe(false);
+    expect(tool.reason).toBe("not-user-message");
+    expect(spawned).toHaveLength(0);
+  });
+  it("extractMessageText pulls text blocks and skips non-text", async () => {
+    const { extractMessageText } = await import("../dsh/plugin.mjs");
+    expect(
+      extractMessageText({
+        content: [
+          { type: "text", text: "你好" },
+          { type: "tool", tool: "x" },
+          { type: "text", text: "世界" },
+        ],
+      })
+    ).toBe("你好\n世界");
+    expect(extractMessageText({ content: [{ type: "image" }] })).toBe("");
+    expect(extractMessageText(undefined)).toBe("");
+    expect(extractMessageText({ content: "nope" })).toBe("");
+  });
+
+  it("recordDialogueFromInbox spawns the local CLI with --query and skips short/disabled input", async () => {
+    const spawned: unknown[][] = [];
+    const fakeSpawn = ((...args: unknown[]) => {
+      spawned.push(args);
+      return { unref() {} };
+    }) as unknown as typeof import("node:child_process").spawn;
+    const { recordDialogueFromInbox, resolveCliCommand } = await import("../dsh/plugin.mjs");
+
+    const ok = recordDialogueFromInbox(
+      { content: [{ type: "text", text: "这个功能怎么实现" }] },
+      "/tmp/ws",
+      { spawn: fakeSpawn, env: {} }
+    );
+    expect(ok.attempted).toBe(true);
+    expect(ok.workspace).toBe("/tmp/ws");
+    expect(spawned).toHaveLength(1);
+    const [bin, args, opts] = spawned[0] as [string, string[], { cwd: string }];
+    expect(bin).toBe(process.execPath);
+    expect(args).toEqual([
+      resolveCliCommand(join(__dirname, "..")),
+      "dialogue",
+      "record",
+      "--query",
+      "这个功能怎么实现",
+    ]);
+    expect(opts.cwd).toBe("/tmp/ws");
+
+    const short = recordDialogueFromInbox({ content: [{ type: "text", text: "hi" }] }, "/tmp/ws", {
+      spawn: fakeSpawn,
+      env: {},
+    });
+    expect(short.attempted).toBe(false);
+    expect(short.reason).toBe("query-too-short");
+
+    const off = recordDialogueFromInbox({ content: [{ type: "text", text: "xxxxx" }] }, "/tmp/ws", {
+      spawn: fakeSpawn,
+      env: { GRAPHFLOW_AUTO_CAPTURE: "0" },
+    });
+    expect(off.attempted).toBe(false);
+    expect(off.reason).toBe("auto-capture-off");
+    expect(spawned).toHaveLength(1);
+  });
+});
+
+describe("assistant reply auto-fill (dialogue turn close loop)", () => {
+  it("recordReplyFromTurn spawns the local CLI with --reply and --session", async () => {
+    const spawned: unknown[][] = [];
+    const fakeSpawn = ((...args: unknown[]) => {
+      spawned.push(args);
+      return { unref() {} };
+    }) as unknown as typeof import("node:child_process").spawn;
+    const { recordReplyFromTurn, resolveCliCommand } = await import("../dsh/plugin.mjs");
+
+    const result = recordReplyFromTurn(
+      { type: "assistant/message", message: { role: "assistant", content: [{ type: "text", text: "这样实现即可" }] } },
+      "sess-123",
+      "/tmp/ws",
+      { spawn: fakeSpawn, env: {} }
+    );
+    expect(result.attempted).toBe(true);
+    expect(result.workspace).toBe("/tmp/ws");
+    expect(spawned).toHaveLength(1);
+    const [bin, args, opts] = spawned[0] as [string, string[], { cwd: string }];
+    expect(bin).toBe(process.execPath);
+    expect(args).toEqual([
+      resolveCliCommand(join(__dirname, "..")),
+      "dialogue",
+      "record",
+      "--reply",
+      "这样实现即可",
+      "--session",
+      "sess-123",
+    ]);
+    expect(opts.cwd).toBe("/tmp/ws");
+  });
+
+  it("recordReplyFromTurn skips interrupted, empty, and disabled input without spawning", async () => {
+    const spawned: unknown[][] = [];
+    const fakeSpawn = ((...args: unknown[]) => {
+      spawned.push(args);
+      return { unref() {} };
+    }) as unknown as typeof import("node:child_process").spawn;
+    const { recordReplyFromTurn } = await import("../dsh/plugin.mjs");
+
+    const interrupted = recordReplyFromTurn(
+      { type: "assistant/message", interrupted: true, message: { content: [{ type: "text", text: "半截回复" }] } },
+      "sess-1",
+      "/tmp/ws",
+      { spawn: fakeSpawn, env: {} }
+    );
+    expect(interrupted.attempted).toBe(false);
+    expect(interrupted.reason).toBe("interrupted");
+
+    const empty = recordReplyFromTurn(
+      { type: "assistant/message", message: { content: [{ type: "image" }] } },
+      "sess-1",
+      "/tmp/ws",
+      { spawn: fakeSpawn, env: {} }
+    );
+    expect(empty.attempted).toBe(false);
+    expect(empty.reason).toBe("no-text");
+
+    const off = recordReplyFromTurn(
+      { type: "assistant/message", message: { content: [{ type: "text", text: "完整回复" }] } },
+      "sess-1",
+      "/tmp/ws",
+      { spawn: fakeSpawn, env: { GRAPHFLOW_AUTO_CAPTURE: "0" } }
+    );
+    expect(off.attempted).toBe(false);
+    expect(off.reason).toBe("auto-capture-off");
+
+    expect(spawned).toHaveLength(0);
+  });
+
+  it("fills assistant replies via session/event, dedupes per message, and skips interrupted", () => {
+    const handlers: Record<string, (...args: unknown[]) => unknown> = {};
+    const spawned: Array<{ bin: string; args: string[]; cwd?: string }> = [];
+    const workspace = makeTempRoot("gf-dsh-glue-reply-");
+    const ctx = {
+      skills: { register() {} },
+      on(event: string, handler: (...args: unknown[]) => unknown) {
+        handlers[event] = handler;
+      },
+    };
+    apply(ctx, {
+      cwd: workspace,
+      spawn: ((bin: string, args: string[], opts?: { cwd?: string }) => {
+        spawned.push({ bin, args, cwd: opts?.cwd });
+        return { unref() {} };
+      }) as typeof import("node:child_process").spawn,
+    });
+
+    expect(typeof handlers["session/event"]).toBe("function");
+    const session = { id: "sess-9", header: { cwd: workspace } };
+    const message = { role: "assistant", content: [{ type: "text", text: "好，这样" }] };
+
+    handlers["session/event"]?.(session, { type: "assistant/message", message });
+    handlers["session/event"]?.(session, { type: "assistant/message", message });
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0]?.args).toEqual(
+      expect.arrayContaining(["dialogue", "record", "--reply", "好，这样", "--session", "sess-9"])
+    );
+    expect(spawned[0]?.cwd).toBe(workspace);
+
+    const interruptedMessage = { role: "assistant", content: [{ type: "text", text: "半截" }] };
+    handlers["session/event"]?.(session, {
+      type: "assistant/message",
+      interrupted: true,
+      message: interruptedMessage,
+    });
+    expect(spawned).toHaveLength(1);
+  });
+});

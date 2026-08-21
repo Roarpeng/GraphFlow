@@ -1,6 +1,7 @@
 import type { GraphEdge, GraphNode } from "../core/types";
 import type { GraphClient } from "../graph/client-factory";
 import { hashText } from "../utils/hash";
+import { deriveTurnSummary, deriveTurnTitle } from "./turn-distillation";
 
 /**
  * Dialogue threads: each user question (+ optional LLM reply) becomes a
@@ -42,6 +43,10 @@ export interface DialogueTurnRecord {
   relatedNodeIds: string[];
   createdAt: number;
   updatedAt: number;
+  /** Distilled short title (offline heuristic, no LLM). */
+  title?: string;
+  /** Distilled conclusion summary (offline heuristic, no LLM). */
+  summary?: string;
 }
 
 export interface DialogueSessionRecord {
@@ -137,7 +142,13 @@ export async function recordDialogueTurn(
 
   if (userQuery.trim().length < MIN_QUERY_CHARS) {
     if (assistantReply && tip) {
-      const updated: DialogueTurnRecord = { ...tip, assistantReply, updatedAt: now };
+      const summary = deriveTurnSummary(assistantReply);
+      const updated: DialogueTurnRecord = {
+        ...tip,
+        assistantReply,
+        ...(summary ? { summary } : {}),
+        updatedAt: now,
+      };
       await persistTurn(client, updated, session, {
         linkParent: false,
         jumped: tip.jumped,
@@ -151,9 +162,11 @@ export async function recordDialogueTurn(
   }
 
   if (tip && shouldReuseTurn(tip, userQuery, now)) {
+    const summary = assistantReply ? deriveTurnSummary(assistantReply) : undefined;
     const updated: DialogueTurnRecord = {
       ...tip,
       ...(assistantReply ? { assistantReply } : {}),
+      ...(summary ? { summary } : {}),
       updatedAt: now,
     };
     await persistTurn(client, updated, session, {
@@ -175,6 +188,8 @@ export async function recordDialogueTurn(
   const parentTurnId = resumeFrom && existingTurns.some((turn) => turn.id === resumeFrom) ? resumeFrom : tip?.id;
   const jumped = Boolean(parentTurnId && tip && parentTurnId !== tip.id);
   const seq = session.turnCount + 1;
+  const title = deriveTurnTitle(userQuery);
+  const summary = assistantReply.trim() ? deriveTurnSummary(assistantReply) : undefined;
   const turn: DialogueTurnRecord = {
     id: dialogueTurnIdFor(sessionId, seq),
     sessionId,
@@ -186,6 +201,8 @@ export async function recordDialogueTurn(
     relatedNodeIds: uniqueIds(input.relatedNodeIds).slice(0, MAX_RELATED_CODE),
     createdAt: now,
     updatedAt: now,
+    ...(title ? { title } : {}),
+    ...(summary ? { summary } : {}),
   };
 
   const nextSession: DialogueSessionRecord = {
@@ -234,6 +251,56 @@ export async function listDialogueTurns(
     return turns.slice(Math.max(0, turns.length - bounded));
   }
   return turns.slice(0, bounded);
+}
+
+export interface TurnDistillationPatch {
+  title?: string;
+  summary?: string;
+}
+
+/**
+ * Backfill distilled title/summary onto an existing turn without touching its
+ * graph shape. Existing non-empty fields win (never overwritten); missing
+ * fields are filled from `patch`. Returns the persisted record, or `undefined`
+ * when the turn (or its session hub) is missing.
+ */
+export async function applyTurnDistillation(
+  client: GraphClient,
+  turnId: string,
+  patch: TurnDistillationPatch
+): Promise<DialogueTurnRecord | undefined> {
+  const nodes = await collectDialogueNodes(client);
+  const node = nodes.find((item) => item.id === turnId);
+  const turn = node ? parseDialogueTurn(node) : undefined;
+  if (!turn) return undefined;
+
+  const nextTitle = mergeDistilledField(turn.title, patch.title);
+  const nextSummary = mergeDistilledField(turn.summary, patch.summary);
+  if (nextTitle === turn.title && nextSummary === turn.summary) {
+    return turn;
+  }
+
+  const merged: DialogueTurnRecord = {
+    ...turn,
+    ...(nextTitle ? { title: nextTitle } : {}),
+    ...(nextSummary ? { summary: nextSummary } : {}),
+  };
+  const session = await loadSession(client, merged.sessionId);
+  if (!session) return undefined;
+  await persistTurn(client, merged, session, {
+    linkParent: false,
+    jumped: merged.jumped,
+    relatedNodeIds: merged.relatedNodeIds,
+  });
+  return merged;
+}
+
+function mergeDistilledField(existing: string | undefined, incoming: string | undefined): string | undefined {
+  const existingTrimmed = existing?.trim();
+  const incomingTrimmed = incoming?.trim();
+  if (existingTrimmed) return existingTrimmed;
+  if (incomingTrimmed) return incomingTrimmed;
+  return undefined;
 }
 
 export async function loadDialogueThread(
@@ -427,6 +494,8 @@ function deserializeTurn(node: GraphNode): DialogueTurnRecord | undefined {
         : [],
       createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : 0,
       updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
+      ...(typeof parsed.title === "string" ? { title: parsed.title } : {}),
+      ...(typeof parsed.summary === "string" ? { summary: parsed.summary } : {}),
     };
   } catch {
     return undefined;

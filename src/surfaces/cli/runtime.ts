@@ -75,7 +75,10 @@ export {
 export {
   listDialogueTurnsRuntime,
   recordDialogueTurnRuntime,
+  resolveDialogueRecordInput,
+  distillDialogueTurnsRuntime,
   type DialogueListItem,
+  type DistillDialogueResult,
 } from "./runtime/dialogue.js";
 export {
   detectInstalledAgents,

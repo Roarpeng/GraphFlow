@@ -80,6 +80,152 @@ export function buildContextHint(cwd = process.cwd()) {
   return `GraphFlow: before large code reads, call mcp__graphflow__graphflow_context with rootDir=${cwd}. Do not dump SKILL.md.`;
 }
 
+/**
+ * Extract the plain text of a user message (its text ContentBlocks joined).
+ * Returns "" when the message carries no text. Never throws.
+ * @param {object|undefined} message - a UserMessage (agent/inbox/inserted payload).
+ * @returns {string}
+ */
+export function extractMessageText(message) {
+  if (!message || typeof message !== "object") return "";
+  const content = message.content;
+  if (!Array.isArray(content)) return "";
+  const parts = [];
+  for (const block of content) {
+    if (block && typeof block === "object" && block.type === "text" && typeof block.text === "string") {
+      parts.push(block.text);
+    }
+  }
+  return parts.join("\n").trim();
+}
+
+/**
+ * The local GraphFlow CLI entry (this package's own dist build). Falls back to
+ * `graphflow` from PATH when dist is absent (source checkout without build).
+ * @returns {string}
+ */
+export function resolveCliCommand(packageRoot = PACKAGE_ROOT) {
+  const distCli = join(packageRoot, "dist", "surfaces", "cli", "index.js");
+  return existsSync(distCli) ? distCli : "graphflow";
+}
+
+/**
+ * Whether a message originates from the human user rather than the harness.
+ * Only `source.kind === "user"` qualifies; harness/system injections
+ * (`plugin`/`tool`/`model`) must not become dialogue turns (job finished
+ * notices, subagent reports, tool results, …). Unknown/missing source falls
+ * back to the role check so nothing legitimate is dropped.
+ * @param {object|undefined} message
+ * @returns {boolean}
+ */
+export function isUserOriginatedMessage(message) {
+  if (!message || typeof message !== "object") return false;
+  const kind =
+    message.source && typeof message.source === "object" ? message.source.kind : undefined;
+  if (kind === "user") return true;
+  if (kind === "plugin" || kind === "tool" || kind === "model") return false;
+  return message.role !== "system";
+}
+
+/**
+ * Best-effort auto-record of one user turn as a dialogue node.
+ * Spawns `graphflow dialogue record --query "<text>" [--session <sessionId>]`
+ * in the agent's workspace (cwd = session header cwd) so every web/agent
+ * question becomes a dialogue-turn graph node without relying on the agent
+ * calling graphflow_context itself. Only human-originated messages are
+ * recorded (see isUserOriginatedMessage) — harness/system injections must not
+ * pollute the dialogue graph. `sessionId` scopes the turn to one dsh session
+ * (omitted → default "main" dialogue session) so question recording and reply
+ * filling land in the same dialogue session. Never throws; the spawned child
+ * is detached.
+ * @param {object|undefined} message - a UserMessage (agent/inbox/inserted payload).
+ * @param {string} [cwd]
+ * @param {GraphFlowDshPluginConfig} [config]
+ * @param {string} [sessionId] - dialogue session name/id; omitted → "main".
+ * @returns {{attempted: boolean, reason?: string, workspace?: string}}
+ */
+export function recordDialogueFromInbox(message, cwd, config = {}, sessionId) {
+  try {
+    if (!isUserOriginatedMessage(message)) {
+      return { attempted: false, reason: "not-user-message" };
+    }
+    const env = envOf(config);
+    if (!isAutoCaptureEnabled(env)) {
+      return { attempted: false, reason: "auto-capture-off" };
+    }
+    const text = extractMessageText(message);
+    if (text.length < 4) {
+      return { attempted: false, reason: "query-too-short" };
+    }
+    const workspace = typeof cwd === "string" && cwd.trim() ? cwd : process.cwd();
+    const spawnFn = typeof config.spawn === "function" ? config.spawn : spawn;
+    const cli = resolveCliCommand(config.packageRoot);
+    const args = [cli, "dialogue", "record", "--query", text];
+    if (typeof sessionId === "string" && sessionId.trim()) {
+      args.push("--session", sessionId);
+    }
+    const bin = cli === "graphflow" ? (env.GRAPHFLOW_HOOK_BIN?.trim() || "npx") : process.execPath;
+    const fullArgs = cli === "graphflow" ? ["-y", "--package=@roarpeng/graphflow", ...args] : args;
+    spawnFn(bin, fullArgs, {
+      cwd: workspace,
+      env,
+      stdio: "ignore",
+      detached: true,
+      windowsHide: true,
+    })?.unref?.();
+    return { attempted: true, workspace };
+  } catch {
+    return { attempted: false, reason: "error" };
+  }
+}
+
+/**
+ * Best-effort fill of one assistant reply into the latest pending dialogue
+ * turn for `sessionId`. Spawns `graphflow dialogue record --reply "<text>"
+ * [--session <sessionId>]` (reply-only mode) in the workspace; the runtime
+ * fills the latest pending turn's assistantReply and safely skips when none is
+ * pending. Half-written (interrupted) replies are not filled. Never throws.
+ * @param {object|undefined} event - an `assistant/message` session event.
+ * @param {string} [sessionId] - dialogue session name/id.
+ * @param {string} [cwd]
+ * @param {GraphFlowDshPluginConfig} [config]
+ * @returns {{attempted: boolean, reason?: string, workspace?: string}}
+ */
+export function recordReplyFromTurn(event, sessionId, cwd, config = {}) {
+  try {
+    const text = extractMessageText(event?.message);
+    if (!text) {
+      return { attempted: false, reason: "no-text" };
+    }
+    if (event?.interrupted) {
+      return { attempted: false, reason: "interrupted" };
+    }
+    const env = envOf(config);
+    if (!isAutoCaptureEnabled(env)) {
+      return { attempted: false, reason: "auto-capture-off" };
+    }
+    const workspace = typeof cwd === "string" && cwd.trim() ? cwd : process.cwd();
+    const spawnFn = typeof config.spawn === "function" ? config.spawn : spawn;
+    const cli = resolveCliCommand(config.packageRoot);
+    const args = [cli, "dialogue", "record", "--reply", text];
+    if (typeof sessionId === "string" && sessionId.trim()) {
+      args.push("--session", sessionId);
+    }
+    const bin = cli === "graphflow" ? (env.GRAPHFLOW_HOOK_BIN?.trim() || "npx") : process.execPath;
+    const fullArgs = cli === "graphflow" ? ["-y", "--package=@roarpeng/graphflow", ...args] : args;
+    spawnFn(bin, fullArgs, {
+      cwd: workspace,
+      env,
+      stdio: "ignore",
+      detached: true,
+      windowsHide: true,
+    })?.unref?.();
+    return { attempted: true, workspace };
+  } catch {
+    return { attempted: false, reason: "error" };
+  }
+}
+
 export function loadGraphFlowSkillRegistration(packageRoot = PACKAGE_ROOT) {
   const skillPath = join(packageRoot, "skills", "graphflow", "SKILL.md");
   let content = "";
@@ -228,6 +374,59 @@ export function apply(ctx, config = {}) {
     // mark the flywheel successful while the agent is still working.
     listen(ctx, "agent/disposed", (payload) => {
       closeFromPayload(payload);
+    });
+  } catch {
+    // event bus missing
+  }
+
+  const recordedInboxMessages = new WeakSet();
+
+  try {
+    // Auto record every user question as a dialogue-turn node (the dsh analog
+    // of Claude Code's PostToolUse capture): each web/agent question becomes a
+    // graph node with session/workspace lineage, without relying on the agent
+    // calling graphflow_context itself. Turns are scoped to the dsh session id
+    // so question recording and reply filling stay in the same dialogue
+    // session (never crossing same-workspace sessions).
+    listen(ctx, "agent/inbox/inserted", (payload) => {
+      try {
+        const message = payload?.message;
+        if (!message || typeof message !== "object") return;
+        if (recordedInboxMessages.has(message)) return;
+        recordedInboxMessages.add(message);
+        const agent = payloadAgent(payload);
+        const cwd =
+          agent?.session?.header?.cwd ??
+          resolveWorkspaceCwd(payload, config.cwd);
+        recordDialogueFromInbox(message, cwd, config, agent?.session?.id);
+      } catch {
+        // recording is optional
+      }
+    });
+  } catch {
+    // event bus missing
+  }
+
+  const recordedReplies = new WeakSet();
+
+  try {
+    // Auto fill every assistant reply into the latest pending dialogue turn of
+    // the same dsh session: closes the question→answer loop so dialogue-turn
+    // nodes record a complete exchange without the agent calling
+    // graphflow_context({ assistantReply }) itself. Deduped per message object;
+    // interrupted (half-written) replies are skipped.
+    listen(ctx, "session/event", (session, event) => {
+      try {
+        if (event?.type !== "assistant/message") return;
+        if (event.interrupted) return;
+        const message = event.message;
+        if (!message || typeof message !== "object") return;
+        if (recordedReplies.has(message)) return;
+        recordedReplies.add(message);
+        recordReplyFromTurn(event, session?.id, session?.header?.cwd, config);
+      } catch {
+        // reply fill is optional
+      }
     });
   } catch {
     // event bus missing

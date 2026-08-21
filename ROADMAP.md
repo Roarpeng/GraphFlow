@@ -68,6 +68,59 @@
 | **P2** | **社区化基建** | ✅ | CONTRIBUTING / ROADMAP / Issue 模板 |
 | **P3** | **MCP 2.0 无状态规范适配** | ⬜ | 升级 SDK 后复核 ping / schema |
 
+## 进化方向（2026-08 深度调研版）
+
+> 来源：CLI dogfood 实证 + 41k LOC 内部代码调研 + 4 主题行业趋势调研（详见会话调研报告）。核心判断：**"记得住"已有 99% 压缩背书，"学得会"还是空的（Skill=0、episode 全 pending）——进化主线 = 把学习飞轮做成真实证据链，再用 MCP 2.0 + SKILL.md 互操作成为标准记忆层，最后用概念层让记忆变成知识。**
+
+### R0 · 让飞轮真的转起来（P0，决定项目本质）
+
+| 优先级 | 事项 | 状态 | 说明与依据 |
+| --- | --- | --- | --- |
+| **P0** | 真实证据链替代规则堆叠 | ⬜ | `proven = uses>=2` 的 `uses` 是原子出现次数而非成功次数（skill-flywheel L528/L228）；改为与成功 episode 绑定的 success 计数 |
+| **P0** | 删除硬编码准入闭集 | ⬜ | `FALLBACK_GOLDEN_TOKENS` 仅 15 词（skill-admission L14），技能名不在其中永远无法 proven；改为随 golden set / 真实 episode 动态生成 |
+| **P0** | 本地闭环验证 | ⬜ | 当前 8 episode 全 pending、0 技能——无外部 agent 时飞轮不收敛；补离线自学习路径让 dogfood 也能积累 |
+| **P0** | 对话记录噪声治理 | ✅ | `isUserOriginatedMessage` 按 `source.kind` 过滤 harness 系统注入（job/子代理/Cordis 通知不再入图） |
+
+### R1 · 性能与存储收敛（P0，规模化前提）
+
+| 优先级 | 事项 | 状态 | 说明与依据 |
+| --- | --- | --- | --- |
+| **P0** | 消灭 file 后端全量读写放大 | ⬜ | `readStore()` 每次整文件读+解析、`queryByKeyword` 每次重建倒排（graphify-file-client L49/L110/L125）；进程内缓存或 auto 优先落 sqlite FTS5 |
+| **P0** | 技能读路径改 O(1) id 查找 | ⬜ | `skill-store` L158/164 用 `queryByKeyword` 代替已存在的 `getNodesByIds`；复合技能逐对读 O(N²) |
+| **P1** | fidelity 指标落地 | ⬜ | `kind:"tokens-not-fidelity"` 从免责声明变成可追踪指标（golden recall / expand 保真度评测） |
+
+### R2 · 对齐行业标准（P1，防被覆盖）
+
+| 优先级 | 事项 | 状态 | 说明与依据 |
+| --- | --- | --- | --- |
+| **P1** | MCP 2.0 无状态规范迁移 | ⬜ | 2026-07-28 官方发布无状态核心规范；升级 SDK、适配 streamable HTTP、处理 SEP-2577（Roots/Sampling/Logging 废弃）；MCP 结果用 `structuredContent` |
+| **P1** | Skill 节点对齐 SKILL.md 事实标准 | ⬜ | 技能可导出为 SKILL.md 直接注入 agent（反向导入）；让飞轮产出变成跨工具可消费资产 |
+| **P2** | 自适应遗忘机制 | ⬜ | 学术主线 SWE-MeM/MAGMA/FadeMem；访问时间 + 成功率的双维证据衰变曲线 |
+
+### R3 · 从"记录"到"知识"（P1，产品差异化）
+
+| 优先级 | 事项 | 状态 | 说明与依据 |
+| --- | --- | --- | --- |
+| **P1** | Concept/Requirement 层落地 | ⬜ | 文档图谱能力已建好但节点为 0；把对话提炼的结论升级为 Concept 节点（`derived_from` 链） |
+| **P2** | 团队共享记忆补位 | ⬜ | skill sync 之上做团队知识图谱 artifact 同步 + 冲突合并 + canary 门控（已有） |
+
+### R4 · 工程治理（P2，持续维护前提）
+
+| 优先级 | 事项 | 状态 | 说明与依据 |
+| --- | --- | --- | --- |
+| **P2** | 配置 split-brain 收敛 | ⬜ | `graphPolicy.embeddingProvider:"fnv"` vs `embeddingPolicy.provider:"transformers"` 冲突；`DEFAULT_EMBEDDING_MODEL`(bge) 与 `embeddings.ts` 硬编码(all-MiniLM) 不一致 |
+| **P2** | context-slicer / orchestrator 重复合并 | ⬜ | `buildLayeredContextPackage`/`buildEnhancedContextPackage` ~60% 重复；`runOrchestration` 358 行 |
+| **P2** | 集成层模块化 | ⬜ | agent-mcp-installer 2099 行 + skill-installer 1436 行平台胶水 → agent 适配器抽象 |
+| **P2** | 测试隔离修复 | ⬜ | m74/m75/m62 读写真实 home 的并行竞态 |
+| **P2** | web 知识节点栏产品化 | ⬜ | 动态插件 → 静态 bundle（dsh 打包管线），源码种子已入 `web/` |
+
+### 建议版本节奏
+
+- **v1.10**：R0 全部（真证据链 + 本地闭环 + 噪声治理）——"学习引擎"成为真能力的版本
+- **v1.11**：R1 + R2.6（性能收敛 + MCP 2.0）
+- **v1.12**：R2.7-2.8 + R3（SKILL.md 互操作 + 概念层落地）
+- **长期**：R4 工程债随版本消化
+
 ## 如何参与
 
 - 认领 ⬜ / 🟡 事项、修 bug、补测试与文档：见 [CONTRIBUTING.md](CONTRIBUTING.md)

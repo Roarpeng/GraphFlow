@@ -528,8 +528,14 @@ export function getAgentInstructionStatus(): AgentInstructionStatus[] {
     const detected = existsSync(target.markerDir);
     let installed = false;
     if (existsSync(target.filePath)) {
-      const content = readFileSync(target.filePath, "utf8");
-      installed = content.includes(INSTRUCTION_BEGIN) && content.includes(INSTRUCTION_END);
+      // existsSync + readFileSync 之间存在竞态窗口（并行测试/安装可删除文件）；
+      // 读失败一律视为未安装，不抛异常。
+      try {
+        const content = readFileSync(target.filePath, "utf8");
+        installed = content.includes(INSTRUCTION_BEGIN) && content.includes(INSTRUCTION_END);
+      } catch {
+        installed = false;
+      }
     }
     return { agent: target.agent, configPath: target.filePath, detected, installed };
   });

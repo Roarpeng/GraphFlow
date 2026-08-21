@@ -40,10 +40,13 @@ import {
   forgetEpisode,
   listDialogueTurnsRuntime,
   recordDialogueTurnRuntime,
+  resolveDialogueRecordInput,
+  distillDialogueTurnsRuntime,
   type MemoryEpisodeItem,
   type MemorySearchHit,
   type MemoryOutcome,
   type DialogueListItem,
+  type DistillDialogueResult,
 } from "./runtime";
 import { validateConfigDetailed, type ConfigValidationResult } from "../../config/loader.js";
 import { isDeviationKind } from "../../learning/episodic-memory";
@@ -713,44 +716,34 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   }
 
   if (command === "dialogue" && args[0] === "record") {
-    const query =
-      readCliFlagValue(args, "--query") ??
-      args
-        .slice(1)
-        .filter((part) => !part.startsWith("--"))
-        .join(" ")
-        .trim();
+    const input = resolveDialogueRecordInput(args);
+    const query = input.query;
     if (!query) {
-      const replyOnly = readCliFlagValue(args, "--reply");
-      if (!replyOnly) {
-        console.log(
-          'Usage: graphflow dialogue record --query "<text>" [--reply "<text>"] [--resume-from <turnId>] [--session <name>] [--json] [--config <path>]\n       graphflow dialogue record --reply "<text>"  (fill pending assistant answer)'
-        );
-        process.exitCode = 1;
-        return undefined;
+      if (input.reply) {
+        const data = await recordDialogueTurnRuntime("", {
+          ...(configPath ? { configPath } : {}),
+          assistantReply: input.reply,
+          ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+        });
+        return {
+          command: "dialogue-record",
+          data,
+          legacyText: data
+            ? `id=${data.id}; seq=${data.seq}; filled=true; q=${data.userQuery}`
+            : "skipped",
+        };
       }
-      const sessionId = readCliFlagValue(args, "--session");
-      const data = await recordDialogueTurnRuntime("", {
-        ...(configPath ? { configPath } : {}),
-        assistantReply: replyOnly,
-        ...(sessionId ? { sessionId } : {}),
-      });
-      return {
-        command: "dialogue-record",
-        data,
-        legacyText: data
-          ? `id=${data.id}; seq=${data.seq}; filled=true; q=${data.userQuery}`
-          : "skipped",
-      };
+      console.log(
+        'Usage: graphflow dialogue record --query "<text>" [--reply "<text>"] [--resume-from <turnId>] [--session <name>] [--json] [--config <path>]\n       graphflow dialogue record --reply "<text>"  (fill pending assistant answer)'
+      );
+      process.exitCode = 1;
+      return undefined;
     }
-    const reply = readCliFlagValue(args, "--reply");
-    const sessionId = readCliFlagValue(args, "--session");
-    const resumeFrom = readCliFlagValue(args, "--resume-from");
     const data = await recordDialogueTurnRuntime(query, {
       ...(configPath ? { configPath } : {}),
-      ...(reply ? { assistantReply: reply } : {}),
-      ...(sessionId ? { sessionId } : {}),
-      ...(resumeFrom ? { resumeFromTurnId: resumeFrom } : {}),
+      ...(input.reply ? { assistantReply: input.reply } : {}),
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      ...(input.resumeFrom ? { resumeFromTurnId: input.resumeFrom } : {}),
     });
     return {
       command: "dialogue-record",
@@ -758,6 +751,20 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       legacyText: data
         ? `id=${data.id}; seq=${data.seq}; jumped=${data.jumped}; q=${data.userQuery}`
         : "skipped",
+    };
+  }
+
+  if (command === "dialogue" && args[0] === "distill") {
+    const all = args.includes("--all");
+    const sessionId = readCliFlagValue(args, "--session");
+    const data = await distillDialogueTurnsRuntime(configPath, {
+      ...(all ? { all: true } : {}),
+      ...(sessionId ? { sessionId } : {}),
+    });
+    return {
+      command: "dialogue-distill",
+      data,
+      legacyText: formatDialogueDistill(data),
     };
   }
 
@@ -791,11 +798,16 @@ function formatDialogueList(items: DialogueListItem[]): string {
   const lines: string[] = [`count=${items.length}`];
   for (const item of items) {
     const jump = item.jumped ? `; jump←${item.parentTurnId ?? "?"}` : "";
+    const title = item.title ? `; title=${item.title}` : "";
     lines.push(
-      `id=${item.id}; seq=${item.seq}${jump}; q=${item.userQuery}; a=${item.assistantReply || "(pending)"}`
+      `id=${item.id}; seq=${item.seq}${jump}; q=${item.userQuery}; a=${item.assistantReply || "(pending)"}${title}`
     );
   }
   return lines.join("\n");
+}
+
+function formatDialogueDistill(data: DistillDialogueResult): string {
+  return `updated=${data.updated}; unchanged=${data.unchanged}; total=${data.total}`;
 }
 
 function formatValidationResult(data: ConfigValidationResult): string {

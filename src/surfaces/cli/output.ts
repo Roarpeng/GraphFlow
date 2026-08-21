@@ -59,6 +59,7 @@ export function buildCliUsage(): string {
     "  memory forget <episodeId> [--json] [--config <path>]  # prune episode + hide descendant skills; unknown id is a clean no-op",
     "  dialogue list [--session <name|id>] [--limit N] [--json] [--config <path>]  # list conversation-turn graph nodes",
     '  dialogue record --query "<text>" [--reply "<text>"] [--resume-from <turnId>] [--session <name>] [--json] [--config <path>]',
+    "  dialogue distill [--all] [--session <name|id>] [--json] [--config <path>]  # backfill turn titles/summaries (offline)",
     "  help | --help | -h",
     "  version | --version | -v",
   ].join("\n");
