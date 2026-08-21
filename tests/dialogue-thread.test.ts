@@ -10,6 +10,7 @@ import {
   recordDialogueTurn,
   scoreTopicOverlap,
 } from "../src/learning/dialogue-thread";
+import { resolveDialogueRecordInput } from "../src/surfaces/cli/runtime/dialogue";
 
 describe("dialogue-thread knowledge graph", () => {
   it("records a user question as a Decision node linked to a session hub", async () => {
@@ -185,5 +186,62 @@ describe("dialogue-thread knowledge graph", () => {
   it("scores topic overlap so jumps are visible without being blocked", () => {
     expect(scoreTopicOverlap(["deterministic", "context"], "deterministic context package")).toBeGreaterThan(0.5);
     expect(scoreTopicOverlap(["deterministic", "context"], "install robotic arm firmware")).toBe(0);
+  });
+});
+
+describe("resolveDialogueRecordInput", () => {
+  it("reply-only mode never leaks --reply/--session values into the query", () => {
+    const input = resolveDialogueRecordInput([
+      "dialogue",
+      "record",
+      "--reply",
+      "结论：这是内存泄漏导致的。",
+      "--session",
+      "s1",
+    ]);
+    expect(input.query).toBeUndefined();
+    expect(input.reply).toBe("结论：这是内存泄漏导致的。");
+    expect(input.sessionId).toBe("s1");
+  });
+
+  it("--query with --reply keeps both, plus session and resume-from", () => {
+    const input = resolveDialogueRecordInput([
+      "dialogue",
+      "record",
+      "--query",
+      "这个报错怎么解决",
+      "--reply",
+      "升级依赖即可",
+      "--session",
+      "s1",
+      "--resume-from",
+      "dialogue:abc:0001",
+    ]);
+    expect(input.query).toBe("这个报错怎么解决");
+    expect(input.reply).toBe("升级依赖即可");
+    expect(input.sessionId).toBe("s1");
+    expect(input.resumeFrom).toBe("dialogue:abc:0001");
+  });
+
+  it("bare positional tokens form the query only when no dialogue flag is present", () => {
+    expect(resolveDialogueRecordInput(["dialogue", "record", "你好，看看这个报错"]).query).toBe(
+      "你好，看看这个报错"
+    );
+    const withFlag = resolveDialogueRecordInput(["dialogue", "record", "裸词", "--session", "s2"]);
+    expect(withFlag.query).toBeUndefined();
+    expect(withFlag.sessionId).toBe("s2");
+  });
+
+  it("--flag=value form is honored and empty values are dropped", () => {
+    const input = resolveDialogueRecordInput([
+      "dialogue",
+      "record",
+      "--query=等于号形式",
+      "--reply=",
+      "--session=s3",
+    ]);
+    expect(input.query).toBe("等于号形式");
+    expect(input.reply).toBeUndefined();
+    expect(input.sessionId).toBe("s3");
   });
 });
