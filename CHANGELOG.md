@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.9.16] - 2026-08-21
+
+### Added
+
+- **dsh 对话自动闭环**：`dsh/plugin.mjs` 监听 `session/event` 的 `assistant/message`，自动把每轮回复填入 `dialogue-turn` 节点（`dialogue record --reply`），与 `agent/inbox/inserted` 提问记录配对；提问/回复均按 dsh 会话 id 隔离（`--session`），同工作区多会话不串
+- **对话节点提炼**：新增 `src/learning/turn-distillation.ts`（离线启发式）——`deriveTurnTitle` 剥离问候/祈使前缀取首子句（30 字符），`deriveTurnSummary` 结论标记句优先/末段落回退（200 字符）；`DialogueTurnRecord` 增加可选 `title/summary`，记录/回填时自动生成
+- **CLI `graphflow dialogue distill [--all] [--session]`**：批量回填遗留轮次的 title/summary（幂等）；`dialogue list` 输出 title/summary
+- **对话记录噪声治理**：`isUserOriginatedMessage` 按 `message.source.kind` 过滤 harness 系统注入（job 完成/子代理/Cordis 通知不再入图），未知来源回退 role 判断
+- **web 知识节点栏源码种子**：`web/plugin.mjs`（Host+Client 双半部参考实现）+ `web/README.md`；`docs/dsh-install-guide.md` 新 harness 安装启用指南
+- **ROADMAP 进化方向**：R0-R4 深度调研版（真实证据链 / 性能收敛 / MCP 2.0 与 SKILL.md 对齐 / 概念层落地 / 工程治理）
+
+### Fixed
+
+- **CLI `dialogue record --reply` 解析 bug**：reply-only 填充此前被参数解析短路——`--reply` 的值被裸参数拼接当成 query，导致填充变成新建垃圾轮次；新增 `resolveDialogueRecordInput`（reply-only 优先、flag 值不泄漏进 query、兼容 `--flag=value`）+ 4 个回归用例
+- **doctor 指令状态检查竞态**：`getAgentInstructionStatus` 的 `existsSync`+`readFileSync` 非原子，并行场景（测试/安装并发）下 ENOENT 会抛异常；读失败改为视为未安装
+
+### Tests
+
+- `tests/dsh-plugin-glue.test.ts`：回复补全（spawn 参数/三态跳过/session/event 接线去重）+ 消息来源过滤（plugin/tool/model 不入图）
+- `tests/turn-distillation.test.ts`（新增 14 用例）：标题/摘要单元 + `dialogue distill` 端到端幂等
+- `tests/dialogue-thread.test.ts`：`resolveDialogueRecordInput` 4 用例
+
 ## [1.9.15] - 2026-08-20
 
 ### Added
