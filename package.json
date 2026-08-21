@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "1.9.15",
+  "version": "1.9.16",
   "publishConfig": {
     "access": "public"
   },
@@ -12,6 +12,7 @@
     "mcp.json",
     "cordis.patch.yml",
     "dsh",
+    "web",
     "skills",
     "src/surfaces/trae-skill",
     "src/surfaces/trae-rules",
@@ -39,6 +40,7 @@
       "default": "./dist/index.js"
     },
     "./dsh": "./dsh/plugin.mjs",
+    "./web": "./web/plugin.mjs",
     "./package.json": "./package.json"
   },
   "bin": {
