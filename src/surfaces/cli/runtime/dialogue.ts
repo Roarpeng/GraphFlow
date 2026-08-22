@@ -75,7 +75,7 @@ export async function listDialogueTurnsRuntime(
   options?: { sessionId?: string; limit?: number; rootDir?: string }
 ): Promise<DialogueListItem[]> {
   const config = bindRuntimeWorkspaceRoot(
-    resolveConfig(configPath),
+    resolveConfig(configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
     options?.rootDir ? { rootDir: options.rootDir } : undefined
   );
   const client = createGraphClient(config);
@@ -98,7 +98,7 @@ export async function recordDialogueTurnRuntime(
   }
 ): Promise<DialogueListItem | undefined> {
   const config = bindRuntimeWorkspaceRoot(
-    resolveConfig(options?.configPath),
+    resolveConfig(options?.configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
     options?.rootDir ? { rootDir: options.rootDir } : undefined
   );
   const client = createGraphClient(config);
@@ -122,7 +122,7 @@ export async function distillDialogueTurnsRuntime(
   options?: { sessionId?: string; rootDir?: string; all?: boolean }
 ): Promise<DistillDialogueResult> {
   const config = bindRuntimeWorkspaceRoot(
-    resolveConfig(configPath),
+    resolveConfig(configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
     options?.rootDir ? { rootDir: options.rootDir } : undefined
   );
   const client = createGraphClient(config);

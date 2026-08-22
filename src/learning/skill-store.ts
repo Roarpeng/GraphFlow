@@ -80,6 +80,18 @@ export function parseSkillState(content: string): SkillState | undefined {
       ...(typeof parsed.lastDecayedAt === "number" ? { lastDecayedAt: parsed.lastDecayedAt } : {}),
       ...(parsed.hasSymbolEvidence === true ? { hasSymbolEvidence: true } : {}),
       ...(parsed.linkedSuccess === true ? { linkedSuccess: true } : {}),
+      ...(typeof parsed.successCount === "number" &&
+      Number.isFinite(parsed.successCount) &&
+      parsed.successCount > 0
+        ? { successCount: parsed.successCount }
+        : {}),
+      ...(Array.isArray(parsed.successEpisodeIds)
+        ? {
+            successEpisodeIds: parsed.successEpisodeIds.filter(
+              (value): value is string => typeof value === "string"
+            ),
+          }
+        : {}),
       ...(typeof parsed.failStreak === "number" && parsed.failStreak > 0 ? { failStreak: parsed.failStreak } : {}),
       ...(parsed.seeded === true ? { seeded: true } : {}),
       ...(parsed.outcomeKind === "proven" || parsed.outcomeKind === "correctable" || parsed.outcomeKind === "anti-pattern" || parsed.outcomeKind === "noise"
@@ -155,9 +167,21 @@ export function parseCompositeState(content: string): CompositeSkillState | unde
   }
 }
 
-export async function readSkillState(client: GraphClient, id: string): Promise<SkillState | undefined> {
+async function findSkillNode(client: GraphClient, id: string): Promise<GraphNode | undefined> {
+  if (client.getNodesByIds) {
+    const directNodes = await client.getNodesByIds([id]);
+    const direct = directNodes.find((node) => node.id === id && node.type === "Skill");
+    if (direct) {
+      return direct;
+    }
+  }
+
   const hits = await client.queryByKeyword(id);
-  const direct = hits.find((node) => node.id === id && node.type === "Skill");
+  return hits.find((node) => node.id === id && node.type === "Skill");
+}
+
+export async function readSkillState(client: GraphClient, id: string): Promise<SkillState | undefined> {
+  const direct = await findSkillNode(client, id);
   return direct ? parseSkillState(direct.content) : undefined;
 }
 
@@ -165,8 +189,7 @@ export async function loadCompositeSkill(
   client: GraphClient,
   id: string
 ): Promise<CompositeSkillState | undefined> {
-  const hits = await client.queryByKeyword(id);
-  const direct = hits.find((node) => node.id === id && node.type === "Skill");
+  const direct = await findSkillNode(client, id);
   return direct ? parseCompositeState(direct.content) : undefined;
 }
 

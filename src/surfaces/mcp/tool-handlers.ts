@@ -13,6 +13,7 @@ import {
   planAndBrainstormResult,
   planInsightResult,
   previewContext,
+  extractDialogueKnowledgeRuntime,
   rebuildGraph,
   reportOutcome,
   runTaskResult,
@@ -38,6 +39,7 @@ export type ToolCallResponse = {
     type: "text";
     text: string;
   }>;
+  structuredContent?: unknown;
 };
 
 export interface ExecutionHooks {
@@ -49,13 +51,13 @@ export async function executeToolCall(
   call: ToolCall,
   server?: McpServer,
   _hooks?: ExecutionHooks
-): Promise<ToolCallResponse> {
+): Promise<ToolCallResponse & { structuredContent: Record<string, unknown> }> {
   const args = call.arguments ?? {};
   const onProgress = makeProgressCallback(server, call.progressToken);
 
   switch (call.name) {
     case "graphflow_run":
-      return textResponse(
+      return structuredResponse(
         await runTaskResult(readRequiredString(args.task, "task"), readOptionalString(args.configPath))
       );
     case "graphflow_report_outcome": {
@@ -74,7 +76,7 @@ export async function executeToolCall(
         ...(codeHints ? { codeHints } : {}),
       };
       const hasEngHints = Boolean(requirementIds || conceptIds || codeHints);
-      return textResponse(
+      return structuredResponse(
         await reportOutcome(
           readRequiredString(args.episodeId, "episodeId"),
           typeof args.success === "boolean" ? args.success : false,
@@ -90,7 +92,7 @@ export async function executeToolCall(
       const anchorId = readOptionalString(args.anchorId);
       const assistantReply = readOptionalString(args.assistantReply);
       if (anchorId && !query) {
-        return textResponse(
+        return structuredResponse(
           await expandAnchor(
             anchorId,
             readOptionalString(args.configPath),
@@ -99,7 +101,7 @@ export async function executeToolCall(
         );
       }
       if (!query && !anchorId && assistantReply) {
-        return textResponse(
+        return structuredResponse(
           await captureAssistantReply(
             assistantReply,
             readOptionalString(args.configPath),
@@ -109,7 +111,7 @@ export async function executeToolCall(
         );
       }
       if (query && !anchorId) {
-        return textResponse(
+        return structuredResponse(
           await previewContext(
             query,
             readOptionalString(args.configPath),
@@ -121,7 +123,7 @@ export async function executeToolCall(
       }
       if (query && anchorId) {
         // Both provided: default to preview behavior for backward compatibility
-        return textResponse(
+        return structuredResponse(
           await previewContext(
             query,
             readOptionalString(args.configPath),
@@ -137,44 +139,61 @@ export async function executeToolCall(
       const mode = readOptionalString(args.mode) || "simple";
       const task = readRequiredString(args.task, "task");
       if (mode === "insight") {
-        return textResponse(
+        return structuredResponse(
           await planInsightResult(task, readOptionalString(args.configPath))
         );
       }
-      return textResponse(
+      return structuredResponse(
         await planAndBrainstormResult(task, readOptionalString(args.configPath))
       );
     }
     case "graphflow_index": {
       const filePath = readOptionalString(args.filePath);
       const mode = readOptionalString(args.mode) || "incremental";
+      const extractKnowledge = args.knowledgeExtract === true;
       if (filePath) {
-        return textResponse(
-          await indexFile(filePath, readOptionalString(args.configPath))
-        );
+        const result = await indexFile(filePath, readOptionalString(args.configPath));
+        if (!extractKnowledge) return structuredResponse(result);
+        return structuredResponse({
+          ...result,
+          knowledge: await extractDialogueKnowledgeRuntime(readOptionalString(args.configPath), {
+            ...dialogueKnowledgeOptions(args),
+          }),
+        });
       }
       if (mode === "full") {
-        return textResponse(
-          await rebuildGraph(
+        const result = await rebuildGraph(
             readOptionalString(args.rootDir),
             readOptionalString(args.configPath),
             onProgress ? { onProgress } : undefined
-          )
         );
+        if (!extractKnowledge) return structuredResponse(result);
+        return structuredResponse({
+          ...result,
+          knowledge: await extractDialogueKnowledgeRuntime(readOptionalString(args.configPath), {
+            ...dialogueKnowledgeOptions(args),
+          }),
+        });
       }
-      return textResponse(
-        await indexGraph(
+
+      const result = await indexGraph(
           readOptionalString(args.rootDir),
           readOptionalString(args.configPath),
           onProgress ? { onProgress } : undefined
-        )
       );
+      if (!extractKnowledge) return structuredResponse(result);
+      return structuredResponse({
+        ...result,
+        knowledge: await extractDialogueKnowledgeRuntime(readOptionalString(args.configPath), {
+          ...dialogueKnowledgeOptions(args),
+        }),
+      });
     }
     case "graphflow_insight": {
       const mode = readRequiredString(args.mode, "mode");
       const task = readRequiredString(args.task, "task");
       if (mode === "submit") {
-        return textResponse(
+        return structuredResponse(
           await submitAgentInsightResult(
             task,
             readRequiredString(args.workItemId, "workItemId"),
@@ -186,7 +205,7 @@ export async function executeToolCall(
         );
       }
       if (mode === "merge") {
-        return textResponse(
+        return structuredResponse(
           await mergeAgentInsightResult(
             task,
             readOptionalString(args.configPath),
@@ -197,7 +216,7 @@ export async function executeToolCall(
       throw new Error(`Invalid mode '${mode}' for graphflow_insight. Use 'submit' or 'merge'.`);
     }
     case "graphflow_skill_insights":
-      return textResponse(
+      return structuredResponse(
         await getSkillInsights(
           readOptionalString(args.configPath),
           readOptionalNumber(args.limit),
@@ -210,7 +229,7 @@ export async function executeToolCall(
       const graph = await inspectGraph(configPath, buildInspectOptions(args));
       const stats = getTokenSavingsStats(configPath, readOptionalString(args.rootDir));
       const flywheel = getFlywheelReport(configPath, readOptionalString(args.rootDir));
-      return textResponse({
+      return structuredResponse({
         health,
         graph,
         stats,
@@ -225,7 +244,7 @@ export async function executeToolCall(
         const compression = compressionRaw === "none" || compressionRaw === "gzip"
           ? compressionRaw
           : undefined;
-        return textResponse(
+        return structuredResponse(
           await exportArtifact(
             readOptionalString(args.configPath),
             readOptionalString(args.outputPath),
@@ -235,7 +254,7 @@ export async function executeToolCall(
         );
       }
       if (mode === "import") {
-        return textResponse(
+        return structuredResponse(
           await importArtifact(readOptionalString(args.configPath), readOptionalString(args.inputPath))
         );
       }
@@ -244,7 +263,17 @@ export async function executeToolCall(
     case "graphflow_skill_guide": {
       const section = readOptionalString(args.section) || "all";
       const skillGuide = getSkillGuide(section);
-      return textResponse(skillGuide);
+      return {
+        content: [
+          {
+            type: "text",
+            // Preserve the pre-structuredContent wire shape for clients that
+            // JSON.parse this field as a guide string.
+            text: JSON.stringify(skillGuide, null, 2),
+          },
+        ],
+        structuredContent: { section, guide: skillGuide },
+      };
     }
     default:
       throw new Error(`Unknown tool: ${call.name}`);
@@ -368,8 +397,17 @@ ALWAYS call \`graphflow_context(query)\` BEFORE:
 Call \`graphflow_skill_guide(section: "all")\` for the complete guide.`;
 }
 
-function textResponse(data: unknown): ToolCallResponse {
+function dialogueKnowledgeOptions(args: Record<string, unknown>) {
+  const rootDir = readOptionalString(args.rootDir);
   return {
+    ...(rootDir ? { rootDir } : {}),
+  };
+}
+
+function structuredResponse(
+  data: unknown
+): ToolCallResponse & { structuredContent: Record<string, unknown> } {
+  const response: ToolCallResponse = {
     content: [
       {
         type: "text",
@@ -377,6 +415,16 @@ function textResponse(data: unknown): ToolCallResponse {
       },
     ],
   };
+
+  if (data !== null && typeof data === "object") {
+    response.structuredContent = data as Record<string, unknown>;
+  } else {
+    // Every current tool result is an object or array. Keep the invariant
+    // explicit so the SDK's CallToolResult contract cannot regress silently.
+    response.structuredContent = { result: data };
+  }
+
+  return response as ToolCallResponse & { structuredContent: Record<string, unknown> };
 }
 
 export function readRequiredString(value: unknown, field: string): string {

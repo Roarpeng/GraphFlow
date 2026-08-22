@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-08-20（v1.9.15：Experience v2 + dsh glue 发版）
+> 最后更新：2026-08-22（v1.12.1：真实证据链、fidelity 指标、SKILL.md 互操作、Engineering KG、MCP structured/discovery/Streamable HTTP）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -10,7 +10,7 @@
 - 🟡 进行中 / 部分完成
 - ⬜ 未开始（欢迎认领）
 
-## 已完成里程碑（v1.0 → v1.9.15）
+## 已完成里程碑（v1.0 → v1.12.1）
 
 | 版本 | 日期 | 里程碑 | 关键交付 | 状态 |
 | --- | --- | --- | --- | --- |
@@ -28,6 +28,8 @@
 | v1.9.13 | 2026-08-13 | **Settings 一页配置** | GraphFlow: Settings 集成文档解析、anydoc、语义召回、MCP、模型与功能入口 | ✅ |
 | v1.9.14 | 2026-08-15 | **工作台脉络** | 计划 DAG 播种功能主题容器；按需唤醒大纲；`topicId` / `assistantReply` 续聊；DeepSeek Harness 插件 | ✅ |
 | v1.9.15 | 2026-08-20 | **Experience v2 + dsh glue** | 噪声清理、outcome 不默认成功、保真度拆分、File expand 全文、准入/playbook、workflow 蒸馏与撤销；dsh `plugin.mjs` + `agent/disposed` 飞轮 | ✅ |
+| v1.12.0 | 2026-08-22 | **Evidence & Knowledge Release** | context fidelity 指标流；O(1) skill read；自适应遗忘；SKILL.md export/import；确定性 Concept/Requirement 抽取；MCP structuredContent、JSON Schema 2020-12 与 `server/discover`；SDK 1.30 | ✅ |
+| v1.12.1 | 2026-08-22 | **MCP Streamable HTTP** | stateless JSON + stateful SSE transport；`graphflow-mcp --http` / `graphflow mcp serve --http`；loopback 默认与 Host/Origin 防护；HTTP initialize/ping/tools/resources/tool-call/session DELETE 矩阵 | ✅ |
 
 ## 下一阶段
 
@@ -66,7 +68,7 @@
 | **P2** | **协议层占位**：ATP/IR v1.2、MCP resources | ✅ | MCP resources 已落地；ATP/IR v1.2 Stable（§8 memory-* + outcome eng-link 字段）；最小 producer / 一致性测试 |
 | **P2** | **代码域检索评测公开数据集** | ✅ | [`benchmarks/datasets/retrieval-golden-v1.json`](benchmarks/datasets/retrieval-golden-v1.json)（+ JSONL）；`npm run dataset:retrieval` 从 TS 真源再生；`npm run bench:retrieval` |
 | **P2** | **社区化基建** | ✅ | CONTRIBUTING / ROADMAP / Issue 模板 |
-| **P3** | **MCP 2.0 无状态规范适配** | ⬜ | 升级 SDK 后复核 ping / schema |
+| **P3** | **MCP 2.0 无状态规范适配** | ✅ | SDK 1.30；JSON Schema 2020-12；draft discovery；stdio handshake 兼容 |
 
 ## 进化方向（2026-08 深度调研版）
 
@@ -76,32 +78,32 @@
 
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
-| **P0** | 真实证据链替代规则堆叠 | ⬜ | `proven = uses>=2` 的 `uses` 是原子出现次数而非成功次数（skill-flywheel L528/L228）；改为与成功 episode 绑定的 success 计数 |
-| **P0** | 删除硬编码准入闭集 | ⬜ | `FALLBACK_GOLDEN_TOKENS` 仅 15 词（skill-admission L14），技能名不在其中永远无法 proven；改为随 golden set / 真实 episode 动态生成 |
-| **P0** | 本地闭环验证 | ⬜ | 当前 8 episode 全 pending、0 技能——无外部 agent 时飞轮不收敛；补离线自学习路径让 dogfood 也能积累 |
+| **P0** | 真实证据链替代规则堆叠 | ✅ | `proven` 改为 `successCount>=阈值`（默认 2，env 可覆盖），按 episodeId 去重并持久化 `successCount/successEpisodeIds`；旧数据自动迁移，已 proven 不降级 |
+| **P0** | 删除硬编码准入闭集 | ✅ | `FALLBACK_GOLDEN_TOKENS` 已删除；golden 词集动态生成（retrieval golden 数据集 + 运行时 pass episode/symbol 证据叠加）；golden-overlap 降为辅助条件 |
+| **P0** | 本地闭环验证 | 🟡 | dsh glue 已修复 A 面回填根因（信封字段读错）并改为 `turn/end` 提交模型——对话数据首次完整；待真实使用积累非零 skill（当前 Skill=0、episode 全 pending） |
 | **P0** | 对话记录噪声治理 | ✅ | `isUserOriginatedMessage` 按 `source.kind` 过滤 harness 系统注入（job/子代理/Cordis 通知不再入图） |
 
 ### R1 · 性能与存储收敛（P0，规模化前提）
 
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
-| **P0** | 消灭 file 后端全量读写放大 | ⬜ | `readStore()` 每次整文件读+解析、`queryByKeyword` 每次重建倒排（graphify-file-client L49/L110/L125）；进程内缓存或 auto 优先落 sqlite FTS5 |
-| **P0** | 技能读路径改 O(1) id 查找 | ⬜ | `skill-store` L158/164 用 `queryByKeyword` 代替已存在的 `getNodesByIds`；复合技能逐对读 O(N²) |
-| **P1** | fidelity 指标落地 | ⬜ | `kind:"tokens-not-fidelity"` 从免责声明变成可追踪指标（golden recall / expand 保真度评测） |
+| **P0** | 消灭 file 后端全量读写放大 | ✅ | `graphify-file-client` 进程内缓存（绝对路径 key、mtime+size 校验、写穿透、倒排索引懒重建、跨实例共享）；`transport: auto` 已是默认（sqlite 优先、file 回退，回退路径已测） |
+| **P0** | 技能读路径改 O(1) id 查找 | 🟡 | 重复解析/重建索引已被进程内缓存消除；`queryByKeyword` → `getNodesByIds` 的调用点改造仍待 |
+| **P1** | fidelity 指标落地 | ✅ | 独立 `context-fidelity.json` 记录 anchor recall@k、missing anchors 与 normalized LCS body coverage；`FlywheelReport.fidelity` 输出样本聚合 |
 
 ### R2 · 对齐行业标准（P1，防被覆盖）
 
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
-| **P1** | MCP 2.0 无状态规范迁移 | ⬜ | 2026-07-28 官方发布无状态核心规范；升级 SDK、适配 streamable HTTP、处理 SEP-2577（Roots/Sampling/Logging 废弃）；MCP 结果用 `structuredContent` |
-| **P1** | Skill 节点对齐 SKILL.md 事实标准 | ⬜ | 技能可导出为 SKILL.md 直接注入 agent（反向导入）；让飞轮产出变成跨工具可消费资产 |
-| **P2** | 自适应遗忘机制 | ⬜ | 学术主线 SWE-MeM/MAGMA/FadeMem；访问时间 + 成功率的双维证据衰变曲线 |
+| **P1** | MCP 2.0 无状态规范迁移 | ✅ | SDK 已升 1.30；`server/discover`、JSON Schema 2020-12、全量 `structuredContent`、stdio 握手兼容、Streamable HTTP stateless/stateful 均已落地并有端到端矩阵 |
+| **P1** | Skill 节点对齐 SKILL.md 事实标准 | ✅ | `skill markdown export|import` 双向互操作；导入保守标记 import/correctable，不继承本地成功或 canary 证据 |
+| **P2** | 自适应遗忘机制 | ✅ | 陈旧度 × 失败压力 × 成功保持 × proven 保护的有界衰减曲线；只软衰减，不删除证据节点 |
 
 ### R3 · 从"记录"到"知识"（P1，产品差异化）
 
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
-| **P1** | Concept/Requirement 层落地 | ⬜ | 文档图谱能力已建好但节点为 0；把对话提炼的结论升级为 Concept 节点（`derived_from` 链） |
+| **P1** | Concept/Requirement 层落地 | ✅ | 确定性中英文抽取器已接线 CLI/MCP；本仓 dogfood 写入 20 Requirement + 224 Concept 和 503 条 provenance 边 |
 | **P2** | 团队共享记忆补位 | ⬜ | skill sync 之上做团队知识图谱 artifact 同步 + 冲突合并 + canary 门控（已有） |
 
 ### R4 · 工程治理（P2，持续维护前提）
@@ -112,13 +114,13 @@
 | **P2** | context-slicer / orchestrator 重复合并 | ⬜ | `buildLayeredContextPackage`/`buildEnhancedContextPackage` ~60% 重复；`runOrchestration` 358 行 |
 | **P2** | 集成层模块化 | ⬜ | agent-mcp-installer 2099 行 + skill-installer 1436 行平台胶水 → agent 适配器抽象 |
 | **P2** | 测试隔离修复 | ⬜ | m74/m75/m62 读写真实 home 的并行竞态 |
-| **P2** | web 知识节点栏产品化 | ⬜ | 动态插件 → 静态 bundle（dsh 打包管线），源码种子已入 `web/` |
+| **P2** | web 知识节点栏产品化 | ✅ | 静态 `dsh.client` bundle 落地：`dsh/client.js` factory 双 slot + glue `/gf` Connection RPC 数据通道 + `dsh.client`/`exports["./client"]` 声明，重启自动加载。已知缺口（上游）：client-modules 扫描器只从 dsh 安装树解析条目名（loader 是安装树→profile 两锚点），out-of-tree 包需可从安装树解析（如 `~/node_modules` 符号链接）否则被静默跳过 |
+| **P2** | 集成健壮性：unsafe-cwd 下 rootDir 生效 | ✅ | dsh dogfood 实证：`resolveConfig()` 先于工具级 rootDir 绑定并抛 unsafe-cwd 错，MCP 工具全灭；已改为 `resolveConfig(configPath, { rootDir })` 贯穿 runtime 调用点，安全检查不放宽 |
 
 ### 建议版本节奏
 
 - **v1.10**：R0 全部（真证据链 + 本地闭环 + 噪声治理）——"学习引擎"成为真能力的版本
-- **v1.11**：R1 + R2.6（性能收敛 + MCP 2.0）
-- **v1.12**：R2.7-2.8 + R3（SKILL.md 互操作 + 概念层落地）
+- ~~v1.10–v1.12~~：v1.12.1 已发布——真实证据链、fidelity 指标、O(1) 技能读路径、SKILL.md 互操作、自适应遗忘、Engineering KG 概念层和 MCP Streamable HTTP。下一阶段优先做团队图谱 artifact 同步和企业治理。
 - **长期**：R4 工程债随版本消化
 
 ## 如何参与

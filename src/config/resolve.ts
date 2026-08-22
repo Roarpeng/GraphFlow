@@ -57,7 +57,20 @@ function finalizeConfig(config: GraphFlowConfig): GraphFlowConfig {
   return config;
 }
 
-export function resolveConfig(path = "graphflow.config.json"): GraphFlowConfig {
+/**
+ * Resolve the effective GraphFlow config for the current process.
+ *
+ * @param path Explicit config path; default resolves project/global/overlay layers.
+ * @param bind Optional workspace-root override, forwarded into the internal
+ *   `bindRuntimeWorkspaceRoot` so a caller-provided `rootDir` (e.g. an MCP tool
+ *   argument) takes priority over `projectWorkspaceRoot` and over discovery
+ *   from an unsafe `process.cwd()` (home dir / AppData), instead of throwing
+ *   "Refusing to index unsafe workspace root" before the override is applied.
+ */
+export function resolveConfig(
+  path = "graphflow.config.json",
+  bind?: { rootDir?: string }
+): GraphFlowConfig {
   if (!isDefaultProjectConfigPath(path)) {
     const result = loadConfigSafe(path);
     if (result.usedFallback && result.error) {
@@ -67,7 +80,7 @@ export function resolveConfig(path = "graphflow.config.json"): GraphFlowConfig {
     return finalizeConfig(
       bindRuntimeWorkspaceRoot(
         result.config,
-        projectRoot ? { projectWorkspaceRoot: projectRoot } : undefined
+        mergeRuntimeWorkspaceBind(bind, projectRoot)
       )
     );
   }
@@ -102,9 +115,29 @@ export function resolveConfig(path = "graphflow.config.json"): GraphFlowConfig {
   return finalizeConfig(
     bindRuntimeWorkspaceRoot(
       merged,
-      projectWorkspaceRoot ? { projectWorkspaceRoot } : undefined
+      mergeRuntimeWorkspaceBind(bind, projectWorkspaceRoot)
     )
   );
+}
+
+/**
+ * Merge the caller-provided `rootDir` override with the project-level
+ * `workspaceRoot` for the internal bind. `rootDir` is listed first so
+ * `resolveRuntimeWorkspaceRoot`'s existing priority applies: explicit rootDir
+ * wins over projectWorkspaceRoot. Returns undefined when neither is present
+ * (equivalent to the historical no-options call).
+ */
+function mergeRuntimeWorkspaceBind(
+  bind: { rootDir?: string } | undefined,
+  projectWorkspaceRoot: string | undefined
+): { rootDir?: string; projectWorkspaceRoot?: string } | undefined {
+  const merged: { rootDir?: string; projectWorkspaceRoot?: string } = {
+    ...(bind?.rootDir ? { rootDir: bind.rootDir } : {}),
+    ...(projectWorkspaceRoot ? { projectWorkspaceRoot } : {}),
+  };
+  return merged.rootDir !== undefined || merged.projectWorkspaceRoot !== undefined
+    ? merged
+    : undefined;
 }
 
 function loadLayer(path: string): GraphFlowConfig {

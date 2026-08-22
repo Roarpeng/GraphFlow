@@ -174,3 +174,193 @@ export function resetSavingsStats(config: GraphFlowConfig): { path: string; rese
   saveStats(statsPath, empty);
   return { path: statsPath, reset: true };
 }
+
+export interface ContextFidelityRecordInput {
+  timestamp?: string;
+  query?: string;
+  expectedAnchorIds: string[];
+  returnedAnchorIds: string[];
+  /** Anchor id to the authoritative/source body that should have been packaged. */
+  expectedBodies?: Record<string, string>;
+  /** Anchor id to the body actually placed into the context package. */
+  packagedBodies?: Record<string, string>;
+  source?: "preview_context" | "run" | "evaluation";
+}
+
+export interface ContextFidelityRecord extends Required<Pick<
+  ContextFidelityRecordInput,
+  "timestamp" | "query" | "expectedAnchorIds" | "returnedAnchorIds"
+>> {
+  expectedBodies?: Record<string, string>;
+  packagedBodies?: Record<string, string>;
+  anchorRecallAtK: number;
+  missingAnchorIds: string[];
+  /** Normalized LCS similarity over supplied bodies; undefined when no pair is measurable. */
+  bodyCoverage?: number;
+  source: NonNullable<ContextFidelityRecordInput["source"]>;
+}
+
+export interface ContextFidelityStats {
+  sampleCount: number;
+  averageAnchorRecallPercent: number;
+  averageBodyCoveragePercent: number;
+  totalExpectedAnchors: number;
+  totalReturnedAnchors: number;
+  totalMissingAnchors: number;
+  bodyCoverageSampleCount: number;
+  firstRecordAt: string | null;
+  lastRecordAt: string | null;
+  recentRecords: ContextFidelityRecord[];
+}
+
+function normalizeText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Longest-common-subsequence similarity. Unlike equality or a byte-length
+ * ratio, this measures how much of the normalized source survives while
+ * allowing reordering-free edits and never rewards unrelated padding.
+ */
+function calculateBodyCoverage(expected: string, packaged: string): number {
+  const left = normalizeText(expected);
+  const right = normalizeText(packaged);
+  if (!left) return !right ? 1 : 0;
+  if (!right) return 0;
+
+  let previous = new Array<number>(right.length + 1).fill(0);
+  let current = new Array<number>(right.length + 1).fill(0);
+  for (let i = 1; i <= left.length; i += 1) {
+    for (let j = 1; j <= right.length; j += 1) {
+      current[j] = left[i - 1] === right[j - 1]
+        ? previous[j - 1]! + 1
+        : Math.max(previous[j]!, current[j - 1]!);
+    }
+    previous = current;
+    current = new Array<number>(right.length + 1).fill(0);
+  }
+  return previous[right.length]! / left.length;
+}
+
+function emptyContextFidelityStats(): ContextFidelityStats {
+  return {
+    sampleCount: 0,
+    averageAnchorRecallPercent: 0,
+    averageBodyCoveragePercent: 0,
+    totalExpectedAnchors: 0,
+    totalReturnedAnchors: 0,
+    totalMissingAnchors: 0,
+    bodyCoverageSampleCount: 0,
+    firstRecordAt: null,
+    lastRecordAt: null,
+    recentRecords: [],
+  };
+}
+
+function resolveFidelityPath(config: GraphFlowConfig): string {
+  const root = config.graphPolicy.workspaceRoot ?? process.cwd();
+  return join(root, "graphflow-out", "context-fidelity.json");
+}
+
+function loadContextFidelityStats(fidelityPath: string): ContextFidelityStats {
+  if (!existsSync(fidelityPath)) return emptyContextFidelityStats();
+  try {
+    const parsed = JSON.parse(readFileSync(fidelityPath, "utf8")) as Partial<ContextFidelityStats>;
+    if (!Array.isArray(parsed.recentRecords)) return emptyContextFidelityStats();
+    return { ...emptyContextFidelityStats(), ...parsed, recentRecords: parsed.recentRecords };
+  } catch {
+    return emptyContextFidelityStats();
+  }
+}
+
+function saveContextFidelityStats(fidelityPath: string, stats: ContextFidelityStats): void {
+  mkdirSync(dirname(fidelityPath), { recursive: true });
+  writeFileSync(fidelityPath, JSON.stringify(stats, null, 2), "utf8");
+}
+
+function normalizeAnchorIds(values: readonly string[]): string[] {
+  return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
+export function recordContextFidelity(
+  config: GraphFlowConfig,
+  input: ContextFidelityRecordInput
+): ContextFidelityRecord {
+  const expectedAnchorIds = normalizeAnchorIds(input.expectedAnchorIds);
+  const returnedAnchorIds = normalizeAnchorIds(input.returnedAnchorIds);
+  const returnedSet = new Set(returnedAnchorIds);
+  const missingAnchorIds = expectedAnchorIds.filter((id) => !returnedSet.has(id));
+  const anchorRecallAtK =
+    expectedAnchorIds.length === 0
+      ? 1
+      : (expectedAnchorIds.length - missingAnchorIds.length) / expectedAnchorIds.length;
+
+  let bodyCoverageSum = 0;
+  let bodyCoverageCount = 0;
+  const expectedBodies = input.expectedBodies ?? {};
+  const packagedBodies = input.packagedBodies ?? {};
+  for (const [anchorId, expectedBody] of Object.entries(expectedBodies)) {
+    const packagedBody = packagedBodies[anchorId];
+    if (typeof packagedBody !== "string") continue;
+    bodyCoverageSum += calculateBodyCoverage(expectedBody, packagedBody);
+    bodyCoverageCount += 1;
+  }
+
+  const stored: ContextFidelityRecord = {
+    timestamp: input.timestamp ?? new Date().toISOString(),
+    query: input.query ?? "",
+    expectedAnchorIds,
+    returnedAnchorIds,
+    ...(input.expectedBodies ? { expectedBodies } : {}),
+    ...(input.packagedBodies ? { packagedBodies } : {}),
+    anchorRecallAtK,
+    missingAnchorIds,
+    ...(bodyCoverageCount > 0 ? { bodyCoverage: bodyCoverageSum / bodyCoverageCount } : {}),
+    source: input.source ?? "evaluation",
+  };
+
+  const fidelityPath = resolveFidelityPath(config);
+  const stats = loadContextFidelityStats(fidelityPath);
+  const nextRecallTotal =
+    stats.averageAnchorRecallPercent * stats.sampleCount + anchorRecallAtK * 100;
+  const nextCoverageTotal =
+    stats.averageBodyCoveragePercent * stats.bodyCoverageSampleCount +
+    (stored.bodyCoverage ?? 0) * 100;
+  const nextSampleCount = stats.sampleCount + 1;
+  const nextCoverageSampleCount = stats.bodyCoverageSampleCount + (bodyCoverageCount > 0 ? 1 : 0);
+
+  stats.sampleCount = nextSampleCount;
+  stats.averageAnchorRecallPercent = Math.round(nextRecallTotal / nextSampleCount);
+  stats.bodyCoverageSampleCount = nextCoverageSampleCount;
+  stats.averageBodyCoveragePercent =
+    nextCoverageSampleCount === 0 ? 0 : Math.round(nextCoverageTotal / nextCoverageSampleCount);
+  stats.totalExpectedAnchors += expectedAnchorIds.length;
+  stats.totalReturnedAnchors += returnedAnchorIds.length;
+  stats.totalMissingAnchors += missingAnchorIds.length;
+  stats.firstRecordAt = stats.firstRecordAt ?? stored.timestamp;
+  stats.lastRecordAt = stored.timestamp;
+  stats.recentRecords.unshift(stored);
+  if (stats.recentRecords.length > MAX_RECENT_RECORDS) {
+    stats.recentRecords = stats.recentRecords.slice(0, MAX_RECENT_RECORDS);
+  }
+  saveContextFidelityStats(fidelityPath, stats);
+  return stored;
+}
+
+export function listContextFidelityRecords(config: GraphFlowConfig): ContextFidelityRecord[] {
+  return loadContextFidelityStats(resolveFidelityPath(config)).recentRecords;
+}
+
+export function getContextFidelityStats(config: GraphFlowConfig): ContextFidelityStats {
+  return loadContextFidelityStats(resolveFidelityPath(config));
+}
+
+export function resetContextFidelityStats(config: GraphFlowConfig): {
+  path: string;
+  reset: boolean;
+} {
+  const fidelityPath = resolveFidelityPath(config);
+  if (!existsSync(fidelityPath)) return { path: fidelityPath, reset: false };
+  saveContextFidelityStats(fidelityPath, emptyContextFidelityStats());
+  return { path: fidelityPath, reset: true };
+}

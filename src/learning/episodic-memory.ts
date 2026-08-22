@@ -10,6 +10,10 @@ import {
   distillWorkflowFromEpisode,
   quarantineSkillsFromEpisode,
 } from "./workflow-skill";
+import {
+  extractGoldenEvidenceTokens,
+  registerGoldenEvidenceTokens,
+} from "./skill-admission";
 
 export { quarantineSkillsFromEpisode };
 
@@ -145,11 +149,27 @@ export async function updateEpisodeOutcome(
     metadata: { ...node.metadata, record: serialize(updated) },
   };
   await client.upsertNodes([updatedNode]);
-  if (outcome === "pass" && updated.plan.length >= 2) {
+  if (outcome === "pass") {
+    // 叠加真实 episode/symbol 证据到动态 golden 词集：pass episode 的
+    // plan 描述 / keyDecisions 是执行成功的真实符号证据（best-effort，
+    // 失败不阻断 outcome 回填）。
     try {
-      await distillWorkflowFromEpisode(client, updated);
+      registerGoldenEvidenceTokens(
+        extractGoldenEvidenceTokens([
+          updated.task,
+          ...updated.plan.map((p) => p.description),
+          ...updated.keyDecisions,
+        ])
+      );
     } catch {
-      // Distillation must never block outcome reporting.
+      // 证据词叠加失败不影响 outcome 回填
+    }
+    if (updated.plan.length >= 2) {
+      try {
+        await distillWorkflowFromEpisode(client, updated);
+      } catch {
+        // Distillation must never block outcome reporting.
+      }
     }
   }
   return updated;

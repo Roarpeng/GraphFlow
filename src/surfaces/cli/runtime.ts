@@ -81,6 +81,14 @@ export {
   type DistillDialogueResult,
 } from "./runtime/dialogue.js";
 export {
+  exportSkillsToMarkdownRuntime,
+  importSkillsFromMarkdownRuntime,
+  extractDialogueKnowledgeRuntime,
+  type SkillMarkdownExportResult,
+  type SkillMarkdownImportResult,
+  type DialogueKnowledgeExtractionResult,
+} from "./runtime/knowledge.js";
+export {
   detectInstalledAgents,
   formatModelConfigGuide,
   installMcpToDetectedAgents,

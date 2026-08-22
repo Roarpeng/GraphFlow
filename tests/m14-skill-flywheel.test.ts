@@ -93,39 +93,58 @@ describe("M14 skill flywheel", () => {
       expect(state.outcomeKind).toBe("anti-pattern");
     }
 
-    // Unlinked success: generic atoms stay correctable (admission blocks proven).
+    // Unlinked success: 无 episode 绑定的成功（uses 仅展示）不再晋升 proven——
+    // 即使是 golden 词，也需要真实成功证据链（successCount）。
     await applySkillLearning(client, task, run("COMPLETED"));
     skills = client.snapshot().nodes.filter((n) => n.type === "Skill" && !n.id.includes("composite"));
     for (const node of skills) {
       const state = parseSkillState(node.content)!;
       expect(state.failStreak ?? 0).toBe(0);
-      if (admitSkillToProven(state.name).ok) {
-        expect(state.outcomeKind).toBe("proven");
-      } else {
-        expect(state.outcomeKind).toBe("correctable");
-        expect(state.score).toBe(-1);
-      }
+      expect(state.outcomeKind).toBe("correctable");
+      expect(state.successCount ?? 0).toBe(0);
     }
   });
 
-  it("promotes golden-overlapping atoms to proven; generic names stay correctable", async () => {
+  it("promotes episode-success atoms to proven; mentions alone never prove", async () => {
     const client = new GraphifyClient();
     const task = "refactor planner module in planner.ts and add tests";
     const run = { status: "COMPLETED" as const, attempts: 1, feedback: "done" };
-    await applySkillLearning(client, task, run);
-    await applySkillLearning(client, task, run);
 
-    const skills = client
+    // 两次成功但 0 个 pass episode 绑定（仅出现/使用计数）→ 不 proven。
+    await applySkillLearning(client, task, run);
+    await applySkillLearning(client, task, run);
+    let skills = client
+      .snapshot()
+      .nodes.filter((n) => n.type === "Skill" && !n.id.includes("composite"))
+      .map((n) => parseSkillState(n.content)!)
+      .filter(Boolean);
+    expect(skills.length).toBeGreaterThan(0);
+    for (const state of skills) {
+      expect(state.outcomeKind).toBe("correctable");
+      expect(state.successCount ?? 0).toBe(0);
+      expect(state.uses).toBe(2);
+    }
+
+    // 绑定两个 pass episode → 真实成功证据链 → proven。
+    await applySkillLearning(client, task, run, undefined, { episodeId: "ep-skill-a" });
+    await applySkillLearning(client, task, run, undefined, { episodeId: "ep-skill-b" });
+    skills = client
       .snapshot()
       .nodes.filter((n) => n.type === "Skill" && !n.id.includes("composite"))
       .map((n) => parseSkillState(n.content)!)
       .filter(Boolean);
     const proven = skills.filter((s) => s.outcomeKind === "proven");
-    const blocked = skills.filter((s) => !admitSkillToProven(s.name).ok);
     expect(proven.length).toBeGreaterThan(0);
-    expect(proven.every((s) => admitSkillToProven(s.name).ok)).toBe(true);
-    for (const state of blocked) {
-      expect(state.outcomeKind).not.toBe("proven");
+    for (const state of proven) {
+      expect(state.successCount).toBe(2);
+      expect(state.successEpisodeIds).toEqual(["ep-skill-a", "ep-skill-b"]);
+      expect(state.score).toBeGreaterThan(0);
+      // 有真实成功证据链的技能，即使名字不在任何静态列表也能准入：
+      expect(admitSkillToProven(state.name, { successCount: state.successCount }).ok).toBe(true);
+    }
+    // 旧字段语义未变：uses 仍累计展示。
+    for (const state of skills) {
+      expect(state.uses).toBe(4);
     }
   });
 
@@ -150,6 +169,9 @@ describe("M14 skill flywheel", () => {
       expect(state.linkedSuccess).toBe(true);
       expect(state.outcomeKind).toBe("proven");
       expect(state.provenance).toEqual({ source: "local", episodeId: "ep-skill-p0" });
+      // linked 成功同时计入 successCount（1 个绑定 pass episode）。
+      expect(state.successCount).toBe(1);
+      expect(state.successEpisodeIds).toEqual(["ep-skill-p0"]);
     }
   });
 

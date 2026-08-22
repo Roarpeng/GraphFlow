@@ -3,7 +3,7 @@ import type { GraphClient } from "../graph/client-factory";
 import { hashText } from "../utils/hash";
 import type { EpisodeRecord } from "./episodic-memory";
 import { hasProjectSymbolEvidence } from "./skill-flywheel";
-import { parseSkillState, serializeAtomic } from "./skill-store";
+import { parseSkillState, readSkillState, serializeAtomic } from "./skill-store";
 import type { SkillState } from "./skill-types";
 
 /**
@@ -40,6 +40,8 @@ async function listSkillNodes(client: GraphClient): Promise<GraphNode[]> {
 /**
  * Distill a passing multi-step episode plan into a reusable atomic workflow skill.
  * Never auto-promotes to proven — outcomeKind stays `correctable`.
+ * 真实成功证据链：每个 pass episode 绑定一次（按 episode.id 去重）计入
+ * successCount，供 proven 准入使用。
  */
 export async function distillWorkflowFromEpisode(
   client: GraphClient,
@@ -51,6 +53,18 @@ export async function distillWorkflowFromEpisode(
 
   const id = workflowSkillId(episode.plan);
   const hasSymbolEvidence = corpusHasSymbolEvidence(episode);
+  // 去重累计绑定 pass episode；旧数据按 linkedSuccess + provenance.episodeId 迁移。
+  const previous = await readSkillState(client, id);
+  const boundEpisodeIds = new Set<string>(previous?.successEpisodeIds ?? []);
+  if (
+    previous?.successCount === undefined &&
+    previous?.linkedSuccess === true &&
+    previous?.provenance?.episodeId
+  ) {
+    boundEpisodeIds.add(previous.provenance.episodeId);
+  }
+  boundEpisodeIds.add(episode.id);
+  const successEpisodeIds = Array.from(boundEpisodeIds);
   const state: SkillState = {
     id,
     name: `workflow: ${episode.task.slice(0, 60)}`,
@@ -63,6 +77,9 @@ export async function distillWorkflowFromEpisode(
     guidance: numberedGuidance(episode.plan),
     provenance: { source: "local", episodeId: episode.id },
     ...(hasSymbolEvidence ? { hasSymbolEvidence: true } : {}),
+    ...(successEpisodeIds.length > 0
+      ? { successCount: successEpisodeIds.length, successEpisodeIds }
+      : {}),
   };
 
   await client.upsertNodes([{ id, type: "Skill", content: serializeAtomic(state) }]);

@@ -1,6 +1,7 @@
 export interface ToolDefinition {
   name: string;
   description: string;
+  $schema?: string;
   inputSchema: {
     type: "object";
     properties: Record<string, unknown>;
@@ -10,7 +11,7 @@ export interface ToolDefinition {
 }
 
 export function getToolDefinitions(): ToolDefinition[] {
-  return [
+  const tools: Array<Omit<ToolDefinition, "$schema">> = [
     {
       name: "graphflow_run",
       description: "[Core] Plan and package a task with compressed context, returning a structured execution descriptor for external coding agents (Cursor, Claude Code) to execute. Bridge mode by default. CALL graphflow_report_outcome AFTER executing the plan to close the learning loop.",
@@ -131,6 +132,10 @@ export function getToolDefinitions(): ToolDefinition[] {
           rootDir: { type: "string", description: "Optional workspace path to index." },
           filePath: { type: "string", description: "Absolute or workspace-relative path to a single file to index. When provided, only this file is indexed." },
           mode: { type: "string", enum: ["incremental", "full"], description: "Indexing mode: 'incremental' (default) for incremental re-index, 'full' for full rebuild (clear cache and re-index everything)." },
+          knowledgeExtract: {
+            type: "boolean",
+            description: "Optional: also extract deterministic Concept/Requirement nodes from stored dialogue turns (v1.12 Engineering KG).",
+          },
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
         },
         additionalProperties: false,
@@ -210,4 +215,8 @@ export function getToolDefinitions(): ToolDefinition[] {
       },
     },
   ];
+  return tools.map((tool) => ({
+    ...tool,
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+  }));
 }

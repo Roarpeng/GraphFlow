@@ -28,7 +28,11 @@ import {
 } from "./skill-store";
 import { applyPlaybookDelta, seedPlaybookFromGuidance } from "./skill-opt-lite";
 import { gateSkillPromotion } from "./canary-gate";
-import { admitSkillToProven, isSymbolicSkillName } from "./skill-admission";
+import {
+  admitSkillToProven,
+  isSymbolicSkillName,
+  resolveProvenMinSuccess,
+} from "./skill-admission";
 import { serializePlaybookGuidance } from "./skill-types";
 
 // 兼容性重新导出，确保外部消费者完全兼容
@@ -40,7 +44,15 @@ export {
   DEFAULT_CANARY_LOCAL_SUCCESSES,
   shouldHardDeleteAntiPattern,
 } from "./canary-gate";
-export { admitSkillToProven, isSymbolicSkillName, wouldDegradeLibrary } from "./skill-admission";
+export {
+  admitSkillToProven,
+  isSymbolicSkillName,
+  wouldDegradeLibrary,
+  goldenTokenOverlap,
+  registerGoldenEvidenceTokens,
+  resolveProvenMinSuccess,
+  DEFAULT_PROVEN_MIN_SUCCESS,
+} from "./skill-admission";
 export {
   planSkillConsolidation,
   applySkillConsolidation,
@@ -218,17 +230,23 @@ export interface SkillLearningOptions {
  * - noise:        no symbol evidence — never persisted; pruned on load.
  * - anti-pattern: >= 2 consecutive failures with symbol evidence — the ONLY
  *                 class that accrues negative score.
- * - proven:       >= 2 uses or a linked successful outcome — the ONLY class
- *                 that accrues positive score. Curated seed skills count as
- *                 proven by design (baseline, never sinkable to negative).
- *                 External (sync/import) skills additionally require canary
- *                 (N local successes or canaryValidated) before proven.
+ * - proven:       real success evidence chain — successCount (绑定且 pass 的
+ *                 去重 episode 数) >= 阈值（默认 2，见 DEFAULT_PROVEN_MIN_SUCCESS
+ *                 / GRAPHFLOW_SKILL_PROVEN_MIN_SUCCESS），或 legacy 的
+ *                 linkedSuccess（旧版"一次链接成功"信号，保留兼容）。uses
+ *                 （出现/提及次数）不再参与 proven 判定，仅用于展示。
+ *                 Curated seed skills count as proven by design (baseline,
+ *                 never sinkable to negative). External (sync/import) skills
+ *                 additionally require canary (N local successes or
+ *                 canaryValidated) before proven.
  * - correctable:  symbol evidence present, not yet proven. Score stays put.
  */
 export function classifySkillOutcome(options: {
   uses: number;
   failStreak: number;
   linkedSuccess: boolean;
+  /** 绑定且 outcome=pass 的去重 episode 数（真实成功证据链，主要判定依据）。 */
+  successCount?: number;
   seeded?: boolean;
   provenance?: SkillState["provenance"];
   canaryValidated?: boolean;
@@ -243,17 +261,34 @@ export function classifySkillOutcome(options: {
   if (options.failStreak >= 2) {
     return "anti-pattern";
   }
+  // 未显式提供 successCount 时按 legacy 语义回退：linkedSuccess 视为 1 个成功 episode。
+  const successCount =
+    options.successCount ?? (options.linkedSuccess ? 1 : 0);
   const candidate: SkillOutcomeKind =
-    options.uses >= 2 || options.linkedSuccess ? "proven" : "correctable";
+    successCount >= resolveProvenMinSuccess() || options.linkedSuccess
+      ? "proven"
+      : "correctable";
   return gateSkillPromotion({
     outcomeKind: candidate,
     localSuccesses: options.localSuccesses ?? options.uses,
+    successCount,
     ...(options.provenance ? { provenance: options.provenance } : {}),
     ...(options.canaryValidated !== undefined
       ? { validated: options.canaryValidated }
       : {}),
     ...(options.skillName ? { skillName: options.skillName } : {}),
   });
+}
+
+/**
+ * 技能的真实成功证据计数：优先读持久化 successCount；旧数据按
+ * linkedSuccess + provenance.episodeId 迁移为 1（向后兼容）。
+ */
+export function resolveSkillSuccessCount(state: SkillState): number {
+  if (typeof state.successCount === "number" && Number.isFinite(state.successCount)) {
+    return Math.max(0, Math.floor(state.successCount));
+  }
+  return state.linkedSuccess === true && state.provenance?.episodeId ? 1 : 0;
 }
 
 /**
@@ -272,6 +307,7 @@ export async function markSkillCanaryValidated(
     uses: previous.uses,
     failStreak: previous.failStreak ?? 0,
     linkedSuccess: previous.linkedSuccess === true,
+    successCount: resolveSkillSuccessCount(previous),
     localSuccesses: previous.uses,
     canaryValidated: true,
     skillName: previous.name,
@@ -529,21 +565,40 @@ export async function applySkillLearning(
     const failStreak = passed ? 0 : (previous?.failStreak ?? 0) + 1;
     const linkedSuccess =
       (passed && linked) || previous?.linkedSuccess === true;
+    // 真实成功证据链：绑定且 outcome=pass 的去重 episode 数。
+    // 去重簿记存 successEpisodeIds；旧数据按 linkedSuccess + provenance.episodeId
+    // 迁移为 1 个 pass episode（仅当 successCount 尚未持久化时执行一次）。
+    const boundEpisodeIds = new Set<string>(previous?.successEpisodeIds ?? []);
+    if (
+      previous?.successCount === undefined &&
+      previous?.linkedSuccess === true &&
+      previous?.provenance?.episodeId
+    ) {
+      boundEpisodeIds.add(previous.provenance.episodeId);
+    }
+    if (passed && options?.episodeId) {
+      boundEpisodeIds.add(options.episodeId);
+    }
+    const successEpisodeIds = Array.from(boundEpisodeIds);
+    const successCount = successEpisodeIds.length;
     let outcomeKind = classifySkillOutcome({
       uses,
       failStreak,
       linkedSuccess,
+      successCount,
       localSuccesses: uses,
       skillName: skill,
       ...(previous?.seeded === true ? { seeded: true } : {}),
       ...(previous?.provenance ? { provenance: previous.provenance } : {}),
       ...(previous?.canaryValidated === true ? { canaryValidated: true } : {}),
     });
-    // Held-out admission: proven candidates without golden overlap stay correctable.
+    // Held-out admission: proven candidates without real success evidence or
+    // golden overlap stay correctable. Real success evidence (successCount >=
+    // 阈值) bypasses the golden gate — see admitSkillToProven.
     if (
       outcomeKind === "proven" &&
       previous?.seeded !== true &&
-      !admitSkillToProven(skill).ok
+      !admitSkillToProven(skill, { successCount }).ok
     ) {
       outcomeKind = "correctable";
     }
@@ -569,6 +624,8 @@ export async function applySkillLearning(
       updatedAt: now,
       hasSymbolEvidence: isSymbolicSkillName(skill),
       linkedSuccess,
+      // 真实成功证据链：仅在有绑定 pass episode 时持久化（去重）。
+      ...(successCount > 0 ? { successCount, successEpisodeIds } : {}),
       failStreak,
       outcomeKind,
       // 来源元数据随本地学习延续（外部 sync 技能晋升 proven 后仍保留来源标记）。
@@ -746,6 +803,7 @@ function resolveAtomicOutcomeKind(state: SkillState): SkillOutcomeKind {
     uses: state.uses,
     failStreak: state.failStreak ?? 0,
     linkedSuccess: state.linkedSuccess === true,
+    successCount: resolveSkillSuccessCount(state),
     ...(state.seeded === true ? { seeded: true } : {}),
     ...(state.provenance ? { provenance: state.provenance } : {}),
     ...(state.canaryValidated === true ? { canaryValidated: true } : {}),
@@ -907,12 +965,80 @@ export async function suggestSkillHints(
 }
 
 const DECAY_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
-const DECAY_RATE = 1;
+const DECAY_MAX_PERIODS = 4;
 
 export interface SkillDecayResult {
   total: number;
   decayed: number;
   skipped: number;
+}
+
+/**
+ * Deterministic dual-evidence forgetting. Staleness expands the decay budget,
+ * failures accelerate it, and bound successful episodes retain score. The
+ * returned amount is always a non-negative magnitude; the caller applies it
+ * toward zero.
+ */
+export function computeAdaptiveDecayAmount(
+  skill: Pick<
+    SkillState,
+    | "score"
+    | "uses"
+    | "lastOutcome"
+    | "updatedAt"
+    | "lastDecayedAt"
+    | "successCount"
+    | "successEpisodeIds"
+    | "failStreak"
+    | "outcomeKind"
+    | "linkedSuccess"
+    | "provenance"
+  >,
+  now: number
+): number {
+  const referenceTime = skill.lastDecayedAt ?? skill.updatedAt;
+  const elapsedPeriods = Math.floor((now - referenceTime) / DECAY_THRESHOLD_MS);
+  if (!Number.isFinite(elapsedPeriods) || elapsedPeriods < 1) {
+    return 0;
+  }
+
+  const stalePeriods = Math.min(elapsedPeriods, DECAY_MAX_PERIODS);
+  const stalenessFactor = 1 + 0.25 * (stalePeriods - 1);
+
+  const persistedSuccesses =
+    typeof skill.successCount === "number" && Number.isFinite(skill.successCount)
+      ? Math.max(0, Math.floor(skill.successCount))
+      : 0;
+  const episodeSuccesses = Array.isArray(skill.successEpisodeIds)
+    ? new Set(skill.successEpisodeIds.filter(Boolean)).size
+    : 0;
+  const legacySuccess =
+    skill.linkedSuccess === true && skill.provenance?.episodeId ? 1 : 0;
+  const successEvidence = Math.min(
+    Math.max(persistedSuccesses, episodeSuccesses, legacySuccess),
+    5
+  );
+  const successRetention = 1 / (1 + 0.5 * successEvidence);
+
+  const failureEvidence = Math.min(
+    Math.max(
+      typeof skill.failStreak === "number" && Number.isFinite(skill.failStreak)
+        ? Math.max(0, Math.floor(skill.failStreak))
+        : 0,
+      skill.lastOutcome === "fail" ? 1 : 0
+    ),
+    4
+  );
+  const failureFactor = 1 + 0.25 * failureEvidence;
+
+  const isProvenWithRealEvidence =
+    skill.outcomeKind === "proven" &&
+    Math.max(persistedSuccesses, episodeSuccesses, legacySuccess) >= 2;
+  const provenFactor = isProvenWithRealEvidence ? 0.5 : 1;
+  const amount = stalenessFactor * failureFactor * successRetention * provenFactor;
+
+  // Keep the curve portable across JSON round-trips while avoiding float dust.
+  return Math.round(amount * 1000) / 1000;
 }
 
 export async function maybeDecaySkills(client: GraphClient): Promise<SkillDecayResult> {
@@ -932,26 +1058,26 @@ export async function maybeDecaySkills(client: GraphClient): Promise<SkillDecayR
     }
 
     const lastDecayedAt = skill.lastDecayedAt ?? skill.updatedAt;
-    const daysSinceDecay = (now - lastDecayedAt) / DECAY_THRESHOLD_MS;
-    if (daysSinceDecay < 1) {
+    if ((now - lastDecayedAt) / DECAY_THRESHOLD_MS < 1) {
       skipped += 1;
       continue;
     }
 
-    const decayAmount = Math.floor(daysSinceDecay) * DECAY_RATE;
+    const decayAmount = computeAdaptiveDecayAmount(skill, now);
     if (decayAmount <= 0) {
       skipped += 1;
       continue;
     }
 
-    let newScore = skill.score;
-    if (skill.score > 0) {
-      newScore = Math.max(0, skill.score - decayAmount);
-    } else if (skill.score < 0) {
-      newScore = Math.min(0, skill.score + decayAmount);
+    const currentScore = boundedScore(skill.score);
+    let newScore = currentScore;
+    if (currentScore > 0) {
+      newScore = Math.max(0, currentScore - decayAmount);
+    } else if (currentScore < 0) {
+      newScore = Math.min(0, currentScore + decayAmount);
     }
 
-    if (newScore === skill.score) {
+    if (newScore === currentScore) {
       skipped += 1;
       continue;
     }

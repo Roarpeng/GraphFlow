@@ -48,7 +48,13 @@ Preview is a **pointer package**: `summary[]` + `anchors[]` under a token budget
 | --- | --- | --- |
 | `estimatedSavingsPercent` | Packaging ROI: estimated-raw tokens vs compressed payload | Information fidelity, Hit@k, or body coverage |
 | Retrieval Hit@k | Whether the right File/Symbol anchors were retrieved | Token savings |
-| Body coverage | Whether expand (or Read) returned the full file/symbol window | Compression ratio |
+| Body coverage (`averageBodyCoveragePercent`) | Persisted normalized similarity between expected/source and packaged bodies; scored only when both are present | Compression ratio or proof of semantic correctness |
+
+v1.12 persists evaluation samples in `graphflow-out/context-fidelity.json`. Each
+record keeps expected/returned anchor IDs, missing anchors, recall, and optional
+body coverage; `FlywheelReport.fidelity` exposes `sampleCount`,
+`averageAnchorRecallPercent`, and `averageBodyCoveragePercent` separately from
+packaging savings.
 
 **Exact edits:** expand a **File** anchor (`graphflow_context` with `anchorId`) to get the full source (capped), or Read the file. Symbol expand uses a configurable window: `GRAPHFLOW_EXPAND_SYMBOL_BEFORE` (default 3) and `GRAPHFLOW_EXPAND_SYMBOL_AFTER` (default 20), about 24 lines. Do not treat preview summaries as the file to patch.
 

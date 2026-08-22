@@ -81,6 +81,16 @@ export interface SkillState {
   hasSymbolEvidence?: boolean;
   /** A successful outcome linked to this skill via the episode outcome loop. */
   linkedSuccess?: boolean;
+  /**
+   * 真实成功证据链：绑定到本技能且 outcome=pass 的去重 episode 数。
+   * proven 准入的主要依据（阈值见 skill-admission 的 DEFAULT_PROVEN_MIN_SUCCESS，
+   * 可用 GRAPHFLOW_SKILL_PROVEN_MIN_SUCCESS 覆盖）。仅新增字段，
+   * 不改动 uses / linkedSuccess 等既有字段语义；旧数据缺失时按
+   * linkedSuccess + provenance.episodeId 迁移为 1。
+   */
+  successCount?: number;
+  /** 已计入 successCount 的 episode id（去重簿记；向后兼容可缺失）。 */
+  successEpisodeIds?: string[];
   /** Consecutive failure count; classified anti-pattern at >= 2. */
   failStreak?: number;
   /** Curated baseline written by seedInitialSkills — never pruned as noise. */

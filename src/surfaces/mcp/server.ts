@@ -3,8 +3,11 @@ process.env.GRAPHFLOW_MCP_STDIO ??= "1";
 process.env.GRAPHFLOW_LOG_JSON ??= "1";
 
 import type { Readable, Writable } from "node:stream";
+import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
+import { randomUUID } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   CallToolRequestSchema,
   ErrorCode,
@@ -71,6 +74,12 @@ const DIAGNOSE_RESOURCE_URI = "graphflow://diagnose";
 const STATS_RESOURCE_URI = "graphflow://stats";
 const FLYWHEEL_RESOURCE_URI = "graphflow://flywheel";
 const ATP_IR_RESOURCE_URI = "graphflow://atp-ir";
+/**
+ * SDK 1.30 ships the draft stateless spec types while its runtime still
+ * negotiates the stable handshake protocol. Keep both paths explicit until the
+ * SDK promotes the draft runtime constants.
+ */
+const STATELESS_DISCOVERY_PROTOCOL_VERSION = "DRAFT-2026-v1";
 
 /**
  * 资源面注册表（P2-1）：在 graphflow://diagnose 基础上新增 stats / flywheel /
@@ -219,6 +228,35 @@ export interface McpServer {
   sendLogNotification(level: LoggingLevel, message: string): void;
 }
 
+export interface McpHttpServerOptions {
+  /** Defaults to loopback. Non-loopback binds require explicit allowedHosts. */
+  host?: string;
+  port?: number;
+  endpoint?: string;
+  /** false keeps every HTTP request independent (MCP stateless core). */
+  stateful?: boolean;
+  enableJsonResponse?: boolean;
+  allowedHosts?: string[];
+  allowedOrigins?: string[];
+  signal?: AbortSignal;
+}
+
+export interface StartedMcpHttpServer {
+  httpServer: HttpServer;
+  url: string;
+  endpoint: string;
+  host: string;
+  port: number;
+  stateful: boolean;
+  close(): Promise<void>;
+}
+
+interface HttpMcpSession {
+  id?: string;
+  server: McpServer;
+  transport: StreamableHTTPServerTransport;
+}
+
 export async function executeToolCall(
   call: ToolCall,
   server: McpServer = createMcpServer()
@@ -244,6 +282,24 @@ export function createMcpServer(
       },
     }
   );
+
+  // SDK transports dispatch protocol requests directly to the low-level
+  // Server, so the draft stateless discovery method must live beside the
+  // initialized handshake handlers rather than only in the stdio JSON-RPC shim.
+  sdkServer.fallbackRequestHandler = async (request) => {
+    if (request.method === "server/discover") {
+      return {
+        protocolVersion: STATELESS_DISCOVERY_PROTOCOL_VERSION,
+        capabilities: {
+          tools: {},
+          logging: {},
+          resources: {},
+        },
+        serverInfo: wrapper.serverInfo,
+      };
+    }
+    throw new McpError(ErrorCode.MethodNotFound, `Method not found: ${request.method}`);
+  };
 
   const wrapper: McpServer = {
     serverInfo: {
@@ -284,6 +340,16 @@ export function createMcpServer(
       }
       try {
         switch (request.method) {
+          case "server/discover":
+            return respond(request.id ?? null, {
+              protocolVersion: STATELESS_DISCOVERY_PROTOCOL_VERSION,
+              capabilities: {
+                tools: {},
+                logging: {},
+                resources: {},
+              },
+              serverInfo: wrapper.serverInfo,
+            });
           case "initialize":
             return respond(request.id ?? null, {
               protocolVersion: LATEST_PROTOCOL_VERSION,
@@ -369,6 +435,250 @@ export async function startStdioServer(
   connectedServers.add(server);
 }
 
+function normalizeHttpEndpoint(endpoint: string | undefined): string {
+  const value = endpoint?.trim() || "/mcp";
+  if (!value.startsWith("/")) throw new Error("MCP HTTP endpoint must begin with '/'");
+  if (value.includes("*") || value.includes("?")) throw new Error("MCP HTTP endpoint must be an exact path");
+  return value.endsWith("/") && value !== "/" ? value.slice(0, -1) : value;
+}
+
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
+}
+
+function writeHttpJsonError(
+  res: ServerResponse,
+  status: number,
+  code: number,
+  message: string,
+  requestId: number | string | null = null
+): void {
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify({
+    jsonrpc: "2.0",
+    id: requestId,
+    error: { code, message },
+  }));
+}
+
+function validateHttpOrigin(req: IncomingMessage, allowedOrigins: string[] | undefined): boolean {
+  const origin = req.headers.origin;
+  // No Origin means a non-browser MCP client. Browser clients must be explicitly allowed.
+  if (typeof origin !== "string" || origin.length === 0) return true;
+  return Boolean(allowedOrigins?.some((allowed) => allowed.toLowerCase() === origin.toLowerCase()));
+}
+
+function validateHttpHost(req: IncomingMessage, host: string, allowedHosts: string[] | undefined): boolean {
+  const header = req.headers.host;
+  if (!header) return false;
+  if (!allowedHosts?.length) {
+    const hostname = header.split(":", 2)[0] ?? "";
+    return isLoopbackHost(host) && isLoopbackHost(hostname);
+  }
+  const normalized = header.toLowerCase();
+  return allowedHosts.some((allowed) => {
+    const value = allowed.toLowerCase();
+    return value === normalized || (value === "*" && false);
+  });
+}
+
+async function handleWithHttpMcpSession(
+  req: IncomingMessage,
+  res: ServerResponse,
+  session: HttpMcpSession,
+  options?: {
+    sessions?: Map<string, HttpMcpSession>;
+    stateful?: boolean;
+  }
+): Promise<void> {
+  connectedServers.add(session.server);
+  let disposed = false;
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
+    connectedServers.delete(session.server);
+    if (options?.sessions && session.id) options.sessions.delete(session.id);
+    void session.transport.close().catch(() => undefined);
+  };
+  const stateful = options?.stateful === true;
+  session.transport.onclose = dispose;
+  // Stateful sessions survive the HTTP response; DELETE or transport close owns
+  // their lifecycle. Uninitialized stateful attempts are cleaned with the response.
+  res.once("close", () => {
+    // The predicate is checked when the response closes because an initialize
+    // request assigns its stateful session id while the response is open.
+    if (!stateful || !session.id) dispose();
+  });
+  try {
+    await session.transport.handleRequest(req, res);
+  } catch (error) {
+    if (!res.headersSent) {
+      writeHttpJsonError(res, 500, ErrorCode.InternalError, "Internal GraphFlow MCP HTTP error");
+    } else {
+      res.destroy();
+    }
+    session.server.sendLogNotification(
+      "error",
+      `GraphFlow MCP HTTP request failed: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+export async function startStreamableHttpServer(
+  createServerInstance: () => McpServer = () => createMcpServer(),
+  options: McpHttpServerOptions = {}
+): Promise<StartedMcpHttpServer> {
+  const host = options.host ?? "127.0.0.1";
+  const requestedPort = options.port ?? Number(process.env.GRAPHFLOW_MCP_HTTP_PORT ?? 0);
+  const stateful = options.stateful ?? process.env.GRAPHFLOW_MCP_HTTP_STATEFUL === "1";
+  const enableJsonResponse = options.enableJsonResponse ?? process.env.GRAPHFLOW_MCP_HTTP_JSON_RESPONSE !== "0";
+  const endpoint = normalizeHttpEndpoint(options.endpoint ?? process.env.GRAPHFLOW_MCP_HTTP_ENDPOINT);
+  const sessions = new Map<string, HttpMcpSession>();
+
+  if (!isLoopbackHost(host) && !options.allowedHosts?.length) {
+    throw new Error(`Refusing to bind MCP HTTP to non-loopback ${host} without explicit allowedHosts`);
+  }
+
+  const httpServer = createServer((req, res) => {
+    void (async () => {
+      if (!validateHttpHost(req, host, options.allowedHosts)) {
+        writeHttpJsonError(res, 403, ErrorCode.InvalidRequest, "Invalid GraphFlow MCP HTTP Host");
+        return;
+      }
+      if (!validateHttpOrigin(req, options.allowedOrigins)) {
+        writeHttpJsonError(res, 403, ErrorCode.InvalidRequest, "Origin is not allowed by GraphFlow MCP HTTP");
+        return;
+      }
+      // Host was validated above; use a trusted base solely to parse pathname/search.
+      const url = new URL(req.url ?? "/", "http://graphflow.invalid");
+      if (url.pathname !== endpoint) {
+        writeHttpJsonError(res, 404, ErrorCode.InvalidRequest, `Unknown GraphFlow MCP HTTP endpoint: ${url.pathname}`);
+        return;
+      }
+
+      const sessionIdHeader = req.headers["mcp-session-id"];
+      const sessionId = Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader;
+
+      if (stateful && typeof sessionId === "string" && sessionId.length > 0) {
+        const existing = sessions.get(sessionId);
+        if (!existing) {
+          writeHttpJsonError(res, 404, -32001, "GraphFlow MCP session not found", null);
+          return;
+        }
+        await handleWithHttpMcpSession(req, res, existing, { sessions, stateful });
+        return;
+      }
+
+      let session!: HttpMcpSession;
+      const transport = new StreamableHTTPServerTransport({
+        ...(stateful
+          ? {
+              sessionIdGenerator: () => randomUUID(),
+              onsessioninitialized: (initializedId: string) => {
+                session.id = initializedId;
+                sessions.set(initializedId, session);
+              },
+            }
+          : {}),
+        enableJsonResponse,
+        ...(options.allowedHosts ? { allowedHosts: options.allowedHosts } : {}),
+        ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
+      });
+      const serverInstance = createServerInstance();
+      session = { server: serverInstance, transport };
+      // SDK 1.30 types optional callbacks as `T | undefined`, which its own
+      // exactOptionalPropertyTypes build rejects structurally despite runtime
+      // compatibility. Keep the narrow local cast at this SDK boundary.
+      type ConnectableTransport = Parameters<typeof serverInstance.sdkServer.connect>[0];
+      await serverInstance.sdkServer.connect(transport as ConnectableTransport);
+      await handleWithHttpMcpSession(req, res, session, { sessions, stateful });
+    })().catch((error) => {
+      console.error("[GraphFlow MCP] Unexpected HTTP error:", error);
+      if (!res.headersSent) {
+        writeHttpJsonError(res, 500, ErrorCode.InternalError, "Unexpected GraphFlow MCP HTTP error");
+      } else {
+        res.destroy();
+      }
+    });
+  });
+
+  if (options.signal) {
+    options.signal.addEventListener(
+      "abort",
+      () => {
+        void httpServer.close();
+      },
+      { once: true }
+    );
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    httpServer.once("error", reject);
+    httpServer.listen(requestedPort, host, resolve);
+  });
+  const address = httpServer.address();
+  if (!address || typeof address === "string") {
+    throw new Error("GraphFlow MCP HTTP listener did not return a TCP address");
+  }
+
+  return {
+    httpServer,
+    url: `http://${host === "::1" ? `[${host}]` : host}:${address.port}${endpoint}`,
+    endpoint,
+    host,
+    port: address.port,
+    stateful,
+    async close(): Promise<void> {
+      for (const session of [...sessions.values()]) {
+        connectedServers.delete(session.server);
+        await session.transport.close().catch(() => undefined);
+      }
+      sessions.clear();
+      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    },
+  };
+}
+
+export function readMcpHttpOptionsFromArgv(
+  argv: string[] = process.argv.slice(2)
+): McpHttpServerOptions | undefined {
+  if (!argv.includes("--http")) return undefined;
+  const readFlag = (name: string): string | undefined => {
+    const index = argv.indexOf(name);
+    return index >= 0 ? argv[index + 1]?.trim() : undefined;
+  };
+  const collectFlags = (name: string): string[] => {
+    const values: string[] = [];
+    for (let index = 0; index < argv.length; index += 1) {
+      if (argv[index] === name) {
+        const value = argv[index + 1]?.trim();
+        if (value) values.push(value);
+      }
+    }
+    return values;
+  };
+  const rawPort = readFlag("--port");
+  const port = rawPort ? Number.parseInt(rawPort, 10) : undefined;
+  const hostFlag = readFlag("--host");
+  const endpointFlag = readFlag("--endpoint");
+  const allowedHostsFlag = readFlag("--allow-host");
+  const allowedOriginsFlag = readFlag("--allow-origin");
+  if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) {
+    throw new Error("--port must be an integer between 0 and 65535");
+  }
+  return {
+    ...(hostFlag ? { host: hostFlag } : {}),
+    ...(port !== undefined ? { port } : {}),
+    ...(endpointFlag ? { endpoint: endpointFlag } : {}),
+    stateful: argv.includes("--stateful"),
+    enableJsonResponse: !argv.includes("--sse-only"),
+    ...(allowedHostsFlag ? { allowedHosts: collectFlags("--allow-host") } : {}),
+    ...(allowedOriginsFlag ? { allowedOrigins: collectFlags("--allow-origin") } : {}),
+  };
+}
+
 function installMcpProcessGuards(server: McpServer): void {
   process.on("uncaughtException", (error) => {
     console.error("[GraphFlow MCP] uncaughtException:", error);
@@ -398,7 +708,9 @@ function installMcpProcessGuards(server: McpServer): void {
   process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
-if (require.main === module) {
+function runMcpServerCli(): void {
+  const argv = process.argv.slice(2);
+  const httpOptions = readMcpHttpOptionsFromArgv(argv);
   const server = createMcpServer();
   installMcpProcessGuards(server);
   attachMcpLogSink((level, message) => server.sendLogNotification(level as LoggingLevel, message));
@@ -440,9 +752,27 @@ if (require.main === module) {
     }
   })();
 
+  if (httpOptions) {
+    void startStreamableHttpServer(() => server, httpOptions)
+      .then((started) => {
+        console.error(
+          `[GraphFlow MCP] Streamable HTTP listening on ${started.url} (${started.stateful ? "stateful" : "stateless"})`
+        );
+      })
+      .catch((error) => {
+        console.error("[GraphFlow MCP] Failed to start Streamable HTTP server:", error);
+        process.exit(1);
+      });
+    return;
+  }
+
   // Respond to initialize immediately; watcher is background-only.
   void startStdioServer(server).catch((error) => {
     console.error("[GraphFlow MCP] Failed to start stdio server:", error);
     process.exit(1);
   });
+}
+
+if (require.main === module) {
+  runMcpServerCli();
 }
