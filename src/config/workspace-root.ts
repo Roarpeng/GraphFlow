@@ -35,6 +35,12 @@ function assertSafeWorkspaceRoot(root: string, source: string): string {
 export function resolveRuntimeWorkspaceRoot(options?: {
   rootDir?: string;
   projectWorkspaceRoot?: string;
+  /**
+   * Injectable working directory used for upward discovery and the final cwd
+   * fallback. Defaults to process.cwd(). Lets tests exercise unsafe-cwd paths
+   * without process.chdir() (which races under parallel test workers).
+   */
+  fromDir?: string;
 }): string {
   if (options?.rootDir?.trim()) {
     return assertSafeWorkspaceRoot(options.rootDir.trim(), "rootDir");
@@ -58,7 +64,9 @@ export function resolveRuntimeWorkspaceRoot(options?: {
     return assertSafeWorkspaceRoot(options.projectWorkspaceRoot.trim(), "projectWorkspaceRoot");
   }
 
-  const discovered = discoverWorkspaceRoot(process.cwd());
+  const baseDir = options?.fromDir?.trim() ? resolve(options.fromDir.trim()) : process.cwd();
+
+  const discovered = discoverWorkspaceRoot(baseDir);
   if (discovered) {
     // Defense in depth: discovery must never surface home/AppData. Skip if it does.
     if (!isUnsafeWorkspaceFallback(discovered)) {
@@ -66,7 +74,7 @@ export function resolveRuntimeWorkspaceRoot(options?: {
     }
   }
 
-  const cwd = resolve(process.cwd());
+  const cwd = resolve(baseDir);
   if (isUsableWorkspaceFallback(cwd)) {
     return cwd;
   }

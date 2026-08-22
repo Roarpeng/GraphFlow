@@ -389,6 +389,12 @@ export interface ContextFidelityMetrics {
   estimatedSavingsPercent: number;
   pendingRatio: number;
   unknownOutcomeRatio: number;
+  /** Number of persisted context-fidelity evaluation samples. */
+  sampleCount: number;
+  /** Mean expected-anchor hit rate across samples (1.0 = every expected anchor returned). */
+  averageAnchorRecallPercent: number;
+  /** Mean normalized source-to-package similarity across measurable samples; 0 if none. */
+  averageBodyCoveragePercent: number;
   note: string;
 }
 

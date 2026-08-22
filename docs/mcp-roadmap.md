@@ -1,9 +1,18 @@
 # MCP 协议演进 Roadmap — 无状态规范（2026-07-28）适配
 
-> 状态：**前瞻评估 / 待升级** ｜ 适用版本：`@roarpeng/graphflow` v1.9.5 ｜
-> 当前 SDK：`@modelcontextprotocol/sdk` `^1.29.0`（已装 1.29.0）｜
-> 当前协议：`2025-11-25`（SDK `LATEST_PROTOCOL_VERSION`）｜
+> 状态：**v1.12.1 已落地（GraphFlow 支持的 transport 矩阵）** ｜ 适用版本：`@roarpeng/graphflow` v1.12.1 ｜
+> 当前 SDK：`@modelcontextprotocol/sdk` `^1.30.0` ｜
+> 当前协议：stdio 继续协商 `2025-11-25`；`server/discover` 返回 draft `DRAFT-2026-v1` ｜
 > 关联代码：`src/surfaces/mcp/server.ts`、`src/surfaces/mcp/tool-definitions.ts`
+
+## 0. v1.12 落地状态
+
+- ✅ SDK 升级到 1.30。
+- ✅ 工具 schema 声明 JSON Schema 2020-12。
+- ✅ 所有工具结果保留 `content[0].text` 兼容层，并新增 `structuredContent`。
+- ✅ 手写兼容层支持 `server/discover`；旧 `initialize` / `ping` stdio 路径继续可用。
+- ✅ Streamable HTTP server transport：stateless JSON 与 stateful SSE 均可用，默认 loopback + Host/Origin 防护。
+- ✅ 客户端矩阵：SDK Client 分别通过 HTTP JSON 和 stateful SSE；raw 请求覆盖 discovery、initialize、ping、tools、resources、structured tool result、DELETE 后 stale session、非法路径/Origin 与非 loopback 保护；stdio legacy handshake 由既有 MCP integration 覆盖。
 
 ## 1. 背景：2026-07-28 无状态规范改版要点
 

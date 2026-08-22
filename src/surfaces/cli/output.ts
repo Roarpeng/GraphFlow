@@ -22,6 +22,7 @@ export function buildCliUsage(): string {
     "  doctor [--json]             自检：列出各 agent 的 MCP 与指令文件注册状态",
     "  uninstall                   移除 MCP + Skill + Rules + hooks（插件卸后请再跑此命令）",
     "  mcp remove [--agent <name>] 从指定 agent 中移除 GraphFlow MCP 配置（支持 --agent 参数）",
+    "  mcp serve --http [--host <host>] [--port <port>] [--stateful] [--sse-only]  # MCP Streamable HTTP transport",
     "  learn nightly [--json]      Run nightly learning loop",
     "  config init [--global]",
     "  config validate [--json] [--config <path>]",
@@ -47,6 +48,7 @@ export function buildCliUsage(): string {
     "  skill import [path] [--json] [--config <path>]",
     "  skill sync <export|import> [--path <file>] [--force]  # git-committable team skill package (.graphflow/skills/team-skills.json); import MERGES (newer updatedAt wins, ties keep local, --force overwrites); golden queries -> .graphflow/team-golden.json",
     "  skill report [--json] [--config <path>]  # flywheel contribution: skills health + episode outcomes",
+    "  skill markdown <export|import> [path] [--force]  # portable SKILL.md export/import; imports start correctable and never inherit trust",
     "  skill decay [--json] [--config <path>]",
     "  skill reset --name <name> [--json] [--config <path>]",
     "  skill prune [--json] [--config <path>]",
@@ -60,6 +62,7 @@ export function buildCliUsage(): string {
     "  dialogue list [--session <name|id>] [--limit N] [--json] [--config <path>]  # list conversation-turn graph nodes",
     '  dialogue record --query "<text>" [--reply "<text>"] [--resume-from <turnId>] [--session <name>] [--json] [--config <path>]',
     "  dialogue distill [--all] [--session <name|id>] [--json] [--config <path>]  # backfill turn titles/summaries (offline)",
+    "  knowledge extract [--all|--session <name|id>] [--limit N] [--dry-run] [--json]  # deterministic Concept/Requirement extraction from dialogue turns",
     "  help | --help | -h",
     "  version | --version | -v",
   ].join("\n");

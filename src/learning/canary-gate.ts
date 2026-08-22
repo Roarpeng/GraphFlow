@@ -44,6 +44,8 @@ export interface GateSkillPromotionOptions {
   localSuccesses: number;
   validated?: boolean;
   minLocalSuccesses?: number;
+  /** 绑定且 outcome=pass 的去重 episode 数（真实成功证据链，透传准入门）。 */
+  successCount?: number;
   /** When set, proven is held at correctable unless the held-out admission gate passes. */
   skillName?: string;
 }
@@ -51,7 +53,9 @@ export interface GateSkillPromotionOptions {
 /**
  * Gate proven promotion for external skills and the held-out admission gate.
  * Other classes pass through. Proven is held at correctable until canaryPassed
- * and (when skillName is provided) admitSkillToProven.
+ * and (when skillName is provided) admitSkillToProven. Real success evidence
+ * (successCount >= threshold) bypasses the golden-overlap veto inside the
+ * admission gate — see skill-admission.
  */
 export function gateSkillPromotion(options: GateSkillPromotionOptions): SkillOutcomeKind {
   if (options.outcomeKind !== "proven") {
@@ -68,7 +72,9 @@ export function gateSkillPromotion(options: GateSkillPromotionOptions): SkillOut
   if (!canaryPassed(check)) {
     return "correctable";
   }
-  if (options.skillName && !admitSkillToProven(options.skillName).ok) {
+  const admitOptions: { successCount?: number } | undefined =
+    options.successCount !== undefined ? { successCount: options.successCount } : undefined;
+  if (options.skillName && !admitSkillToProven(options.skillName, admitOptions).ok) {
     return "correctable";
   }
   return "proven";

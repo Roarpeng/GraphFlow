@@ -47,6 +47,9 @@ import {
   type MemoryOutcome,
   type DialogueListItem,
   type DistillDialogueResult,
+  exportSkillsToMarkdownRuntime,
+  importSkillsFromMarkdownRuntime,
+  extractDialogueKnowledgeRuntime,
 } from "./runtime";
 import { validateConfigDetailed, type ConfigValidationResult } from "../../config/loader.js";
 import { isDeviationKind } from "../../learning/episodic-memory";
@@ -116,6 +119,30 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       command: "mcp-remove",
       data: {},
       legacyText: `MCP removal complete`,
+    };
+  }
+
+  if (command === "mcp" && args[0] === "serve") {
+    if (!args.includes("--http")) {
+      console.log("Usage: graphflow mcp serve --http [--host <host>] [--port <port>] [--endpoint </path>] [--stateful] [--sse-only]");
+      process.exitCode = 1;
+      return undefined;
+    }
+    const { readMcpHttpOptionsFromArgv, startStreamableHttpServer } =
+      await import("../mcp/server.js");
+    const started = await startStreamableHttpServer(
+      undefined,
+      readMcpHttpOptionsFromArgv(["--http", ...args.slice(1)])
+    );
+    // The returned listener keeps the event loop alive; data intentionally
+    // excludes the Node server so --json remains serializable.
+    const { httpServer: _httpServer, close: _close, ...data } = started;
+    return {
+      command: "mcp-serve",
+      data,
+      legacyText:
+        `GraphFlow MCP Streamable HTTP listening on ${data.url} ` +
+        `(${data.stateful ? "stateful" : "stateless"})`,
     };
   }
 
@@ -527,6 +554,60 @@ async function executeCommand(command: string, args: string[], configPath?: stri
         `topUsed=${data.skills.topUsed.map((s) => `${s.name}:${s.uses}`).join(",") || "-"}`,
         `experience=conv:${data.experience.episodeToSkillConversionRate.toFixed(2)},lessons:${data.experience.lessonsCoverageRate.toFixed(2)},consol:${data.experience.consolidation.actionable}`,
       ].join("; "),
+    };
+  }
+
+  if (command === "skill" && args[0] === "markdown") {
+    const direction = args[1]?.trim().toLowerCase();
+    if (direction !== "export" && direction !== "import") {
+      console.log("Usage: graphflow skill markdown <export|import> [path] [--force]");
+      process.exitCode = 1;
+      return undefined;
+    }
+    const positional = args.slice(2).find((part) => !part.startsWith("--"))?.trim();
+    if (direction === "export") {
+      const rootDir = readCliFlagValue(args, "--root-dir");
+      const data = await exportSkillsToMarkdownRuntime(configPath, {
+        ...(positional ? { outputDir: positional } : {}),
+        ...(rootDir ? { rootDir } : {}),
+      });
+      return {
+        command: "skill-markdown-export",
+        data,
+        legacyText: `path=${data.outputDir}; files=${data.fileCount}; bytes=${data.bytes}; compositesSkipped=${data.skippedComposites}`,
+      };
+    }
+    const rootDir = readCliFlagValue(args, "--root-dir");
+    const data = await importSkillsFromMarkdownRuntime(configPath, {
+      ...(positional ? { inputPath: positional } : {}),
+      force: args.includes("--force"),
+      ...(rootDir ? { rootDir } : {}),
+    });
+    return {
+      command: "skill-markdown-import",
+      data,
+      legacyText: `path=${data.inputPath}; imported=${data.imported}; updated=${data.updated}; skipped=${data.skipped}; total=${data.total}`,
+    };
+  }
+
+  if (command === "knowledge" && (args[0] === "extract" || !args[0])) {
+    const limitRaw = readCliFlagValue(args, "--limit");
+    const limit = limitRaw ? Number.parseInt(limitRaw, 10) : undefined;
+    const sessionId = readCliFlagValue(args, "--session");
+    const rootDir = readCliFlagValue(args, "--root-dir");
+    const data = await extractDialogueKnowledgeRuntime(configPath, {
+      ...(sessionId ? { sessionId } : {}),
+      all: args.includes("--all"),
+      apply: !args.includes("--dry-run"),
+      ...(rootDir ? { rootDir } : {}),
+      ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
+    });
+    return {
+      command: "knowledge-extract",
+      data,
+      legacyText:
+        `applied=${data.applied}; turns=${data.scannedTurns}; requirements=${data.requirements}; ` +
+        `concepts=${data.concepts}; edges=${data.edges}`,
     };
   }
 

@@ -77,6 +77,7 @@ describe("canary-gate（团队记忆安全）", () => {
         uses: DEFAULT_CANARY_LOCAL_SUCCESSES,
         failStreak: 0,
         linkedSuccess: false,
+        successCount: DEFAULT_CANARY_LOCAL_SUCCESSES,
         provenance: syncProv,
         localSuccesses: DEFAULT_CANARY_LOCAL_SUCCESSES,
       })
@@ -96,14 +97,32 @@ describe("canary-gate（团队记忆安全）", () => {
     ).toBe("proven");
   });
 
-  it("本地技能不受 canary 额外约束", () => {
+  it("本地技能不受 canary 额外约束；uses 不再参与 proven 判定", () => {
+    // 真实成功证据链：2 个 pass episode → proven。
+    expect(
+      classifySkillOutcome({
+        uses: 2,
+        failStreak: 0,
+        linkedSuccess: false,
+        successCount: 2,
+      })
+    ).toBe("proven");
+    // 出现 2 次但 0 成功 → 不 proven（提及次数只是展示字段）。
     expect(
       classifySkillOutcome({
         uses: 2,
         failStreak: 0,
         linkedSuccess: false,
       })
-    ).toBe("proven");
+    ).toBe("correctable");
+    expect(
+      classifySkillOutcome({
+        uses: 2,
+        failStreak: 0,
+        linkedSuccess: false,
+        successCount: 0,
+      })
+    ).toBe("correctable");
   });
 
   it("admission gate holds generic proven candidates at correctable", () => {
@@ -155,12 +174,13 @@ describe("canary-gate（团队记忆安全）", () => {
       await importSkillPackage(client, pkgPath);
       const run = { status: "COMPLETED" as const, attempts: 1, feedback: "done" };
 
-      await applySkillLearning(client, task, run);
+      // 两次成功均绑定 pass episode（真实 reportOutcome 路径），第二次后 successCount=2。
+      await applySkillLearning(client, task, run, undefined, { episodeId: "ep-canary-a" });
       const afterOne = await readSkill(client, externalId);
       expect(afterOne?.outcomeKind).toBe("correctable");
       expect(afterOne?.provenance?.source).toBe("sync");
 
-      await applySkillLearning(client, task, run);
+      await applySkillLearning(client, task, run, undefined, { episodeId: "ep-canary-b" });
       const afterTwo = await readSkill(client, externalId);
       expect(afterTwo?.outcomeKind).toBe("proven");
       expect(afterTwo?.provenance?.source).toBe("sync");

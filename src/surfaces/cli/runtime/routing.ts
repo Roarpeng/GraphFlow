@@ -680,7 +680,7 @@ export async function submitAgentInsightResult(
   rootDir?: string
 ): Promise<SubmitAgentInsightResult> {
   const config = bindRuntimeWorkspaceRoot(
-    resolveConfig(configPath),
+    resolveConfig(configPath, rootDir ? { rootDir } : undefined),
     rootDir ? { rootDir } : undefined
   );
   const graphClient = createGraphClient(config);
@@ -699,7 +699,7 @@ export async function mergeAgentInsightResult(
   rootDir?: string
 ): Promise<MergeAgentInsightsResult> {
   const config = bindRuntimeWorkspaceRoot(
-    resolveConfig(configPath),
+    resolveConfig(configPath, rootDir ? { rootDir } : undefined),
     rootDir ? { rootDir } : undefined
   );
   const graphClient = createGraphClient(config);
@@ -719,7 +719,7 @@ async function maybeSeedWorkbench(
   if (steps.length === 0) return undefined;
   try {
     const config = bindRuntimeWorkspaceRoot(
-      resolveConfig(configPath),
+      resolveConfig(configPath, rootDir ? { rootDir } : undefined),
       rootDir ? { rootDir } : undefined
     );
     const client = createGraphClient(config);

@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-[![npm version](https://img.shields.io/badge/npm-1.9.16-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.12.1-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **The memory & context harness for coding agents.** Local-first code knowledge graph · bounded context compression (~98% token savings) · cross-session learning flywheel.
 
@@ -84,7 +84,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 
 > The differentiator is the **learning flywheel**: graph indexing and token compression are replicable; project-private experience (skills, lessons, decisions) accumulated across sessions is not — it compounds with use. Serena is a complement, not a competitor — see [GraphFlow + Serena: better together](docs/comparison.md#graphflow--serena-better-together联合方案).
 
-## Core capabilities (v1.7.15+)
+## Core capabilities (v1.12+)
 
 | Module | Capability |
 | --- | --- |
@@ -92,16 +92,16 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | **Goal alignment** | Goal anchor nodes (intent five-tuple as first-class citizen, original requirement auto-injected); low-confidence clarification gate (no plan below 0.6); runtime alignment-check; deviation classification (misread-requirement / scope-creep / tech-drift); goal version chain + diffs |
 | **Knowledge graph** | 12-language AST indexing; File / Module / Symbol + **Concept / Requirement**; cross-layer edges `documents` / `implements` / `derived_from`; Office/PDF → Markdown via optional **`@firecrawl/anydoc`** (MIT). **CLI/npm**: optionalDependency. **VSIX**: not bundled; on activate the extension **auto-downloads the current-OS binary** into `~/.graphflow/optional-deps` when `graphflow.downloadAnydoc` is true (default). Disable the setting to skip network; source indexing still works. |
 | **Context compression** | L1/L2/L3 layered anchors; graph compression (edge weights + PageRank, LRU cache); stem-matching recall (orchestrate ↔ orchestration); vector recall + RRF; RepoMap overview; adaptive budget |
-| **Retrieval quality** | Golden-set regression gate (132 queries, Hit@5=100%, MRR=0.836, NDCG@5=0.601) |
+| **Retrieval & fidelity** | Golden-set regression gate (132 queries, Hit@5=100%, MRR=0.836, NDCG@5=0.601); separate anchor-recall and normalized body-coverage metrics persisted beside token savings |
 | **Vector index** | In-process memoization + disk persistence (fingerprint-checked, seconds to restore after MCP restart) |
 | **Storage backends** | `file` / `memory` / `sqlite` (FTS5, tokenizer-enhanced `searchtext`, camelCase searchable) / **`auto` (sqlite-first with fallback)** / `mcp-http` |
-| **Learning flywheel** | Episodic memory, reflection, skill nodes (score ±1, bounded [-20,20]), nightly training, skill decay/pruning, **auto-capture + Claude Code hooks (on by default)**, **SkillOpt-lite** bounded guidance edits, four-class lifecycle + **canary gate for synced skills**, `npm run backfill:episodes`, contribution reports (`skill report` / `graphflow_diagnose` / `route diagnose`) |
+| **Learning flywheel** | Episodic memory, reflection, skill nodes (score ±1, bounded [-20,20]), nightly training, adaptive evidence-aware forgetting, **auto-capture + Claude Code hooks (on by default)**, **SkillOpt-lite** bounded guidance edits, four-class lifecycle + **canary gate for synced skills**, portable SKILL.md import/export, `npm run backfill:episodes`, contribution reports (`skill report` / `graphflow_diagnose` / `route diagnose`) |
 | **Team sharing** | `skill sync`: export/import skill packs to a committable `.graphflow/skills/team-skills.json`; imports are a **bidirectional MERGE** (per-skill-id union, newer `updatedAt` wins, ties keep local, local-only skills preserved; `--force` to overwrite); golden retrieval queries round-trip via `.graphflow/team-golden.json`; [security model](docs/team-memory-security.md) |
 | **Benchmarks** | [Comprehensive 92.9%](benchmarks/COMPREHENSIVE-RESULTS.md) · [Independent-style 96.2%](benchmarks/INDEPENDENT-RESULTS.md) · [context-readiness eval](benchmarks/SWE-BENCH-RESULTS.md) · [98.2% token savings](benchmarks/RESULTS.md) |
 | **Model routing** | Smart / Economy tiers; multi-provider health probes and fallback (DeepSeek, OpenAI, Anthropic, Bailian, Doubao) |
 | **Workbench** | Plan DAG seeds function-topic containers; collapsed outline; click `topicId` to resume; drift forks a side branch; original Q/A stored via `assistantReply` |
 | **Observability** | `graphflow_diagnose` / `route diagnose`: provider health + graph stats + token savings + **flywheel health** (auto-capture, episodes, skills by class, session journal) + workbench outline |
-| **Agent surfaces** | CLI `--json`; MCP stdio (10 tools); auto-install into 15+ agents (incl. **Codex Windows NODE/NPX_CLI short-path MCP**) |
+| **Agent surfaces** | CLI `--json`; MCP stdio and Streamable HTTP (stateless JSON or stateful SSE, 10 tools); auto-install into 15+ agents (incl. **Codex Windows NODE/NPX_CLI short-path MCP**) |
 | **Engineering quality** | TypeScript strict; vitest suite; `npm run ci` includes extension packaging and smoke tests |
 
 ### Positioning
@@ -117,7 +117,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | `graphflow_run` | Orchestration + bridge execution descriptor |
 | `graphflow_report_outcome` | Outcome backfill (incl. deviation classification), closes the learning flywheel |
 | `graphflow_insight` | ATP insight submit / merge (agent bridge protocol) |
-| `graphflow_index` | Incremental / full indexing |
+| `graphflow_index` | Incremental / full indexing; optional `knowledgeExtract: true` distills dialogue turns into Concept / Requirement nodes with provenance edges |
 | `graphflow_skill_insights` | Skill insights |
 | `graphflow_diagnose` | Diagnostics (provider + graph + token savings + flywheel + `graph.workbenchOutline`) |
 | `graphflow_artifact` | Graph artifact import / export |
@@ -149,6 +149,7 @@ graphflow workbench tree --json            # on-demand function DAG + side branc
 graphflow run "update readme"              # orchestrate (bridge)
 graphflow skill insights                   # skill insights
 graphflow skill report                     # flywheel contribution report
+graphflow mcp serve --http                 # stateless MCP Streamable HTTP (add --stateful for SSE sessions)
 graphflow skill sync export                # export team skill pack + golden queries (share via git)
 graphflow skill sync import                # import team skill pack (MERGE; --force to overwrite) + golden merge into .graphflow/team-golden.json
 graphflow route diagnose                   # routing diagnostics
@@ -299,7 +300,7 @@ npm install
 npm run ci        # lint + build + tests + extension packaging + smoke
 ```
 
-Requires Node.js ≥ 20, npm ≥ 10. Expected: lint clean, build succeeds, 692 tests pass.
+Requires Node.js ≥ 20, npm ≥ 10. Expected: lint clean, build succeeds, 956 tests pass.
 
 ## Project structure
 
@@ -319,7 +320,7 @@ GraphFlow/
 │   └── surfaces/
 │       ├── cli/        # CLI + runtime
 │       └── mcp/        # MCP server (10 tools)
-├── tests/              # 99 files / 692 tests (incl. retrieval golden set, bridge+DAG)
+├── tests/              # 141 files / 956 tests (incl. fidelity, SKILL.md, Engineering KG, MCP HTTP/stdio matrix)
 ├── benchmarks/         # comprehensive + independent + SWE-bench + token savings + skill A/B (reproducible)
 ├── docs/               # ATP spec + context contract + experience memory + comparisons
 ├── vscode-extension/   # VS Code panel and commands

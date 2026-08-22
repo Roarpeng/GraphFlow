@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   admitSkillToProven,
-  FALLBACK_GOLDEN_TOKENS,
   goldenTokenOverlap,
   isSymbolicSkillName,
+  registerGoldenEvidenceTokens,
   wouldDegradeLibrary,
 } from "../src/learning/skill-admission";
 
@@ -34,26 +34,37 @@ describe("skill admission gate", () => {
     expect(isSymbolicSkillName("readme+update")).toBe(false);
   });
 
-  it("admits skill-flywheel.ts or applySkillLearning when present in golden/fallback", () => {
-    const fallback = FALLBACK_GOLDEN_TOKENS.map((token) => token.toLowerCase());
-    expect(
-      fallback.some((token) => token.includes("skill-flywheel") || token.includes("applyskilllearning"))
-    ).toBe(true);
-
+  it("admits project symbols present in the repo retrieval-golden dataset", () => {
+    // 词集由仓库自带检索 golden 数据集动态生成（benchmarks/datasets/retrieval-golden-v1.json），
+    // 不再依赖任何硬编码闭集。skill-flywheel 是数据集 expectAny 中的符号。
     const flywheel = admitSkillToProven("skill-flywheel.ts");
-    const fn = admitSkillToProven("applySkillLearning");
     expect(flywheel.ok).toBe(true);
-    expect(fn.ok).toBe(true);
     expect(wouldDegradeLibrary("skill-flywheel.ts")).toBe(false);
     expect(goldenTokenOverlap("skill-flywheel.ts").length).toBeGreaterThan(0);
-    expect(goldenTokenOverlap("applySkillLearning").length).toBeGreaterThan(0);
   });
 
-  it("keeps names without golden overlap correctable (not proven)", () => {
-    const result = admitSkillToProven("totally-unknown-widget.ts");
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe("no-golden-overlap");
+  it("admits closed-set-outside names on real success evidence (no static list veto)", () => {
+    // 无成功证据时，闭集外名字（不在任何静态/数据集列表）保持 no-golden-overlap：
+    const unknown = admitSkillToProven("totally-unknown-widget.ts");
+    expect(unknown.ok).toBe(false);
+    expect(unknown.reason).toBe("no-golden-overlap");
     expect(isSymbolicSkillName("totally-unknown-widget.ts")).toBe(true);
+    // 绑定 >= 阈值（默认 2）个 pass episode → 闭集外也能准入：
+    const evidenced = admitSkillToProven("totally-unknown-widget.ts", { successCount: 2 });
+    expect(evidenced.ok).toBe(true);
+    expect(evidenced.reason).toBe("success-evidence");
+    // applySkillLearning 同样不在任何静态列表中，凭成功证据链可准入：
+    expect(admitSkillToProven("applySkillLearning").ok).toBe(false);
+    expect(admitSkillToProven("applySkillLearning", { successCount: 2 }).ok).toBe(true);
+    // 未达阈值时闭集检查仍作为辅助条件生效（1 个成功不足以免除）：
+    expect(admitSkillToProven("totally-unknown-widget.ts", { successCount: 1 }).ok).toBe(false);
+  });
+
+  it("overlays real episode/symbol evidence into the dynamic golden set", () => {
+    // 运行时真实证据（如 pass episode 的符号词）可叠加进动态词集：
+    registerGoldenEvidenceTokens(["applySkillLearning", "total-unknown-widget.ts"]);
+    expect(admitSkillToProven("applySkillLearning").ok).toBe(true);
+    expect(goldenTokenOverlap("applySkillLearning").length).toBeGreaterThan(0);
   });
 
   it("simulates Hit@k drop when un-gated noise is injected into the library", () => {

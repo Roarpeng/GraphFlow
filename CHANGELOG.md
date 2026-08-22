@@ -2,7 +2,49 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [1.12.1] - 2026-08-22
+
+### Added
+
+- **MCP Streamable HTTP transport**：新增 stateless JSON 与 stateful SSE 双模式；支持 MCP initialize、draft `server/discover`、ping、tools、resources 和 structured tool results。启动方式：`graphflow mcp serve --http` 或 `graphflow-mcp --http`
+- **HTTP 生命周期与安全默认**：显式 DELETE 关闭 stateful session；默认仅绑定 loopback，Host 校验防止 rebinding，浏览器 Origin 默认拒绝并可用 allowlist 显式放行
+- **端到端 transport 矩阵**：SDK Client 分别验证 HTTP JSON 与 stateful SSE；raw 请求验证 discovery、未知路径、非法 Origin、DELETE 后 stale session 和非 loopback 保护
+
+### Changed
+
+- `@modelcontextprotocol/sdk` 固定到 1.30 runtime 面；stdio legacy handshake 继续兼容
+
+### Tests
+
+- 新增 `tests/mcp-streamable-http.test.ts`；全量回归 141 文件 / 956 用例通过，扩展 bundled runtime 冒烟 7/7 通过
+
+## [1.12.0] - 2026-08-22
+
+### Added
+
+- **dsh 知识节点面板静态化（R4 落地）**：新增预构建 CJS factory bundle `dsh/client.js`（`window.__ModuleLoader__.load({id:"@roarpeng/graphflow/dsh",factory})`，named 导出 apply+inject；注册 `conversation.session.header.utilities` 开关与 `shell.overlay` 面板两个 slot，PANEL_CSS 闭包内注入防重），随 bundle 层开机自动加载——**不再需要按会话手动激活动态插件**。数据通道走 Connection 通用 RPC：glue 注册 `/gf`（`ctx.connection.rpc.handle(…,{authority:"trusted-host"})`，自带 browser-trust fence），handler 返回 RpcResult 信封 `{ok,value:{workbench,dialogues}}`；浏览器端 `connection.rpc.call("/gf","nodes",{workspaceRoot})` 取数。package.json 叠加声明 `dsh.client{platform:"web"}` + `exports["./client"]`/`exports["./dsh/package.json"]`（后者让现有 glue 行原样成为 client 扫描条目，实测 Node 解析通过）
+- **Context Fidelity 指标流（R1）**：新增 `graphflow-out/context-fidelity.json`、anchor recall@k、missing anchors 和基于归一化 LCS 的 body coverage；`FlywheelReport.fidelity` 增加 sample / recall / coverage 聚合。token savings 与信息保真度从此是两条可审计指标
+- **SKILL.md 双向互操作（R2）**：新增 `skill markdown export|import`；导出只带 portable 元数据与 playbook，不带走 GraphFlow 本地信任决策；导入一律保守标记 `import/correctable`，不继承 proven 或 canary 证据
+- **Engineering KG 抽取落地（R3）**：新增确定性中英文 Concept/Requirement 抽取器；CLI `knowledge extract [--all|--session] [--dry-run]` 与 MCP `graphflow_index({knowledgeExtract:true})` 可把对话结论写入图谱并保留 dialogue-turn `derived_from` 审计链
+- **MCP structured results + stateless discovery**：全部工具结果继续保留 `content[0].text` 兼容层，同时返回 `structuredContent`；tool schema 声明 JSON Schema 2020-12；SDK 升级到 1.30，stdio 兼容握手之外支持 `server/discover`
+- **O(1) 技能读路径 + 自适应遗忘**：`readSkillState` / `loadCompositeSkill` 优先 `getNodesByIds`；skill decay 改为陈旧度 × 失败压力 × 成功保持 × proven 保护的确定性曲线，只软衰减，不删除经验
+- **学习飞轮真实证据链（R0）**：`proven` 准入从"原子出现次数 `uses>=2`"改为"成功 episode 绑定计数 `successCount>=阈值`"（默认 2，`GRAPHFLOW_SKILL_PROVEN_MIN_SUCCESS` 可覆盖；按 episodeId 去重，旧数据经 `linkedSuccess+provenance.episodeId` 自动迁移，已 proven 节点不降级）；删除 `FALLBACK_GOLDEN_TOKENS` 硬编码闭集，golden 词集动态生成（检索 golden 数据集 `expectAny` + 运行时 pass episode/symbol 证据叠加 `registerGoldenEvidenceTokens`）；golden-overlap/符号检查降为辅助条件，不再一票否决真实成功记录
+- **dsh 对话 A 面真实回填**：修复 glue 监听器读错会话事件信封字段（assistant 消息在 `event.data.message`，旧代码读 `event.message` 恒为空）这一"回复永远待回复"的根因；重写为 `turn/end` 提交模型（`assistant/message` 按 step 只喂"本 turn 最后文本"缓冲；`turn/end` 按 (session, turn) 去重提交；interrupted/aborted 不填）；回填管线 = 进程内 runtime（`captureAssistantReply`；命中 workbench topic 时追加 dialogue turn 填充，保证 A 面必闭）→ CLI 兜底（`context preview --reply` + `dialogue record --reply` 双幂等 tip 填）；latest-wins 每 session 串行队列 + no-pending-turn 有界重试；`GRAPHFLOW_CAPTURE_REPLY=0` 一票关闭
+- **对话节点噪声过滤扩展**：`SYSTEM_MESSAGE_SOURCE_KINDS` 黑名单新增 `subagent-settled`/`subagent-report`（子代理完成/汇报通知此前被记成用户提问的直接根因）及 `agent-instructions`/`session-reference`/`goal`/`skill-catalog`；`user` kind 白名单放行真人输入，未知来源维持 role 回退保守兜底
+- **file 图存储进程内缓存（R1）**：`graphify-file-client` 按绝对路径缓存解析 store 与懒构建倒排索引（`queryByKeyword` 不再每次重建索引），mtime+size 校验失效、写路径 write-through（拷贝构建 + `readSnapshot` 浅拷贝防污染）、跨实例共享；导出测试钩子
+
+### Fixed
+
+- **MCP unsafe-cwd 下工具级 rootDir 被吞（工具全灭）**：`resolveConfig()` 内部无条件先执行 `bindRuntimeWorkspaceRoot`（只认配置文件 `workspaceRoot`），MCP 服务端 cwd=家目录时在调用方 rootDir 应用前就抛 `Refusing to index unsafe workspace root`——而服务端启动日志承诺 "Pass rootDir on tools"。现在 `resolveConfig(configPath, { rootDir })` 把 rootDir 传入内部绑定（优先级 rootDir > projectWorkspaceRoot > cwd 发现不变，unsafe 安全检查不放宽）；`src/surfaces/cli/runtime/{graph,dialogue,routing}.ts` 全部持有 rootDir 的调用点已接线；`resolveRuntimeWorkspaceRoot` 支持注入 `fromDir`（测试免 `process.chdir`）
+
+### Tests
+
+- `tests/resolve-config-rootdir.test.ts`（新增 6 用例）：unsafe cwd + rootDir 不抛错且绑定生效；不传 rootDir 保持抛错；显式 configPath 分支；`fromDir` 注入向上发现
+- `tests/dsh-plugin-glue.test.ts`：reply 断言重写到 turn/end 提交模型（信封形状、按 turn 去重重放无副作用、aborted/interrupted 跳过、CLI 兜底双 spawn 参数与 cwd）
+- `tests/graphify-file-client-cache.test.ts`（新增 9 用例）+ `auto-transport` / `auto-transport-fallback`（+5）：缓存命中/外部变更失效/仅 mtime 失效/写透三方一致/交错读写、sqlite 不可用与初始化失败静默回退
+- `tests/m-learning-success-evidence.test.ts`（新增 9 用例）；更新 5 个编码旧 `uses>=2→proven` 规则的测试
+- 全量回归：140 文件 / 953 用例全绿；`tsc --noEmit` 零错误
+- v1.12 新增回归：context fidelity、SKILL.md round-trip、Engineering KG extraction、structuredContent/stateless discovery、O(1) skill read、adaptive decay
 
 ## [1.9.16] - 2026-08-21
 

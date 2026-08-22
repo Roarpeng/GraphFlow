@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "graphflow",
-  "version": "1.9.16",
+  "version": "1.12.1",
   "description": "图谱上下文压缩与任务规划插件（10 个 MCP 工具）。能力：压缩上下文、DAG 规划、增量建图、技能飞轮、诊断与产物导入导出。DeepSeek Harness：dsh plugin --profile web add @roarpeng/graphflow；工具名为 mcp__graphflow__graphflow_*。先调 graphflow_context（传 rootDir），复杂任务再 plan，改完代码后 index。",
   "author": {
     "name": "Roarpeng",

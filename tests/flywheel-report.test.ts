@@ -46,19 +46,20 @@ describe("flywheel contribution report", () => {
 
     const client = createGraphClient(validateConfig(JSON.parse(JSON.stringify(configJson))));
 
-    // Seed skills: one passing task (twice → proven, positive score) and one
-    // failing task (twice → anti-pattern, negative score). P0-2 taxonomy:
-    // single observations stay neutral (correctable).
+    // Seed skills: one passing task (twice with bound pass episodes → proven,
+    // positive score) and one failing task (twice → anti-pattern, negative
+    // score). P0-2 taxonomy: single observations stay neutral (correctable).
+    // 真实成功证据链按 episodeId 绑定：2 个 pass episode → proven。
     await applySkillLearning(client, "refactor planner module in planner.ts and add tests", {
       status: "COMPLETED",
       attempts: 1,
       feedback: "done",
-    });
+    }, undefined, { episodeId: "ep-report-pass-a" });
     await applySkillLearning(client, "refactor planner module in planner.ts and add tests", {
       status: "COMPLETED",
       attempts: 1,
       feedback: "done",
-    });
+    }, undefined, { episodeId: "ep-report-pass-b" });
     await applySkillLearning(client, "fix broken cache layer in cache-layer.ts", {
       status: "FAILED",
       attempts: 1,
@@ -416,17 +417,18 @@ describe("flywheel contribution report", () => {
       )
     );
 
-    // Seed classified skills: proven (2× pass) and anti-pattern (2× fail).
+    // Seed classified skills: proven (2× pass with bound episodes) and
+    // anti-pattern (2× fail).
     await applySkillLearning(client, "refactor health planner in planner.ts", {
       status: "COMPLETED",
       attempts: 1,
       feedback: "done",
-    });
+    }, undefined, { episodeId: "ep-health-pass-a" });
     await applySkillLearning(client, "refactor health planner in planner.ts", {
       status: "COMPLETED",
       attempts: 1,
       feedback: "done",
-    });
+    }, undefined, { episodeId: "ep-health-pass-b" });
     await applySkillLearning(client, "fix health cache in cache-layer.ts", {
       status: "FAILED",
       attempts: 1,

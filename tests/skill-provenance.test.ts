@@ -121,21 +121,23 @@ describe("外部技能入库门禁（记忆投毒防护）", () => {
     expect(legacy?.provenance).toBeUndefined();
   });
 
-  it("本地技能晋升路径不受影响：本地成功使用后可晋升 proven", async () => {
+  it("本地技能晋升路径不受影响：绑定 pass episode 后可晋升 proven", async () => {
     const client = new GraphifyClient() as GraphClient;
     const run = { status: "COMPLETED" as const, attempts: 1, feedback: "done" };
     const task = "refactor planner module in planner.ts and add tests";
 
-    await applySkillLearning(client, task, run);
-    await applySkillLearning(client, task, run);
+    // 两次成功均绑定 pass episode（真实 reportOutcome 路径）：successCount=2 → proven。
+    await applySkillLearning(client, task, run, undefined, { episodeId: "ep-local-a" });
+    await applySkillLearning(client, task, run, undefined, { episodeId: "ep-local-b" });
 
     const atoms = extractSkillAtoms(task);
     expect(atoms.length).toBeGreaterThan(0);
     const atom = pickAdmissibleAtom(task);
     const state = await readSkill(client, skillNodeId(atom));
     expect(state).toBeDefined();
-    // 本地技能：>=2 次使用晋升 proven，且不携带 sync 来源标记
+    // 本地技能：2 个 pass episode 晋升 proven，且不携带 sync 来源标记
     expect(state?.outcomeKind).toBe("proven");
+    expect(state?.successCount).toBe(2);
     expect(state?.provenance?.source ?? "local").toBe("local");
   });
 
@@ -171,13 +173,14 @@ describe("外部技能入库门禁（记忆投毒防护）", () => {
       expect(imported?.outcomeKind).toBe("correctable");
       expect(imported?.uses).toBe(0);
 
-      // 本地成功使用 → 晋升 proven；来源标记保持 sync（可审计）
+      // 本地成功使用（绑定 pass episode）→ 晋升 proven；来源标记保持 sync（可审计）
       const run = { status: "COMPLETED" as const, attempts: 1, feedback: "done" };
-      await applySkillLearning(client, task, run);
-      await applySkillLearning(client, task, run);
+      await applySkillLearning(client, task, run, undefined, { episodeId: "ep-sync-a" });
+      await applySkillLearning(client, task, run, undefined, { episodeId: "ep-sync-b" });
 
       const promoted = await readSkill(client, externalId);
       expect(promoted?.outcomeKind).toBe("proven");
+      expect(promoted?.successCount).toBe(2);
       expect(promoted?.provenance?.source).toBe("sync");
     } finally {
       rmSync(root, { recursive: true, force: true });

@@ -34,7 +34,12 @@ describe("M62 Trae CN project install", () => {
     expect(rule).toContain("alwaysApply: true");
     expect(rule).toContain("graphflow_context");
 
-    const status = getTraeInstallStatus(dir);
+    // User-level Trae directories are process-global and other installation
+    // suites may create/remove them concurrently. Assert only the project
+    // entries created by this temporary workspace.
+    const status = getTraeInstallStatus(dir).filter((item) =>
+      item.agent.includes("project")
+    );
     expect(status.every((s) => s.installed)).toBe(true);
 
     rmSync(dir, { recursive: true, force: true });

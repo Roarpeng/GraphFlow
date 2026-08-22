@@ -15,6 +15,7 @@ import { extractNodeSourcePath } from "../../../graph/graph-utils";
 import { sampleGraphForSnapshot } from "../../../graph/snapshot-view.js";
 import {
   explainSavings,
+  getContextFidelityStats,
   getSavingsStats,
   recordSavings,
   resetSavingsStats,
@@ -139,7 +140,7 @@ export async function previewContext(
   englishQuery?: string,
   dialogue?: PreviewDialogueOptions
 ): Promise<ContextPreviewResult> {
-  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
+  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath, rootDir ? { rootDir } : undefined), rootDir ? { rootDir } : undefined);
   const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
 
   const { getCachedContext, cacheContextResult } = await import("../../../graph/context-cache.js");
@@ -425,7 +426,7 @@ export async function captureAssistantReply(
   if (reply.length < 1) {
     return { ok: false, filled: false, reason: "reply-empty" };
   }
-  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
+  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath, rootDir ? { rootDir } : undefined), rootDir ? { rootDir } : undefined);
   const client = createGraphClient(config);
   const workspaceRoot = config.graphPolicy.workspaceRoot;
 
@@ -487,7 +488,7 @@ export async function indexGraph(
   configPath?: string,
   options?: { onProgress?: (processed: number, total: number) => void }
 ): Promise<GraphIndexResult> {
-  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
+  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath, rootDir ? { rootDir } : undefined), rootDir ? { rootDir } : undefined);
   const graphClient = createGraphClient(config);
   const targetDir = config.graphPolicy.workspaceRoot ?? process.cwd();
 
@@ -544,7 +545,7 @@ export async function rebuildGraph(
   configPath?: string,
   options?: { onProgress?: (processed: number, total: number) => void }
 ): Promise<GraphRebuildResult> {
-  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
+  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath, rootDir ? { rootDir } : undefined), rootDir ? { rootDir } : undefined);
   const graphClient = createGraphClient(config);
   const targetDir = config.graphPolicy.workspaceRoot ?? process.cwd();
   const storePath = resolveGraphStorePath(config);
@@ -573,7 +574,7 @@ export async function inspectGraph(
   options?: { nodeLimit?: number; edgeLimit?: number; rootDir?: string }
 ): Promise<GraphSnapshotResult> {
   const config = bindRuntimeWorkspaceRoot(
-    resolveConfig(configPath),
+    resolveConfig(configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
     options?.rootDir ? { rootDir: options.rootDir } : undefined
   );
   const nodeLimit = Math.max(1, options?.nodeLimit ?? 96);
@@ -653,7 +654,7 @@ export async function listWorkbenchOutline(
   outlines: import("../../../learning/workbench-topic").WorkbenchOutline[];
   lines: string[];
 }> {
-  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
+  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath, rootDir ? { rootDir } : undefined), rootDir ? { rootDir } : undefined);
   const client = createGraphClient(config);
   const outlines = await loadWorkbenchOutlines(client);
   return { outlines, lines: formatWorkbenchOutlineLines(outlines) };
@@ -663,7 +664,7 @@ export async function getSkillInsights(
   configPath?: string,
   limit = 12,
   rootDir?: string
-): Promise<SkillInsightsResult> {  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath), rootDir ? { rootDir } : undefined);
+): Promise<SkillInsightsResult> {  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath, rootDir ? { rootDir } : undefined), rootDir ? { rootDir } : undefined);
   const boundedLimit = Math.max(1, limit);
 
   if (config.graphPolicy.transport === "mcp-http") {
@@ -834,7 +835,7 @@ export interface FlywheelReport {
  * (pass/fail/pending + lessons) accumulate. Read-only; never triggers indexing.
  */
 export function getFlywheelReport(configPath?: string, rootDir?: string): FlywheelReport {
-  const resolved = resolveConfig(configPath);
+  const resolved = resolveConfig(configPath, rootDir ? { rootDir } : undefined);
   // Preserve config/project workspaceRoot when rootDir is omitted; a bare
   // bindRuntimeWorkspaceRoot(resolved) re-discovers from cwd and drops the
   // explicit graphPolicy.workspaceRoot that resolveConfig already bound.
@@ -984,6 +985,7 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
   } else if (consolidationActionable > 0) {
     consolidationHint = `Consolidation suggested (${consolidationSummary.updates} UPDATE / ${consolidationSummary.deletes} DELETE / ${consolidationSummary.adds} ADD) — dry-run: graphflow skill consolidate; apply: --apply.`;
   }
+  const contextFidelityStats = getContextFidelityStats(config);
 
   return {
     transport: config.graphPolicy.transport,
@@ -1048,6 +1050,9 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
       estimatedSavingsPercent: getSavingsStats(config).averageSavingsPercent,
       pendingRatio: pendingShare,
       unknownOutcomeRatio: pendingShare,
+      sampleCount: contextFidelityStats.sampleCount,
+      averageAnchorRecallPercent: contextFidelityStats.averageAnchorRecallPercent,
+      averageBodyCoveragePercent: contextFidelityStats.averageBodyCoveragePercent,
       note: SAVINGS_NOT_FIDELITY_NOTE,
     },
   };
@@ -1252,7 +1257,7 @@ export async function syncSkillPackageRuntime(
 export function getTokenSavingsStats(configPath?: string, rootDir?: string): SavingsStats & {
   explanation: string;
 } {
-  const resolved = resolveConfig(configPath);
+  const resolved = resolveConfig(configPath, rootDir ? { rootDir } : undefined);
   const config = bindRuntimeWorkspaceRoot(
     resolved,
     rootDir
@@ -1313,7 +1318,7 @@ export async function expandAnchor(
   configPath?: string,
   rootDir?: string
 ): Promise<ExpandAnchorResult | undefined> {
-  const baseConfig = resolveConfig(configPath);
+  const baseConfig = resolveConfig(configPath, rootDir ? { rootDir } : undefined);
   // Respect explicit rootDir override; otherwise keep the config's workspaceRoot
   const config = rootDir
     ? bindRuntimeWorkspaceRoot(baseConfig, { rootDir })
