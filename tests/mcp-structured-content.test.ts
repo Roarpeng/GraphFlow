@@ -23,6 +23,9 @@ function createIsolatedConfig(): string {
       ...config,
       graphPolicy: {
         ...config.graphPolicy,
+        // The MCP handler boundary has no client handle to dispose. Keep this
+        // matrix on the file backend so Windows never races an open SQLite file.
+        transport: "file",
         autoIndexOnPreview: false,
         autoIndexOnRun: false,
         autoIndexOnSave: false,
