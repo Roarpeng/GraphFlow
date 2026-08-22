@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-08-22（v1.12.1：真实证据链、fidelity 指标、SKILL.md 互操作、Engineering KG、MCP structured/discovery/Streamable HTTP）
+> 最后更新：2026-08-22（v1.12.2：真实证据链、fidelity 指标、SKILL.md 互操作、Engineering KG、MCP structured/discovery/Streamable HTTP + Windows release fix）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -10,7 +10,7 @@
 - 🟡 进行中 / 部分完成
 - ⬜ 未开始（欢迎认领）
 
-## 已完成里程碑（v1.0 → v1.12.1）
+## 已完成里程碑（v1.0 → v1.12.2）
 
 | 版本 | 日期 | 里程碑 | 关键交付 | 状态 |
 | --- | --- | --- | --- | --- |
@@ -30,6 +30,7 @@
 | v1.9.15 | 2026-08-20 | **Experience v2 + dsh glue** | 噪声清理、outcome 不默认成功、保真度拆分、File expand 全文、准入/playbook、workflow 蒸馏与撤销；dsh `plugin.mjs` + `agent/disposed` 飞轮 | ✅ |
 | v1.12.0 | 2026-08-22 | **Evidence & Knowledge Release** | context fidelity 指标流；O(1) skill read；自适应遗忘；SKILL.md export/import；确定性 Concept/Requirement 抽取；MCP structuredContent、JSON Schema 2020-12 与 `server/discover`；SDK 1.30 | ✅ |
 | v1.12.1 | 2026-08-22 | **MCP Streamable HTTP** | stateless JSON + stateful SSE transport；`graphflow-mcp --http` / `graphflow mcp serve --http`；loopback 默认与 Host/Origin 防护；HTTP initialize/ping/tools/resources/tool-call/session DELETE 矩阵 | ✅ |
+| v1.12.2 | 2026-08-22 | **Cross-platform Release Fix** | structured-result 测试隔离改用 file backend，修复 Windows SQLite 清理竞态导致的 validate `EBUSY` | ✅ |
 
 ## 下一阶段
 
@@ -120,7 +121,7 @@
 ### 建议版本节奏
 
 - **v1.10**：R0 全部（真证据链 + 本地闭环 + 噪声治理）——"学习引擎"成为真能力的版本
-- ~~v1.10–v1.12~~：v1.12.1 已发布——真实证据链、fidelity 指标、O(1) 技能读路径、SKILL.md 互操作、自适应遗忘、Engineering KG 概念层和 MCP Streamable HTTP。下一阶段优先做团队图谱 artifact 同步和企业治理。
+- ~~v1.10–v1.12~~：v1.12.2 已发布——真实证据链、fidelity 指标、O(1) 技能读路径、SKILL.md 互操作、自适应遗忘、Engineering KG 概念层和 MCP Streamable HTTP。下一阶段优先做团队图谱 artifact 同步和企业治理。
 - **长期**：R4 工程债随版本消化
 
 ## 如何参与

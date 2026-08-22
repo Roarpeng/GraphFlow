@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.12.2] - 2026-08-22
+
+### Fixed
+
+- **Windows release gate**：MCP structured-result 测试显式使用 file graph backend，避免 SQLite 连接仍在打开时清理临时目录导致 `EBUSY`。这是 v1.12.1 Windows validate 失败的直接根因；Linux/macOS 本地矩阵未暴露该平台锁差异。
+
 ## [1.12.1] - 2026-08-22
 
 ### Added

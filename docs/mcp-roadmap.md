@@ -1,6 +1,6 @@
 # MCP 协议演进 Roadmap — 无状态规范（2026-07-28）适配
 
-> 状态：**v1.12.1 已落地（GraphFlow 支持的 transport 矩阵）** ｜ 适用版本：`@roarpeng/graphflow` v1.12.1 ｜
+> 状态：**v1.12.2 已落地（GraphFlow 支持的 transport 矩阵）** ｜ 适用版本：`@roarpeng/graphflow` v1.12.2 ｜
 > 当前 SDK：`@modelcontextprotocol/sdk` `^1.30.0` ｜
 > 当前协议：stdio 继续协商 `2025-11-25`；`server/discover` 返回 draft `DRAFT-2026-v1` ｜
 > 关联代码：`src/surfaces/mcp/server.ts`、`src/surfaces/mcp/tool-definitions.ts`
