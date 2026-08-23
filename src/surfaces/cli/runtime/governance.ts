@@ -1,6 +1,8 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 
 import { resolveConfig } from "../../../config/resolve";
 import { createGraphClient } from "../../../graph/client-factory";
@@ -191,10 +193,102 @@ export interface ReleaseGateOptions {
   maxPendingRatio: number;
 }
 
-export function releaseGate(
-  configPath?: string,
+export interface ReleaseGateState {
+  schemaVersion: 1;
+  evidenceCommit: string;
+  provenSkills: number;
+  fidelitySamples: number;
+  pendingRatio: number;
+  proofResultsPath?: string;
+  stateHash: string;
+}
+
+function currentGitCommit(): string {
+  return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+}
+
+function canonicalReleaseState(state: Omit<ReleaseGateState, "stateHash">): string {
+  return JSON.stringify({
+    schemaVersion: state.schemaVersion,
+    evidenceCommit: state.evidenceCommit,
+    provenSkills: state.provenSkills,
+    fidelitySamples: state.fidelitySamples,
+    pendingRatio: state.pendingRatio,
+    ...(state.proofResultsPath ? { proofResultsPath: state.proofResultsPath } : {}),
+  });
+}
+
+function readVerifiedReleaseState(path: string): ReleaseGateState | undefined {
+  if (!existsSync(path)) return undefined;
+  const parsed = JSON.parse(readFileSync(path, "utf8")) as ReleaseGateState;
+  const { stateHash, ...state } = parsed;
+  const expected = createHash("sha256")
+    .update(canonicalReleaseState(state as Omit<ReleaseGateState, "stateHash">))
+    .digest("hex");
+  if (
+    parsed.schemaVersion !== 1 ||
+    stateHash !== expected ||
+    state.evidenceCommit !== currentGitCommit()
+  ) {
+    throw new Error("release gate state is invalid or bound to another commit");
+  }
+  return parsed;
+}
+
+export function captureReleaseGateState(
+  configPath: string | undefined,
+  outputPath: string,
   thresholds: ReleaseGateOptions = { minProvenSkills: 1, minFidelitySamples: 1, maxPendingRatio: 0.5 }
 ) {
+  const result = releaseGate(configPath, thresholds);
+  const withoutHash = {
+    schemaVersion: 1 as const,
+    evidenceCommit: currentGitCommit(),
+    provenSkills: result.report.experience.provenSkillCount,
+    fidelitySamples: result.fidelity.sampleCount,
+    pendingRatio:
+      result.report.episodes.total === 0
+        ? 0
+        : result.report.episodes.pending / result.report.episodes.total,
+    proofResultsPath: "benchmarks/.cache/proof-plane-self-results.json",
+  };
+  const state: ReleaseGateState = {
+    ...withoutHash,
+    stateHash: createHash("sha256").update(canonicalReleaseState(withoutHash)).digest("hex"),
+  };
+  mkdirSync(dirname(outputPath), { recursive: true });
+  writeFileSync(outputPath, JSON.stringify(state, null, 2), "utf8");
+  return state;
+}
+
+export function releaseGate(
+  configPath?: string,
+  thresholds: ReleaseGateOptions = { minProvenSkills: 1, minFidelitySamples: 1, maxPendingRatio: 0.5 },
+  statePath?: string
+) {
+  const committed = statePath ? readVerifiedReleaseState(statePath) : undefined;
+  if (committed) {
+    const checks = [
+      { name: "proven-skills", actual: committed.provenSkills, required: thresholds.minProvenSkills },
+      { name: "fidelity-samples", actual: committed.fidelitySamples, required: thresholds.minFidelitySamples },
+      {
+        name: "pending-ratio",
+        actual: committed.pendingRatio,
+        maximum: thresholds.maxPendingRatio,
+      },
+    ];
+    const failures = checks.flatMap((check) => {
+      if ("required" in check && check.actual < check.required) {
+        return [`${check.name}: ${check.actual} < ${check.required}`];
+      }
+      if ("maximum" in check && check.actual > check.maximum) {
+        return [`${check.name}: ${check.actual} > ${check.maximum}`];
+      }
+      return [];
+    });
+    if (failures.length > 0) throw new Error(`release gates failed: ${failures.join("; ")}`);
+    return { report: getFlywheelReport(configPath), fidelity: getContextFidelityStats(resolveConfig(configPath)), checks, state: committed };
+  }
   const report = getFlywheelReport(configPath);
   const config = resolveConfig(configPath);
   const fidelity = getContextFidelityStats(config);
