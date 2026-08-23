@@ -30,6 +30,8 @@ export function buildCliUsage(): string {
     "  outcome report <episodeId> <success> [--lesson <text>]... [--deviation <none|misread-requirement|scope-creep|tech-drift>] [--requirement-id <id>]... [--concept-id <id>]... [--code-hint <path|symbol|id>]... [--json] [--config <path>]",
     '  insight submit --task "<task>" --work-item-id <id> --response "<json>" [--episode-id <id>] [--json] [--config <path>]',
     '  insight merge --task "<task>" [--json] [--config <path>]',
+    "  outcome backfill --evidence <entries.json|jsonl> [--journal <path>] [--dry-run]  # close pending episodes with evidence packages",
+    "  governance <knowledge-upsert|review-queue|review|trace|merge-artifacts|sign-artifact|verify-artifact-signature|encrypted-artifact-export|encrypted-artifact-import|quarantine|retention|profiles|release-gate>",
     '  plan "<task>" [--json] [--config <path>]',
     '  plan insight "<task>" [--json] [--config <path>]',
     '  context preview "<query>" [--json] [--config <path>]',

@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { GraphNode } from "../core/types";
+import { CANONICAL_EMBEDDING_MODEL } from "../config/embedding-model";
 import { logger } from "../utils/logger";
 
 export const EMBEDDING_DIM = 384;
@@ -242,9 +243,9 @@ export function createTransformersEmbeddingProvider(options?: {
       const { pipeline } = transformers;
       const timeoutMs = parseInt(process.env[GRAPHFLOW_EMBEDDING_TIMEOUT_MS_ENV] ?? "", 10) || 60000;
       extractor = await withTimeout(
-        pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2"),
+        pipeline("feature-extraction", CANONICAL_EMBEDDING_MODEL),
         timeoutMs,
-        "pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')"
+        `pipeline('feature-extraction', '${CANONICAL_EMBEDDING_MODEL}')`
       );
       return extractor;
     } catch (error) {

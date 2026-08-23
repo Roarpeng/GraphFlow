@@ -1,13 +1,14 @@
 import type { GraphFlowConfig } from "./schema";
 import { validateConfig } from "./loader";
 import { DEFAULT_INCLUDE_EXTENSIONS } from "./include-extensions.js";
+import { CANONICAL_EMBEDDING_MODEL } from "./embedding-model.js";
 
 export const SCAFFOLD_TIERS = {
   smart: { provider: "openai", model: "gpt-4.1" },
   economy: { provider: "openai", model: "gpt-4.1-mini" },
 } as const;
 
-export const DEFAULT_EMBEDDING_MODEL = "Xenova/bge-base-zh-v1.5";
+export const DEFAULT_EMBEDDING_MODEL = CANONICAL_EMBEDDING_MODEL;
 export const DEFAULT_MAX_CONTEXT_TOKENS = 1500;
 /** Unified output directory for all knowledge-graph artifacts. */
 export const DEFAULT_OUTPUT_DIR = "graphflow-out";

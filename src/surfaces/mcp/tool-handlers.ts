@@ -70,12 +70,33 @@ export async function executeToolCall(
       const requirementIds = readOptionalStringArray(args.requirementIds);
       const conceptIds = readOptionalStringArray(args.conceptIds);
       const codeHints = readOptionalStringArray(args.codeHints);
+      const artifacts = readOptionalStringArray(args.artifacts) ?? [];
+      const testResultRaw = readOptionalString(args.testResult);
+      const commit = readOptionalString(args.commit);
+      const diff = readOptionalString(args.diff);
+      const testCommand = readOptionalString(args.testCommand);
+      const evidenceSource = readOptionalString(args.evidenceSource);
+      const repository = readOptionalString(args.repository);
       const engineeringHints = {
         ...(requirementIds ? { requirementIds } : {}),
         ...(conceptIds ? { conceptIds } : {}),
         ...(codeHints ? { codeHints } : {}),
       };
       const hasEngHints = Boolean(requirementIds || conceptIds || codeHints);
+      const evidence = commit || diff || testCommand ? {
+        ...(repository ? { repository } : {}),
+        ...(commit ? { commit } : {}),
+        ...(diff ? { diff } : {}),
+        ...(testCommand ? { testCommand } : {}),
+        testResult: testResultRaw === "pass" || testResultRaw === "fail" || testResultRaw === "unknown"
+          ? testResultRaw
+          : ("unknown" as const),
+        artifacts,
+        userConfirmed: args.userConfirmed === true,
+        source: evidenceSource === "ci" || evidenceSource === "agent" || evidenceSource === "hook"
+          ? evidenceSource
+          : ("manual" as const),
+      } as const : undefined;
       return structuredResponse(
         await reportOutcome(
           readRequiredString(args.episodeId, "episodeId"),
@@ -83,7 +104,8 @@ export async function executeToolCall(
           lessons,
           readOptionalString(args.configPath),
           deviation,
-          hasEngHints ? engineeringHints : undefined
+          hasEngHints ? engineeringHints : undefined,
+          evidence
         )
       );
     }

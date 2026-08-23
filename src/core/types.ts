@@ -176,9 +176,13 @@ export interface GraphNode {
     | "Module"
     | "Concept"
     | "Requirement"
-    | "TaskRun"
-    | "Decision"
-    | "Skill";
+   | "TaskRun"
+   | "Decision"
+   | "Skill"
+   | "ADR"
+   | "Invariant"
+   | "APIContract"
+   | "Test";
   content: string;
   metadata?: Record<string, unknown>;
 }
@@ -206,5 +210,7 @@ export interface GraphEdge {
     /** Code Symbol/File → Requirement (implementation fulfills requirement). */
     | "implements"
     /** Concept/Requirement → source File or insight Decision (provenance). */
-    | "derived_from";
+    | "derived_from"
+    | "supersedes"
+    | "governed_by";
 }

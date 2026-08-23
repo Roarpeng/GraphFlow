@@ -62,6 +62,13 @@ export function getToolDefinitions(): ToolDefinition[] {
             description:
               "Optional file paths, symbol names, or file:/symbol: ids resolved against the graph and linked from this episode via derived_from.",
           },
+          commit: { type: "string", description: "Repository commit that produced the outcome." },
+          diff: { type: "string", description: "Unified diff or concise changed-file summary." },
+          testCommand: { type: "string", description: "Command used to validate the outcome." },
+          testResult: { type: "string", enum: ["pass", "fail", "unknown"], description: "Actual test command result." },
+          artifacts: { type: "array", items: { type: "string" }, description: "Logs, reports, or artifact paths supporting the outcome." },
+          userConfirmed: { type: "boolean", description: "Whether a human explicitly confirmed the result." },
+          evidenceSource: { type: "string", enum: ["manual", "ci", "agent", "hook"], description: "Origin of the evidence package." },
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
         },
         required: ["episodeId", "success"],

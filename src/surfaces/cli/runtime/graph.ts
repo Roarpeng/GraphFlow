@@ -588,6 +588,10 @@ export async function inspectGraph(
     TaskRun: 0,
     Decision: 0,
     Skill: 0,
+    ADR: 0,
+    Invariant: 0,
+    APIContract: 0,
+    Test: 0,
   };
 
   if (config.graphPolicy.transport === "mcp-http") {

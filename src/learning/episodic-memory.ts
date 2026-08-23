@@ -14,6 +14,11 @@ import {
   extractGoldenEvidenceTokens,
   registerGoldenEvidenceTokens,
 } from "./skill-admission";
+import {
+  normalizeOutcomeEvidence,
+  type OutcomeEvidence,
+  type OutcomeEvidenceInput,
+} from "./evidence";
 
 export { quarantineSkillsFromEpisode };
 
@@ -35,6 +40,8 @@ export interface EpisodeRecord {
    * learnable instead of collapsing every outcome into pass/fail.
    */
   deviation?: DeviationKind;
+  /** P0 evidence package: commit + diff + tests + confirmation. */
+  evidence?: OutcomeEvidence;
 }
 
 /** Drift taxonomy shared by alignment-check submit and outcome report. */
@@ -84,8 +91,9 @@ export async function recordEpisode(
     ...(episode.executionRounds ? { executionRounds: episode.executionRounds } : {}),
     createdAt: now,
     updatedAt: now,
-    ...(episode.runFeedback !== undefined ? { runFeedback: episode.runFeedback } : {}),
-    ...(episode.deviation !== undefined ? { deviation: episode.deviation } : {}),
+      ...(episode.runFeedback !== undefined ? { runFeedback: episode.runFeedback } : {}),
+      ...(episode.deviation !== undefined ? { deviation: episode.deviation } : {}),
+      ...(episode.evidence !== undefined ? { evidence: episode.evidence } : {}),
   };
 
   const node: GraphNode = {
@@ -123,7 +131,8 @@ export async function updateEpisodeOutcome(
   episodeId: string,
   outcome: "pass" | "fail",
   lessons?: string[],
-  deviation?: DeviationKind
+  deviation?: DeviationKind,
+  evidenceInput?: OutcomeEvidenceInput
 ): Promise<EpisodeRecord | undefined> {
   if (!client.getNodesByIds) {
     return undefined;
@@ -142,6 +151,9 @@ export async function updateEpisodeOutcome(
     outcome,
     lessons: lessons ? lessons.slice(0, 4) : rec.lessons,
     ...(deviation !== undefined ? { deviation } : {}),
+    ...(normalizeOutcomeEvidence(evidenceInput)
+      ? { evidence: normalizeOutcomeEvidence(evidenceInput)! }
+      : {}),
     updatedAt: Date.now(),
   };
   const updatedNode: GraphNode = {
@@ -473,6 +485,7 @@ function deserialize(node: GraphNode): EpisodeRecord | undefined {
       updatedAt: parsed.updatedAt ?? 0,
       ...(parsed.runFeedback !== undefined ? { runFeedback: parsed.runFeedback } : {}),
       ...(isDeviationKind(parsed.deviation) ? { deviation: parsed.deviation } : {}),
+      ...(parsed.evidence ? { evidence: parsed.evidence as OutcomeEvidence } : {}),
     };
   } catch {
     return undefined;
