@@ -2,11 +2,12 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.12.2-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.13.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（约 98% token 节省） · 跨会话学习飞轮。
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。v1.12 增加 fidelity 指标、SKILL.md 互操作和 Concept / Requirement 工程知识层。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
+v1.13 增加 evidence package、治理审查、签名/加密 artifact、release gate 和 MCP HTTP 认证。
 
 ## 快速开始
 

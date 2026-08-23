@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.13.0] - 2026-08-23
+
+### Added
+
+- **Evidence Runtime**：outcome report 支持 repository/commit/diff/test command/result/artifacts/user confirmation；episode 持久化 evidence package，并返回 `verified|partial|unverified` 结论。新增 `outcome backfill` 用 JSON/JSONL 证据批量关闭 pending episodes。
+- **Governance Plane**：新增 ADR / Invariant / APIContract / Test 图节点、版本化 upsert、supersession、review queue 和 requirement traceability；artifact 支持三方合并、冲突队列、HMAC 签名验证、AES-256-GCM 加密、保留策略与 quarantine 传播。
+- **Tamper-evident audit**：evidence 与 MCP HTTP 治理事件使用 sequence + prevHash + SHA-256 hash chain，可离线验证篡改。
+- **Secure MCP HTTP**：Streamable HTTP 支持 bearer token、HS256/RS256 JWT、issuer/audience/scope 校验、tenant allowlist、per-tenant session key 和审计响应头。
+- **Release gates**：`graphflow governance release-gate` 强制 proven skill、context fidelity sample 和 pending episode ratio；npm publish workflow 已接入该门禁。
+- **Portable profiles & proof plane**：`governance profiles` 导出 Cursor/Claude/Codex/DSH 配置；`benchmarks/run-proof-plane.ts` 支持多仓库 fidelity/token 评测。
+- **Host adapter registry**：新增 DSH/Cursor/Claude 能力模型，作为 installer 后续拆分的稳定接口。
+
+### Changed
+
+- 统一 canonical embedding model 为 `Xenova/bge-base-zh-v1.5`，消除 graphPolicy 默认值与 transformers loader 的模型 split-brain。
+- Graph node 类型扩展 ADR / Invariant / APIContract / Test；edge 扩展 `supersedes` / `governed_by` 并纳入 compression weights。
+
+### Tests
+
+- 新增 P0-P2 governance foundation suite，覆盖 evidence verification、knowledge supersession、artifact merge/signing/retention、encrypted snapshot 与 JWT claims。全量回归随发布流水线执行。
+
 ## [1.12.2] - 2026-08-22
 
 ### Fixed

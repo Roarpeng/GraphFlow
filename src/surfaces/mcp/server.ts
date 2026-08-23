@@ -5,6 +5,7 @@ process.env.GRAPHFLOW_LOG_JSON ??= "1";
 import type { Readable, Writable } from "node:stream";
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -40,6 +41,8 @@ import {
   type ToolCallResponse,
 } from "./tool-handlers.js";
 import { PACKAGE_VERSION } from "./version.js";
+import { appendGovernanceAudit } from "../../learning/evidence.js";
+import { verifyAccessToken, type TokenAuthConfig } from "../../security/token-auth.js";
 
 export { getToolDefinitions } from "./tool-definitions.js";
 export type { ToolCall, ToolCallResponse } from "./tool-handlers.js";
@@ -239,6 +242,13 @@ export interface McpHttpServerOptions {
   allowedHosts?: string[];
   allowedOrigins?: string[];
   signal?: AbortSignal;
+  /** Optional bearer/JWT authentication for non-loopback or team deployments. */
+  auth?: McpHttpAuthOptions;
+  auditPath?: string;
+}
+
+export interface McpHttpAuthOptions extends TokenAuthConfig {
+  allowedTenants?: readonly string[];
 }
 
 export interface StartedMcpHttpServer {
@@ -253,6 +263,7 @@ export interface StartedMcpHttpServer {
 
 interface HttpMcpSession {
   id?: string;
+  tenant?: string;
   server: McpServer;
   transport: StreamableHTTPServerTransport;
 }
@@ -470,6 +481,30 @@ function validateHttpOrigin(req: IncomingMessage, allowedOrigins: string[] | und
   return Boolean(allowedOrigins?.some((allowed) => allowed.toLowerCase() === origin.toLowerCase()));
 }
 
+function requestTenant(
+  req: IncomingMessage,
+  auth: McpHttpAuthOptions | undefined
+): string {
+  const value = req.headers["x-graphflow-tenant"];
+  const raw = Array.isArray(value) ? value[0] : value;
+  const tenant = raw?.trim() || "default";
+  if (auth?.allowedTenants?.length && !auth.allowedTenants.includes(tenant)) {
+    throw new Error("tenant is not allowed");
+  }
+  return tenant;
+}
+
+async function authenticateHttpRequest(
+  req: IncomingMessage,
+  auth: McpHttpAuthOptions | undefined
+): Promise<{ authenticated: boolean; subject?: string; reason?: string }> {
+  const credentialsConfigured = Boolean(
+    auth?.bearerTokens?.length || auth?.jwtSecret || auth?.publicKeyPem
+  );
+  if (!credentialsConfigured) return { authenticated: true, subject: "local" };
+  return verifyAccessToken(req.headers.authorization, auth ?? {});
+}
+
 function validateHttpHost(req: IncomingMessage, host: string, allowedHosts: string[] | undefined): boolean {
   const header = req.headers.host;
   if (!header) return false;
@@ -499,7 +534,9 @@ async function handleWithHttpMcpSession(
     if (disposed) return;
     disposed = true;
     connectedServers.delete(session.server);
-    if (options?.sessions && session.id) options.sessions.delete(session.id);
+    if (options?.sessions && session.id && session.tenant) {
+      options.sessions.delete(`${session.tenant}\u0000${session.id}`);
+    }
     void session.transport.close().catch(() => undefined);
   };
   const stateful = options?.stateful === true;
@@ -551,8 +588,34 @@ export async function startStreamableHttpServer(
         writeHttpJsonError(res, 403, ErrorCode.InvalidRequest, "Origin is not allowed by GraphFlow MCP HTTP");
         return;
       }
-      // Host was validated above; use a trusted base solely to parse pathname/search.
       const url = new URL(req.url ?? "/", "http://graphflow.invalid");
+      let tenant = "default";
+      try {
+        tenant = requestTenant(req, options.auth);
+      } catch (error) {
+        writeHttpJsonError(res, 403, ErrorCode.InvalidRequest, error instanceof Error ? error.message : "tenant rejected");
+        return;
+      }
+      const authentication = await authenticateHttpRequest(req, options.auth);
+      if (!authentication.authenticated) {
+        appendGovernanceAudit(options.auditPath ?? ".graphflow/mcp-http-audit.jsonl", {
+          actor: "anonymous",
+          action: "http.auth.reject",
+          subject: url?.pathname ?? req.url ?? endpoint,
+          tenant,
+          data: { reason: authentication.reason },
+        });
+        writeHttpJsonError(res, 401, ErrorCode.InvalidRequest, authentication.reason ?? "authentication rejected");
+        return;
+      }
+      const auditEvent = appendGovernanceAudit(options.auditPath ?? ".graphflow/mcp-http-audit.jsonl", {
+        actor: authentication.subject ?? "local",
+        action: `http.${req.method?.toLowerCase() ?? "request"}`,
+        subject: `${tenant}:${url.pathname}`,
+        tenant,
+        data: { query: Object.fromEntries(url.searchParams) },
+      });
+      res.setHeader("x-graphflow-audit-seq", String(auditEvent.seq));
       if (url.pathname !== endpoint) {
         writeHttpJsonError(res, 404, ErrorCode.InvalidRequest, `Unknown GraphFlow MCP HTTP endpoint: ${url.pathname}`);
         return;
@@ -561,8 +624,9 @@ export async function startStreamableHttpServer(
       const sessionIdHeader = req.headers["mcp-session-id"];
       const sessionId = Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader;
 
+      const sessionKey = `${tenant}\u0000${sessionId}`;
       if (stateful && typeof sessionId === "string" && sessionId.length > 0) {
-        const existing = sessions.get(sessionId);
+        const existing = sessions.get(sessionKey);
         if (!existing) {
           writeHttpJsonError(res, 404, -32001, "GraphFlow MCP session not found", null);
           return;
@@ -578,7 +642,8 @@ export async function startStreamableHttpServer(
               sessionIdGenerator: () => randomUUID(),
               onsessioninitialized: (initializedId: string) => {
                 session.id = initializedId;
-                sessions.set(initializedId, session);
+                session.tenant = tenant;
+                sessions.set(`${tenant}\u0000${initializedId}`, session);
               },
             }
           : {}),
@@ -665,6 +730,17 @@ export function readMcpHttpOptionsFromArgv(
   const endpointFlag = readFlag("--endpoint");
   const allowedHostsFlag = readFlag("--allow-host");
   const allowedOriginsFlag = readFlag("--allow-origin");
+  const bearerTokens = [
+    ...(process.env.GRAPHFLOW_MCP_HTTP_TOKEN ? [process.env.GRAPHFLOW_MCP_HTTP_TOKEN] : []),
+    ...collectFlags("--http-token"),
+  ];
+  const jwtSecret = readFlag("--http-jwt-secret") ?? process.env.GRAPHFLOW_MCP_HTTP_JWT_SECRET;
+  const publicKeyFile = readFlag("--http-public-key-file");
+  const issuer = readFlag("--http-oidc-issuer") ?? process.env.GRAPHFLOW_MCP_HTTP_OIDC_ISSUER;
+  const audience = readFlag("--http-oidc-audience") ?? process.env.GRAPHFLOW_MCP_HTTP_OIDC_AUDIENCE;
+  const requiredScope = readFlag("--http-required-scope");
+  const allowedTenants = collectFlags("--allow-tenant");
+  const auditPath = readFlag("--audit-path") ?? ".graphflow/mcp-http-audit.jsonl";
   if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) {
     throw new Error("--port must be an integer between 0 and 65535");
   }
@@ -676,6 +752,16 @@ export function readMcpHttpOptionsFromArgv(
     enableJsonResponse: !argv.includes("--sse-only"),
     ...(allowedHostsFlag ? { allowedHosts: collectFlags("--allow-host") } : {}),
     ...(allowedOriginsFlag ? { allowedOrigins: collectFlags("--allow-origin") } : {}),
+    auth: {
+      ...(bearerTokens.length > 0 ? { bearerTokens } : {}),
+      ...(jwtSecret ? { jwtSecret } : {}),
+      ...(publicKeyFile ? { publicKeyPem: readFileSync(publicKeyFile, "utf8") } : {}),
+      ...(issuer ? { issuer } : {}),
+      ...(audience ? { audience } : {}),
+      ...(requiredScope ? { requiredScope } : {}),
+      ...(allowedTenants.length > 0 ? { allowedTenants } : {}),
+    },
+    auditPath,
   };
 }
 

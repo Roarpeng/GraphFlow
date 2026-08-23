@@ -369,6 +369,8 @@ export interface ReportOutcomeResult {
   skillsUpdated?: number;
   /** P1 — drift classification echoed back when reported (none / misread-requirement / scope-creep / tech-drift). */
   deviation?: string;
+  /** Verification level derived from the supplied evidence package. */
+  evidence?: import("../../../learning/evidence").EvidenceVerification;
   /**
    * Optional Engineering KG links written when callers pass requirementIds /
    * conceptIds / codeHints (episode → derived_from → eng nodes).

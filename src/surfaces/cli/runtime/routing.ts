@@ -20,6 +20,10 @@ import { indexWorkspaceFiles, hasPendingGraphIndexWork } from "../../../graph/fi
 import { appendFeedbackEvent } from "../../../learning/learning-events";
 import { updateEpisodeOutcome, type DeviationKind } from "../../../learning/episodic-memory";
 import {
+  verifyOutcomeEvidence,
+  type OutcomeEvidenceInput,
+} from "../../../learning/evidence";
+import {
   linkEpisodeToEngineeringNodes,
   type EngineeringLinkHints,
 } from "../../../graph/episode-engineering-links.js";
@@ -575,7 +579,9 @@ export async function reportOutcome(
   configPath?: string,
   deviation?: DeviationKind,
   /** Optional episode → Requirement/Concept/code derived_from links (Engineering KG). */
-  engineeringHints?: EngineeringLinkHints
+  engineeringHints?: EngineeringLinkHints,
+  /** Optional commit/diff/test evidence package. */
+  evidenceInput?: OutcomeEvidenceInput
 ): Promise<ReportOutcomeResult> {
   const config = resolveConfig(configPath);
   const graphClient = createGraphClient(config);
@@ -598,7 +604,8 @@ export async function reportOutcome(
     episodeId,
     success ? "pass" : "fail",
     sanitizedLessons,
-    deviation
+    deviation,
+    evidenceInput
   );
   if (!updated) {
     return { ok: false, reason: `Episode not found: ${episodeId}` };
@@ -667,6 +674,7 @@ export async function reportOutcome(
     outcome: success ? "pass" : "fail",
     skillsUpdated,
     ...(updated.deviation !== undefined ? { deviation: updated.deviation } : {}),
+    ...(evidenceInput ? { evidence: verifyOutcomeEvidence(updated.evidence) } : {}),
     ...(engineeringLinks ? { engineeringLinks } : {}),
   };
 }

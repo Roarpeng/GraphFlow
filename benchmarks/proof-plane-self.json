@@ -1,0 +1,27 @@
+[
+  {
+    "root": ".",
+    "queries": [
+      {
+        "query": "team governance artifact merge signing retention",
+        "expectedAnchorIds": [
+          "module:src/graph/team-governance",
+          "module:src/surfaces/cli/runtime/governance"
+        ]
+      },
+      {
+        "query": "evidence outcome package verification audit",
+        "expectedAnchorIds": [
+          "module:src/learning/evidence",
+          "module:src/surfaces/cli/runtime/evidence"
+        ]
+      },
+      {
+        "query": "engineering knowledge governance review supersession",
+        "expectedAnchorIds": [
+          "module:src/graph/engineering-knowledge"
+        ]
+      }
+    ]
+  }
+]

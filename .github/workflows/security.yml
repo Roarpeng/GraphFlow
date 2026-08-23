@@ -1,0 +1,28 @@
+name: Security Audit
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit
+        env:
+          GRAPHFLOW_SKIP_POSTINSTALL: "1"
+      - name: Production dependency audit against official npm registry
+        run: npm run security:audit -- --json
+        env:
+          GRAPHFLOW_SECURITY_REPORT: graphflow-out/security-audit.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-security-report
+          path: graphflow-out/security-audit.json

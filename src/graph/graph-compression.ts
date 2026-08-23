@@ -28,6 +28,8 @@ export const DEFAULT_EDGE_WEIGHTS: Record<GraphEdge["relation"], number> = {
   documents: 0.8,
   implements: 0.85,
   derived_from: 0.55,
+  supersedes: 0.8,
+  governed_by: 0.7,
 };
 
 export interface ConnectedSubgraphOptions {

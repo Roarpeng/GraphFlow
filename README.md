@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-[![npm version](https://img.shields.io/badge/npm-1.12.2-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.13.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **The memory & context harness for coding agents.** Local-first code knowledge graph · bounded context compression (~98% token savings) · cross-session learning flywheel.
 
@@ -84,7 +84,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 
 > The differentiator is the **learning flywheel**: graph indexing and token compression are replicable; project-private experience (skills, lessons, decisions) accumulated across sessions is not — it compounds with use. Serena is a complement, not a competitor — see [GraphFlow + Serena: better together](docs/comparison.md#graphflow--serena-better-together联合方案).
 
-## Core capabilities (v1.12+)
+## Core capabilities (v1.13+)
 
 | Module | Capability |
 | --- | --- |
@@ -102,6 +102,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | **Workbench** | Plan DAG seeds function-topic containers; collapsed outline; click `topicId` to resume; drift forks a side branch; original Q/A stored via `assistantReply` |
 | **Observability** | `graphflow_diagnose` / `route diagnose`: provider health + graph stats + token savings + **flywheel health** (auto-capture, episodes, skills by class, session journal) + workbench outline |
 | **Agent surfaces** | CLI `--json`; MCP stdio and Streamable HTTP (stateless JSON or stateful SSE, 10 tools); auto-install into 15+ agents (incl. **Codex Windows NODE/NPX_CLI short-path MCP**) |
+| **Evidence & governance** | Outcome evidence packages (commit/diff/tests), evidence backfill, tamper-evident audit chains, ADR/Invariant/APIContract/Test review states, artifact three-way merge/signing/encryption, retention/quarantine, release gates |
 | **Engineering quality** | TypeScript strict; vitest suite; `npm run ci` includes extension packaging and smoke tests |
 
 ### Positioning
@@ -150,6 +151,8 @@ graphflow run "update readme"              # orchestrate (bridge)
 graphflow skill insights                   # skill insights
 graphflow skill report                     # flywheel contribution report
 graphflow mcp serve --http                 # stateless MCP Streamable HTTP (add --stateful for SSE sessions)
+graphflow outcome backfill --evidence evidence.jsonl  # close pending episodes with evidence packages
+graphflow governance release-gate         # enforce proven-skill/fidelity/pending gates
 graphflow skill sync export                # export team skill pack + golden queries (share via git)
 graphflow skill sync import                # import team skill pack (MERGE; --force to overwrite) + golden merge into .graphflow/team-golden.json
 graphflow route diagnose                   # routing diagnostics
@@ -300,7 +303,7 @@ npm install
 npm run ci        # lint + build + tests + extension packaging + smoke
 ```
 
-Requires Node.js ≥ 20, npm ≥ 10. Expected: lint clean, build succeeds, 956 tests pass.
+Requires Node.js ≥ 20, npm ≥ 10. Expected: lint clean, build succeeds, 961 tests pass.
 
 ## Project structure
 
@@ -320,7 +323,7 @@ GraphFlow/
 │   └── surfaces/
 │       ├── cli/        # CLI + runtime
 │       └── mcp/        # MCP server (10 tools)
-├── tests/              # 141 files / 956 tests (incl. fidelity, SKILL.md, Engineering KG, MCP HTTP/stdio matrix)
+├── tests/              # 142 files / 961 tests (incl. governance foundation and MCP HTTP/stdio matrix)
 ├── benchmarks/         # comprehensive + independent + SWE-bench + token savings + skill A/B (reproducible)
 ├── docs/               # ATP spec + context contract + experience memory + comparisons
 ├── vscode-extension/   # VS Code panel and commands

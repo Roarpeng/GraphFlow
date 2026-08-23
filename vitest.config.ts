@@ -14,5 +14,18 @@ export default defineConfig({
     testTimeout: 60_000,
     hookTimeout: 60_000,
     teardownTimeout: 30_000,
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.ts"],
+      exclude: ["src/**/types.ts", "src/**/*-types.ts"],
+      thresholds: {
+        global: {
+          lines: 55,
+          branches: 45,
+          functions: 50,
+          statements: 55,
+        },
+      },
+    },
   },
 });

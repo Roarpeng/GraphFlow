@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "1.12.2",
+  "version": "1.13.0",
   "publishConfig": {
     "access": "public"
   },
@@ -85,6 +85,9 @@
     "package:extension": "npm --prefix vscode-extension run package",
     "sync:surfaces": "node scripts/sync-surfaces.cjs",
     "ci": "npm run lint && npm run build && npm test && npm run build:extension && npm run test:extension",
+    "gate:release": "node scripts/release-gates.cjs",
+    "security:audit": "node scripts/security-audit.cjs",
+    "test:coverage": "vitest run --coverage",
     "prepare": "husky || true"
   },
   "lint-staged": {

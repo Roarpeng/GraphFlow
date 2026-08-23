@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-08-22（v1.12.2：真实证据链、fidelity 指标、SKILL.md 互操作、Engineering KG、MCP structured/discovery/Streamable HTTP + Windows release fix）
+> 最后更新：2026-08-23（v1.13.0：Evidence Runtime、Governance Plane、release gates、secure MCP HTTP 与 host adapter 基础）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -10,7 +10,7 @@
 - 🟡 进行中 / 部分完成
 - ⬜ 未开始（欢迎认领）
 
-## 已完成里程碑（v1.0 → v1.12.2）
+## 已完成里程碑（v1.0 → v1.13.0）
 
 | 版本 | 日期 | 里程碑 | 关键交付 | 状态 |
 | --- | --- | --- | --- | --- |
@@ -31,6 +31,7 @@
 | v1.12.0 | 2026-08-22 | **Evidence & Knowledge Release** | context fidelity 指标流；O(1) skill read；自适应遗忘；SKILL.md export/import；确定性 Concept/Requirement 抽取；MCP structuredContent、JSON Schema 2020-12 与 `server/discover`；SDK 1.30 | ✅ |
 | v1.12.1 | 2026-08-22 | **MCP Streamable HTTP** | stateless JSON + stateful SSE transport；`graphflow-mcp --http` / `graphflow mcp serve --http`；loopback 默认与 Host/Origin 防护；HTTP initialize/ping/tools/resources/tool-call/session DELETE 矩阵 | ✅ |
 | v1.12.2 | 2026-08-22 | **Cross-platform Release Fix** | structured-result 测试隔离改用 file backend，修复 Windows SQLite 清理竞态导致的 validate `EBUSY` | ✅ |
+| v1.13.0 | 2026-08-23 | **Evidence & Governance Plane** | outcome evidence package/backfill/audit chain；ADR/Invariant/APIContract/Test 版本治理；artifact 三方合并、签名、加密、保留与隔离；bearer/JWT HTTP auth、tenant 隔离与审计；host adapter registry 和 release gates | ✅ |
 
 ## 下一阶段
 
@@ -81,7 +82,7 @@
 | --- | --- | --- | --- |
 | **P0** | 真实证据链替代规则堆叠 | ✅ | `proven` 改为 `successCount>=阈值`（默认 2，env 可覆盖），按 episodeId 去重并持久化 `successCount/successEpisodeIds`；旧数据自动迁移，已 proven 不降级 |
 | **P0** | 删除硬编码准入闭集 | ✅ | `FALLBACK_GOLDEN_TOKENS` 已删除；golden 词集动态生成（retrieval golden 数据集 + 运行时 pass episode/symbol 证据叠加）；golden-overlap 降为辅助条件 |
-| **P0** | 本地闭环验证 | 🟡 | dsh glue 已修复 A 面回填根因（信封字段读错）并改为 `turn/end` 提交模型——对话数据首次完整；待真实使用积累非零 skill（当前 Skill=0、episode 全 pending） |
+| **P0** | 本地闭环验证 | ✅ | evidence backfill 可用 commit/diff/test command/result 关闭 pending episode；`governance release-gate` 强制 proven skill、fidelity sample 和 pending ratio 门禁；本仓 v1.13 dogfood 已产生非零样本 |
 | **P0** | 对话记录噪声治理 | ✅ | `isUserOriginatedMessage` 按 `source.kind` 过滤 harness 系统注入（job/子代理/Cordis 通知不再入图） |
 
 ### R1 · 性能与存储收敛（P0，规模化前提）
@@ -89,7 +90,7 @@
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
 | **P0** | 消灭 file 后端全量读写放大 | ✅ | `graphify-file-client` 进程内缓存（绝对路径 key、mtime+size 校验、写穿透、倒排索引懒重建、跨实例共享）；`transport: auto` 已是默认（sqlite 优先、file 回退，回退路径已测） |
-| **P0** | 技能读路径改 O(1) id 查找 | 🟡 | 重复解析/重建索引已被进程内缓存消除；`queryByKeyword` → `getNodesByIds` 的调用点改造仍待 |
+| **P0** | 技能读路径改 O(1) id 查找 | ✅ | `readSkillState` / `loadCompositeSkill` 已优先 `getNodesByIds`，仅在旧后端缺失或未命中时回退 keyword 查询 |
 | **P1** | fidelity 指标落地 | ✅ | 独立 `context-fidelity.json` 记录 anchor recall@k、missing anchors 与 normalized LCS body coverage；`FlywheelReport.fidelity` 输出样本聚合 |
 
 ### R2 · 对齐行业标准（P1，防被覆盖）
@@ -105,23 +106,23 @@
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
 | **P1** | Concept/Requirement 层落地 | ✅ | 确定性中英文抽取器已接线 CLI/MCP；本仓 dogfood 写入 20 Requirement + 224 Concept 和 503 条 provenance 边 |
-| **P2** | 团队共享记忆补位 | ⬜ | skill sync 之上做团队知识图谱 artifact 同步 + 冲突合并 + canary 门控（已有） |
+| **P2** | 团队共享记忆补位 | 🟡 | 已落地 graph artifact 三方合并、冲突队列、签名/加密、保留/隔离与 audit chain；企业 RBAC/远端协作仍需产品化 |
 
 ### R4 · 工程治理（P2，持续维护前提）
 
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
-| **P2** | 配置 split-brain 收敛 | ⬜ | `graphPolicy.embeddingProvider:"fnv"` vs `embeddingPolicy.provider:"transformers"` 冲突；`DEFAULT_EMBEDDING_MODEL`(bge) 与 `embeddings.ts` 硬编码(all-MiniLM) 不一致 |
+| **P2** | 配置 split-brain 收敛 | ✅ | 新增 canonical embedding model 模块；defaults 与 transformers loader 统一使用 `Xenova/bge-base-zh-v1.5` |
 | **P2** | context-slicer / orchestrator 重复合并 | ⬜ | `buildLayeredContextPackage`/`buildEnhancedContextPackage` ~60% 重复；`runOrchestration` 358 行 |
-| **P2** | 集成层模块化 | ⬜ | agent-mcp-installer 2099 行 + skill-installer 1436 行平台胶水 → agent 适配器抽象 |
-| **P2** | 测试隔离修复 | ⬜ | m74/m75/m62 读写真实 home 的并行竞态 |
+| **P2** | 集成层模块化 | 🟡 | 新增 `HostAdapter` 能力模型与 DSH/Cursor/Claude 注册表，作为 installer 拆分入口；两个大型 installer 仍需迁移到适配器实现 |
+| **P2** | 测试隔离修复 | 🟡 | Trae project-install 真实 home 并行竞态已改为只断言临时 workspace 项目项；m74/m75 仍需继续隔离 |
 | **P2** | web 知识节点栏产品化 | ✅ | 静态 `dsh.client` bundle 落地：`dsh/client.js` factory 双 slot + glue `/gf` Connection RPC 数据通道 + `dsh.client`/`exports["./client"]` 声明，重启自动加载。已知缺口（上游）：client-modules 扫描器只从 dsh 安装树解析条目名（loader 是安装树→profile 两锚点），out-of-tree 包需可从安装树解析（如 `~/node_modules` 符号链接）否则被静默跳过 |
 | **P2** | 集成健壮性：unsafe-cwd 下 rootDir 生效 | ✅ | dsh dogfood 实证：`resolveConfig()` 先于工具级 rootDir 绑定并抛 unsafe-cwd 错，MCP 工具全灭；已改为 `resolveConfig(configPath, { rootDir })` 贯穿 runtime 调用点，安全检查不放宽 |
 
 ### 建议版本节奏
 
 - **v1.10**：R0 全部（真证据链 + 本地闭环 + 噪声治理）——"学习引擎"成为真能力的版本
-- ~~v1.10–v1.12~~：v1.12.2 已发布——真实证据链、fidelity 指标、O(1) 技能读路径、SKILL.md 互操作、自适应遗忘、Engineering KG 概念层和 MCP Streamable HTTP。下一阶段优先做团队图谱 artifact 同步和企业治理。
+- ~~v1.10–v1.13~~：v1.13.0 已发布——真实证据链、fidelity 指标、O(1) 技能读路径、SKILL.md 互操作、自适应遗忘、Engineering KG 概念层、MCP Streamable HTTP 和治理/release-gate 平面。下一阶段优先把两个大型 installer 迁移到 HostAdapter，并产品化企业远端协作。
 - **长期**：R4 工程债随版本消化
 
 ## 如何参与

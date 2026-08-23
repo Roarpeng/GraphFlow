@@ -89,6 +89,26 @@ export {
   type DialogueKnowledgeExtractionResult,
 } from "./runtime/knowledge.js";
 export {
+  backfillOutcomeEvidence,
+  type EvidenceBackfillEntry,
+} from "./runtime/evidence.js";
+export {
+  listKnowledgeQueue,
+  reviewKnowledge,
+  traceRequirement,
+  upsertKnowledge,
+  mergeArtifactFiles,
+  writeMergedArtifact,
+  signArtifactFile,
+  verifyArtifactSignature,
+  createSignedArtifactFile,
+  importSignedArtifactFile,
+  quarantineNodes,
+  retentionSummary,
+  exportMemoryProfiles,
+  releaseGate,
+} from "./runtime/governance.js";
+export {
   detectInstalledAgents,
   formatModelConfigGuide,
   installMcpToDetectedAgents,

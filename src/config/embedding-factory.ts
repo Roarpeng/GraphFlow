@@ -15,6 +15,7 @@ import {
   getEmbeddingQualitySummary,
   wrapEmbeddingProviderWithQualityMonitor,
 } from "../learning/embedding-quality";
+import { CANONICAL_EMBEDDING_MODEL } from "./embedding-model";
 
 function collectResolveRoots(config: GraphFlowConfig): string[] {
   const roots: string[] = [];
@@ -103,7 +104,7 @@ export function createEmbeddingProviderFromConfig(
   const modelCacheDir = resolveConfiguredModelCacheDir(config);
 
   let embeddingProvider: EmbeddingProvider | undefined;
-  let model = "Xenova/all-MiniLM-L6-v2";
+  let model = CANONICAL_EMBEDDING_MODEL;
   let dimensions = EMBEDDING_DIM;
   let resolvedProviderName = "transformers";
 

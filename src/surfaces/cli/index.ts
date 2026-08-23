@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
+
 import {
   diagnoseRouting,
   diagnoseRoutingResult,
@@ -50,6 +52,21 @@ import {
   exportSkillsToMarkdownRuntime,
   importSkillsFromMarkdownRuntime,
   extractDialogueKnowledgeRuntime,
+  backfillOutcomeEvidence,
+  upsertKnowledge,
+  listKnowledgeQueue,
+  reviewKnowledge,
+  traceRequirement,
+  mergeArtifactFiles,
+  writeMergedArtifact,
+  signArtifactFile,
+  verifyArtifactSignature as governanceVerifySignature,
+  createSignedArtifactFile,
+  importSignedArtifactFile,
+  quarantineNodes,
+  retentionSummary,
+  exportMemoryProfiles,
+  releaseGate,
 } from "./runtime";
 import { validateConfigDetailed, type ConfigValidationResult } from "../../config/loader.js";
 import { isDeviationKind } from "../../learning/episodic-memory";
@@ -175,7 +192,7 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     const episodeId = args[1]?.trim();
     const success = parseCliSuccess(args[2]);
     if (!episodeId || success === undefined) {
-      console.log("Usage: graphflow outcome report <episodeId> <success> [--lesson <text>]... [--deviation <none|misread-requirement|scope-creep|tech-drift>] [--requirement-id <id>]... [--concept-id <id>]... [--code-hint <hint>]...");
+      console.log("Usage: graphflow outcome report <episodeId> <success> [--lesson <text>]... [--commit <sha>] [--diff <diff>] [--test-command <cmd>] [--test-result pass|fail|unknown] [--user-confirmed] ...");
       process.exitCode = 1;
       return undefined;
     }
@@ -185,6 +202,26 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     const requirementIds = collectCliFlagValues(args, "--requirement-id");
     const conceptIds = collectCliFlagValues(args, "--concept-id");
     const codeHints = collectCliFlagValues(args, "--code-hint");
+    const commit = readCliFlagValue(args, "--commit");
+    const diff = readCliFlagValue(args, "--diff");
+    const testCommand = readCliFlagValue(args, "--test-command");
+    const testResultRaw = readCliFlagValue(args, "--test-result");
+    const evidenceSourceRaw = readCliFlagValue(args, "--evidence-source");
+    const repository = readCliFlagValue(args, "--repository");
+    const evidence = commit || testCommand ? {
+      ...(repository ? { repository } : {}),
+      ...(commit ? { commit } : {}),
+      ...(diff ? { diff } : {}),
+      ...(testCommand ? { testCommand } : {}),
+      testResult: testResultRaw === "pass" || testResultRaw === "fail" || testResultRaw === "unknown"
+        ? (testResultRaw as "pass" | "fail" | "unknown")
+        : ("unknown" as const),
+      artifacts: collectCliFlagValues(args, "--artifact"),
+      userConfirmed: args.includes("--user-confirmed"),
+      source: evidenceSourceRaw === "ci" || evidenceSourceRaw === "agent" || evidenceSourceRaw === "hook"
+        ? (evidenceSourceRaw as "ci" | "agent" | "hook")
+        : ("manual" as const),
+    } : undefined;
     const hasEngHints =
       requirementIds.length > 0 || conceptIds.length > 0 || codeHints.length > 0;
     const data = await reportOutcome(
@@ -199,7 +236,8 @@ async function executeCommand(command: string, args: string[], configPath?: stri
             ...(conceptIds.length > 0 ? { conceptIds } : {}),
             ...(codeHints.length > 0 ? { codeHints } : {}),
           }
-        : undefined
+        : undefined,
+      evidence
     );
     return {
       command: "outcome-report",
@@ -212,6 +250,222 @@ async function executeCommand(command: string, args: string[], configPath?: stri
           }`
         : `ok=false; reason=${data.reason ?? "unknown"}`,
     };
+  }
+
+  if (command === "outcome" && args[0] === "backfill") {
+    const evidencePath = readCliFlagValue(args, "--evidence");
+    const journalPath = readCliFlagValue(args, "--journal");
+    const auditPath = readCliFlagValue(args, "--audit");
+    const actor = readCliFlagValue(args, "--actor");
+    if (!evidencePath) {
+      console.log("Usage: graphflow outcome backfill --evidence <entries.json|jsonl> [--journal <path>] [--dry-run]");
+      process.exitCode = 1;
+      return undefined;
+    }
+    const data = await backfillOutcomeEvidence({
+      evidencePath,
+      ...(journalPath ? { journalPath } : {}),
+      ...(configPath ? { configPath } : {}),
+      ...(auditPath ? { auditPath } : {}),
+      ...(actor ? { actor } : {}),
+      dryRun: args.includes("--dry-run"),
+    });
+    return {
+      command: "outcome-backfill",
+      data,
+      legacyText: `total=${data.total}; closed=${data.closed}; failed=${data.failed}; skipped=${data.skipped}`,
+    };
+  }
+
+  if (command === "governance") {
+    const subcommand = args[0];
+    if (subcommand === "knowledge-upsert") {
+      const kind = readCliFlagValue(args, "--kind") as "adr" | "invariant" | "api-contract" | "test";
+      const key = readCliFlagValue(args, "--key");
+      const title = readCliFlagValue(args, "--title");
+      if (!kind || !key || !title) {
+        console.log("Usage: graphflow governance knowledge-upsert --kind <adr|invariant|api-contract|test> --key <key> --title <title> --content <text>");
+        process.exitCode = 1;
+        return undefined;
+      }
+      const versionRaw = readCliFlagValue(args, "--version");
+      const statusRaw = readCliFlagValue(args, "--status");
+      const requirementId = readCliFlagValue(args, "--requirement-id");
+      const data = await upsertKnowledge(configPath, {
+        kind,
+        key,
+        title,
+        content: readCliFlagValue(args, "--content") ?? "",
+        ...(statusRaw === "draft" || statusRaw === "in_review" || statusRaw === "approved"
+          ? { status: statusRaw }
+          : {}),
+        ...(versionRaw ? { version: Number.parseInt(versionRaw, 10) } : {}),
+        sourceIds: collectCliFlagValues(args, "--source-id"),
+        ...(requirementId ? { requirementId } : {}),
+      });
+      return { command: "governance-knowledge", data, legacyText: `${data.nodeId}; status=${data.record.status}` };
+    }
+    if (subcommand === "review-queue") {
+      const data = await listKnowledgeQueue(configPath);
+      return { command: "governance-review-queue", data, legacyText: `items=${data.length}` };
+    }
+    if (subcommand === "review") {
+      const nodeId = readCliFlagValue(args, "--node-id");
+      const decisionRaw = readCliFlagValue(args, "--decision");
+      if (!nodeId || !decisionRaw) {
+        console.log("Usage: graphflow governance review --node-id <id> --decision <approved|rejected> --role <role> --reason <text>");
+        process.exitCode = 1;
+        return undefined;
+      }
+      const data = await reviewKnowledge(
+        configPath,
+        nodeId,
+        readCliFlagValue(args, "--role") ?? "admin",
+        decisionRaw as "approved" | "rejected",
+        readCliFlagValue(args, "--reason")
+      );
+      return { command: "governance-review", data, legacyText: `updated=${data.updated}` };
+    }
+    if (subcommand === "trace") {
+      const requirementId = readCliFlagValue(args, "--requirement-id");
+      if (!requirementId) {
+        console.log("Usage: graphflow governance trace --requirement-id <id>");
+        process.exitCode = 1;
+        return undefined;
+      }
+      const data = await traceRequirement(configPath, requirementId);
+      return {
+        command: "governance-trace",
+        data,
+        legacyText: `code=${data.code.length}; tests=${data.tests.length}; governance=${data.governance.length}; episodes=${data.episodes.length}`,
+      };
+    }
+    if (subcommand === "merge-artifacts") {
+      const base = readCliFlagValue(args, "--base");
+      const local = readCliFlagValue(args, "--local");
+      const remote = readCliFlagValue(args, "--remote");
+      const output = readCliFlagValue(args, "--output");
+      if (!base || !local || !remote || !output) {
+        console.log("Usage: graphflow governance merge-artifacts --base <json> --local <json> --remote <json> --output <json>");
+        process.exitCode = 1;
+        return undefined;
+      }
+      const result = mergeArtifactFiles(base, local, remote);
+      writeMergedArtifact(output, result.merged);
+      return {
+        command: "governance-merge",
+        data: { output, conflicts: result.conflicts },
+        legacyText: `nodes=${result.merged.nodes.length}; edges=${result.merged.edges.length}; conflicts=${result.conflicts.length}`,
+      };
+    }
+    if (subcommand === "sign-artifact") {
+      const input = readCliFlagValue(args, "--input");
+      const secret = readCliFlagValue(args, "--secret");
+      if (!input || !secret) {
+        console.log("Usage: graphflow governance sign-artifact --input <artifact.json> --secret <passphrase> --output <signature.json>");
+        process.exitCode = 1;
+        return undefined;
+      }
+      const signature = signArtifactFile(input, secret);
+      const outputPath = readCliFlagValue(args, "--output") ?? `${input}.sig.json`;
+      writeMergedArtifact(outputPath, signature);
+      return { command: "governance-sign", data: { outputPath, signature }, legacyText: `algorithm=${signature.algorithm}` };
+    }
+    if (subcommand === "encrypted-artifact-export") {
+      const output = readCliFlagValue(args, "--output");
+      const passphrase = readCliFlagValue(args, "--passphrase");
+      if (!output || !passphrase) {
+        console.log("Usage: graphflow governance encrypted-artifact-export --output <artifact.enc.json> --passphrase <secret>");
+        process.exitCode = 1;
+        return undefined;
+      }
+      const data = createSignedArtifactFile(configPath, output, passphrase);
+      return { command: "governance-encrypted-export", data, legacyText: `path=${data.path}; nodes=${data.nodeCount}` };
+    }
+    if (subcommand === "encrypted-artifact-import") {
+      const input = readCliFlagValue(args, "--input");
+      const passphrase = readCliFlagValue(args, "--passphrase");
+      if (!input || !passphrase) {
+        console.log("Usage: graphflow governance encrypted-artifact-import --input <artifact.enc.json> --passphrase <secret>");
+        process.exitCode = 1;
+        return undefined;
+      }
+      const data = await importSignedArtifactFile(configPath, input, passphrase);
+      return { command: "governance-encrypted-import", data, legacyText: `nodes=${data.nodeCount}; edges=${data.edgeCount}` };
+    }
+    if (subcommand === "verify-artifact-signature") {
+      const input = readCliFlagValue(args, "--input");
+      const signaturePath = readCliFlagValue(args, "--signature");
+      const secret = readCliFlagValue(args, "--secret");
+      if (!input || !signaturePath || !secret) {
+        console.log("Usage: graphflow governance verify-artifact-signature --input <artifact.json> --signature <sig.json> --secret <passphrase>");
+        process.exitCode = 1;
+        return undefined;
+      }
+      const payload = JSON.parse(readFileSync(input, "utf8"));
+      const expected = signArtifactFile(input, secret);
+      const supplied = JSON.parse(readFileSync(signaturePath, "utf8")) as { signature?: string };
+      const valid = governanceVerifySignature(payload, supplied.signature ?? "", secret) &&
+        expected.signature === supplied.signature;
+      return { command: "governance-verify", data: { valid }, legacyText: `valid=${valid}` };
+    }
+    if (subcommand === "quarantine") {
+      const ids = collectCliFlagValues(args, "--id");
+      if (ids.length === 0) {
+        console.log("Usage: graphflow governance quarantine --id <node-id>... [--reason <text>] [--audit <path>]");
+        process.exitCode = 1;
+        return undefined;
+      }
+      const actor = readCliFlagValue(args, "--actor");
+      const auditPath = readCliFlagValue(args, "--audit");
+      const reason = readCliFlagValue(args, "--reason");
+      const data = await quarantineNodes(configPath, ids, {
+        ...(actor ? { actor } : {}),
+        ...(auditPath ? { auditPath } : {}),
+        ...(reason ? { reason } : {}),
+      });
+      return { command: "governance-quarantine", data, legacyText: `quarantined=${data.quarantined.length}; auditValid=${data.auditValid}` };
+    }
+    if (subcommand === "retention") {
+      const data = retentionSummary(configPath);
+      return { command: "governance-retention", data, legacyText: `retained=${data.retained.length}; expired=${data.expired.length}` };
+    }
+    if (subcommand === "profiles") {
+      const outputDir = readCliFlagValue(args, "--output-dir") ?? "graphflow-out/memory-profiles";
+      const httpUrl = readCliFlagValue(args, "--http-url");
+      const packageSpec = readCliFlagValue(args, "--package-spec");
+      const files = exportMemoryProfiles({
+        outputDir,
+        ...(httpUrl ? { httpUrl } : {}),
+        stateful: args.includes("--stateful"),
+        ...(packageSpec ? { packageSpec } : {}),
+      });
+      return { command: "governance-profiles", data: files, legacyText: Object.keys(files).join(",") };
+    }
+    if (subcommand === "release-gate") {
+      const minProvenSkills = Number.parseInt(readCliFlagValue(args, "--min-proven-skills") ?? "1", 10);
+      const minFidelitySamples = Number.parseInt(readCliFlagValue(args, "--min-fidelity-samples") ?? "1", 10);
+      const maxPendingRatio = Number.parseFloat(readCliFlagValue(args, "--max-pending-ratio") ?? "0.5");
+      try {
+        const data = releaseGate(configPath, {
+          minProvenSkills,
+          minFidelitySamples,
+          maxPendingRatio,
+        });
+        return {
+          command: "governance-release-gate",
+          data,
+          legacyText: "release gates passed",
+        };
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+        return undefined;
+      }
+    }
+    console.log("Usage: graphflow governance <knowledge-upsert|review-queue|review|trace|merge-artifacts|sign-artifact|verify-artifact-signature|quarantine|retention|profiles|release-gate>");
+    process.exitCode = 1;
+    return undefined;
   }
 
   if (command === "insight" && args[0] === "submit") {

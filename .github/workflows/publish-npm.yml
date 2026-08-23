@@ -36,6 +36,9 @@ jobs:
       - name: Lint, build, and test
         run: npm run lint && npm run build && npm test
 
+      - name: Evidence and fidelity release gates
+        run: npm run gate:release
+
       - name: Publish @roarpeng/graphflow (idempotent)
         run: node scripts/publish-npm-idempotent.mjs
         env:
