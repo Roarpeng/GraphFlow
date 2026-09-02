@@ -54,6 +54,8 @@ const SNAPSHOT_EDGE_PRIORITY: GraphEdge["relation"][] = [
   "next_section",
   "part_of",
   "co_occurs",
+  "supersedes",
+  "same_topic",
   "improves",
   "prerequisite",
 ];

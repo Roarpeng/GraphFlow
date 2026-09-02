@@ -212,5 +212,7 @@ export interface GraphEdge {
     /** Concept/Requirement → source File or insight Decision (provenance). */
     | "derived_from"
     | "supersedes"
+    /** Dialogue turn → dialogue turn (cross-session semantic link: both turns discuss the same code/topic). */
+    | "same_topic"
     | "governed_by";
 }

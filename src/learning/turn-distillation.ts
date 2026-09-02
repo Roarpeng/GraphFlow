@@ -159,3 +159,125 @@ export function deriveTurnSummary(assistantReply: string): string {
   const last = paragraphs[paragraphs.length - 1];
   return clip(last ?? trimmed, SUMMARY_MAX_CHARS);
 }
+
+// ───────────────── Conversation Graph 2.0: optional LLM distillation ─────────────────
+
+/** Distillation result with provenance: which path produced the fields. */
+export interface DistilledTurn {
+  title: string;
+  summary: string;
+  /** True when a decision-relevant turn: the answer chooses between options / changes direction. */
+  decisionTurn: boolean;
+  /** "heuristic" (offline default) or "llm" (optional model path). */
+  source: "heuristic" | "llm";
+}
+
+/** Minimal injected LLM call: prompt in, plain text out. The runtime wires this to the economy tier. */
+export type DistillGenerateFn = (prompt: string) => Promise<string>;
+
+/**
+ * Decision markers that make a turn "decision-relevant" for the flywheel:
+ * the answer/reply commits to a choice, correction, or direction change
+ * rather than only describing facts. Feeds the skill-admission evidence
+ * chain (turn-granularity learning signal).
+ */
+const DECISION_TURN_MARKERS: string[] = [
+  "建议",
+  "推荐",
+  "选择",
+  "决定",
+  "方案",
+  "更正",
+  "修正",
+  "改为",
+  "放弃",
+  "优先",
+  "结论",
+  "recommend",
+  "suggest",
+  "choose",
+  "decide",
+  "correction",
+  "instead",
+  "prefer",
+  "conclusion",
+  "we should",
+  "let's go with",
+];
+
+export function isDecisionTurn(userQuery: string, assistantReply: string): boolean {
+  const haystack = `${userQuery}\n${assistantReply}`.toLowerCase();
+  return DECISION_TURN_MARKERS.some((marker) => haystack.includes(marker.toLowerCase()));
+}
+
+/** Heuristic distillation (existing behavior, now also reports decisionTurn). */
+export function distillTurnHeuristic(userQuery: string, assistantReply: string): DistilledTurn {
+  return {
+    title: deriveTurnTitle(userQuery),
+    summary: deriveTurnSummary(assistantReply),
+    decisionTurn: isDecisionTurn(userQuery, assistantReply),
+    source: "heuristic",
+  };
+}
+
+const LLM_DISTILL_PROMPT_MAX_QUERY = 600;
+const LLM_DISTILL_PROMPT_MAX_REPLY = 2_400;
+
+/**
+ * Optional LLM distillation path (Conversation Graph W1b).
+ *
+ * `generate` receives a compact Chinese+English instruction and must answer
+ * with two lines: `Title: <short title>` and `Summary: <one-sentence
+ * conclusion>`. Any missing/blank generation, missing `generate`, or a
+ * thrown error falls back to the deterministic heuristic — no Key, no LLM,
+ * no network ever breaks turn recording.
+ */
+export async function distillTurnWithLlm(
+  userQuery: string,
+  assistantReply: string,
+  generate?: DistillGenerateFn
+): Promise<DistilledTurn> {
+  const fallback = distillTurnHeuristic(userQuery, assistantReply);
+  if (typeof generate !== "function") return fallback;
+  if (!userQuery.trim() || !assistantReply.trim()) return fallback;
+
+  const prompt = [
+    "你是对话蒸馏器。把下面一轮问答蒸馏成标题和结论。",
+    "Title: 一行不超过 24 字的标题（去掉称呼语）。",
+    "Summary: 一句话结论（不超过 60 字，优先结论句）。",
+    "Decision: 若回答中做出了选择/修正/方向改变则 yes，否则 no。",
+    "只输出这三行，格式严格为：",
+    "Title: …",
+    "Summary: …",
+    "Decision: yes|no",
+    "",
+    `问题: ${clip(userQuery, LLM_DISTILL_PROMPT_MAX_QUERY)}`,
+    `回答: ${clip(assistantReply, LLM_DISTILL_PROMPT_MAX_REPLY)}`,
+  ].join("\n");
+
+  let raw: string;
+  try {
+    raw = await generate(prompt);
+  } catch {
+    return fallback;
+  }
+  if (typeof raw !== "string" || !raw.trim()) return fallback;
+
+  const title = matchLabeledLine(raw, "Title");
+  const summary = matchLabeledLine(raw, "Summary");
+  const decision = /^Decision:\s*(yes|no)\s*$/im.exec(raw)?.[1]?.toLowerCase() === "yes";
+  if (!title && !summary) return fallback;
+
+  return {
+    title: title || fallback.title,
+    summary: summary || fallback.summary,
+    decisionTurn: decision || fallback.decisionTurn,
+    source: "llm",
+  };
+}
+
+function matchLabeledLine(text: string, label: string): string {
+  const match = new RegExp(`^${label}:\\s*(.+)$`, "mi").exec(text);
+  const value = match?.[1]?.trim();
+  return value ? clip(value, label === "Title" ? TITLE_MAX_CHARS * 2 : SUMMARY_MAX_CHARS) : "";
+}

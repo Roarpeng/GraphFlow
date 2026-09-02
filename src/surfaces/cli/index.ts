@@ -1091,9 +1091,11 @@ async function executeCommand(command: string, args: string[], configPath?: stri
 
   if (command === "dialogue" && args[0] === "distill") {
     const all = args.includes("--all");
+    const useLlm = args.includes("--llm");
     const sessionId = readCliFlagValue(args, "--session");
     const data = await distillDialogueTurnsRuntime(configPath, {
       ...(all ? { all: true } : {}),
+      ...(useLlm ? { useLlm: true } : {}),
       ...(sessionId ? { sessionId } : {}),
     });
     return {
