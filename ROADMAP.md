@@ -76,6 +76,17 @@
 
 > 来源：CLI dogfood 实证 + 41k LOC 内部代码调研 + 4 主题行业趋势调研（详见会话调研报告）。核心判断：**"记得住"已有 99% 压缩背书，"学得会"还是空的（Skill=0、episode 全 pending）——进化主线 = 把学习飞轮做成真实证据链，再用 MCP 2.0 + SKILL.md 互操作成为标准记忆层，最后用概念层让记忆变成知识。**
 
+### R5 · Conversation Graph 2.0（对话过程节点图谱，2026-08-23 落地）
+
+> 定位：把对话过程从「仅显示的脉络树」升级为一等图资产——时间语义、上下文引擎接入、多 Agent 轨迹、回放分叉、面板与导出全链路。三层价值：飞轮学习信号从 episode 粒度升到 turn 粒度（W1b decisionTurn + W2 修正链）；历史问答成为可检索上下文（"这个问题上周讨论过，结论 X 被修正为 Y"）；多 Agent 轨迹成为审计与回放基础（W3）。
+
+| 优先级 | 事项 | 状态 | 说明与依据 |
+| --- | --- | --- | --- |
+| **P0** | **W1 时间语义与类型化边** | ✅ | `supersedes`/`same_topic` 边 + `validAt`/`invalidAt`（Graphiti 式时间有效性）；`detectSupersession` 离线修正启发式（更正标记 + 主题重叠 ≥ 0.25 + pending 不可被取代）；跨 session `same_topic` 连边；`effectiveTurns` 当前真值过滤。turn-distillation 增加可选 LLM 蒸馏路径（`distillTurnWithLlm`，无 Key/失败回退启发式；`isDecisionTurn` 决策轮标记喂飞轮证据链） |
+| **P0** | **W2 对话图进入上下文引擎** | ✅ | `context-slicer` L3 打包命中有效对话轮（≤3，含修正链标注行），同 token 预算与 L3 quota，绝不豁免；`graph-search` 新增 `searchDialogueTurns`（默认隐藏被取代轮，`includeSuperseded` 可选回看历史），对话命中纯增量、永不挤掉代码锚点 |
+| **P0** | **W3 多 Agent 轨迹 + fork/回放** | ✅ | dsh glue 监听 `subagent/start|end` 写 `agent-trace` Decision 节点（`GRAPHFLOW_CAPTURE_TRACE` 开关、身份去重、绝不抛入 harness 循环）；`forkDialogueSession` 显式分叉（跨 session next_section 主干 + same_topic 溯源边）；`walkDialoguePath` 回放路径（fork 边界标注）；CLI `dialogue fork --from` / `list --path` / `traces` |
+| **P1** | **W4 面板与导出** | ✅ | `/gf` RPC 数据通道扩展返回 traces；web 面板对话轮显示「修正过结论/fork/跳转」徽章 + Agent 轨迹区块；`artifact export-memory` 新增 `dialogues.md`（会话分组、修正链标注、轨迹列表，含 superseded 历史标记） |
+
 ### R0 · 让飞轮真的转起来（P0，决定项目本质）
 
 | 优先级 | 事项 | 状态 | 说明与依据 |

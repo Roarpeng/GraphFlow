@@ -66,10 +66,12 @@ export function hostHalf() {
         try {
           const wb = await runCli("graphflow workbench tree --json", workspaceRoot);
           const dl = await runCli("graphflow dialogue list --json --limit 50", workspaceRoot);
+          const tr = await runCli("graphflow dialogue traces --json --limit 50", workspaceRoot);
           return {
             ok: true,
             workbench: parseCliOut(wb),
             dialogues: parseCliOut(dl),
+            traces: parseCliOut(tr),
           };
         } catch (error) {
           return { ok: false, error: String(error && error.message ? error.message : error) };
@@ -248,8 +250,9 @@ function KnowledgePanel(props) {
         ? wbData.outlines
         : [];
     const dialogues = Array.isArray(data.dialogues) ? data.dialogues : [];
+    const traces = Array.isArray(data.traces) ? data.traces : [];
     const sections = [];
-    if (outlines.length === 0 && dialogues.length === 0) {
+    if (outlines.length === 0 && dialogues.length === 0 && traces.length === 0) {
       sections.push(
         React.createElement(
           "div",
@@ -270,6 +273,14 @@ function KnowledgePanel(props) {
     if (dialogues.length > 0) {
       const children = [React.createElement("div", { className: "gf-section-title" }, "对话记录")];
       for (const turn of dialogues) {
+        const badges = [];
+        if (turn.jumped) badges.push(React.createElement("span", { key: "j", className: "gf-badge gf-badge-jump" }, "跳转"));
+        if (turn.supersedesTurnIds && turn.supersedesTurnIds.length > 0) {
+          badges.push(React.createElement("span", { key: "s", className: "gf-badge gf-badge-supersede" }, "修正过结论"));
+        }
+        if (turn.forkBoundary) {
+          badges.push(React.createElement("span", { key: "f", className: "gf-badge" }, "fork"));
+        }
         children.push(
           React.createElement(
             "button",
@@ -288,7 +299,7 @@ function KnowledgePanel(props) {
                 { className: "gf-node-label" },
                 clip(turn.title || turn.userQuery, 40)
               ),
-              turn.jumped ? React.createElement("span", { className: "gf-badge gf-badge-jump" }, "跳转") : null
+              badges
             ),
             React.createElement(
               "div",
@@ -303,6 +314,28 @@ function KnowledgePanel(props) {
         );
       }
       sections.push(React.createElement("div", { key: "dialogues" }, children));
+    }
+    if (traces.length > 0) {
+      const children = [React.createElement("div", { className: "gf-section-title" }, "Agent 轨迹")];
+      for (const trace of traces.slice(0, 20)) {
+        children.push(
+          React.createElement(
+            "div",
+            { key: trace.id, className: "gf-trace" },
+            React.createElement(
+              "span",
+              { className: "gf-badge" + (trace.status === "failed" ? " gf-badge-jump" : "") },
+              trace.status === "failed" ? "失败" : trace.status === "start" ? "启动" : "完成"
+            ),
+            React.createElement(
+              "span",
+              { className: "gf-node-preview" },
+              `T#${trace.turnSeq} ${clip(trace.label, 48)} · ${new Date(trace.createdAt).toLocaleTimeString()}`
+            )
+          )
+        );
+      }
+      sections.push(React.createElement("div", { key: "traces" }, children));
     }
     body = React.createElement("div", { className: "gf-panel-body" }, sections);
   }
@@ -424,6 +457,16 @@ export const PANEL_CSS = `
 .gf-badge-active { background: var(--dsw-alias-brand-primary, #4a90d9); color: #fff; }
 .gf-badge-pending { background: var(--dsw-alias-state-warn-primary, #e0a13c); color: #000; }
 .gf-badge-jump { background: var(--dsw-alias-state-warn-primary, #e0a13c); color: #000; }
+.gf-badge-supersede { background: var(--dsw-alias-state-ok-primary, #4caf7d); color: #000; }
+.gf-trace {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  margin: 2px 0;
+  border-radius: 8px;
+  background: rgba(128,128,128,.08);
+}
 .gf-node-preview {
   color: var(--dsw-alias-label-secondary, #aaa);
   font-size: 12px;
