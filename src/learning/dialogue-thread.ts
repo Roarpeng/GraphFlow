@@ -15,6 +15,20 @@ import { deriveTurnSummary, deriveTurnTitle } from "./turn-distillation";
  *                  parent -next_section-> turn   (resumeFrom or previous tip)
  *                  prevTip -co_occurs-> turn     (when the click is a jump)
  *                  turn -references-> code       (optional L1 anchors)
+ *                  turn -supersedes-> priorTurn  (correction: this turn's
+ *                                                answer replaces an earlier
+ *                                                conclusion on the same topic;
+ *                                                Graphiti-style temporal edge)
+ *                  turn -same_topic-> turn'      (cross-session semantic link:
+ *                                                both turns discuss the same
+ *                                                code/topic tokens)
+ *
+ * Temporal semantics (Conversation Graph 2.0):
+ *   - validAt:    ms epoch when the turn's conclusion became effective
+ *                (defaults to createdAt; a later correction gets its own
+ *                validAt so "current truth" = newest validAt on the chain)
+ *   - invalidAt:  ms epoch when the turn's conclusion stopped being current
+ *                (set on the superseded turn when a supersedes edge lands)
  */
 
 export const DIALOGUE_TURN_PREFIX = "dialogue:";
@@ -30,6 +44,12 @@ const MAX_REPLY_CHARS = 4_000;
 const MAX_RELATED_CODE = 6;
 const MAX_THREAD_PROMPT_TURNS = 6;
 const MIN_QUERY_CHARS = 4;
+/** Cross-session same_topic links: minimum token-set overlap ratio. */
+const SAME_TOPIC_MIN_OVERLAP = 0.34;
+/** Max turns scanned per other session when linking same_topic edges. */
+const SAME_TOPIC_SCAN_LIMIT = 60;
+/** Supersession: how many earlier turns to link (nearest N on the chain). */
+const SUPERSEDE_LINK_LIMIT = 2;
 
 export interface DialogueTurnRecord {
   id: string;
@@ -47,6 +67,16 @@ export interface DialogueTurnRecord {
   title?: string;
   /** Distilled conclusion summary (offline heuristic, no LLM). */
   summary?: string;
+  /**
+   * Temporal edge (Conversation Graph 2.0): ids of earlier turns whose
+   * conclusion this turn's answer corrects/replaces. Mirrors the
+   * `supersedes` graph edge; kept on the record for O(1) reads.
+   */
+  supersedesTurnIds?: string[];
+  /** Temporal validity: ms epoch when this turn's conclusion became effective (defaults to createdAt). */
+  validAt?: number;
+  /** Temporal validity: ms epoch when this turn's conclusion stopped being current (set when superseded). */
+  invalidAt?: number;
 }
 
 export interface DialogueSessionRecord {
@@ -190,6 +220,21 @@ export async function recordDialogueTurn(
   const seq = session.turnCount + 1;
   const title = deriveTurnTitle(userQuery);
   const summary = assistantReply.trim() ? deriveTurnSummary(assistantReply) : undefined;
+
+  // Conversation Graph 2.0 temporal edges:
+  //  - supersedes: this answer corrects an earlier conclusion on the same topic
+  //  - same_topic: cross-session turns discussing the same code/topic tokens
+  const supersedesTurnIds = assistantReply.trim()
+    ? detectSupersession(existingTurns, userQuery, assistantReply, seq, SUPERSEDE_LINK_LIMIT)
+    : [];
+  const otherSessionTurns = (await listDialogueTurns(client, { limit: SAME_TOPIC_SCAN_LIMIT }))
+    .filter((turn) => turn.sessionId !== sessionId);
+  const sameTopicPairs = detectSameTopicLinks(
+    otherSessionTurns,
+    { id: dialogueTurnIdFor(sessionId, seq), userQuery },
+    session.topicTokens
+  );
+
   const turn: DialogueTurnRecord = {
     id: dialogueTurnIdFor(sessionId, seq),
     sessionId,
@@ -203,6 +248,8 @@ export async function recordDialogueTurn(
     updatedAt: now,
     ...(title ? { title } : {}),
     ...(summary ? { summary } : {}),
+    ...(supersedesTurnIds.length > 0 ? { supersedesTurnIds } : {}),
+    ...(supersedesTurnIds.length > 0 ? { validAt: now } : {}),
   };
 
   const nextSession: DialogueSessionRecord = {
@@ -221,6 +268,7 @@ export async function recordDialogueTurn(
     ...(previousTipId ? { previousTipId } : {}),
     relatedNodeIds: turn.relatedNodeIds,
   });
+  await linkTemporalEdges(client, { turn, supersedesTurnIds, sameTopicPairs, now });
 
   return { recorded: true, reused: false, jumped, turn, session: nextSession };
 }
@@ -496,6 +544,15 @@ function deserializeTurn(node: GraphNode): DialogueTurnRecord | undefined {
       updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
       ...(typeof parsed.title === "string" ? { title: parsed.title } : {}),
       ...(typeof parsed.summary === "string" ? { summary: parsed.summary } : {}),
+      ...(Array.isArray(parsed.supersedesTurnIds)
+        ? {
+            supersedesTurnIds: parsed.supersedesTurnIds.filter(
+              (id): id is string => typeof id === "string"
+            ),
+          }
+        : {}),
+      ...(typeof parsed.validAt === "number" ? { validAt: parsed.validAt } : {}),
+      ...(typeof parsed.invalidAt === "number" ? { invalidAt: parsed.invalidAt } : {}),
     };
   } catch {
     return undefined;
@@ -570,4 +627,218 @@ function uniqueIds(ids?: string[]): string[] {
 
 function mergeRelated(current: string[], incoming?: string[]): string[] {
   return uniqueIds([...current, ...(incoming ?? [])]).slice(0, MAX_RELATED_CODE);
+}
+
+// ─────────────────── Conversation Graph 2.0: temporal edges ───────────────────
+
+/**
+ * Correction markers that make an assistant reply a "supersession answer":
+ * the turn explicitly replaces/updates an earlier conclusion rather than
+ * answering an unrelated question. EN + CJK, used on the reply text.
+ */
+const SUPERSESSION_REPLY_MARKERS: string[] = [
+  "更正",
+  "更准确地说",
+  "修正一下",
+  "修正",
+  "纠正一下",
+  "纠正",
+  "重新回答",
+  "重新梳理",
+  "不是",
+  "之前说错",
+  "上面说错",
+  "其实",
+  "实际上",
+  "重新确认后",
+  "correction",
+  "corrected",
+  "actually",
+  "to be precise",
+  "in fact",
+  "rather than",
+  "instead of",
+  "updated answer",
+  "supersedes the earlier",
+  "revised",
+];
+
+/** Topic-overlap floor for a reply to qualify as correcting "the same topic". */
+const SUPERSEDE_TOPIC_OVERLAP = 0.25;
+
+/**
+ * Offline heuristic: which earlier turns does this answer supersede?
+ *
+ * A turn T' supersedes T when:
+ *  1. T' carries a correction marker in its reply (or its query re-asks the
+ *     same topic as T), AND
+ *  2. T's question/topic tokens overlap T' enough that they discuss the same
+ *     subject, AND
+ *  3. T already has an answer (a pending turn cannot be superseded — nothing
+ *     to replace), AND
+ *  4. T is not already superseded by another kept turn (nearest N win).
+ *
+ * Deterministic and conservative: no LLM, no I/O. Returns turn ids ordered
+ * oldest-first, capped at `limit`.
+ */
+export function detectSupersession(
+  turns: DialogueTurnRecord[],
+  userQuery: string,
+  assistantReply: string,
+  currentSeq: number,
+  limit = SUPERSEDE_LINK_LIMIT
+): string[] {
+  const replyMarked = SUPERSESSION_REPLY_MARKERS.some((marker) =>
+    assistantReply.toLowerCase().includes(marker.toLowerCase())
+  );
+  if (!replyMarked) return [];
+
+  const currentTokens = new Set(extractTokens(userQuery));
+  if (currentTokens.size === 0) return [];
+
+  const candidates: Array<{ turn: DialogueTurnRecord; overlap: number }> = [];
+  for (const turn of turns) {
+    if (turn.seq >= currentSeq) continue;
+    if (!turn.assistantReply.trim()) continue; // pending: nothing to supersede
+    if (turn.invalidAt !== undefined) continue; // already off the current chain
+    const overlap = tokenOverlapRatio(currentTokens, turn.userQuery);
+    if (overlap < SUPERSEDE_TOPIC_OVERLAP) continue;
+    candidates.push({ turn, overlap });
+  }
+  if (candidates.length === 0) return [];
+
+  // Nearest turns first (highest overlap, then latest), capped at `limit`.
+  candidates.sort((a, b) => b.overlap - a.overlap || b.turn.seq - a.turn.seq);
+  return candidates
+    .slice(0, Math.max(1, limit))
+    .map((c) => c.turn.id)
+    .sort();
+}
+
+function tokenOverlapRatio(next: Set<string>, earlierQuery: string): number {
+  const earlier = extractTokens(earlierQuery);
+  if (earlier.length === 0) return 0;
+  let hit = 0;
+  for (const token of earlier) {
+    if (next.has(token)) hit += 1;
+  }
+  return hit / earlier.length;
+}
+
+/**
+ * Candidate cross-session same_topic links for a newly recorded turn:
+ * other-session turns whose query tokens overlap the new query beyond
+ * `SAME_TOPIC_MIN_OVERLAP` (falling back to session topicTokens when the
+ * query itself is sparse). Pure — callers persist the chosen edges.
+ */
+export function detectSameTopicLinks(
+  allTurns: DialogueTurnRecord[],
+  next: { id: string; userQuery: string },
+  sessionTopicTokens: string[],
+  options?: { limit?: number }
+): Array<{ from: string; to: string }> {
+  const currentTokens = new Set([
+    ...extractTokens(next.userQuery),
+    ...sessionTopicTokens,
+  ]);
+  if (currentTokens.size === 0) return [];
+
+  const scored: Array<{ turn: DialogueTurnRecord; overlap: number }> = [];
+  for (const turn of allTurns) {
+    if (turn.id === next.id) continue;
+    const overlap = tokenOverlapRatio(currentTokens, turn.userQuery);
+    if (overlap < SAME_TOPIC_MIN_OVERLAP) continue;
+    scored.push({ turn, overlap });
+  }
+  scored.sort((a, b) => b.overlap - a.overlap || b.turn.updatedAt - a.turn.updatedAt);
+  const limit = options?.limit ?? 3;
+  return scored
+    .slice(0, Math.max(1, limit))
+    .map((s) => ({ from: next.id, to: s.turn.id }));
+}
+
+/**
+ * Persist the temporal edge set of one turn:
+ *  - `supersedes` edges turn -> supersededTurn for each correction link, and
+ *    the superseded turns get `invalidAt = now` (their conclusion stopped
+ *    being current) while this turn's `validAt = now`.
+ *  - `same_topic` edges turn -> otherTurn for cross-session semantic links
+ *    (bidirectional information: one edge, both reads traverse "both").
+ * Best-effort: failures degrade to a graph without temporal edges, never
+ * throw into the record path.
+ */
+async function linkTemporalEdges(
+  client: GraphClient,
+  input: {
+    turn: DialogueTurnRecord;
+    supersedesTurnIds: string[];
+    sameTopicPairs: Array<{ from: string; to: string }>;
+    now: number;
+  }
+): Promise<void> {
+  const { turn, supersedesTurnIds, sameTopicPairs, now } = input;
+  try {
+    const edges: GraphEdge[] = [];
+    for (const targetId of supersedesTurnIds) {
+      edges.push({ from: turn.id, to: targetId, relation: "supersedes" });
+    }
+    for (const pair of sameTopicPairs) {
+      edges.push({ from: pair.from, to: pair.to, relation: "same_topic" });
+    }
+    if (edges.length > 0) {
+      await upsertUniqueEdges(client, edges);
+    }
+
+    // Mark the superseded turns as no longer current (invalidAt) so
+    // retrieval can distinguish "was true then" from "current truth".
+    if (supersedesTurnIds.length > 0) {
+      const nodes = await collectDialogueNodes(client);
+      for (const node of nodes) {
+        const record = parseDialogueTurn(node);
+        if (!record) continue;
+        if (!supersedesTurnIds.includes(record.id)) continue;
+        if (record.invalidAt !== undefined) continue;
+        const updated: DialogueTurnRecord = { ...record, invalidAt: now };
+        const session = await loadSession(client, updated.sessionId);
+        if (!session) continue;
+        await persistTurn(client, updated, session, {
+          linkParent: false,
+          jumped: updated.jumped,
+          relatedNodeIds: updated.relatedNodeIds,
+        });
+      }
+    }
+  } catch {
+    // temporal edges are additive — never break the record path
+  }
+}
+
+/**
+ * Effective (current) turns of a set: drop turns carrying an `invalidAt`
+ * unless the caller asks for the full history. Used by L3 packing and
+ * retrieval so agents see "current truth" by default and the correction
+ * chain only on request.
+ */
+export function effectiveTurns(
+  turns: DialogueTurnRecord[],
+  options?: { includeSuperseded?: boolean }
+): DialogueTurnRecord[] {
+  if (options?.includeSuperseded === true) return turns;
+  return turns.filter((turn) => turn.invalidAt === undefined);
+}
+
+/**
+ * Render a correction chain line for a superseded turn: "结论 X 已被修正为
+ * Y (turn#seq)" — used by retrieval annotations and L3 packing.
+ */
+export function formatSupersessionLine(turn: DialogueTurnRecord, supersededBy: DialogueTurnRecord): string {
+  const oldConclusion = clip(
+    turn.summary?.trim() ? turn.summary : turn.assistantReply,
+    60
+  );
+  const newConclusion = clip(
+    supersededBy.summary?.trim() ? supersededBy.summary : supersededBy.assistantReply,
+    60
+  );
+  return `Turn #${turn.seq} "${oldConclusion}" 已被修正 (Turn #${supersededBy.seq}): "${newConclusion}"`;
 }

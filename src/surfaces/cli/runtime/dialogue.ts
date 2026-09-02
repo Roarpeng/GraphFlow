@@ -1,5 +1,6 @@
 import { resolveConfig } from "../../../config/resolve";
 import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
+import { hasUsableLlmProvider } from "../../../config/llm-availability";
 import { createGraphClient } from "../../../graph/client-factory";
 import {
   applyTurnDistillation,
@@ -8,7 +9,7 @@ import {
   recordDialogueTurn,
   type DialogueTurnRecord,
 } from "../../../learning/dialogue-thread";
-import { deriveTurnSummary, deriveTurnTitle } from "../../../learning/turn-distillation";
+import { deriveTurnSummary, deriveTurnTitle, distillTurnWithLlm } from "../../../learning/turn-distillation";
 import { readCliFlagValue } from "../output";
 
 export interface DialogueListItem {
@@ -116,10 +117,15 @@ export async function recordDialogueTurnRuntime(
  * Backfill distilled title/summary for turns that are still missing them.
  * Defaults to the "main" session; pass `all: true` to sweep every turn in the
  * workspace. Existing values are never overwritten.
+ *
+ * Conversation Graph W1b: with `useLlm: true` (and a usable provider), each
+ * missing distillation runs the optional LLM path via `distillTurnWithLlm`;
+ * missing/failed generation transparently falls back per turn to the
+ * deterministic heuristic — the sweep never fails because the model did.
  */
 export async function distillDialogueTurnsRuntime(
   configPath?: string,
-  options?: { sessionId?: string; rootDir?: string; all?: boolean }
+  options?: { sessionId?: string; rootDir?: string; all?: boolean; useLlm?: boolean }
 ): Promise<DistillDialogueResult> {
   const config = bindRuntimeWorkspaceRoot(
     resolveConfig(configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
@@ -133,15 +139,41 @@ export async function distillDialogueTurnsRuntime(
     ...(sessionId ? { sessionId } : {}),
   });
 
+  const wantLlm = options?.useLlm === true && hasUsableLlmProvider(config);
+  let generate: ((prompt: string) => Promise<string>) | undefined;
+  if (wantLlm) {
+    try {
+      const { executeRolePrompt } = await import("../../../routing/provider-executor");
+      const { resolveModelForRole } = await import("../../../routing/model-router");
+      const selection = resolveModelForRole("compressor", configPath);
+      generate = (prompt: string) => executeRolePrompt("compressor", prompt, selection);
+    } catch {
+      generate = undefined; // fall back to heuristic wholesale
+    }
+  }
+
   let updated = 0;
   let unchanged = 0;
   for (const turn of turns) {
-    const title = turn.title?.trim() ? undefined : deriveTurnTitle(turn.userQuery);
-    const summary = turn.summary?.trim()
-      ? undefined
-      : turn.assistantReply.trim()
-        ? deriveTurnSummary(turn.assistantReply)
-        : undefined;
+    let title: string | undefined;
+    let summary: string | undefined;
+    if (generate) {
+      // LLM path only for turns actually missing a field; existing values win.
+      const missingTitle = !turn.title?.trim();
+      const missingSummary = !turn.summary?.trim() && turn.assistantReply.trim().length > 0;
+      if (missingTitle || missingSummary) {
+        const distilled = await distillTurnWithLlm(turn.userQuery, turn.assistantReply, generate);
+        title = missingTitle ? distilled.title : undefined;
+        summary = missingSummary ? distilled.summary : undefined;
+      }
+    } else {
+      title = turn.title?.trim() ? undefined : deriveTurnTitle(turn.userQuery);
+      summary = turn.summary?.trim()
+        ? undefined
+        : turn.assistantReply.trim()
+          ? deriveTurnSummary(turn.assistantReply)
+          : undefined;
+    }
     if (!title && !summary) {
       unchanged += 1;
       continue;

@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npm test *)",
+      "Bash(git stash *)",
+      "Bash(npx vitest *)",
+      "Bash(node -p \"require\\('./vscode-extension/package.json'\\).version\")",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git checkout *)",
+      "Bash(git merge *)",
+      "Bash(git tag *)",
+      "Bash(gh run *)",
+      "Bash(echo \"---PUBLISH EXIT: $?---\")",
+      "Bash(echo \"---BUILD EXIT: $?---\")"
+    ]
+  }
+}
