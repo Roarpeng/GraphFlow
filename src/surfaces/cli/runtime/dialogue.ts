@@ -5,8 +5,14 @@ import { createGraphClient } from "../../../graph/client-factory";
 import {
   applyTurnDistillation,
   dialogueSessionIdFor,
+  forkDialogueSession,
+  listAgentTraces,
   listDialogueTurns,
+  recordAgentTrace,
   recordDialogueTurn,
+  walkDialoguePath,
+  type AgentTraceRecord,
+  type DialoguePathStep,
   type DialogueTurnRecord,
 } from "../../../learning/dialogue-thread";
 import { deriveTurnSummary, deriveTurnTitle, distillTurnWithLlm } from "../../../learning/turn-distillation";
@@ -192,6 +198,106 @@ function resolveSessionId(raw: string | undefined, workspaceRoot?: string): stri
   if (!raw?.trim()) return undefined;
   if (raw.startsWith("dialogue-session:")) return raw;
   return dialogueSessionIdFor(raw, workspaceRoot);
+}
+
+// ───────────────── Conversation Graph W3: fork, replay path, agent traces ─────────────────
+
+/** Fork a dialogue session from a turn: new session rooted at the fork point. */
+export async function forkDialogueSessionRuntime(
+  fromTurnId: string,
+  options?: { configPath?: string; rootDir?: string; forkName?: string }
+): Promise<ForkDialogueListItem | undefined> {
+  const config = bindRuntimeWorkspaceRoot(
+    resolveConfig(options?.configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
+    options?.rootDir ? { rootDir: options.rootDir } : undefined
+  );
+  const client = createGraphClient(config);
+  const result = await forkDialogueSession(client, {
+    fromTurnId,
+    ...(options?.forkName ? { forkName: options.forkName } : {}),
+    ...(config.graphPolicy.workspaceRoot ? { workspaceRoot: config.graphPolicy.workspaceRoot } : {}),
+  });
+  if (!result) return undefined;
+  return {
+    forkedSessionId: result.forkedSessionId,
+    forkedSessionName: result.forkedSessionName,
+    sourceTurnId: result.sourceTurnId,
+    copiedTurns: result.copiedTurns,
+  };
+}
+
+export interface ForkDialogueListItem {
+  forkedSessionId: string;
+  forkedSessionName: string;
+  sourceTurnId: string;
+  copiedTurns: number;
+}
+
+/** One hop on the replay path (dialogue list --path). */
+export type { DialoguePathStep } from "../../../learning/dialogue-thread";
+
+/**
+ * Replay path (Conversation Graph W3b): walk the turn spine ending at
+ * `endTurnId` — following `parentTurnId` links (which include jump targets
+ * and fork boundaries) back to the session's first turn. Returns steps
+ * oldest-first. `--path` on `dialogue list` renders exactly this chain so an
+ * agent can restore "how did we get here" context.
+ */
+export async function dialoguePathRuntime(
+  endTurnId: string,
+  options?: { configPath?: string; rootDir?: string; limit?: number }
+): Promise<DialoguePathStep[]> {
+  const config = bindRuntimeWorkspaceRoot(
+    resolveConfig(options?.configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
+    options?.rootDir ? { rootDir: options.rootDir } : undefined
+  );
+  const client = createGraphClient(config);
+  const all = await listDialogueTurns(client, { limit: 500 });
+  return walkDialoguePath(all, endTurnId, options?.limit ?? 30);
+}
+
+/** Record one multi-agent trajectory event (dsh glue → agent-trace node). */
+export async function recordAgentTraceRuntime(
+  trace: { sessionId?: string; turnSeq?: number; agentKind: string; label: string; status: string },
+  configPath?: string,
+  rootDir?: string
+): Promise<boolean> {
+  const config = bindRuntimeWorkspaceRoot(
+    resolveConfig(configPath, rootDir ? { rootDir } : undefined),
+    rootDir ? { rootDir } : undefined
+  );
+  const client = createGraphClient(config);
+  const sessionId = trace.sessionId?.trim()
+    ? resolveSessionId(trace.sessionId, config.graphPolicy.workspaceRoot)
+    : dialogueSessionIdFor("main", config.graphPolicy.workspaceRoot);
+  if (!sessionId) return false;
+  const record = await recordAgentTrace(client, {
+    sessionId,
+    turnSeq: typeof trace.turnSeq === "number" ? trace.turnSeq : 0,
+    agentKind: trace.agentKind,
+    label: trace.label,
+    status: trace.status,
+  });
+  return record !== undefined;
+}
+
+/** List agent-trace records (panel data channel). */
+export async function listDialogueTracesRuntime(
+  configPath?: string,
+  options?: { sessionId?: string; limit?: number; rootDir?: string }
+): Promise<AgentTraceRecord[]> {
+  const config = bindRuntimeWorkspaceRoot(
+    resolveConfig(configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
+    options?.rootDir ? { rootDir: options.rootDir } : undefined
+  );
+  const client = createGraphClient(config);
+  const sessionId = options?.sessionId
+    ? resolveSessionId(options.sessionId, config.graphPolicy.workspaceRoot)
+    : undefined;
+  return listAgentTraces(client, {
+    ...(sessionId ? { sessionId } : {}),
+    ...(options?.limit !== undefined ? { limit: options.limit } : {}),
+  });
 }
 
 function toListItem(turn: DialogueTurnRecord): DialogueListItem {

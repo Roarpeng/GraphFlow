@@ -77,8 +77,14 @@ export {
   recordDialogueTurnRuntime,
   resolveDialogueRecordInput,
   distillDialogueTurnsRuntime,
+  forkDialogueSessionRuntime,
+  dialoguePathRuntime,
+  listDialogueTracesRuntime,
+  recordAgentTraceRuntime,
   type DialogueListItem,
   type DistillDialogueResult,
+  type DialoguePathStep,
+  type ForkDialogueListItem,
 } from "./runtime/dialogue.js";
 export {
   exportSkillsToMarkdownRuntime,

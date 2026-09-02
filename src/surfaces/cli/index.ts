@@ -44,11 +44,15 @@ import {
   recordDialogueTurnRuntime,
   resolveDialogueRecordInput,
   distillDialogueTurnsRuntime,
+  forkDialogueSessionRuntime,
+  dialoguePathRuntime,
+  listDialogueTracesRuntime,
   type MemoryEpisodeItem,
   type MemorySearchHit,
   type MemoryOutcome,
   type DialogueListItem,
   type DistillDialogueResult,
+  type DialoguePathStep,
   exportSkillsToMarkdownRuntime,
   importSkillsFromMarkdownRuntime,
   extractDialogueKnowledgeRuntime,
@@ -1034,9 +1038,21 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     const limitRaw = readCliFlagValue(args, "--limit");
     const limit = limitRaw ? Number(limitRaw) : undefined;
     if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
-      console.log("Usage: graphflow dialogue list [--session <name|id>] [--limit N] [--json] [--config <path>]");
+      console.log("Usage: graphflow dialogue list [--session <name|id>] [--limit N] [--path <turnId>] [--json] [--config <path>]");
       process.exitCode = 1;
       return undefined;
+    }
+    const pathTurnId = readCliFlagValue(args, "--path");
+    if (pathTurnId) {
+      const steps = await dialoguePathRuntime(pathTurnId, {
+        ...(configPath ? { configPath } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+      });
+      return {
+        command: "dialogue-path",
+        data: steps,
+        legacyText: formatDialoguePath(steps),
+      };
     }
     const sessionId = readCliFlagValue(args, "--session");
     const data = await listDialogueTurnsRuntime(configPath, {
@@ -1047,6 +1063,42 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       command: "dialogue-list",
       data,
       legacyText: formatDialogueList(data),
+    };
+  }
+
+  if (command === "dialogue" && args[0] === "fork") {
+    const fromTurnId = readCliFlagValue(args, "--from");
+    if (!fromTurnId) {
+      console.log("Usage: graphflow dialogue fork --from <turnId> [--name <sessionName>] [--json] [--config <path>]");
+      process.exitCode = 1;
+      return undefined;
+    }
+    const forkName = readCliFlagValue(args, "--name");
+    const data = await forkDialogueSessionRuntime(fromTurnId, {
+      ...(configPath ? { configPath } : {}),
+      ...(forkName ? { forkName } : {}),
+    });
+    return {
+      command: "dialogue-fork",
+      data,
+      legacyText: data
+        ? `forkedSession=${data.forkedSessionName}; sourceTurn=${data.sourceTurnId}; copiedTurns=${data.copiedTurns}`
+        : "not-found",
+    };
+  }
+
+  if (command === "dialogue" && args[0] === "traces") {
+    const limitRaw = readCliFlagValue(args, "--limit");
+    const limit = limitRaw ? Number(limitRaw) : undefined;
+    const sessionId = readCliFlagValue(args, "--session");
+    const data = await listDialogueTracesRuntime(configPath, {
+      ...(sessionId ? { sessionId } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    });
+    return {
+      command: "dialogue-traces",
+      data,
+      legacyText: formatDialogueTraces(data),
     };
   }
 
@@ -1145,6 +1197,31 @@ function formatDialogueList(items: DialogueListItem[]): string {
 
 function formatDialogueDistill(data: DistillDialogueResult): string {
   return `updated=${data.updated}; unchanged=${data.unchanged}; total=${data.total}`;
+}
+
+function formatDialoguePath(steps: DialoguePathStep[]): string {
+  const lines: string[] = [`steps=${steps.length}`];
+  for (const step of steps) {
+    const fork = step.forkBoundary ? " [fork]" : "";
+    const jump = step.jumped ? " jump" : "";
+    const stale = step.invalidAt !== undefined ? " (superseded)" : "";
+    lines.push(
+      `seq=${step.seq}${fork}${jump}${stale}; q=${step.userQuery}; a=${step.assistantReply || "(pending)"}`
+    );
+  }
+  return lines.join("\n");
+}
+
+function formatDialogueTraces(
+  traces: Array<{ id: string; agentKind: string; label: string; status: string; turnSeq: number; createdAt: number }>
+): string {
+  const lines: string[] = [`count=${traces.length}`];
+  for (const trace of traces) {
+    lines.push(
+      `turn#${trace.turnSeq} ${trace.agentKind}:${trace.status} ${trace.label}; at=${new Date(trace.createdAt).toISOString()}`
+    );
+  }
+  return lines.join("\n");
 }
 
 function formatValidationResult(data: ConfigValidationResult): string {
