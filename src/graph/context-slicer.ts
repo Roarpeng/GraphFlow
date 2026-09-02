@@ -113,6 +113,89 @@ function tryAppendL3Node(
   return "packed";
 }
 
+// ───────────────── Conversation Graph W2a: dialogue nodes in L3 packing ─────────────────
+
+/** Max matched dialogue turns packed per preview (after effective-turns filter). */
+const DIALOGUE_PACK_MAX_TURNS = 3;
+
+interface DialogueContextLine {
+  kind: "turn" | "summary";
+  text: string;
+  node?: GraphNode;
+  correctionLine?: string;
+}
+
+/**
+ * Collect dialogue-turn context for a query (Conversation Graph W2a).
+ *
+ * - Matches effective (non-superseded) turns whose query/title/summary tokens
+ *   overlap the search tokens; never within the same recording session id
+ *   chain — matched turns are historical Q&A, including other sessions.
+ * - Each packed turn carries an optional correction annotation when the
+ *   turn itself supersedes an earlier one ("结论 X 已被修正为 Y").
+ * - Falls back to [] on any failure — dialogue packing is additive.
+ */
+async function collectDialogueContextLines(
+  client: GraphClient,
+  query: string,
+  options?: LayeredPackageOptions
+): Promise<DialogueContextLine[]> {
+  try {
+    const { listDialogueTurns, effectiveTurns, formatSupersessionLine } = await import(
+      "../learning/dialogue-thread.js"
+    );
+    const allTurns = await listDialogueTurns(client, { limit: 60 });
+    const turns = effectiveTurns(allTurns);
+    if (turns.length === 0) return [];
+
+    const scoreTokens = buildSearchScoreTokens(query, options?.englishQuery);
+    if (scoreTokens.length === 0) return [];
+    const tokenSet = new Set(scoreTokens.map((t) => t.toLowerCase()));
+
+    const scored = turns
+      .map((turn) => {
+        const haystack = `${turn.userQuery} ${turn.title ?? ""} ${turn.summary ?? ""}`.toLowerCase();
+        let hits = 0;
+        for (const token of tokenSet) {
+          if (haystack.includes(token)) hits += 1;
+        }
+        return { turn, hits };
+      })
+      .filter((s) => s.hits > 0)
+      .sort((a, b) => b.hits - a.hits || b.turn.updatedAt - a.turn.updatedAt)
+      .slice(0, DIALOGUE_PACK_MAX_TURNS);
+    if (scored.length === 0) return [];
+
+    // Correction chain lookup uses ALL turns (the superseded one is off the
+    // effective list by design — we need it to render "was corrected").
+    const byId = new Map(allTurns.map((t) => [t.id, t]));
+    const lines: DialogueContextLine[] = [];
+    for (const { turn } of scored) {
+      const correctionTargets = (turn.supersedesTurnIds ?? [])
+        .map((id) => byId.get(id))
+        .filter((t): t is NonNullable<typeof t> => Boolean(t));
+      const correctionLine =
+        correctionTargets.length > 0
+          ? formatSupersessionLine(correctionTargets[correctionTargets.length - 1]!, turn)
+          : undefined;
+      lines.push({
+        kind: "turn",
+        text: turn.title ?? turn.userQuery,
+        node: {
+          id: turn.id,
+          type: "Decision",
+          content: `dialogue-turn #${turn.seq} Q: ${turn.userQuery}`,
+          metadata: { kind: "dialogue-turn", record: JSON.stringify(turn) },
+        },
+        ...(correctionLine ? { correctionLine } : {}),
+      });
+    }
+    return lines;
+  } catch {
+    return [];
+  }
+}
+
 // Re-export utility functions that were previously exported
 export {
   getEncoder,
@@ -409,6 +492,40 @@ export async function buildLayeredContextPackage(
       tokens = acc.tokens;
       truncated = acc.truncated;
     }
+  }
+
+  // Conversation Graph W2a: pack matched dialogue turns (effective ones plus
+  // a correction-chain annotation) under the same L3 quota + token budget as
+  // every other node — dialogue anchors are never exempt from budgeting.
+  if (!truncated) {
+    const dialogueAcc: { tokens: number; truncated: boolean } = { tokens, truncated };
+    const dialoguePackCtx = { summaryChannel, anchorChannel, added, quota, used, maxTokens };
+    const dialogueLines = await collectDialogueContextLines(client, query, options);
+    for (const line of dialogueLines) {
+      if (line.kind === "summary") {
+        const estimate = estimateTokens(line.text);
+        if (dialogueAcc.tokens + estimate > maxTokens) {
+          dialogueAcc.truncated = true;
+          break;
+        }
+        dialogueAcc.tokens += estimate;
+      } else if (line.kind === "turn" && line.node) {
+        if (tryAppendL3Node(line.node, dialoguePackCtx, dialogueAcc) === "budget") {
+          break;
+        }
+        if (line.correctionLine) {
+          const estimate = estimateTokens(line.correctionLine);
+          if (dialogueAcc.tokens + estimate > maxTokens) {
+            dialogueAcc.truncated = true;
+            break;
+          }
+          dialoguePackCtx.summaryChannel.push(line.correctionLine);
+          dialogueAcc.tokens += estimate;
+        }
+      }
+    }
+    tokens = dialogueAcc.tokens;
+    truncated = dialogueAcc.truncated;
   }
 
   const enableExpansion = options?.enableEdgeExpansion !== false;

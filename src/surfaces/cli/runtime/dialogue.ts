@@ -143,8 +143,8 @@ export async function distillDialogueTurnsRuntime(
   let generate: ((prompt: string) => Promise<string>) | undefined;
   if (wantLlm) {
     try {
-      const { executeRolePrompt } = await import("../../../routing/provider-executor");
-      const { resolveModelForRole } = await import("../../../routing/model-router");
+      const { executeRolePrompt } = await import("../../../routing/provider-executor.js");
+      const { resolveModelForRole } = await import("../../../routing/model-router.js");
       const selection = resolveModelForRole("compressor", configPath);
       generate = (prompt: string) => executeRolePrompt("compressor", prompt, selection);
     } catch {
