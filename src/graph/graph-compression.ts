@@ -29,6 +29,7 @@ export const DEFAULT_EDGE_WEIGHTS: Record<GraphEdge["relation"], number> = {
   implements: 0.85,
   derived_from: 0.55,
   supersedes: 0.8,
+  same_topic: 0.5,
   governed_by: 0.7,
 };
 
