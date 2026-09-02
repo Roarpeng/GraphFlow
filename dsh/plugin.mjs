@@ -670,9 +670,75 @@ function spawnCliCapture(args, workspace, config, signal) {
 }
 
 /**
- * Static-panel data fetch: run the two read-only CLI snapshots
- * (`workbench tree --json`, `dialogue list --json --limit 50`) in the given
- * workspace and return structured JSON. Pure function — `config.spawn`,
+ * One-switch kill for the multi-agent trajectory capture (W3a), independent
+ * of question/reply capture: `GRAPHFLOW_CAPTURE_TRACE` in
+ * {0,false,off,no,disabled} (case-insensitive) disables trace recording.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {boolean}
+ */
+export function isTraceCaptureEnabled(env = process.env) {
+  const raw = env.GRAPHFLOW_CAPTURE_TRACE?.trim().toLowerCase();
+  return !(raw === "0" || raw === "false" || raw === "off" || raw === "no" || raw === "disabled");
+}
+
+/**
+ * Best-effort in-process agent-trace write via the co-located runtime module.
+ * Falls back to undefined when the runtime is absent — trace recording is
+ * additive and must never throw into the harness loop. `turnSeq` is the dsh
+ * turn ordinal when known (0 keeps the trace session-scoped only).
+ * @param {{ sessionId?: string, turnSeq?: number, agentKind: string, label: string, status: string }} trace
+ * @param {string} workspace
+ * @param {GraphFlowDshPluginConfig} [config]
+ * @returns {Promise<boolean>} true when the write landed
+ */
+async function writeAgentTraceInProcess(trace, workspace, config = {}) {
+  try {
+    const runtimePath = join(config.packageRoot ?? PACKAGE_ROOT, "dist", "surfaces", "cli", "runtime", "dialogue.js");
+    if (!existsSync(runtimePath)) return false;
+    const mod = await import(pathToFileURL(runtimePath).href);
+    const fn = mod?.recordAgentTraceRuntime ?? mod?.default?.recordAgentTraceRuntime;
+    if (typeof fn !== "function") return false;
+    const result = await fn(trace, resolveWorkspaceConfigPath(workspace), workspace);
+    return result === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Normalize a `subagent/start` | `subagent/end` payload into a trace record.
+ * The payload identity is `{ runId, provider, id, local, stopReason? }` and
+ * the parent agent is the second event argument. Unknown shapes return
+ * undefined (skipped, never recorded).
+ * @param {object|undefined} payload
+ * @param {object|undefined} [parent]
+ * @returns {{ sessionId?: string, turnSeq: number, agentKind: string, label: string, status: string }|undefined}
+ */
+export function normalizeSubagentTrace(payload, parent) {
+  if (!payload || typeof payload !== "object") return undefined;
+  const id = typeof payload.id === "string" ? payload.id : undefined;
+  const provider = typeof payload.provider === "string" ? payload.provider : "subagent";
+  const stopReason = typeof payload.stopReason === "string" ? payload.stopReason : undefined;
+  if (!id && !stopReason) return undefined;
+  const status = stopReason ? (stopReason === "error" ? "failed" : "settled") : "start";
+  const label = id ? `${provider}:${id}` : `${provider}:unknown`;
+  const sessionId =
+    parent && typeof parent === "object" && typeof parent.session?.id === "string"
+      ? parent.session.id
+      : undefined;
+  return {
+    ...(sessionId ? { sessionId } : {}),
+    turnSeq: 0,
+    agentKind: "subagent",
+    label,
+    status,
+  };
+}
+/**
+ * Static-panel data fetch: run the read-only CLI snapshots
+ * (`workbench tree --json`, `dialogue list --json --limit 50`,
+ * `dialogue traces --json --limit 50`) in the given workspace and return
+ * structured JSON. Pure function — `config.spawn`,
  * `config.env` and `config.packageRoot` are injectable for tests (the spawn
  * convention matches the rest of the glue); an optional `config.signal`
  * aborts the children. CLI/parse failures map to null fields with `ok: true`
@@ -680,21 +746,23 @@ function spawnCliCapture(args, workspace, config, signal) {
  * throwing) yield `ok: false`.
  * @param {string} workspaceRoot
  * @param {GraphFlowDshPluginConfig & {signal?: AbortSignal}} [config]
- * @returns {Promise<{ok: boolean, workbench?: unknown, dialogues?: unknown, error?: string}>}
+ * @returns {Promise<{ok: boolean, workbench?: unknown, dialogues?: unknown, traces?: unknown, error?: string}>}
  */
 export async function collectNodesData(workspaceRoot, config = {}) {
   if (typeof workspaceRoot !== "string" || !workspaceRoot.trim()) {
     return { ok: false, error: "no-workspace" };
   }
   try {
-    const [wb, dl] = await Promise.all([
+    const [wb, dl, tr] = await Promise.all([
       spawnCliCapture(["workbench", "tree", "--json"], workspaceRoot, config, config.signal),
       spawnCliCapture(["dialogue", "list", "--json", "--limit", "50"], workspaceRoot, config, config.signal),
+      spawnCliCapture(["dialogue", "traces", "--json", "--limit", "50"], workspaceRoot, config, config.signal),
     ]);
     return {
       ok: true,
       workbench: parseCliOut(wb),
       dialogues: parseCliOut(dl),
+      traces: parseCliOut(tr),
     };
   } catch (error) {
     return { ok: false, error: String(error && error.message ? error.message : error) };
@@ -742,7 +810,11 @@ async function rpcNodesHandler(endpoint, payload, signal, config) {
     }
     return {
       ok: true,
-      value: { workbench: result.workbench ?? null, dialogues: result.dialogues ?? null },
+      value: {
+        workbench: result.workbench ?? null,
+        dialogues: result.dialogues ?? null,
+        traces: result.traces ?? null,
+      },
     };
   } catch (error) {
     return {
@@ -1147,6 +1219,39 @@ export function apply(ctx, config = {}) {
         }
       } catch {
         // reply fill is optional
+      }
+    });
+  } catch {
+    // event bus missing
+  }
+
+  try {
+    // Conversation Graph W3a: multi-agent trajectory capture. Each
+    // `subagent/start` / `subagent/end` becomes an agent-trace Decision node
+    // in the workspace's dialogue graph (session-scoped when the parent
+    // session is known), so the conversation graph carries WHO did WHAT
+    // inside a turn — not just Q/A. In-process first (co-located runtime);
+    // a missing runtime is a silent no-op. GRAPHFLOW_CAPTURE_TRACE=0 kills it.
+    listen(ctx, "subagent/start", (payload, parent) => {
+      try {
+        if (!isTraceCaptureEnabled(envOf(config))) return;
+        const trace = normalizeSubagentTrace(payload, parent);
+        if (!trace) return;
+        const workspace = resolveWorkspaceCwd(parent, config.cwd);
+        writeAgentTraceInProcess(trace, workspace, config).catch(() => {});
+      } catch {
+        // trace capture is optional
+      }
+    });
+    listen(ctx, "subagent/end", (payload, parent) => {
+      try {
+        if (!isTraceCaptureEnabled(envOf(config))) return;
+        const trace = normalizeSubagentTrace(payload, parent);
+        if (!trace) return;
+        const workspace = resolveWorkspaceCwd(parent, config.cwd);
+        writeAgentTraceInProcess(trace, workspace, config).catch(() => {});
+      } catch {
+        // trace capture is optional
       }
     });
   } catch {

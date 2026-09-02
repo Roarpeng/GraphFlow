@@ -760,8 +760,8 @@ describe("static panel data channel (/gf nodes)", () => {
       home: makeTempRoot("gf-nodes-home-"),
     });
 
-    expect(spawned).toHaveLength(2);
-    expect(children).toHaveLength(2);
+    expect(spawned).toHaveLength(3);
+    expect(children).toHaveLength(3);
     expect(spawned[0]?.bin).toBe("npx");
     expect(spawned[0]?.args).toEqual([
       "-y",
@@ -782,18 +782,32 @@ describe("static panel data channel (/gf nodes)", () => {
       "--limit",
       "50",
     ]);
+    expect(spawned[2]?.bin).toBe("npx");
+    expect(spawned[2]?.args).toEqual([
+      "-y",
+      "--package=@roarpeng/graphflow",
+      "graphflow",
+      "dialogue",
+      "traces",
+      "--json",
+      "--limit",
+      "50",
+    ]);
     expect(spawned[0]?.cwd).toBe("/tmp/ws");
     expect(spawned[1]?.cwd).toBe("/tmp/ws");
+    expect(spawned[2]?.cwd).toBe("/tmp/ws");
 
     // workbench stdout is a wrapping `{ data }` object (unwrapped); dialogue
     // stdout is a bare array (passed through).
     settleFakeChild(children[0] as FakeSpawnChild, 0, JSON.stringify({ data: { outlines: [{ rootId: "r1", task: "t1", nodes: [] }] } }));
     settleFakeChild(children[1] as FakeSpawnChild, 0, JSON.stringify([{ id: "d1", seq: 1, userQuery: "q1" }]));
+    settleFakeChild(children[2] as FakeSpawnChild, 0, JSON.stringify([{ id: "tr1", agentKind: "subagent", status: "start" }]));
 
     await expect(promise).resolves.toEqual({
       ok: true,
       workbench: { outlines: [{ rootId: "r1", task: "t1", nodes: [] }] },
       dialogues: [{ id: "d1", seq: 1, userQuery: "q1" }],
+      traces: [{ id: "tr1", agentKind: "subagent", status: "start" }],
     });
   });
 
@@ -815,13 +829,15 @@ describe("static panel data channel (/gf nodes)", () => {
     expect(spawned[0]?.bin).toBe(process.execPath);
     expect(spawned[0]?.args).toEqual([cli, "workbench", "tree", "--json"]);
     expect(spawned[1]?.args).toEqual([cli, "dialogue", "list", "--json", "--limit", "50"]);
+    expect(spawned[2]?.args).toEqual([cli, "dialogue", "traces", "--json", "--limit", "50"]);
 
     // workbench exits 1 (stderr noise) → null; dialogue exits 0 but stdout is
     // not JSON → null. Overall ok stays true so the panel shows an empty state.
     settleFakeChild(children[0] as FakeSpawnChild, 1, "", "boom: workbench failed");
     settleFakeChild(children[1] as FakeSpawnChild, 0, "definitely not json");
+    settleFakeChild(children[2] as FakeSpawnChild, 0, "");
 
-    await expect(promise).resolves.toEqual({ ok: true, workbench: null, dialogues: null });
+    await expect(promise).resolves.toEqual({ ok: true, workbench: null, dialogues: null, traces: null });
   });
 
   it("collectNodesData returns no-workspace for a missing workspaceRoot without spawning", async () => {
@@ -898,7 +914,7 @@ describe("static panel data channel (/gf nodes)", () => {
 
     // Success: the handler wraps collectNodesData into the RpcResult envelope.
     const okPromise = handler("nodes", { workspaceRoot: "/tmp/ws" }, undefined) as Promise<unknown>;
-    expect(spawned).toHaveLength(2);
+    expect(spawned).toHaveLength(3);
     expect(spawned[0]?.args).toEqual([
       "-y",
       "--package=@roarpeng/graphflow",
@@ -917,12 +933,23 @@ describe("static panel data channel (/gf nodes)", () => {
       "--limit",
       "50",
     ]);
+    expect(spawned[2]?.args).toEqual([
+      "-y",
+      "--package=@roarpeng/graphflow",
+      "graphflow",
+      "dialogue",
+      "traces",
+      "--json",
+      "--limit",
+      "50",
+    ]);
     expect(spawned[0]?.cwd).toBe("/tmp/ws");
     settleFakeChild(children[0] as FakeSpawnChild, 0, JSON.stringify({ data: { outlines: [] } }));
     settleFakeChild(children[1] as FakeSpawnChild, 0, JSON.stringify([]));
+    settleFakeChild(children[2] as FakeSpawnChild, 0, JSON.stringify([]));
     await expect(okPromise).resolves.toEqual({
       ok: true,
-      value: { workbench: { outlines: [] }, dialogues: [] },
+      value: { workbench: { outlines: [] }, dialogues: [], traces: [] },
     });
 
     // Missing workspace → bad-request envelope with the required issues field.
@@ -944,5 +971,93 @@ describe("static panel data channel (/gf nodes)", () => {
     expect(() => cleanup?.()).not.toThrow();
     apply(ctx, cfg);
     expect(registrations).toHaveLength(2);
+  });
+});
+
+describe("multi-agent trajectory capture (Conversation Graph W3a)", () => {
+  it("normalizeSubagentTrace maps start/end identities into trace records", async () => {
+    const { normalizeSubagentTrace } = await import("../dsh/plugin.mjs");
+    const parent = { session: { id: "sess-1", header: { cwd: "/tmp/ws" } } };
+
+    const start = normalizeSubagentTrace(
+      { runId: "run-1", provider: "in-process", id: "child-1", local: true },
+      parent
+    );
+    expect(start).toEqual({
+      sessionId: "sess-1",
+      turnSeq: 0,
+      agentKind: "subagent",
+      label: "in-process:child-1",
+      status: "start",
+    });
+
+    const end = normalizeSubagentTrace(
+      { runId: "run-1", provider: "in-process", id: "child-1", local: true, stopReason: "completed" },
+      parent
+    );
+    expect(end?.status).toBe("settled");
+
+    const failed = normalizeSubagentTrace(
+      { runId: "run-2", provider: "in-process", id: "child-2", local: true, stopReason: "error" },
+      parent
+    );
+    expect(failed?.status).toBe("failed");
+
+    // Unknown shapes are skipped, never recorded.
+    expect(normalizeSubagentTrace(undefined, parent)).toBeUndefined();
+    expect(normalizeSubagentTrace({}, parent)).toBeUndefined();
+    expect(normalizeSubagentTrace({ id: "child-3" }, undefined)?.sessionId).toBeUndefined();
+  });
+
+  it("isTraceCaptureEnabled obeys GRAPHFLOW_CAPTURE_TRACE", async () => {
+    const { isTraceCaptureEnabled } = await import("../dsh/plugin.mjs");
+    expect(isTraceCaptureEnabled({})).toBe(true);
+    expect(isTraceCaptureEnabled({ GRAPHFLOW_CAPTURE_TRACE: "0" })).toBe(false);
+    expect(isTraceCaptureEnabled({ GRAPHFLOW_CAPTURE_TRACE: "off" })).toBe(false);
+    expect(isTraceCaptureEnabled({ GRAPHFLOW_CAPTURE_TRACE: "yes" })).toBe(true);
+  });
+
+  it("apply listens to subagent/start and subagent/end without throwing on a bare ctx", async () => {
+    const listened: string[] = [];
+    const ctx = {
+      skills: { register() {} },
+      on(event: string) {
+        listened.push(event);
+      },
+    };
+    const cfg = { spawn: (() => makeFakeSpawnChild()) as never, env: {}, packageRoot: makeTempRoot("gf-trace-pkg-") };
+    expect(() => apply(ctx as never, cfg as never)).not.toThrow();
+    expect(listened).toContain("subagent/start");
+    expect(listened).toContain("subagent/end");
+  });
+
+  it("subagent events never throw when the runtime write path is absent", async () => {
+    const { normalizeSubagentTrace } = await import("../dsh/plugin.mjs");
+    const handlers: Record<string, (payload: unknown, parent: unknown) => void> = {};
+    const ctx = {
+      skills: { register() {} },
+      on(event: string, handler: (payload: unknown, parent: unknown) => void) {
+        handlers[event] = handler;
+      },
+    };
+    const cfg = { env: {}, packageRoot: makeTempRoot("gf-trace-noruntime-") };
+    apply(ctx as never, cfg as never);
+
+    // fire the handlers — packageRoot has no dist runtime, so the write is a
+    // silent no-op and nothing may throw into the harness loop.
+    expect(() =>
+      handlers["subagent/start"]?.(
+        { runId: "r", provider: "in-process", id: "c", local: true },
+        { session: { id: "s", header: { cwd: "/tmp/ws" } } }
+      )
+    ).not.toThrow();
+    expect(() =>
+      handlers["subagent/end"]?.(
+        { runId: "r", provider: "in-process", id: "c", local: true, stopReason: "error" },
+        { session: { id: "s", header: { cwd: "/tmp/ws" } } }
+      )
+    ).not.toThrow();
+    // disabled switch short-circuits before any write
+    expect(normalizeSubagentTrace({ id: "x" }, undefined)).toBeDefined();
   });
 });

@@ -842,3 +842,275 @@ export function formatSupersessionLine(turn: DialogueTurnRecord, supersededBy: D
   );
   return `Turn #${turn.seq} "${oldConclusion}" 已被修正 (Turn #${supersededBy.seq}): "${newConclusion}"`;
 }
+
+// ─────────────────── Conversation Graph W3: fork + agent traces ───────────────────
+
+/** One hop on the replay path (dialogue list --path). */
+export interface DialoguePathStep {
+  id: string;
+  seq: number;
+  sessionId: string;
+  title?: string;
+  userQuery: string;
+  assistantReply: string;
+  jumped: boolean;
+  /** True when this step is the fork boundary (session changed from the previous step). */
+  forkBoundary: boolean;
+  supersedesTurnIds?: string[];
+  invalidAt?: number;
+}
+
+/**
+ * Replay path walk (pure graph): the turn spine ending at `endTurnId`,
+ * following parentTurnId links (jump targets + fork boundaries included)
+ * back to the first turn. Returns steps oldest-first.
+ */
+export function walkDialoguePath(
+  allTurns: DialogueTurnRecord[],
+  endTurnId: string,
+  limit = 30
+): DialoguePathStep[] {
+  const byId = new Map(allTurns.map((t) => [t.id, t]));
+  const chain: DialogueTurnRecord[] = [];
+  const seen = new Set<string>();
+  let cursor: DialogueTurnRecord | undefined = byId.get(endTurnId);
+  while (cursor && !seen.has(cursor.id) && chain.length < limit) {
+    seen.add(cursor.id);
+    chain.push(cursor);
+    cursor = cursor.parentTurnId ? byId.get(cursor.parentTurnId) : undefined;
+  }
+  chain.reverse();
+
+  return chain.map((turn, index) => ({
+    id: turn.id,
+    seq: turn.seq,
+    sessionId: turn.sessionId,
+    ...(turn.title ? { title: turn.title } : {}),
+    userQuery: turn.userQuery,
+    assistantReply: turn.assistantReply,
+    jumped: turn.jumped,
+    forkBoundary: index > 0 && chain[index - 1]!.sessionId !== turn.sessionId,
+    ...(turn.supersedesTurnIds && turn.supersedesTurnIds.length > 0
+      ? { supersedesTurnIds: turn.supersedesTurnIds }
+      : {}),
+    ...(turn.invalidAt !== undefined ? { invalidAt: turn.invalidAt } : {}),
+  }));
+}
+
+/** Fork result: a new session whose spine starts from the chosen turn. */
+export interface ForkDialogueResult {
+  forkedSessionId: string;
+  forkedSessionName: string;
+  sourceTurnId: string;
+  /** Turns copied into the fork (source spine up to and including the fork point). */
+  copiedTurns: number;
+}
+
+/**
+ * Explicit dialogue fork (Conversation Graph W3a): create a NEW dialogue
+ * session rooted at `fromTurnId`. The new session's first turn links
+ * `parentTurnId = fromTurnId` (next_section edge), so `dialogue list
+ * --path` can walk the spine across the fork boundary, and a `co_occurs`
+ * edge is NOT added (a fork is deliberate, not a jump).
+ *
+ * The fork records the source session's spine compactly: a single seed
+ * turn carrying the source question, plus fork metadata on the session hub
+ * (`forkedFrom`, `forkedFromTurnId`) for panel rendering. Pure graph
+ * operations; no snapshot copying.
+ */
+export async function forkDialogueSession(
+  client: GraphClient,
+  input: {
+    fromTurnId: string;
+    forkName?: string;
+    workspaceRoot?: string;
+    now?: number;
+  }
+): Promise<ForkDialogueResult | undefined> {
+  const now = input.now ?? Date.now();
+  const nodes = await collectDialogueNodes(client);
+  const sourceTurn = nodes
+    .map((node) => parseDialogueTurn(node))
+    .find((turn) => turn?.id === input.fromTurnId);
+  if (!sourceTurn) return undefined;
+
+  const forkedSessionName =
+    input.forkName?.trim() || `${sourceTurn.sessionId.slice("dialogue-session:".length)}-fork-${now.toString(36)}`;
+
+  // Seed the fork: the source question re-asked in the new session. The seed
+  // records WITHOUT resumeFrom (that flag only accepts same-session turns);
+  // the cross-session spine edge is added explicitly below.
+  const result = await recordDialogueTurn(client, {
+    userQuery: sourceTurn.userQuery,
+    ...(sourceTurn.assistantReply.trim() ? { assistantReply: sourceTurn.assistantReply } : {}),
+    sessionName: forkedSessionName,
+    ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}),
+    now,
+  });
+  if (!result.recorded || !result.turn || !result.session) return undefined;
+
+  // Fork spine: seed -next_section-> fork origin (cross-session) and
+  // parentTurnId on the record so dialogue list --path walks the boundary.
+  try {
+    await upsertUniqueEdges(client, [
+      { from: input.fromTurnId, to: result.turn.id, relation: "next_section" },
+    ]);
+    const seedWithParent: DialogueTurnRecord = { ...result.turn, parentTurnId: input.fromTurnId };
+    const seedSession = await loadSession(client, result.session.id);
+    if (seedSession) {
+      await persistTurn(client, seedWithParent, seedSession, {
+        linkParent: false,
+        jumped: false,
+        relatedNodeIds: seedWithParent.relatedNodeIds,
+      });
+    }
+  } catch {
+    // spine edges are additive
+  }
+
+  // Fork provenance on the session hub: read-modify-write the hub record.
+  try {
+    const hub = await loadSession(client, result.session.id);
+    if (hub) {
+      const patched: DialogueSessionRecord = {
+        ...hub,
+        topicTokens: mergeTopicTokens(hub.topicTokens, sourceTurn.userQuery),
+      };
+      await persistSession(client, patched);
+      await upsertUniqueEdges(client, [
+        { from: result.session.id, to: sourceTurn.sessionId, relation: "same_topic" },
+      ]);
+    }
+  } catch {
+    // provenance edges are additive
+  }
+
+  return {
+    forkedSessionId: result.session.id,
+    forkedSessionName,
+    sourceTurnId: input.fromTurnId,
+    copiedTurns: 1,
+  };
+}
+
+/** Agent-trace node: one orchestrator step of a multi-agent turn (W3a). */
+export interface AgentTraceRecord {
+  id: string;
+  sessionId: string;
+  turnSeq: number;
+  /** Sub-agent kind: "subagent" | "tool" | "interrupt". */
+  agentKind: string;
+  /** Short label: subagent description or tool name. */
+  label: string;
+  /** Outcome: "start" | "settled" | "failed" | "interrupted". */
+  status: string;
+  createdAt: number;
+}
+
+export const AGENT_TRACE_PREFIX = "agent-trace:";
+export const AGENT_TRACE_KIND = "agent-trace";
+const AGENT_TRACE_MAX_PER_TURN = 24;
+
+export function isAgentTraceNode(node: GraphNode): boolean {
+  return node.metadata?.kind === AGENT_TRACE_KIND || node.id.startsWith(AGENT_TRACE_PREFIX);
+}
+
+/**
+ * Record one multi-agent trajectory event as a Decision node linked to the
+ * session hub (part_of) and its turn spine anchor (co_occurs): dsh glue
+ * listens to subagent/tool events and writes these so the conversation
+ * graph carries WHO did WHAT within a turn, not just Q/A.
+ * Pure single write; never throws into the caller.
+ */
+export async function recordAgentTrace(
+  client: GraphClient,
+  input: {
+    sessionId: string;
+    turnSeq: number;
+    agentKind: string;
+    label: string;
+    status: string;
+    now?: number;
+  }
+): Promise<AgentTraceRecord | undefined> {
+  try {
+    const now = input.now ?? Date.now();
+    const sessionHash = input.sessionId.startsWith(DIALOGUE_SESSION_PREFIX)
+      ? input.sessionId.slice(DIALOGUE_SESSION_PREFIX.length)
+      : hashText(input.sessionId);
+    // Dedupe key: kind+label+status+turn; seq suffix keeps distinct repeats.
+    const dedupe = hashText(`${input.agentKind}|${input.label}|${input.status}|${input.turnSeq}`);
+    const id = `${AGENT_TRACE_PREFIX}${sessionHash}:${String(input.turnSeq).padStart(4, "0")}:${dedupe.slice(0, 12)}`;
+
+    const record: AgentTraceRecord = {
+      id,
+      sessionId: input.sessionId,
+      turnSeq: input.turnSeq,
+      agentKind: input.agentKind,
+      label: clip(input.label, 120),
+      status: input.status,
+      createdAt: now,
+    };
+    const node: GraphNode = {
+      id,
+      type: "Decision",
+      content: `agent-trace turn#${input.turnSeq} ${input.agentKind}:${input.status} ${record.label}`,
+      metadata: {
+        kind: AGENT_TRACE_KIND,
+        record: JSON.stringify(record),
+        agentKind: input.agentKind,
+        status: input.status,
+      },
+    };
+    await client.upsertNodes([node]);
+    await upsertUniqueEdges(client, [
+      { from: id, to: input.sessionId, relation: "part_of" },
+    ]);
+    return record;
+  } catch {
+    return undefined;
+  }
+}
+
+/** List agent-trace records (optionally per session / turn), newest first. */
+export async function listAgentTraces(
+  client: GraphClient,
+  options?: { sessionId?: string; turnSeq?: number; limit?: number }
+): Promise<AgentTraceRecord[]> {
+  const snapshot = client.readSnapshot?.();
+  let nodes: GraphNode[];
+  if (snapshot) {
+    nodes = snapshot.nodes.filter((node) => isAgentTraceNode(node));
+  } else {
+    const byId = new Map<string, GraphNode>();
+    for (const node of await client.queryByKeyword(AGENT_TRACE_PREFIX)) {
+      if (isAgentTraceNode(node)) byId.set(node.id, node);
+    }
+    nodes = Array.from(byId.values());
+  }
+  const records: AgentTraceRecord[] = [];
+  for (const node of nodes) {
+    try {
+      const parsed = JSON.parse(
+        typeof node.metadata?.record === "string" ? node.metadata.record : "{}"
+      ) as Partial<AgentTraceRecord>;
+      if (typeof parsed.id !== "string" || typeof parsed.label !== "string") continue;
+      records.push({
+        id: parsed.id,
+        sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : "",
+        turnSeq: typeof parsed.turnSeq === "number" ? parsed.turnSeq : 0,
+        agentKind: typeof parsed.agentKind === "string" ? parsed.agentKind : "",
+        label: parsed.label,
+        status: typeof parsed.status === "string" ? parsed.status : "",
+        createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : 0,
+      });
+    } catch {
+      // skip malformed trace payloads
+    }
+  }
+  records.sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id));
+  let filtered = records;
+  if (options?.sessionId) filtered = filtered.filter((r) => r.sessionId === options.sessionId);
+  if (options?.turnSeq !== undefined) filtered = filtered.filter((r) => r.turnSeq === options.turnSeq);
+  return filtered.slice(0, Math.min(options?.limit ?? AGENT_TRACE_MAX_PER_TURN * 4, 200));
+}
