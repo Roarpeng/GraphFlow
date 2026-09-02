@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased] - Conversation Graph 2.0（对话过程节点图谱）
+## [1.14.0] - 2026-09-02
 
 ### Added
 
