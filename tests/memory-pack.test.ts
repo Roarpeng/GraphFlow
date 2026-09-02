@@ -181,14 +181,16 @@ describe("experience memory pack", () => {
     expect(result.path).toBe(outDir);
     expect(result.skillCount).toBe(1);
     expect(result.episodeCount).toBe(1);
-    expect(result.files).toEqual(["README.md", "skills.md", "episodes.md"]);
+    expect(result.files).toEqual(["README.md", "skills.md", "episodes.md", "dialogues.md"]);
 
     const readme = readFileSync(join(outDir, "README.md"), "utf8");
     const skills = readFileSync(join(outDir, "skills.md"), "utf8");
     const episodes = readFileSync(join(outDir, "episodes.md"), "utf8");
+    const dialogues = readFileSync(join(outDir, "dialogues.md"), "utf8");
     expect(readme).toContain("experience memory pack");
     expect(skills).toContain("use-context-first");
     expect(episodes).toContain("document context contract");
     expect(episodes).toContain("ship markdown pack");
+    expect(dialogues).toContain("No dialogue-turn");
   });
 });

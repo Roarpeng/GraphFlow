@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased] - Conversation Graph 2.0（对话过程节点图谱）
+
+### Added
+
+- **W1 时间语义与类型化边**：dialogue-turn 新增 `supersedes` / `same_topic` 类型化边与 `validAt` / `invalidAt` 时间有效性（Graphiti 式）；`detectSupersession` 离线修正检测（更正标记 + 主题重叠阈值，pending 轮不可被取代，nearest-N 截断）；跨 session `same_topic` 语义连边；`effectiveTurns` 当前真值过滤与 `formatSupersessionLine` 修正链渲染。`GraphEdge.relation` 扩展 `same_topic` 并纳入 compression weights / snapshot 优先级。
+- **W1 可选 LLM 轮蒸馏**：`distillTurnWithLlm`（economy tier 路由，严格 Title/Summary/Decision 标签输出，失败逐轮回退启发式）；`isDecisionTurn` 决策轮标记为飞轮提供 turn 粒度学习信号；`dialogue distill --llm` CLI 旗标（仅 `hasUsableLlmProvider` 时生效）。
+- **W2 对话图进入上下文引擎**：`context-slicer` L3 打包命中有效对话轮（≤3）并附修正链标注行——同 token 预算与 L3 quota，绝不豁免；`graph-search` 新增 `searchDialogueTurns`（默认隐藏被取代轮、`includeSuperseded` 回看历史、修正链注解），对话命中纯增量、永不挤掉代码 Symbol/File 结果。
+- **W3 多 Agent 轨迹**：dsh glue 监听 `subagent/start|end` 写 `agent-trace` Decision 节点（`GRAPHFLOW_CAPTURE_TRACE` 独立开关、kind+label+status+turn 哈希去重、in-process runtime 优先、缺失即静默 no-op、绝不抛入 harness 循环）。
+- **W3 fork / 回放原语**：`forkDialogueSession` 显式分叉（跨 session `next_section` 主干边 + fork session↔源 session `same_topic` 溯源边 + seed parentTurnId）；`walkDialoguePath` 回放路径 walker（jump/fork 边界标注）；CLI `dialogue fork --from <turnId> [--name]`、`dialogue list --path <turnId>`、`dialogue traces [--session] [--limit]`。
+- **W4 面板与导出**：`/gf` RPC `nodes` 通道与 web 面板 host half 新增 `dialogue traces` 快照；面板对话轮显示「跳转 / 修正过结论 / fork」徽章与「Agent 轨迹」区块（含启动/完成/失败状态）；`artifact export-memory` 新增 `dialogues.md`——按 session 分组的对话子图（修正链与 superseded 历史标注、Agent 轨迹列表）。
+
+### Tests
+
+- 新增 5 个测试文件 28 个用例：`m-dialogue-temporal`（8，时间边与修正链）、`m-dialogue-llm-distill`（6，LLM 蒸馏回退）、`m-dialogue-l3-packing`（5，L3 打包预算与修正标注）、`m-dialogue-retrieval`（5，检索命中与 superseded 过滤）、`m-dialogue-fork-replay`（6，fork/回放/轨迹）、`m-memory-pack-dialogues`（4，对话子图导出）；dsh glue 套件更新为 3 命令面板协议并新增 4 个轨迹用例（共 29）。
+
 ## [1.13.0] - 2026-08-23
 
 ### Added
