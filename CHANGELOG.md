@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **GraphFlow + Serena 联合方案独立指南**：把 `docs/comparison.md` 里的 "better together" 提升为一等文档 [`docs/graphflow-serena.md`](docs/graphflow-serena.md) / [中文](docs/graphflow-serena.zh.md)——并列安装两个 MCP、谁做什么（context/plan → Serena 编辑 → `report_outcome`）、常见坑。README（EN/中文）与 comparison 互链；配置示例 [`examples/graphflow-serena.mcp.json`](examples/graphflow-serena.mcp.json)（仅 MCP 片段，不把 Serena 写入 `package.json`）。无运行时代码改动。
+
 ## [1.15.1] - 2026-09-05
 
 ### Changed
