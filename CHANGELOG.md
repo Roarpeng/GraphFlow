@@ -9,13 +9,20 @@ All notable changes to this project are documented in this file.
 - **W1 时间语义与类型化边**：dialogue-turn 新增 `supersedes` / `same_topic` 类型化边与 `validAt` / `invalidAt` 时间有效性（Graphiti 式）；`detectSupersession` 离线修正检测（更正标记 + 主题重叠阈值，pending 轮不可被取代，nearest-N 截断）；跨 session `same_topic` 语义连边；`effectiveTurns` 当前真值过滤与 `formatSupersessionLine` 修正链渲染。`GraphEdge.relation` 扩展 `same_topic` 并纳入 compression weights / snapshot 优先级。
 - **W1 可选 LLM 轮蒸馏**：`distillTurnWithLlm`（economy tier 路由，严格 Title/Summary/Decision 标签输出，失败逐轮回退启发式）；`isDecisionTurn` 决策轮标记为飞轮提供 turn 粒度学习信号；`dialogue distill --llm` CLI 旗标（仅 `hasUsableLlmProvider` 时生效）。
 - **W2 对话图进入上下文引擎**：`context-slicer` L3 打包命中有效对话轮（≤3）并附修正链标注行——同 token 预算与 L3 quota，绝不豁免；`graph-search` 新增 `searchDialogueTurns`（默认隐藏被取代轮、`includeSuperseded` 回看历史、修正链注解），对话命中纯增量、永不挤掉代码 Symbol/File 结果。
+- **W2b 对话轮检索接入生产链路**：`previewContext` 附加 `dialogueHits`（跨 session 历史问答召回，≤3 条、默认隐藏被取代轮；命中修正链时在 summary 顶部加一行 `Dialogue recall: ...`，`recordDialogue: false` 的只读召回也生效）——MCP `graphflow_context` 结构化结果与 CLI `graphflow context` 同步获得该字段；新增 CLI `dialogue search "<query>" [--limit N] [--include-superseded]` 与 runtime `searchDialogueTurnsRuntime`，直接检索历史问答。
 - **W3 多 Agent 轨迹**：dsh glue 监听 `subagent/start|end` 写 `agent-trace` Decision 节点（`GRAPHFLOW_CAPTURE_TRACE` 独立开关、kind+label+status+turn 哈希去重、in-process runtime 优先、缺失即静默 no-op、绝不抛入 harness 循环）。
 - **W3 fork / 回放原语**：`forkDialogueSession` 显式分叉（跨 session `next_section` 主干边 + fork session↔源 session `same_topic` 溯源边 + seed parentTurnId）；`walkDialoguePath` 回放路径 walker（jump/fork 边界标注）；CLI `dialogue fork --from <turnId> [--name]`、`dialogue list --path <turnId>`、`dialogue traces [--session] [--limit]`。
 - **W4 面板与导出**：`/gf` RPC `nodes` 通道与 web 面板 host half 新增 `dialogue traces` 快照；面板对话轮显示「跳转 / 修正过结论 / fork」徽章与「Agent 轨迹」区块（含启动/完成/失败状态）；`artifact export-memory` 新增 `dialogues.md`——按 session 分组的对话子图（修正链与 superseded 历史标注、Agent 轨迹列表）。
+- **发布管线真正可发版**：新增 `scripts/ci-release-evidence.ts` flywheel 自证步骤——在 CI 上对本仓库做真实 dogfood（真实索引 + 检索探针写入 context-fidelity 样本 + 两个真实 pass episode 绑定 proven skill），并生成确定性 `graphflow-out/ci.config.json` 供 gate 审计；`publish-npm.yml` 在 gate 前执行该步骤。此前 release gate 在全新 checkout 上恒为 `proven-skills 0 < 1; fidelity-samples 0 < 1`，v1.13 接入门禁后 npm 实际从未发版成功。
+
+### Fixed
+
+- **Windows release gate**：`scripts/release-gates.cjs` 改为直接 `node + tsx` 运行 gate CLI——Node ≥ 18 出于安全拒绝 spawn `npx`/`npx.cmd` shim（EINVAL），旧写法在 Windows 上静默失败且无任何输出。
 
 ### Tests
 
 - 新增 5 个测试文件 28 个用例：`m-dialogue-temporal`（8，时间边与修正链）、`m-dialogue-llm-distill`（6，LLM 蒸馏回退）、`m-dialogue-l3-packing`（5，L3 打包预算与修正标注）、`m-dialogue-retrieval`（5，检索命中与 superseded 过滤）、`m-dialogue-fork-replay`（6，fork/回放/轨迹）、`m-memory-pack-dialogues`（4，对话子图导出）；dsh glue 套件更新为 3 命令面板协议并新增 4 个轨迹用例（共 29）。
+- 新增 `m-dialogue-search-recall`（2，preview 附加 `dialogueHits` 与 CLI runtime 检索回环）；修复 README 版本徽章落后于 package.json 导致的 doc-code consistency 用例失败。
 
 ## [1.13.0] - 2026-08-23
 
