@@ -68,7 +68,8 @@ describe("install JSON report for agent self-check", () => {
       report.doctor.ok &&
         !report.mcp.some((m) => m.status === "error") &&
         report.claudeCodeHooks.status !== "error" &&
-        report.dshHarness.status !== "error"
+        report.dshHarness.status !== "error" &&
+        report.globalConfig.status !== "error"
     );
     if (!report.ok) {
       expect(report.remediation.length).toBeGreaterThan(0);

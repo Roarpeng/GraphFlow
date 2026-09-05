@@ -24,22 +24,22 @@ import {
   type McpInstallResult,
   type McpRemoveResult,
 } from "../../integrations/agent-mcp-installer";
-import {
-  getClaudeCodeHooksStatus,
-  installClaudeCodeHooks,
-  uninstallClaudeCodeHooks,
-  type ClaudeCodeHooksResult,
-} from "../../integrations/claude-code-hooks";
+import { type ClaudeCodeHooksResult } from "../../integrations/claude-code-hooks";
 import {
   DSH_GLUE_ROW_ID,
-  getDshHarnessStatus,
   type DshHarnessInstallResult,
 } from "../../integrations/dsh-harness-installer";
 import {
+  CLAUDE_CODE_HOST_ADAPTER_ID,
+  CURSOR_HOST_ADAPTER_ID,
   DSH_HOST_ADAPTER_ID,
+  getHostAdapterInstallStatus,
   installViaHostAdapter,
   uninstallViaHostAdapter,
 } from "../../integrations/host-adapter-install";
+
+const HOST_ADAPTER_MCP_IDS = new Set(["cursor", "claude-code", "cursor-windows", "claude-code-windows"]);
+const HOST_ADAPTER_SKILL_AGENTS = new Set(["Cursor skill", "Claude Code skill"]);
 
 const isWindows = process.platform === "win32";
 
@@ -269,6 +269,16 @@ export function buildInstallReport(
 ): InstallReport {
   const bootstrapGraph = options.bootstrapGraph !== false;
   const globalConfig = ensureGlobalGraphFlowConfig();
+  // Migrated hosts first so HostAdapter is the primary writer; legacy
+  // installers below stay responsible for Trae / VS Code / Windsurf / etc.
+  const cursorInstalled = installViaHostAdapter(CURSOR_HOST_ADAPTER_ID);
+  const claudeInstalled = installViaHostAdapter(CLAUDE_CODE_HOST_ADAPTER_ID);
+  const dshInstalled = installViaHostAdapter(DSH_HOST_ADAPTER_ID);
+  const claudeCodeHooks: ClaudeCodeHooksResult = {
+    status: claudeInstalled.status === "unsupported" ? "skipped" : claudeInstalled.status,
+    ...(claudeInstalled.filePath !== undefined ? { filePath: claudeInstalled.filePath } : {}),
+    ...(claudeInstalled.message !== undefined ? { message: claudeInstalled.message } : {}),
+  };
   // Silent during report build so `--json` is not polluted; human text comes from formatInstallLegacyText.
   const skills = installAllSkills(undefined, () => undefined, workspaceRoot);
   const mcp = installMcpToDetectedAgents({
@@ -276,18 +286,6 @@ export function buildInstallReport(
     installScope: "user",
     workspaceRoot,
   });
-  const hooksStatus = getClaudeCodeHooksStatus();
-  const claudeCodeHooks: ClaudeCodeHooksResult = hooksStatus.detected
-    ? installClaudeCodeHooks({
-        settingsPath: hooksStatus.settingsPath,
-        hooksDir: hooksStatus.hooksDir,
-      })
-    : {
-        status: "skipped",
-        filePath: hooksStatus.settingsPath,
-        message: "Claude Code not detected",
-      };
-  const dshInstalled = installViaHostAdapter(DSH_HOST_ADAPTER_ID);
   const dshHarness: DshHarnessInstallResult = {
     status: dshInstalled.status === "unsupported" ? "skipped" : dshInstalled.status,
     ...(dshInstalled.filePath !== undefined ? { filePath: dshInstalled.filePath } : {}),
@@ -305,6 +303,7 @@ export function buildInstallReport(
   const mcpHasError = mcp.some((item) => item.status === "error");
   const hooksHasError = claudeCodeHooks.status === "error";
   const dshHasError = dshHarness.status === "error";
+  const cursorHasError = cursorInstalled.status === "error";
   const skillHasError = [
     ...skills.traeSkills,
     ...skills.cursorRules,
@@ -313,7 +312,13 @@ export function buildInstallReport(
     ...skills.agentSkills,
     ...skills.projectRules,
   ].some((item) => item.status === "error");
-  const ok = doctor.ok && !mcpHasError && !hooksHasError && !dshHasError && globalConfig.status !== "error";
+  const ok =
+    doctor.ok &&
+    !mcpHasError &&
+    !hooksHasError &&
+    !dshHasError &&
+    !cursorHasError &&
+    globalConfig.status !== "error";
   const remediation: string[] = [];
   if (!ok) {
     if (globalConfig.status === "error") {
@@ -326,8 +331,15 @@ export function buildInstallReport(
     }
     if (hooksHasError) {
       remediation.push(
-        `Fix Claude Code hooks install at ${claudeCodeHooks.filePath ?? hooksStatus.settingsPath}${
+        `Fix Claude Code hooks install at ${claudeCodeHooks.filePath ?? ""}${
           claudeCodeHooks.message ? `: ${claudeCodeHooks.message}` : "."
+        }`
+      );
+    }
+    if (cursorHasError) {
+      remediation.push(
+        `Fix Cursor HostAdapter install at ${cursorInstalled.filePath ?? ""}${
+          cursorInstalled.message ? `: ${cursorInstalled.message}` : "."
         }`
       );
     }
@@ -502,23 +514,28 @@ export function runUninstall(workspaceRoot: string = process.cwd()) {
   }
   console.log(`[INFO] Skills/Rules removed: ${skillRemoved}/${skillResults.length} targets`);
 
-  // 3. Remove Claude Code SessionStart/End/Stop hooks when Claude Code is present
-  const hooksStatus = getClaudeCodeHooksStatus();
-  if (hooksStatus.detected) {
-    try {
-      const hooksResult = uninstallClaudeCodeHooks(hooksStatus.settingsPath, hooksStatus.hooksDir);
-      const icon = hooksResult.status === "updated" || hooksResult.status === "created" ? "[REMOVED]" : "[SKIP]";
-      console.log(`${icon} Claude Code hooks: ${hooksResult.message ?? hooksResult.status}`);
-    } catch (error) {
-      console.log(`[SKIP] Claude Code hooks: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  // 3. Remove Cursor / Claude Code (MCP + rules/skills + hooks) via HostAdapter
+  const cursorStatus = getHostAdapterInstallStatus(CURSOR_HOST_ADAPTER_ID);
+  if (cursorStatus?.detected) {
+    const cursorUninstalled = uninstallViaHostAdapter(CURSOR_HOST_ADAPTER_ID);
+    const icon = cursorUninstalled.status === "updated" ? "[REMOVED]" : "[SKIP]";
+    console.log(`${icon} Cursor: ${cursorUninstalled.message ?? cursorUninstalled.status}`);
   } else {
-    console.log("[SKIP] Claude Code hooks: Claude Code not detected");
+    console.log("[SKIP] Cursor: not detected");
+  }
+
+  const claudeStatus = getHostAdapterInstallStatus(CLAUDE_CODE_HOST_ADAPTER_ID);
+  if (claudeStatus?.detected) {
+    const claudeUninstalled = uninstallViaHostAdapter(CLAUDE_CODE_HOST_ADAPTER_ID);
+    const icon = claudeUninstalled.status === "updated" ? "[REMOVED]" : "[SKIP]";
+    console.log(`${icon} Claude Code: ${claudeUninstalled.message ?? claudeUninstalled.status}`);
+  } else {
+    console.log("[SKIP] Claude Code: not detected");
   }
 
   // 4. Remove DeepSeek Harness home-level cordis.patch.yml overlay
-  const dshStatus = getDshHarnessStatus();
-  if (dshStatus.detected) {
+  const dshStatus = getHostAdapterInstallStatus(DSH_HOST_ADAPTER_ID);
+  if (dshStatus?.detected) {
     const dshUninstalled = uninstallViaHostAdapter(DSH_HOST_ADAPTER_ID);
     const dshResult: DshHarnessInstallResult = {
       status: dshUninstalled.status === "unsupported" ? "skipped" : dshUninstalled.status,
@@ -579,11 +596,81 @@ function toDoctorStatus(installed: boolean, detected = true): DoctorCheckStatus 
   return detected ? "missing" : "n/a";
 }
 
+function pushHostAdapterDoctorChecks(checks: DoctorCheckItem[], hostId: string): void {
+  const status = getHostAdapterInstallStatus(hostId);
+  if (!status?.detected) return;
+
+  const mcpTargets = status.mcpTargets ?? [];
+  if (mcpTargets.length > 0) {
+    for (const target of mcpTargets) {
+      checks.push({
+        category: "mcp",
+        agent: target.agentName ?? status.agent,
+        path: target.path,
+        scope: target.scope ?? "user",
+        status: toDoctorStatus(target.installed, true),
+        detected: true,
+      });
+    }
+  } else if (status.mcpPath) {
+    checks.push({
+      category: "mcp",
+      agent: status.agent,
+      path: status.mcpPath,
+      scope: "user",
+      status: toDoctorStatus(status.mcpInstalled ?? status.installed, true),
+      detected: true,
+    });
+  } else if (status.patchPath) {
+    checks.push({
+      category: "mcp",
+      agent: status.agent,
+      path: status.patchPath,
+      scope: "user",
+      status: toDoctorStatus(status.installed, true),
+      detected: true,
+    });
+  }
+
+  if (status.skillPath && hostId !== DSH_HOST_ADAPTER_ID) {
+    checks.push({
+      category: "skill",
+      agent: `${status.agent} skill`,
+      path: status.skillPath,
+      status: toDoctorStatus(status.skillInstalled ?? false, true),
+      detected: true,
+    });
+  }
+
+  if (hostId === CLAUDE_CODE_HOST_ADAPTER_ID && status.settingsPath) {
+    checks.push({
+      category: "hooks",
+      agent: "Claude Code hooks",
+      path: status.settingsPath,
+      scope: "user",
+      status: toDoctorStatus(status.hooksInstalled ?? false, true),
+      detected: true,
+    });
+  }
+
+  if (hostId === DSH_HOST_ADAPTER_ID && status.patchPath) {
+    checks.push({
+      category: "hooks",
+      agent: "DeepSeek Harness glue",
+      path: `${status.patchPath}#${DSH_GLUE_ROW_ID}`,
+      scope: "user",
+      status: toDoctorStatus(status.glueInstalled ?? false, true),
+      detected: true,
+    });
+  }
+}
+
 export function buildDoctorReport(workspaceRoot: string = process.cwd()): DoctorReport {
   const agents = detectInstalledAgents();
   const checks: DoctorCheckItem[] = [];
 
   for (const status of getMcpInstallStatus()) {
+    if (HOST_ADAPTER_MCP_IDS.has(status.agentId)) continue;
     checks.push({
       category: "mcp",
       agent: status.agentName,
@@ -636,6 +723,7 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
 
   for (const status of getAgentSkillStatus()) {
     if (!status.detected) continue;
+    if (HOST_ADAPTER_SKILL_AGENTS.has(status.agent)) continue;
     checks.push({
       category: "skill",
       agent: status.agent,
@@ -656,37 +744,9 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
     });
   }
 
-  const hooksStatus = getClaudeCodeHooksStatus();
-  if (hooksStatus.detected) {
-    checks.push({
-      category: "hooks",
-      agent: hooksStatus.agent,
-      path: hooksStatus.settingsPath,
-      scope: "user",
-      status: toDoctorStatus(hooksStatus.installed, true),
-      detected: true,
-    });
-  }
-
-  const dshStatus = getDshHarnessStatus();
-  if (dshStatus.detected) {
-    checks.push({
-      category: "mcp",
-      agent: dshStatus.agent,
-      path: dshStatus.patchPath,
-      scope: "user",
-      status: toDoctorStatus(dshStatus.installed, true),
-      detected: true,
-    });
-    checks.push({
-      category: "hooks",
-      agent: "DeepSeek Harness glue",
-      path: `${dshStatus.patchPath}#${DSH_GLUE_ROW_ID}`,
-      scope: "user",
-      status: toDoctorStatus(dshStatus.glueInstalled, true),
-      detected: true,
-    });
-  }
+  pushHostAdapterDoctorChecks(checks, CURSOR_HOST_ADAPTER_ID);
+  pushHostAdapterDoctorChecks(checks, CLAUDE_CODE_HOST_ADAPTER_ID);
+  pushHostAdapterDoctorChecks(checks, DSH_HOST_ADAPTER_ID);
 
   const installed = checks.filter((c) => c.status === "installed").length;
   const missing = checks.filter((c) => c.status === "missing").length;
