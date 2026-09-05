@@ -53,18 +53,23 @@ function unsupportedHost(hostId: string, displayName: string): HostAdapterInstal
   };
 }
 
+function dshHomeOptions(options: HostAdapterInstallOptions): { dshHome?: string } {
+  return typeof options.home === "string" ? { dshHome: options.home } : {};
+}
+
 function withAdapterMeta(
   hostId: string,
   displayName: string,
   result: DshHarnessInstallResult
 ): HostAdapterInstallResult {
-  return {
+  const mapped: HostAdapterInstallResult = {
     hostId,
     displayName,
     status: result.status,
-    filePath: result.filePath,
-    message: result.message,
   };
+  if (result.filePath !== undefined) mapped.filePath = result.filePath;
+  if (result.message !== undefined) mapped.message = result.message;
+  return mapped;
 }
 
 /** Install the migrated host slice. DSH only in this PR; other hosts are unsupported. */
@@ -75,7 +80,7 @@ export function installViaHostAdapter(
   const adapter = getHostAdapter(hostId);
   if (!adapter) return unknownHost(hostId);
   if (adapter.id === DSH_HOST_ADAPTER_ID) {
-    return withAdapterMeta(adapter.id, adapter.displayName, installDshHarness({ dshHome: options.home }));
+    return withAdapterMeta(adapter.id, adapter.displayName, installDshHarness(dshHomeOptions(options)));
   }
   return unsupportedHost(adapter.id, adapter.displayName);
 }
@@ -87,7 +92,7 @@ export function uninstallViaHostAdapter(
   const adapter = getHostAdapter(hostId);
   if (!adapter) return unknownHost(hostId);
   if (adapter.id === DSH_HOST_ADAPTER_ID) {
-    return withAdapterMeta(adapter.id, adapter.displayName, uninstallDshHarness({ dshHome: options.home }));
+    return withAdapterMeta(adapter.id, adapter.displayName, uninstallDshHarness(dshHomeOptions(options)));
   }
   return unsupportedHost(adapter.id, adapter.displayName);
 }
@@ -98,5 +103,5 @@ export function getHostAdapterInstallStatus(
 ): DshHarnessStatus | undefined {
   const adapter = getHostAdapter(hostId);
   if (!adapter || adapter.id !== DSH_HOST_ADAPTER_ID) return undefined;
-  return getDshHarnessStatus({ dshHome: options.home });
+  return getDshHarnessStatus(dshHomeOptions(options));
 }

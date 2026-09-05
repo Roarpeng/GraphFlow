@@ -288,8 +288,8 @@ export function buildInstallReport(
   const dshInstalled = installViaHostAdapter(DSH_HOST_ADAPTER_ID);
   const dshHarness: DshHarnessInstallResult = {
     status: dshInstalled.status === "unsupported" ? "skipped" : dshInstalled.status,
-    filePath: dshInstalled.filePath,
-    message: dshInstalled.message,
+    ...(dshInstalled.filePath !== undefined ? { filePath: dshInstalled.filePath } : {}),
+    ...(dshInstalled.message !== undefined ? { message: dshInstalled.message } : {}),
   };
 
   if (bootstrapGraph) {
@@ -520,8 +520,8 @@ export function runUninstall(workspaceRoot: string = process.cwd()) {
     const dshUninstalled = uninstallViaHostAdapter(DSH_HOST_ADAPTER_ID);
     const dshResult: DshHarnessInstallResult = {
       status: dshUninstalled.status === "unsupported" ? "skipped" : dshUninstalled.status,
-      filePath: dshUninstalled.filePath,
-      message: dshUninstalled.message,
+      ...(dshUninstalled.filePath !== undefined ? { filePath: dshUninstalled.filePath } : {}),
+      ...(dshUninstalled.message !== undefined ? { message: dshUninstalled.message } : {}),
     };
     const icon = dshResult.status === "updated" ? "[REMOVED]" : "[SKIP]";
     console.log(`${icon} DeepSeek Harness: ${dshResult.message ?? dshResult.status}`);
