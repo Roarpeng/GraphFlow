@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-09-05（v1.15.0 之后：Cursor / Claude Code 安装路径迁到 HostAdapter）
+> 最后更新：2026-09-05（v1.15.1 之后：公开飞轮复现包 `npm run proof:flywheel`）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -62,10 +62,10 @@
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
 | **P0** | **飞轮自动闭环**：hook 式 outcome 自动捕获 + 历史 backfill | ✅ | auto-capture；Claude Code hooks API + **install/doctor 接线**；`npm run backfill:episodes`；v1.9.8 diagnose 暴露 flywheel 健康。Dogfood 非零 skill 靠真实使用积累 |
-| **P1** | **独立 benchmark 公开复现** | ✅ | [benchmarks/README.md](benchmarks/README.md) + commit 锚定 JSON；欢迎第三方复现 |
+| **P1** | **独立 benchmark 公开复现** | ✅ | [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md) + `npm run proof:flywheel`（检索 / 飞轮 A/B / 记忆 A/B）；方法学见 [benchmarks/README.md](benchmarks/README.md) |
 | **P1** | **图噪声治理**：Trie 引用预过滤、子图 PageRank 缓存 | ✅ | v1.9.8 落地；Bloom 非必要（Trie 已覆盖预过滤） |
 | **P1** | **团队共享记忆安全门控**：provenance + canary + anti-pattern 隔离 | ✅ | `canary-gate.ts`；见 [docs/team-memory-security.md](docs/team-memory-security.md) |
-| **P1** | **第三方基准复现邀请** | ✅ | 与独立 benchmark 同源；README「Proof, not promises」 |
+| **P1** | **第三方基准复现邀请** | ✅ | README「Proof, not promises」指向 `npm run proof:flywheel`；issue 标题 `[benchmark] Independent reproduction — <commit>` |
 | **P1（融合）** | **Skill-conditioned DAG + SkillOpt-lite** | ✅ | plan 节点 `skillRefs`/`avoidPatterns`；outcome 有界编辑 guidance |
 | **P2** | **协议层占位**：ATP/IR v1.2、MCP resources | ✅ | MCP resources 已落地；ATP/IR v1.2 Stable（§8 memory-* + outcome eng-link 字段）；最小 producer / 一致性测试 |
 | **P2** | **代码域检索评测公开数据集** | ✅ | [`benchmarks/datasets/retrieval-golden-v1.json`](benchmarks/datasets/retrieval-golden-v1.json)（+ JSONL）；`npm run dataset:retrieval` 从 TS 真源再生；`npm run bench:retrieval` |
@@ -139,6 +139,7 @@
 
 ## 如何参与
 
+- 独立复现飞轮 / 记忆 / 检索自测：`npm run proof:flywheel`（[docs/flywheel-reproduction.md](docs/flywheel-reproduction.md)）
 - 认领 ⬜ / 🟡 事项、修 bug、补测试与文档：见 [CONTRIBUTING.md](CONTRIBUTING.md)
 - 想法与新功能：先在 [Discussions](https://github.com/Roarpeng/GraphFlow/discussions) 讨论
 - 节奏说明：单作者维护；版本节奏随社区参与度调整

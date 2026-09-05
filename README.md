@@ -29,14 +29,16 @@ It is also **local-first and portable**: everything runs offline with no API key
 
 ## Proof, not promises
 
-All headline numbers come from a **public, reproducible benchmark suite** ([benchmarks/README.md](benchmarks/README.md)) with published methodology ([docs/benchmark-standards.md](docs/benchmark-standards.md)) and machine-readable JSON dumps pinned to commits:
+**Third-party reproduction entry:** `npm run proof:flywheel` — one command, offline, no API key. Guide: [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md). Independent runs are welcome; open a GitHub issue titled `[benchmark] Independent reproduction — <commit>`.
+
+All headline numbers come from a **public, reproducible benchmark suite** ([benchmarks/README.md](benchmarks/README.md)) with published methodology ([docs/benchmark-standards.md](docs/benchmark-standards.md)) and machine-readable JSON dumps pinned to commits. Authoritative percentages live in the tracked RESULTS markdown; this package does not invent new scores.
 
 - **~98% token savings** (8-query suite, 262,926 → 2,843 tokens; independently re-counted with `gpt-tokenizer`)
 - **132-query golden retrieval set** in CI (Hit@5 = 100%, MRR = 0.836, NDCG@5 = 0.601); downloadable open dataset: [`benchmarks/datasets/retrieval-golden-v1.json`](benchmarks/datasets/retrieval-golden-v1.json) — run `npm run bench:retrieval`
 - **Skill A/B: 100% vs 61.5%** task success with the flywheel on vs off (26 tasks)
 - **Memory ROI: 100% vs 56.5%** with episodic memory on vs off (62 tasks, with attribution chains)
 
-Results are commit-anchored so any number above can be checked out and re-run. Third-party reproduction is actively welcomed — see [ROADMAP.md](ROADMAP.md) for the open invitation.
+Results are commit-anchored so any number above can be checked out and re-run. See [ROADMAP.md](ROADMAP.md) for the open invitation.
 
 ## Memory poisoning protection
 
@@ -325,7 +327,7 @@ GraphFlow/
 │       └── mcp/        # MCP server (10 tools)
 ├── tests/              # 142 files / 961 tests (incl. governance foundation and MCP HTTP/stdio matrix)
 ├── benchmarks/         # comprehensive + independent + SWE-bench + token savings + skill A/B (reproducible)
-├── docs/               # ATP spec + context contract + experience memory + comparisons + GraphFlow/Serena compose
+├── docs/               # ATP spec + context contract + experience memory + flywheel reproduction + GraphFlow/Serena
 ├── examples/           # ATP producer + team-memory config + GraphFlow/Serena dual-MCP snippet
 ├── vscode-extension/   # VS Code panel and commands
 └── CHANGELOG.md

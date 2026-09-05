@@ -1,6 +1,7 @@
 # GraphFlow Benchmark Standards（基准方法学公开标准）
 
 > 适用版本：@roarpeng/graphflow v1.9.5+　|　标准版本：v1
+> 第三方复现入口（一条命令）：[`docs/flywheel-reproduction.md`](flywheel-reproduction.md) · `npm run proof:flywheel`
 > 范围：把项目内置的三套自测基准（token 节省 / Skill A/B / Memory A/B）的方法学固化为**第三方可复现的公开标准**：环境要求、运行命令、输入数据、判定标准、输出位置、复现清单与结果解读。
 
 > **诚实声明（self-test vs independent）**：本文件中引用的所有具体数字（如 98.7%、100%、56.5%）均为**项目自测结果**——由作者在作者机器上运行、未经过独立第三方复核。第三方复现时应以本文档为准重新跑出**自己的数字**，再与本文数字对比；任何"官方宣称"均应以独立复现为准。
@@ -145,9 +146,16 @@ npm run benchmark:memory   # P3：  等价于 tsx benchmarks/run-memory-ab.ts
 
 ## 7. 第三方复现清单（checklist）
 
-1. `git clone <repo> && cd <repo>` 并 `git checkout` 一个固定 tag/commit（如 `v1.9.5`）。
+首选一条命令（飞轮 / 记忆 A/B / 检索）：见 [`docs/flywheel-reproduction.md`](flywheel-reproduction.md)。
+
+```bash
+npm run proof:flywheel            # 必要公开套件 + checklist + JSON
+npm run proof:flywheel -- --dry-run
+```
+
+1. `git clone <repo> && cd <repo>` 并 `git checkout` 一个固定 tag/commit（如 `v1.15.1`）。
 2. `npm ci`（或 `npm install`）。
-3. 按序运行四命令（均离线、无需 API key）：
+3. 按序运行四命令（均离线、无需 API key；或直接 `npm run proof:flywheel -- --with-token`）：
    ```bash
    npm run benchmark        # → RESULTS.md 顶部区块 + .cache/token-bench-results.json
    npm run benchmark:skills # → SKILL-AB-RESULTS.md
@@ -163,3 +171,4 @@ npm run benchmark:memory   # P3：  等价于 tsx benchmarks/run-memory-ab.ts
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
 | v1 | 2026-08-02 | 初版：方法学固化（随 v1.9.5）；token 基准新增机器可读 JSON 落盘（commit hash + 运行日期）。 |
+| v1.1 | 2026-09-05 | 增加第三方入口 `npm run proof:flywheel` 与 [`docs/flywheel-reproduction.md`](flywheel-reproduction.md)；不改既有自测数字。 |
