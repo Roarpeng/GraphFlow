@@ -12,6 +12,7 @@ import {
 import { indexWorkspaceFiles, clearGraphIndexArtifacts, hasPendingGraphIndexWork, indexSingleFile } from "../../../graph/file-indexer";
 import { GraphFileWatcher } from "../../../graph/file-watcher.js";
 import { extractNodeSourcePath } from "../../../graph/graph-utils";
+import { searchDialogueTurns } from "../../../graph/graph-search";
 import { sampleGraphForSnapshot } from "../../../graph/snapshot-view.js";
 import {
   explainSavings,
@@ -279,14 +280,46 @@ async function attachWorkbenchThenDialogue(
   query: string,
   dialogue?: PreviewDialogueOptions
 ): Promise<ContextPreviewResult> {
+  // Historical recall (Conversation Graph W2b) is read-only, so it runs even
+  // when this preview must not record a dialogue turn.
+  const withHits = await attachDialogueHits(result, client, query);
   if (dialogue?.recordDialogue === false) {
-    return result;
+    return withHits;
   }
-  const withWorkbench = await attachWorkbenchTopic(result, client, config, query, dialogue);
+  const withWorkbench = await attachWorkbenchTopic(withHits, client, config, query, dialogue);
   if (withWorkbench.workbench) {
     return withWorkbench;
   }
-  return attachDialogueThread(result, client, config, query, dialogue);
+  return attachDialogueThread(withHits, client, config, query, dialogue);
+}
+
+/**
+ * Recall historical dialogue turns matching the query (Conversation Graph
+ * W2b). Additive-only: hits ride in `dialogueHits` and never displace code
+ * anchors; a correction-chain hit surfaces as one summary line so a
+ * previously corrected conclusion is visible before the agent re-derives it.
+ */
+async function attachDialogueHits(
+  result: ContextPreviewResult,
+  client: GraphClient,
+  query: string
+): Promise<ContextPreviewResult> {
+  try {
+    const hits = await searchDialogueTurns(client, query, { limit: 3 });
+    if (hits.length === 0) {
+      return result;
+    }
+    const withHits: ContextPreviewResult = { ...result, dialogueHits: hits };
+    const corrected = hits.find((hit) => hit.correctionLine);
+    if (corrected?.correctionLine) {
+      withHits.summary = [`Dialogue recall: ${corrected.correctionLine}`, ...withHits.summary];
+      withHits.summaryCount += 1;
+    }
+    return withHits;
+  } catch (error) {
+    logger.warn({ error }, "Dialogue recall attach failed");
+    return result;
+  }
 }
 
 async function attachWorkbenchTopic(

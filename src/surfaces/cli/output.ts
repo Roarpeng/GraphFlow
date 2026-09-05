@@ -62,6 +62,7 @@ export function buildCliUsage(): string {
     '  memory search "<query>" [--limit N] [--json] [--config <path>]  # semantic similarity over episodes (FNV fallback); per-hit id, task, score, outcome',
     "  memory forget <episodeId> [--json] [--config <path>]  # prune episode + hide descendant skills; unknown id is a clean no-op",
     "  dialogue list [--session <name|id>] [--limit N] [--path <turnId>] [--json] [--config <path>]  # list conversation-turn nodes; --path walks the replay spine ending at a turn",
+    '  dialogue search "<query>" [--limit N] [--include-superseded] [--json] [--config <path>]  # recall historical Q&A turns across sessions (correction-chain annotated)',
     '  dialogue record --query "<text>" [--reply "<text>"] [--resume-from <turnId>] [--session <name>] [--json] [--config <path>]',
     "  dialogue fork --from <turnId> [--name <sessionName>] [--json] [--config <path>]  # fork a new dialogue session rooted at a turn",
     "  dialogue traces [--session <name|id>] [--limit N] [--json] [--config <path>]  # multi-agent trajectory nodes (subagent start/end)",

@@ -2,6 +2,7 @@ import { resolveConfig } from "../../../config/resolve";
 import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
 import { hasUsableLlmProvider } from "../../../config/llm-availability";
 import { createGraphClient } from "../../../graph/client-factory";
+import { searchDialogueTurns, type DialogueSearchHit } from "../../../graph/graph-search";
 import {
   applyTurnDistillation,
   dialogueSessionIdFor,
@@ -297,6 +298,36 @@ export async function listDialogueTracesRuntime(
   return listAgentTraces(client, {
     ...(sessionId ? { sessionId } : {}),
     ...(options?.limit !== undefined ? { limit: options.limit } : {}),
+  });
+}
+
+// ───────────────── Conversation Graph W2b: dialogue turn recall ─────────────────
+
+export type { DialogueSearchHit } from "../../../graph/graph-search";
+
+/**
+ * Search historical dialogue turns for a query across every session
+ * (Conversation Graph W2b). Effective turns only unless
+ * `includeSuperseded` is set; each hit carries its correction-chain line so
+ * "this was answered before, then corrected" stays visible.
+ */
+export async function searchDialogueTurnsRuntime(
+  query: string,
+  options?: {
+    configPath?: string;
+    rootDir?: string;
+    limit?: number;
+    includeSuperseded?: boolean;
+  }
+): Promise<DialogueSearchHit[]> {
+  const config = bindRuntimeWorkspaceRoot(
+    resolveConfig(options?.configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
+    options?.rootDir ? { rootDir: options.rootDir } : undefined
+  );
+  const client = createGraphClient(config);
+  return searchDialogueTurns(client, query, {
+    ...(options?.limit !== undefined ? { limit: options.limit } : {}),
+    ...(options?.includeSuperseded ? { includeSuperseded: true } : {}),
   });
 }
 

@@ -80,10 +80,12 @@ export {
   forkDialogueSessionRuntime,
   dialoguePathRuntime,
   listDialogueTracesRuntime,
+  searchDialogueTurnsRuntime,
   recordAgentTraceRuntime,
   type DialogueListItem,
   type DistillDialogueResult,
   type DialoguePathStep,
+  type DialogueSearchHit,
   type ForkDialogueListItem,
 } from "./runtime/dialogue.js";
 export {

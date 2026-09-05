@@ -78,7 +78,7 @@ export function getToolDefinitions(): ToolDefinition[] {
     {
       name: "graphflow_context",
       description:
-        "[Core] Preview near-lossless context packaging OR expand a context anchor. Pass 'query' to preview; pass 'anchorId' (and no query) to expand. After you answer the user, call again with assistantReply (query optional) to write the original answer onto the pending turn/topic. Titles on the workbench are display labels only — do not replace stored messages with an extracted abstract.",
+        "[Core] Preview near-lossless context packaging OR expand a context anchor. Pass 'query' to preview; pass 'anchorId' (and no query) to expand. After you answer the user, call again with assistantReply (query optional) to write the original answer onto the pending turn/topic. The preview result includes dialogueHits: historical Q&A turns matching the query across sessions (superseded ones hidden; a correctionLine flags conclusions that were later revised). Titles on the workbench are display labels only — do not replace stored messages with an extracted abstract.",
       inputSchema: {
         type: "object",
         properties: {
