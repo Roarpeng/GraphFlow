@@ -1,7 +1,7 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   discoverWorkspaceRoot,
   ensureMcpWorkspaceEnv,
@@ -9,15 +9,19 @@ import {
 } from "../src/config/discover-workspace";
 import { resolveRuntimeWorkspaceRoot } from "../src/config/workspace-root";
 import { buildMcpServerNode } from "../src/integrations/agent-mcp-installer";
+import { createTempDir, createTempProjectRoot, rmTrackedRoots } from "./helpers/temp-workspace";
 
 /**
  * M75 — After `graphflow install`, Cursor often spawns MCP with cwd=/home/<user>.
  * Discovery must never return the home directory (error: "from discovery: /home/..."),
  * and must prefer Cursor's WORKSPACE_FOLDER_PATHS / ${workspaceFolder}.
+ *
+ * Isolation: no process.chdir(), no writes under the real home. npx runtime and
+ * project fixtures live in os.tmpdir(); unsafe-cwd is exercised via fromDir /
+ * process.cwd mock. homedir() is only used as a path string.
  */
 
 const tempRoots: string[] = [];
-let previousCwd = process.cwd();
 const envKeys = [
   "GRAPHFLOW_WORKSPACE_ROOT",
   "CURSOR_PROJECT_DIR",
@@ -33,16 +37,11 @@ const previousEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[ke
 >;
 
 function createTempProject(prefix: string): string {
-  const root = join(
-    process.cwd(),
-    "tmp",
-    `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`
-  );
-  mkdirSync(root, { recursive: true });
-  writeFileSync(join(root, "package.json"), JSON.stringify({ name: prefix }), "utf8");
-  mkdirSync(join(root, ".git"));
-  tempRoots.push(root);
-  return root;
+  return createTempProjectRoot(prefix, tempRoots);
+}
+
+function mockCwd(dir: string): void {
+  vi.spyOn(process, "cwd").mockReturnValue(dir);
 }
 
 function clearIdeEnv(): void {
@@ -51,8 +50,11 @@ function clearIdeEnv(): void {
   }
 }
 
+beforeEach(() => {
+  clearIdeEnv();
+});
+
 afterEach(() => {
-  process.chdir(previousCwd);
   for (const key of envKeys) {
     const value = previousEnv[key];
     if (value === undefined) {
@@ -61,32 +63,23 @@ afterEach(() => {
       process.env[key] = value;
     }
   }
-  while (tempRoots.length > 0) {
-    const root = tempRoots.pop();
-    if (root) {
-      rmSync(root, { recursive: true, force: true });
-    }
-  }
+  vi.restoreAllMocks();
+  rmTrackedRoots(tempRoots);
 });
 
 describe("M75 MCP home-cwd discovery after install", () => {
   it("never returns homedir from discoverWorkspaceRoot via IDE hints", () => {
-    clearIdeEnv();
     const home = homedir();
     expect(isUnsafeWorkspaceFallback(home)).toBe(true);
 
-    // Simulate npx package runtime under home + poisoned PWD=home (dotfiles .git common).
+    // npx package runtime in a temp tree (not $HOME/.npm) + poisoned PWD=home.
     const runtime = join(
-      home,
-      ".npm",
-      "_npx",
-      "m75test",
+      createTempDir("m75-npx-runtime", tempRoots),
       "node_modules",
       "@roarpeng",
       "graphflow"
     );
     mkdirSync(runtime, { recursive: true });
-    tempRoots.push(join(home, ".npm", "_npx", "m75test"));
     process.env.PWD = home;
 
     const discovered = discoverWorkspaceRoot(runtime);
@@ -95,13 +88,10 @@ describe("M75 MCP home-cwd discovery after install", () => {
   });
 
   it("uses WORKSPACE_FOLDER_PATHS when MCP cwd is homedir", () => {
-    clearIdeEnv();
     const project = createTempProject("m75-workspace-paths");
     const home = homedir();
     process.env.WORKSPACE_FOLDER_PATHS = project;
-
-    previousCwd = process.cwd();
-    process.chdir(home);
+    mockCwd(home);
 
     const discovered = discoverWorkspaceRoot(home);
     expect(discovered).toBe(resolve(project));
@@ -109,31 +99,25 @@ describe("M75 MCP home-cwd discovery after install", () => {
     const ensured = ensureMcpWorkspaceEnv(home);
     expect(ensured).toBe(resolve(project));
 
-    const runtimeRoot = resolveRuntimeWorkspaceRoot();
+    const runtimeRoot = resolveRuntimeWorkspaceRoot({ fromDir: home });
     expect(runtimeRoot).toBe(resolve(project));
   });
 
   it("ignores unresolved ${workspaceFolder} placeholder env", () => {
-    clearIdeEnv();
     const project = createTempProject("m75-placeholder");
     process.env.GRAPHFLOW_WORKSPACE_ROOT = "${workspaceFolder}";
     process.env.WORKSPACE_FOLDER_PATHS = project;
+    mockCwd(homedir());
 
-    previousCwd = process.cwd();
-    process.chdir(homedir());
-
-    const resolved = resolveRuntimeWorkspaceRoot();
+    const resolved = resolveRuntimeWorkspaceRoot({ fromDir: homedir() });
     expect(resolved).toBe(resolve(project));
     expect(process.env.GRAPHFLOW_WORKSPACE_ROOT === "${workspaceFolder}").toBe(false);
   });
 
   it("supports multi-root WORKSPACE_FOLDER_PATHS and picks the first safe project", () => {
-    clearIdeEnv();
     const project = createTempProject("m75-multi-root");
     process.env.WORKSPACE_FOLDER_PATHS = [homedir(), project].join(delimiter);
-
-    previousCwd = process.cwd();
-    process.chdir(homedir());
+    mockCwd(homedir());
 
     expect(discoverWorkspaceRoot(homedir())).toBe(resolve(project));
   });
@@ -147,12 +131,10 @@ describe("M75 MCP home-cwd discovery after install", () => {
   });
 
   it("resolveRuntimeWorkspaceRoot does not throw 'from discovery' for homedir cwd", () => {
-    clearIdeEnv();
-    previousCwd = process.cwd();
-    process.chdir(homedir());
+    mockCwd(homedir());
 
-    expect(() => resolveRuntimeWorkspaceRoot()).not.toThrow(/from discovery/i);
+    expect(() => resolveRuntimeWorkspaceRoot({ fromDir: homedir() })).not.toThrow(/from discovery/i);
     // Without a project hint, unsafe cwd still refuses indexing — but not via discovery leak.
-    expect(() => resolveRuntimeWorkspaceRoot()).toThrow(/unsafe workspace root/i);
+    expect(() => resolveRuntimeWorkspaceRoot({ fromDir: homedir() })).toThrow(/unsafe workspace root/i);
   });
 });
