@@ -31,10 +31,13 @@ import {
 import {
   DSH_GLUE_ROW_ID,
   getDshHarnessStatus,
-  installDshHarness,
-  uninstallDshHarness,
   type DshHarnessInstallResult,
 } from "../../integrations/dsh-harness-installer";
+import {
+  DSH_HOST_ADAPTER_ID,
+  installViaHostAdapter,
+  uninstallViaHostAdapter,
+} from "../../integrations/host-adapter-install";
 
 const isWindows = process.platform === "win32";
 
@@ -282,7 +285,12 @@ export function buildInstallReport(
         filePath: hooksStatus.settingsPath,
         message: "Claude Code not detected",
       };
-  const dshHarness = installDshHarness();
+  const dshInstalled = installViaHostAdapter(DSH_HOST_ADAPTER_ID);
+  const dshHarness: DshHarnessInstallResult = {
+    status: dshInstalled.status === "unsupported" ? "skipped" : dshInstalled.status,
+    filePath: dshInstalled.filePath,
+    message: dshInstalled.message,
+  };
 
   if (bootstrapGraph) {
     void bootstrapGraphIndex(workspaceRoot).catch((error) => {
@@ -509,7 +517,12 @@ export function runUninstall(workspaceRoot: string = process.cwd()) {
   // 4. Remove DeepSeek Harness home-level cordis.patch.yml overlay
   const dshStatus = getDshHarnessStatus();
   if (dshStatus.detected) {
-    const dshResult = uninstallDshHarness();
+    const dshUninstalled = uninstallViaHostAdapter(DSH_HOST_ADAPTER_ID);
+    const dshResult: DshHarnessInstallResult = {
+      status: dshUninstalled.status === "unsupported" ? "skipped" : dshUninstalled.status,
+      filePath: dshUninstalled.filePath,
+      message: dshUninstalled.message,
+    };
     const icon = dshResult.status === "updated" ? "[REMOVED]" : "[SKIP]";
     console.log(`${icon} DeepSeek Harness: ${dshResult.message ?? dshResult.status}`);
   } else {
