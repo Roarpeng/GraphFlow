@@ -223,6 +223,6 @@ Shipped in this MVP: team server, JWT/bearer RBAC, tenant isolation, diagnose
 - **Code-domain retrieval evaluation** (planned): open the 132-query golden
   set and methodology as a community dataset, so shared-memory retrieval
   quality is measurable across tools.
-- **Third-party benchmark reproduction** (in progress): commit-anchored
-  results and public methodology ([benchmark-standards.md](benchmark-standards.md))
-  so the security and quality claims above can be independently checked.
+- **Third-party benchmark reproduction** (shipped): `npm run proof:flywheel`
+  + [flywheel-reproduction.md](flywheel-reproduction.md); methodology in
+  [benchmark-standards.md](benchmark-standards.md).

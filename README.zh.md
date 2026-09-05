@@ -137,3 +137,5 @@ dsh plugin --profile web remove @roarpeng/graphflow
 ## 更多
 
 完整英文文档、基准与协议：[README.md](README.md) · [ATP/IR](docs/atp-ir-spec-v1.md) · [上下文合同](docs/context-contract.md) · [经验记忆](docs/experience-memory.md) · [GraphFlow + Serena](docs/graphflow-serena.zh.md) · [竞品对比](docs/comparison.md)
+
+第三方复现飞轮 / 记忆 A/B / 检索自测：`npm run proof:flywheel`（说明见 [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md)）。
