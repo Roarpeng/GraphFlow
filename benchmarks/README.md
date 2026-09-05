@@ -26,6 +26,8 @@ npm run proof:flywheel -- --dry-run
 
 Guide, expected artifacts, and what **pass** means:
 [`docs/flywheel-reproduction.md`](../docs/flywheel-reproduction.md).
+Frozen self-test numbers (do not invent new scores):
+[`flywheel-proof-claims.json`](flywheel-proof-claims.json).
 Independent runs: open a GitHub issue titled
 `[benchmark] Independent reproduction — <commit>`.
 

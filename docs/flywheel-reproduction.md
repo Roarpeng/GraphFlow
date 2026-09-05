@@ -59,8 +59,10 @@ suite.
 
 ## Published self-test claims (already in git)
 
-Copied from the tracked reports. Compare your live JSON to these files — not
-to README headlines if they have drifted.
+Copied into the frozen catalog [`benchmarks/flywheel-proof-claims.json`](../benchmarks/flywheel-proof-claims.json)
+from the tracked reports (do not invent new scores). Compare your live JSON to
+that catalog — not to README headlines, and not to `*-RESULTS.md` after a live
+run (existing runners rewrite those files in the working tree).
 
 | Claim | Display | Source file (committed) |
 | --- | --- | --- |
@@ -102,8 +104,12 @@ Dry-run writes nothing under `.cache/`. It only checks that the package
 
 | Mode | `pass` is true when |
 | --- | --- |
-| `--dry-run` | Entrypoint script exists, `package.json` has `proof:flywheel`, reproduction docs exist, tracked RESULTS + open dataset exist, and every published claim needle still appears in its source markdown. |
+| `--dry-run` | Entrypoint script exists, `package.json` has `proof:flywheel`, reproduction docs exist, tracked RESULTS + open dataset exist, and `benchmarks/flywheel-proof-claims.json` is present and complete. |
 | live (default) | Dry-run structural checks **and** every selected bench exits 0 **and** its `.cache/*.json` was written. |
+
+Live runs are allowed to rewrite `benchmarks/*-RESULTS.md`. That is existing
+runner behavior. **Do not commit those regenerations** unless you intend to
+update the frozen self-test catalog. `pass` does not require `claimMatch`.
 
 `claimMatch` is a **separate** field:
 
