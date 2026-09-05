@@ -1,6 +1,6 @@
 # Team Shared Memory & Poisoning Protection
 
-> Status: **shipped MVP** (post v1.14.1). GraphFlow 的团队共享记忆模型、RBAC 与安全边界。
+> Status: **shipped MVP** (v1.15.0). GraphFlow 的团队共享记忆模型、RBAC 与安全边界。
 > 相关文档：[ATP/IR 规范](atp-ir-spec-v1.md) · [竞品对比](comparison.md) · [ROADMAP](../ROADMAP.md)
 > 客户端示例：[examples/team-memory/graphflow.config.example.json](../examples/team-memory/graphflow.config.example.json)
 
