@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- Cursor and Claude Code install / uninstall / doctor now go through the HostAdapter registry (`installViaHostAdapter("cursor")` / `installViaHostAdapter("claude-code")`), including Claude Code hooks. Remaining hosts (Trae, VS Code, Windsurf, Codex, Gemini, and others) still use the legacy installers.
+
+### Tests
+
+- Extended `host-adapter-install` with Cursor / Claude Code install-uninstall-status slices and M16-style CLI doctor wiring.
+
 ## [1.15.0] - 2026-09-05
 
 ### Added
