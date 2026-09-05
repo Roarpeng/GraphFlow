@@ -14,6 +14,7 @@ import {
   importArtifact,
   importSkillPackageRuntime,
   syncSkillPackageRuntime,
+  syncSkillPackageRemote,
   indexFile,
   indexGraph,
   inspectGraph,
@@ -114,6 +115,10 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   if (command === "doctor") {
     const { buildDoctorReport, formatDoctorLegacyText } = require("./init") as typeof import("./init");
     const data = buildDoctorReport(process.cwd());
+    if (data.team?.enabled) {
+      const { probeTeamDiagnosis } = await import("../team/diagnose.js");
+      data.team = await probeTeamDiagnosis(configPath);
+    }
     if (!data.ok) {
       process.exitCode = 1;
     }
@@ -145,9 +150,24 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
+  if (command === "team") {
+    return executeTeamCommand(args);
+  }
+
+  if (command === "diagnose") {
+    const data = diagnoseRoutingResult(configPath);
+    const { probeTeamDiagnosis } = await import("../team/diagnose.js");
+    data.team = await probeTeamDiagnosis(configPath);
+    return {
+      command: "diagnose",
+      data,
+      legacyText: diagnoseRouting(configPath, data),
+    };
+  }
+
   if (command === "mcp" && args[0] === "serve") {
     if (!args.includes("--http")) {
-      console.log("Usage: graphflow mcp serve --http [--host <host>] [--port <port>] [--endpoint </path>] [--stateful] [--sse-only]");
+      console.log("Usage: graphflow mcp serve --http [--host <host>] [--port <port>] [--endpoint </path>] [--stateful] [--sse-only] [--http-token <role:token>] [--rbac]");
       process.exitCode = 1;
       return undefined;
     }
@@ -726,16 +746,28 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     // overwrite semantics. Team golden queries ride along and merge into
     // `.graphflow/team-golden.json` (dedupe by text, local-first order).
     const directionArg = args[1]?.trim().toLowerCase();
-    if (directionArg !== "export" && directionArg !== "import") {
-      console.log("Usage: graphflow skill sync <export|import> [--path <file>] [--force]");
+    if (directionArg !== "export" && directionArg !== "import" && directionArg !== "push" && directionArg !== "pull") {
+      console.log("Usage: graphflow skill sync <export|import|push|pull> [--path <file>] [--force]");
       console.log("  import MERGES per-skill-id: newer updatedAt wins; ties keep local; --force overwrites.");
       console.log("  team golden queries ride along -> .graphflow/team-golden.json (dedupe, local-first).");
+      console.log("  push/pull use graphPolicy.mcpEndpoint (mcp-http team server) and keep MERGE on pull.");
       process.exitCode = 1;
       return undefined;
     }
     const pathIdx = args.indexOf("--path");
     const customPath = pathIdx >= 0 ? args[pathIdx + 1]?.trim() : undefined;
     const force = args.includes("--force");
+    if (directionArg === "push" || directionArg === "pull") {
+      const data = await syncSkillPackageRemote(configPath, directionArg, { force });
+      return {
+        command: "skill-sync",
+        data,
+        legacyText:
+          data.direction === "push"
+            ? `direction=push; path=${data.path}; skillCount=${data.skillCount ?? 0}; revision=${data.revision ?? 0}`
+            : `direction=pull; path=${data.path}; imported=${data.imported ?? 0}; skipped=${data.skipped ?? 0}; updated=${data.updated ?? 0}; revision=${data.revision ?? 0}`,
+      };
+    }
     const data = await syncSkillPackageRuntime(configPath, directionArg, customPath, { force });
     return {
       command: "skill-sync",
@@ -873,10 +905,12 @@ async function executeCommand(command: string, args: string[], configPath?: stri
 
   if (command === "route" && args[0] === "diagnose") {
     const data = diagnoseRoutingResult(configPath);
+    const { probeTeamDiagnosis } = await import("../team/diagnose.js");
+    data.team = await probeTeamDiagnosis(configPath);
     return {
       command: "route-diagnose",
       data,
-      legacyText: diagnoseRouting(configPath),
+      legacyText: diagnoseRouting(configPath, data),
     };
   }
 
@@ -1304,6 +1338,53 @@ main().catch((error) => {
   console.error("GraphFlow execution failed:", error);
   process.exitCode = 1;
 });
+
+async function executeTeamCommand(args: string[]): Promise<CliCommandResult | undefined> {
+  const sub = args[0]?.trim();
+  if (sub === "serve") {
+    const { startTeamServerFromArgv } = await import("../team/ops.js");
+    const started = await startTeamServerFromArgv(args.slice(1));
+    const { httpServer: _httpServer, close: _close, ...data } = started;
+    return {
+      command: "team-serve",
+      data,
+      legacyText:
+        `GraphFlow team memory listening on ${data.url} ` +
+        `(auth=${data.requireAuth ? "required" : "optional"}; rbac=on; store=${data.storeRoot})`,
+    };
+  }
+  if (sub === "issue-token") {
+    const { issueTeamTokenFromArgv } = await import("../team/ops.js");
+    const data = issueTeamTokenFromArgv(args.slice(1));
+    return {
+      command: "team-issue-token",
+      data,
+      legacyText: `subject=${data.subject}; role=${data.role}; ttl=${data.ttlSeconds}; token=${data.token}`,
+    };
+  }
+  if (sub === "example-config") {
+    const { buildTeamClientExampleConfig } = await import("../team/ops.js");
+    const endpoint = readCliFlagValue(args, "--endpoint");
+    const tenant = readCliFlagValue(args, "--tenant");
+    const apiKey = readCliFlagValue(args, "--api-key");
+    const data = buildTeamClientExampleConfig({
+      ...(endpoint ? { endpoint } : {}),
+      ...(tenant ? { tenant } : {}),
+      ...(apiKey ? { apiKey } : {}),
+    });
+    return {
+      command: "team-example-config",
+      data,
+      legacyText: JSON.stringify(data, null, 2),
+    };
+  }
+  console.log("Usage: graphflow team <serve|issue-token|example-config>");
+  console.log("  team serve [--host <host>] [--port <port>] [--store <dir>] [--http-token <role:token>] [--http-jwt-secret <secret>] [--allow-tenant <id>]");
+  console.log("  team issue-token --subject <id> --role <viewer|contributor|admin> [--secret <jwt>] [--ttl <seconds>]");
+  console.log("  team example-config [--endpoint <url>] [--tenant <id>]");
+  process.exitCode = 1;
+  return undefined;
+}
 
 function buildInsightLegacyText(
   data: Awaited<ReturnType<typeof planInsightResult>>

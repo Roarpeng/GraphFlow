@@ -175,7 +175,10 @@ export function createGraphClient(config: GraphFlowConfig): GraphClient {
     try {
       // mcp-http 是远程试点后端：PageRank 影响面标记只作用于本地图，
       // 且远程 client 有 isDegraded 等特有契约，这里不做装饰器包装。
-      return new GraphifyMcpClient(endpoint, config.graphPolicy.mcpApiKey, { fallbackPath });
+      return new GraphifyMcpClient(endpoint, config.graphPolicy.mcpApiKey, {
+        fallbackPath,
+        ...(config.graphPolicy.mcpTenant ? { tenant: config.graphPolicy.mcpTenant } : {}),
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.warn(

@@ -22,6 +22,30 @@ export interface GraphifyMcpOptions {
   fallbackPath?: string;
   /** Per-request timeout in ms. Defaults to 15_000. */
   timeoutMs?: number;
+  /** Tenant isolation header (`X-GraphFlow-Tenant`). */
+  tenant?: string;
+}
+
+export class TeamAuthError extends Error {
+  readonly statusCode: number;
+
+  constructor(message: string, statusCode: number) {
+    super(message);
+    this.name = "TeamAuthError";
+    this.statusCode = statusCode;
+  }
+}
+
+export interface TeamClientHealth {
+  ok: boolean;
+  service?: string;
+  tenant?: string;
+  role?: string;
+  rbac?: boolean;
+  authMode?: string;
+  nodeCount?: number;
+  edgeCount?: number;
+  skillPackRevision?: number | null;
 }
 
 /**
@@ -38,8 +62,10 @@ export class GraphifyMcpClient implements GraphClient {
   private readonly fallback: GraphifyFileClient | null;
   private readonly fallbackPath: string | undefined;
   private readonly timeoutMs: number;
+  private readonly tenant: string | undefined;
   private degraded = false;
   private snapshotWarned = false;
+  private lastHealth: TeamClientHealth | undefined;
 
   constructor(
     private readonly endpoint: string,
@@ -54,6 +80,7 @@ export class GraphifyMcpClient implements GraphClient {
     this.fallbackPath = options.fallbackPath;
     this.fallback = options.fallbackPath ? new GraphifyFileClient(options.fallbackPath) : null;
     this.timeoutMs = options.timeoutMs ?? 15_000;
+    this.tenant = options.tenant?.trim() || undefined;
   }
 
   /** True once any request has failed and later operations serve from the local fallback store. */
@@ -61,14 +88,58 @@ export class GraphifyMcpClient implements GraphClient {
     return this.degraded;
   }
 
+  get tenantId(): string {
+    return this.tenant ?? "default";
+  }
+
+  get lastTeamHealth(): TeamClientHealth | undefined {
+    return this.lastHealth;
+  }
+
   /** Startup connectivity probe; returns false when the endpoint is unreachable. */
   async ping(): Promise<boolean> {
     try {
-      await this.call<McpQueryResponse>("graph.query_subgraph", { query: "" });
-      return true;
-    } catch {
-      return false;
+      const health = await this.teamHealth();
+      return health.ok;
+    } catch (error) {
+      if (error instanceof TeamAuthError) return false;
+      try {
+        await this.call<McpQueryResponse>("graph.query_subgraph", { query: "" });
+        return true;
+      } catch {
+        return false;
+      }
     }
+  }
+
+  async teamHealth(): Promise<TeamClientHealth> {
+    const result = await this.call<TeamClientHealth>("team.health", {});
+    this.lastHealth = result;
+    return result;
+  }
+
+  async fetchSnapshot(): Promise<GraphStoreSnapshot> {
+    return this.withFallback(
+      "graph.read_snapshot",
+      async () => {
+        const response = await this.call<Partial<GraphStoreSnapshot>>("graph.read_snapshot", {});
+        return { nodes: response.nodes ?? [], edges: response.edges ?? [] };
+      },
+      (fb) => Promise.resolve(fb.readSnapshot()),
+      { nodes: [], edges: [] }
+    );
+  }
+
+  async pushSkillPack(pack: unknown): Promise<{ revision?: number; updatedAt?: string }> {
+    return this.call("skill.sync_push", { pack });
+  }
+
+  async pullSkillPack(): Promise<{ pack: unknown; revision?: number | null; updatedAt?: string | null }> {
+    return this.call("skill.sync_pull", {});
+  }
+
+  async importArtifactRemote(nodes: GraphNode[], edges: GraphEdge[]): Promise<unknown> {
+    return this.call("artifact.import", { nodes, edges });
   }
 
   async upsertNodes(nodes: GraphNode[]): Promise<void> {
@@ -189,6 +260,7 @@ export class GraphifyMcpClient implements GraphClient {
     try {
       return await run();
     } catch (error) {
+      if (error instanceof TeamAuthError) throw error;
       this.degradeOnce(error, method);
       return this.fallback ? fallbackRun(this.fallback) : Promise.resolve(empty);
     }
@@ -215,6 +287,7 @@ export class GraphifyMcpClient implements GraphClient {
       headers: {
         "Content-Type": "application/json",
         ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
+        ...(this.tenant ? { "X-GraphFlow-Tenant": this.tenant } : {}),
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
@@ -226,6 +299,17 @@ export class GraphifyMcpClient implements GraphClient {
     if (signal) init.signal = signal;
 
     const response = await fetch(this.endpoint, init);
+
+    if (response.status === 401 || response.status === 403) {
+      let detail = `Graphify MCP ${response.status}`;
+      try {
+        const denied = (await response.json()) as { error?: { message?: string } };
+        if (denied.error?.message) detail = denied.error.message;
+      } catch {
+        // keep status-only detail
+      }
+      throw new TeamAuthError(detail, response.status);
+    }
 
     if (!response.ok) {
       throw new Error(`Graphify MCP request failed: ${response.status}`);
