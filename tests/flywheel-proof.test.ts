@@ -92,7 +92,10 @@ describe("flywheel proof package", () => {
     expect(text).toContain("Structural pass: YES");
     expect(text).toContain("Overall pass: YES");
     expect(text).toContain("[x] package.json script proof:flywheel");
+    expect(text).toContain("flywheel-proof-claims.json");
     expect(text).toContain("What pass means");
+    expect(summary.withToken).toBe(false);
+    expect(summary.publishedClaims.every((claim) => claim.suite !== "token")).toBe(true);
   });
 
   it("CLI --help exits 0 and prints usage", () => {

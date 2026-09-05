@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "catalogId": "flywheel-proof-claims-v1",
+  "disclaimer": "Author-run self-tests copied from tracked RESULTS markdown. Not independently verified. Live runners may rewrite *-RESULTS.md in the working tree; this catalog is the frozen comparison target.",
+  "claims": [
+    {
+      "id": "retrieval-hit5",
+      "suite": "retrieval",
+      "sourceFile": "benchmarks/RETRIEVAL-EVAL-RESULTS.md",
+      "sourceNeedle": "**Hit-rate@5** | **100.0%**",
+      "metric": "hitRateAt5",
+      "display": "100.0%",
+      "numeric": 1,
+      "note": "Self-test in RETRIEVAL-EVAL-RESULTS.md (commit 3f457399c38026a48b529e88fce07de5af199a50, 2026-08-04)."
+    },
+    {
+      "id": "retrieval-mrr",
+      "suite": "retrieval",
+      "sourceFile": "benchmarks/RETRIEVAL-EVAL-RESULTS.md",
+      "sourceNeedle": "**MRR** | **0.836**",
+      "metric": "mrr",
+      "display": "0.836",
+      "numeric": 0.836,
+      "note": "Same retrieval self-test report as Hit@5."
+    },
+    {
+      "id": "retrieval-ndcg5",
+      "suite": "retrieval",
+      "sourceFile": "benchmarks/RETRIEVAL-EVAL-RESULTS.md",
+      "sourceNeedle": "**NDCG@5** | **0.671**",
+      "metric": "ndcgAt5",
+      "display": "0.671",
+      "numeric": 0.671,
+      "note": "Authoritative NDCG@5 is this RESULTS file, not a README headline if they drift."
+    },
+    {
+      "id": "skill-ab-on",
+      "suite": "skill-ab",
+      "sourceFile": "benchmarks/RESULTS.md",
+      "sourceNeedle": "**100.0%** (26/26)",
+      "metric": "successRateA",
+      "display": "100.0% (26/26)",
+      "numeric": 1,
+      "note": "P1-2 flywheel ON success proxy. Self-test 2026-08-04."
+    },
+    {
+      "id": "skill-ab-off",
+      "suite": "skill-ab",
+      "sourceFile": "benchmarks/RESULTS.md",
+      "sourceNeedle": "**61.5%** (16/26)",
+      "metric": "successRateB",
+      "display": "61.5% (16/26)",
+      "numeric": 0.615,
+      "note": "P1-2 flywheel OFF success proxy. Same RESULTS.md block."
+    },
+    {
+      "id": "memory-ab-on",
+      "suite": "memory-ab",
+      "sourceFile": "benchmarks/RESULTS.md",
+      "sourceNeedle": "**100.0%** (62/62)",
+      "metric": "successRateA",
+      "display": "100.0% (62/62)",
+      "numeric": 1,
+      "note": "P3 memory ON success proxy. Self-test 2026-08-04."
+    },
+    {
+      "id": "memory-ab-off",
+      "suite": "memory-ab",
+      "sourceFile": "benchmarks/RESULTS.md",
+      "sourceNeedle": "**56.5%** (35/62)",
+      "metric": "successRateB",
+      "display": "56.5% (35/62)",
+      "numeric": 0.565,
+      "note": "P3 memory OFF success proxy. Same RESULTS.md block."
+    },
+    {
+      "id": "token-savings",
+      "suite": "token",
+      "sourceFile": "benchmarks/RESULTS.md",
+      "sourceNeedle": "**Overall token savings:** **98.2%**",
+      "metric": "savingsPercent",
+      "display": "98.2%",
+      "numeric": 98.2,
+      "note": "Optional compression claim (274,434 → 4,928). Corpus = this repo src/; cross-commit drift is expected."
+    }
+  ]
+}
