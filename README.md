@@ -96,7 +96,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | **Vector index** | In-process memoization + disk persistence (fingerprint-checked, seconds to restore after MCP restart) |
 | **Storage backends** | `file` / `memory` / `sqlite` (FTS5, tokenizer-enhanced `searchtext`, camelCase searchable) / **`auto` (sqlite-first with fallback)** / `mcp-http` |
 | **Learning flywheel** | Episodic memory, reflection, skill nodes (score ±1, bounded [-20,20]), nightly training, adaptive evidence-aware forgetting, **auto-capture + Claude Code hooks (on by default)**, **SkillOpt-lite** bounded guidance edits, four-class lifecycle + **canary gate for synced skills**, portable SKILL.md import/export, `npm run backfill:episodes`, contribution reports (`skill report` / `graphflow_diagnose` / `route diagnose`) |
-| **Team sharing** | `skill sync`: export/import skill packs to a committable `.graphflow/skills/team-skills.json`; imports are a **bidirectional MERGE** (per-skill-id union, newer `updatedAt` wins, ties keep local, local-only skills preserved; `--force` to overwrite); golden retrieval queries round-trip via `.graphflow/team-golden.json`; [security model](docs/team-memory-security.md) |
+| **Team sharing** | `graphflow team serve` (tenant + RBAC) + `skill sync export/import/push/pull`; imports/pulls are a **bidirectional MERGE**; golden queries via `.graphflow/team-golden.json`; [security model + ops runbook](docs/team-memory-security.md) |
 | **Benchmarks** | [Comprehensive 92.9%](benchmarks/COMPREHENSIVE-RESULTS.md) · [Independent-style 96.2%](benchmarks/INDEPENDENT-RESULTS.md) · [context-readiness eval](benchmarks/SWE-BENCH-RESULTS.md) · [98.2% token savings](benchmarks/RESULTS.md) |
 | **Model routing** | Smart / Economy tiers; multi-provider health probes and fallback (DeepSeek, OpenAI, Anthropic, Bailian, Doubao) |
 | **Workbench** | Plan DAG seeds function-topic containers; collapsed outline; click `topicId` to resume; drift forks a side branch; original Q/A stored via `assistantReply` |
@@ -183,7 +183,7 @@ Set `graphPolicy.transport` to `mcp-http` to host the graph on a remote Graphify
 { "graphPolicy": { "transport": "mcp-http", "mcpEndpoint": "http://graphify.team.internal:8080" } }
 ```
 
-A missing/malformed endpoint fails at config validation; connection or runtime request failures degrade transparently to local JSON storage (`graphPolicy.graphStorePath`, default `graphflow-out/graphflow-graph.json`) with a `logger.warn`, consistent with the sqlite→file fallback, never interrupting the agent. The pilot protocol does not yet support full snapshots: `readSnapshot` returns the local mirror file (possibly stale). For the team-sharing security model, see [docs/team-memory-security.md](docs/team-memory-security.md).
+A missing/malformed endpoint fails at config validation; connection or runtime request failures degrade transparently to local JSON storage (`graphPolicy.graphStorePath`, default `graphflow-out/graphflow-graph.json`) with a `logger.warn`, consistent with the sqlite→file fallback, never interrupting the agent. HTTP 401/403 (auth / RBAC deny) do **not** degrade — they throw. `graphflow team serve` implements `graph.read_snapshot` and `team.health`; third-party Graphify servers without those methods still fall back to the local mirror. See [docs/team-memory-security.md](docs/team-memory-security.md).
 
 ## Benchmarks
 

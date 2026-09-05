@@ -4,6 +4,7 @@ process.env.GRAPHFLOW_LOG_JSON ??= "1";
 
 import type { Readable, Writable } from "node:stream";
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -42,7 +43,26 @@ import {
 } from "./tool-handlers.js";
 import { PACKAGE_VERSION } from "./version.js";
 import { appendGovernanceAudit } from "../../learning/evidence.js";
-import { verifyAccessToken, type TokenAuthConfig } from "../../security/token-auth.js";
+import {
+  authorizeMcpTool,
+  TeamAuthorizationError,
+  type TeamRole,
+} from "../../security/rbac.js";
+import {
+  credentialsConfigured,
+  parseRoleTaggedBearer,
+  verifyAccessToken,
+  type TokenAuthConfig,
+} from "../../security/token-auth.js";
+
+interface HttpRequestAuthContext {
+  subject?: string;
+  role?: TeamRole;
+  tenant: string;
+  rbac: boolean;
+}
+
+const httpRequestAuth = new AsyncLocalStorage<HttpRequestAuthContext>();
 
 export { getToolDefinitions } from "./tool-definitions.js";
 export type { ToolCall, ToolCallResponse } from "./tool-handlers.js";
@@ -160,6 +180,8 @@ agent:    report_outcome(episodeId, success, lessons[], deviation?, requirementI
 
 async function readDiagnoseResource(): Promise<unknown> {
   const health = diagnoseRoutingResult(undefined);
+  const { probeTeamDiagnosis } = await import("../team/diagnose.js");
+  health.team = await probeTeamDiagnosis(undefined);
   const graph = await inspectGraph(undefined);
   const stats = getTokenSavingsStats(undefined, undefined);
   const flywheel = getFlywheelReport(undefined, undefined);
@@ -245,6 +267,8 @@ export interface McpHttpServerOptions {
   /** Optional bearer/JWT authentication for non-loopback or team deployments. */
   auth?: McpHttpAuthOptions;
   auditPath?: string;
+  /** Enforce viewer/contributor/admin on tools/call. Default: on when auth is configured. */
+  rbac?: boolean;
 }
 
 export interface McpHttpAuthOptions extends TokenAuthConfig {
@@ -401,8 +425,19 @@ export function createMcpServer(
       ...(progressToken !== undefined ? { progressToken } : {}),
     };
     try {
+      const requestAuth = httpRequestAuth.getStore();
+      if (requestAuth?.rbac) {
+        const decision = authorizeMcpTool(requestAuth.role, call.name);
+        if (!decision.ok) {
+          throw new TeamAuthorizationError(decision);
+        }
+      }
       return await executeToolCallImpl(call, wrapper);
     } catch (error) {
+      if (error instanceof TeamAuthorizationError) {
+        wrapper.sendLogNotification("warning", `Tool '${call.name}' denied: ${error.message}`);
+        throw new McpError(ErrorCode.InvalidRequest, error.message);
+      }
       const message = error instanceof Error ? error.message : "Unknown tool execution error";
       wrapper.sendLogNotification("error", `Tool '${call.name}' failed: ${message}`);
       throw new McpError(ErrorCode.InternalError, message);
@@ -497,11 +532,8 @@ function requestTenant(
 async function authenticateHttpRequest(
   req: IncomingMessage,
   auth: McpHttpAuthOptions | undefined
-): Promise<{ authenticated: boolean; subject?: string; reason?: string }> {
-  const credentialsConfigured = Boolean(
-    auth?.bearerTokens?.length || auth?.jwtSecret || auth?.publicKeyPem
-  );
-  if (!credentialsConfigured) return { authenticated: true, subject: "local" };
+): Promise<{ authenticated: boolean; subject?: string; reason?: string; role?: TeamRole }> {
+  if (!credentialsConfigured(auth)) return { authenticated: true, subject: "local" };
   return verifyAccessToken(req.headers.authorization, auth ?? {});
 }
 
@@ -608,14 +640,24 @@ export async function startStreamableHttpServer(
         writeHttpJsonError(res, 401, ErrorCode.InvalidRequest, authentication.reason ?? "authentication rejected");
         return;
       }
+      const rbacEnabled = options.rbac ?? credentialsConfigured(options.auth);
       const auditEvent = appendGovernanceAudit(options.auditPath ?? ".graphflow/mcp-http-audit.jsonl", {
         actor: authentication.subject ?? "local",
         action: `http.${req.method?.toLowerCase() ?? "request"}`,
         subject: `${tenant}:${url.pathname}`,
         tenant,
-        data: { query: Object.fromEntries(url.searchParams) },
+        data: {
+          query: Object.fromEntries(url.searchParams),
+          ...(authentication.role ? { role: authentication.role } : {}),
+        },
       });
       res.setHeader("x-graphflow-audit-seq", String(auditEvent.seq));
+      if (authentication.role) {
+        res.setHeader("x-graphflow-role", authentication.role);
+      }
+      res.setHeader("x-graphflow-tenant", tenant);
+
+      const runAuthed = async (): Promise<void> => {
       if (url.pathname !== endpoint) {
         writeHttpJsonError(res, 404, ErrorCode.InvalidRequest, `Unknown GraphFlow MCP HTTP endpoint: ${url.pathname}`);
         return;
@@ -659,6 +701,17 @@ export async function startStreamableHttpServer(
       type ConnectableTransport = Parameters<typeof serverInstance.sdkServer.connect>[0];
       await serverInstance.sdkServer.connect(transport as ConnectableTransport);
       await handleWithHttpMcpSession(req, res, session, { sessions, stateful });
+      };
+
+      await httpRequestAuth.run(
+        {
+          tenant,
+          rbac: rbacEnabled,
+          ...(authentication.subject ? { subject: authentication.subject } : {}),
+          ...(authentication.role ? { role: authentication.role } : {}),
+        },
+        runAuthed
+      );
     })().catch((error) => {
       console.error("[GraphFlow MCP] Unexpected HTTP error:", error);
       if (!res.headersSent) {
@@ -730,10 +783,16 @@ export function readMcpHttpOptionsFromArgv(
   const endpointFlag = readFlag("--endpoint");
   const allowedHostsFlag = readFlag("--allow-host");
   const allowedOriginsFlag = readFlag("--allow-origin");
-  const bearerTokens = [
+  const bearerRoleMap: Record<string, TeamRole> = {};
+  const bearerTokens: string[] = [];
+  for (const raw of [
     ...(process.env.GRAPHFLOW_MCP_HTTP_TOKEN ? [process.env.GRAPHFLOW_MCP_HTTP_TOKEN] : []),
     ...collectFlags("--http-token"),
-  ];
+  ]) {
+    const parsed = parseRoleTaggedBearer(raw);
+    bearerTokens.push(parsed.token);
+    if (parsed.role) bearerRoleMap[parsed.token] = parsed.role;
+  }
   const jwtSecret = readFlag("--http-jwt-secret") ?? process.env.GRAPHFLOW_MCP_HTTP_JWT_SECRET;
   const publicKeyFile = readFlag("--http-public-key-file");
   const issuer = readFlag("--http-oidc-issuer") ?? process.env.GRAPHFLOW_MCP_HTTP_OIDC_ISSUER;
@@ -754,6 +813,7 @@ export function readMcpHttpOptionsFromArgv(
     ...(allowedOriginsFlag ? { allowedOrigins: collectFlags("--allow-origin") } : {}),
     auth: {
       ...(bearerTokens.length > 0 ? { bearerTokens } : {}),
+      ...(Object.keys(bearerRoleMap).length > 0 ? { bearerRoleMap } : {}),
       ...(jwtSecret ? { jwtSecret } : {}),
       ...(publicKeyFile ? { publicKeyPem: readFileSync(publicKeyFile, "utf8") } : {}),
       ...(issuer ? { issuer } : {}),
@@ -762,6 +822,7 @@ export function readMcpHttpOptionsFromArgv(
       ...(allowedTenants.length > 0 ? { allowedTenants } : {}),
     },
     auditPath,
+    ...(argv.includes("--rbac") ? { rbac: true } : argv.includes("--no-rbac") ? { rbac: false } : {}),
   };
 }
 

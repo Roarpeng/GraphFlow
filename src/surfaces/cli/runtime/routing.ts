@@ -61,6 +61,7 @@ import { buildEmbeddingOptions } from "./env.js";
 import { extractTokenCost } from "./helpers.js";
 import { hasIndexCache } from "../../../graph/file-indexer-cache";
 import { getFlywheelReport } from "./graph.js";
+import { diagnoseTeamConfig } from "../../team/diagnose.js";
 import { buildWorkbenchOutlines, seedWorkbenchFromPlan } from "../../../learning/workbench-topic.js";
 import type {
   PlanPreviewResult,
@@ -252,6 +253,7 @@ export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResu
     modelCache,
     connectivitySummary,
     flywheel,
+    team: diagnoseTeamConfig(config),
   };
 }
 
@@ -302,8 +304,7 @@ function computeModelCacheDiagnosis() {
   return { exists, path: cacheDir, resolution };
 }
 
-export function diagnoseRouting(configPath?: string): string {
-  const result = diagnoseRoutingResult(configPath);
+export function diagnoseRouting(configPath?: string, result = diagnoseRoutingResult(configPath)): string {
   const experience = result.flywheel?.experience;
   return [
     `dynamicRouting=${result.dynamicRouting ? "on" : "off"}`,
@@ -319,6 +320,15 @@ export function diagnoseRouting(configPath?: string): string {
           `experience=conv:${experience.episodeToSkillConversionRate.toFixed(2)},lessons:${experience.lessonsCoverageRate.toFixed(2)},consol:${experience.consolidation?.actionable ?? 0}`,
         ]
       : []),
+    result.team
+      ? `team=${result.team.enabled ? "on" : "off"}:${result.team.transport}` +
+        `${result.team.endpoint ? `:${result.team.endpoint}` : ""}` +
+        `;tenant=${result.team.tenant ?? "default"}` +
+        `;auth=${result.team.authMode}` +
+        `;rbac=${result.team.rbacExpected ? "expected" : "local"}` +
+        `${result.team.reachable === undefined ? "" : `;reachable=${result.team.reachable}`}` +
+        `${result.team.degradedToLocal ? ";degraded=local" : ""}`
+      : "team=off",
   ].join("; ");
 }
 

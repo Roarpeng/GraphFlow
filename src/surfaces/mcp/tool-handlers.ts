@@ -248,6 +248,8 @@ export async function executeToolCall(
     case "graphflow_diagnose": {
       const configPath = readOptionalString(args.configPath);
       const health = diagnoseRoutingResult(configPath);
+      const { probeTeamDiagnosis } = await import("../team/diagnose.js");
+      health.team = await probeTeamDiagnosis(configPath);
       const graph = await inspectGraph(configPath, buildInspectOptions(args));
       const stats = getTokenSavingsStats(configPath, readOptionalString(args.rootDir));
       const flywheel = getFlywheelReport(configPath, readOptionalString(args.rootDir));

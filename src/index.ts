@@ -105,6 +105,14 @@ export {
   createGraphClient,
   type GraphClient,
 } from "./graph/client-factory";
+export { startTeamMemoryServer, type StartedTeamMemoryServer, type TeamMemoryServerOptions } from "./surfaces/team/server";
+export {
+  authorizeTeamMethod,
+  authorizeMcpTool,
+  type TeamRole,
+  type TeamPermission,
+} from "./security/rbac";
+export { issueLocalJwt, verifyAccessToken, parseRoleTaggedBearer } from "./security/token-auth";
 export { validateConfig, loadConfig, loadConfigSafe, type LoadConfigResult, validateConfigDetailed, type ConfigValidationResult, type ValidationIssue } from "./config/loader";
 export {
   graphflowSkills,

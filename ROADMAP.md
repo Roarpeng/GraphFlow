@@ -117,7 +117,7 @@
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
 | **P1** | Concept/Requirement 层落地 | ✅ | 确定性中英文抽取器已接线 CLI/MCP；本仓 dogfood 写入 20 Requirement + 224 Concept 和 503 条 provenance 边 |
-| **P2** | 团队共享记忆补位 | 🟡 | 已落地 graph artifact 三方合并、冲突队列、签名/加密、保留/隔离与 audit chain；企业 RBAC/远端协作仍需产品化 |
+| **P2** | 团队共享记忆补位 | ✅ | MVP 已产品化：`graphflow team serve`（tenant 隔离 + viewer/contributor/admin RBAC）、`team issue-token`、mcp-http 客户端 JWT/bearer + 401/403 不降级、`skill sync push/pull`、diagnose/doctor 报告 team 连通与 RBAC。artifact 三方合并/签名/加密/quarantine 仍在。企业 wishlist：OIDC IdP UI、审批流界面、托管多活 |
 
 ### R4 · 工程治理（P2，持续维护前提）
 
@@ -133,7 +133,8 @@
 ### 建议版本节奏
 
 - **v1.10**：R0 全部（真证据链 + 本地闭环 + 噪声治理）——"学习引擎"成为真能力的版本
-- ~~v1.10–v1.13~~：v1.13.0 已发布——真实证据链、fidelity 指标、O(1) 技能读路径、SKILL.md 互操作、自适应遗忘、Engineering KG 概念层、MCP Streamable HTTP 和治理/release-gate 平面。下一阶段优先把两个大型 installer 迁移到 HostAdapter，并产品化企业远端协作。
+- ~~v1.10–v1.13~~：v1.13.0 已发布——真实证据链、fidelity 指标、O(1) 技能读路径、SKILL.md 互操作、自适应遗忘、Engineering KG 概念层、MCP Streamable HTTP 和治理/release-gate 平面。
+- **v1.14+**：团队共享记忆 HTTP RBAC + `graphflow team serve` MVP 已落地。下一阶段优先把两个大型 installer 迁移到 HostAdapter。
 - **长期**：R4 工程债随版本消化
 
 ## 如何参与

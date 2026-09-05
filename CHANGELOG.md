@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Team shared memory MVP (ROADMAP R3)**：`graphflow team serve` 提供带 tenant 隔离与 viewer/contributor/admin RBAC 的 Graphify JSON-RPC 团队图服务；非 loopback 默认强制认证。`graphflow team issue-token` / `team example-config` 覆盖发证与客户端配置。
+- **HTTP RBAC**：JWT `role` / `memory:read|write|admin` scope 或 `--http-token role:token` bearer 角色表；写路径（图变更、skill sync push、artifact import、governance）对 viewer 失败关闭。MCP Streamable HTTP 在配置了凭据时对 `tools/call` 执行同一套角色。
+- **客户端**：`graphPolicy.mcpTenant`；mcp-http 客户端发送 `X-GraphFlow-Tenant`；401/403 不再静默降级到本地文件。`skill sync push|pull` 在 MERGE 语义上复用既有 git 技能包。
+- **Diagnose / doctor**：`graphflow diagnose`（`route diagnose` 别名）与 `graphflow_diagnose` 输出 team 连通、authMode、tenant、RBAC、degraded-to-local。
+- **文档**：`docs/team-memory-security.md` 标为 shipped MVP，并附部署 / 发证 / 加入 / 同步 runbook。
+
+### Tests
+
+- 新增 team RBAC 单测与 team server 集成测：角色允许/拒绝、tenant 隔离、非 loopback 拒无认证启动、客户端鉴权失败。
+
 ## [1.14.1] - 2026-09-05
 
 ### Fixed
