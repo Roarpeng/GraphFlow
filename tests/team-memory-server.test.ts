@@ -8,7 +8,7 @@ import { diagnoseTeamConfig, probeTeamDiagnosis } from "../src/surfaces/team/dia
 import {
   readTeamServerOptionsFromArgv,
   issueTeamTokenFromArgv,
-} from "../src/surfaces/team/cli";
+} from "../src/surfaces/team/ops";
 import { startTeamMemoryServer } from "../src/surfaces/team/server";
 import { diagnoseRoutingResult } from "../src/surfaces/cli/runtime";
 import { validateConfig } from "../src/config/loader";

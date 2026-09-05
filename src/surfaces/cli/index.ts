@@ -1342,7 +1342,7 @@ main().catch((error) => {
 async function executeTeamCommand(args: string[]): Promise<CliCommandResult | undefined> {
   const sub = args[0]?.trim();
   if (sub === "serve") {
-    const { startTeamServerFromArgv } = await import("../team/cli.js");
+    const { startTeamServerFromArgv } = await import("../team/ops.js");
     const started = await startTeamServerFromArgv(args.slice(1));
     const { httpServer: _httpServer, close: _close, ...data } = started;
     return {
@@ -1354,7 +1354,7 @@ async function executeTeamCommand(args: string[]): Promise<CliCommandResult | un
     };
   }
   if (sub === "issue-token") {
-    const { issueTeamTokenFromArgv } = await import("../team/cli.js");
+    const { issueTeamTokenFromArgv } = await import("../team/ops.js");
     const data = issueTeamTokenFromArgv(args.slice(1));
     return {
       command: "team-issue-token",
@@ -1363,7 +1363,7 @@ async function executeTeamCommand(args: string[]): Promise<CliCommandResult | un
     };
   }
   if (sub === "example-config") {
-    const { buildTeamClientExampleConfig } = await import("../team/cli.js");
+    const { buildTeamClientExampleConfig } = await import("../team/ops.js");
     const endpoint = readCliFlagValue(args, "--endpoint");
     const tenant = readCliFlagValue(args, "--tenant");
     const apiKey = readCliFlagValue(args, "--api-key");
