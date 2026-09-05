@@ -1310,6 +1310,7 @@ export function looksLikeGraphFlowOwnedContent(content: string): boolean {
     content.includes("10 MCP tools") ||
     content.includes("graphflow-mcp") ||
     content.includes("A Context-Aware Multi-Agent Orchestration Engine") ||
+    content.includes("memory & context harness") ||
     /^\s*#\s*GraphFlow\b/m.test(content)
   );
 }
@@ -1345,7 +1346,8 @@ export function removeGraphFlowOwnedFile(filePath: string): boolean {
       const mostlyOurs =
         content.includes(INSTRUCTION_BEGIN) ||
         /^\s*#\s*GraphFlow\b/m.test(content) ||
-        content.includes("A Context-Aware Multi-Agent Orchestration Engine");
+        content.includes("A Context-Aware Multi-Agent Orchestration Engine") ||
+        content.includes("memory & context harness");
       if (mostlyOurs) {
         return removeFileIfExists(filePath);
       }
