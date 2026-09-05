@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-08-23（v1.13.0：Evidence Runtime、Governance Plane、release gates、secure MCP HTTP 与 host adapter 基础）
+> 最后更新：2026-09-05（v1.15.0 之后：Cursor / Claude Code 安装路径迁到 HostAdapter）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -125,7 +125,7 @@
 | --- | --- | --- | --- |
 | **P2** | 配置 split-brain 收敛 | ✅ | 新增 canonical embedding model 模块；defaults 与 transformers loader 统一使用 `Xenova/bge-base-zh-v1.5` |
 | **P2** | context-slicer / orchestrator 重复合并 | ⬜ | `buildLayeredContextPackage`/`buildEnhancedContextPackage` ~60% 重复；`runOrchestration` 358 行 |
-| **P2** | 集成层模块化 | 🟡 | `HostAdapter` 能力模型已落地；DSH 安装路径已迁到 `installViaHostAdapter("deepseek-harness")`。Cursor / Claude Code 的大型 installer 仍待迁移 |
+| **P2** | 集成层模块化 | 🟡 | `HostAdapter` 能力模型已落地；DSH / Cursor / Claude Code 的 install / uninstall / doctor 已迁到 `installViaHostAdapter`。其余宿主（Trae、VS Code、Windsurf、Codex、Gemini、Antigravity、Copilot、Cline、Roo、Kilo、Qoder、Opencode 等）仍走 `agent-mcp-installer` / `skill-installer` 遗留路径 |
 | **P2** | 测试隔离修复 | 🟡 | Trae project-install 真实 home 并行竞态已改为只断言临时 workspace 项目项；m74/m75 仍需继续隔离 |
 | **P2** | web 知识节点栏产品化 | ✅ | 静态 `dsh.client` bundle 落地：`dsh/client.js` factory 双 slot + glue `/gf` Connection RPC 数据通道 + `dsh.client`/`exports["./client"]` 声明，重启自动加载。已知缺口（上游）：client-modules 扫描器只从 dsh 安装树解析条目名（loader 是安装树→profile 两锚点），out-of-tree 包需可从安装树解析（如 `~/node_modules` 符号链接）否则被静默跳过 |
 | **P2** | 集成健壮性：unsafe-cwd 下 rootDir 生效 | ✅ | dsh dogfood 实证：`resolveConfig()` 先于工具级 rootDir 绑定并抛 unsafe-cwd 错，MCP 工具全灭；已改为 `resolveConfig(configPath, { rootDir })` 贯穿 runtime 调用点，安全检查不放宽 |
@@ -134,7 +134,7 @@
 
 - **v1.10**：R0 全部（真证据链 + 本地闭环 + 噪声治理）——"学习引擎"成为真能力的版本
 - ~~v1.10–v1.13~~：v1.13.0 已发布——真实证据链、fidelity 指标、O(1) 技能读路径、SKILL.md 互操作、自适应遗忘、Engineering KG 概念层、MCP Streamable HTTP 和治理/release-gate 平面。
-- **v1.14+**：团队共享记忆 HTTP RBAC + `graphflow team serve` MVP 已落地。下一阶段优先把两个大型 installer 迁移到 HostAdapter。
+- **v1.14+**：团队共享记忆 HTTP RBAC + `graphflow team serve` MVP 已落地。Cursor / Claude Code 已迁到 HostAdapter；其余 IDE 安装器仍待迁移。
 - **长期**：R4 工程债随版本消化
 
 ## 如何参与

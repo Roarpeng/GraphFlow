@@ -1,7 +1,7 @@
 /**
  * Host capability registry (v1.13).
- * Install dispatch lives in `host-adapter-install.ts` — DSH is the first
- * migrated slice; Cursor and Claude Code installers are still standalone.
+ * Install dispatch lives in `host-adapter-install.ts` — DSH, Cursor, and
+ * Claude Code are migrated; other IDE installers remain standalone.
  */
 export type HostCapability =
   | "mcp-stdio"
