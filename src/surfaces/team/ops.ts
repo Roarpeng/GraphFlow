@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { isTeamRole, type TeamRole } from "../../security/rbac.js";
 import { issueLocalJwt, parseRoleTaggedBearer } from "../../security/token-auth.js";
 import {
-  isLoopbackHost,
   startTeamMemoryServer,
   type TeamHttpAuthOptions,
   type TeamMemoryServerOptions,
@@ -154,8 +153,3 @@ export function buildTeamClientExampleConfig(options: {
   };
 }
 
-export function describeTeamBindPolicy(host: string): string {
-  return isLoopbackHost(host)
-    ? "loopback: auth optional (local-first)"
-    : "non-loopback: auth + RBAC required";
-}
