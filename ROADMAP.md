@@ -125,7 +125,7 @@
 | --- | --- | --- | --- |
 | **P2** | 配置 split-brain 收敛 | ✅ | 新增 canonical embedding model 模块；defaults 与 transformers loader 统一使用 `Xenova/bge-base-zh-v1.5` |
 | **P2** | context-slicer / orchestrator 重复合并 | ⬜ | `buildLayeredContextPackage`/`buildEnhancedContextPackage` ~60% 重复；`runOrchestration` 358 行 |
-| **P2** | 集成层模块化 | 🟡 | 新增 `HostAdapter` 能力模型与 DSH/Cursor/Claude 注册表，作为 installer 拆分入口；两个大型 installer 仍需迁移到适配器实现 |
+| **P2** | 集成层模块化 | 🟡 | `HostAdapter` 能力模型已落地；DSH 安装路径已迁到 `installViaHostAdapter("deepseek-harness")`。Cursor / Claude Code 的大型 installer 仍待迁移 |
 | **P2** | 测试隔离修复 | 🟡 | Trae project-install 真实 home 并行竞态已改为只断言临时 workspace 项目项；m74/m75 仍需继续隔离 |
 | **P2** | web 知识节点栏产品化 | ✅ | 静态 `dsh.client` bundle 落地：`dsh/client.js` factory 双 slot + glue `/gf` Connection RPC 数据通道 + `dsh.client`/`exports["./client"]` 声明，重启自动加载。已知缺口（上游）：client-modules 扫描器只从 dsh 安装树解析条目名（loader 是安装树→profile 两锚点），out-of-tree 包需可从安装树解析（如 `~/node_modules` 符号链接）否则被静默跳过 |
 | **P2** | 集成健壮性：unsafe-cwd 下 rootDir 生效 | ✅ | dsh dogfood 实证：`resolveConfig()` 先于工具级 rootDir 绑定并抛 unsafe-cwd 错，MCP 工具全灭；已改为 `resolveConfig(configPath, { rootDir })` 贯穿 runtime 调用点，安全检查不放宽 |

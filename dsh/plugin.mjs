@@ -55,7 +55,7 @@ const CAPTURE_OUTPUT_MAX_BYTES = 4_000_000;
 
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** @typedef {{ spawn?: typeof spawn, env?: NodeJS.ProcessEnv, cwd?: string, readSkill?: () => { name: string, description: string, content: string, source: string, path?: string } }} GraphFlowDshPluginConfig */
+/** @typedef {{ spawn?: typeof spawn, env?: NodeJS.ProcessEnv, cwd?: string, log?: { warn?: (msg: string) => void, error?: (msg: string) => void }, readSkill?: () => { name: string, description: string, content: string, source: string, path?: string } }} GraphFlowDshPluginConfig */
 
 function envOf(config) {
   return config?.env ?? process.env;
@@ -152,6 +152,21 @@ export function latestPendingEpisodeId(journalPath) {
 
 export function buildContextHint(cwd = process.cwd()) {
   return `GraphFlow: before large code reads, call mcp__graphflow__graphflow_context with rootDir=${cwd}. Do not dump SKILL.md.`;
+}
+
+/**
+ * Same-step first-turn hint message. Tagged as plugin instructions so
+ * `isUserOriginatedMessage` does not treat it as a user question.
+ * `inject()` is the wrong primitive here — it lands in the *next* step inbox.
+ * @param {string} [cwd]
+ */
+export function buildHintMessage(cwd = process.cwd()) {
+  return {
+    id: crypto.randomUUID(),
+    role: "user",
+    content: [{ type: "text", text: buildContextHint(cwd) }],
+    source: { kind: "plugin", plugin: PLUGIN_ID, form: "instructions" },
+  };
 }
 
 /**
@@ -824,23 +839,66 @@ async function rpcNodesHandler(endpoint, payload, signal, config) {
   }
 }
 
+function logGlue(config, level, message) {
+  try {
+    const logger = config?.log;
+    if (logger && typeof logger[level] === "function") {
+      logger[level](`[graphflow-dsh] ${message}`);
+      return;
+    }
+    const fallback = level === "error" ? console.error : console.warn;
+    fallback(`[graphflow-dsh] ${message}`);
+  } catch {
+    // logging must never throw into the harness
+  }
+}
+
 /**
- * Best-effort registration of the /gf Connection RPC channel
- * (`ctx.connection.rpc.handle("/gf", handler, { authority: "trusted-host" })`
- * — see dsh-client-connection lib/index.js:219-258: the handler is
- * `(endpoint, payload, signal)` and `handle` returns a disposer). Duck-typed,
- * idempotent (one channel per connection instance), and the returned disposer
- * both unregisters via the handle disposer and is attached to `ctx.effect`
- * when available so the harness tears it down on unload. Never throws.
- * @param {object} ctx
- * @param {GraphFlowDshPluginConfig} [config]
+ * Resolve a Connection service from a Cordis ctx, an inject fork, or the
+ * connection object itself. `ctx.get("connection")` may be undefined while
+ * `ctx.connection` is already set (or the reverse); try both. Never throws.
+ * @param {object|undefined} source
+ * @returns {object|undefined}
+ */
+export function resolveConnectionService(source) {
+  if (!source || typeof source !== "object") return undefined;
+  if (typeof source.get === "function") {
+    try {
+      const viaGet = source.get("connection");
+      if (viaGet && typeof viaGet === "object") return viaGet;
+    } catch {
+      // service not ready / get threw
+    }
+  }
+  if (source.connection && typeof source.connection === "object") return source.connection;
+  if (source.rpc && typeof source.rpc.handle === "function") return source;
+  return undefined;
+}
+
+function attachRpcEffect(targetCtx, dispose) {
+  if (!targetCtx || typeof targetCtx.effect !== "function") return;
+  try {
+    targetCtx.effect(() => dispose, "graphflow-dsh: /gf nodes rpc channel");
+  } catch {
+    // effect bus missing — the apply return value still cleans up
+  }
+}
+
+/**
+ * Wire `/gf` on one connection instance. Idempotent per connection.
+ * Failures are logged (not swallowed). Never throws.
  * @returns {(() => void)|undefined}
  */
-function registerNodesRpcChannel(ctx, config) {
-  const connection = typeof ctx.get === "function" ? ctx.get("connection") : ctx.connection;
-  if (!connection || typeof connection !== "object") return undefined;
+function registerNodesRpcOnConnection(connection, ctx, config) {
+  if (!connection || typeof connection !== "object") {
+    logGlue(config, "warn", "/gf RPC: connection service unavailable");
+    return undefined;
+  }
   const rpc = connection.rpc;
-  if (!rpc || typeof rpc.handle !== "function") return undefined;
+  if (!rpc || typeof rpc.handle !== "function") {
+    logGlue(config, "warn", "/gf RPC: connection.rpc.handle is missing");
+    return undefined;
+  }
   if (wiredRpcConnections.has(connection)) return undefined;
   wiredRpcConnections.add(connection);
   let disposer;
@@ -848,8 +906,13 @@ function registerNodesRpcChannel(ctx, config) {
     disposer = rpc.handle(NODES_CHANNEL, (endpoint, payload, signal) => rpcNodesHandler(endpoint, payload, signal, config), {
       authority: "trusted-host",
     });
-  } catch {
+  } catch (error) {
     wiredRpcConnections.delete(connection);
+    logGlue(
+      config,
+      "error",
+      `/gf RPC: rpc.handle("${NODES_CHANNEL}") failed: ${error && error.message ? error.message : error}`
+    );
     return undefined;
   }
   const dispose = () => {
@@ -863,14 +926,83 @@ function registerNodesRpcChannel(ctx, config) {
       }
     }
   };
-  if (typeof ctx.effect === "function") {
+  attachRpcEffect(ctx, dispose);
+  return dispose;
+}
+
+/**
+ * Best-effort registration of the /gf Connection RPC channel
+ * (`ctx.connection.rpc.handle("/gf", handler, { authority: "trusted-host" })`
+ * — see dsh-client-connection lib/index.js:219-258: the handler is
+ * `(endpoint, payload, signal)` and `handle` returns a disposer).
+ *
+ * The host `connection` service is often not ready at apply() time
+ * (`ctx.get("connection")` is undefined because it injects `webRuntime`).
+ * Mirror DSH api-gateway: wait with `ctx.inject(["connection"], cb)` and
+ * register when the service appears. Duck-typed, idempotent (one channel
+ * per connection), and the returned disposer both unregisters via the
+ * handle disposer and is attached to `ctx.effect` when available.
+ * Registration failures are logged. Never throws.
+ * @param {object} ctx
+ * @param {GraphFlowDshPluginConfig} [config]
+ * @returns {(() => void)|undefined}
+ */
+function registerNodesRpcChannel(ctx, config) {
+  const disposeHolder = { current: undefined };
+  let disposed = false;
+
+  const tryRegister = (sourceCtx) => {
+    if (disposed) return undefined;
+    const connection = resolveConnectionService(sourceCtx) ?? resolveConnectionService(ctx);
+    if (!connection) return undefined;
+    const dispose = registerNodesRpcOnConnection(connection, sourceCtx ?? ctx, config);
+    if (dispose) {
+      disposeHolder.current = dispose;
+      attachRpcEffect(ctx, dispose);
+    }
+    return dispose;
+  };
+
+  tryRegister(ctx);
+
+  if (!disposeHolder.current && ctx && typeof ctx.inject === "function") {
+    logGlue(config, "warn", '/gf RPC: connection not ready; waiting via ctx.inject(["connection"])');
     try {
-      ctx.effect(() => dispose, "graphflow-dsh: /gf nodes rpc channel");
-    } catch {
-      // effect bus missing — the apply return value still cleans up
+      ctx.inject(["connection"], (injected) => {
+        try {
+          if (disposed) return;
+          const dispose = tryRegister(injected ?? ctx);
+          if (!dispose && !disposeHolder.current) {
+            logGlue(config, "warn", "/gf RPC: connection inject fired but /gf channel was not registered");
+          }
+        } catch (error) {
+          logGlue(
+            config,
+            "error",
+            `/gf RPC: delayed registration failed: ${error && error.message ? error.message : error}`
+          );
+        }
+      });
+    } catch (error) {
+      logGlue(
+        config,
+        "error",
+        `/gf RPC: ctx.inject(["connection"]) failed: ${error && error.message ? error.message : error}`
+      );
     }
   }
-  return dispose;
+
+  return () => {
+    disposed = true;
+    if (typeof disposeHolder.current === "function") {
+      try {
+        disposeHolder.current();
+      } catch {
+        // teardown is best-effort
+      }
+      disposeHolder.current = undefined;
+    }
+  };
 }
 
 /**
@@ -1067,17 +1199,6 @@ export function closePendingEpisodeForCwd(cwd, config = {}) {
   }
 }
 
-function safeInjectHint(agent, cwd) {
-  if (!agent || typeof agent.inject !== "function") return;
-  const text = buildContextHint(cwd);
-  agent.inject({
-    id: crypto.randomUUID(),
-    role: "user",
-    content: [{ type: "text", text }],
-    source: { kind: "plugin", plugin: PLUGIN_ID, form: "instructions" },
-  });
-}
-
 function registerSkill(ctx, config) {
   const skills = ctx?.skills;
   if (!skills || typeof skills.register !== "function") return;
@@ -1104,14 +1225,18 @@ export function apply(ctx, config = {}) {
   }
 
   // Static-panel data channel: /gf Connection RPC (registerNodesRpcChannel).
-  // Best-effort — a missing connection service or a failed registration must
-  // never affect the rest of the glue. The disposer is returned from apply so
-  // Cordis tears the channel down on unload.
+  // Registers immediately when connection is already on ctx; otherwise waits
+  // via ctx.inject(["connection"]) so apply() racing webRuntime still works.
+  // Failures are logged. Never throw into the harness.
   let disposeNodesRpc;
   try {
     disposeNodesRpc = registerNodesRpcChannel(ctx, config);
-  } catch {
-    // the /gf data channel is optional
+  } catch (error) {
+    logGlue(
+      config,
+      "error",
+      `/gf RPC: registerNodesRpcChannel threw: ${error && error.message ? error.message : error}`
+    );
   }
 
   const hinted = new WeakSet();
@@ -1259,20 +1384,29 @@ export function apply(ctx, config = {}) {
   }
 
   try {
-    listen(ctx, "agent/pre-step", (payload, next) => {
+    // First-turn hint must ride in the *same* step as the user's first
+    // message. `agent.inject()` from pre-step appends to the *next* step
+    // inbox (and can spawn a trailing step the model refuses). Extend the
+    // enter decision's `messages` after `next()` instead — same WeakSet
+    // gating and source tagging, no driver wake.
+    listen(ctx, "agent/pre-step", async (payload, next) => {
+      let decision;
       try {
-        const agent = payloadAgent(payload);
-        if (agent && !hinted.has(agent)) {
-          hinted.add(agent);
-          safeInjectHint(agent, resolveWorkspaceCwd(payload, config.cwd));
-        }
+        decision = typeof next === "function" ? await next() : undefined;
       } catch {
-        // hint is optional
+        return undefined;
       }
-      if (typeof next === "function") {
-        return next();
+      try {
+        if (!decision || decision.kind !== "enter") return decision;
+        const agent = payloadAgent(payload);
+        if (!agent || hinted.has(agent)) return decision;
+        const hint = buildHintMessage(resolveWorkspaceCwd(payload, config.cwd));
+        const messages = Array.isArray(decision.messages) ? decision.messages : [];
+        hinted.add(agent);
+        return { ...decision, messages: [...messages, hint] };
+      } catch {
+        return decision;
       }
-      return undefined;
     });
   } catch {
     // event bus missing

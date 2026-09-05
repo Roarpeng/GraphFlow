@@ -12,6 +12,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { getHostAdapter } from "./host-adapter";
+
+/** HostAdapter registry id for this installer slice. */
+export const DSH_HOST_ADAPTER_ID = "deepseek-harness";
+
+function dshAdapterDisplayName(): string {
+  return getHostAdapter(DSH_HOST_ADAPTER_ID)?.displayName ?? "DeepSeek Harness";
+}
 
 export const DSH_HOME_ENV = "GRAPHFLOW_DSH_HOME";
 export const DSH_MCP_ROW_ID = "mcp-graphflow";
@@ -162,7 +170,7 @@ export function getDshHarnessStatus(options: { dshHome?: string } = {}): DshHarn
     }
   }
   return {
-    agent: "DeepSeek Harness",
+    agent: dshAdapterDisplayName(),
     detected,
     installed,
     glueInstalled,
@@ -179,7 +187,7 @@ export function installDshHarness(options: { dshHome?: string } = {}): DshHarnes
     return {
       status: "skipped",
       filePath: paths.patchPath,
-      message: "DeepSeek Harness not detected",
+      message: `${dshAdapterDisplayName()} not detected`,
     };
   }
 
