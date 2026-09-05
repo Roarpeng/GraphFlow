@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **R4 context packaging 去重**：`buildLayeredContextPackage` / `buildEnhancedContextPackage` 抽出共享 `context-package-core`（keyword/vector 召回、L1–L3 配额打包、dialogue 与 neighbor expansion）。两条公开函数的签名与 MCP/CLI context preview 行为保持不变；enhanced 仍独占 adaptive budget、RepoMap、symbol boost、graph compression 与 same-file/import 扩展。
+
+### Tests
+
+- **m74/m75 测试隔离**：不再 `process.chdir()`，也不再向真实 `$HOME/.npm/_npx` 写文件。fake home 与项目根均落在 `os.tmpdir()`，通过 `fromDir` 注入与 `process.cwd` mock 覆盖 unsafe-cwd 路径。
+
 ## [1.15.2] - 2026-09-05
 
 ### Added
