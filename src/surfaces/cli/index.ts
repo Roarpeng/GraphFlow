@@ -47,12 +47,14 @@ import {
   forkDialogueSessionRuntime,
   dialoguePathRuntime,
   listDialogueTracesRuntime,
+  searchDialogueTurnsRuntime,
   type MemoryEpisodeItem,
   type MemorySearchHit,
   type MemoryOutcome,
   type DialogueListItem,
   type DistillDialogueResult,
   type DialoguePathStep,
+  type DialogueSearchHit,
   exportSkillsToMarkdownRuntime,
   importSkillsFromMarkdownRuntime,
   extractDialogueKnowledgeRuntime,
@@ -1102,6 +1104,28 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
+  if (command === "dialogue" && args[0] === "search") {
+    const query = readCliFlagValue(args, "--query")
+      ?? args.slice(1).filter((part) => part !== "--include-superseded" && !part.startsWith("--")).join(" ").trim();
+    if (!query) {
+      console.log('Usage: graphflow dialogue search "<query>" [--limit N] [--include-superseded] [--json] [--config <path>]');
+      process.exitCode = 1;
+      return undefined;
+    }
+    const limitRaw = readCliFlagValue(args, "--limit");
+    const limit = limitRaw ? Number(limitRaw) : undefined;
+    const data = await searchDialogueTurnsRuntime(query, {
+      ...(configPath ? { configPath } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+      ...(args.includes("--include-superseded") ? { includeSuperseded: true } : {}),
+    });
+    return {
+      command: "dialogue-search",
+      data,
+      legacyText: formatDialogueSearch(data),
+    };
+  }
+
   if (command === "dialogue" && args[0] === "record") {
     const input = resolveDialogueRecordInput(args);
     const query = input.query;
@@ -1220,6 +1244,18 @@ function formatDialogueTraces(
     lines.push(
       `turn#${trace.turnSeq} ${trace.agentKind}:${trace.status} ${trace.label}; at=${new Date(trace.createdAt).toISOString()}`
     );
+  }
+  return lines.join("\n");
+}
+
+function formatDialogueSearch(hits: DialogueSearchHit[]): string {
+  const lines: string[] = [`hits=${hits.length}`];
+  for (const hit of hits) {
+    const stale = hit.superseded ? " (superseded)" : "";
+    lines.push(`seq=${hit.seq}${stale}; q=${hit.userQuery}`);
+    if (hit.title) lines.push(`  title=${hit.title}`);
+    if (hit.summary) lines.push(`  a=${hit.summary}`);
+    if (hit.correctionLine) lines.push(`  ${hit.correctionLine}`);
   }
   return lines.join("\n");
 }

@@ -42,6 +42,12 @@ export interface ContextPreviewResult {
   agentInstructions?: string;
   /** Connected conversation spine (user Q + LLM A) for staying on the main thread. */
   dialogueThread?: DialogueThreadView;
+  /**
+   * Historical dialogue turns recalled for this query (Conversation Graph
+   * W2b). Additive-only: rides in its own field and never displaces code
+   * anchors. Superseded turns are hidden unless the query history matters.
+   */
+  dialogueHits?: import("../../../graph/graph-search.js").DialogueSearchHit[];
   /** Active workbench topic container (function node on the canvas). */
   workbench?: import("../../../learning/workbench-topic").WorkbenchContextView;
   /** What this preview wrote into the dialogue/workbench graph. */
