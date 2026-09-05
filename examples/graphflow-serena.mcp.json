@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "graphflow": {
+      "command": "npx",
+      "args": ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"]
+    },
+    "serena": {
+      "command": "serena",
+      "args": [
+        "start-mcp-server",
+        "--context",
+        "ide",
+        "--project",
+        "<your-project-path>"
+      ]
+    }
+  }
+}
