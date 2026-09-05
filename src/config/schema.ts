@@ -44,8 +44,10 @@ export interface GraphFlowConfig {
      * back to the local JSON file store (graphPolicy.graphStorePath).
      */
     mcpEndpoint?: string;
-    /** Optional bearer token sent as `Authorization: Bearer <key>` to the Graphify endpoint. */
+    /** Optional bearer token or JWT sent as `Authorization: Bearer <key>` to the team endpoint. */
     mcpApiKey?: string;
+    /** Tenant id sent as `X-GraphFlow-Tenant` (mcp-http only). Defaults to `default`. */
+    mcpTenant?: string;
     graphStorePath?: string;
     maxContextTokens: number;
     layerQuota?: {

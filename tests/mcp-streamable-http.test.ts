@@ -152,4 +152,57 @@ describe("GraphFlow MCP Streamable HTTP matrix", () => {
       readMcpHttpOptionsFromArgv(["--http", "--port", "70000"])
     ).toThrow(/--port/);
   });
+
+  it("enforces RBAC on tools/call when bearer roles are configured", async () => {
+    const started = await startStreamableHttpServer(undefined, {
+      host: "127.0.0.1",
+      port: 0,
+      enableJsonResponse: true,
+      rbac: true,
+      auth: {
+        bearerRoleMap: { view: "viewer", write: "contributor" },
+      },
+    });
+    try {
+      const denied = await postJson(
+        started.url,
+        {
+          jsonrpc: "2.0",
+          id: "index",
+          method: "tools/call",
+          params: { name: "graphflow_index", arguments: { mode: "incremental" } },
+        },
+        { Authorization: "Bearer view" }
+      );
+      expect(denied.status).toBe(200);
+      const deniedBody = await denied.json();
+      expect(deniedBody.error?.message).toMatch(/RBAC denied|graph.write/);
+
+      const allowed = await postJson(
+        started.url,
+        {
+          jsonrpc: "2.0",
+          id: "guide",
+          method: "tools/call",
+          params: { name: "graphflow_skill_guide", arguments: { section: "tools" } },
+        },
+        { Authorization: "Bearer view" }
+      );
+      expect(allowed.status).toBe(200);
+      const allowedBody = await allowed.json();
+      expect(allowedBody.error).toBeUndefined();
+      expect(allowedBody.result?.structuredContent).toMatchObject({ section: "tools" });
+
+      const parsed = readMcpHttpOptionsFromArgv([
+        "--http",
+        "--http-token",
+        "admin:secret",
+        "--rbac",
+      ]);
+      expect(parsed?.auth?.bearerRoleMap?.secret).toBe("admin");
+      expect(parsed?.rbac).toBe(true);
+    } finally {
+      await started.close();
+    }
+  });
 });
