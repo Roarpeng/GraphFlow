@@ -31,7 +31,7 @@
     "node": ">=20",
     "npm": ">=10"
   },
-  "description": "A Context-Aware Multi-Agent Orchestration Engine",
+  "description": "Local-first memory & context harness for coding agents",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -98,11 +98,12 @@
     "url": "git+https://github.com/Roarpeng/GraphFlow.git"
   },
   "keywords": [
-    "multi-agent",
-    "orchestration",
+    "memory-harness",
+    "context-harness",
+    "local-first",
     "mcp",
-    "context-engine",
-    "agent-plugins",
+    "knowledge-graph",
+    "coding-agents",
     "cursor",
     "claude-code",
     "dsh-plugin",

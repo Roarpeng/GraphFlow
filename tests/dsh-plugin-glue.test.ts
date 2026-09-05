@@ -18,10 +18,12 @@ import { buildDoctorReport } from "../src/surfaces/cli/init";
 import {
   apply,
   buildContextHint,
+  buildHintMessage,
   closePendingEpisodeForCwd,
   isAutoCaptureEnabled,
   latestPendingEpisodeId,
   loadGraphFlowSkillRegistration,
+  resolveConnectionService,
 } from "../dsh/plugin.mjs";
 
 const tempRoots: string[] = [];
@@ -188,10 +190,11 @@ describe("dsh ESM glue plugin", () => {
     expect(skill.content).toContain("graphflow_context");
   });
 
-  it("injects a short pre-step hint and closes pending episode on agent/disposed", () => {
+  it("extends the enter decision with a same-step hint and closes pending episode on agent/disposed", async () => {
     const handlers: Record<string, (...args: unknown[]) => unknown> = {};
     const injected: unknown[] = [];
     const spawned: Array<{ bin: string; args: string[]; cwd?: string }> = [];
+    const userMessage = { role: "user", content: [{ type: "text", text: "hey" }] };
     const agent = {
       inject(message: unknown) {
         injected.push(message);
@@ -229,17 +232,63 @@ describe("dsh ESM glue plugin", () => {
     expect(typeof handlers["agent/pre-step"]).toBe("function");
     expect(typeof handlers["agent/disposed"]).toBe("function");
     expect(handlers["session/flush"]).toBeUndefined();
-    const next = (): { kind: string } => ({ kind: "enter" });
-    const decision = handlers["agent/pre-step"]?.({ agent, cwd: workspace }, next);
-    expect(decision).toEqual({ kind: "enter" });
-    expect(injected).toHaveLength(1);
-    const hint = injected[0] as { content: Array<{ text: string }> };
-    expect(hint.content[0]?.text).toContain("mcp__graphflow__graphflow_context");
-    expect(hint.content[0]?.text).toContain(`rootDir=${workspace}`);
-    expect(hint.content[0]?.text.length).toBeLessThan(240);
+    const next = (): { kind: string; messages: unknown[] } => ({ kind: "enter", messages: [userMessage] });
+    const decision = await handlers["agent/pre-step"]?.({ agent, cwd: workspace }, next);
+    expect(injected).toHaveLength(0);
+    expect(decision).toMatchObject({ kind: "enter" });
+    const messages = (decision as { messages: Array<{ content?: Array<{ text?: string }>; source?: unknown }> }).messages;
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toBe(userMessage);
+    expect(messages[1]?.content?.[0]?.text).toContain("mcp__graphflow__graphflow_context");
+    expect(messages[1]?.content?.[0]?.text).toContain(`rootDir=${workspace}`);
+    expect(messages[1]?.content?.[0]?.text?.length).toBeLessThan(240);
+    expect(messages[1]?.source).toEqual({ kind: "plugin", plugin: "graphflow-dsh", form: "instructions" });
 
     handlers["agent/disposed"]?.({ agent, cwd: workspace });
     expect(spawned).toHaveLength(0);
+  });
+
+  it("does not attach a first-turn hint or consume WeakSet gating on a non-enter decision", async () => {
+    const handlers: Record<string, (...args: unknown[]) => unknown> = {};
+    const injected: unknown[] = [];
+    const agent = {
+      inject(message: unknown) {
+        injected.push(message);
+      },
+    };
+    apply(
+      {
+        skills: { register() {} },
+        on(event: string, handler: (...args: unknown[]) => unknown) {
+          handlers[event] = handler;
+        },
+      },
+      { cwd: "/tmp/ws" }
+    );
+
+    const skip = await handlers["agent/pre-step"]?.(
+      { agent, cwd: "/tmp/ws" },
+      () => ({ kind: "skip", messages: [] })
+    );
+    expect(skip).toEqual({ kind: "skip", messages: [] });
+    expect(injected).toHaveLength(0);
+
+    const userMessage = { role: "user", content: [{ type: "text", text: "hey" }] };
+    const enter = (await handlers["agent/pre-step"]?.(
+      { agent, cwd: "/tmp/ws" },
+      async () => ({ kind: "enter", messages: [userMessage] })
+    )) as { kind: string; messages: Array<{ source?: unknown }> };
+    expect(enter.kind).toBe("enter");
+    expect(enter.messages).toHaveLength(2);
+    expect(enter.messages[1]?.source).toEqual({ kind: "plugin", plugin: "graphflow-dsh", form: "instructions" });
+    expect(injected).toHaveLength(0);
+
+    const again = (await handlers["agent/pre-step"]?.(
+      { agent, cwd: "/tmp/ws" },
+      () => ({ kind: "enter", messages: [userMessage] })
+    )) as { messages: unknown[] };
+    expect(again.messages).toHaveLength(1);
+    expect(injected).toHaveLength(0);
   });
 
   it("reports outcome on agent/disposed only when GRAPHFLOW_HOOK_SUCCESS is explicit", () => {
@@ -354,6 +403,11 @@ describe("dsh ESM glue plugin", () => {
     expect(isAutoCaptureEnabled({})).toBe(true);
     expect(isAutoCaptureEnabled({ GRAPHFLOW_AUTO_CAPTURE: "false" })).toBe(false);
     expect(buildContextHint("/tmp/proj")).toContain("rootDir=/tmp/proj");
+    const hint = buildHintMessage("/tmp/proj");
+    expect(hint.source).toEqual({ kind: "plugin", plugin: "graphflow-dsh", form: "instructions" });
+    expect(hint.content[0]?.text).toContain("rootDir=/tmp/proj");
+    expect(resolveConnectionService({ get: () => undefined, connection: { rpc: {} } })).toEqual({ rpc: {} });
+    expect(resolveConnectionService({ get: () => ({ rpc: { handle() {} } }) })?.rpc).toBeDefined();
     const journal = join(makeTempRoot("gf-dsh-journal-"), "empty.jsonl");
     expect(latestPendingEpisodeId(journal)).toBeUndefined();
   });
@@ -971,6 +1025,124 @@ describe("static panel data channel (/gf nodes)", () => {
     expect(() => cleanup?.()).not.toThrow();
     apply(ctx, cfg);
     expect(registrations).toHaveLength(2);
+  });
+
+  it("registers /gf when connection arrives later via ctx.inject", async () => {
+    const registrations: Array<{ channel: string }> = [];
+    const logs: string[] = [];
+    let injectCallback: ((injected: unknown) => void) | undefined;
+    const connection = {
+      rpc: {
+        handle(channel: string) {
+          registrations.push({ channel });
+          return () => {};
+        },
+      },
+    };
+    const ctx = {
+      skills: { register() {} },
+      on() {},
+      get() {
+        return undefined;
+      },
+      inject(deps: unknown, callback: (injected: unknown) => void) {
+        expect(deps).toEqual(["connection"]);
+        injectCallback = callback;
+      },
+    };
+    const cfg = {
+      env: {},
+      log: {
+        warn(message: string) {
+          logs.push(message);
+        },
+        error(message: string) {
+          logs.push(message);
+        },
+      },
+    };
+    const cleanup = apply(ctx, cfg) as (() => void) | undefined;
+
+    expect(registrations).toHaveLength(0);
+    expect(typeof injectCallback).toBe("function");
+    expect(logs.some((line) => line.includes("waiting via ctx.inject"))).toBe(true);
+
+    injectCallback?.({ connection });
+    expect(registrations).toHaveLength(1);
+    expect(registrations[0]?.channel).toBe("/gf");
+
+    expect(typeof cleanup).toBe("function");
+    expect(() => cleanup?.()).not.toThrow();
+    injectCallback?.({ connection });
+    expect(registrations).toHaveLength(1);
+
+    apply(ctx, cfg);
+    injectCallback?.({ connection });
+    expect(registrations).toHaveLength(2);
+  });
+
+  it("logs when rpc.handle throws and does not stay wired", () => {
+    const logs: string[] = [];
+    let handleCalls = 0;
+    const connection = {
+      rpc: {
+        handle() {
+          handleCalls += 1;
+          throw new Error("duplicate /gf route");
+        },
+      },
+    };
+    const ctx = {
+      skills: { register() {} },
+      on() {},
+      connection,
+    };
+    const cfg = {
+      log: {
+        warn(message: string) {
+          logs.push(message);
+        },
+        error(message: string) {
+          logs.push(message);
+        },
+      },
+    };
+    expect(() => apply(ctx, cfg)).not.toThrow();
+    expect(handleCalls).toBe(1);
+    expect(logs.some((line) => line.includes('rpc.handle("/gf") failed') && line.includes("duplicate"))).toBe(true);
+
+    apply(ctx, cfg);
+    expect(handleCalls).toBe(2);
+  });
+
+  it("logs when inject fires but the connection still cannot register /gf", () => {
+    const logs: string[] = [];
+    let injectCallback: ((injected: unknown) => void) | undefined;
+    apply(
+      {
+        skills: { register() {} },
+        on() {},
+        get() {
+          return undefined;
+        },
+        inject(_deps: unknown, callback: (injected: unknown) => void) {
+          injectCallback = callback;
+        },
+      },
+      {
+        log: {
+          warn(message: string) {
+            logs.push(message);
+          },
+          error(message: string) {
+            logs.push(message);
+          },
+        },
+      }
+    );
+    injectCallback?.({ connection: {} });
+    expect(logs.some((line) => line.includes("connection.rpc.handle is missing"))).toBe(true);
+    expect(logs.some((line) => line.includes("was not registered"))).toBe(true);
   });
 });
 

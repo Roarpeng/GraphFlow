@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **#28 DSH first-turn hint**: the glue extends the `agent/pre-step` enter decision's `messages` after `next()`, so the hint rides in the same step as the user's first message. `agent.inject()` is no longer used (it landed in the next-step inbox and spawned a trailing step the model refused). WeakSet gating and plugin source tagging are unchanged.
+- **#26 `/gf/nodes` HTTP 405**: `/gf` RPC registration waits for the host `connection` service with `ctx.inject(["connection"])` (same pattern as DSH api-gateway) instead of a sync `ctx.get("connection")` that is often undefined at apply() time. Registration failures are logged instead of swallowed.
+
+### Changed
+
+- package.json `description` / keywords match the README positioning: GraphFlow is a local-first memory & context harness for coding agents, not an orchestrating executor.
+- DSH home overlay install/uninstall goes through the HostAdapter registry (`installViaHostAdapter("deepseek-harness")`). Cursor and Claude Code installers are unchanged.
+
 ## [1.14.0] - 2026-09-02
 
 ### Added
