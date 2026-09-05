@@ -10,13 +10,33 @@ machine-readable output, and runnable with a single command.
 > this suite exists for. Full methodology (inputs, judgment criteria, honest
 > caveats) is standardized in [`docs/benchmark-standards.md`](../docs/benchmark-standards.md).
 
+## Third-party reproduction entry
+
+The outsider command for flywheel / memory A/B / retrieval claims:
+
+```bash
+npm run proof:flywheel
+```
+
+Dry-run (no benches; prints the published self-test claims + checklist):
+
+```bash
+npm run proof:flywheel -- --dry-run
+```
+
+Guide, expected artifacts, and what **pass** means:
+[`docs/flywheel-reproduction.md`](../docs/flywheel-reproduction.md).
+Independent runs: open a GitHub issue titled
+`[benchmark] Independent reproduction — <commit>`.
+
 ## One-command reproduce
 
 ```bash
 git clone https://github.com/Roarpeng/GraphFlow.git && cd GraphFlow
 git checkout <pinned-commit-or-tag>   # pin the exact source state
 npm ci                                # Node >= 20, npm >= 10
-npm run bench:all                     # run everything below in sequence
+npm run proof:flywheel                # essential public suite + checklist
+# npm run bench:all                   # same plus token-savings
 ```
 
 | Command | Benchmark | Runner | Machine-readable JSON |

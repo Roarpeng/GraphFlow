@@ -77,6 +77,7 @@
     "bench:skill-ab": "tsx benchmarks/run-skill-ab-benchmark.ts && tsx benchmarks/run-skill-ab.ts",
     "bench:memory": "tsx benchmarks/run-memory-ab.ts",
     "bench:all": "npm run bench:retrieval && npm run bench:token && npm run bench:skill-ab && npm run bench:memory",
+    "proof:flywheel": "tsx benchmarks/run-flywheel-proof.ts",
     "dataset:retrieval": "tsx benchmarks/export-retrieval-dataset.ts",
     "backfill:episodes": "node scripts/backfill-episodes.cjs",
     "lint": "eslint .",
