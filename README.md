@@ -67,7 +67,7 @@ Connect via MCP (Cursor / Claude Code / …):
 }
 ```
 
-The agent calls `graphflow_context` for compressed context, then `graphflow_plan` to plan; without a provider API key GraphFlow automatically bridges the ATP thinking protocol to the host agent (agent-delegated mode).
+The agent calls `graphflow_context` for compressed context, then `graphflow_plan` to plan; without a provider API key GraphFlow automatically bridges the ATP thinking protocol to the host agent (agent-delegated mode). For symbol-precise edits, compose Serena as a second MCP server — [GraphFlow + Serena](docs/graphflow-serena.md) (`examples/graphflow-serena.mcp.json`).
 
 ## Why GraphFlow
 
@@ -82,7 +82,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | Local-first | ✅ | ✅ | ✅ | ✅ |
 | Open protocol | [ATP/IR public spec](docs/atp-ir-spec-v1.md) | — | — | — |
 
-> The differentiator is the **learning flywheel**: graph indexing and token compression are replicable; project-private experience (skills, lessons, decisions) accumulated across sessions is not — it compounds with use. Serena is a complement, not a competitor — see [GraphFlow + Serena: better together](docs/comparison.md#graphflow--serena-better-together联合方案).
+> The differentiator is the **learning flywheel**: graph indexing and token compression are replicable; project-private experience (skills, lessons, decisions) accumulated across sessions is not — it compounds with use. Serena is a complement, not a competitor — see [GraphFlow + Serena: better together](docs/graphflow-serena.md) ([中文](docs/graphflow-serena.zh.md); [comparison](docs/comparison.md)).
 
 ## Core capabilities (v1.13+)
 
@@ -285,7 +285,7 @@ Supported: Cursor, VS Code, Trae (incl. CN), Claude Code, Windsurf, Cline, Roo C
 
 ## Protocol
 
-[ATP/IR — Agent Thinking Protocol public specification v1.0](docs/atp-ir-spec-v1.md): work-item registry, submit/merge contract, compatibility rules. Third-party tools can implement compatible producers / consumers. Minimal Producer example: [`examples/atp-minimal-producer/`](examples/atp-minimal-producer/).
+[ATP/IR — Agent Thinking Protocol public specification v1.0](docs/atp-ir-spec-v1.md): work-item registry, submit/merge contract, compatibility rules. Third-party tools can implement compatible producers / consumers. Minimal Producer example: [`examples/atp-minimal-producer/`](examples/atp-minimal-producer/). Dual-MCP compose snippet (GraphFlow + Serena, config only): [`examples/graphflow-serena.mcp.json`](examples/graphflow-serena.mcp.json).
 
 ## Community
 
@@ -325,7 +325,8 @@ GraphFlow/
 │       └── mcp/        # MCP server (10 tools)
 ├── tests/              # 142 files / 961 tests (incl. governance foundation and MCP HTTP/stdio matrix)
 ├── benchmarks/         # comprehensive + independent + SWE-bench + token savings + skill A/B (reproducible)
-├── docs/               # ATP spec + context contract + experience memory + comparisons
+├── docs/               # ATP spec + context contract + experience memory + comparisons + GraphFlow/Serena compose
+├── examples/           # ATP producer + team-memory config + GraphFlow/Serena dual-MCP snippet
 ├── vscode-extension/   # VS Code panel and commands
 └── CHANGELOG.md
 ```
