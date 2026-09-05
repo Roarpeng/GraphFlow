@@ -1,12 +1,12 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { resolve } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ensureMcpWorkspaceEnv,
   isUnsafeWorkspaceFallback,
 } from "../src/config/discover-workspace";
 import { resolveRuntimeWorkspaceRoot } from "../src/config/workspace-root";
+import { createTempProjectRoot, rmTrackedRoots } from "./helpers/temp-workspace";
 
 /**
  * M74 — MCP unsafe workspace regression.
@@ -15,50 +15,47 @@ import { resolveRuntimeWorkspaceRoot } from "../src/config/workspace-root";
  * homedir/AppData (see comment on resolveChildWorkspaceRoot). Pure CJS spawn
  * side-effects make the launcher awkward to unit-test; these cases cover the
  * shared TS helpers the launcher mirrors.
+ *
+ * Isolation: no process.chdir(), no writes under $HOME. Project fixtures live
+ * in os.tmpdir(); unsafe-cwd is exercised via fromDir / process.cwd mock.
+ * homedir() is only used as a path string for the unsafe-root predicate.
  */
 
 const tempRoots: string[] = [];
-let previousCwd = process.cwd();
-let previousWorkspaceEnv = process.env.GRAPHFLOW_WORKSPACE_ROOT;
-let previousCursorProject = process.env.CURSOR_PROJECT_DIR;
-let previousWorkspaceFolder = process.env.WORKSPACE_FOLDER;
+const envKeys = [
+  "GRAPHFLOW_WORKSPACE_ROOT",
+  "CURSOR_PROJECT_DIR",
+  "WORKSPACE_FOLDER",
+] as const;
+const previousEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]])) as Partial<
+  Record<(typeof envKeys)[number], string | undefined>
+>;
 
 function createTempProject(prefix: string): string {
-  const root = join(
-    process.cwd(),
-    "tmp",
-    `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`
-  );
-  mkdirSync(root, { recursive: true });
-  writeFileSync(join(root, "package.json"), JSON.stringify({ name: prefix }), "utf8");
-  mkdirSync(join(root, ".git"));
-  tempRoots.push(root);
-  return root;
+  return createTempProjectRoot(prefix, tempRoots);
 }
 
+function mockCwd(dir: string): void {
+  vi.spyOn(process, "cwd").mockReturnValue(dir);
+}
+
+beforeEach(() => {
+  for (const key of envKeys) {
+    delete process.env[key];
+  }
+});
+
 afterEach(() => {
-  process.chdir(previousCwd);
-  if (previousWorkspaceEnv === undefined) {
-    delete process.env.GRAPHFLOW_WORKSPACE_ROOT;
-  } else {
-    process.env.GRAPHFLOW_WORKSPACE_ROOT = previousWorkspaceEnv;
-  }
-  if (previousCursorProject === undefined) {
-    delete process.env.CURSOR_PROJECT_DIR;
-  } else {
-    process.env.CURSOR_PROJECT_DIR = previousCursorProject;
-  }
-  if (previousWorkspaceFolder === undefined) {
-    delete process.env.WORKSPACE_FOLDER;
-  } else {
-    process.env.WORKSPACE_FOLDER = previousWorkspaceFolder;
-  }
-  while (tempRoots.length > 0) {
-    const root = tempRoots.pop();
-    if (root) {
-      rmSync(root, { recursive: true, force: true });
+  for (const key of envKeys) {
+    const value = previousEnv[key];
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
     }
   }
+  vi.restoreAllMocks();
+  rmTrackedRoots(tempRoots);
 });
 
 describe("M74 MCP unsafe workspace regression", () => {
@@ -85,14 +82,12 @@ describe("M74 MCP unsafe workspace regression", () => {
     const withOverride = resolveRuntimeWorkspaceRoot({ rootDir: project });
     expect(withOverride).toBe(resolve(project));
 
-    // Env may still be poisoned when rootDir short-circuits; clear path:
     process.env.GRAPHFLOW_WORKSPACE_ROOT = homedir();
-    previousCwd = process.cwd();
-    process.chdir(project);
     delete process.env.CURSOR_PROJECT_DIR;
     delete process.env.WORKSPACE_FOLDER;
+    mockCwd(project);
 
-    const discovered = resolveRuntimeWorkspaceRoot();
+    const discovered = resolveRuntimeWorkspaceRoot({ fromDir: project });
     expect(discovered).toBe(resolve(project));
     expect(process.env.GRAPHFLOW_WORKSPACE_ROOT).toBeUndefined();
   });
@@ -100,8 +95,6 @@ describe("M74 MCP unsafe workspace regression", () => {
   it("ensureMcpWorkspaceEnv rediscovers a real project after clearing home env", () => {
     const project = createTempProject("m74-rediscover");
     process.env.GRAPHFLOW_WORKSPACE_ROOT = homedir();
-    previousCwd = process.cwd();
-    process.chdir(project);
     delete process.env.CURSOR_PROJECT_DIR;
     delete process.env.WORKSPACE_FOLDER;
 
