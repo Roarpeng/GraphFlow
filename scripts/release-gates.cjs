@@ -18,7 +18,10 @@ const args = [
 ];
 if (configPath) args.push("--config", configPath);
 
-const result = spawnSync("npx", args, {
+// Run the gate through node + tsx directly: spawning the "npx" shim is not
+// portable (Windows refuses .cmd shims without a shell, EINVAL on Node >= 18).
+const tsxCli = join(__dirname, "..", "node_modules", "tsx", "dist", "cli.mjs");
+const result = spawnSync(process.execPath, [tsxCli, ...args.slice(1)], {
   stdio: "inherit",
   cwd: join(__dirname, ".."),
   env: process.env,
