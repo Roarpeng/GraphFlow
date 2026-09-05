@@ -6,6 +6,7 @@ import type { AgentWorkItem } from "../../../core/agent-delegation";
 export type { GraphSnapshotSampleEdge, GraphSnapshotSampleNode };
 import type { GraphFlowConfig } from "../../../config/schema";
 import type { DialogueThreadView } from "../../../learning/dialogue-thread";
+import type { TeamDiagnosis } from "../../team/diagnose.js";
 
 export interface ContextPreviewResult {
   query: string;
@@ -280,6 +281,8 @@ export interface RoutingDiagnosisResult {
       };
     };
   };
+  /** Team shared-memory / RBAC snapshot (mcp-http). Live probe fields are optional. */
+  team?: TeamDiagnosis;
 }
 
 export interface SettingsValidationIssue {

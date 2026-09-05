@@ -2,6 +2,8 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ensureGlobalGraphFlowConfig } from "../../config/scaffold";
+import { resolveConfig } from "../../config/resolve";
+import { diagnoseTeamConfig, type TeamDiagnosis } from "../team/diagnose.js";
 import {
   installAllSkills,
   uninstallAllSkillsAndRules,
@@ -568,6 +570,8 @@ export interface DoctorReport {
   ok: boolean;
   /** Next steps when missing items exist; empty when ok. */
   remediation: string[];
+  /** Team shared-memory config (mcp-http). Live reachability is filled by `graphflow diagnose`. */
+  team?: TeamDiagnosis;
 }
 
 function toDoctorStatus(installed: boolean, detected = true): DoctorCheckStatus {
@@ -696,6 +700,13 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
         "Ensure target agent directories exist (e.g. ~/.cursor / ~/.claude / ~/.dsh) so installers can detect them.",
       ];
 
+  let team: TeamDiagnosis | undefined;
+  try {
+    team = diagnoseTeamConfig(resolveConfig());
+  } catch {
+    team = undefined;
+  }
+
   return {
     command: "doctor",
     detectedAgents: agents.map((a) => ({ id: a.id, name: a.name })),
@@ -708,6 +719,7 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
     },
     ok,
     remediation,
+    ...(team ? { team } : {}),
   };
 }
 
@@ -717,6 +729,16 @@ export function formatDoctorLegacyText(report: DoctorReport): string {
   lines.push(
     `Detected agents: ${report.detectedAgents.map((a) => a.name).join(", ") || "none"}`
   );
+  if (report.team) {
+    lines.push(
+      `Team: enabled=${report.team.enabled} transport=${report.team.transport}` +
+        `${report.team.endpoint ? ` endpoint=${report.team.endpoint}` : ""}` +
+        ` tenant=${report.team.tenant ?? "default"} auth=${report.team.authMode}` +
+        ` rbac=${report.team.rbacExpected ? "expected" : "local"}` +
+        `${report.team.reachable === undefined ? "" : ` reachable=${report.team.reachable}`}` +
+        `${report.team.degradedToLocal ? " degraded=local" : ""}`
+    );
+  }
 
   for (const check of report.checks) {
     const icon =

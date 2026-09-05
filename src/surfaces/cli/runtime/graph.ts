@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isUnsafeWorkspaceFallback } from "../../../config/discover-workspace.js";
 import { resolveConfig } from "../../../config/resolve";
@@ -6,6 +6,7 @@ import { resolveGraphStorePath } from "../../../config/paths";
 import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
 import type { GraphEdge, GraphNode } from "../../../core/types";
 import { createGraphClient, type GraphClient } from "../../../graph/client-factory";
+import { GraphifyMcpClient } from "../../../graph/graphify-mcp-client";
 import {
   createContextRefillManager,
 } from "../../../graph/context-slicer";
@@ -628,16 +629,49 @@ export async function inspectGraph(
   };
 
   if (config.graphPolicy.transport === "mcp-http") {
+    const graphClient = createGraphClient(config);
+    const remote = graphClient instanceof GraphifyMcpClient
+      ? await graphClient.fetchSnapshot()
+      : { nodes: [] as GraphNode[], edges: [] as GraphEdge[] };
+    if (remote.nodes.length === 0 && remote.edges.length === 0) {
+      return {
+        transport: config.graphPolicy.transport,
+        storePath: resolveGraphStorePath(config),
+        nodeCount: 0,
+        edgeCount: 0,
+        nodeTypeCount: emptyTypeCount,
+        topRelations: [],
+        sampleNodes: [],
+        sampleEdges: [],
+        workbenchOutline: [],
+      };
+    }
+    const relationCounts = new Map<GraphEdge["relation"], number>();
+    for (const edge of remote.edges) {
+      relationCounts.set(edge.relation, (relationCounts.get(edge.relation) ?? 0) + 1);
+    }
+    const nodeTypeCount = { ...emptyTypeCount };
+    for (const node of remote.nodes) {
+      nodeTypeCount[node.type] += 1;
+    }
     return {
       transport: config.graphPolicy.transport,
       storePath: resolveGraphStorePath(config),
-      nodeCount: 0,
-      edgeCount: 0,
-      nodeTypeCount: emptyTypeCount,
-      topRelations: [],
-      sampleNodes: [],
-      sampleEdges: [],
-      workbenchOutline: [],
+      nodeCount: remote.nodes.length,
+      edgeCount: remote.edges.length,
+      nodeTypeCount,
+      topRelations: Array.from(relationCounts.entries())
+        .map(([relation, count]) => ({ relation, count }))
+        .sort((a, b) => b.count - a.count || a.relation.localeCompare(b.relation))
+        .slice(0, 8),
+      ...sampleGraphForSnapshot(
+        remote.nodes,
+        remote.edges,
+        nodeLimit,
+        edgeLimit,
+        config.graphPolicy.workspaceRoot ?? process.cwd()
+      ),
+      workbenchOutline: buildWorkbenchOutlines(remote.nodes, remote.edges),
     };
   }
 
@@ -705,11 +739,21 @@ export async function getSkillInsights(
   const boundedLimit = Math.max(1, limit);
 
   if (config.graphPolicy.transport === "mcp-http") {
+    const graphClient = createGraphClient(config);
+    const remote = graphClient instanceof GraphifyMcpClient
+      ? await graphClient.fetchSnapshot()
+      : { nodes: [] as GraphNode[] };
+    const skills = remote.nodes
+      .filter((node) => node.type === "Skill")
+      .map((node) => parseSkillInsight(node))
+      .filter((state): state is SkillInsightItem => Boolean(state))
+      .sort((a, b) => b.score - a.score || b.uses - a.uses || b.updatedAt - a.updatedAt)
+      .slice(0, boundedLimit);
     return {
-      source: "unavailable",
+      source: skills.length > 0 ? "graph-store" : "unavailable",
       transport: config.graphPolicy.transport,
       storePath: resolveGraphStorePath(config),
-      skills: [],
+      skills,
     };
   }
 
@@ -1289,6 +1333,72 @@ export async function syncSkillPackageRuntime(
     force: opts?.force ?? false,
   });
   return { direction: "import", ...result };
+}
+
+export async function syncSkillPackageRemote(
+  configPath: string | undefined,
+  direction: "push" | "pull",
+  opts?: { force?: boolean }
+): Promise<{
+  direction: "push" | "pull";
+  path: string;
+  revision?: number | null;
+  skillCount?: number;
+  imported?: number;
+  skipped?: number;
+  updated?: number;
+  total?: number;
+  goldenQueries?: number;
+}> {
+  const config = resolveConfig(configPath);
+  if (config.graphPolicy.transport !== "mcp-http" || !config.graphPolicy.mcpEndpoint) {
+    throw new Error(
+      "skill sync push/pull requires graphPolicy.transport=mcp-http and graphPolicy.mcpEndpoint"
+    );
+  }
+  const client = createGraphClient(config);
+  if (!(client instanceof GraphifyMcpClient)) {
+    throw new Error("skill sync push/pull requires a live mcp-http team client");
+  }
+  if (direction === "push") {
+    const exported = await syncSkillPackageRuntime(configPath, "export");
+    if (exported.direction !== "export") {
+      throw new Error("skill sync push failed to export a local pack");
+    }
+    const pack = JSON.parse(readFileSync(exported.path, "utf8")) as unknown;
+    const pushed = await client.pushSkillPack(pack);
+    return {
+      direction: "push",
+      path: exported.path,
+      revision: pushed.revision ?? null,
+      skillCount: exported.skillCount,
+      ...(exported.goldenQueries !== undefined ? { goldenQueries: exported.goldenQueries } : {}),
+    };
+  }
+  const pulled = await client.pullSkillPack();
+  if (!pulled.pack || typeof pulled.pack !== "object") {
+    throw new Error("team skill pack is empty; nothing to pull");
+  }
+  const root = config.graphPolicy.workspaceRoot ?? process.cwd();
+  const teamPath = join(root, ".graphflow", "skills", "team-skills.json");
+  mkdirSync(join(root, ".graphflow", "skills"), { recursive: true });
+  writeFileSync(teamPath, `${JSON.stringify(pulled.pack, null, 2)}\n`, "utf8");
+  const imported = await syncSkillPackageRuntime(configPath, "import", teamPath, {
+    force: opts?.force ?? false,
+  });
+  if (imported.direction !== "import") {
+    throw new Error("skill sync pull failed to import the team pack");
+  }
+  return {
+    direction: "pull",
+    path: teamPath,
+    revision: pulled.revision ?? null,
+    imported: imported.imported,
+    skipped: imported.skipped,
+    updated: imported.updated,
+    total: imported.total,
+    ...(imported.goldenQueries !== undefined ? { goldenQueries: imported.goldenQueries } : {}),
+  };
 }
 
 export function getTokenSavingsStats(configPath?: string, rootDir?: string): SavingsStats & {

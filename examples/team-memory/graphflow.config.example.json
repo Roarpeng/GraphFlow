@@ -1,0 +1,24 @@
+{
+  "providers": {},
+  "tiers": {
+    "smart": { "provider": "openai" },
+    "economy": { "provider": "openai" }
+  },
+  "budgetPolicy": {
+    "runTokenCap": 4000
+  },
+  "graphPolicy": {
+    "enableAutoBuild": true,
+    "transport": "mcp-http",
+    "mcpEndpoint": "http://127.0.0.1:8787/mcp",
+    "mcpApiKey": "${GRAPHFLOW_TEAM_TOKEN}",
+    "mcpTenant": "default",
+    "graphStorePath": "graphflow-out/graphflow-graph.json",
+    "maxContextTokens": 1500
+  },
+  "learningPolicy": {
+    "enableFlywheel": true,
+    "trainingCadence": "nightly",
+    "exportPath": "graphflow-out/learning-dataset.jsonl"
+  }
+}

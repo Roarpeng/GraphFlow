@@ -29,6 +29,7 @@ export {
   exportSkillPackageRuntime,
   importSkillPackageRuntime,
   syncSkillPackageRuntime,
+  syncSkillPackageRemote,
   getFlywheelReport,
   getTokenSavingsStats,
   resetTokenSavingsStats,
