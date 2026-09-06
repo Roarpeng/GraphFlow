@@ -86,7 +86,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 
 > The differentiator is the **learning flywheel**: graph indexing and token compression are replicable; project-private experience (skills, lessons, decisions) accumulated across sessions is not — it compounds with use. Serena is a complement, not a competitor — see [GraphFlow + Serena: better together](docs/graphflow-serena.md) ([中文](docs/graphflow-serena.zh.md); [comparison](docs/comparison.md)).
 
-## Core capabilities (v1.13+)
+## Core capabilities (v1.15+)
 
 | Module | Capability |
 | --- | --- |
@@ -103,7 +103,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | **Model routing** | Smart / Economy tiers; multi-provider health probes and fallback (DeepSeek, OpenAI, Anthropic, Bailian, Doubao) |
 | **Workbench** | Plan DAG seeds function-topic containers; collapsed outline; click `topicId` to resume; drift forks a side branch; original Q/A stored via `assistantReply` |
 | **Observability** | `graphflow_diagnose` / `route diagnose`: provider health + graph stats + token savings + **flywheel health** (auto-capture, episodes, skills by class, session journal) + workbench outline |
-| **Agent surfaces** | CLI `--json`; MCP stdio and Streamable HTTP (stateless JSON or stateful SSE, 10 tools); auto-install into 15+ agents (incl. **Codex Windows NODE/NPX_CLI short-path MCP**) |
+| **Agent surfaces** | CLI `--json`; MCP stdio and Streamable HTTP (stateless JSON or stateful SSE, 10 tools); auto-install into 15+ agents (incl. **Codex Windows NODE/NPX_CLI short-path MCP**). **HostAdapter** registry owns Cursor / Claude Code / DeepSeek Harness install · uninstall · doctor; other hosts still use the legacy installers |
 | **Evidence & governance** | Outcome evidence packages (commit/diff/tests), evidence backfill, tamper-evident audit chains, ADR/Invariant/APIContract/Test review states, artifact three-way merge/signing/encryption, retention/quarantine, release gates |
 | **Engineering quality** | TypeScript strict; vitest suite; `npm run ci` includes extension packaging and smoke tests |
 
@@ -153,6 +153,7 @@ graphflow run "update readme"              # orchestrate (bridge)
 graphflow skill insights                   # skill insights
 graphflow skill report                     # flywheel contribution report
 graphflow mcp serve --http                 # stateless MCP Streamable HTTP (add --stateful for SSE sessions)
+graphflow team serve                       # team graph JSON-RPC (tenant + RBAC; non-loopback requires auth)
 graphflow outcome backfill --evidence evidence.jsonl  # close pending episodes with evidence packages
 graphflow governance release-gate         # enforce proven-skill/fidelity/pending gates
 graphflow skill sync export                # export team skill pack + golden queries (share via git)
@@ -277,7 +278,7 @@ npx @roarpeng/graphflow uninstall  # remove MCP + Skill + Rules + hooks
 npx @roarpeng/graphflow init       # write a minimal project config
 ```
 
-Supported: Cursor, VS Code, Trae (incl. CN), Claude Code, Windsurf, Cline, Roo Code, Kilo Code, Gemini CLI, Codex, Antigravity, Opencode, Qoder, Amazon Q, Zed, Continue, DeepSeek Harness (`dsh`), and more (15+).
+Supported: Cursor, VS Code, Trae (incl. CN), Claude Code, Windsurf, Cline, Roo Code, Kilo Code, Gemini CLI, Codex, Antigravity, Opencode, Qoder, Amazon Q, Zed, Continue, DeepSeek Harness (`dsh`), and more (15+). Cursor, Claude Code, and DeepSeek Harness go through the HostAdapter registry (`installViaHostAdapter`); remaining hosts still use the legacy installers.
 
 | Path | When to use |
 | --- | --- |

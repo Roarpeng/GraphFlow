@@ -6,8 +6,9 @@
 
 > **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（约 98% token 节省） · 跨会话学习飞轮。
 
-GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。v1.12 增加 fidelity 指标、SKILL.md 互操作和 Concept / Requirement 工程知识层。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
-v1.13 增加 evidence package、治理审查、签名/加密 artifact、release gate 和 MCP HTTP 认证。
+GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
+
+**v1.15.3** 已发：团队共享记忆 MVP（`graphflow team serve` + RBAC）、Cursor / Claude Code 走 HostAdapter 安装路径、飞轮公开复现（`npm run proof:flywheel`）、Serena 双 MCP 指南，以及 R4 上下文打包去重。v1.14 把对话图做成一等资产（时间边、召回、fork/回放）。v1.12–v1.13 的 fidelity / 治理平面仍在。
 
 ## 快速开始
 
@@ -32,6 +33,18 @@ MCP 入口：
 ```
 
 Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `graphflow_plan`。没有 LLM API Key 时会桥接到宿主 Agent（agent-delegated）。需要符号级精确编辑时，把 Serena 作为第二个 MCP server 并列挂载——见 [GraphFlow + Serena 联合方案](docs/graphflow-serena.zh.md)（配置示例：[`examples/graphflow-serena.mcp.json`](examples/graphflow-serena.mcp.json)）。
+
+## 本版要点（v1.15）
+
+| 能力 | 说明 |
+| --- | --- |
+| **Harness** | 记忆动态、按任务召回（图锚点 + 压缩摘要 + 历史 episode + skill），有明确 L0–L3 token 预算 |
+| **飞轮复现** | `npm run proof:flywheel` 离线串检索 / skill A/B / memory A/B；见 [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md) |
+| **团队记忆** | `graphflow team serve`：tenant 隔离 + viewer/contributor/admin；非 loopback 默认强制认证；`diagnose` 报告连通与 RBAC。见 [docs/team-memory-security.md](docs/team-memory-security.md) |
+| **HostAdapter** | Cursor / Claude Code / DeepSeek Harness 的 install / uninstall / doctor 走注册表；其余宿主仍走遗留安装器 |
+| **Serena** | 并列第二个 MCP：context/plan → Serena 编辑 → `report_outcome` |
+
+完整英文对照与基准数字：[README.md](README.md)。
 
 ## 工作台脉络（v1.9.14）
 

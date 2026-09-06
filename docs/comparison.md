@@ -5,7 +5,7 @@
 
 ## 一句话：GraphFlow 在赛道中的位置
 
-GraphFlow 不是"又一个代码图谱"，而是把 **本地知识图谱 + 三层上下文压缩 + DAG/六顶思考帽规划 + 跨会话学习记忆（Episodic/Skill/Decision）** 整合进一个 local-first 引擎，并以诚实的 **bridge 模式** 把"压缩后的上下文 + 执行计划"交还给 Cursor / Claude Code 执行。它押注的是当前**无人占住的中期趋势——"图谱 + agent 记忆/学习"的融合**；代价是认知度低、战线宽、独立 benchmark 仍待补齐。
+GraphFlow 不是"又一个代码图谱"，而是把 **本地知识图谱 + 三层上下文压缩 + DAG/六顶思考帽规划 + 跨会话学习记忆（Episodic/Skill/Decision）** 整合进一个 local-first 引擎，并以诚实的 **bridge 模式** 把"压缩后的上下文 + 执行计划"交还给 Cursor / Claude Code 执行。它押注的是当前**无人占住的中期趋势——"图谱 + agent 记忆/学习"的融合**；代价是认知度低、战线宽。公开复现入口已落地（`npm run proof:flywheel`），第三方独立跑数仍欢迎。
 
 ---
 
@@ -95,8 +95,8 @@ GraphFlow 不是"又一个代码图谱"，而是把 **本地知识图谱 + 三�
 **同样坦诚地说明短板：**
 
 - **认知度与星数低**：相比 47.4k★ 的 CodeGraph，GraphFlow 是新项目，社区信任与生态尚需积累。
-- **战线宽**：图谱 + 压缩 + 规划 + 记忆 + 路由 + 20 个 MCP 工具 + VS Code 扩展，覆盖面广意味着每一块都可能不如对应专精工具深；广度是双刃剑。
-- **独立 benchmark 待补**：CodeGraph、GitNexus、grepai 都有第三方 / 生产环境实测数据，GraphFlow 的 token 节省与质量提升尚缺独立复现——而**独立 benchmark 是这条赛道的硬通货**。
+- **战线宽**：图谱 + 压缩 + 规划 + 记忆 + 路由 + 10 个 MCP 工具 + VS Code 扩展，覆盖面广意味着每一块都可能不如对应专精工具深；广度是双刃剑。
+- **第三方独立复现仍开放**：仓库已提供离线复现包与冻结数字（`npm run proof:flywheel`，见 [docs/flywheel-reproduction.md](flywheel-reproduction.md)）。CodeGraph、GitNexus、grepai 仍有更多生产环境实测；GraphFlow 欢迎 issue 标题 `[benchmark] Independent reproduction — <commit>`——**独立 benchmark 是这条赛道的硬通货**。
 - **单人 / 小团队维护风险**：这是赛道共性（头部项目同样如此），但仍是选型时应纳入考量的现实风险。
 
 一句话：**GraphFlow 适合认同"整合 + 记忆飞轮"方向、愿意与一个年轻但前瞻的开源项目共同成长的用户；不适合只要单点最成熟方案、或需要现成第三方背书的用户。**
@@ -121,7 +121,7 @@ GraphFlow 不是"又一个代码图谱"，而是把 **本地知识图谱 + 三�
 - 只需把仓库**一次性打包**进上下文窗口 → 选 **Repomix**。
 - 只要**成熟语义 / 向量检索**且接受云端 → 选 **claude-context**。
 - 需要**企业级商业支持、SLA、现成产品化体验**，且预算充足 → 选 **Augment / Sourcegraph Cody**。
-- **决策强依赖第三方独立 benchmark 背书**，无法接受数据待补的新项目 → 暂时观望或选有实测数据的方案。
+- **决策强依赖第三方（非作者）独立 benchmark 背书**，而仓库自测复现尚不够 → 暂时观望或选已有第三方实测的方案。
 
 ---
 
