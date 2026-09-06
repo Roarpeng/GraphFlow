@@ -76,19 +76,22 @@ describe("HostAdapter DSH install slice", () => {
     expect(created.displayName).toBe("DeepSeek Harness");
     expect(created.status).toBe("created");
     expect(created.filePath).toBe(join(dshHome, "cordis.patch.yml"));
+    expect(created.message).toMatch(/glue omitted/i);
 
     const patch = readFileSync(created.filePath as string, "utf8");
     expect(patch).toContain(DSH_PATCH_BEGIN);
     expect(patch).toContain(`id: ${DSH_MCP_ROW_ID}`);
+    expect(patch).not.toContain("graphflow-dsh");
 
     const status = getHostAdapterInstallStatus(DSH_HOST_ADAPTER_ID, { home: dshHome });
     expect(status?.detected).toBe(true);
     expect(status?.installed).toBe(true);
-    expect(status?.glueInstalled).toBe(true);
+    expect(status?.glueInstalled).toBe(false);
     expect(status?.agent).toBe("DeepSeek Harness");
 
     const skipped = installViaHostAdapter(DSH_HOST_ADAPTER_ID, { home: dshHome });
     expect(skipped.status).toBe("skipped");
+    expect(skipped.message).toMatch(/glue omitted/i);
 
     const removed = uninstallViaHostAdapter(DSH_HOST_ADAPTER_ID, { home: dshHome });
     expect(removed.status).toBe("updated");
