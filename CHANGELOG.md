@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.15.4] - 2026-09-06
+
+### Fixed
+
+- **DeepSeek Harness 安装不再弄挂 `dsh web`**：`graphflow install` 在 profile 未安装 `@roarpeng/graphflow` 时只写 MCP home overlay（不写 glue）；profile 已有包时清空 home overlay，由 bundle 独占 MCP+glue，避免 `ERR_MODULE_NOT_FOUND` 与 `duplicate loader entry id: mcp-graphflow`。空 `cordis.patch.yml` 改为删除文件（dsh 拒绝空 YAML）。FAQ 补充对应排障。
+
 ## [1.15.3] - 2026-09-05
 
 ### Changed
