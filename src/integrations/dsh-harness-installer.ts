@@ -432,8 +432,11 @@ export function installDshHarness(options: DshHarnessInstallOptions = {}): DshHa
     }
     writeFileSync(paths.patchPath, next.endsWith("\n") ? next : `${next}\n`, "utf8");
     const baseMessage = includeGlue ? undefined : glueOmittedMessage(profile);
-    const message = [baseMessage, ...notes].filter(Boolean).join("; ") || undefined;
-    return { status: kind, filePath: paths.patchPath, message };
+    const message = [baseMessage, ...notes].filter((part): part is string => Boolean(part)).join("; ");
+    if (message) {
+      return { status: kind, filePath: paths.patchPath, message };
+    }
+    return { status: kind, filePath: paths.patchPath };
   } catch (error) {
     return {
       status: "error",
