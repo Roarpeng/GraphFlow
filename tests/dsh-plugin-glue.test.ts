@@ -105,7 +105,7 @@ describe("dsh installer overlay + skill path", () => {
     const prev = process.env.GRAPHFLOW_DSH_HOME;
     process.env.GRAPHFLOW_DSH_HOME = dshHome;
     try {
-      const created = installDshHarness({ dshHome });
+      const created = installDshHarness({ dshHome, includeGlue: true });
       expect(created.status).toBe("created");
       const patch = readFileSync(join(dshHome, "cordis.patch.yml"), "utf8");
       expect(patch).toContain("cwd: !!js process.cwd()");

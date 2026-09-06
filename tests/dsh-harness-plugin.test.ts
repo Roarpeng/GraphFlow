@@ -1,9 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  DSH_GLUE_ROW_ID,
   DSH_MCP_ROW_ID,
+  DSH_PACKAGE_NAME,
   DSH_PATCH_BEGIN,
   DSH_PATCH_END,
   buildGraphFlowDshInsertPatch,
@@ -65,25 +67,81 @@ describe("DeepSeek Harness dsh plugin", () => {
     expect(getDshHarnessStatus({ dshHome }).detected).toBe(false);
   });
 
-  it("writes a managed overlay into an empty home patch", () => {
+  it("writes MCP-only overlay when profile package is missing (safe for dsh boot)", () => {
     const dir = makeTempRoot("gf-dsh-empty-");
     const dshHome = join(dir, ".dsh");
     mkdirSync(dshHome, { recursive: true });
 
     const created = installDshHarness({ dshHome });
     expect(created.status).toBe("created");
+    expect(created.message).toMatch(/glue omitted/i);
     const patchPath = join(dshHome, "cordis.patch.yml");
     const content = readFileSync(patchPath, "utf8");
     expect(content).toContain(DSH_PATCH_BEGIN);
     expect(content).toContain(DSH_PATCH_END);
     expect(content).toContain(`id: ${DSH_MCP_ROW_ID}`);
+    expect(content).not.toContain(`id: ${DSH_GLUE_ROW_ID}`);
+    expect(content).not.toContain("@roarpeng/graphflow/dsh");
 
     const skipped = installDshHarness({ dshHome });
     expect(skipped.status).toBe("skipped");
+    expect(skipped.message).toMatch(/glue omitted/i);
 
     const status = getDshHarnessStatus({ dshHome });
     expect(status.detected).toBe(true);
     expect(status.installed).toBe(true);
+    expect(status.glueInstalled).toBe(false);
+    expect(status.packageInstalled).toBe(false);
+  });
+
+  it("clears home overlay when profile package is present (bundle owns MCP+glue)", () => {
+    const dir = makeTempRoot("gf-dsh-with-pkg-");
+    const dshHome = join(dir, ".dsh");
+    const profileDir = join(dshHome, "profiles", "web");
+    const pkgDir = join(profileDir, "node_modules", "@roarpeng", "graphflow");
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: DSH_PACKAGE_NAME, version: "0.0.0" }), "utf8");
+    writeFileSync(
+      join(profileDir, "package.json"),
+      JSON.stringify(
+        {
+          name: "dsh-profile-web",
+          private: true,
+          dependencies: { [DSH_PACKAGE_NAME]: "0.0.0" },
+          dsh: { profile: { bundles: ["@deepseek-ai/dsh-base"], patchReload: "live" } },
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+    writeFileSync(join(dshHome, "cordis.patch.yml"), wrapDshManagedPatch(buildGraphFlowDshInsertPatch()), "utf8");
+
+    const updated = installDshHarness({ dshHome });
+    expect(updated.status).toBe("updated");
+    expect(updated.message).toMatch(/cleared home overlay/i);
+    expect(existsSync(join(dshHome, "cordis.patch.yml"))).toBe(false);
+    expect(getDshHarnessStatus({ dshHome }).packageInstalled).toBe(true);
+    expect(getDshHarnessStatus({ dshHome }).glueInstalled).toBe(true);
+
+    const profilePkg = JSON.parse(readFileSync(join(profileDir, "package.json"), "utf8")) as {
+      dsh: { profile: { bundles: string[] } };
+    };
+    expect(profilePkg.dsh.profile.bundles).toContain(DSH_PACKAGE_NAME);
+  });
+
+  it("downgrades existing glue overlay to MCP-only when package is missing", () => {
+    const dir = makeTempRoot("gf-dsh-downgrade-");
+    const dshHome = join(dir, ".dsh");
+    mkdirSync(dshHome, { recursive: true });
+    const patchPath = join(dshHome, "cordis.patch.yml");
+    writeFileSync(patchPath, wrapDshManagedPatch(buildGraphFlowDshInsertPatch({ includeGlue: true })), "utf8");
+
+    const updated = installDshHarness({ dshHome });
+    expect(updated.status).toBe("updated");
+    const content = readFileSync(patchPath, "utf8");
+    expect(content).toContain(`id: ${DSH_MCP_ROW_ID}`);
+    expect(content).not.toContain(`id: ${DSH_GLUE_ROW_ID}`);
   });
 
   it("appends the overlay without clobbering existing user rows", () => {
@@ -103,6 +161,7 @@ describe("DeepSeek Harness dsh plugin", () => {
     expect(content).toContain("id: user-row");
     expect(content).toContain("@example/keep-me");
     expect(content).toContain(`id: ${DSH_MCP_ROW_ID}`);
+    expect(content).not.toContain(`id: ${DSH_GLUE_ROW_ID}`);
 
     const removed = uninstallDshHarness({ dshHome });
     expect(removed.status).toBe("updated");
