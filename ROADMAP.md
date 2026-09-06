@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-09-05（v1.15.2 之后：R4 context packaging 去重 + m74/m75 测试隔离）
+> 最后更新：2026-09-05（v1.15.3：R4 context packaging 去重 + m74/m75 测试隔离）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -10,7 +10,7 @@
 - 🟡 进行中 / 部分完成
 - ⬜ 未开始（欢迎认领）
 
-## 已完成里程碑（v1.0 → v1.13.0）
+## 已完成里程碑（v1.0 → v1.15.3）
 
 | 版本 | 日期 | 里程碑 | 关键交付 | 状态 |
 | --- | --- | --- | --- | --- |
@@ -32,6 +32,12 @@
 | v1.12.1 | 2026-08-22 | **MCP Streamable HTTP** | stateless JSON + stateful SSE transport；`graphflow-mcp --http` / `graphflow mcp serve --http`；loopback 默认与 Host/Origin 防护；HTTP initialize/ping/tools/resources/tool-call/session DELETE 矩阵 | ✅ |
 | v1.12.2 | 2026-08-22 | **Cross-platform Release Fix** | structured-result 测试隔离改用 file backend，修复 Windows SQLite 清理竞态导致的 validate `EBUSY` | ✅ |
 | v1.13.0 | 2026-08-23 | **Evidence & Governance Plane** | outcome evidence package/backfill/audit chain；ADR/Invariant/APIContract/Test 版本治理；artifact 三方合并、签名、加密、保留与隔离；bearer/JWT HTTP auth、tenant 隔离与审计；host adapter registry 和 release gates | ✅ |
+| v1.14.0 | 2026-09-02 | **对话图 2.0** | W1–W4：时间语义与类型化边、L3 对话召回、多 Agent 轨迹与 fork/回放、面板与 `dialogues.md` 导出；发布管线 CI dogfood 自证 | ✅ |
+| v1.14.1 | 2026-09-05 | **DSH 修复 + HostAdapter 起步** | #28 首轮 hint 同拍注入；#26 `/gf/nodes` HTTP 405；DSH overlay 经 HostAdapter；定位改为 memory & context harness | ✅ |
+| v1.15.0 | 2026-09-05 | **团队共享记忆 MVP** | `graphflow team serve` tenant 隔离 + viewer/contributor/admin RBAC；HTTP JWT/bearer；`skill sync push/pull`；diagnose/doctor 报告 team 连通 | ✅ |
+| v1.15.1 | 2026-09-05 | **HostAdapter Cursor/Claude** | Cursor / Claude Code 的 install / uninstall / doctor 走 HostAdapter 注册表（含 Claude hooks） | ✅ |
+| v1.15.2 | 2026-09-05 | **飞轮复现 + Serena 指南** | `npm run proof:flywheel` 公开复现包；`docs/graphflow-serena.md` 双 MCP 并列指南 | ✅ |
+| v1.15.3 | 2026-09-05 | **R4 打包去重 + 测试隔离** | 抽出共享 `context-package-core`；m74/m75 不再 `chdir` / 写真实 `$HOME` | ✅ |
 
 ## 下一阶段
 
@@ -132,9 +138,9 @@
 
 ### 建议版本节奏
 
-- **v1.10**：R0 全部（真证据链 + 本地闭环 + 噪声治理）——"学习引擎"成为真能力的版本
 - ~~v1.10–v1.13~~：v1.13.0 已发布——真实证据链、fidelity 指标、O(1) 技能读路径、SKILL.md 互操作、自适应遗忘、Engineering KG 概念层、MCP Streamable HTTP 和治理/release-gate 平面。
-- **v1.14+**：团队共享记忆 HTTP RBAC + `graphflow team serve` MVP 已落地。Cursor / Claude Code 已迁到 HostAdapter；其余 IDE 安装器仍待迁移。
+- ~~v1.14–v1.15~~：v1.15.3 已发布——对话图 2.0、团队共享记忆 MVP（`graphflow team serve` + RBAC，已落地）、HostAdapter（DSH / Cursor / Claude Code）、飞轮公开复现包、Serena 双 MCP 指南、R4 `context-package-core` + 测试隔离。
+- **下一拍**：其余宿主迁到 HostAdapter；`runOrchestration` 拆分。企业 wishlist（OIDC / 审批流 / 托管多活）仍开放。
 - **长期**：R4 工程债随版本消化
 
 ## 如何参与
