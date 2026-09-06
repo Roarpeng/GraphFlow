@@ -20,7 +20,10 @@
 # 调用约定: 先 context（传 rootDir），复杂任务再 plan；改完代码后 index；
 #   若走了 run，结束后必须 report_outcome。不要写死 GRAPHFLOW_WORKSPACE_ROOT。
 #
-# graphflow install 也会把同一段 insert 写入 $DSH_HOME/cordis.patch.yml。
+# graphflow install（无 profile 包时）只写 MCP 行到 $DSH_HOME/cordis.patch.yml；
+# 已 `dsh plugin add` / profile 有包时会清空 home overlay，由 bundle 独占 MCP+glue
+# （避免 duplicate loader entry id / ERR_MODULE_NOT_FOUND）。
+# 完整安装请优先: dsh plugin --profile web add @roarpeng/graphflow
 
 - insert:
     - id: mcp-graphflow

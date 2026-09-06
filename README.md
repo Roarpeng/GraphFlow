@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-[![npm version](https://img.shields.io/badge/npm-1.15.3-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.15.4-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **The memory & context harness for coding agents.** Local-first code knowledge graph · bounded context compression (~98% token savings) · cross-session learning flywheel.
 
@@ -10,9 +10,9 @@ The community is converging on an "agent harness" vocabulary: **memory + hooks +
 
 | Harness primitive | GraphFlow implementation |
 | --- | --- |
-| **Memory** | 12-language AST code graph + Episodic / Skill / Decision nodes — project knowledge *and* project experience persist across sessions |
-| **Hooks** | Outcome auto-capture (on by default) + Claude Code `SessionEnd` / `Stop` and DeepSeek Harness `agent/disposed` glue close the learning loop automatically — no manual outcome reporting required |
-| **Skills** | A four-class flywheel (`proven` / `correctable` / `anti-pattern` / `noise`) with canary validation — skills are promoted by evidence, not by assertion |
+| **Memory** | 12-language AST code graph + Episodic / Skill / Decision nodes �?project knowledge *and* project experience persist across sessions |
+| **Hooks** | Outcome auto-capture (on by default) + Claude Code `SessionEnd` / `Stop` and DeepSeek Harness `agent/disposed` glue close the learning loop automatically �?no manual outcome reporting required |
+| **Skills** | A four-class flywheel (`proven` / `correctable` / `anti-pattern` / `noise`) with canary validation �?skills are promoted by evidence, not by assertion |
 
 Pure TypeScript/Node. CLI + MCP + VS Code extension. Fully offline, no API key required.
 
@@ -21,20 +21,20 @@ Pure TypeScript/Node. CLI + MCP + VS Code extension. Fully offline, no API key r
 Most "memory" products are either **static injection** (load `CLAUDE.md` / rules files in full on every session) or **plain RAG** (retrieve chunks, no learning). Both fail in long-lived projects:
 
 - Static injection pays the same token cost every session regardless of the task, and grows until it is truncated or ignored.
-- Plain RAG retrieves text but never accumulates *experience* — the thousandth task pays the same cost as the first.
+- Plain RAG retrieves text but never accumulates *experience* �?the thousandth task pays the same cost as the first.
 
-GraphFlow is a harness: **memory is dynamic and typed**. Each request retrieves only what the current decision needs — graph anchors, compressed summaries, similar past episodes, applicable skills — under an explicit token budget (L0–L3 layered compression, ~98% savings measured). What the agent learns (outcomes, lessons, skills) is written back through hooks, so the harness gets better with use.
+GraphFlow is a harness: **memory is dynamic and typed**. Each request retrieves only what the current decision needs �?graph anchors, compressed summaries, similar past episodes, applicable skills �?under an explicit token budget (L0–L3 layered compression, ~98% savings measured). What the agent learns (outcomes, lessons, skills) is written back through hooks, so the harness gets better with use.
 
 It is also **local-first and portable**: everything runs offline with no API key, and the whole surface is exposed over MCP, so the same memory travels across agents instead of being locked into one vendor's format.
 
 ## Proof, not promises
 
-**Third-party reproduction entry:** `npm run proof:flywheel` — one command, offline, no API key. Guide: [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md). Independent runs are welcome; open a GitHub issue titled `[benchmark] Independent reproduction — <commit>`.
+**Third-party reproduction entry:** `npm run proof:flywheel` �?one command, offline, no API key. Guide: [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md). Independent runs are welcome; open a GitHub issue titled `[benchmark] Independent reproduction �?<commit>`.
 
 All headline numbers come from a **public, reproducible benchmark suite** ([benchmarks/README.md](benchmarks/README.md)) with published methodology ([docs/benchmark-standards.md](docs/benchmark-standards.md)) and machine-readable JSON dumps pinned to commits. Authoritative percentages live in the tracked RESULTS markdown; this package does not invent new scores.
 
-- **~98% token savings** (8-query suite, 262,926 → 2,843 tokens; independently re-counted with `gpt-tokenizer`)
-- **132-query golden retrieval set** in CI (Hit@5 = 100%, MRR = 0.836, NDCG@5 = 0.601); downloadable open dataset: [`benchmarks/datasets/retrieval-golden-v1.json`](benchmarks/datasets/retrieval-golden-v1.json) — run `npm run bench:retrieval`
+- **~98% token savings** (8-query suite, 262,926 �?2,843 tokens; independently re-counted with `gpt-tokenizer`)
+- **132-query golden retrieval set** in CI (Hit@5 = 100%, MRR = 0.836, NDCG@5 = 0.601); downloadable open dataset: [`benchmarks/datasets/retrieval-golden-v1.json`](benchmarks/datasets/retrieval-golden-v1.json) �?run `npm run bench:retrieval`
 - **Skill A/B: 100% vs 61.5%** task success with the flywheel on vs off (26 tasks)
 - **Memory ROI: 100% vs 56.5%** with episodic memory on vs off (62 tasks, with attribution chains)
 
@@ -56,7 +56,7 @@ npx @roarpeng/graphflow graph index .
 npx @roarpeng/graphflow context preview "orchestrator" --json
 ```
 
-Connect via MCP (Cursor / Claude Code / …):
+Connect via MCP (Cursor / Claude Code / �?:
 
 ```json
 {
@@ -69,7 +69,7 @@ Connect via MCP (Cursor / Claude Code / …):
 }
 ```
 
-The agent calls `graphflow_context` for compressed context, then `graphflow_plan` to plan; without a provider API key GraphFlow automatically bridges the ATP thinking protocol to the host agent (agent-delegated mode). For symbol-precise edits, compose Serena as a second MCP server — [GraphFlow + Serena](docs/graphflow-serena.md) (`examples/graphflow-serena.mcp.json`).
+The agent calls `graphflow_context` for compressed context, then `graphflow_plan` to plan; without a provider API key GraphFlow automatically bridges the ATP thinking protocol to the host agent (agent-delegated mode). For symbol-precise edits, compose Serena as a second MCP server �?[GraphFlow + Serena](docs/graphflow-serena.md) (`examples/graphflow-serena.mcp.json`).
 
 ## Why GraphFlow
 
@@ -77,14 +77,14 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 
 | Capability | **GraphFlow** | CodeGraph | Serena | Repomix |
 | --- | --- | --- | --- | --- |
-| Code graph | 12-language AST index | more mature | LSP symbols | — |
+| Code graph | 12-language AST index | more mature | LSP symbols | �?|
 | Context compression | layered + graph compression + vector recall | partial | partial | whole-repo dump |
-| Planning protocol | ATP IR + DAG + agent bridge | — | — | — |
-| **Learning memory** | Episodic / Skill / Decision flywheel | — | — | — |
-| Local-first | ✅ | ✅ | ✅ | ✅ |
-| Open protocol | [ATP/IR public spec](docs/atp-ir-spec-v1.md) | — | — | — |
+| Planning protocol | ATP IR + DAG + agent bridge | �?| �?| �?|
+| **Learning memory** | Episodic / Skill / Decision flywheel | �?| �?| �?|
+| Local-first | �?| �?| �?| �?|
+| Open protocol | [ATP/IR public spec](docs/atp-ir-spec-v1.md) | �?| �?| �?|
 
-> The differentiator is the **learning flywheel**: graph indexing and token compression are replicable; project-private experience (skills, lessons, decisions) accumulated across sessions is not — it compounds with use. Serena is a complement, not a competitor — see [GraphFlow + Serena: better together](docs/graphflow-serena.md) ([中文](docs/graphflow-serena.zh.md); [comparison](docs/comparison.md)).
+> The differentiator is the **learning flywheel**: graph indexing and token compression are replicable; project-private experience (skills, lessons, decisions) accumulated across sessions is not �?it compounds with use. Serena is a complement, not a competitor �?see [GraphFlow + Serena: better together](docs/graphflow-serena.md) ([中文](docs/graphflow-serena.zh.md); [comparison](docs/comparison.md)).
 
 ## Core capabilities (v1.15+)
 
@@ -92,8 +92,8 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | --- | --- |
 | **Planning protocol** | ATP v1.1 (Intent / Requirement / Six Hats / 5-Why / First Principles / Decision Matrix / Planning / Reflection); simple / complex / insight modes; agent-delegated bridge without an LLM; **skill-conditioned DAG** (`skillRefs` / `avoidPatterns` on plan nodes); [ATP/IR public spec v1.1](docs/atp-ir-spec-v1.md) |
 | **Goal alignment** | Goal anchor nodes (intent five-tuple as first-class citizen, original requirement auto-injected); low-confidence clarification gate (no plan below 0.6); runtime alignment-check; deviation classification (misread-requirement / scope-creep / tech-drift); goal version chain + diffs |
-| **Knowledge graph** | 12-language AST indexing; File / Module / Symbol + **Concept / Requirement**; cross-layer edges `documents` / `implements` / `derived_from`; Office/PDF → Markdown via optional **`@firecrawl/anydoc`** (MIT). **CLI/npm**: optionalDependency. **VSIX**: not bundled; on activate the extension **auto-downloads the current-OS binary** into `~/.graphflow/optional-deps` when `graphflow.downloadAnydoc` is true (default). Disable the setting to skip network; source indexing still works. |
-| **Context compression** | L1/L2/L3 layered anchors; graph compression (edge weights + PageRank, LRU cache); stem-matching recall (orchestrate ↔ orchestration); vector recall + RRF; RepoMap overview; adaptive budget |
+| **Knowledge graph** | 12-language AST indexing; File / Module / Symbol + **Concept / Requirement**; cross-layer edges `documents` / `implements` / `derived_from`; Office/PDF �?Markdown via optional **`@firecrawl/anydoc`** (MIT). **CLI/npm**: optionalDependency. **VSIX**: not bundled; on activate the extension **auto-downloads the current-OS binary** into `~/.graphflow/optional-deps` when `graphflow.downloadAnydoc` is true (default). Disable the setting to skip network; source indexing still works. |
+| **Context compression** | L1/L2/L3 layered anchors; graph compression (edge weights + PageRank, LRU cache); stem-matching recall (orchestrate �?orchestration); vector recall + RRF; RepoMap overview; adaptive budget |
 | **Retrieval & fidelity** | Golden-set regression gate (132 queries, Hit@5=100%, MRR=0.836, NDCG@5=0.601); separate anchor-recall and normalized body-coverage metrics persisted beside token savings |
 | **Vector index** | In-process memoization + disk persistence (fingerprint-checked, seconds to restore after MCP restart) |
 | **Storage backends** | `file` / `memory` / `sqlite` (FTS5, tokenizer-enhanced `searchtext`, camelCase searchable) / **`auto` (sqlite-first with fallback)** / `mcp-http` |
@@ -109,13 +109,13 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 
 ### Positioning
 
-> GraphFlow is **not an orchestrating executor** — it is the **memory & context harness** for coding agents. Task execution is delegated to the host coding agent via bridge mode (honest semantics, no faked COMPLETED); GraphFlow's job is to make the agent see clearly and remember.
+> GraphFlow is **not an orchestrating executor** �?it is the **memory & context harness** for coding agents. Task execution is delegated to the host coding agent via bridge mode (honest semantics, no faked COMPLETED); GraphFlow's job is to make the agent see clearly and remember.
 
 ## MCP tools (10)
 
 | Tool | Function |
 | --- | --- |
-| `graphflow_context` | Compressed context package (query → anchors + summaries; `topicId` / `assistantReply` to resume a workbench node or fill the pending answer; anchorId → expand) |
+| `graphflow_context` | Compressed context package (query �?anchors + summaries; `topicId` / `assistantReply` to resume a workbench node or fill the pending answer; anchorId �?expand) |
 | `graphflow_plan` | Task planning (mode='simple' or 'insight'; seeds `workbench.topics` + `workbench.outline`; agent-delegated without an LLM) |
 | `graphflow_run` | Orchestration + bridge execution descriptor |
 | `graphflow_report_outcome` | Outcome backfill (incl. deviation classification), closes the learning flywheel |
@@ -130,14 +130,14 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 
 ## Workbench navigation (v1.9.14)
 
-Everyday chat stays a single thread. Complex work seeds a **workbench of function-topic containers** from `graphflow_plan` — one canvas node per plan step, not one node per turn. Click a node and pass `topicId` to `graphflow_context` to refine that function or return to the mainline. Drift auto-forks an isolated side branch (`co_occurs`); the trunk is not overwritten. After answering, call `graphflow_context({ assistantReply })` so the original reply is stored. Outline titles are display labels only; next-turn context is Goal + ancestor titles + the node's original Q/A.
+Everyday chat stays a single thread. Complex work seeds a **workbench of function-topic containers** from `graphflow_plan` �?one canvas node per plan step, not one node per turn. Click a node and pass `topicId` to `graphflow_context` to refine that function or return to the mainline. Drift auto-forks an isolated side branch (`co_occurs`); the trunk is not overwritten. After answering, call `graphflow_context({ assistantReply })` so the original reply is stored. Outline titles are display labels only; next-turn context is Goal + ancestor titles + the node's original Q/A.
 
 Wake the collapsed outline when you need it (still 10 MCP tools):
 
 ```bash
 graphflow workbench tree --json            # CLI
 # VS Code / Cursor: GraphFlow: Workbench Tree (Activity Bar, default collapsed) or chat /tree
-# MCP: graphflow_diagnose → graph.workbenchOutline
+# MCP: graphflow_diagnose �?graph.workbenchOutline
 graphflow context preview --topic-id "<topic:...>" "continue from this node"
 graphflow context preview --reply "original assistant answer"
 ```
@@ -165,7 +165,7 @@ graphflow doctor                           # install self-check
 
 ## Configuration
 
-Three-layer merge: global `~/.graphflow.config.json` → project `graphflow.config.json` → project `.graphflow/config.json`. Copy [graphflow.config.example.json](graphflow.config.example.json) to get started.
+Three-layer merge: global `~/.graphflow.config.json` �?project `graphflow.config.json` �?project `.graphflow/config.json`. Copy [graphflow.config.example.json](graphflow.config.example.json) to get started.
 
 Key options:
 
@@ -186,16 +186,16 @@ Set `graphPolicy.transport` to `mcp-http` to host the graph on a remote Graphify
 { "graphPolicy": { "transport": "mcp-http", "mcpEndpoint": "http://graphify.team.internal:8080" } }
 ```
 
-A missing/malformed endpoint fails at config validation; connection or runtime request failures degrade transparently to local JSON storage (`graphPolicy.graphStorePath`, default `graphflow-out/graphflow-graph.json`) with a `logger.warn`, consistent with the sqlite→file fallback, never interrupting the agent. HTTP 401/403 (auth / RBAC deny) do **not** degrade — they throw. `graphflow team serve` implements `graph.read_snapshot` and `team.health`; third-party Graphify servers without those methods still fall back to the local mirror. See [docs/team-memory-security.md](docs/team-memory-security.md).
+A missing/malformed endpoint fails at config validation; connection or runtime request failures degrade transparently to local JSON storage (`graphPolicy.graphStorePath`, default `graphflow-out/graphflow-graph.json`) with a `logger.warn`, consistent with the sqlite→file fallback, never interrupting the agent. HTTP 401/403 (auth / RBAC deny) do **not** degrade �?they throw. `graphflow team serve` implements `graph.read_snapshot` and `team.health`; third-party Graphify servers without those methods still fall back to the local mirror. See [docs/team-memory-security.md](docs/team-memory-security.md).
 
 ## Benchmarks
 
-- **Comprehensive**: [COMPREHENSIVE-RESULTS.md](benchmarks/COMPREHENSIVE-RESULTS.md) — P1–P6 six-dimension evaluation, overall **92.9%** (indexing 100% / compression 64.9% / planning 100% / learning 100% / bridge 100% / performance 99.7%)
-- **Independent-style**: [INDEPENDENT-RESULTS.md](benchmarks/INDEPENDENT-RESULTS.md) — CodeGraph-style 5-domain evaluation, Hit@5 **96%**, token savings **96.6%**, overall **96.2%**
-- **SWE-bench-style**: [SWE-BENCH-RESULTS.md](benchmarks/SWE-BENCH-RESULTS.md) — self-built 12-instance context-readiness eval; [SWE-BENCH-REAL-RESULTS.md](benchmarks/SWE-BENCH-REAL-RESULTS.md) — Flask real-project 10-instance file-recall eval (48.3%)
-- **Token savings**: [RESULTS.md](benchmarks/RESULTS.md) — 8 representative queries, **98.2%** savings, re-counted with independent gpt-tokenizer
-- **Retrieval quality**: [RETRIEVAL-EVAL-RESULTS.md](benchmarks/RETRIEVAL-EVAL-RESULTS.md) — 132 queries, Hit@5=100%, MRR=0.836, NDCG@5=0.601
-- **Skill flywheel A/B**: [SKILL-AB-RESULTS.md](benchmarks/SKILL-AB-RESULTS.md) — injection rate 100%, recall 100%, overhead 25.6 tok/task
+- **Comprehensive**: [COMPREHENSIVE-RESULTS.md](benchmarks/COMPREHENSIVE-RESULTS.md) �?P1–P6 six-dimension evaluation, overall **92.9%** (indexing 100% / compression 64.9% / planning 100% / learning 100% / bridge 100% / performance 99.7%)
+- **Independent-style**: [INDEPENDENT-RESULTS.md](benchmarks/INDEPENDENT-RESULTS.md) �?CodeGraph-style 5-domain evaluation, Hit@5 **96%**, token savings **96.6%**, overall **96.2%**
+- **SWE-bench-style**: [SWE-BENCH-RESULTS.md](benchmarks/SWE-BENCH-RESULTS.md) �?self-built 12-instance context-readiness eval; [SWE-BENCH-REAL-RESULTS.md](benchmarks/SWE-BENCH-REAL-RESULTS.md) �?Flask real-project 10-instance file-recall eval (48.3%)
+- **Token savings**: [RESULTS.md](benchmarks/RESULTS.md) �?8 representative queries, **98.2%** savings, re-counted with independent gpt-tokenizer
+- **Retrieval quality**: [RETRIEVAL-EVAL-RESULTS.md](benchmarks/RETRIEVAL-EVAL-RESULTS.md) �?132 queries, Hit@5=100%, MRR=0.836, NDCG@5=0.601
+- **Skill flywheel A/B**: [SKILL-AB-RESULTS.md](benchmarks/SKILL-AB-RESULTS.md) �?injection rate 100%, recall 100%, overhead 25.6 tok/task
 
 ## VS Code / Cursor extension
 
@@ -225,7 +225,7 @@ ln -s /absolute/path/to/GraphFlow ~/.cursor/plugins/local/graphflow
 
 Docs: [Context Engineering contract](docs/context-contract.md) · [Experience memory](docs/experience-memory.md)
 
-**Uninstall:** Removing the Agent Plugin in Cursor only drops the plugin package. Skills/Rules/MCP written by `graphflow install` remain and will keep steering the agent — run:
+**Uninstall:** Removing the Agent Plugin in Cursor only drops the plugin package. Skills/Rules/MCP written by `graphflow install` remain and will keep steering the agent �?run:
 
 ```bash
 npx @roarpeng/graphflow uninstall
@@ -233,39 +233,39 @@ npx @roarpeng/graphflow uninstall
 
 That removes user + workspace MCP entries, `skills/graphflow` folders, GraphFlow rules/instruction blocks, Claude Code hooks, and the DeepSeek Harness `cordis.patch.yml` overlay. Also delete any local symlink under `~/.cursor/plugins/local/graphflow` if you used one.
 
-## DeepSeek Harness 插件（用法与能力）
+## DeepSeek Harness 插件（用法与能力�?
 
-GraphFlow 是 [DeepSeek Harness](https://www.deepseek.com/harness/en/) 的 [`dsh-plugin`](https://github.com/topics/dsh-plugin)。包内 `dsh.bundle` + `cordis.patch.yml` 会把 GraphFlow MCP 挂到内置 `@deepseek-ai/dsh-mcp-client`，并把 `@roarpeng/graphflow/dsh` glue 插入插件树。模型看到的工具名是 `mcp__graphflow__graphflow_*`。中文说明见 [README.zh.md](README.zh.md)。
+GraphFlow �?[DeepSeek Harness](https://www.deepseek.com/harness/en/) �?[`dsh-plugin`](https://github.com/topics/dsh-plugin)。包�?`dsh.bundle` + `cordis.patch.yml` 会把 GraphFlow MCP 挂到内置 `@deepseek-ai/dsh-mcp-client`，并�?`@roarpeng/graphflow/dsh` glue 插入插件树。模型看到的工具名是 `mcp__graphflow__graphflow_*`。中文说明见 [README.zh.md](README.zh.md)�?
 
-**在 dsh 上能工作 vs 不能工作：**
+**�?dsh 上能工作 vs 不能工作�?*
 
 | 能力 | dsh |
 | --- | --- |
-| 10 个 MCP 工具（`mcp__graphflow__graphflow_*`），stdio `cwd` = 会话工作区 | 是 |
-| Skill（on-demand `skill({name:"graphflow"})`；bundle glue 注册，不必先 `graphflow install`） | 是 |
-| 会话结束飞轮：仅 `agent/disposed` 关闭 pending episode（不是 live `session/flush`；`GRAPHFLOW_AUTO_CAPTURE=0` 可关） | 是 |
-| 首轮短 hint：先调 `graphflow_context`（`rootDir` = cwd） | 是 |
-| Workbench 数据（`topicId` / outline）经 MCP `graphflow_context` / `graphflow_diagnose` | 是 |
-| VS Code/Cursor 图谱面板、Settings webview、Workbench Tree、`@graphflow` chat | **否**（宿主 UI，不移植） |
-| Cursor Agent Plugins 1.0 发现 | **否**（dsh 用 `dsh.bundle`） |
-| Claude Code `SessionStart/End/Stop` **文件** hooks | **否**（dsh analog 是上面的 glue） |
+| 10 �?MCP 工具（`mcp__graphflow__graphflow_*`），stdio `cwd` = 会话工作�?| �?|
+| Skill（on-demand `skill({name:"graphflow"})`；bundle glue 注册，不必先 `graphflow install`�?| �?|
+| 会话结束飞轮：仅 `agent/disposed` 关闭 pending episode（不�?live `session/flush`；`GRAPHFLOW_AUTO_CAPTURE=0` 可关�?| �?|
+| 首轮�?hint：先�?`graphflow_context`（`rootDir` = cwd�?| �?|
+| Workbench 数据（`topicId` / outline）经 MCP `graphflow_context` / `graphflow_diagnose` | �?|
+| VS Code/Cursor 图谱面板、Settings webview、Workbench Tree、`@graphflow` chat | **�?*（宿�?UI，不移植�?|
+| Cursor Agent Plugins 1.0 发现 | **�?*（dsh �?`dsh.bundle`�?|
+| Claude Code `SessionStart/End/Stop` **文件** hooks | **�?*（dsh analog 是上面的 glue�?|
 
-**装进某个 profile（推荐）：**
+**装进某个 profile（推荐）�?*
 
 ```bash
 dsh plugin --profile web add @roarpeng/graphflow
 npx @deepseek-ai/dsh web
 ```
 
-**或在已有 `~/.dsh` 时写 home 级 overlay（对所有 profile 生效）：**
+**或在已有 `~/.dsh` 时写 home �?overlay（对所�?profile 生效）：**
 
 ```bash
 npx @roarpeng/graphflow install
 ```
 
-会写入 `$DSH_HOME/cordis.patch.yml`（MCP + glue）与 `$DSH_HOME/skills/graphflow/SKILL.md`。卸载：`npx @roarpeng/graphflow uninstall`，或 `dsh plugin --profile web remove @roarpeng/graphflow`。`graphflow doctor` 会检查 overlay、glue、skill。
+会写�?`$DSH_HOME/cordis.patch.yml`（MCP + glue）与 `$DSH_HOME/skills/graphflow/SKILL.md`。卸载：`npx @roarpeng/graphflow uninstall`，或 `dsh plugin --profile web remove @roarpeng/graphflow`。`graphflow doctor` 会检�?overlay、glue、skill�?
 
-**用法：** 第一轮先 `mcp__graphflow__graphflow_context`（传入 `rootDir` = 仓库绝对路径），复杂任务再 `graphflow_plan`；改完代码后 `graphflow_index`；若走了 `graphflow_run`，结束后必须 `graphflow_report_outcome`。不要在 patch 里写死 `GRAPHFLOW_WORKSPACE_ROOT`。
+**用法�?* 第一轮先 `mcp__graphflow__graphflow_context`（传�?`rootDir` = 仓库绝对路径），复杂任务�?`graphflow_plan`；改完代码后 `graphflow_index`；若走了 `graphflow_run`，结束后必须 `graphflow_report_outcome`。不要在 patch 里写�?`GRAPHFLOW_WORKSPACE_ROOT`�?
 
 ## Agent integrations
 
@@ -284,11 +284,11 @@ Supported: Cursor, VS Code, Trae (incl. CN), Claude Code, Windsurf, Cline, Roo C
 | --- | --- |
 | **Agent Plugins** | Preferred single-host Skill + MCP discovery |
 | **`graphflow install`** | Rules / multi-agent / non-plugin hosts |
-| **`graphflow uninstall`** | After removing a plugin (or anytime) — clears leftover Skill/MCP/Rules |
+| **`graphflow uninstall`** | After removing a plugin (or anytime) �?clears leftover Skill/MCP/Rules |
 
 ## Protocol
 
-[ATP/IR — Agent Thinking Protocol public specification v1.0](docs/atp-ir-spec-v1.md): work-item registry, submit/merge contract, compatibility rules. Third-party tools can implement compatible producers / consumers. Minimal Producer example: [`examples/atp-minimal-producer/`](examples/atp-minimal-producer/). Dual-MCP compose snippet (GraphFlow + Serena, config only): [`examples/graphflow-serena.mcp.json`](examples/graphflow-serena.mcp.json).
+[ATP/IR �?Agent Thinking Protocol public specification v1.0](docs/atp-ir-spec-v1.md): work-item registry, submit/merge contract, compatibility rules. Third-party tools can implement compatible producers / consumers. Minimal Producer example: [`examples/atp-minimal-producer/`](examples/atp-minimal-producer/). Dual-MCP compose snippet (GraphFlow + Serena, config only): [`examples/graphflow-serena.mcp.json`](examples/graphflow-serena.mcp.json).
 
 ## Community
 
@@ -306,7 +306,7 @@ npm install
 npm run ci        # lint + build + tests + extension packaging + smoke
 ```
 
-Requires Node.js ≥ 20, npm ≥ 10. Expected: lint clean, build succeeds, 961 tests pass.
+Requires Node.js �?20, npm �?10. Expected: lint clean, build succeeds, 961 tests pass.
 
 ## Project structure
 
@@ -318,14 +318,14 @@ GraphFlow/
 ├── dsh/plugin.mjs      # dsh ESM glue: skill register + session-end capture
 ├── skills/graphflow/   # portable Agent Skill (canonical SKILL.md)
 ├── src/
-│   ├── core/           # orchestration core: orchestrator, triage, dag-engine, agent-delegation
-│   ├── graph/          # indexing, context slicing, graph compression, sqlite/auto storage, snapshot
-│   ├── routing/        # model routing and health probes (5 providers)
-│   ├── learning/       # embeddings, episodic, skill-flywheel, hnsw, nightly
-│   ├── agents/         # ATP schema, planner, insight, brainstormer
-│   └── surfaces/
-│       ├── cli/        # CLI + runtime
-│       └── mcp/        # MCP server (10 tools)
+�?  ├── core/           # orchestration core: orchestrator, triage, dag-engine, agent-delegation
+�?  ├── graph/          # indexing, context slicing, graph compression, sqlite/auto storage, snapshot
+�?  ├── routing/        # model routing and health probes (5 providers)
+�?  ├── learning/       # embeddings, episodic, skill-flywheel, hnsw, nightly
+�?  ├── agents/         # ATP schema, planner, insight, brainstormer
+�?  └── surfaces/
+�?      ├── cli/        # CLI + runtime
+�?      └── mcp/        # MCP server (10 tools)
 ├── tests/              # 142 files / 961 tests (incl. governance foundation and MCP HTTP/stdio matrix)
 ├── benchmarks/         # comprehensive + independent + SWE-bench + token savings + skill A/B (reproducible)
 ├── docs/               # ATP spec + context contract + experience memory + flywheel reproduction + GraphFlow/Serena

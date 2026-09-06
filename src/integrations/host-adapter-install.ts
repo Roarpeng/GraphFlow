@@ -133,6 +133,7 @@ function fromDshStatus(status: DshHarnessStatus): HostAdapterHostStatus {
     installed: status.installed,
     glueInstalled: status.glueInstalled,
     skillInstalled: status.skillInstalled,
+    mcpInstalled: status.installed,
     home: status.dshHome,
     patchPath: status.patchPath,
     skillPath: status.skillPath,

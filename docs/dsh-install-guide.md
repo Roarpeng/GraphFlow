@@ -86,6 +86,8 @@ cd 工作区 && graphflow graph index . && graphflow dialogue list --json
 
 | 问题 | 处理 |
 |---|---|
+| `Cannot find package '@roarpeng/graphflow'` / `dsh web` 启动失败 | home `cordis.patch.yml` 写了 glue 但 profile 未装包。修复：`dsh plugin --profile web add @roarpeng/graphflow`，并清空 home 里 `# GRAPHFLOW-DSH-*` 块（或 `npx @roarpeng/graphflow install`，新版会在有包时自动清 home overlay） |
+| `duplicate loader entry id: mcp-graphflow` | home overlay 与 bundle patch 重复。清空 `~/.dsh/cordis.patch.yml` 的 GRAPHFLOW 块，只保留 `dsh plugin add` 的 bundle |
 | 重启后没有 `mcp__graphflow__*` 工具 | 确认 profile `package.json` 的 `dsh.profile.bundles` 含 `@roarpeng/graphflow`；`dsh plugin --profile web list`；重启 harness |
 | 面板空白/加载失败 | 确认工作区已 `graphflow graph index .`（无图则无节点）；点"刷新"；检查会话 cwd 是否正确 |
 | 不想自动记录 | 环境变量 `GRAPHFLOW_AUTO_CAPTURE=0` |
