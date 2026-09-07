@@ -12,6 +12,8 @@ const result = spawnSync("npm", args, {
   cwd: root,
   encoding: "utf8",
   env: process.env,
+  // Node ≥ 18 refuses .cmd shims (npm.cmd) without a shell (EINVAL / exit 1).
+  shell: process.platform === "win32",
 });
 if (json && result.stdout) {
   const outputPath = process.env.GRAPHFLOW_SECURITY_REPORT ?? "graphflow-out/security-audit.json";

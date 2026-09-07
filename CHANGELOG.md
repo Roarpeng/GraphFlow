@@ -6,7 +6,7 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
-- **Security Audit CI**：`scripts/security-audit.cjs` 漏了 `node:path` 的 `join` 导入，周一定时 `npm run security:audit` 在调用 `npm audit` 前就以 `ReferenceError: join is not defined` 失败。现补导入，并在写 `GRAPHFLOW_SECURITY_REPORT` 前递归创建目录。
+- **Security Audit CI**：`scripts/security-audit.cjs` 漏了 `node:path` 的 `join` 导入，周一定时 `npm run security:audit` 在调用 `npm audit` 前就以 `ReferenceError: join is not defined` 失败。现补导入，写报告前递归创建目录，并在 Windows 上 `shell: true` 以执行 `npm.cmd`。
 - **生产依赖审计**：为 MCP SDK / transformers 传递依赖加 npm `overrides`（hono、@hono/node-server、body-parser、fast-uri、ip-address、qs、sharp），使 `--omit=dev` 的 `npm audit` 能通过。
 
 ## [1.15.4] - 2026-09-06

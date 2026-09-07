@@ -19,6 +19,7 @@ describe("security-audit script", () => {
     expect(src).toMatch(/\{[^}]*\bjoin\b[^}]*\}\s*=\s*require\(["']node:path["']\)/);
     expect(src).toContain('const root = join(__dirname, "..")');
     expect(src).toContain("cwd: root");
+    expect(src).toContain('shell: process.platform === "win32"');
   });
 
   it("writes JSON to a nested report path without ReferenceError", () => {
@@ -51,7 +52,10 @@ describe("security-audit script", () => {
     );
 
     expect(result.stderr ?? "").not.toMatch(/join is not defined/);
-    expect(result.status).toBe(0);
+    expect(
+      result.status,
+      `stderr=${result.stderr ?? ""} error=${result.error?.message ?? ""}`
+    ).toBe(0);
     expect(readFileSync(report, "utf8")).toBe(payload);
   });
 });
