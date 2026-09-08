@@ -96,4 +96,32 @@ describe("Doc/code consistency", () => {
       expect(exists, "README references docs/testing/* but that directory does not exist").toBe(true);
     }
   });
+
+  it("README.zh.md version badge matches package.json", () => {
+    const version = readJson("package.json").version as string;
+    // v1.15.4 bumped README.md but left the Chinese badge one release behind.
+    expect(read("README.zh.md"), `README.zh.md should reference current version ${version}`).toContain(
+      version
+    );
+  });
+
+  it("shipped docs are valid UTF-8 (no lossy byte replacement)", () => {
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    const files = [
+      ...DOC_FILES,
+      "ROADMAP.md",
+      "CHANGELOG.md",
+      "CONTRIBUTING.md",
+      "docs/context-contract.md",
+      "docs/experience-memory.md",
+    ];
+    for (const file of files) {
+      const filePath = join(root, file);
+      if (!existsSync(filePath)) continue;
+      // v1.15.4's release bump rewrote both READMEs, replacing the third byte of
+      // ~100 multi-byte sequences with "?" — mojibake that shipped to npm.
+      // Decoding fatally makes any recurrence a CI failure instead of a surprise.
+      expect(() => decoder.decode(readFileSync(filePath)), `${file} is not valid UTF-8`).not.toThrow();
+    }
+  });
 });

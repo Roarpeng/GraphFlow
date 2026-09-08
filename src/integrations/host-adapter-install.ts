@@ -1,9 +1,16 @@
 /**
- * Thin HostAdapter install dispatch.
+ * HostAdapter install dispatch.
  *
- * v1.13 added the capability registry (`host-adapter.ts`). Migrated install
- * slices: DeepSeek Harness, Cursor, Claude Code, and Kimi Code. Other IDE
- * installers (Trae, VS Code, Windsurf, Codex, Gemini, …) still use the legacy paths.
+ * v1.13 added the capability registry (`host-adapter.ts`). Two dispatch paths:
+ * - **Hand-written slices** (host-specific behaviour): DeepSeek Harness, Cursor,
+ *   Claude Code, Kimi Code.
+ * - **Profile-backed generic slice** (`profile-host-installer.ts`): every other
+ *   registry host (Trae, VS Code, Windsurf, Cline, Roo Code, Kilo Code, PearAI,
+ *   Gemini, Codex, Antigravity, Amazon Q, Zed, Continue, Qoder, Opencode).
+ *
+ * Every registry host is therefore installable through `installViaHostAdapter`;
+ * `installViaHostAdapter` returns `unsupported` only for an id that is in the
+ * registry but has neither slice (a programming error, asserted by tests).
  */
 import {
   CLAUDE_CODE_HOST_ADAPTER_ID,
@@ -38,17 +45,35 @@ import {
   type KimiCodeHostStatus,
 } from "./kimi-code-host-installer";
 import { getHostAdapter } from "./host-adapter";
+import {
+  PROFILE_HOST_IDS,
+  getProfileHostStatus,
+  installProfileHost,
+  isProfileHost,
+  uninstallProfileHost,
+  type ProfileHostStatus,
+} from "./profile-host-installer";
 
 export { CLAUDE_CODE_HOST_ADAPTER_ID, CURSOR_HOST_ADAPTER_ID, DSH_HOST_ADAPTER_ID, KIMI_CODE_HOST_ADAPTER_ID };
 
 export const HOST_ADAPTER_INSTALL_UNMIGRATED =
   "install path is not yet migrated onto HostAdapter";
 
-export const HOST_ADAPTER_MIGRATED_IDS = [
+/** Hosts with a hand-written install slice (host-specific behaviour). */
+export const HAND_WRITTEN_HOST_ADAPTER_IDS = [
   DSH_HOST_ADAPTER_ID,
   CURSOR_HOST_ADAPTER_ID,
   CLAUDE_CODE_HOST_ADAPTER_ID,
   KIMI_CODE_HOST_ADAPTER_ID,
+] as const;
+
+/** Hosts whose slice is fully derived from profile / skill / instruction targets. */
+export const PROFILE_HOST_ADAPTER_IDS = PROFILE_HOST_IDS;
+
+/** Every host that `installViaHostAdapter` can install. */
+export const HOST_ADAPTER_MIGRATED_IDS = [
+  ...HAND_WRITTEN_HOST_ADAPTER_IDS,
+  ...PROFILE_HOST_ADAPTER_IDS,
 ] as const;
 
 export interface HostAdapterInstallOptions {
@@ -95,7 +120,8 @@ type SliceInstallResult =
   | DshHarnessInstallResult
   | CursorHostInstallResult
   | ClaudeCodeHostInstallResult
-  | KimiCodeHostInstallResult;
+  | KimiCodeHostInstallResult
+  | { status: "created" | "updated" | "skipped" | "error"; filePath?: string; message?: string };
 
 function unknownHost(hostId: string): HostAdapterInstallResult {
   return {
@@ -208,6 +234,23 @@ function fromClaudeStatus(status: ClaudeCodeHostStatus): HostAdapterHostStatus {
   };
 }
 
+function fromProfileStatus(status: ProfileHostStatus): HostAdapterHostStatus {
+  const mapped: HostAdapterHostStatus = {
+    hostId: status.hostId,
+    agent: status.agent,
+    detected: status.detected,
+    installed: status.installed,
+    mcpInstalled: status.mcpInstalled,
+    mcpTargets: status.mcpTargets,
+  };
+  if (status.mcpPath !== undefined) mapped.mcpPath = status.mcpPath;
+  if (status.skillPath !== undefined) mapped.skillPath = status.skillPath;
+  if (status.rulesPath !== undefined) mapped.rulesPath = status.rulesPath;
+  if (status.skillInstalled !== undefined) mapped.skillInstalled = status.skillInstalled;
+  if (status.rulesInstalled !== undefined) mapped.rulesInstalled = status.rulesInstalled;
+  return mapped;
+}
+
 /** Install a migrated host slice. Unknown registry ids error; unmigrated hosts are unsupported. */
 export function installViaHostAdapter(
   hostId: string,
@@ -226,6 +269,12 @@ export function installViaHostAdapter(
   }
   if (adapter.id === KIMI_CODE_HOST_ADAPTER_ID) {
     return withAdapterMeta(adapter.id, adapter.displayName, installKimiCodeHost(sliceHomeOptions(options)));
+  }
+  if (isProfileHost(adapter.id)) {
+    const profileResult = installProfileHost(adapter.id, sliceHomeOptions(options));
+    if (profileResult) {
+      return withAdapterMeta(adapter.id, adapter.displayName, profileResult);
+    }
   }
   return unsupportedHost(adapter.id, adapter.displayName);
 }
@@ -248,6 +297,12 @@ export function uninstallViaHostAdapter(
   if (adapter.id === KIMI_CODE_HOST_ADAPTER_ID) {
     return withAdapterMeta(adapter.id, adapter.displayName, uninstallKimiCodeHost(sliceHomeOptions(options)));
   }
+  if (isProfileHost(adapter.id)) {
+    const profileResult = uninstallProfileHost(adapter.id, sliceHomeOptions(options));
+    if (profileResult) {
+      return withAdapterMeta(adapter.id, adapter.displayName, profileResult);
+    }
+  }
   return unsupportedHost(adapter.id, adapter.displayName);
 }
 
@@ -268,6 +323,10 @@ export function getHostAdapterInstallStatus(
   }
   if (adapter.id === KIMI_CODE_HOST_ADAPTER_ID) {
     return fromKimiStatus(getKimiCodeHostStatus(sliceHomeOptions(options)));
+  }
+  if (isProfileHost(adapter.id)) {
+    const profileStatus = getProfileHostStatus(adapter.id, sliceHomeOptions(options));
+    if (profileStatus) return fromProfileStatus(profileStatus);
   }
   return undefined;
 }

@@ -31,24 +31,56 @@ import {
 } from "../../integrations/dsh-harness-installer";
 import {
   CLAUDE_CODE_HOST_ADAPTER_ID,
-  CURSOR_HOST_ADAPTER_ID,
   DSH_HOST_ADAPTER_ID,
+  HOST_ADAPTER_MIGRATED_IDS,
   KIMI_CODE_HOST_ADAPTER_ID,
   getHostAdapterInstallStatus,
   installViaHostAdapter,
   uninstallViaHostAdapter,
+  type HostAdapterInstallResult,
 } from "../../integrations/host-adapter-install";
+import { getHostAdapter } from "../../integrations/host-adapter";
+import { PROFILE_HOST_IDS, isProfileHost } from "../../integrations/profile-host-installer";
 
-const HOST_ADAPTER_MCP_IDS = new Set([
+/** Agent ids written by a HostAdapter slice — excluded from the legacy doctor loops. */
+const HOST_ADAPTER_MCP_IDS = new Set<string>([
   "cursor",
   "claude-code",
   "kimi-code",
   "cursor-windows",
   "claude-code-windows",
   "kimi-code-windows",
+  // Profile-backed hosts own their MCP targets through the generic slice.
+  ...PROFILE_HOST_IDS,
+  ...PROFILE_HOST_IDS.map((id) => `${id}-windows`),
 ]);
-const HOST_ADAPTER_SKILL_AGENTS = new Set(["Cursor skill", "Claude Code skill", "Kimi Code skill"]);
-const HOST_ADAPTER_INSTRUCTION_AGENTS = new Set(["Kimi Code"]);
+
+/** Skill target names written by a HostAdapter slice — excluded from the legacy doctor loops. */
+const HOST_ADAPTER_SKILL_AGENTS = new Set<string>([
+  "Cursor skill",
+  "Claude Code skill",
+  "Kimi Code skill",
+  "Roo Code skill",
+  "Kilo Code skill",
+  "Codex skill",
+  "Codex (agents) skill",
+  "Antigravity skill",
+  "Qoder skill",
+  "Qoder CN skill",
+  "Opencode skill",
+]);
+
+/** Instruction target names written by a HostAdapter slice — excluded from the legacy doctor loops. */
+const HOST_ADAPTER_INSTRUCTION_AGENTS = new Set<string>([
+  "Kimi Code",
+  "Windsurf",
+  "Cline",
+  "Roo Code",
+  "Kilo Code",
+  "Gemini",
+  "Codex",
+  "Opencode",
+]);
 
 const isWindows = process.platform === "win32";
 
@@ -278,17 +310,31 @@ export function buildInstallReport(
 ): InstallReport {
   const bootstrapGraph = options.bootstrapGraph !== false;
   const globalConfig = ensureGlobalGraphFlowConfig();
-  // Migrated hosts first so HostAdapter is the primary writer; legacy
-  // installers below stay responsible for Trae / VS Code / Windsurf / etc.
-  const cursorInstalled = installViaHostAdapter(CURSOR_HOST_ADAPTER_ID);
-  const claudeInstalled = installViaHostAdapter(CLAUDE_CODE_HOST_ADAPTER_ID);
-  const kimiInstalled = installViaHostAdapter(KIMI_CODE_HOST_ADAPTER_ID);
-  const dshInstalled = installViaHostAdapter(DSH_HOST_ADAPTER_ID);
+  // HostAdapter is the per-host install authority for every registry host:
+  // hand-written slices (DSH / Cursor / Claude Code / Kimi Code) and the generic
+  // profile-backed slice for the rest. Adding a host no longer needs edits here.
+  const hostInstalls = new Map<string, HostAdapterInstallResult>();
+  for (const hostId of HOST_ADAPTER_MIGRATED_IDS) {
+    hostInstalls.set(hostId, installViaHostAdapter(hostId));
+  }
+  const hostResult = (hostId: string): HostAdapterInstallResult =>
+    hostInstalls.get(hostId) ?? {
+      hostId,
+      displayName: getHostAdapter(hostId)?.displayName ?? hostId,
+      status: "error",
+      message: "host adapter dispatch missing",
+    };
+
+  const claudeInstalled = hostResult(CLAUDE_CODE_HOST_ADAPTER_ID);
+  const dshInstalled = hostResult(DSH_HOST_ADAPTER_ID);
   const claudeCodeHooks: ClaudeCodeHooksResult = {
     status: claudeInstalled.status === "unsupported" ? "skipped" : claudeInstalled.status,
     ...(claudeInstalled.filePath !== undefined ? { filePath: claudeInstalled.filePath } : {}),
     ...(claudeInstalled.message !== undefined ? { message: claudeInstalled.message } : {}),
   };
+  // Aggregate legacy writers stay for report shape and for host-scoped extras
+  // that are not part of a host slice (Trae user Skills, project-level rules).
+  // Every write is idempotent, so the adapter pass above remains authoritative.
   // Silent during report build so `--json` is not polluted; human text comes from formatInstallLegacyText.
   const skills = installAllSkills(undefined, () => undefined, workspaceRoot);
   const mcp = installMcpToDetectedAgents({
@@ -313,8 +359,7 @@ export function buildInstallReport(
   const mcpHasError = mcp.some((item) => item.status === "error");
   const hooksHasError = claudeCodeHooks.status === "error";
   const dshHasError = dshHarness.status === "error";
-  const cursorHasError = cursorInstalled.status === "error";
-  const kimiHasError = kimiInstalled.status === "error";
+  const hostHasError = [...hostInstalls.values()].some((item) => item.status === "error");
   const skillHasError = [
     ...skills.traeSkills,
     ...skills.cursorRules,
@@ -328,8 +373,7 @@ export function buildInstallReport(
     !mcpHasError &&
     !hooksHasError &&
     !dshHasError &&
-    !cursorHasError &&
-    !kimiHasError &&
+    !hostHasError &&
     globalConfig.status !== "error";
   const remediation: string[] = [];
   if (!ok) {
@@ -348,24 +392,19 @@ export function buildInstallReport(
         }`
       );
     }
-    if (cursorHasError) {
-      remediation.push(
-        `Fix Cursor HostAdapter install at ${cursorInstalled.filePath ?? ""}${
-          cursorInstalled.message ? `: ${cursorInstalled.message}` : "."
-        }`
-      );
-    }
-    if (kimiHasError) {
-      remediation.push(
-        `Fix Kimi Code HostAdapter install at ${kimiInstalled.filePath ?? ""}${
-          kimiInstalled.message ? `: ${kimiInstalled.message}` : "."
-        }`
-      );
-    }
     if (dshHasError) {
       remediation.push(
         `Fix DeepSeek Harness overlay at ${dshHarness.filePath ?? ""}${
           dshHarness.message ? `: ${dshHarness.message}` : "."
+        }`
+      );
+    }
+    for (const result of hostInstalls.values()) {
+      if (result.status !== "error") continue;
+      if (result.hostId === DSH_HOST_ADAPTER_ID) continue; // covered above
+      remediation.push(
+        `Fix ${result.displayName} HostAdapter install${result.filePath ? ` at ${result.filePath}` : ""}${
+          result.message ? `: ${result.message}` : "."
         }`
       );
     }
@@ -515,7 +554,22 @@ export function runInit() {
 export function runUninstall(workspaceRoot: string = process.cwd()) {
   console.log("[START] Uninstalling GraphFlow (MCP + Skills + Rules + hooks)...");
 
-  // 1. Remove MCP configs from detected agents (user + workspace)
+  // 1. Per-host removal through HostAdapter (every registry host).
+  //    Runs first so the per-host slice owns its own MCP / Skill / rules / hooks.
+  for (const hostId of HOST_ADAPTER_MIGRATED_IDS) {
+    const label = getHostAdapter(hostId)?.displayName ?? hostId;
+    const hostStatus = getHostAdapterInstallStatus(hostId);
+    if (!hostStatus?.detected) {
+      console.log(`[SKIP] ${label}: not detected`);
+      continue;
+    }
+    const hostUninstalled = uninstallViaHostAdapter(hostId);
+    const icon = hostUninstalled.status === "updated" ? "[REMOVED]" : "[SKIP]";
+    console.log(`${icon} ${label}: ${hostUninstalled.message ?? hostUninstalled.status}`);
+  }
+
+  // 2. Legacy sweep for anything not host-scoped (workspace MCP entries,
+  //    Trae user Skills, project-level rules, stray managed blocks).
   const mcpResults = uninstallMcpFromDetectedAgents({ workspaceRoot });
   for (const result of mcpResults) {
     const icon = result.removed ? "[REMOVED]" : "[SKIP]";
@@ -523,7 +577,6 @@ export function runUninstall(workspaceRoot: string = process.cwd()) {
     console.log(`${icon} MCP ${result.agentName}${scope}: ${result.message}`);
   }
 
-  // 2. Remove Skills / Rules / managed instruction blocks
   const skillResults = uninstallAllSkillsAndRules(workspaceRoot);
   let skillRemoved = 0;
   for (const result of skillResults) {
@@ -532,49 +585,6 @@ export function runUninstall(workspaceRoot: string = process.cwd()) {
     console.log(`[REMOVED] ${result.target}: ${result.path}`);
   }
   console.log(`[INFO] Skills/Rules removed: ${skillRemoved}/${skillResults.length} targets`);
-
-  // 3. Remove Cursor / Claude Code (MCP + rules/skills + hooks) via HostAdapter
-  const cursorStatus = getHostAdapterInstallStatus(CURSOR_HOST_ADAPTER_ID);
-  if (cursorStatus?.detected) {
-    const cursorUninstalled = uninstallViaHostAdapter(CURSOR_HOST_ADAPTER_ID);
-    const icon = cursorUninstalled.status === "updated" ? "[REMOVED]" : "[SKIP]";
-    console.log(`${icon} Cursor: ${cursorUninstalled.message ?? cursorUninstalled.status}`);
-  } else {
-    console.log("[SKIP] Cursor: not detected");
-  }
-
-  const claudeStatus = getHostAdapterInstallStatus(CLAUDE_CODE_HOST_ADAPTER_ID);
-  if (claudeStatus?.detected) {
-    const claudeUninstalled = uninstallViaHostAdapter(CLAUDE_CODE_HOST_ADAPTER_ID);
-    const icon = claudeUninstalled.status === "updated" ? "[REMOVED]" : "[SKIP]";
-    console.log(`${icon} Claude Code: ${claudeUninstalled.message ?? claudeUninstalled.status}`);
-  } else {
-    console.log("[SKIP] Claude Code: not detected");
-  }
-
-  const kimiStatus = getHostAdapterInstallStatus(KIMI_CODE_HOST_ADAPTER_ID);
-  if (kimiStatus?.detected) {
-    const kimiUninstalled = uninstallViaHostAdapter(KIMI_CODE_HOST_ADAPTER_ID);
-    const icon = kimiUninstalled.status === "updated" ? "[REMOVED]" : "[SKIP]";
-    console.log(`${icon} Kimi Code: ${kimiUninstalled.message ?? kimiUninstalled.status}`);
-  } else {
-    console.log("[SKIP] Kimi Code: not detected");
-  }
-
-  // 4. Remove DeepSeek Harness home-level cordis.patch.yml overlay
-  const dshStatus = getHostAdapterInstallStatus(DSH_HOST_ADAPTER_ID);
-  if (dshStatus?.detected) {
-    const dshUninstalled = uninstallViaHostAdapter(DSH_HOST_ADAPTER_ID);
-    const dshResult: DshHarnessInstallResult = {
-      status: dshUninstalled.status === "unsupported" ? "skipped" : dshUninstalled.status,
-      ...(dshUninstalled.filePath !== undefined ? { filePath: dshUninstalled.filePath } : {}),
-      ...(dshUninstalled.message !== undefined ? { message: dshUninstalled.message } : {}),
-    };
-    const icon = dshResult.status === "updated" ? "[REMOVED]" : "[SKIP]";
-    console.log(`${icon} DeepSeek Harness: ${dshResult.message ?? dshResult.status}`);
-  } else {
-    console.log("[SKIP] DeepSeek Harness: not detected");
-  }
 
   console.log("[FINISH] Uninstall complete.");
   console.log("[HINT] If you also installed the Agent Plugin, remove it in Cursor Customize / Plugins,");
@@ -681,7 +691,7 @@ function pushHostAdapterDoctorChecks(checks: DoctorCheckItem[], hostId: string):
     });
   }
 
-  if (hostId === KIMI_CODE_HOST_ADAPTER_ID && status.rulesPath) {
+  if (status.rulesPath && (hostId === KIMI_CODE_HOST_ADAPTER_ID || isProfileHost(hostId))) {
     checks.push({
       category: "instruction",
       agent: `${status.agent} instructions`,
@@ -784,10 +794,9 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
     });
   }
 
-  pushHostAdapterDoctorChecks(checks, CURSOR_HOST_ADAPTER_ID);
-  pushHostAdapterDoctorChecks(checks, CLAUDE_CODE_HOST_ADAPTER_ID);
-  pushHostAdapterDoctorChecks(checks, KIMI_CODE_HOST_ADAPTER_ID);
-  pushHostAdapterDoctorChecks(checks, DSH_HOST_ADAPTER_ID);
+  for (const hostId of HOST_ADAPTER_MIGRATED_IDS) {
+    pushHostAdapterDoctorChecks(checks, hostId);
+  }
 
   const installed = checks.filter((c) => c.status === "installed").length;
   const missing = checks.filter((c) => c.status === "missing").length;

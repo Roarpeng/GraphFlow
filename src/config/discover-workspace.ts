@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
-import { homedir, release } from "node:os";
+import { homedir, release, tmpdir } from "node:os";
 
 const RUNTIME_DIR_MARKERS = [
   "/vendor/graphflow",
@@ -166,6 +166,24 @@ export function isUsableWorkspaceFallback(dir: string): boolean {
   return hasProjectWorkspaceMarkers(root) || hasDevProjectMarkers(root);
 }
 
+/**
+ * True when `dir` is an OS temp root (e.g. `%TEMP%` / `/tmp`).
+ *
+ * A temp root must never be an implicit workspace: an MCP server started with
+ * cwd inside the temp directory writes `graphflow-out/graphflow-graph.json`
+ * there, and `hasProjectWorkspaceMarkers()` would then treat the temp root as a
+ * project — capturing upward discovery for every project created beneath it
+ * (observed as the m49 workspace-isolation failure).
+ */
+export function isSystemTempDirectory(dir: string): boolean {
+  const normalize = (value: string): string =>
+    resolve(value).replace(/\\/g, "/").toLowerCase().replace(/\/+$/, "");
+  const target = normalize(dir);
+  return [tmpdir(), process.env.TEMP, process.env.TMP]
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .some((value) => normalize(value) === target);
+}
+
 function resolveIdeWorkspaceHint(): string | undefined {
   const wsl = isWsl();
   for (const key of IDE_WORKSPACE_ENV_KEYS) {
@@ -217,17 +235,30 @@ function wslUncToPath(uncPath: string): string {
  * Walk upward from `fromDir` to find the nearest user project root.
  * Skips GraphFlow runtime directories (extension vendor, global npm package).
  *
+ * The walk stops at unsafe boundaries (home / AppData) and at OS temp roots,
+ * so a stray graph store in `%TEMP%` cannot capture unrelated projects.
+ * `extraBoundaries` is a test hook for exercising the same rule without writing
+ * to the real temp directory.
+ *
  * IDE env hints (CURSOR_PROJECT_DIR, etc.) are only used when `fromDir` is a
  * GraphFlow runtime directory — e.g. extension vendor — where upward walk cannot
  * reach the user's opened workspace.
  */
-export function discoverWorkspaceRoot(fromDir: string = process.cwd()): string | undefined {
+export function discoverWorkspaceRoot(
+  fromDir: string = process.cwd(),
+  options: { extraBoundaries?: readonly string[] } = {}
+): string | undefined {
   const resolvedFrom = resolve(fromDir);
+  const extraBoundaries = new Set((options.extraBoundaries ?? []).map((dir) => resolve(dir)));
 
   let current = resolvedFrom;
   for (let depth = 0; depth < MAX_WALK_DEPTH; depth += 1) {
-    if (isUnsafeWorkspaceFallback(current)) {
-      // Stop walking upward at unsafe boundaries (e.g. Windows AppData, home dir).
+    if (isUnsafeWorkspaceFallback(current) || isSystemTempDirectory(current)) {
+      // Stop walking upward at unsafe boundaries (e.g. Windows AppData, home dir)
+      // and at the OS temp root.
+      break;
+    }
+    if (extraBoundaries.has(current)) {
       break;
     }
     if (hasProjectWorkspaceMarkers(current) && !isGraphFlowRuntimeDirectory(current)) {

@@ -109,9 +109,12 @@ describe("install/doctor wire Claude Code hooks", () => {
     process.env.GRAPHFLOW_CLAUDE_HOME = claudeHome;
     try {
       const report = buildDoctorReport(process.cwd());
-      const hooksChecks = report.checks.filter((c) => c.category === "hooks");
-      expect(hooksChecks.length).toBeGreaterThan(0);
-      expect(hooksChecks[0]).toMatchObject({
+      // Registry order is not a contract: DeepSeek Harness glue is also a
+      // "hooks" check, so match the Claude Code one by agent name.
+      const hooksCheck = report.checks.find(
+        (c) => c.category === "hooks" && c.agent === "Claude Code hooks"
+      );
+      expect(hooksCheck).toMatchObject({
         agent: "Claude Code hooks",
         status: expect.stringMatching(/^(installed|missing)$/),
         detected: true,

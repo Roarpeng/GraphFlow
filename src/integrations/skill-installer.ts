@@ -515,18 +515,52 @@ export function getAgentInstructionTargets(): Array<{
  * 使用 append-with-markers，绝不覆盖用户已有内容。
  */
 export function installAgentInstructions(): SkillInstallResult[] {
+  const results = installInstructionsToTargets(getAgentInstructionTargets().map((target) => target.agent));
+
+  if (results.length === 0) {
+    results.push({ target: "Agent instructions", status: "skipped", message: "No supported agent detected" });
+  }
+
+  return results;
+}
+
+/**
+ * 将 GraphFlow 受管指令块写入**指定** agent 的全局规则/记忆文件（按 agent 名精确匹配）。
+ *
+ * HostAdapter 迁移用：让单个宿主的 install slice 只写自己的文件，
+ * 不因为"机器上还装了别的 agent"而顺带写入其它宿主。
+ * 未检测到（marker 目录不存在）的 agent 返回 skipped，绝不创建目录。
+ */
+export function installInstructionsToTargets(agentNames: readonly string[]): SkillInstallResult[] {
+  const wanted = new Set(agentNames);
   const results: SkillInstallResult[] = [];
 
   for (const target of getAgentInstructionTargets()) {
+    if (!wanted.has(target.agent)) continue;
     if (!existsSync(target.markerDir)) {
-      continue; // 未检测到该 agent，跳过
+      results.push({ target: target.agent, status: "skipped", message: "agent not detected" });
+      continue;
     }
     const result = upsertManagedBlock(target.filePath, target.destDir);
     results.push({ target: target.agent, status: result.status, message: result.message });
   }
 
-  if (results.length === 0) {
-    results.push({ target: "Agent instructions", status: "skipped", message: "No supported agent detected" });
+  return results;
+}
+
+/** 从**指定** agent 的全局指令文件移除 GraphFlow 受管块（HostAdapter 卸载用）。 */
+export function removeInstructionsFromTargets(agentNames: readonly string[]): SkillInstallResult[] {
+  const wanted = new Set(agentNames);
+  const results: SkillInstallResult[] = [];
+
+  for (const target of getAgentInstructionTargets()) {
+    if (!wanted.has(target.agent)) continue;
+    const removed = removeManagedBlock(target.filePath);
+    results.push({
+      target: target.agent,
+      status: removed ? "updated" : "skipped",
+      message: removed ? "removed managed block" : "no managed block",
+    });
   }
 
   return results;
@@ -779,6 +813,66 @@ export function installAgentSkills(vendorRuntimeRoot?: string, workspaceRoot?: s
       target: "Agent skills",
       status: "skipped",
       message: "No supported agent detected",
+    });
+  }
+
+  return results;
+}
+
+/**
+ * 将 GraphFlow SKILL.md 安装到**指定** agent 的 Skill 目录（按 agent 名精确匹配）。
+ *
+ * HostAdapter 迁移用：单宿主 install slice 只写自己的 `skills/graphflow/SKILL.md`。
+ * 未检测到（marker 目录不存在）的 agent 返回 skipped，绝不创建目录。
+ */
+export function installSkillToTargets(
+  agentNames: readonly string[],
+  vendorRuntimeRoot?: string
+): SkillInstallResult[] {
+  const wanted = new Set(agentNames);
+  const results: SkillInstallResult[] = [];
+  const skillSourceDir = resolveSkillSourcePath(vendorRuntimeRoot);
+
+  if (!skillSourceDir) {
+    return [{ target: "Agent skills", status: "skipped", message: "Skill source (SKILL.md) not found" }];
+  }
+
+  const sourceSkillFile = join(skillSourceDir, "SKILL.md");
+
+  for (const target of getAgentSkillTargets()) {
+    if (!wanted.has(target.agent)) continue;
+    if (!existsSync(target.markerDir)) {
+      results.push({ target: target.agent, status: "skipped", message: "agent not detected" });
+      continue;
+    }
+    try {
+      const destDir = join(target.skillsRoot, "graphflow");
+      const result = installFile(sourceSkillFile, destDir, "SKILL.md");
+      results.push({ target: target.agent, status: result.status, message: result.message });
+    } catch (error) {
+      results.push({
+        target: target.agent,
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return results;
+}
+
+/** 从**指定** agent 的 Skill 目录移除 graphflow Skill（HostAdapter 卸载用）。 */
+export function removeSkillFromTargets(agentNames: readonly string[]): SkillInstallResult[] {
+  const wanted = new Set(agentNames);
+  const results: SkillInstallResult[] = [];
+
+  for (const target of getAgentSkillTargets()) {
+    if (!wanted.has(target.agent)) continue;
+    const removed = removeAgentSkill(target.skillsRoot);
+    results.push({
+      target: target.agent,
+      status: removed ? "updated" : "skipped",
+      message: removed ? "removed graphflow skill" : "no graphflow skill",
     });
   }
 

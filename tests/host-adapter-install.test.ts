@@ -7,12 +7,14 @@ import {
   CLAUDE_CODE_HOST_ADAPTER_ID,
   CURSOR_HOST_ADAPTER_ID,
   DSH_HOST_ADAPTER_ID,
+  HAND_WRITTEN_HOST_ADAPTER_IDS,
+  HOST_ADAPTER_MIGRATED_IDS,
   KIMI_CODE_HOST_ADAPTER_ID,
   getHostAdapterInstallStatus,
-  HOST_ADAPTER_MIGRATED_IDS,
   installViaHostAdapter,
   uninstallViaHostAdapter,
 } from "../src/integrations/host-adapter-install";
+import { PROFILE_HOST_IDS, isProfileHost } from "../src/integrations/profile-host-installer";
 import { DSH_MCP_ROW_ID, DSH_PATCH_BEGIN } from "../src/integrations/dsh-harness-installer";
 import { SESSION_HOOK_SCRIPT } from "../src/integrations/claude-code-hooks";
 import { buildDoctorReport, buildInstallReport } from "../src/surfaces/cli/init";
@@ -51,12 +53,17 @@ describe("package.json narrative", () => {
 
 describe("HostAdapter registry", () => {
   it("lists DSH, Cursor, Claude, and Kimi Code with their capability slices", () => {
-    expect(HOST_ADAPTERS.map((adapter) => adapter.id)).toEqual([
+    const ids = HOST_ADAPTERS.map((adapter) => adapter.id);
+    expect(ids.slice(0, 4)).toEqual([
       "deepseek-harness",
       "cursor",
       "claude-code",
       "kimi-code",
     ]);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const hostId of HOST_ADAPTER_MIGRATED_IDS) {
+      expect(ids).toContain(hostId);
+    }
     expect(getHostAdapter(DSH_HOST_ADAPTER_ID)?.capabilities).toEqual(
       expect.arrayContaining(["mcp-stdio", "skills", "hooks", "client-panel"])
     );
@@ -66,6 +73,15 @@ describe("HostAdapter registry", () => {
       "deepseek-harness",
       "claude-code",
     ]);
+  });
+
+  it("has a profile-backed spec for every registry host that is not hand-written", () => {
+    const handWritten = new Set<string>(HAND_WRITTEN_HOST_ADAPTER_IDS);
+    for (const adapter of HOST_ADAPTERS) {
+      if (handWritten.has(adapter.id)) continue;
+      expect(isProfileHost(adapter.id)).toBe(true);
+    }
+    expect(PROFILE_HOST_IDS.length).toBe(HOST_ADAPTERS.length - handWritten.size);
   });
 });
 
@@ -101,18 +117,106 @@ describe("HostAdapter DSH install slice", () => {
     expect(getHostAdapterInstallStatus(DSH_HOST_ADAPTER_ID, { home: dshHome })?.installed).toBe(false);
   });
 
-  it("rejects unknown hosts and lists Cursor + Claude + Kimi Code as migrated", () => {
-    expect(HOST_ADAPTER_MIGRATED_IDS).toEqual([
+  it("rejects unknown hosts and lists every migrated host", () => {
+    expect([...HOST_ADAPTER_MIGRATED_IDS].slice(0, 4)).toEqual([
       "deepseek-harness",
       "cursor",
       "claude-code",
       "kimi-code",
     ]);
+    expect(HOST_ADAPTER_MIGRATED_IDS).toContain("windsurf");
+    expect(HOST_ADAPTER_MIGRATED_IDS).toContain("codex");
+    expect(HOST_ADAPTER_MIGRATED_IDS).toContain("opencode");
 
     const unknown = installViaHostAdapter("not-a-host");
     expect(unknown.status).toBe("error");
     expect(unknown.message).toMatch(/unknown host adapter/);
     expect(getHostAdapterInstallStatus("not-a-host")).toBeUndefined();
+  });
+});
+
+describe("HostAdapter profile-backed install slice", () => {
+  it("installs and uninstalls a profile host (Windsurf) through the adapter", () => {
+    const home = makeTempRoot("gf-host-adapter-windsurf-");
+    const windsurfDir = join(home, ".codeium", "windsurf");
+    mkdirSync(windsurfDir, { recursive: true });
+
+    const prevProfile = process.env.USERPROFILE;
+    const prevHome = process.env.HOME;
+    const prevAppData = process.env.APPDATA;
+    if (process.platform === "win32") process.env.USERPROFILE = home;
+    else process.env.HOME = home;
+    process.env.APPDATA = join(home, "AppData", "Roaming");
+
+    try {
+      const created = installViaHostAdapter("windsurf");
+      expect(created.hostId).toBe("windsurf");
+      expect(created.displayName).toBe("Windsurf");
+      expect(created.status).toBe("created");
+
+      const mcpPath = join(windsurfDir, "mcp_config.json");
+      expect(existsSync(mcpPath)).toBe(true);
+      const config = JSON.parse(readFileSync(mcpPath, "utf8")) as {
+        mcpServers?: { graphflow?: unknown };
+      };
+      expect(config.mcpServers?.graphflow).toBeTruthy();
+      expect(existsSync(join(windsurfDir, "memories", "global_rules.md"))).toBe(true);
+
+      const status = getHostAdapterInstallStatus("windsurf");
+      expect(status?.detected).toBe(true);
+      expect(status?.mcpInstalled).toBe(true);
+      expect(status?.rulesInstalled).toBe(true);
+
+      const again = installViaHostAdapter("windsurf");
+      expect(["created", "updated", "skipped"]).toContain(again.status);
+
+      const removed = uninstallViaHostAdapter("windsurf");
+      expect(removed.status).toBe("updated");
+      const after = JSON.parse(readFileSync(mcpPath, "utf8")) as {
+        mcpServers?: Record<string, unknown>;
+      };
+      expect(after.mcpServers?.graphflow).toBeUndefined();
+      expect(getHostAdapterInstallStatus("windsurf")?.mcpInstalled).toBe(false);
+    } finally {
+      if (prevProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = prevProfile;
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      if (prevAppData === undefined) delete process.env.APPDATA;
+      else process.env.APPDATA = prevAppData;
+    }
+  });
+
+  it("reports a well-formed status and stays idle when the host is not installed", () => {
+    const home = makeTempRoot("gf-host-adapter-zed-");
+    const prevProfile = process.env.USERPROFILE;
+    const prevHome = process.env.HOME;
+    const prevAppData = process.env.APPDATA;
+    if (process.platform === "win32") process.env.USERPROFILE = home;
+    else process.env.HOME = home;
+    process.env.APPDATA = join(home, "AppData", "Roaming");
+
+    try {
+      // Status before install: no marker, no MCP target.
+      const before = getHostAdapterInstallStatus("zed");
+      expect(before?.hostId).toBe("zed");
+      expect(before?.agent).toBe("Zed");
+      expect(before?.detected).toBe(false);
+      expect(before?.mcpInstalled).toBe(false);
+      expect(before?.mcpTargets).toEqual([]);
+
+      const result = installViaHostAdapter("zed");
+      expect(result.hostId).toBe("zed");
+      expect(result.displayName).toBe("Zed");
+      expect(["created", "updated", "skipped"]).toContain(result.status);
+    } finally {
+      if (prevProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = prevProfile;
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      if (prevAppData === undefined) delete process.env.APPDATA;
+      else process.env.APPDATA = prevAppData;
+    }
   });
 });
 
