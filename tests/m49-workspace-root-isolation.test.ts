@@ -5,6 +5,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { validateConfig } from "../src/config/loader";
 import { resolveGraphStorePath } from "../src/config/paths";
 import { resolveConfig } from "../src/config/resolve";
+import {
+  discoverWorkspaceRoot,
+  isSystemTempDirectory,
+} from "../src/config/discover-workspace";
 import { saveGraphFlowSettings } from "../src/surfaces/cli/runtime";
 
 const tempRoots: string[] = [];
@@ -162,5 +166,26 @@ describe("M49 runtime workspace root isolation", () => {
 
     const config = resolveConfig();
     expect(resolveGraphStorePath(config)).toBe(join(pinnedProject, "graphflow-out", "graphflow-graph.json"));
+  });
+
+  it("treats the OS temp root as a discovery boundary", () => {
+    expect(isSystemTempDirectory(tmpdir())).toBe(true);
+    expect(isSystemTempDirectory(join(tmpdir(), "graphflow-m49-child"))).toBe(false);
+  });
+
+  it("does not let a stray graph store in a boundary directory capture nested projects", () => {
+    // Reproduces the real failure: an MCP server started with cwd in %TEMP%
+    // writes graphflow-out/graphflow-graph.json there, which used to make the
+    // temp root look like a project for every directory beneath it.
+    const boundary = createTempRoot("graphflow-m49-stray-boundary");
+    const nestedProject = join(boundary, "nested-project");
+    mkdirSync(nestedProject, { recursive: true });
+    mkdirSync(join(boundary, "graphflow-out"), { recursive: true });
+    writeFileSync(join(boundary, "graphflow-out", "graphflow-graph.json"), "x".repeat(100), "utf8");
+
+    // The weak marker alone still resolves upward to the boundary directory...
+    expect(discoverWorkspaceRoot(nestedProject)).toBe(boundary);
+    // ...but the same boundary rule applied to a temp root stops the walk.
+    expect(discoverWorkspaceRoot(nestedProject, { extraBoundaries: [boundary] })).toBeUndefined();
   });
 });

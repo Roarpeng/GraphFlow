@@ -1,7 +1,11 @@
 /**
  * Host capability registry (v1.13).
- * Install dispatch lives in `host-adapter-install.ts` — DSH, Cursor,
- * Claude Code, and Kimi Code are migrated; other IDE installers remain standalone.
+ *
+ * Install dispatch lives in `host-adapter-install.ts`. Two kinds of hosts:
+ * - **Hand-written slices** (host-specific behaviour: hooks, home overlays,
+ *   placeholder rules): `deepseek-harness`, `cursor`, `claude-code`, `kimi-code`.
+ * - **Profile-backed generic slices** (`profile-host-installer.ts`): every other
+ *   registry host — MCP / Skill / instruction targets are already declarative.
  */
 export type HostCapability =
   | "mcp-stdio"
@@ -47,6 +51,67 @@ export const HOST_ADAPTERS: readonly HostAdapter[] = [
     capabilities: ["mcp-stdio", "skills", "rules"],
     homeMarker: ".kimi-code",
     toolPrefix: "mcp__graphflow__",
+  },
+  // ── Profile-backed hosts (generic slice) ──────────────────────────────
+  { id: "trae", displayName: "Trae", capabilities: ["mcp-stdio"], homeMarker: ".trae" },
+  { id: "vscode", displayName: "VS Code", capabilities: ["mcp-stdio"], homeMarker: ".vscode" },
+  {
+    id: "windsurf",
+    displayName: "Windsurf",
+    capabilities: ["mcp-stdio", "rules"],
+    homeMarker: ".codeium",
+  },
+  {
+    id: "cline",
+    displayName: "Cline",
+    capabilities: ["mcp-stdio", "rules"],
+    homeMarker: ".cline",
+  },
+  {
+    id: "roo-code",
+    displayName: "Roo Code",
+    capabilities: ["mcp-stdio", "skills", "rules"],
+    homeMarker: ".roo",
+  },
+  {
+    id: "kilocode",
+    displayName: "Kilo Code",
+    capabilities: ["mcp-stdio", "skills", "rules"],
+    homeMarker: ".kilocode",
+  },
+  { id: "pearai", displayName: "PearAI", capabilities: ["mcp-stdio"] },
+  {
+    id: "gemini",
+    displayName: "Gemini CLI",
+    capabilities: ["mcp-stdio", "rules"],
+    homeMarker: ".gemini",
+  },
+  {
+    id: "codex",
+    displayName: "Codex",
+    capabilities: ["mcp-stdio", "skills", "rules"],
+    homeMarker: ".codex",
+  },
+  {
+    id: "antigravity",
+    displayName: "Antigravity",
+    capabilities: ["mcp-stdio", "skills"],
+    homeMarker: ".gemini/antigravity",
+  },
+  { id: "amazon-q", displayName: "Amazon Q", capabilities: ["mcp-stdio"] },
+  { id: "zed", displayName: "Zed", capabilities: ["mcp-stdio"] },
+  { id: "continue", displayName: "Continue", capabilities: ["mcp-stdio"] },
+  {
+    id: "qoder",
+    displayName: "Qoder",
+    capabilities: ["mcp-stdio", "skills"],
+    homeMarker: ".qoder",
+  },
+  {
+    id: "opencode",
+    displayName: "Opencode",
+    capabilities: ["mcp-stdio", "rules"],
+    homeMarker: ".config/opencode",
   },
 ] as const;
 

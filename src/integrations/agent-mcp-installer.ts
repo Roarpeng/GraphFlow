@@ -2,6 +2,7 @@ import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { homedir, release } from "node:os";
+import { profileRegistry } from "./agent-profiles";
 import { resolveDshHome } from "./dsh-harness-installer";
 import { resolveKimiCodeHome } from "./kimi-code-paths";
 
@@ -617,7 +618,17 @@ export function buildAgentProfiles(): AgentProfile[] {
     }
   }
 
-  return profiles;
+  // Merge the canonical `agent-profiles` registry (v1.13+) so hosts registered
+  // only there (e.g. opencode) get MCP install/status support from one source of
+  // truth. Legacy entries win on id collisions so the exact marker / target
+  // paths this installer has always written stay unchanged.
+  const byId = new Map(profiles.map((profile) => [profile.id, profile]));
+  for (const profile of profileRegistry.getProfiles()) {
+    if (byId.has(profile.id)) continue;
+    byId.set(profile.id, profile);
+  }
+
+  return [...byId.values()];
 }
 
 export function detectInstalledAgents(): DetectedAgent[] {

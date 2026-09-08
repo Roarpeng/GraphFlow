@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-09-05（v1.15.3：R4 context packaging 去重 + m74/m75 测试隔离）
+> 最后更新：2026-09-08（v1.15.5：R4 收口——HostAdapter 全宿主迁移 + `runOrchestration` 拆分；团队共享记忆 MVP、飞轮公开复现包）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -38,6 +38,9 @@
 | v1.15.1 | 2026-09-05 | **HostAdapter Cursor/Claude** | Cursor / Claude Code 的 install / uninstall / doctor 走 HostAdapter 注册表（含 Claude hooks） | ✅ |
 | v1.15.2 | 2026-09-05 | **飞轮复现 + Serena 指南** | `npm run proof:flywheel` 公开复现包；`docs/graphflow-serena.md` 双 MCP 并列指南 | ✅ |
 | v1.15.3 | 2026-09-05 | **R4 打包去重 + 测试隔离** | 抽出共享 `context-package-core`；m74/m75 不再 `chdir` / 写真实 `$HOME` | ✅ |
+| v1.15.4 | 2026-09-06 | **dsh 安装健壮性** | profile 未装包时只写 MCP overlay，避免 `ERR_MODULE_NOT_FOUND` / `duplicate loader entry id` | ✅ |
+| v1.15.5 | 2026-09-08 | **Kimi Code HostAdapter** | `installViaHostAdapter("kimi-code")` 写 `~/.kimi-code/mcp.json` + Skill + `AGENTS.md`；doctor/uninstall 走注册表 | ✅ |
+| v1.16.0 | 2026-09-08 | **集成层模块化收口 + orchestrator 拆分** | 通用 profile 切片覆盖其余 15 个宿主，`HostAdapter` 成为 19 宿主唯一入口；CLI install/uninstall/doctor 改注册表遍历；`agent-profiles` 并入 `buildAgentProfiles()`；`runOrchestration` 拆为 `orchestrator-phases.ts` 四阶段；修复 README UTF-8 损坏与临时目录劫持工作区发现 | ✅ |
 
 ## 下一阶段
 
@@ -130,17 +133,20 @@
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
 | **P2** | 配置 split-brain 收敛 | ✅ | 新增 canonical embedding model 模块；defaults 与 transformers loader 统一使用 `Xenova/bge-base-zh-v1.5` |
-| **P2** | context-slicer / orchestrator 重复合并 | 🟡 | `buildLayeredContextPackage`/`buildEnhancedContextPackage` 已抽出共享 `context-package-core`（keyword/vector 召回、L1–L3 配额打包、dialogue、edge expansion）；对外 MCP/CLI preview API 不变。`runOrchestration` 大函数仍待拆 |
-| **P2** | 集成层模块化 | 🟡 | `HostAdapter` 能力模型已落地；DSH / Cursor / Claude Code / Kimi Code 的 install / uninstall / doctor 已迁到 `installViaHostAdapter`。其余宿主（Trae、VS Code、Windsurf、Codex、Gemini、Antigravity、Copilot、Cline、Roo、Kilo、Qoder、Opencode 等）仍走 `agent-mcp-installer` / `skill-installer` 遗留路径 |
-| **P2** | 测试隔离修复 | ✅ | Trae project-install 只断言临时 workspace；m74/m75 改为 `os.tmpdir()` + fake home + `fromDir`/`cwd` mock，不再 `process.chdir()` 或写入真实 `$HOME` |
+| **P2** | context-slicer / orchestrator 重复合并 | ✅ | `buildLayeredContextPackage`/`buildEnhancedContextPackage` 已抽出共享 `context-package-core`（keyword/vector 召回、L1–L3 配额打包、dialogue、edge expansion）；对外 MCP/CLI preview API 不变。`runOrchestration` 已拆为 `orchestrator-phases.ts` 的四个具名阶段（`runSimplePhase` / `resolvePlanPhase` / `runBridgePhase` / `runLlmDagPhase`）+ 薄协调器，日志、同步顺序与 `triageId` 传播语义逐字保持 |
+| **P2** | 集成层模块化 | ✅ | `HostAdapter` 已是全部 19 个宿主的唯一 install / uninstall / doctor 入口：4 个手写切片（DSH / Cursor / Claude Code / Kimi Code）+ 通用 profile 切片 `profile-host-installer.ts`（Trae、VS Code、Windsurf、Cline、Roo Code、Kilo Code、PearAI、Gemini、Codex、Antigravity、Amazon Q、Zed、Continue、Qoder、Opencode）。CLI 三处硬编码（install / uninstall / doctor）改为注册表遍历；`agent-profiles` 注册表并入 `buildAgentProfiles()`，补齐 opencode 的 MCP 目标；每次安装只写本宿主的文件（MCP 按 `agentIdsOverride`，Skill/规则按精确目标名） |
+| **P2** | 测试隔离修复 | ✅ | Trae project-install 只断言临时 workspace；m74/m75 改为 `os.tmpdir()` + fake home + `fromDir`/`cwd` mock，不再 `process.chdir()` 或写入真实 `$HOME`。补充：本机无限制并发跑全量时，vitest worker RPC 会 `onTaskUpdate` 超时并把最长用例误记为失败；`npx vitest run --maxWorkers=4` 全绿（155 文件 / 1058 用例），属本机并发争用而非产品缺陷 |
 | **P2** | web 知识节点栏产品化 | ✅ | 静态 `dsh.client` bundle 落地：`dsh/client.js` factory 双 slot + glue `/gf` Connection RPC 数据通道 + `dsh.client`/`exports["./client"]` 声明，重启自动加载。已知缺口（上游）：client-modules 扫描器只从 dsh 安装树解析条目名（loader 是安装树→profile 两锚点），out-of-tree 包需可从安装树解析（如 `~/node_modules` 符号链接）否则被静默跳过 |
 | **P2** | 集成健壮性：unsafe-cwd 下 rootDir 生效 | ✅ | dsh dogfood 实证：`resolveConfig()` 先于工具级 rootDir 绑定并抛 unsafe-cwd 错，MCP 工具全灭；已改为 `resolveConfig(configPath, { rootDir })` 贯穿 runtime 调用点，安全检查不放宽 |
+| **P2** | 工作区发现边界：临时目录不得被当作项目根 | ✅ | MCP 以 cwd 位于 `%TEMP%` 启动会写下 `graphflow-out/graphflow-graph.json`，该弱标记曾让向上发现对所有临时目录下的项目都返回临时根；新增 `isSystemTempDirectory()` 遍历边界 + `discoverWorkspaceRoot(..., { extraBoundaries })` 测试钩子，m49 回归覆盖 |
+| **P2** | 文档编码守卫 | ✅ | v1.15.4 版本号提交把两个 README 的约 100 个多字节字符打成 `?` 并随 npm 发布；已按 v1.15.3 文档提交重建，并新增「文档必须合法 UTF-8」+「README.zh.md 徽章与 package.json 一致」CI 守卫 |
 
 ### 建议版本节奏
 
 - ~~v1.10–v1.13~~：v1.13.0 已发布——真实证据链、fidelity 指标、O(1) 技能读路径、SKILL.md 互操作、自适应遗忘、Engineering KG 概念层、MCP Streamable HTTP 和治理/release-gate 平面。
-- ~~v1.14–v1.15~~：v1.15.3 已发布——对话图 2.0、团队共享记忆 MVP（`graphflow team serve` + RBAC，已落地）、HostAdapter（DSH / Cursor / Claude Code）、飞轮公开复现包、Serena 双 MCP 指南、R4 `context-package-core` + 测试隔离。
-- **下一拍**：其余宿主迁到 HostAdapter；`runOrchestration` 拆分。企业 wishlist（OIDC / 审批流 / 托管多活）仍开放。
+- ~~v1.14–v1.15~~：v1.15.5 已发布——对话图 2.0、团队共享记忆 MVP（`graphflow team serve` + RBAC，已落地）、HostAdapter（DSH / Cursor / Claude Code / Kimi Code）、飞轮公开复现包、Serena 双 MCP 指南、R4 `context-package-core` + 测试隔离。
+- ~~下一拍~~：已收口——其余 15 个宿主迁到通用 profile 切片（`HostAdapter` 覆盖全部 19 宿主），`runOrchestration` 已拆为 `orchestrator-phases.ts` 四阶段。
+- **下一拍**：企业 wishlist（OIDC IdP UI / 审批流界面 / 托管多活）；飞轮 dogfood 样本积累（proven skill 靠真实使用而非合成证据）。
 - **长期**：R4 工程债随版本消化
 
 ## 如何参与

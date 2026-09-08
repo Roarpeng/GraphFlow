@@ -172,12 +172,20 @@ export function createGraphClient(config: GraphFlowConfig): GraphClient {
       );
     }
     const fallbackPath = resolveGraphStorePath(config);
+    // Operational knob: on hosts where a connection to a dead endpoint hangs
+    // instead of being refused (Windows firewall / loaded CI), the default 15s
+    // per-request timeout multiplies across graph operations. Set
+    // GRAPHFLOW_MCP_TIMEOUT_MS to fail fast (e.g. 500 in tests).
+    const envTimeout = Number.parseInt(process.env.GRAPHFLOW_MCP_TIMEOUT_MS ?? "", 10);
+    const timeoutOptions =
+      Number.isFinite(envTimeout) && envTimeout > 0 ? { timeoutMs: envTimeout } : {};
     try {
       // mcp-http 是远程试点后端：PageRank 影响面标记只作用于本地图，
       // 且远程 client 有 isDegraded 等特有契约，这里不做装饰器包装。
       return new GraphifyMcpClient(endpoint, config.graphPolicy.mcpApiKey, {
         fallbackPath,
         ...(config.graphPolicy.mcpTenant ? { tenant: config.graphPolicy.mcpTenant } : {}),
+        ...timeoutOptions,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

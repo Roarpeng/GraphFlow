@@ -2,6 +2,32 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.16.0] - 2026-09-08
+
+### Added
+
+- **R4 集成层模块化收口（HostAdapter 全宿主）**：新增通用 profile 驱动切片 `src/integrations/profile-host-installer.ts`。`installViaHostAdapter` / `uninstallViaHostAdapter` / `getHostAdapterInstallStatus` 现覆盖全部 19 个注册宿主——4 个手写切片（DeepSeek Harness / Cursor / Claude Code / Kimi Code）+ 15 个 profile 宿主（Trae、VS Code、Windsurf、Cline、Roo Code、Kilo Code、PearAI、Gemini、Codex、Antigravity、Amazon Q、Zed、Continue、Qoder、Opencode）。
+- **`skill-installer` 精确目标原语**：`installSkillToTargets` / `removeSkillFromTargets` / `installInstructionsToTargets` / `removeInstructionsFromTargets`——单宿主 install slice 只写自己的 `skills/graphflow/SKILL.md` 与受管指令块，不再顺带写其它已检测宿主。
+
+### Changed
+
+- **CLI 三处宿主硬编码改为注册表遍历**：`install` / `uninstall` / `doctor` 统一走 `HOST_ADAPTER_MIGRATED_IDS`；`uninstall` 先按宿主切片清理，再跑遗留清扫（工作区 MCP 条目、Trae 用户 Skill、项目级规则）。新增宿主不再需要改 `init.ts`。
+- **`agent-profiles` 注册表并入 `buildAgentProfiles()`**：`opencode` 等仅在新注册表登记的宿主获得 MCP 安装/状态支持；遗留条目在同 id 时优先，已写入的 marker / target 路径不变。
+- **`runOrchestration` 拆分**：新增 `src/core/orchestrator-phases.ts`，把 ~360 行大函数拆为 `runSimplePhase` / `resolvePlanPhase` / `runBridgePhase` / `runLlmDagPhase` + `makeDagNodeRunner`；`orchestrator.ts` 只保留模式解析、上下文装配与 triage。日志、图/技能同步顺序、`triageId` 传播（含 LLM 失败路径有意不带 `triageId`）逐字保持。
+
+### Fixed
+
+- **mcp-http 请求超时可配置**：新增 `GRAPHFLOW_MCP_TIMEOUT_MS`，`createGraphClient()` 据此设置 `GraphifyMcpClient.timeoutMs`（默认仍 15s）。当端点连接挂起（而非被拒绝）时，15s × 多次图操作会拖长单次运行；该开关让 CI / 测试可以快速失败。
+- **临时目录残留图谱劫持工作区发现**：MCP 服务以 cwd 位于 `%TEMP%` 启动时会在那里写 `graphflow-out/graphflow-graph.json`，而 `hasProjectWorkspaceMarkers()` 把该文件当作项目标记，于是 `discoverWorkspaceRoot()` 对**所有**位于临时目录之下的项目都返回临时目录根，m49 工作区隔离用例随之失败。新增 `isSystemTempDirectory()` 作为向上遍历边界（不改动 `isUsableWorkspaceFallback`，保留显式 cwd 回退语义），并给 `discoverWorkspaceRoot()` 增加 `extraBoundaries` 测试钩子。
+- **README.md / README.zh.md UTF-8 损坏**：v1.15.4 的版本号提交（`a8ae51d`）在改写两个 README 时把约 100 个多字节序列的第三字节替换成 `?`——中文、破折号、箭头、勾选全部变成乱码并随 npm 包发布。已按 `e7e429d`（v1.15.3 文档提交）逐行核对后重建，仅保留有意的版本号与 HostAdapter 文案改动；同时补齐 README.zh.md 落后一版的版本徽章（1.15.4 → 1.15.5）。
+
+### Tests
+
+- `tests/host-adapter-install.test.ts`：注册表完整性、通用切片 install / uninstall / status、未安装宿主零写入（+4 用例）。
+- `tests/m-install-hooks-wiring.test.ts`：doctor hooks 检查改为按 agent 名匹配（DeepSeek Harness glue 与 Claude Code hooks 同属 `hooks` 类别，注册表顺序不是契约）。
+- `tests/m48-doc-code-consistency.test.ts`：新增「文档必须是合法 UTF-8」与「README.zh.md 徽章与 package.json 一致」两个守卫（+2 用例）。
+- `tests/m49-workspace-root-isolation.test.ts`：新增临时目录边界与「残留图谱不得捕获嵌套项目」回归用例（+2 用例）。
+
 ## [1.15.5] - 2026-09-08
 
 ### Added

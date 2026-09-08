@@ -1,4 +1,4 @@
-﻿import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -97,6 +97,13 @@ describe("M17 release readiness", () => {
     const configPath = join(root, "graphflow.config.json");
     const eventsPath = join(root, "events.jsonl");
 
+    // A dead endpoint normally refuses instantly, but on loaded hosts (or with a
+    // firewall that drops the SYN) each request burns the 15s client timeout and
+    // the run can exceed the 60s test ceiling. Pin a fast-fail timeout so this
+    // test measures graceful degradation, not the OS connect behaviour.
+    const prevTimeout = process.env.GRAPHFLOW_MCP_TIMEOUT_MS;
+    process.env.GRAPHFLOW_MCP_TIMEOUT_MS = "300";
+
     try {
       writeFileSync(
         configPath,
@@ -151,6 +158,8 @@ describe("M17 release readiness", () => {
       expect(typeof last.retries).toBe("number");
       expect(last.retries).toBeGreaterThanOrEqual(0);
     } finally {
+      if (prevTimeout === undefined) delete process.env.GRAPHFLOW_MCP_TIMEOUT_MS;
+      else process.env.GRAPHFLOW_MCP_TIMEOUT_MS = prevTimeout;
       rmSync(root, { recursive: true, force: true });
     }
   });
