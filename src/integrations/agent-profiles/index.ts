@@ -19,6 +19,7 @@ import "./profiles/continue";
 import "./profiles/qoder";
 import "./profiles/opencode";
 import "./profiles/dsh";
+import "./profiles/kimi-code";
 
 import "./skills/cursor";
 import "./skills/claude-code";
@@ -29,3 +30,4 @@ import "./skills/antigravity";
 import "./skills/qoder";
 import "./skills/opencode";
 import "./skills/dsh";
+import "./skills/kimi-code";
