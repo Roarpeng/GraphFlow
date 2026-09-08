@@ -1,6 +1,6 @@
 ---
 name: "graphflow"
-description: "图谱上下文压缩、任务规划与知识图谱编排（10 个 MCP 工具）。任何读代码、改代码、排错、中文问题之前必须先调 graphflow_context。DeepSeek Harness 下工具名为 mcp__graphflow__graphflow_*。"
+description: "图谱上下文压缩、任务规划与知识图谱编排（10 个 MCP 工具）。任何读代码、改代码、排错、中文问题之前必须先调 graphflow_context。DeepSeek Harness / Kimi Code 下工具名为 mcp__graphflow__graphflow_*。"
 ---
 
 # GraphFlow Skill
@@ -90,6 +90,16 @@ Run `npx @roarpeng/graphflow install` from the project root. Do **not** hardcode
 | `~/.config/Code/User/mcp.json` | User MCP (`servers.graphflow`) |
 | `.vscode/mcp.json` | Project MCP (optional, team-shared) |
 | `.github/copilot-instructions.md` | Repo-level Copilot instructions |
+
+### Kimi Code CLI setup
+
+| Path | Role |
+|------|------|
+| `~/.kimi-code/mcp.json` (or `$KIMI_CODE_HOME/mcp.json`) | User MCP (`mcpServers.graphflow`) |
+| `~/.kimi-code/skills/graphflow/SKILL.md` | User Skill (`/skill:graphflow`) |
+| `~/.kimi-code/AGENTS.md` | Global token-first instruction block |
+
+Run `npx @roarpeng/graphflow install`. Kimi Code does not expand `${workspaceFolder}`; GraphFlow omits that env placeholder. Tools appear as `mcp__graphflow__graphflow_*`. HostAdapter id: `kimi-code`.
 
 ### DeepSeek Harness（`dsh`）插件：用法与能力
 

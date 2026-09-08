@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.15.5] - 2026-09-08
+
+### Added
+
+- **Kimi Code HostAdapter**：`installViaHostAdapter("kimi-code")` 写入 `~/.kimi-code/mcp.json`、Skill 与 `AGENTS.md`；doctor / uninstall 同步走注册表。Kimi Code 不展开 `${workspaceFolder}`，MCP env 省略该占位符。工具前缀 `mcp__graphflow__`。
+
 ## [1.15.4] - 2026-09-06
 
 ### Fixed

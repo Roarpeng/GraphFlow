@@ -7,6 +7,7 @@ import {
   CLAUDE_CODE_HOST_ADAPTER_ID,
   CURSOR_HOST_ADAPTER_ID,
   DSH_HOST_ADAPTER_ID,
+  KIMI_CODE_HOST_ADAPTER_ID,
   getHostAdapterInstallStatus,
   HOST_ADAPTER_MIGRATED_IDS,
   installViaHostAdapter,
@@ -49,16 +50,18 @@ describe("package.json narrative", () => {
 });
 
 describe("HostAdapter registry", () => {
-  it("lists DSH, Cursor, and Claude with their capability slices", () => {
+  it("lists DSH, Cursor, Claude, and Kimi Code with their capability slices", () => {
     expect(HOST_ADAPTERS.map((adapter) => adapter.id)).toEqual([
       "deepseek-harness",
       "cursor",
       "claude-code",
+      "kimi-code",
     ]);
     expect(getHostAdapter(DSH_HOST_ADAPTER_ID)?.capabilities).toEqual(
       expect.arrayContaining(["mcp-stdio", "skills", "hooks", "client-panel"])
     );
     expect(getHostAdapter("cursor")?.homeMarker).toBe(".cursor");
+    expect(getHostAdapter("kimi-code")?.toolPrefix).toBe("mcp__graphflow__");
     expect(hostsWithCapability("hooks").map((adapter) => adapter.id)).toEqual([
       "deepseek-harness",
       "claude-code",
@@ -98,11 +101,12 @@ describe("HostAdapter DSH install slice", () => {
     expect(getHostAdapterInstallStatus(DSH_HOST_ADAPTER_ID, { home: dshHome })?.installed).toBe(false);
   });
 
-  it("rejects unknown hosts and lists Cursor + Claude as migrated", () => {
+  it("rejects unknown hosts and lists Cursor + Claude + Kimi Code as migrated", () => {
     expect(HOST_ADAPTER_MIGRATED_IDS).toEqual([
       "deepseek-harness",
       "cursor",
       "claude-code",
+      "kimi-code",
     ]);
 
     const unknown = installViaHostAdapter("not-a-host");
@@ -203,6 +207,56 @@ describe("HostAdapter Claude Code install slice", () => {
   });
 });
 
+describe("HostAdapter Kimi Code install slice", () => {
+  it("installViaHostAdapter writes MCP + AGENTS.md + skill without ${workspaceFolder}", () => {
+    const kimiHome = join(makeTempRoot("gf-host-adapter-kimi-"), ".kimi-code");
+    mkdirSync(kimiHome, { recursive: true });
+
+    const created = installViaHostAdapter(KIMI_CODE_HOST_ADAPTER_ID, { home: kimiHome });
+    expect(created.hostId).toBe(KIMI_CODE_HOST_ADAPTER_ID);
+    expect(created.displayName).toBe("Kimi Code");
+    expect(created.status).toBe("created");
+    expect(created.filePath).toBe(join(kimiHome, "mcp.json"));
+
+    const mcp = JSON.parse(readFileSync(join(kimiHome, "mcp.json"), "utf8")) as {
+      mcpServers?: { graphflow?: { command?: string; env?: Record<string, string> } };
+    };
+    expect(mcp.mcpServers?.graphflow?.command).toBeTruthy();
+    expect(mcp.mcpServers?.graphflow?.env?.GRAPHFLOW_WORKSPACE_ROOT).toBeUndefined();
+    expect(existsSync(join(kimiHome, "AGENTS.md"))).toBe(true);
+    expect(readFileSync(join(kimiHome, "AGENTS.md"), "utf8")).toContain("GRAPHFLOW:BEGIN");
+    expect(existsSync(join(kimiHome, "skills", "graphflow", "SKILL.md"))).toBe(true);
+
+    const status = getHostAdapterInstallStatus(KIMI_CODE_HOST_ADAPTER_ID, { home: kimiHome });
+    expect(status?.detected).toBe(true);
+    expect(status?.installed).toBe(true);
+    expect(status?.mcpInstalled).toBe(true);
+    expect(status?.rulesInstalled).toBe(true);
+    expect(status?.skillInstalled).toBe(true);
+    expect(status?.agent).toBe("Kimi Code");
+
+    const skipped = installViaHostAdapter(KIMI_CODE_HOST_ADAPTER_ID, { home: kimiHome });
+    expect(skipped.status).toBe("skipped");
+
+    const removed = uninstallViaHostAdapter(KIMI_CODE_HOST_ADAPTER_ID, { home: kimiHome });
+    expect(removed.status).toBe("updated");
+    expect(getHostAdapterInstallStatus(KIMI_CODE_HOST_ADAPTER_ID, { home: kimiHome })?.installed).toBe(
+      false
+    );
+    expect(existsSync(join(kimiHome, "skills", "graphflow", "SKILL.md"))).toBe(false);
+  });
+
+  it("skips Kimi Code when the host home is absent", () => {
+    const missing = join(makeTempRoot("gf-host-adapter-kimi-missing-"), ".kimi-code");
+    const skipped = installViaHostAdapter(KIMI_CODE_HOST_ADAPTER_ID, { home: missing });
+    expect(skipped.status).toBe("skipped");
+    expect(skipped.message).toMatch(/not detected/i);
+    expect(getHostAdapterInstallStatus(KIMI_CODE_HOST_ADAPTER_ID, { home: missing })?.detected).toBe(
+      false
+    );
+  });
+});
+
 describe("M16 HostAdapter CLI wiring", () => {
   it("doctor reports Cursor checks from the adapter when GRAPHFLOW_CURSOR_HOME is set", () => {
     const cursorHome = join(makeTempRoot("gf-doctor-cursor-"), ".cursor");
@@ -223,6 +277,38 @@ describe("M16 HostAdapter CLI wiring", () => {
     } finally {
       if (prev === undefined) delete process.env.GRAPHFLOW_CURSOR_HOME;
       else process.env.GRAPHFLOW_CURSOR_HOME = prev;
+    }
+  });
+
+  it("doctor reports Kimi Code checks from the adapter when GRAPHFLOW_KIMI_CODE_HOME is set", () => {
+    const kimiHome = join(makeTempRoot("gf-doctor-kimi-"), ".kimi-code");
+    mkdirSync(kimiHome, { recursive: true });
+    installViaHostAdapter(KIMI_CODE_HOST_ADAPTER_ID, { home: kimiHome });
+
+    const prev = process.env.GRAPHFLOW_KIMI_CODE_HOME;
+    process.env.GRAPHFLOW_KIMI_CODE_HOME = kimiHome;
+    try {
+      const report = buildDoctorReport(process.cwd());
+      const kimiMcp = report.checks.filter((check) => check.category === "mcp" && check.agent === "Kimi Code");
+      expect(kimiMcp.length).toBeGreaterThan(0);
+      expect(kimiMcp[0]?.status).toBe("installed");
+      expect(kimiMcp[0]?.path).toBe(join(kimiHome, "mcp.json"));
+      expect(
+        report.checks.some(
+          (check) => check.category === "skill" && check.agent === "Kimi Code skill" && check.status === "installed"
+        )
+      ).toBe(true);
+      expect(
+        report.checks.some(
+          (check) =>
+            check.category === "instruction" &&
+            check.agent === "Kimi Code instructions" &&
+            check.status === "installed"
+        )
+      ).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.GRAPHFLOW_KIMI_CODE_HOME;
+      else process.env.GRAPHFLOW_KIMI_CODE_HOME = prev;
     }
   });
 

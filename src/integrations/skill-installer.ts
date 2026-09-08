@@ -8,6 +8,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync,
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { resolveDshHome } from "./dsh-harness-installer";
+import { resolveKimiCodeHome } from "./kimi-code-paths";
 
 // ── 类型定义 ──────────────────────────────────────────────────────────
 
@@ -483,6 +484,15 @@ export function getAgentInstructionTargets(): Array<{
     filePath: join(home, ".config", "opencode", "AGENTS.md"),
   });
 
+  // Kimi Code 全局指令：~/.kimi-code/AGENTS.md（或 $KIMI_CODE_HOME / GRAPHFLOW_KIMI_CODE_HOME）
+  const kimiHome = resolveKimiCodeHome();
+  targets.push({
+    agent: "Kimi Code",
+    markerDir: kimiHome,
+    destDir: kimiHome,
+    filePath: join(kimiHome, "AGENTS.md"),
+  });
+
   // Cline 全局指令：Documents/Cline/Rules/graphflow.md
   const documentsDir = isWindows ? join(home, "Documents") : join(home, "Documents");
   const clineMarkerCandidates = [
@@ -696,6 +706,11 @@ export function getAgentSkillTargets(): Array<{
       agent: "DeepSeek Harness",
       markerDir: resolveDshHome(),
       skillsRoot: join(resolveDshHome(), "skills"),
+    },
+    {
+      agent: "Kimi Code",
+      markerDir: resolveKimiCodeHome(),
+      skillsRoot: join(resolveKimiCodeHome(), "skills"),
     },
   ];
 }

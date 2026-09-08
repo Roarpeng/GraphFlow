@@ -1,7 +1,7 @@
 /**
  * Host capability registry (v1.13).
- * Install dispatch lives in `host-adapter-install.ts` — DSH, Cursor, and
- * Claude Code are migrated; other IDE installers remain standalone.
+ * Install dispatch lives in `host-adapter-install.ts` — DSH, Cursor,
+ * Claude Code, and Kimi Code are migrated; other IDE installers remain standalone.
  */
 export type HostCapability =
   | "mcp-stdio"
@@ -40,6 +40,13 @@ export const HOST_ADAPTERS: readonly HostAdapter[] = [
     displayName: "Claude Code",
     capabilities: ["mcp-stdio", "skills", "rules", "hooks"],
     homeMarker: ".claude",
+  },
+  {
+    id: "kimi-code",
+    displayName: "Kimi Code",
+    capabilities: ["mcp-stdio", "skills", "rules"],
+    homeMarker: ".kimi-code",
+    toolPrefix: "mcp__graphflow__",
   },
 ] as const;
 

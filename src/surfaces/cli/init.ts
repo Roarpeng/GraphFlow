@@ -33,13 +33,22 @@ import {
   CLAUDE_CODE_HOST_ADAPTER_ID,
   CURSOR_HOST_ADAPTER_ID,
   DSH_HOST_ADAPTER_ID,
+  KIMI_CODE_HOST_ADAPTER_ID,
   getHostAdapterInstallStatus,
   installViaHostAdapter,
   uninstallViaHostAdapter,
 } from "../../integrations/host-adapter-install";
 
-const HOST_ADAPTER_MCP_IDS = new Set(["cursor", "claude-code", "cursor-windows", "claude-code-windows"]);
-const HOST_ADAPTER_SKILL_AGENTS = new Set(["Cursor skill", "Claude Code skill"]);
+const HOST_ADAPTER_MCP_IDS = new Set([
+  "cursor",
+  "claude-code",
+  "kimi-code",
+  "cursor-windows",
+  "claude-code-windows",
+  "kimi-code-windows",
+]);
+const HOST_ADAPTER_SKILL_AGENTS = new Set(["Cursor skill", "Claude Code skill", "Kimi Code skill"]);
+const HOST_ADAPTER_INSTRUCTION_AGENTS = new Set(["Kimi Code"]);
 
 const isWindows = process.platform === "win32";
 
@@ -273,6 +282,7 @@ export function buildInstallReport(
   // installers below stay responsible for Trae / VS Code / Windsurf / etc.
   const cursorInstalled = installViaHostAdapter(CURSOR_HOST_ADAPTER_ID);
   const claudeInstalled = installViaHostAdapter(CLAUDE_CODE_HOST_ADAPTER_ID);
+  const kimiInstalled = installViaHostAdapter(KIMI_CODE_HOST_ADAPTER_ID);
   const dshInstalled = installViaHostAdapter(DSH_HOST_ADAPTER_ID);
   const claudeCodeHooks: ClaudeCodeHooksResult = {
     status: claudeInstalled.status === "unsupported" ? "skipped" : claudeInstalled.status,
@@ -304,6 +314,7 @@ export function buildInstallReport(
   const hooksHasError = claudeCodeHooks.status === "error";
   const dshHasError = dshHarness.status === "error";
   const cursorHasError = cursorInstalled.status === "error";
+  const kimiHasError = kimiInstalled.status === "error";
   const skillHasError = [
     ...skills.traeSkills,
     ...skills.cursorRules,
@@ -318,6 +329,7 @@ export function buildInstallReport(
     !hooksHasError &&
     !dshHasError &&
     !cursorHasError &&
+    !kimiHasError &&
     globalConfig.status !== "error";
   const remediation: string[] = [];
   if (!ok) {
@@ -340,6 +352,13 @@ export function buildInstallReport(
       remediation.push(
         `Fix Cursor HostAdapter install at ${cursorInstalled.filePath ?? ""}${
           cursorInstalled.message ? `: ${cursorInstalled.message}` : "."
+        }`
+      );
+    }
+    if (kimiHasError) {
+      remediation.push(
+        `Fix Kimi Code HostAdapter install at ${kimiInstalled.filePath ?? ""}${
+          kimiInstalled.message ? `: ${kimiInstalled.message}` : "."
         }`
       );
     }
@@ -533,6 +552,15 @@ export function runUninstall(workspaceRoot: string = process.cwd()) {
     console.log("[SKIP] Claude Code: not detected");
   }
 
+  const kimiStatus = getHostAdapterInstallStatus(KIMI_CODE_HOST_ADAPTER_ID);
+  if (kimiStatus?.detected) {
+    const kimiUninstalled = uninstallViaHostAdapter(KIMI_CODE_HOST_ADAPTER_ID);
+    const icon = kimiUninstalled.status === "updated" ? "[REMOVED]" : "[SKIP]";
+    console.log(`${icon} Kimi Code: ${kimiUninstalled.message ?? kimiUninstalled.status}`);
+  } else {
+    console.log("[SKIP] Kimi Code: not detected");
+  }
+
   // 4. Remove DeepSeek Harness home-level cordis.patch.yml overlay
   const dshStatus = getHostAdapterInstallStatus(DSH_HOST_ADAPTER_ID);
   if (dshStatus?.detected) {
@@ -653,6 +681,17 @@ function pushHostAdapterDoctorChecks(checks: DoctorCheckItem[], hostId: string):
     });
   }
 
+  if (hostId === KIMI_CODE_HOST_ADAPTER_ID && status.rulesPath) {
+    checks.push({
+      category: "instruction",
+      agent: `${status.agent} instructions`,
+      path: status.rulesPath,
+      scope: "user",
+      status: toDoctorStatus(status.rulesInstalled ?? false, true),
+      detected: true,
+    });
+  }
+
   if (hostId === DSH_HOST_ADAPTER_ID && status.patchPath) {
     checks.push({
       category: "hooks",
@@ -735,6 +774,7 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
 
   for (const status of getAgentInstructionStatus()) {
     if (!status.detected) continue;
+    if (HOST_ADAPTER_INSTRUCTION_AGENTS.has(status.agent)) continue;
     checks.push({
       category: "instruction",
       agent: status.agent,
@@ -746,6 +786,7 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
 
   pushHostAdapterDoctorChecks(checks, CURSOR_HOST_ADAPTER_ID);
   pushHostAdapterDoctorChecks(checks, CLAUDE_CODE_HOST_ADAPTER_ID);
+  pushHostAdapterDoctorChecks(checks, KIMI_CODE_HOST_ADAPTER_ID);
   pushHostAdapterDoctorChecks(checks, DSH_HOST_ADAPTER_ID);
 
   const installed = checks.filter((c) => c.status === "installed").length;
@@ -757,7 +798,7 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
     : [
         "Run `graphflow install` to register MCP + Skills (+ Claude Code hooks / DeepSeek Harness overlay+glue when detected). Primary dsh path: `dsh plugin --profile web add @roarpeng/graphflow`.",
         "Re-run `graphflow doctor --json` and fix any remaining missing items.",
-        "Ensure target agent directories exist (e.g. ~/.cursor / ~/.claude / ~/.dsh) so installers can detect them.",
+        "Ensure target agent directories exist (e.g. ~/.cursor / ~/.claude / ~/.kimi-code / ~/.dsh) so installers can detect them.",
       ];
 
   let team: TeamDiagnosis | undefined;

@@ -2,8 +2,8 @@
  * Thin HostAdapter install dispatch.
  *
  * v1.13 added the capability registry (`host-adapter.ts`). Migrated install
- * slices: DeepSeek Harness, Cursor, and Claude Code. Other IDE installers
- * (Trae, VS Code, Windsurf, Codex, Gemini, …) still use the legacy paths.
+ * slices: DeepSeek Harness, Cursor, Claude Code, and Kimi Code. Other IDE
+ * installers (Trae, VS Code, Windsurf, Codex, Gemini, …) still use the legacy paths.
  */
 import {
   CLAUDE_CODE_HOST_ADAPTER_ID,
@@ -29,9 +29,17 @@ import {
   type DshHarnessInstallResult,
   type DshHarnessStatus,
 } from "./dsh-harness-installer";
+import {
+  KIMI_CODE_HOST_ADAPTER_ID,
+  getKimiCodeHostStatus,
+  installKimiCodeHost,
+  uninstallKimiCodeHost,
+  type KimiCodeHostInstallResult,
+  type KimiCodeHostStatus,
+} from "./kimi-code-host-installer";
 import { getHostAdapter } from "./host-adapter";
 
-export { CLAUDE_CODE_HOST_ADAPTER_ID, CURSOR_HOST_ADAPTER_ID, DSH_HOST_ADAPTER_ID };
+export { CLAUDE_CODE_HOST_ADAPTER_ID, CURSOR_HOST_ADAPTER_ID, DSH_HOST_ADAPTER_ID, KIMI_CODE_HOST_ADAPTER_ID };
 
 export const HOST_ADAPTER_INSTALL_UNMIGRATED =
   "install path is not yet migrated onto HostAdapter";
@@ -40,6 +48,7 @@ export const HOST_ADAPTER_MIGRATED_IDS = [
   DSH_HOST_ADAPTER_ID,
   CURSOR_HOST_ADAPTER_ID,
   CLAUDE_CODE_HOST_ADAPTER_ID,
+  KIMI_CODE_HOST_ADAPTER_ID,
 ] as const;
 
 export interface HostAdapterInstallOptions {
@@ -82,7 +91,11 @@ export interface HostAdapterHostStatus {
   }>;
 }
 
-type SliceInstallResult = DshHarnessInstallResult | CursorHostInstallResult | ClaudeCodeHostInstallResult;
+type SliceInstallResult =
+  | DshHarnessInstallResult
+  | CursorHostInstallResult
+  | ClaudeCodeHostInstallResult
+  | KimiCodeHostInstallResult;
 
 function unknownHost(hostId: string): HostAdapterInstallResult {
   return {
@@ -158,6 +171,23 @@ function fromCursorStatus(status: CursorHostStatus): HostAdapterHostStatus {
   };
 }
 
+function fromKimiStatus(status: KimiCodeHostStatus): HostAdapterHostStatus {
+  return {
+    hostId: status.hostId,
+    agent: status.agent,
+    detected: status.detected,
+    installed: status.installed,
+    mcpInstalled: status.mcpInstalled,
+    rulesInstalled: status.rulesInstalled,
+    skillInstalled: status.skillInstalled,
+    home: status.home,
+    mcpPath: status.mcpPath,
+    rulesPath: status.rulesPath,
+    skillPath: status.skillPath,
+    mcpTargets: status.mcpTargets,
+  };
+}
+
 function fromClaudeStatus(status: ClaudeCodeHostStatus): HostAdapterHostStatus {
   return {
     hostId: status.hostId,
@@ -194,6 +224,9 @@ export function installViaHostAdapter(
   if (adapter.id === CLAUDE_CODE_HOST_ADAPTER_ID) {
     return withAdapterMeta(adapter.id, adapter.displayName, installClaudeCodeHost(sliceHomeOptions(options)));
   }
+  if (adapter.id === KIMI_CODE_HOST_ADAPTER_ID) {
+    return withAdapterMeta(adapter.id, adapter.displayName, installKimiCodeHost(sliceHomeOptions(options)));
+  }
   return unsupportedHost(adapter.id, adapter.displayName);
 }
 
@@ -212,6 +245,9 @@ export function uninstallViaHostAdapter(
   if (adapter.id === CLAUDE_CODE_HOST_ADAPTER_ID) {
     return withAdapterMeta(adapter.id, adapter.displayName, uninstallClaudeCodeHost(sliceHomeOptions(options)));
   }
+  if (adapter.id === KIMI_CODE_HOST_ADAPTER_ID) {
+    return withAdapterMeta(adapter.id, adapter.displayName, uninstallKimiCodeHost(sliceHomeOptions(options)));
+  }
   return unsupportedHost(adapter.id, adapter.displayName);
 }
 
@@ -229,6 +265,9 @@ export function getHostAdapterInstallStatus(
   }
   if (adapter.id === CLAUDE_CODE_HOST_ADAPTER_ID) {
     return fromClaudeStatus(getClaudeCodeHostStatus(sliceHomeOptions(options)));
+  }
+  if (adapter.id === KIMI_CODE_HOST_ADAPTER_ID) {
+    return fromKimiStatus(getKimiCodeHostStatus(sliceHomeOptions(options)));
   }
   return undefined;
 }

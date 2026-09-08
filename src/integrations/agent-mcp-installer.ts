@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { homedir, release } from "node:os";
 import { resolveDshHome } from "./dsh-harness-installer";
+import { resolveKimiCodeHome } from "./kimi-code-paths";
 
 export type McpServersKey = "mcpServers" | "servers" | "context_servers" | "mcp";
 
@@ -250,6 +251,18 @@ function buildWindowsProfilesFromWsl(windowsHome: string): AgentProfile[] {
       markerPaths: [join(windowsHome, ".gemini")],
       userTargets: [
         { configPath: join(windowsHome, ".gemini", "settings.json"), serversKey: "mcpServers" },
+      ],
+    },
+    // Kimi Code (Windows from WSL)
+    {
+      id: "kimi-code-windows",
+      name: "Kimi Code (Windows)",
+      markerPaths: [join(windowsHome, ".kimi-code")],
+      userTargets: [
+        { configPath: join(windowsHome, ".kimi-code", "mcp.json"), serversKey: "mcpServers" },
+      ],
+      workspaceRelativePaths: [
+        { relativePath: join(".kimi-code", "mcp.json"), serversKey: "mcpServers" },
       ],
     },
     // Cline (Windows from WSL)
@@ -566,6 +579,17 @@ export function buildAgentProfiles(): AgentProfile[] {
         },
       ],
       workspaceRelativePaths: [{ relativePath: join(".qoder", "mcp.json"), serversKey: "mcpServers" }],
+    },
+    {
+      id: "kimi-code",
+      name: "Kimi Code",
+      markerPaths: [resolveKimiCodeHome(), join(home, ".kimi-code")],
+      userTargets: [
+        { configPath: join(resolveKimiCodeHome(), "mcp.json"), serversKey: "mcpServers" },
+      ],
+      workspaceRelativePaths: [
+        { relativePath: join(".kimi-code", "mcp.json"), serversKey: "mcpServers" },
+      ],
     },
     {
       id: "deepseek-harness",
@@ -1902,20 +1926,23 @@ export function installMcpToDetectedAgents(options: McpInstallOptions): McpInsta
         isWindows() ||
         target.agentId.endsWith("-windows");
       const isCodex = target.configFormat === "codex-toml";
+      const omitWorkspaceFolderPlaceholder =
+        Boolean(restOptions.omitWorkspaceFolderPlaceholder) ||
+        isCodex ||
+        target.agentId === "kimi-code" ||
+        target.agentId === "kimi-code-windows";
       const node = buildMcpServerNode(
         target.scope === "workspace" && workspaceRoot
           ? {
               ...restOptions,
               workspaceRoot,
               windowsHost,
-              omitWorkspaceFolderPlaceholder:
-                Boolean(restOptions.omitWorkspaceFolderPlaceholder) || isCodex,
+              omitWorkspaceFolderPlaceholder,
             }
           : {
               ...restOptions,
               windowsHost,
-              omitWorkspaceFolderPlaceholder:
-                Boolean(restOptions.omitWorkspaceFolderPlaceholder) || isCodex,
+              omitWorkspaceFolderPlaceholder,
             }
       );
       const status = injectIntoAgentConfig(
