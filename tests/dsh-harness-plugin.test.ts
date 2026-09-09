@@ -171,6 +171,58 @@ describe("DeepSeek Harness dsh plugin", () => {
     expect(after).not.toContain(`id: ${DSH_MCP_ROW_ID}`);
   });
 
+  it("does not mistake a comment mentioning the begin marker for the managed block", () => {
+    const dir = makeTempRoot("gf-dsh-marker-comment-");
+    const dshHome = join(dir, ".dsh");
+    mkdirSync(dshHome, { recursive: true });
+    const patchPath = join(dshHome, "cordis.patch.yml");
+    const comment = `# Never append a literal ${DSH_PATCH_BEGIN} block after this line.\n[]\n`;
+    writeFileSync(patchPath, comment, "utf8");
+
+    const installed = installDshHarness({ dshHome });
+    expect(installed.status).toBe("updated");
+    const content = readFileSync(patchPath, "utf8");
+    expect(content).toContain(comment.split("\n")[0]);
+    expect(content.match(new RegExp(`^${DSH_PATCH_BEGIN}$`, "gm"))).toHaveLength(1);
+    expect(content).not.toMatch(/^.*\[\]\s*\n- insert:/m);
+
+    const removed = uninstallDshHarness({ dshHome });
+    expect(removed.status).toBe("updated");
+    expect(readFileSync(patchPath, "utf8")).toBe(comment);
+  });
+
+  it("clears a duplicate home overlay when a profile patch owns mcp-graphflow", () => {
+    const dir = makeTempRoot("gf-dsh-profile-owner-");
+    const dshHome = join(dir, ".dsh");
+    const profileDir = join(dshHome, "profiles", "web");
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(
+      join(profileDir, "cordis.patch.yml"),
+      "- insert:\n    - id: mcp-graphflow\n      name: '@deepseek-ai/dsh-mcp-client'\n",
+      "utf8"
+    );
+    const patchPath = join(dshHome, "cordis.patch.yml");
+    writeFileSync(
+      patchPath,
+      `# The old writer matched a comment mentioning ${DSH_PATCH_BEGIN}\n${wrapDshManagedPatch(
+        buildGraphFlowDshInsertPatch({ includeGlue: false })
+      )}`,
+      "utf8"
+    );
+
+    const repaired = installDshHarness({ dshHome });
+    expect(repaired.status).toBe("updated");
+    expect(repaired.message).toMatch(/cleared home overlay.*duplicate loader entry id/i);
+    const homePatch = readFileSync(patchPath, "utf8");
+    expect(homePatch).not.toContain(`id: ${DSH_MCP_ROW_ID}`);
+    expect(homePatch.trimEnd()).toMatch(/\[\]$/);
+
+    const status = getDshHarnessStatus({ dshHome });
+    expect(status.installed).toBe(true);
+    expect(status.packageInstalled).toBe(false);
+    expect(status.profilePatchOwner).toBe("profiles/web/cordis.patch.yml");
+  });
+
   it("detects DeepSeek Harness in agent profiles and skill targets", () => {
     const profile = buildAgentProfiles().find((p) => p.id === "deepseek-harness");
     expect(profile).toBeDefined();
