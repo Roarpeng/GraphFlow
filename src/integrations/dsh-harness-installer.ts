@@ -11,12 +11,17 @@
  * 2. When the package is missing, `graphflow install` writes an **MCP-only** home
  *    overlay (npx graphflow-mcp). It never writes the glue row without the package —
  *    that caused `ERR_MODULE_NOT_FOUND` and blocked `dsh web`.
+ * 3. When any `profiles/<profile>/cordis.patch.yml` already declares the MCP row
+ *    (hand-written or from an older install), that profile layer owns it. The home
+ *    overlay applies over *every* profile, so writing it there too makes Cordis throw
+ *    `duplicate loader entry id: mcp-graphflow` at boot. `graphflow install` then
+ *    removes any managed home overlay and reports the owning profile patch.
  *
  * Skills go to `$DSH_HOME/skills/graphflow/SKILL.md` via skill-installer targets;
  * the bundle glue also registers the skill at runtime so `dsh plugin add` is enough.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { getHostAdapter } from "./host-adapter";
@@ -55,6 +60,8 @@ export interface DshHarnessStatus {
   patchPath: string;
   skillPath: string;
   profileDir: string;
+  /** Profile patch that owns the MCP row, e.g. `profiles/web/cordis.patch.yml`; null when none. */
+  profilePatchOwner: string | null;
 }
 
 export interface DshHarnessInstallResult {
@@ -174,14 +181,76 @@ export function patchContainsGraphFlowDshGlue(content: string): boolean {
   return new RegExp(`^\\s*-\\s*id:\\s*${DSH_GLUE_ROW_ID}\\s*$`, "m").test(content);
 }
 
-function upsertManagedPatch(existing: string, managed: string): { next: string; changed: boolean; kind: "created" | "updated" | "skipped" } {
-  const beginIdx = existing.indexOf(DSH_PATCH_BEGIN);
-  const endIdx = existing.indexOf(DSH_PATCH_END);
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
-  if (beginIdx !== -1 && endIdx !== -1 && endIdx > beginIdx) {
-    const before = existing.slice(0, beginIdx);
-    const after = existing.slice(endIdx + DSH_PATCH_END.length).replace(/^\n/, "");
-    const next = `${before}${managed}${after}`.replace(/\n{3,}/g, "\n\n");
+/**
+ * Locate the managed block. Markers must sit on their own line: a plain `indexOf`
+ * also matches the marker text when a comment merely *mentions* it, which sliced the
+ * file mid-comment and silently dropped the top-level `[]`.
+ * Returns `beginIdx` (start of the BEGIN line) and `endIdx` (exclusive end of the END marker).
+ */
+function findManagedPatchBlock(content: string): { beginIdx: number; endIdx: number } | null {
+  const beginRe = new RegExp(`^[ \\t]*${escapeRegExp(DSH_PATCH_BEGIN)}[ \\t]*$`, "m");
+  const beginMatch = beginRe.exec(content);
+  if (beginMatch) {
+    const endRe = new RegExp(`^[ \\t]*${escapeRegExp(DSH_PATCH_END)}[ \\t]*$`, "gm");
+    endRe.lastIndex = beginMatch.index + beginMatch[0].length;
+    const endMatch = endRe.exec(content);
+    if (endMatch) {
+      return { beginIdx: beginMatch.index, endIdx: endMatch.index + endMatch[0].length };
+    }
+  }
+
+  // Recovery for files an older `indexOf`-based writer already corrupted: the BEGIN
+  // marker is embedded in a comment line. Drop that whole line rather than leave a
+  // truncated sentence behind.
+  const rawBegin = content.indexOf(DSH_PATCH_BEGIN);
+  const rawEnd = content.indexOf(DSH_PATCH_END);
+  if (rawBegin === -1 || rawEnd === -1 || rawEnd <= rawBegin) {
+    return null;
+  }
+  return {
+    beginIdx: content.lastIndexOf("\n", rawBegin) + 1,
+    endIdx: rawEnd + DSH_PATCH_END.length,
+  };
+}
+
+function stripCommentLines(content: string): string {
+  return content
+    .split("\n")
+    .filter((line) => !/^\s*#/.test(line))
+    .join("\n");
+}
+
+/**
+ * Keep the patch a valid top-level YAML array. dsh parses `cordis.patch.yml` as an
+ * array: comments followed by `[]` **and** `- insert:` items is a parse error, and a
+ * comments-only file parses to null. So drop a bare `[]` when items exist, and restore
+ * it when only comments remain.
+ */
+function normalizePatchArray(content: string): string {
+  const withoutEmptyArray = content
+    .split("\n")
+    .filter((line) => line.trim() !== "[]")
+    .join("\n");
+  if (!withoutEmptyArray.trim()) {
+    return "";
+  }
+  if (/^-/m.test(stripCommentLines(withoutEmptyArray))) {
+    return withoutEmptyArray;
+  }
+  return `${withoutEmptyArray.trimEnd()}\n[]\n`;
+}
+
+function upsertManagedPatch(existing: string, managed: string): { next: string; changed: boolean; kind: "created" | "updated" | "skipped" } {
+  const block = findManagedPatchBlock(existing);
+
+  if (block) {
+    const before = existing.slice(0, block.beginIdx);
+    const after = existing.slice(block.endIdx).replace(/^\r?\n/, "");
+    const next = normalizePatchArray(`${before}${managed}${after}`.replace(/\n{3,}/g, "\n\n"));
     if (next === existing) {
       return { next, changed: false, kind: "skipped" };
     }
@@ -189,22 +258,84 @@ function upsertManagedPatch(existing: string, managed: string): { next: string; 
   }
 
   if (!existing.trim()) {
-    return { next: managed, changed: true, kind: "created" };
+    return { next: normalizePatchArray(managed), changed: true, kind: "created" };
   }
 
   const separator = existing.endsWith("\n") ? "\n" : "\n\n";
-  return { next: `${existing}${separator}${managed}`, changed: true, kind: "updated" };
+  return {
+    next: normalizePatchArray(`${existing}${separator}${managed}`),
+    changed: true,
+    kind: "updated",
+  };
 }
 
 export function removeManagedDshPatch(content: string): { next: string; removed: boolean } {
-  const beginIdx = content.indexOf(DSH_PATCH_BEGIN);
-  const endIdx = content.indexOf(DSH_PATCH_END);
-  if (beginIdx === -1 || endIdx === -1 || endIdx <= beginIdx) {
+  const block = findManagedPatchBlock(content);
+  if (!block) {
     return { next: content, removed: false };
   }
-  const before = content.slice(0, beginIdx);
-  const after = content.slice(endIdx + DSH_PATCH_END.length).replace(/^\n/, "");
-  return { next: `${before}${after}`.replace(/\n{3,}/g, "\n\n").trimStart(), removed: true };
+  const before = content.slice(0, block.beginIdx);
+  const after = content.slice(block.endIdx).replace(/^\r?\n/, "");
+  const next = normalizePatchArray(`${before}${after}`.replace(/\n{3,}/g, "\n\n").trimStart());
+  return { next, removed: true };
+}
+
+export interface DshProfilePatchOwner {
+  profile: string;
+  /** Path of the profile's own `cordis.patch.yml`. */
+  patchPath: string;
+  /** Relative label used in messages, e.g. `profiles/web/cordis.patch.yml`. */
+  label: string;
+}
+
+function readPatchFile(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Profiles whose own `cordis.patch.yml` already declares the GraphFlow MCP row.
+ * The home overlay applies over *every* profile, so a row in either layer makes Cordis
+ * abort boot. Detection is marker-independent on purpose: hand-written profile rows
+ * carry no GRAPHFLOW-DSH-BEGIN/END wrapper.
+ */
+export function findDshProfilePatchOwners(
+  dshHome = resolveDshHome(),
+  profile?: string
+): DshProfilePatchOwner[] {
+  const profilesRoot = join(dshHome, "profiles");
+  const wanted = profile?.trim();
+  let names: string[];
+  try {
+    names = readdirSync(profilesRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+
+  const owners: DshProfilePatchOwner[] = [];
+  for (const name of names) {
+    if (wanted && name !== wanted) continue;
+    const patchPath = join(profilesRoot, name, "cordis.patch.yml");
+    const content = readPatchFile(patchPath);
+    if (content === null) continue;
+    if (!patchContainsGraphFlowDsh(content)) continue;
+    owners.push({ profile: name, patchPath, label: `profiles/${name}/cordis.patch.yml` });
+  }
+  return owners.sort((a, b) => a.profile.localeCompare(b.profile));
+}
+
+function profileOwnerWarning(owners: DshProfilePatchOwner[]): string | null {
+  if (owners.length === 0) return null;
+  const list = owners.map((owner) => owner.label).join(", ");
+  return (
+    `WARNING: ${list} also declares ${DSH_MCP_ROW_ID}; that row plus the bundle layer aborts dsh ` +
+    `boot with "duplicate loader entry id". Remove the row from the profile patch.`
+  );
 }
 
 function readJsonObject(path: string): Record<string, unknown> | null {
@@ -321,7 +452,10 @@ function writeOrRemovePatchFile(patchPath: string, next: string): void {
   writeFileSync(patchPath, next.endsWith("\n") ? next : `${next}\n`, "utf8");
 }
 
-function clearHomeOverlayIfPresent(paths: DshHarnessPaths): DshHarnessInstallResult | null {
+function clearHomeOverlayIfPresent(
+  paths: DshHarnessPaths,
+  message: string
+): DshHarnessInstallResult | null {
   if (!existsSync(paths.patchPath)) {
     return null;
   }
@@ -337,7 +471,7 @@ function clearHomeOverlayIfPresent(paths: DshHarnessPaths): DshHarnessInstallRes
   return {
     status: "updated",
     filePath: paths.patchPath,
-    message: `package present in profile; cleared home overlay (bundle owns MCP+glue via ${DSH_PACKAGE_NAME})`,
+    message,
   };
 }
 
@@ -364,6 +498,11 @@ export function getDshHarnessStatus(options: { dshHome?: string; profile?: strin
     installed = true;
     glueInstalled = true;
   }
+  const profileOwners = findDshProfilePatchOwners(paths.dshHome);
+  // A profile-owned row means the MCP bridge is live even with no home overlay.
+  if (profileOwners.length > 0) {
+    installed = true;
+  }
   return {
     agent: dshAdapterDisplayName(),
     detected,
@@ -375,6 +514,7 @@ export function getDshHarnessStatus(options: { dshHome?: string; profile?: strin
     patchPath: paths.patchPath,
     skillPath: paths.skillPath,
     profileDir,
+    profilePatchOwner: profileOwners[0]?.label ?? null,
   };
 }
 
@@ -396,47 +536,70 @@ export function installDshHarness(options: DshHarnessInstallOptions = {}): DshHa
       notes.push(ensured.message);
     }
 
-    const packagePresent = isGraphFlowPackageInProfile(paths.dshHome, profile);
-    if (packagePresent) {
-      ensureGraphFlowBundleInProfilePackageJson(getDshProfileDir(paths.dshHome, profile));
-      const cleared = clearHomeOverlayIfPresent(paths);
-      if (cleared) {
-        if (notes.length) cleared.message = `${cleared.message}; ${notes.join("; ")}`;
-        return cleared;
-      }
-      return {
-        status: "skipped",
-        filePath: paths.patchPath,
-        message: notes.length
+      const packagePresent = isGraphFlowPackageInProfile(paths.dshHome, profile);
+      const profileOwners = findDshProfilePatchOwners(paths.dshHome);
+      if (packagePresent) {
+        ensureGraphFlowBundleInProfilePackageJson(getDshProfileDir(paths.dshHome, profile));
+        const cleared = clearHomeOverlayIfPresent(
+          paths,
+          `package present in profile; cleared home overlay (bundle owns MCP+glue via ${DSH_PACKAGE_NAME})`
+        );
+        if (cleared) {
+          if (notes.length) cleared.message = `${cleared.message}; ${notes.join("; ")}`;
+          return cleared;
+        }
+        const conflict = profileOwnerWarning(profileOwners);
+        const baseMessage = notes.length
           ? `package present in profile; home overlay not needed; ${notes.join("; ")}`
-          : `package present in profile; home overlay not needed (bundle owns MCP+glue)`,
-      };
-    }
+          : `package present in profile; home overlay not needed (bundle owns MCP+glue)`;
+        return {
+          status: "skipped",
+          filePath: paths.patchPath,
+          message: conflict ? `${baseMessage}. ${conflict}` : baseMessage,
+        };
+      }
 
-    // Package missing: MCP-only home overlay (never glue — keeps dsh bootable).
-    const includeGlue = options.includeGlue === true;
-    mkdirSync(dirname(paths.patchPath), { recursive: true });
-    const existing = existsSync(paths.patchPath) ? readFileSync(paths.patchPath, "utf8") : "";
-    const managed = wrapDshManagedPatch(buildGraphFlowDshInsertPatch({ includeGlue }));
-    const { next, kind } = upsertManagedPatch(existing, managed);
-    if (kind === "skipped") {
-      return {
-        status: "skipped",
-        filePath: paths.patchPath,
-        message: includeGlue
-          ? notes.length
-            ? `already up to date; ${notes.join("; ")}`
-            : "already up to date"
-          : glueOmittedMessage(profile),
-      };
-    }
-    writeFileSync(paths.patchPath, next.endsWith("\n") ? next : `${next}\n`, "utf8");
-    const baseMessage = includeGlue ? undefined : glueOmittedMessage(profile);
-    const message = [baseMessage, ...notes].filter((part): part is string => Boolean(part)).join("; ");
-    if (message) {
-      return { status: kind, filePath: paths.patchPath, message };
-    }
-    return { status: kind, filePath: paths.patchPath };
+      // A profile patch that already declares the row owns it. Writing the home overlay
+      // as well is what produced `duplicate loader entry id: mcp-graphflow`.
+      if (profileOwners.length > 0) {
+        const ownerList = profileOwners.map((owner) => owner.label).join(", ");
+        const skipReason = `${ownerList} already declares ${DSH_MCP_ROW_ID}; home overlay skipped to avoid duplicate loader entry id`;
+        const cleared = clearHomeOverlayIfPresent(
+          paths,
+          `${ownerList} already declares ${DSH_MCP_ROW_ID}; cleared home overlay to avoid duplicate loader entry id`
+        );
+        const base = cleared?.message ?? skipReason;
+        return {
+          status: cleared ? "updated" : "skipped",
+          filePath: paths.patchPath,
+          message: notes.length ? `${base}; ${notes.join("; ")}` : base,
+        };
+      }
+
+      // Package missing: MCP-only home overlay (never glue — keeps dsh bootable).
+      const includeGlue = options.includeGlue === true;
+      mkdirSync(dirname(paths.patchPath), { recursive: true });
+      const existing = existsSync(paths.patchPath) ? readFileSync(paths.patchPath, "utf8") : "";
+      const managed = wrapDshManagedPatch(buildGraphFlowDshInsertPatch({ includeGlue }));
+      const { next, kind } = upsertManagedPatch(existing, managed);
+      if (kind === "skipped") {
+        return {
+          status: "skipped",
+          filePath: paths.patchPath,
+          message: includeGlue
+            ? notes.length
+              ? `already up to date; ${notes.join("; ")}`
+              : "already up to date"
+            : glueOmittedMessage(profile),
+        };
+      }
+      writeOrRemovePatchFile(paths.patchPath, next);
+      const baseMessage = includeGlue ? undefined : glueOmittedMessage(profile);
+      const message = [baseMessage, ...notes].filter((part): part is string => Boolean(part)).join("; ");
+      if (message) {
+        return { status: kind, filePath: paths.patchPath, message };
+      }
+      return { status: kind, filePath: paths.patchPath };
   } catch (error) {
     return {
       status: "error",
