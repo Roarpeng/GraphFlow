@@ -2,13 +2,13 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.17.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.17.1-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（对现实 top-K 文件读取口径 **95.6%**，见[双基线](benchmarks/RESULTS.md)） · 跨会话学习飞轮。
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
-**v1.17.0** 已发：团队共享记忆 MVP（`graphflow team serve` + RBAC）、**全部 19 个宿主的 install / uninstall / doctor 统一走 HostAdapter**（4 个手写切片 + 通用 profile 切片）、飞轮公开复现（`npm run proof:flywheel`）、Serena 双 MCP 指南，以及 R4 `context-package-core` 与 `runOrchestration` 拆分。v1.14 把对话图做成一等资产（时间边、召回、fork/回放）。v1.12–v1.13 的 fidelity / 治理平面仍在。
+**v1.17.1** 已发：团队共享记忆 MVP（`graphflow team serve` + RBAC）、**全部 19 个宿主的 install / uninstall / doctor 统一走 HostAdapter**（4 个手写切片 + 通用 profile 切片）、飞轮公开复现（`npm run proof:flywheel`）、Serena 双 MCP 指南，以及 R4 `context-package-core` 与 `runOrchestration` 拆分。v1.14 把对话图做成一等资产（时间边、召回、fork/回放）。v1.12–v1.13 的 fidelity / 治理平面仍在。
 
 ## 快速开始
 
@@ -34,11 +34,13 @@ MCP 入口：
 
 Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `graphflow_plan`。没有 LLM API Key 时会桥接到宿主 Agent（agent-delegated）。需要符号级精确编辑时，把 Serena 作为第二个 MCP server 并列挂载——见 [GraphFlow + Serena 联合方案](docs/graphflow-serena.zh.md)（配置示例：[`examples/graphflow-serena.mcp.json`](examples/graphflow-serena.mcp.json)）。
 
-## 本版要点（v1.15）
+## 本版要点（v1.17）
 
 | 能力 | 说明 |
 | --- | --- |
-| **Harness** | 记忆动态、按任务召回（图锚点 + 压缩摘要 + 历史 episode + skill），有明确 L0–L3 token 预算 |
+| **Harness** | 记忆动态、按任务召回（图锚点 + 压缩摘要 + 历史 episode + skill），有明确 L0–L3 token 预算；**打包后追加的载荷也计入预算**（`dialogueHits` 单独报为 `unbudgetedTokens`） |
+| **Token 节省（双口径）** | 对现实 top-K 文件读取 **95.6%**；对朴素 grep 基线 98.5%。两者回答不同问题，**不可互换**；现实口径无法自我膨胀。见 [benchmarks/RESULTS.md](benchmarks/RESULTS.md) |
+| **对话图** | 对话在所有代码锚点阶段**之后**注入，纯增量、可证明不挤掉 Symbol/File 锚点；落盘前做**密钥脱敏**（API Key / Bearer / JWT / 连接串 / PEM），`GRAPHFLOW_DIALOGUE_REDACT=0` 可关 |
 | **飞轮复现** | `npm run proof:flywheel` 离线串检索 / skill A/B / memory A/B；见 [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md) |
 | **团队记忆** | `graphflow team serve`：tenant 隔离 + viewer/contributor/admin；非 loopback 默认强制认证；`diagnose` 报告连通与 RBAC。见 [docs/team-memory-security.md](docs/team-memory-security.md) |
 | **HostAdapter** | **全部 19 个宿主**的 install / uninstall / doctor 统一走注册表：4 个手写切片（Cursor / Claude Code / DeepSeek Harness / Kimi Code）+ 通用 profile 切片（Trae、VS Code、Windsurf、Cline、Roo、Kilo、PearAI、Gemini、Codex、Antigravity、Amazon Q、Zed、Continue、Qoder、Opencode） |

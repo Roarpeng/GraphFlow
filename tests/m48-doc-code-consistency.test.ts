@@ -29,11 +29,21 @@ const DOC_FILES = [
   "AGENTS.md",
   "README.md",
   "README.zh.md",
+  // The extension README is the VS Code Marketplace / Open VSX listing page: it
+  // ships inside the VSIX and is *published*, so it drifts visibly to users.
+  "vscode-extension/README.md",
   ".cursor/rules/graphflow.mdc",
   "src/surfaces/cursor-rules/graphflow.mdc",
   "src/surfaces/trae-rules/graphflow.md",
   "src/surfaces/trae-skill/graphflow/SKILL.md",
   "CLAUDE.md",
+];
+
+/** Every user-facing README that a release must keep in step with package.json. */
+const README_SURFACES = [
+  "README.md",
+  "README.zh.md",
+  "vscode-extension/README.md",
 ];
 
 function canonicalizeToolMention(raw: string): string | undefined {
@@ -97,12 +107,41 @@ describe("Doc/code consistency", () => {
     }
   });
 
-  it("README.zh.md version badge matches package.json", () => {
+  it("every user-facing README references the current version", () => {
     const version = readJson("package.json").version as string;
-    // v1.15.4 bumped README.md but left the Chinese badge one release behind.
-    expect(read("README.zh.md"), `README.zh.md should reference current version ${version}`).toContain(
-      version
-    );
+    for (const file of README_SURFACES) {
+      const filePath = join(root, file);
+      if (!existsSync(filePath)) continue;
+      // v1.15.4 bumped README.md but left the Chinese badge a release behind;
+      // v1.17.0 shipped while the extension README still said 1.15.3.
+      expect(read(file), `${file} should reference current version ${version}`).toContain(version);
+    }
+  });
+
+  it("the extension README's install instructions match the current version", () => {
+    const version = readJson("package.json").version as string;
+    const ext = read("vscode-extension/README.md");
+
+    // The Marketplace/Open VSX listing told users to install
+    // graphflow-1.15.3.vsix for several releases after 1.15.3. Pin every VSIX
+    // filename reference to the current version so that cannot recur.
+    const vsix = [...ext.matchAll(/graphflow-(\d+\.\d+\.\d+)\.vsix/g)].map((m) => m[1]);
+    expect(vsix.length, "extension README should reference a VSIX filename").toBeGreaterThan(0);
+    for (const ref of new Set(vsix)) {
+      expect(
+        ref,
+        `vscode-extension/README.md still tells users to install graphflow-${ref}.vsix`
+      ).toBe(version);
+    }
+
+    // Same for the npx install hint.
+    const pinned = [...ext.matchAll(/@roarpeng\/graphflow@(\d+\.\d+\.\d+)/g)].map((m) => m[1]);
+    for (const ref of new Set(pinned)) {
+      expect(
+        ref,
+        `vscode-extension/README.md still pins @roarpeng/graphflow@${ref}`
+      ).toBe(version);
+    }
   });
 
   it("shipped docs are valid UTF-8 (no lossy byte replacement)", () => {
