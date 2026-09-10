@@ -21,8 +21,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
           cache: npm
+          # Deliberately NO `registry-url` here. It makes setup-node write
+          # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into .npmrc;
+          # with no token secret that resolves to an EMPTY authToken, and npm
+          # then prefers that credential over OIDC trusted publishing and issues
+          # an unauthenticated PUT - which the registry reports as the
+          # misleading "E404 ... PUT https://registry.npmjs.org/@scope%2fname".
+          # The registry is set explicitly further down instead.
 
       - name: Enable package manager
         run: corepack enable
@@ -65,11 +71,27 @@ jobs:
         # Auth is configured on npmjs.com: package Settings -> Publishing access ->
         # Trusted Publisher (repository Roarpeng/GraphFlow, workflow publish-npm.yml).
         run: |
+          npm config set registry https://registry.npmjs.org
+          echo "registry: $(npm config get registry)"
+          echo "npm:      $(npm --version)"
+
           if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL}" ]; then
             echo "::error::OIDC is unavailable - this job needs 'permissions: id-token: write'."
             exit 1
           fi
-          echo "OIDC endpoint present; npm $(npm --version) will exchange the id-token for a publish credential."
+
+          # An explicit authToken (even an empty one left behind by a previous
+          # setup-node `registry-url`) takes precedence over OIDC and produces a
+          # bare unauthenticated PUT, so refuse to publish until it is gone.
+          token_cfg="$(npm config get //registry.npmjs.org/:_authToken 2>/dev/null || true)"
+          case "${token_cfg}" in
+            ""|undefined|null|"null") ;; # no credential configured: OIDC will be used
+            *)
+              echo "::error::an authToken is configured for registry.npmjs.org; npm will use it and skip OIDC trusted publishing."
+              exit 1
+              ;;
+          esac
+          echo "no authToken configured - npm will exchange the GitHub id-token via OIDC."
 
       - name: Publish @roarpeng/graphflow (idempotent, OIDC + provenance)
         run: node scripts/publish-npm-idempotent.mjs
