@@ -38,11 +38,29 @@ jobs:
 
       - name: Generate release evidence (flywheel self-proof)
         run: npx tsx scripts/ci-release-evidence.ts
+        env:
+          # Explicit observable signal instead of inferring it from the workflow
+          # name: the previous step runs lint + build + test and a non-zero exit
+          # aborts the job, so reaching this line IS the test result.
+          GRAPHFLOW_CI_TEST_RESULT: pass
 
       - name: Evidence and fidelity release gates
         run: npm run gate:release
         env:
           GRAPHFLOW_CONFIG_PATH: graphflow-out/ci.config.json
+
+      - name: Verify npm authentication (fail fast on a missing/expired token)
+        # Without this, an invalid or expired token surfaces only as
+        # "E404 ... PUT https://registry.npmjs.org/@scope%2fname" from npm publish,
+        # which reads like a missing package rather than an auth failure.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.npm_token != '' && secrets.npm_token || secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "::error::NODE_AUTH_TOKEN is empty — set the NPM_TOKEN repository secret."
+            exit 1
+          fi
+          echo "Authenticated as: $(npm whoami --registry=https://registry.npmjs.org)"
 
       - name: Publish @roarpeng/graphflow (idempotent)
         run: node scripts/publish-npm-idempotent.mjs
