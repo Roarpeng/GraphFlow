@@ -94,6 +94,50 @@ jobs:
           echo "no authToken configured - npm will exchange the GitHub id-token via OIDC."
 
       - name: Publish @roarpeng/graphflow (idempotent, OIDC + provenance)
+        id: publish
+        continue-on-error: true
         run: node scripts/publish-npm-idempotent.mjs
         env:
           HUSKY: "0"
+
+      - name: npm OIDC diagnostics (always runs, so a failure is explainable)
+        # npm reports every trusted-publishing misconfiguration as a bare 404 or
+        # ENEEDAUTH, so dump what npm itself saw: which OIDC env vars exist, what
+        # auth config resolved, and npm's own debug-log reasoning.
+        # Values are NEVER printed - only presence and length.
+        if: always()
+        run: |
+          echo "=== OIDC / auth environment (presence only) ==="
+          for v in GITHUB_ACTIONS GITHUB_WORKFLOW GITHUB_REPOSITORY GITHUB_REF \
+                   ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN \
+                   NODE_AUTH_TOKEN NPM_TOKEN NPM_CONFIG_USERCONFIG; do
+            val="${!v}"
+            if [ -n "$val" ]; then echo "$v: present (length ${#val})"; else echo "$v: ABSENT"; fi
+          done
+
+          echo "=== resolved npm auth config ==="
+          echo "registry: $(npm config get registry)"
+          echo "userconfig: $(npm config get userconfig)"
+          echo "_authToken for registry.npmjs.org: $(npm config get //registry.npmjs.org/:_authToken)"
+          echo "--- effective .npmrc files (contents never printed) ---"
+          for f in "$(npm config get userconfig)" "$(npm config get globalconfig)" ./.npmrc; do
+            [ -f "$f" ] || continue
+            if grep -q '_authToken' "$f" 2>/dev/null; then
+              echo "[$f] exists and CONTAINS _authToken"
+            else
+              echo "[$f] exists, no _authToken"
+            fi
+          done
+
+          echo "=== npm debug log: oidc / trusted / provenance / auth lines ==="
+          for f in /home/runner/.npm/_logs/*-debug-0.log; do
+            [ -f "$f" ] || continue
+            echo "--- $f"
+            grep -Ei 'oidc|trusted|provenance|auth|token' "$f" | tail -n 60 || true
+          done
+
+      - name: Fail when publish did not succeed
+        if: steps.publish.outcome != 'success'
+        run: |
+          echo "::error::npm publish did not succeed (see the diagnostics above)."
+          exit 1
