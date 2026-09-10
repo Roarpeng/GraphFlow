@@ -9,6 +9,11 @@
  * appears in no static list can still be admitted on real success evidence.
  * Do not run the full retrieval benchmark here.
  *
+ * A weaker `provisional` tier (admitSkillToProvisional) exists for cold start:
+ * hint-only admission below proven. Provisional is NEVER validated by real
+ * success evidence — it must never be presented, persisted, exported, or
+ * synced as proven.
+ *
  * The golden vocabulary is DYNAMIC, not a hardcoded closed set:
  *  - base tokens are extracted best-effort from the repo's retrieval golden
  *    dataset (`benchmarks/datasets/retrieval-golden-v1.json`); when the file
@@ -371,7 +376,66 @@ export function admitSkillToProven(
   };
 }
 
-/** True when promoting this name to proven would inject library-degrading noise. */
-export function wouldDegradeLibrary(skillName: string): boolean {
-  return !admitSkillToProven(skillName).ok;
+/**
+ * Provisional (cold-start) admission tier — visibly weaker than proven.
+ *
+ * 冷启动临时准入：全新用户在攒够 proven 阈值（默认 2 个去重 pass episode）
+ * 之前，让具备项目符号形状、或至少绑定过 1 次成功的技能先以提示身份可用，
+ * 避免飞轮（项目核心差异点）在安装初期完全空转。
+ *
+ * PROVISIONAL MEANS — the integrity contract of this tier:
+ *  - usable as a HINT only; NOT validated by real success evidence;
+ *  - must NEVER be presented or persisted as `proven`;
+ *  - must NEVER be exported/synced as proven — export/sync paths keep using
+ *    admitSkillToProven exclusively;
+ *  - the proven-requires-evidence claim is untouched: this tier only adds a
+ *    weaker, clearly-labelled hint class below it.
+ *
+ * 判定规则：
+ *  - 结构性噪声无条件拒绝（带成功提示也不放行）：空名、纯停用词
+ *    （isStopwordOnlyName）、readme+update 融合（isReadmeUpdateNoise）——
+ *    这些名字永远不可用，provisional 也不例外；
+ *  - 其余名字需满足其一：
+ *      a) 名称具备项目符号形状（isSymbolicSkillName），或
+ *      b) 至少 1 个绑定成功 episode（successCount >= 1）。
+ *
+ * golden 词集在此层级不参与判定（options.extraGoldenTokens 被忽略）：冷启动
+ * 时数据集与运行时证据可能都为空。调用方应先走 admitSkillToProven，未过再
+ * 落到本层级；仅凭 golden-overlap 通过 proven 的非符号名字（0 成功）在此
+ * 会被有意拒绝——provisional 只认符号形状与真实成功提示。
+ */
+export function admitSkillToProvisional(
+  skillName: string,
+  options?: AdmitSkillOptions
+): SkillAdmissionResult {
+  const name = skillName.trim();
+  if (!name) {
+    return { ok: false, reason: "empty-name" };
+  }
+  if (isStopwordOnlyName(name)) {
+    return { ok: false, reason: "stopword-only" };
+  }
+  if (isReadmeUpdateNoise(name)) {
+    return { ok: false, reason: "readme-update-noise" };
+  }
+  if (isSymbolicSkillName(name)) {
+    return { ok: true, reason: "provisional-symbolic" };
+  }
+  const successCount = options?.successCount ?? 0;
+  if (successCount >= 1) {
+    return { ok: true, reason: "provisional-success-hint" };
+  }
+  return { ok: false, reason: "no-provisional-evidence" };
+}
+
+/**
+ * True when promoting this name to proven would inject library-degrading noise.
+ * 与 admitSkillToProven 同一判定：调用方持有真实成功证据（successCount /
+ * extraGoldenTokens）时必须透传 options，否则有证据链的技能会被误判为噪声。
+ */
+export function wouldDegradeLibrary(
+  skillName: string,
+  options?: AdmitSkillOptions
+): boolean {
+  return !admitSkillToProven(skillName, options).ok;
 }

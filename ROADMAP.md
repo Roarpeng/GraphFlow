@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-09-08（v1.15.5：R4 收口——HostAdapter 全宿主迁移 + `runOrchestration` 拆分；团队共享记忆 MVP、飞轮公开复现包）
+> 最后更新：2026-09-09（v1.17.0：证据诚实性冲刺——L3 对话死代码修复、token 记账与双口径节省、CI 证据去同义反复、对话密钥脱敏）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -41,6 +41,7 @@
 | v1.15.4 | 2026-09-06 | **dsh 安装健壮性** | profile 未装包时只写 MCP overlay，避免 `ERR_MODULE_NOT_FOUND` / `duplicate loader entry id` | ✅ |
 | v1.15.5 | 2026-09-08 | **Kimi Code HostAdapter** | `installViaHostAdapter("kimi-code")` 写 `~/.kimi-code/mcp.json` + Skill + `AGENTS.md`；doctor/uninstall 走注册表 | ✅ |
 | v1.16.0 | 2026-09-08 | **集成层模块化收口 + orchestrator 拆分** | 通用 profile 切片覆盖其余 15 个宿主，`HostAdapter` 成为 19 宿主唯一入口；CLI install/uninstall/doctor 改注册表遍历；`agent-profiles` 并入 `buildAgentProfiles()`；`runOrchestration` 拆为 `orchestrator-phases.ts` 四阶段；修复 README UTF-8 损坏与临时目录劫持工作区发现 | ✅ |
+| v1.17.0 | 2026-09-09 | **证据诚实性冲刺（深度调研驱动）** | 修复 L3 对话打包在生产路径的死代码（对话改为 additive-LAST，永不挤掉代码锚点）；打包后 token 记账（`unbudgetedTokens`/`accountedTokens`，节省率对真实总量计算）；token 节省新增现实对照臂（**95.6%** vs 之前的 98.5% 上界口径）；CI fidelity 证据去同义反复（期望锚点独立于返回锚点 + 真正度量 bodyCoverage）；proven 证据改为可观测（`userConfirmed:false`、`testResult` 由信号观测）；技能准入 `wouldDegradeLibrary` 修正 + `admitSkillToProvisional` 冷启动层；对话写入边界密钥脱敏；修复 security-audit 缺 import 导致的连续 3 周静默失败 | ✅ |
 
 ## 下一阶段
 
@@ -92,7 +93,7 @@
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
 | **P0** | **W1 时间语义与类型化边** | ✅ | `supersedes`/`same_topic` 边 + `validAt`/`invalidAt`（Graphiti 式时间有效性）；`detectSupersession` 离线修正启发式（更正标记 + 主题重叠 ≥ 0.25 + pending 不可被取代）；跨 session `same_topic` 连边；`effectiveTurns` 当前真值过滤。turn-distillation 增加可选 LLM 蒸馏路径（`distillTurnWithLlm`，无 Key/失败回退启发式；`isDecisionTurn` 决策轮标记喂飞轮证据链） |
-| **P0** | **W2 对话图进入上下文引擎** | ✅ | `context-slicer` L3 打包命中有效对话轮（≤3，含修正链标注行），同 token 预算与 L3 quota，绝不豁免；`graph-search` 新增 `searchDialogueTurns`（默认隐藏被取代轮，`includeSuperseded` 可选回看历史），对话命中纯增量、永不挤掉代码锚点；已接入生产链路——preview 附加 `dialogueHits`（MCP `graphflow_context` 同步）+ CLI `dialogue search` |
+| **P0** | **W2 对话图进入上下文引擎** | ✅ | `graph-search` 新增 `searchDialogueTurns`（默认隐藏被取代轮，`includeSuperseded` 可选回看历史）；preview 附加 `dialogueHits`（MCP `graphflow_context` 同步）+ CLI `dialogue search`。**v1.17.0 更正**：v1.14.0 声称的「L3 打包命中对话轮」当时**只存在于非生产打包器** `buildLayeredContextPackage`，生产路径 `previewContext` 走 `buildEnhancedContextPackage`，故该能力对用户从未生效（5 个测试只覆盖非生产打包器所以 CI 全绿）。现两个打包器均在**所有代码锚点阶段之后**调用 `injectDialogueTurns`，共享同一 `budget`，对话命中纯增量、**可证明**永不挤掉代码 Symbol/File 锚点（`tests/retrieval-golden.test.ts` 的 "cli help flags" 用例即是此前接线错误被门禁捕获的证据） |
 | **P0** | **W3 多 Agent 轨迹 + fork/回放** | ✅ | dsh glue 监听 `subagent/start|end` 写 `agent-trace` Decision 节点（`GRAPHFLOW_CAPTURE_TRACE` 开关、身份去重、绝不抛入 harness 循环）；`forkDialogueSession` 显式分叉（跨 session next_section 主干 + same_topic 溯源边）；`walkDialoguePath` 回放路径（fork 边界标注）；CLI `dialogue fork --from` / `list --path` / `traces` |
 | **P1** | **W4 面板与导出** | ✅ | `/gf` RPC 数据通道扩展返回 traces；web 面板对话轮显示「修正过结论/fork/跳转」徽章 + Agent 轨迹区块；`artifact export-memory` 新增 `dialogues.md`（会话分组、修正链标注、轨迹列表，含 superseded 历史标记） |
 

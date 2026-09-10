@@ -77,11 +77,11 @@
       "id": "token-savings",
       "suite": "token",
       "sourceFile": "benchmarks/RESULTS.md",
-      "sourceNeedle": "**Overall token savings:** **98.2%**",
+      "sourceNeedle": "**95.6%** savings",
       "metric": "savingsPercent",
-      "display": "98.2%",
-      "numeric": 98.2,
-      "note": "Optional compression claim (274,434 → 4,928). Corpus = this repo src/; cross-commit drift is expected."
+      "display": "95.6%",
+      "numeric": 95.6,
+      "note": "Realistic arm (v1.17): same ranker's top-10 anchors resolved to real files and read in full (136,265 → 6,044). The naive-grep arm (98.5%) is reported separately and is an upper bound by construction. Corpus = this repo src/; cross-commit drift is expected, so re-measure and update both this claim and RESULTS.md together."
     }
   ]
 }

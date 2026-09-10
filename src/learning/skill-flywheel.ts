@@ -46,6 +46,7 @@ export {
 } from "./canary-gate";
 export {
   admitSkillToProven,
+  admitSkillToProvisional,
   isSymbolicSkillName,
   wouldDegradeLibrary,
   goldenTokenOverlap,

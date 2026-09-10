@@ -2,13 +2,13 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.16.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.17.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
-> **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（约 98% token 节省） · 跨会话学习飞轮。
+> **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（对现实 top-K 文件读取口径 **95.6%**，见[双基线](benchmarks/RESULTS.md)） · 跨会话学习飞轮。
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
-**v1.16.0** 已发：团队共享记忆 MVP（`graphflow team serve` + RBAC）、**全部 19 个宿主的 install / uninstall / doctor 统一走 HostAdapter**（4 个手写切片 + 通用 profile 切片）、飞轮公开复现（`npm run proof:flywheel`）、Serena 双 MCP 指南，以及 R4 `context-package-core` 与 `runOrchestration` 拆分。v1.14 把对话图做成一等资产（时间边、召回、fork/回放）。v1.12–v1.13 的 fidelity / 治理平面仍在。
+**v1.17.0** 已发：团队共享记忆 MVP（`graphflow team serve` + RBAC）、**全部 19 个宿主的 install / uninstall / doctor 统一走 HostAdapter**（4 个手写切片 + 通用 profile 切片）、飞轮公开复现（`npm run proof:flywheel`）、Serena 双 MCP 指南，以及 R4 `context-package-core` 与 `runOrchestration` 拆分。v1.14 把对话图做成一等资产（时间边、召回、fork/回放）。v1.12–v1.13 的 fidelity / 治理平面仍在。
 
 ## 快速开始
 
@@ -87,7 +87,7 @@ GraphFlow 本身就是一个 **dsh 插件包**（topic：`dsh-plugin`）。`pack
 | VS Code/Cursor 图谱面板、Settings、Workbench Tree、`@graphflow` chat | **不移植** |
 | Cursor Agent Plugins 发现 / Claude Code Session* **文件** hooks | **不移植**（dsh 用 bundle + glue） |
 
-核心价值：本地 AST 知识图谱、L1–L3 分层压缩（实测约 98% token 节省）、跨会话 Episodic / Skill 飞轮。GraphFlow **不执行代码**，只给宿主 Agent 压缩上下文和计划。Workbench 数据走 MCP `graphflow_context` / `graphflow_diagnose` 即可。
+核心价值：本地 AST 知识图谱、L1–L3 分层压缩（token 节省**双口径**并列——对现实 top-K 文件读取 **95.6%**，对朴素 grep 基线 98.5%，两者回答不同问题、不可互换）、跨会话 Episodic / Skill 飞轮。GraphFlow **不执行代码**，只给宿主 Agent 压缩上下文和计划；对话写入边界默认做密钥脱敏（`GRAPHFLOW_DIALOGUE_REDACT=0` 可关）。Workbench 数据走 MCP `graphflow_context` / `graphflow_diagnose` 即可。
 
 ### 安装
 

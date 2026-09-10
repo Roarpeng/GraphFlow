@@ -2,9 +2,9 @@
 
 English | [中文](README.zh.md)
 
-[![npm version](https://img.shields.io/badge/npm-1.16.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.17.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
-> **The memory & context harness for coding agents.** Local-first code knowledge graph · bounded context compression (~98% token savings) · cross-session learning flywheel.
+> **The memory & context harness for coding agents.** Local-first code knowledge graph · bounded context compression (95.6% vs a realistic top-K-files read; see [both baseline arms](benchmarks/RESULTS.md)) · cross-session learning flywheel.
 
 The community is converging on an "agent harness" vocabulary: **memory + hooks + skills** are the harness primitives that turn a stateless model into a reliable long-running agent. GraphFlow implements all three for coding agents and ships them through a portable MCP surface (Cursor, Claude Code, 15+ agents):
 
@@ -23,7 +23,7 @@ Most "memory" products are either **static injection** (load `CLAUDE.md` / rules
 - Static injection pays the same token cost every session regardless of the task, and grows until it is truncated or ignored.
 - Plain RAG retrieves text but never accumulates *experience* — the thousandth task pays the same cost as the first.
 
-GraphFlow is a harness: **memory is dynamic and typed**. Each request retrieves only what the current decision needs — graph anchors, compressed summaries, similar past episodes, applicable skills — under an explicit token budget (L0–L3 layered compression, ~98% savings measured). What the agent learns (outcomes, lessons, skills) is written back through hooks, so the harness gets better with use.
+GraphFlow is a harness: **memory is dynamic and typed**. Each request retrieves only what the current decision needs — graph anchors, compressed summaries, similar past episodes, applicable skills — under an explicit token budget (L0–L3 layered compression; measured against a realistic top-K-files read, see [benchmarks/RESULTS.md](benchmarks/RESULTS.md)). What the agent learns (outcomes, lessons, skills) is written back through hooks, so the harness gets better with use.
 
 It is also **local-first and portable**: everything runs offline with no API key, and the whole surface is exposed over MCP, so the same memory travels across agents instead of being locked into one vendor's format.
 
@@ -33,7 +33,7 @@ It is also **local-first and portable**: everything runs offline with no API key
 
 All headline numbers come from a **public, reproducible benchmark suite** ([benchmarks/README.md](benchmarks/README.md)) with published methodology ([docs/benchmark-standards.md](docs/benchmark-standards.md)) and machine-readable JSON dumps pinned to commits. Authoritative percentages live in the tracked RESULTS markdown; this package does not invent new scores.
 
-- **~98% token savings** (8-query suite, 262,926 → 2,843 tokens; independently re-counted with `gpt-tokenizer`)
+- **Token savings, two arms — quote them separately** (8-query suite, independently re-counted with `gpt-tokenizer`): **95.6%** against the fair counterfactual (the same ranker's top-10 anchors resolved to real files and read in full: 136,265 → 6,044 tokens) and **98.5%** against a naive term-frequency grep baseline (410,725 → 6,044), whose denominator is an upper bound by construction. The realistic arm cannot inflate itself: anchors pointing at fewer or smaller files make its savings *smaller*. Details: [benchmarks/RESULTS.md](benchmarks/RESULTS.md)
 - **132-query golden retrieval set** in CI (Hit@5 = 100%, MRR = 0.836, NDCG@5 = 0.601); downloadable open dataset: [`benchmarks/datasets/retrieval-golden-v1.json`](benchmarks/datasets/retrieval-golden-v1.json) — run `npm run bench:retrieval`
 - **Skill A/B: 100% vs 61.5%** task success with the flywheel on vs off (26 tasks)
 - **Memory ROI: 100% vs 56.5%** with episodic memory on vs off (62 tasks, with attribution chains)
@@ -93,13 +93,13 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | **Planning protocol** | ATP v1.1 (Intent / Requirement / Six Hats / 5-Why / First Principles / Decision Matrix / Planning / Reflection); simple / complex / insight modes; agent-delegated bridge without an LLM; **skill-conditioned DAG** (`skillRefs` / `avoidPatterns` on plan nodes); [ATP/IR public spec v1.1](docs/atp-ir-spec-v1.md) |
 | **Goal alignment** | Goal anchor nodes (intent five-tuple as first-class citizen, original requirement auto-injected); low-confidence clarification gate (no plan below 0.6); runtime alignment-check; deviation classification (misread-requirement / scope-creep / tech-drift); goal version chain + diffs |
 | **Knowledge graph** | 12-language AST indexing; File / Module / Symbol + **Concept / Requirement**; cross-layer edges `documents` / `implements` / `derived_from`; Office/PDF → Markdown via optional **`@firecrawl/anydoc`** (MIT). **CLI/npm**: optionalDependency. **VSIX**: not bundled; on activate the extension **auto-downloads the current-OS binary** into `~/.graphflow/optional-deps` when `graphflow.downloadAnydoc` is true (default). Disable the setting to skip network; source indexing still works. |
-| **Context compression** | L1/L2/L3 layered anchors; graph compression (edge weights + PageRank, LRU cache); stem-matching recall (orchestrate ↔ orchestration); vector recall + RRF; RepoMap overview; adaptive budget |
+| **Context compression** | L1/L2/L3 layered anchors; graph compression (edge weights + PageRank, LRU cache); stem-matching recall (orchestrate ↔ orchestration); vector recall + RRF; RepoMap overview; adaptive budget; **post-packaging accounting** (dialogue recall lines and workbench prompt lines count against the reported budget; `dialogueHits` reported separately as `unbudgetedTokens` so savings are computed on the true total) |
 | **Retrieval & fidelity** | Golden-set regression gate (132 queries, Hit@5=100%, MRR=0.836, NDCG@5=0.601); separate anchor-recall and normalized body-coverage metrics persisted beside token savings |
 | **Vector index** | In-process memoization + disk persistence (fingerprint-checked, seconds to restore after MCP restart) |
 | **Storage backends** | `file` / `memory` / `sqlite` (FTS5, tokenizer-enhanced `searchtext`, camelCase searchable) / **`auto` (sqlite-first with fallback)** / `mcp-http` |
 | **Learning flywheel** | Episodic memory, reflection, skill nodes (score ±1, bounded [-20,20]), nightly training, adaptive evidence-aware forgetting, **auto-capture + Claude Code hooks (on by default)**, **SkillOpt-lite** bounded guidance edits, four-class lifecycle + **canary gate for synced skills**, portable SKILL.md import/export, `npm run backfill:episodes`, contribution reports (`skill report` / `graphflow_diagnose` / `route diagnose`) |
 | **Team sharing** | `graphflow team serve` (tenant + RBAC) + `skill sync export/import/push/pull`; imports/pulls are a **bidirectional MERGE**; golden queries via `.graphflow/team-golden.json`; [security model + ops runbook](docs/team-memory-security.md) |
-| **Benchmarks** | [Comprehensive 92.9%](benchmarks/COMPREHENSIVE-RESULTS.md) · [Independent-style 96.2%](benchmarks/INDEPENDENT-RESULTS.md) · [context-readiness eval](benchmarks/SWE-BENCH-RESULTS.md) · [98.2% token savings](benchmarks/RESULTS.md) |
+| **Benchmarks** | [Comprehensive 92.9%](benchmarks/COMPREHENSIVE-RESULTS.md) · [Independent-style 96.2%](benchmarks/INDEPENDENT-RESULTS.md) · [context-readiness eval](benchmarks/SWE-BENCH-RESULTS.md) · token savings with **two baseline arms** — [95.6% realistic / 98.5% naive grep](benchmarks/RESULTS.md) |
 | **Model routing** | Smart / Economy tiers; multi-provider health probes and fallback (DeepSeek, OpenAI, Anthropic, Bailian, Doubao) |
 | **Workbench** | Plan DAG seeds function-topic containers; collapsed outline; click `topicId` to resume; drift forks a side branch; original Q/A stored via `assistantReply` |
 | **Observability** | `graphflow_diagnose` / `route diagnose`: provider health + graph stats + token savings + **flywheel health** (auto-capture, episodes, skills by class, session journal) + workbench outline |
