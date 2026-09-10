@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.17.1] - 2026-09-10
+
+### Fixed
+
+- **插件说明页版本停滞两个 minor**：`vscode-extension/README.md` 就是发布到 VS Code Marketplace 与 Open VSX 的**说明页正文**（随 VSIX 打包并对外展示），却仍停留在 **1.15.3**——含 `graphflow-1.15.3.vsix` 安装命令、`npx @roarpeng/graphflow@1.15.3 install`、"升级到 1.15.3+"，以及一整节 "v1.15.x 要点"。v1.16.0 与 v1.17.0 两次发版都没有更新它，用户看到的说明页因此落后两个 minor。已重写为 1.17.x 内容，并补上此前缺失的 v1.16.0（HostAdapter 全宿主、编排层拆分）与 v1.17.0（双口径 token 节省、对话图接入上下文引擎、对话密钥脱敏、provisional 准入）要点。
+- **根 README 章节标题滞后**：`README.md` 的 `## Core capabilities (v1.15+)` 与 `README.zh.md` 的 `## 本版要点（v1.15）` 更新为 v1.17，并补上 v1.17 的能力行（打包后 token 记账、双口径节省、对话图注入位置与密钥脱敏）。
+
+### Tests
+
+- `tests/m48-doc-code-consistency.test.ts` 新增守卫，堵住这次漂移的根因——**插件说明页此前完全不在文档一致性检查范围内**：
+  - `vscode-extension/README.md` 纳入 `DOC_FILES`（工具名一致性 + UTF-8 校验）；
+  - 新增 `README_SURFACES` 断言**所有面向用户的 README**（根 EN / 根 ZH / 扩展）都引用当前版本；
+  - 断言插件说明页里每个 `graphflow-<version>.vsix` 文件名与 `@roarpeng/graphflow@<version>` 都等于当前版本——此前正是"这个页面的版本号没人管"，用户才会照着 1.15.3 的命令去装。
+
 ## [1.17.0] - 2026-09-09
 
 ### Added
