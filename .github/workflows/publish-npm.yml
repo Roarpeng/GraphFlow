@@ -49,21 +49,29 @@ jobs:
         env:
           GRAPHFLOW_CONFIG_PATH: graphflow-out/ci.config.json
 
-      - name: Verify npm authentication (fail fast on a missing/expired token)
-        # Without this, an invalid or expired token surfaces only as
-        # "E404 ... PUT https://registry.npmjs.org/@scope%2fname" from npm publish,
-        # which reads like a missing package rather than an auth failure.
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.npm_token != '' && secrets.npm_token || secrets.NPM_TOKEN }}
+      - name: Install an npm that supports OIDC trusted publishing
+        # Deliberately AFTER install/lint/build/test so those keep using the
+        # runner's known-good npm. A too-old npm cannot complete the OIDC token
+        # exchange and fails confusingly as
+        # "E404 ... PUT https://registry.npmjs.org/@scope%2fname".
         run: |
-          if [ -z "${NODE_AUTH_TOKEN}" ]; then
-            echo "::error::NODE_AUTH_TOKEN is empty — set the NPM_TOKEN repository secret."
+          npm install -g npm@latest
+          npm --version
+
+      - name: Verify OIDC trusted-publishing prerequisites
+        # There is intentionally no NPM_TOKEN here. npm exchanges the GitHub OIDC
+        # token for a short-lived publish credential, so no long-lived secret can
+        # expire and break a release (the previous token expired 2026-09-09).
+        # Auth is configured on npmjs.com: package Settings -> Publishing access ->
+        # Trusted Publisher (repository Roarpeng/GraphFlow, workflow publish-npm.yml).
+        run: |
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL}" ]; then
+            echo "::error::OIDC is unavailable - this job needs 'permissions: id-token: write'."
             exit 1
           fi
-          echo "Authenticated as: $(npm whoami --registry=https://registry.npmjs.org)"
+          echo "OIDC endpoint present; npm $(npm --version) will exchange the id-token for a publish credential."
 
-      - name: Publish @roarpeng/graphflow (idempotent)
+      - name: Publish @roarpeng/graphflow (idempotent, OIDC + provenance)
         run: node scripts/publish-npm-idempotent.mjs
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.npm_token != '' && secrets.npm_token || secrets.NPM_TOKEN }}
           HUSKY: "0"
