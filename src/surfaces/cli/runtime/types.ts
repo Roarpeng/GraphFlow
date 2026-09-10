@@ -24,11 +24,43 @@ export interface ContextPreviewResult {
   anchors: Array<{ id: string; type: GraphNode["type"]; layer: "L1" | "L2" | "L3" }>;
   tokenBudget: {
     maxContextTokens: number;
+    /**
+     * Estimated raw (uncompressed) context tokens. Keeps its floor semantics
+     * after post-packaging accounting: never below the accounted payload
+     * actually sent (see `accountedTokens`).
+     */
     estimatedRawTokens: number;
+    /**
+     * Budgeted payload tokens: the layered package plus summary lines
+     * prepended after packaging (dialogue recall / workbench / thread spine).
+     * Always equals the top-level `tokenEstimate`.
+     */
     compressedTokens: number;
+    /**
+     * Savings against the TRUE accounted payload (`accountedTokens` when
+     * present), so post-packaging additions no longer inflate the ROI.
+     */
     estimatedSavingsPercent: number;
+    /** `compressedTokens / maxContextTokens` — budgeted share; excludes `unbudgetedTokens`. */
     budgetUsedPercent: number;
   };
+  /**
+   * Token cost of additive payloads that ride OUTSIDE the layered L1-L3
+   * package and are not governed by the layer quota (currently
+   * `dialogueHits`, plus dialogue-thread prompt lines when they are not
+   * injected into `summary`). Never folded into `tokenBudget.compressedTokens`;
+   * present only when non-zero.
+   * 分层配额之外附加下发负载的 token 成本（当前为 dialogueHits，以及未注入
+   * summary 的 dialogueThread promptLines）；不折进 compressedTokens，仅非零时出现。
+   */
+  unbudgetedTokens?: number;
+  /**
+   * True accounted payload total = `tokenBudget.compressedTokens` +
+   * `unbudgetedTokens`. Present only when post-packaging additions were
+   * accounted; otherwise the true total is `tokenBudget.compressedTokens`.
+   * 真实下发总量 = 预算内 + 预算外；仅发生打包后追加记账时出现。
+   */
+  accountedTokens?: number;
   /** Agent-translated English query used for symbol search (if provided). */
   englishQuery?: string;
   /** When CJK query yields few anchors, prompts the connected agent to translate to English. */

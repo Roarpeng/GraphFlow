@@ -104,8 +104,11 @@ export async function buildLayeredContextPackage(
   packPrimaryHits(hits, state, budget);
   await injectL2Modules(client, hits, state, budget, "continue");
   await injectL3SkillsAndPins(client, query, options, snapshotNodes, state, budget);
-  await injectDialogueTurns(client, query, options, state, budget);
   await injectNeighborExpansion(client, options, state, budget);
+  // Dialogue is additive-LAST and shares this one budget object: it may only use
+  // budget left over after every code-anchor stage, so a recalled conversation
+  // turn can never displace a Symbol/File anchor (the documented invariant).
+  await injectDialogueTurns(client, query, options, state, budget);
   return toLayeredPackage(state, budget);
 }
 
@@ -160,7 +163,7 @@ export function createContextRefillManager(
  *   1. [Optional] RepoMap fallback for low budgets
  *   2. Keyword retrieval
  *   3. Graph compression: connected subgraph + PageRank re-ranking
- *   4. Layer quotas + token budgeting
+ *   4. Layer quotas + token budgeting (L3 = skills/pins AND dialogue turns)
  *   5. Edge expansion
  *
  * Shared recall/pack steps live in `context-package-core` (same as layered).
@@ -256,5 +259,8 @@ export async function buildEnhancedContextPackage(
   await injectL3SkillsAndPins(client, query, options, snapshotNodes, state, budget);
   await injectSameFileAndImportExpansion(client, snapshotNodes, state, budget);
   await injectNeighborExpansion(client, options, state, budget);
+  // Same additive-LAST rule as the layered packer (see above): dialogue turns
+  // ride on leftover budget and cannot push a code anchor out of the package.
+  await injectDialogueTurns(client, query, options, state, budget);
   return toLayeredPackage(state, budget);
 }

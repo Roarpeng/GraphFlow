@@ -61,6 +61,7 @@ import {
   calculateBudgetUsedPercent,
   calculateSavingsPercent,
   estimateRawContextTokens,
+  estimateTokenCount,
   loadGraphStore,
   parseSkillInsight,
   resolveGraphStoreAfterIndex,
@@ -133,6 +134,94 @@ function graphStoreNeedsIndexing(config: GraphFlowConfig): boolean {
   } catch {
     return true;
   }
+}
+
+/**
+ * 打包后追加负载的 token 记账 / Post-packaging token accounting.
+ *
+ * The layered package computes its token budget BEFORE dialogue recall lines,
+ * workbench prompt lines, or the dialogue-thread spine are prepended to
+ * `summary`, and BEFORE `dialogueHits` ride alongside the package. Without
+ * this accounting the reported budget systematically under-reports the real
+ * payload sent to the agent, and the persisted ROI stats in
+ * `graphflow-out/token-savings.json` stay optimistically wrong. The helpers
+ * below are pure so the shared context cache (which stores pre-attach
+ * results and re-attaches on every call) is never mutated.
+ */
+
+/** Token cost of summary lines prepended after the package budget was computed. */
+export function estimateSummaryLinesTokens(lines: readonly string[]): number {
+  return lines.reduce((total, line) => total + estimateTokenCount(line), 0);
+}
+
+/**
+ * Token cost of additive payloads that ride OUTSIDE the layered L1-L3 package
+ * (currently `dialogueHits`). Each payload is measured as the JSON the MCP
+ * transport actually sends, using the same estimator as the layered package.
+ */
+export function estimateUnbudgetedPayloadTokens(payloads: readonly unknown[]): number {
+  return payloads.reduce<number>(
+    (total, payload) => total + estimateTokenCount(JSON.stringify(payload)),
+    0
+  );
+}
+
+/**
+ * Fold one post-packaging addition into the preview result's token accounting:
+ *
+ * - `prependedLines` join `summary` (as dialogue recall / workbench / spine
+ *   lines do): budgeted — added to `tokenEstimate` and
+ *   `tokenBudget.compressedTokens`, reflected in `budgetUsedPercent`.
+ * - `unbudgetedTokens` is additive payload the layer quota does not govern
+ *   (e.g. `dialogueHits`): reported in `unbudgetedTokens`, never silently
+ *   folded into the L1-L3 budget.
+ * - `estimatedSavingsPercent` is recomputed against the TRUE accounted total
+ *   (budgeted + unbudgeted), `estimatedRawTokens` keeps its floor semantics
+ *   (raw is never below what is actually sent), and `accountedTokens` exposes
+ *   the true total. New fields stay omitted (exactOptionalPropertyTypes)
+ *   until an addition is actually accounted.
+ *
+ * Pure: returns a new result; the input is returned unchanged when there is
+ * nothing to account.
+ * 纯函数：不修改入参（上下文缓存保存的是 attach 前的结果，每次调用重新记账）。
+ */
+export function withPostPackageAccounting(
+  result: ContextPreviewResult,
+  prependedLines: readonly string[],
+  unbudgetedTokens: number
+): ContextPreviewResult {
+  const lineTokens = estimateSummaryLinesTokens(prependedLines);
+  const addedUnbudgeted = Math.max(0, unbudgetedTokens);
+  if (lineTokens === 0 && addedUnbudgeted === 0) {
+    return result;
+  }
+  const compressedTokens = result.tokenBudget.compressedTokens + lineTokens;
+  const unbudgeted = (result.unbudgetedTokens ?? 0) + addedUnbudgeted;
+  const accountedTokens = compressedTokens + unbudgeted;
+  // 真实下发量不会低于 raw 估算：沿用 estimateRawContextTokens 的下限语义。
+  const estimatedRawTokens = Math.max(result.tokenBudget.estimatedRawTokens, accountedTokens);
+  return {
+    ...result,
+    ...(prependedLines.length > 0
+      ? {
+          summary: [...prependedLines, ...result.summary],
+          summaryCount: result.summaryCount + prependedLines.length,
+        }
+      : {}),
+    tokenEstimate: compressedTokens,
+    tokenBudget: {
+      ...result.tokenBudget,
+      estimatedRawTokens,
+      compressedTokens,
+      estimatedSavingsPercent: calculateSavingsPercent(estimatedRawTokens, accountedTokens),
+      budgetUsedPercent: calculateBudgetUsedPercent(
+        compressedTokens,
+        result.tokenBudget.maxContextTokens
+      ),
+    },
+    ...(unbudgeted > 0 ? { unbudgetedTokens: unbudgeted } : {}),
+    accountedTokens,
+  };
 }
 
 export async function previewContext(
@@ -220,20 +309,9 @@ export async function previewContext(
     pkg.tokenEstimate
   );
 
-  // Record cumulative token savings for ROI tracking
-  try {
-    const savingsPercent = calculateSavingsPercent(rawTokenEstimate, pkg.tokenEstimate);
-    recordSavings(config, {
-      timestamp: new Date().toISOString(),
-      query,
-      rawTokens: rawTokenEstimate,
-      compressedTokens: pkg.tokenEstimate,
-      savingsPercent,
-      source: "preview_context",
-    });
-  } catch {
-    // Savings tracking is best-effort; don't fail the preview if it errors
-  }
+  // Record cumulative token savings for ROI tracking — deferred until AFTER
+  // the post-packaging attach (see the end of this function) so the persisted
+  // ROI covers the true accounted payload, not just the layered package.
 
   const anchorCount = pkg.anchorChannel.length;
   const queryTranslationDelegation = shouldDelegateQueryTranslation(query, anchorCount, englishQuery)
@@ -271,7 +349,27 @@ export async function previewContext(
 
   cacheContextResult(query, workspaceRoot, result);
 
-  return attachWorkbenchThenDialogue(result, graphClient, config, query, dialogue);
+  const attached = await attachWorkbenchThenDialogue(result, graphClient, config, query, dialogue);
+
+  // ROI 记账延后到 attach 之后：持久化的节省统计必须覆盖真实下发总量
+  // （budgeted + unbudgeted），否则 dialogue recall / workbench 行触发时
+  // token-savings.json 会系统性乐观。/ Record cumulative token savings AFTER
+  // the post-packaging attach so the persisted ROI uses the accounted total.
+  try {
+    const accountedTokens = attached.accountedTokens ?? attached.tokenBudget.compressedTokens;
+    recordSavings(config, {
+      timestamp: new Date().toISOString(),
+      query,
+      rawTokens: attached.tokenBudget.estimatedRawTokens,
+      compressedTokens: accountedTokens,
+      savingsPercent: attached.tokenBudget.estimatedSavingsPercent,
+      source: "preview_context",
+    });
+  } catch {
+    // Savings tracking is best-effort; don't fail the preview if it errors
+  }
+
+  return attached;
 }
 
 async function attachWorkbenchThenDialogue(
@@ -310,13 +408,17 @@ async function attachDialogueHits(
     if (hits.length === 0) {
       return result;
     }
-    const withHits: ContextPreviewResult = { ...result, dialogueHits: hits };
     const corrected = hits.find((hit) => hit.correctionLine);
-    if (corrected?.correctionLine) {
-      withHits.summary = [`Dialogue recall: ${corrected.correctionLine}`, ...withHits.summary];
-      withHits.summaryCount += 1;
-    }
-    return withHits;
+    const recallLines = corrected?.correctionLine
+      ? [`Dialogue recall: ${corrected.correctionLine}`]
+      : [];
+    // dialogueHits 在分层包之外附加下发 → 记为 unbudgeted；召回行进入
+    // summary → 与其他打包后追加行一样计入预算。/ The hits ride outside the
+    // layered package (unbudgeted); the recall line joins summary (budgeted).
+    return {
+      ...withPostPackageAccounting(result, recallLines, estimateUnbudgetedPayloadTokens(hits)),
+      dialogueHits: hits,
+    };
   } catch (error) {
     logger.warn({ error }, "Dialogue recall attach failed");
     return result;
@@ -354,9 +456,8 @@ async function attachWorkbenchTopic(
       );
     }
     return {
-      ...result,
-      summary: [...promptLines, ...result.summary],
-      summaryCount: result.summaryCount + promptLines.length,
+      // Workbench promptLines 前置进 summary → 计入预算（含 Forked 提示行）。
+      ...withPostPackageAccounting(result, promptLines, 0),
       workbench: { ...view, promptLines },
       dialogueCapture: {
         kind: "workbench",
@@ -420,14 +521,18 @@ async function attachDialogueThread(
     }
     const injectSpine = thread.turns.length >= 2;
     const tip = thread.turns[thread.turns.length - 1];
+    // Spine 注入 summary → 计入预算内；未注入时 promptLines 仅随
+    // dialogueThread 视图下发 → 记为 unbudgeted，保证真实负载对调用方可见。
+    // Spine lines injected into summary are budgeted; when the spine is not
+    // injected the same lines still ride in the dialogueThread view, so they
+    // are reported as unbudgeted instead of staying invisible.
+    const accounted = withPostPackageAccounting(
+      result,
+      injectSpine ? promptLines : [],
+      injectSpine ? 0 : estimateSummaryLinesTokens(promptLines)
+    );
     return {
-      ...result,
-      ...(injectSpine
-        ? {
-            summary: [...promptLines, ...result.summary],
-            summaryCount: result.summaryCount + promptLines.length,
-          }
-        : {}),
+      ...accounted,
       dialogueThread: { ...thread, jumped, overlap, promptLines },
       ...(tip
         ? {

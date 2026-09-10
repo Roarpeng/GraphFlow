@@ -148,15 +148,219 @@ export function parseDialogueSession(node: GraphNode): DialogueSessionRecord | u
   return deserializeSession(node);
 }
 
+// ─────────────────── Secret redaction (dialogue write boundary) ───────────────────
+//
+// Conversation Graph persists userQuery / assistantReply inside Decision nodes
+// (node content + serialised `record` metadata). `expandAnchor` returns that
+// metadata verbatim, `artifact export-memory` writes these turns into
+// dialogues.md, and team shared memory (v1.15.0+, `graphflow team serve` +
+// mcp-http sync) can ship them off this machine — so redaction MUST happen at
+// the WRITE boundary (before text reaches the graph store), not at export time.
+
+/** Env escape hatch: `GRAPHFLOW_DIALOGUE_REDACT=0|false|off|no` disables redaction (default ON). */
+export const DIALOGUE_REDACT_ENV = "GRAPHFLOW_DIALOGUE_REDACT";
+
+/** Stable, debuggable markers. Their `[`/`]` shape never re-matches any rule (idempotency). */
+export const REDACTED_API_KEY = "[REDACTED:api-key]";
+export const REDACTED_BEARER = "[REDACTED:bearer]";
+export const REDACTED_PRIVATE_KEY = "[REDACTED:private-key]";
+export const REDACTED_CONNECTION_STRING = "[REDACTED:connection-string]";
+export const REDACTED_CREDENTIAL = "[REDACTED:credential]";
+
+/**
+ * Reads the escape-hatch env var on every call (cheap; lets tests and the CLI
+ * toggle at runtime). Missing `process` (defensive) keeps redaction ON.
+ */
+export function isDialogueRedactionEnabled(): boolean {
+  if (typeof process === "undefined" || !process.env) return true;
+  const raw = process.env[DIALOGUE_REDACT_ENV]?.trim().toLowerCase();
+  return raw !== "0" && raw !== "false" && raw !== "off" && raw !== "no";
+}
+
+/** PEM private key blocks: full BEGIN…END first, then unterminated headers + base64 runs. */
+const PEM_PRIVATE_KEY_BLOCK_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g;
+const PEM_PRIVATE_KEY_OPEN_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----(?:\s*[A-Za-z0-9+/=]+)*/g;
+
+/** DB/queue connection strings with embedded credentials (scheme://user:pass@host); credential-free URLs are untouched. */
+const CONNECTION_STRING_RE =
+  /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|rediss?|amqps?|mssql):\/\/[^/\s'"<>@:]*:[^/\s'"<>@]+@[^\s'"<>)]+/gi;
+
+/** `Authorization: Bearer <token>` and bare `bearer <token>` — token-likeness is checked in the replacer. */
+const BEARER_RE = /\bbearer\s+([A-Za-z0-9._\-~+/]+=*)/gi;
+/** Standalone JWT (three base64url segments; the header always starts with `eyJ`). */
+const JWT_RE = /\beyJ[A-Za-z0-9_\-]{4,}\.[A-Za-z0-9_\-]{4,}\.[A-Za-z0-9_\-]*/g;
+
+/** Provider API-key shapes. `\b` anchors keep words like "task-management" from matching "sk-". */
+const API_KEY_SHAPE_RES: RegExp[] = [
+  /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}/g, // OpenAI / Anthropic
+  /\bgithub_pat_[A-Za-z0-9_]{16,}/g, // GitHub fine-grained PAT
+  /\bgh[pousr]_[A-Za-z0-9]{16,}/g, // GitHub classic PAT / OAuth
+  /\bglpat-[A-Za-z0-9_-]{16,}/g, // GitLab PAT
+  /\bxox[baprs]-[A-Za-z0-9-]{8,}/g, // Slack
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}(?![0-9A-Z])/g, // AWS access key id
+  /\bAIza[0-9A-Za-z_-]{30,}/g, // Google API key
+  /\b[rs]k_(?:live|test)_[A-Za-z0-9]{12,}/g, // Stripe
+  /\bnpm_[A-Za-z0-9]{30,}/g, // npm automation token
+];
+
+/** Key names treated as credential carriers, per the redaction spec. */
+const CREDENTIAL_KEY_SRC =
+  "[A-Za-z0-9_.\\-]*(?:api[_\\-]?key|secret|token|passw(?:or)?d|pwd|access[_\\-]?key|private[_\\-]?key|client[_\\-]?secret)[A-Za-z0-9_.\\-]*";
+
+/** Quoted form: `"api_key": "value"` / `secret = 'value'` — quotes are preserved so surrounding JSON stays valid. */
+const CREDENTIAL_PAIR_QUOTED_RE = new RegExp(
+  `(${CREDENTIAL_KEY_SRC})(["']?)(\\s*[:=]\\s*)(["'])([^"'<>]*)\\4`,
+  "gi"
+);
+/** Bare form: `API_KEY=value` / `password: value` — value stops at whitespace, quotes, or code punctuation. */
+const CREDENTIAL_PAIR_BARE_RE = new RegExp(
+  `(${CREDENTIAL_KEY_SRC})(\\s*[:=]\\s*)([^\\s"'\\\`,;}{()<>\\[\\]]+)`,
+  "gi"
+);
+
+function splitTrailingPunctuation(value: string): { core: string; trailing: string } {
+  const match = /[.,;:!?]+$/.exec(value);
+  if (!match) return { core: value, trailing: "" };
+  return { core: value.slice(0, value.length - match[0].length), trailing: match[0] };
+}
+
+/** Obvious placeholders / env references are NOT secrets ("your-key-here", "${VAR}", "<token>", "none"). */
+function isPlaceholderValue(value: string): boolean {
+  if (value.length === 0) return true;
+  if (/^(?:true|false|null|nil|none|undefined|unknown|todo|tbd)$/i.test(value)) return true;
+  if (/^\$\{?[A-Za-z0-9_.\-]+\}?$/.test(value)) return true; // $VAR / ${VAR}
+  if (/^\{\{.*\}\}$/.test(value)) return true; // handlebars template
+  if (/^<.*>$/.test(value)) return true; // <your-key-here>
+  if (/^\[?redacted/i.test(value)) return true; // already redacted
+  if (/^(?:your|our|my|his|her|its|their|the|this|that|example|sample|dummy|fake|placeholder|xxx)/i.test(value)) {
+    return true;
+  }
+  return false;
+}
+
+/** Dotted code identifiers (process.env.OPENAI_API_KEY, config.apiKey) are references, not secrets. */
+function isDottedIdentifier(value: string): boolean {
+  return /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+$/.test(value);
+}
+
+function isPasswordKey(key: string): boolean {
+  return /passw|pwd/i.test(key);
+}
+
+function quotedValueShouldRedact(key: string, rawValue: string): boolean {
+  const value = rawValue.trim();
+  if (isPlaceholderValue(value)) return false;
+  if (isDottedIdentifier(value)) return false;
+  return value.length >= 4 || isPasswordKey(key);
+}
+
+function bareValueShouldRedact(key: string, value: string): boolean {
+  if (isPlaceholderValue(value)) return false;
+  if (isDottedIdentifier(value)) return false;
+  if (isPasswordKey(key)) return value.length >= 4;
+  if (value.length < 8) return false;
+  if (/^\d+$/.test(value)) return false; // counts / ports / ids
+  if (/\d/.test(value)) return true; // real secrets almost always carry digits
+  if (/[a-z]/.test(value) && /[A-Z]/.test(value) && value.length >= 16) return true; // long mixed case
+  if (/^[A-Za-z0-9+/]{20,}={0,2}$/.test(value)) return true; // base64-ish run
+  return false;
+}
+
+function looksLikeBearerToken(value: string): boolean {
+  if (value.length < 16) return false;
+  if (/[()[\]{}<>"'`|,;]/.test(value)) return false;
+  if (/\d/.test(value)) return true;
+  if (value.split(".").length === 3 && value.length >= 24) return true; // JWT shape
+  return /^[A-Za-z0-9+/]+={1,2}$/.test(value); // base64 blob
+}
+
+/**
+ * Redact secrets from free text before it is persisted into the dialogue graph.
+ *
+ * Covers: provider API-key shapes (sk-… / ghp_… / github_pat_… / gho_… /
+ * glpat-… / xox[baprs]-… / AKIA… / AIza…), bearer tokens and
+ * `Authorization: Bearer <value>` headers, PEM private-key blocks, connection
+ * strings with embedded credentials (postgres/mysql/mongodb/redis/amqp
+ * `scheme://user:pass@host`), and `KEY=value` / `key: value` pairs whose key
+ * name suggests a credential and whose value looks like one. Every hit becomes
+ * a stable marker (`[REDACTED:api-key]`, `[REDACTED:bearer]`,
+ * `[REDACTED:private-key]`, `[REDACTED:connection-string]`,
+ * `[REDACTED:credential]`) so turns stay debuggable.
+ *
+ * Pure, deterministic, dependency-free and idempotent (markers never
+ * re-match); a handful of regex passes over ≤4k-char turn text, cheap enough
+ * for the per-turn write path. Deliberately conservative: ordinary prose, code
+ * identifiers, file paths, credential-free URLs and version numbers pass
+ * through untouched.
+ *
+ * Escape hatch: set `GRAPHFLOW_DIALOGUE_REDACT=0` (or `false`/`off`/`no`) to
+ * disable redaction entirely.
+ * WARNING: with redaction OFF, pasted API keys / passwords / private keys are
+ * stored verbatim in the local graph store, and once team shared memory
+ * (`graphflow team serve` + mcp-http sync) or `artifact export-memory` is used
+ * they can leave this machine. Keep it ON unless you explicitly accept that.
+ *
+ * 写入边界脱敏(默认开启):密钥在落盘进图谱节点之前即被替换为稳定标记;
+ * `GRAPHFLOW_DIALOGUE_REDACT=0` 可整体关闭,但团队同步/导出会把原始密钥
+ * 带离本机,请谨慎。
+ */
+export function redactSecrets(text: string): string {
+  if (!isDialogueRedactionEnabled()) return text;
+  if (!text) return text;
+  let out = text;
+
+  // 1. PEM private keys (full blocks first, then unterminated remnants).
+  out = out.replace(PEM_PRIVATE_KEY_BLOCK_RE, REDACTED_PRIVATE_KEY);
+  out = out.replace(PEM_PRIVATE_KEY_OPEN_RE, REDACTED_PRIVATE_KEY);
+
+  // 2. Connection strings carrying credentials.
+  out = out.replace(CONNECTION_STRING_RE, REDACTED_CONNECTION_STRING);
+
+  // 3. Bearer tokens, then standalone JWTs.
+  out = out.replace(BEARER_RE, (match, raw: string) => {
+    const { core, trailing } = splitTrailingPunctuation(raw);
+    if (!looksLikeBearerToken(core)) return match;
+    return `${REDACTED_BEARER}${trailing}`;
+  });
+  out = out.replace(JWT_RE, REDACTED_BEARER);
+
+  // 4. Provider API-key shapes.
+  for (const pattern of API_KEY_SHAPE_RES) {
+    out = out.replace(pattern, REDACTED_API_KEY);
+  }
+
+  // 5. Generic credential KEY=value / key: value pairs (quoted form first so
+  //    quoted values may contain spaces and surrounding JSON stays parseable).
+  out = out.replace(
+    CREDENTIAL_PAIR_QUOTED_RE,
+    (match, key: string, keyQuote: string, sep: string, quote: string, value: string) => {
+      if (!quotedValueShouldRedact(key, value)) return match;
+      return `${key}${keyQuote}${sep}${quote}${REDACTED_CREDENTIAL}${quote}`;
+    }
+  );
+  out = out.replace(CREDENTIAL_PAIR_BARE_RE, (match, key: string, sep: string, value: string) => {
+    const { core, trailing } = splitTrailingPunctuation(value);
+    if (!bareValueShouldRedact(key, core)) return match;
+    return `${key}${sep}${REDACTED_CREDENTIAL}${trailing}`;
+  });
+
+  return out;
+}
+
+/** exactOptionalPropertyTypes-friendly helper: redact only when the field is present. */
+function redactOptional(value: string | undefined): string | undefined {
+  return value === undefined ? undefined : redactSecrets(value);
+}
+
 export async function recordDialogueTurn(
   client: GraphClient,
   input: RecordDialogueTurnInput
 ): Promise<RecordDialogueTurnResult> {
-  const userQuery = clip(input.userQuery, MAX_QUERY_CHARS);
+  const userQuery = clip(redactSecrets(input.userQuery), MAX_QUERY_CHARS);
   const now = input.now ?? Date.now();
   const sessionName = normalizeSessionName(input.sessionName);
   const sessionId = dialogueSessionIdFor(sessionName, input.workspaceRoot);
-  const assistantReply = clip(input.assistantReply ?? "", MAX_REPLY_CHARS);
+  const assistantReply = clip(redactSecrets(input.assistantReply ?? ""), MAX_REPLY_CHARS);
 
   const session = (await loadSession(client, sessionId)) ?? {
     id: sessionId,
@@ -322,8 +526,8 @@ export async function applyTurnDistillation(
   const turn = node ? parseDialogueTurn(node) : undefined;
   if (!turn) return undefined;
 
-  const nextTitle = mergeDistilledField(turn.title, patch.title);
-  const nextSummary = mergeDistilledField(turn.summary, patch.summary);
+  const nextTitle = mergeDistilledField(turn.title, redactOptional(patch.title));
+  const nextSummary = mergeDistilledField(turn.summary, redactOptional(patch.summary));
   if (nextTitle === turn.title && nextSummary === turn.summary) {
     return turn;
   }
@@ -427,7 +631,18 @@ async function persistTurn(
   }
 ): Promise<void> {
   const related = uniqueIds(options.relatedNodeIds ?? turn.relatedNodeIds).slice(0, MAX_RELATED_CODE);
-  const stored: DialogueTurnRecord = { ...turn, relatedNodeIds: related };
+  // Write-boundary defence in depth: distillation backfill, supersession and
+  // fork re-persistence also funnel through here, so redact once more right
+  // before serialisation (idempotent for already-clean text).
+  // 所有落盘路径的最终兜底:序列化前再脱敏一次(对干净文本幂等)。
+  const stored: DialogueTurnRecord = {
+    ...turn,
+    relatedNodeIds: related,
+    userQuery: redactSecrets(turn.userQuery),
+    assistantReply: redactSecrets(turn.assistantReply),
+    ...(turn.title !== undefined ? { title: redactSecrets(turn.title) } : {}),
+    ...(turn.summary !== undefined ? { summary: redactSecrets(turn.summary) } : {}),
+  };
   const node: GraphNode = {
     id: stored.id,
     type: "Decision",
@@ -1047,7 +1262,7 @@ export async function recordAgentTrace(
       sessionId: input.sessionId,
       turnSeq: input.turnSeq,
       agentKind: input.agentKind,
-      label: clip(input.label, 120),
+      label: clip(redactSecrets(input.label), 120),
       status: input.status,
       createdAt: now,
     };

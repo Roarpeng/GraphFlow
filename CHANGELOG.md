@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.17.0] - 2026-09-09
+
+### Added
+
+- **Token 节省的现实对照臂**：`benchmarks/run-token-benchmark.ts` 新增 Arm B `baselineTopKFilesFullText`——把**同一排序器**的 top-K 锚点解析到真实源文件并按全文计数（每文件上限 1500 行，`--anchor-top-k=N` 可调）。原 Arm A 更名 `baselineGrepTopFilesFullText` 并明确标注 "upper bound by construction"。实测：Arm A 410,725 → 6,044（98.5%）；**Arm B 136,265 → 6,044（95.6%）**。每查询的 `resolvedFiles` 落盘可复算。Arm B 无法自我膨胀——锚点越小它的节省率越低。
+- **打包后 token 记账**：`src/surfaces/cli/runtime/graph.ts` 新增 `estimateSummaryLinesTokens` / `estimateUnbudgetedPayloadTokens` / `withPostPackageAccounting`。对话召回行、workbench `promptLines`、对话主线 `promptLines` 三处「打包后前插」现全部计入 `tokenEstimate` 与 `budgetUsedPercent`；`dialogueHits` 作为**不占 L1–L3 配额**的负载单独报在 `unbudgetedTokens`，并新增 `accountedTokens`（= 已预算 + 未预算）。`estimatedSavingsPercent` 改为对**真实总量**计算，`graphflow-out/token-savings.json` 的 ROI 不再系统性低报。
+- **技能准入冷启动层**：`admitSkillToProvisional`（`src/learning/skill-admission.ts`）——`proven` 仍严格要求 `successCount >= 2` 的去重 pass episode；新增的 provisional 层要求名字像项目符号**或**至少 1 个成功 episode，且**无条件否决**结构性噪声（空名 / 纯停用词 / readme+update 融合）。文档明示：provisional 只是 hint，**绝不作为 proven 呈现、导出或同步**。
+- **对话写入边界密钥脱敏**：`redactSecrets`（`src/learning/dialogue-thread.ts`）在**写盘前**清洗 `userQuery` / `assistantReply` / 派生 title+summary / 序列化的 `record` metadata / agent trace label。覆盖 PEM 私钥、含凭据的连接串（postgres/mysql/mongodb/redis/amqp/mssql）、Bearer 与 JWT、各家 API key 形态（sk-/ghp_/github_pat_/glpat-/xox[baprs]-/AKIA/AIza…）、以及 `KEY=value` 形式的凭据键。标记稳定可调试（`[REDACTED:api-key]` 等），幂等，默认开启，`GRAPHFLOW_DIALOGUE_REDACT=0` 可关闭（附团队同步风险警告）。误伤保护有 10 组反例测试（散文、路径、无凭据 URL、版本号、`process.env.X` 等原样通过）。
+
+### Fixed
+
+- **L3 对话打包在生产路径是死代码**：`injectDialogueTurns` 此前**只**被 `buildLayeredContextPackage` 调用，而生产路径 `previewContext`（MCP `graphflow_context`）走的是 `buildEnhancedContextPackage`——于是 v1.14.0 的头号能力「对话图进入上下文引擎 L3」对用户**从未生效**，而 5 个测试只覆盖非生产打包器所以 CI 全绿。现抽出共享阶段 `injectL3Stage`（`src/graph/context-package-core.ts`）：治理技能/pin 与对话轮在**同一 budget、同一 L3 配额**下打包，两个打包器共用，不再漂移。`tests/m-dialogue-l3-packing.test.ts` 改为对**两个**打包器同时断言。
+- **CI 发布证据同义反复**：`scripts/ci-release-evidence.ts` 此前用 `returnedAnchorIds.filter(...)` 反推 `expectedAnchorIds`，而 recall 的定义使 `expected ⊆ returned` 时恒为 1.0——该门禁在数学上不可能因检索质量失败。现期望锚点**先于检索**从提交在案的 golden 数据集独立导出（缺失的探针用显式 ground-truth 常量并在 recall < 1.0 时失败）；同时传入 `expectedBodies`/`packagedBodies` 让唯一非同义反复的 `bodyCoverage`（LCS）**真正被度量**，为 0 即失败。
+- **proven 技能证据可断言而非可观测**：`userConfirmed` 在 CI 场景改为 `false`（CI 不是人）；`testResult` 不再硬编码 `"pass"`，改为按 `GRAPHFLOW_CI_TEST_RESULT` 环境变量 → 流水线结果文件 → GitHub Actions 步骤顺序推断，**缺失即 unknown 并明确失败**，不回退到断言；DOGFOOD_LESSONS 里陈旧的 "(149 files)" 改为运行时统计真实测试文件数。
+- **`wouldDegradeLibrary` 忽略真实成功证据**：它调用 `admitSkillToProven(name)` 时不传 options，`successCount` 恒为 0，永远走不到 "success-evidence" 快路径——有真实成功 episode 的技能会被误判为"会污染库"。现接受可选 `AdmitSkillOptions` 并转发（1 参调用点保持兼容）。审计确认生产晋升路径本就直连 `admitSkillToProven`，故无生产调用点在丢失证据；`admitSkillToProvisional` 已从 `src/index.ts` 导出。
+- **安全审计工作流连续 3 周静默失败**：`scripts/security-audit.cjs` 第 10 行用了 `join` 却未 import `node:path`，`ReferenceError` 使 2026-08-24 / 08-31 / 09-07 三次定时运行在 `npm audit` 运行前即崩溃。修复含 `node:path` 导入、Windows `shell` 处理、报告路径按仓库根解析；新增 `tests/security-audit-script.test.ts`（静态断言 import + 端到端跑假 npm 断言无 ReferenceError），随 `npm test` 进入 CI——坏脚本从此无法隐藏。
+
+### Changed
+
+- **README 的 token 节省改为双口径并列**，不再只报膨胀分母的单一数字；两项分别标注其回答的问题与不可互换性。
+
 ## [1.16.0] - 2026-09-08
 
 ### Added

@@ -551,6 +551,18 @@ export async function injectDialogueTurns(
   }
 }
 
+/**
+ * NOTE (v1.17): both packers call `injectL3SkillsAndPins` in the L3 slot and then
+ * `injectDialogueTurns` LAST, after every code-anchor stage. There is deliberately
+ * no combined `injectL3Stage` helper: composing dialogue into the middle of the
+ * pack sequence let a recalled conversation turn take an anchor slot ahead of a
+ * Symbol/File anchor, which broke the golden retrieval gate
+ * (`tests/retrieval-golden.test.ts`, query "cli help flags"). Keeping the two
+ * calls separate — with dialogue provably last and still sharing the one
+ * `budget` object — is what enforces the documented invariant that dialogue
+ * recall is purely additive and never displaces code context.
+ */
+
 export async function injectSameFileAndImportExpansion(
   client: GraphClient,
   snapshotNodes: GraphNode[] | undefined,

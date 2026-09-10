@@ -58,6 +58,7 @@ export {
 export {
   suggestSkillConditionHints,
   admitSkillToProven,
+  admitSkillToProvisional,
   isSymbolicSkillName,
   wouldDegradeLibrary,
   type SkillConditionHints,
