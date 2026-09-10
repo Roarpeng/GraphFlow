@@ -37,11 +37,28 @@ console.log(
   `Publishing ${name}@${version} (registry currently has ${published ?? "no version / package missing"})...`
 );
 
-const publish = spawnSync("npm", ["publish", "--access", "public"], {
-  cwd: root,
-  encoding: "utf8",
-  env: process.env,
-});
+function runPublish(extraArgs) {
+  return spawnSync("npm", ["publish", "--access", "public", ...extraArgs], {
+    cwd: root,
+    encoding: "utf8",
+    env: process.env,
+  });
+}
+
+// Prefer provenance: npm signs an attestation linking this tarball to the
+// repository and commit (requires `id-token: write`, which the workflow grants).
+// If attestation cannot be produced (sigstore/registry hiccup) we still publish,
+// but say so loudly instead of silently shipping an unsigned package.
+let publish = runPublish(["--provenance"]);
+if (
+  publish.status !== 0 &&
+  /provenance|attestation|sigstore/i.test(`${publish.stdout ?? ""}\n${publish.stderr ?? ""}`)
+) {
+  console.warn("[warn] publish --provenance failed; retrying WITHOUT provenance attestation");
+  if (publish.stdout) process.stdout.write(publish.stdout);
+  if (publish.stderr) process.stderr.write(publish.stderr);
+  publish = runPublish([]);
+}
 
 if (publish.stdout) process.stdout.write(publish.stdout);
 if (publish.stderr) process.stderr.write(publish.stderr);
