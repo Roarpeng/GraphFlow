@@ -49,18 +49,26 @@ jobs:
         env:
           GRAPHFLOW_CONFIG_PATH: graphflow-out/ci.config.json
 
-      - name: Verify npm authentication (fail fast on a missing/expired token)
-        # Without this, an invalid or expired token surfaces only as
-        # "E404 ... PUT https://registry.npmjs.org/@scope%2fname" from npm publish,
-        # which reads like a missing package rather than an auth failure.
+      - name: Verify npm authentication
+        # whoami proves the token can read identity. It does NOT prove write:
+        # a 2FA user token still fails publish with EOTP, and an unauthenticated
+        # PUT is often reported as E404. OIDC Trusted Publishing does not need a token.
         env:
           NODE_AUTH_TOKEN: ${{ secrets.npm_token != '' && secrets.npm_token || secrets.NPM_TOKEN }}
         run: |
-          if [ -z "${NODE_AUTH_TOKEN}" ]; then
-            echo "::error::NODE_AUTH_TOKEN is empty — set the NPM_TOKEN repository secret."
-            exit 1
+          echo "npm $(npm --version)"
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "GitHub OIDC is available (id-token: write). Publish will try Trusted Publishing first."
           fi
-          echo "Authenticated as: $(npm whoami --registry=https://registry.npmjs.org)"
+          if [ -n "${NODE_AUTH_TOKEN}" ]; then
+            echo "Authenticated as: $(npm whoami --registry=https://registry.npmjs.org)"
+            echo "Note: whoami only proves identity; publish may still fail with EOTP if the token requires 2FA."
+          elif [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "::error::No NODE_AUTH_TOKEN and no GitHub OIDC. Set the npm_token secret or configure npm Trusted Publishing."
+            exit 1
+          else
+            echo "No NODE_AUTH_TOKEN; publish will use GitHub OIDC Trusted Publishing."
+          fi
 
       - name: Publish @roarpeng/graphflow (idempotent)
         run: node scripts/publish-npm-idempotent.mjs
