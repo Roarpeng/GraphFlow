@@ -6,8 +6,15 @@
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
+const {
+  formatOidcExchangeFailureMessage,
+  isOidcExchangeFailure,
+} = require("./npm-oidc-publish-lib.cjs");
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
@@ -80,5 +87,9 @@ if (alreadyPublished || npmViewVersion() === version) {
   process.exit(0);
 }
 
-console.error(`npm publish failed with exit code ${publish.status ?? 1}`);
+if (isOidcExchangeFailure(combined)) {
+  console.error(formatOidcExchangeFailureMessage());
+} else {
+  console.error(`npm publish failed with exit code ${publish.status ?? 1}`);
+}
 process.exit(publish.status ?? 1);
