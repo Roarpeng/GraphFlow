@@ -6,13 +6,20 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 
 ## 当前版本
 
-- Extension / runtime：**1.17.1**
+- Extension / runtime：**1.18.0**
 - 市场身份：`roarpeng.graphflow`（displayName **GraphFlow Context & Memory**）
-- 对应 VSIX：`../artifacts/graphflow-1.17.1.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
+- 对应 VSIX：`../artifacts/graphflow-1.18.0.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
 
 ## Office/PDF 文档转换（anydoc）
 
 在 **GraphFlow: Settings** 的「图谱」区块勾选 **Office / PDF**，需要时点 **安装解析器**。扩展会把 `@firecrawl/anydoc` 下到 `~/.graphflow/optional-deps`。关掉该项会跳过 Office/PDF，源码建图不受影响。
+
+## v1.18.x 要点
+
+- **效率机制（SoL-Pi 借鉴，默认全开）**：**GraphFlow: Settings → 效率机制** 可逐项开关——大输出归档为句柄（ObservationPack）、日志压缩为逐字核验收据（Evidence-Preserving Reducer）、按观测压力自适应预算 + 压缩建议（Online Context Compact）、编辑+验证融合（Action Fusion）
+- **dsh 自动投影**：DeepSeek Harness 上把超阈值工具结果归档为句柄并替换模型可见内容；`GRAPHFLOW_D_DSH_PROJECTION=0` 关闭
+- **效率/能力门禁**：`governance release-gate` 新增 `--min-efficiency-qualifying` / `--max-capability-regressions` / `--min-anchor-recall-percent` / `--min-body-coverage-percent`
+- **宿主 hooks 扩展**：Cursor / Gemini / Codex 原生 hooks + opencode 插件安装切片；HostAdapter 的 doctor 覆盖 hooks
 
 ## v1.17.x 要点
 
@@ -58,9 +65,9 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 ### 方式 B：命令行
 
 ```bash
-code --install-extension graphflow-1.17.1.vsix
+code --install-extension graphflow-1.18.0.vsix
 # Cursor CLI（若已安装）：
-cursor --install-extension graphflow-1.17.1.vsix
+cursor --install-extension graphflow-1.18.0.vsix
 ```
 
 ### 安装后推荐流程
@@ -124,7 +131,7 @@ graphflow memory forget <episodeId>           # 删除单条记忆
 
 直接发送 VSIX 文件即可，同事**无需** clone GraphFlow 仓库：
 
-1. 从 Releases 或本地 `artifacts/` 取得 `graphflow-1.17.1.vsix`
+1. 从 Releases 或本地 `artifacts/` 取得 `graphflow-1.18.0.vsix`
 2. 按上文「安装 VSIX」步骤安装
 3. 打开项目 → Settings → 建立图谱
 
@@ -175,7 +182,7 @@ npm run package:extension
 **MCP 未自动安装**
 
 - 命令面板 → **GraphFlow: Install MCP to Agents**
-- 或终端：`npx @roarpeng/graphflow@1.17.1 install`
+- 或终端：`npx @roarpeng/graphflow@1.18.0 install`
 
 **图谱为空 / Preview 0 anchors**
 
@@ -184,7 +191,7 @@ npm run package:extension
 
 **MCP 报错 `unsafe workspace root from discovery: /home/...`**
 
-- 升级到 **1.17.1+**，然后 Settings → **安装 / 更新 MCP**，Reload Window
+- 升级到 **1.18.0+**，然后 Settings → **安装 / 更新 MCP**，Reload Window
 - 工具调用务必传 `rootDir`（项目绝对路径）
 - CLI：`graphflow doctor --json` 查看 MCP/Skill 注册状态
 

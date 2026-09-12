@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-09-12（R6 P0–P2 全部落地：opt-in 开关、观测句柄、观测压力预算、融合动作；配对效率报告 + 能力地板门禁；机制自动研究回路；dsh 自动投影层（默认关、fail-open））
+> 最后更新：2026-09-12（v1.18.0 发版：SoL-Pi 效率机制全链路 + 宿主 hooks 收口——四机制默认开、dsh 自动投影、配对效率/能力门禁、机制自动研究回路）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -42,6 +42,8 @@
 | v1.15.5 | 2026-09-08 | **Kimi Code HostAdapter** | `installViaHostAdapter("kimi-code")` 写 `~/.kimi-code/mcp.json` + Skill + `AGENTS.md`；doctor/uninstall 走注册表 | ✅ |
 | v1.16.0 | 2026-09-08 | **集成层模块化收口 + orchestrator 拆分** | 通用 profile 切片覆盖其余 15 个宿主，`HostAdapter` 成为 19 宿主唯一入口；CLI install/uninstall/doctor 改注册表遍历；`agent-profiles` 并入 `buildAgentProfiles()`；`runOrchestration` 拆为 `orchestrator-phases.ts` 四阶段；修复 README UTF-8 损坏与临时目录劫持工作区发现 | ✅ |
 | v1.17.0 | 2026-09-09 | **证据诚实性冲刺（深度调研驱动）** | 修复 L3 对话打包在生产路径的死代码（对话改为 additive-LAST，永不挤掉代码锚点）；打包后 token 记账（`unbudgetedTokens`/`accountedTokens`，节省率对真实总量计算）；token 节省新增现实对照臂（**95.6%** vs 之前的 98.5% 上界口径）；CI fidelity 证据去同义反复（期望锚点独立于返回锚点 + 真正度量 bodyCoverage）；proven 证据改为可观测（`userConfirmed:false`、`testResult` 由信号观测）；技能准入 `wouldDegradeLibrary` 修正 + `admitSkillToProvisional` 冷启动层；对话写入边界密钥脱敏；修复 security-audit 缺 import 导致的连续 3 周静默失败 | ✅ |
+
+| v1.18.0 | 2026-09-12 | **SoL-Pi 效率机制 + 宿主 hooks 收口** | 四机制默认开（ObservationPack / Evidence-Preserving Reducer / Online Context Compact / Action Fusion）；dsh 自动投影（默认开、fail-open）；配对效率/能力地板 + release-gate 阈值；机制自动研究回路（held-out 隔离强制）；Cursor/Gemini/Codex hooks + opencode 插件 | ✅ |
 
 ## 下一阶段
 
