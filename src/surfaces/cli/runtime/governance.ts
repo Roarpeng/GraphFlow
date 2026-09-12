@@ -25,6 +25,11 @@ import { exportGraphArtifact, importGraphArtifact } from "../../../graph/artifac
 import {
   getContextFidelityStats,
 } from "../../../graph/token-savings";
+import {
+  evaluateEfficiencyFloor,
+  evaluateFidelityFloor,
+  getEfficiencyReport,
+} from "../../../learning/efficiency-report";
 import { getFlywheelReport } from "./graph";
 import { decryptJson, encryptJson } from "../../../security/secure-store";
 
@@ -191,6 +196,43 @@ export interface ReleaseGateOptions {
   minProvenSkills: number;
   minFidelitySamples: number;
   maxPendingRatio: number;
+  /** Paired-efficiency capability floor (SoL-Pi analog). All optional. */
+  minEfficiencyQualifying?: number;
+  /** Maximum allowed capability regressions in the paired report. Default 0 when the report exists. */
+  maxCapabilityRegressions?: number;
+  /** Minimum average anchor recall percent when fidelity samples exist. */
+  minAnchorRecallPercent?: number;
+  /** Minimum average body coverage percent when it was measured. */
+  minBodyCoveragePercent?: number;
+}
+
+/**
+ * Capability floor shared by both release-gate paths: paired efficiency (tokens
+ * improved while capability held) plus context-fidelity anchor recall and body
+ * coverage. Thresholds are opt-in, so existing gates keep their behaviour.
+ */
+function capabilityFloorChecks(
+  configPath: string | undefined,
+  thresholds: ReleaseGateOptions
+): { checks: Array<{ name: string; actual: number; required?: number; maximum?: number }>; failures: string[] } {
+  const config = resolveConfig(configPath);
+  const efficiency = evaluateEfficiencyFloor(getEfficiencyReport(config), {
+    ...(thresholds.minEfficiencyQualifying !== undefined
+      ? { minQualifying: thresholds.minEfficiencyQualifying }
+      : {}),
+    ...(thresholds.maxCapabilityRegressions !== undefined
+      ? { maxCapabilityRegressions: thresholds.maxCapabilityRegressions }
+      : {}),
+  });
+  const fidelity = evaluateFidelityFloor(getContextFidelityStats(config), {
+    ...(thresholds.minAnchorRecallPercent !== undefined
+      ? { minAnchorRecallPercent: thresholds.minAnchorRecallPercent }
+      : {}),
+    ...(thresholds.minBodyCoveragePercent !== undefined
+      ? { minBodyCoveragePercent: thresholds.minBodyCoveragePercent }
+      : {}),
+  });
+  return { checks: [...efficiency.checks, ...fidelity.checks], failures: [...efficiency.failures, ...fidelity.failures] };
 }
 
 export interface ReleaseGateState {
@@ -286,8 +328,15 @@ export function releaseGate(
       }
       return [];
     });
-    if (failures.length > 0) throw new Error(`release gates failed: ${failures.join("; ")}`);
-    return { report: getFlywheelReport(configPath), fidelity: getContextFidelityStats(resolveConfig(configPath)), checks, state: committed };
+    const floor = capabilityFloorChecks(configPath, thresholds);
+    const allFailures = [...failures, ...floor.failures];
+    if (allFailures.length > 0) throw new Error(`release gates failed: ${allFailures.join("; ")}`);
+    return {
+      report: getFlywheelReport(configPath),
+      fidelity: getContextFidelityStats(resolveConfig(configPath)),
+      checks: [...checks, ...floor.checks],
+      state: committed,
+    };
   }
   const report = getFlywheelReport(configPath);
   const config = resolveConfig(configPath);
@@ -310,6 +359,8 @@ export function releaseGate(
     }
     return [];
   });
-  if (failures.length > 0) throw new Error(`release gates failed: ${failures.join("; ")}`);
-  return { report, fidelity, checks };
+  const floor = capabilityFloorChecks(configPath, thresholds);
+  const allFailures = [...failures, ...floor.failures];
+  if (allFailures.length > 0) throw new Error(`release gates failed: ${allFailures.join("; ")}`);
+  return { report, fidelity, checks: [...checks, ...floor.checks] };
 }

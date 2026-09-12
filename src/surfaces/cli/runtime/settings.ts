@@ -8,7 +8,12 @@ import {
   hasOfficeIndex,
 } from "../../../config/include-extensions.js";
 import { formatApiKeyForConfig, formatApiKeyForSettings, resolveConfigSecret } from "../../../config/secrets";
-import { resolveConfig, resolveConfigPath, resolveWritableConfigPath } from "../../../config/resolve";
+import {
+  resolveConfig,
+  resolveConfigPath,
+  resolveEfficiencyPolicy,
+  resolveWritableConfigPath,
+} from "../../../config/resolve";
 import { resolveGlobalConfigPath } from "../../../config/scaffold";
 import { stripWorkspaceRootForGlobalPersist } from "../../../config/workspace-root";
 import type { GraphFlowConfig } from "../../../config/schema";
@@ -113,6 +118,15 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
     indexMarkdown: hasMarkdownIndex(config.graphPolicy.includeExtensions),
     indexOfficeDocs: hasOfficeIndex(config.graphPolicy.includeExtensions),
     embeddingProvider: config.graphPolicy.embeddingProvider ?? "fnv",
+    ...(() => {
+      const efficiency = resolveEfficiencyPolicy(config);
+      return {
+        observationsEnabled: efficiency.observations.enabled,
+        observationReduceEnabled: efficiency.observations.reduce.enabled,
+        contextPressureEnabled: efficiency.contextPressure.enabled,
+        actionFusionEnabled: efficiency.actionFusion.enabled,
+      };
+    })(),
   };
 }
 
@@ -133,6 +147,27 @@ export function saveGraphFlowSettings(
   if (economy.provider && economy.provider !== smart.provider) {
     mergeProviderConfig(providers, economy.provider, economy);
   }
+
+  const efficiency = resolveEfficiencyPolicy(current);
+  const efficiencyPolicy: NonNullable<GraphFlowConfig["efficiencyPolicy"]> = {
+    ...current.efficiencyPolicy,
+    observations: {
+      ...current.efficiencyPolicy?.observations,
+      enabled: settings.observationsEnabled ?? efficiency.observations.enabled,
+      reduce: {
+        ...current.efficiencyPolicy?.observations?.reduce,
+        enabled: settings.observationReduceEnabled ?? efficiency.observations.reduce.enabled,
+      },
+    },
+    contextPressure: {
+      ...current.efficiencyPolicy?.contextPressure,
+      enabled: settings.contextPressureEnabled ?? efficiency.contextPressure.enabled,
+    },
+    actionFusion: {
+      ...current.efficiencyPolicy?.actionFusion,
+      enabled: settings.actionFusionEnabled ?? efficiency.actionFusion.enabled,
+    },
+  };
 
   const updated = validateConfig({
     ...current,
@@ -182,6 +217,7 @@ export function saveGraphFlowSettings(
     learningPolicy: {
       ...current.learningPolicy,
     },
+    efficiencyPolicy,
   });
 
   const dir = dirname(actualPath);

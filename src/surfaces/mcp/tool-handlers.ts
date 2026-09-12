@@ -26,6 +26,15 @@ import { isDeviationKind } from "../../learning/episodic-memory";
 import type { McpServer } from "./server.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  packObservation,
+  recallObservation,
+  reduceObservation,
+} from "../../observations/index";
+import { discoverWorkspaceRoot } from "../../config/discover-workspace";
+import type { ObservedContextUsage } from "../../graph/context-pressure";
+import { resolveConfig, resolveEfficiencyPolicy, toObservationPolicy } from "../../config/resolve";
+import type { ObservationPolicy } from "../../observations/types";
 
 export interface ToolCall {
   name: string;
@@ -46,6 +55,33 @@ export interface ExecutionHooks {
 }
 
 export const MAX_STRING_FIELD_LENGTH = 100_000;
+
+function readNumberRange(value: unknown): [number, number] | undefined {
+  if (!Array.isArray(value) || value.length !== 2) return undefined;
+  const [start, end] = value;
+  return typeof start === "number" && typeof end === "number" ? [start, end] : undefined;
+}
+
+/**
+ * Parse the caller-supplied observed context window for GF-3. Returns undefined
+ * when no usable field is present — GraphFlow never fabricates pressure.
+ */
+function readObservedContextUsage(value: unknown): ObservedContextUsage | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  const num = (field: unknown): number | undefined =>
+    typeof field === "number" && Number.isFinite(field) ? field : undefined;
+  const usage: ObservedContextUsage = {};
+  const usedTokens = num(source.usedTokens);
+  const maxTokens = num(source.maxTokens);
+  const pressureRatio = num(source.pressureRatio);
+  const remainingTurnsEstimate = num(source.remainingTurnsEstimate);
+  if (usedTokens !== undefined) usage.usedTokens = usedTokens;
+  if (maxTokens !== undefined) usage.maxTokens = maxTokens;
+  if (pressureRatio !== undefined) usage.pressureRatio = pressureRatio;
+  if (remainingTurnsEstimate !== undefined) usage.remainingTurnsEstimate = remainingTurnsEstimate;
+  return Object.keys(usage).length > 0 ? usage : undefined;
+}
 
 export async function executeToolCall(
   call: ToolCall,
@@ -113,6 +149,62 @@ export async function executeToolCall(
       const query = readOptionalString(args.query);
       const anchorId = readOptionalString(args.anchorId);
       const assistantReply = readOptionalString(args.assistantReply);
+      const handle = readOptionalString(args.handle);
+      const content = readOptionalString(args.content);
+      if (handle || content) {
+        const rootDir =
+          readOptionalString(args.rootDir) ?? discoverWorkspaceRoot() ?? process.cwd();
+        // Observation policy (thresholds/TTL/redaction/reducer route) comes from
+        // efficiencyPolicy.observations. Resolution is fail-open: an unusable
+        // config leaves the store on its built-in defaults.
+        let basePolicy: ObservationPolicy | undefined;
+        try {
+          basePolicy = toObservationPolicy(
+            resolveEfficiencyPolicy(resolveConfig(readOptionalString(args.configPath), { rootDir }))
+          );
+        } catch {
+          basePolicy = undefined;
+        }
+        if (args.reduce === true) {
+          const maxReceiptTokens =
+            typeof args.maxReceiptTokens === "number" ? args.maxReceiptTokens : undefined;
+          const reducePolicy: ObservationPolicy | undefined =
+            maxReceiptTokens !== undefined
+              ? {
+                  ...(basePolicy ?? {}),
+                  reduce: { ...(basePolicy?.reduce ?? {}), maxReceiptTokens },
+                }
+              : basePolicy;
+          return structuredResponse(
+            await reduceObservation({
+              rootDir,
+              ...(handle ? { handle } : {}),
+              ...(content ? { content } : {}),
+              ...(reducePolicy !== undefined ? { policy: reducePolicy } : {}),
+            })
+          );
+        }
+        if (handle) {
+          const page = typeof args.page === "number" ? args.page : undefined;
+          const range = readNumberRange(args.range);
+          return structuredResponse(
+            await recallObservation({
+              rootDir,
+              handle,
+              ...(page !== undefined ? { page } : {}),
+              ...(range !== undefined ? { range } : {}),
+              ...(basePolicy !== undefined ? { policy: basePolicy } : {}),
+            })
+          );
+        }
+        return structuredResponse(
+          await packObservation({
+            rootDir,
+            content: content ?? "",
+            ...(basePolicy !== undefined ? { policy: basePolicy } : {}),
+          })
+        );
+      }
       if (anchorId && !query) {
         return structuredResponse(
           await expandAnchor(
@@ -139,7 +231,8 @@ export async function executeToolCall(
             readOptionalString(args.configPath),
             readOptionalString(args.rootDir),
             readOptionalString(args.englishQuery),
-            buildDialogueOptions(args)
+            buildDialogueOptions(args),
+            readObservedContextUsage(args.contextPressure)
           )
         );
       }
@@ -151,7 +244,8 @@ export async function executeToolCall(
             readOptionalString(args.configPath),
             readOptionalString(args.rootDir),
             readOptionalString(args.englishQuery),
-            buildDialogueOptions(args)
+            buildDialogueOptions(args),
+            readObservedContextUsage(args.contextPressure)
           )
         );
       }

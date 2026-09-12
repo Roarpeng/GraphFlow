@@ -22,6 +22,7 @@ import {
 } from "./agent-delegation.js";
 import { runSimpleTask } from "./state-machine.js";
 import { assignAgentsToTasks, buildAgentAssignments } from "./agent-assignment.js";
+import { buildFusedSteps, enrichExecutionDescriptor } from "./fused-descriptor.js";
 import {
   appendContextFeedback,
   maybeRunPlanInsightForComplex,
@@ -217,7 +218,7 @@ export async function resolvePlanPhase(params: {
   };
 }
 
-function buildExecutionDescriptor(params: {
+export function buildExecutionDescriptor(params: {
   task: string;
   planProjection: Array<{ id: string; description: string; dependencies: string[]; assignedAgent?: string }>;
   agentAssignments: ReturnType<typeof buildAgentAssignments>;
@@ -225,9 +226,11 @@ function buildExecutionDescriptor(params: {
   insightSummary?: string;
   retryHints: string[];
   delegatedExtras: Record<string, unknown>;
+  /** GF-4 / Action Fusion: attach fused edit+validate steps. Default false. */
+  enableActionFusion?: boolean;
 }): NonNullable<TaskRunResult["executionDescriptor"]> {
-  const { task, planProjection, agentAssignments, contextStr, insightSummary, retryHints, delegatedExtras } = params;
-  return {
+  const { task, planProjection, agentAssignments, contextStr, insightSummary, retryHints, delegatedExtras, enableActionFusion } = params;
+  const descriptor = {
     action: "execute",
     task,
     context: `plan=${JSON.stringify(planProjection)}${insightSummary ? `; insight=${insightSummary}` : ""}${contextStr ? `; ${contextStr}` : ""}`,
@@ -235,6 +238,21 @@ function buildExecutionDescriptor(params: {
     ...(agentAssignments.length > 0 ? { agentAssignments } : {}),
     ...delegatedExtras,
   } as NonNullable<TaskRunResult["executionDescriptor"]>;
+
+  // GF-4 / Action Fusion: an edit immediately followed by its validation command
+  // is one intent. Attach the fused steps so the external agent can execute them
+  // in a single action; no steps means no behavioural claim, so leave it unchanged.
+  if (!enableActionFusion) return descriptor;
+  const steps = buildFusedSteps({
+    task,
+    planNodes: planProjection.map((node) => ({
+      id: node.id,
+      description: node.description,
+      dependencies: node.dependencies,
+    })),
+  });
+  if (steps.length === 0) return descriptor;
+  return enrichExecutionDescriptor(descriptor, steps);
 }
 
 /**
@@ -311,6 +329,7 @@ export async function runBridgePhase(
         ...(insightSummary ? { insightSummary } : {}),
         retryHints: dagResult.failed.length > 0 ? dagResult.failed.map((id) => `local-exec-failed:${id}`) : [],
         delegatedExtras,
+        enableActionFusion: effectiveOptions?.enableActionFusion === true,
       }),
       localExecution: {
         completed: dagResult.completed,
@@ -351,6 +370,7 @@ export async function runBridgePhase(
       ...(insightSummary ? { insightSummary } : {}),
       retryHints: [],
       delegatedExtras,
+      enableActionFusion: effectiveOptions?.enableActionFusion === true,
     }),
   };
   const finalRun = appendContextFeedback(bridgeRun, contextPackage, promptContextLines, effectiveOptions);

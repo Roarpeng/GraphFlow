@@ -13,6 +13,78 @@ export interface ProviderConfig {
   enableTools?: boolean;
 }
 
+/**
+ * SoL-Pi-style efficiency mechanisms (see docs: "efficiency for efficiency").
+ *
+ * The default is the best configuration (every mechanism ON). A user can
+ * switch any mechanism off from the graphflow-settings page, or set an explicit
+ * false here. These flags govern config-driven/automatic
+ * behaviour only — an explicit API call (e.g. graphflow_context with
+ * content/handle, or graphflow_run receiving an executionDescriptor) is
+ * explicit intent and still operates when the flag is off.
+ */
+export interface ObservationReducerConfig {
+  /** Enable reduction to a bounded receipt. Default false. */
+  enabled?: boolean;
+  /**
+   * "fingerprint" (local, deterministic, default) or "llm" (delegate reading
+   * to a cheap model). "llm" requires provider + model; without them the
+   * resolver downgrades to "fingerprint".
+   */
+  strategy?: "fingerprint" | "llm";
+  /** Token cap for the verified receipt. Default 400. */
+  maxReceiptTokens?: number;
+  /** Refuse to reduce a source larger than this (bytes). Default 2 MiB. */
+  maxSourceBytes?: number;
+  /** Remote reducer provider namespace. Required when strategy is "llm". */
+  provider?: string;
+  /** Remote reducer model id. Required when strategy is "llm". */
+  model?: string;
+}
+
+export interface ObservationEfficiencyConfig {
+  /** Archive oversized outputs behind a handle. Default false. */
+  enabled?: boolean;
+  /** Outputs at or below this size are returned inline (bytes). Default 8192. */
+  inlineThresholdBytes?: number;
+  /** Head excerpt budget of a packed observation (bytes). Default 2048. */
+  headBytes?: number;
+  /** Tail excerpt budget of a packed observation (bytes). Default 1536. */
+  tailBytes?: number;
+  /** Store cap; oldest entries evict first (bytes). Default 256 MiB. */
+  maxStoreBytes?: number;
+  /** Lazy TTL for archived blobs (days). Default 14. */
+  ttlDays?: number;
+  /** Redact secrets before writing to disk. Default true. */
+  redactOnStore?: boolean;
+  reduce?: ObservationReducerConfig;
+}
+
+export interface ContextPressureEfficiencyConfig {
+  /** Enable observed-pressure budget + compaction signal. Default false. */
+  enabled?: boolean;
+  /**
+   * "auto" (default when enabled) scales graphPolicy.maxContextTokens by the
+   * observed window pressure supplied by the caller; a number pins the budget.
+   */
+  maxContextTokens?: number | "auto";
+  /** Cache write/read cost ratio for the compaction economic check. Default 12.5. */
+  cacheWriteReadRatio?: number;
+  /** Minimum projected-saving ratio required to recommend compaction. Default 0.2. */
+  minSavingRatio?: number;
+}
+
+export interface ActionFusionEfficiencyConfig {
+  /** Attach fused edit+validate steps to executionDescriptors. Default false. */
+  enabled?: boolean;
+}
+
+export interface EfficiencyPolicyConfig {
+  observations?: ObservationEfficiencyConfig;
+  contextPressure?: ContextPressureEfficiencyConfig;
+  actionFusion?: ActionFusionEfficiencyConfig;
+}
+
 export interface GraphFlowConfig {
   providers: Record<string, ProviderConfig>;
   tiers: {
@@ -124,4 +196,9 @@ export interface GraphFlowConfig {
     /** Opt in to vector recall across all graph nodes with embeddings. Default false. */
     enableFullGraphVectorRecall?: boolean;
   };
+  /**
+   * SoL-Pi-style efficiency mechanisms. Omitted sections leave their mechanism
+   * disabled; see {@link EfficiencyPolicyConfig}.
+   */
+  efficiencyPolicy?: EfficiencyPolicyConfig;
 }

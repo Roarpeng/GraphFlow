@@ -2,6 +2,32 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **统一效率机制开关 efficiencyPolicy（SoL-Pi 借鉴，P0 收口）**：新增顶层配置 efficiencyPolicy.{observations,contextPressure,actionFusion}，**默认全开（最佳配置）**；可在 graphflow-settings 页逐项关闭，或在此显式设 false。解析集中在纯函数 src/config/resolve.ts 的 resolveEfficiencyPolicy；数值非法回退安全默认，reduce.strategy="llm" 缺 provider+model 时降级为 fingerprint。显式调用（graphflow_context 传 content/handle、reduce:true）属于明确意图，不受开关限制。
+- **GF-3 观测压力预算 + 压缩建议（Online Context Compact analog）**：graphflow_context 新增 contextPressure 入参（usedTokens/maxTokens/pressureRatio/remainingTurnsEstimate）。启用后打包预算由 deriveAdaptiveBudget("auto", observed) 决定（回退默认预算，绝不编造压力），结果新增 contextPressure 块：effectiveMaxContextTokens + 可选 compaction 经济性建议（cacheWriteReadRatio 默认 12.5，minSavingRatio 默认 0.2）。启用时绕过 context 缓存，避免跨压力复用陈旧预算。
+- **GF-4 融合动作步骤（Action Fusion analog）**：graphflow_run bridge 模式的 executionDescriptor 新增 steps（fused: true）——plan 中 edit/write 紧跟的 run/test/validate 节点合并为一个动作单元（含 command 与 dependsOn），供宿主在一次调用内执行；执行权仍归宿主，GraphFlow 只做计划与证据。
+- **GF-2 观测句柄策略来自配置**：graphflow_context 的 pack/recall/reduce 现按 efficiencyPolicy.observations 解析阈值、head/tail、TTL、脱敏与 reducer 路由（解析失败 fail-open 到内置默认）。SKILL.md 新增 Workflow 8，写明「归档大输出 → 保留 handle → 按页/区间精确召回 → reduce 出逐字核验收据」协议。
+
+- **P1 配对效率报告 + 能力地板（SoL-Pi capability floor）**：新增 src/learning/efficiency-report.ts，按「基线臂 vs 打包臂」记录同一任务的 tokens/turns/toolCalls/responseCount/score 配对对比，落盘 graphflow-out/efficiency.json。token 未改善、或分数/响应数劣化超容差即判不合格——response-count 臂专门证明节省不是「少干活」。提供 evaluateEfficiencyFloor / evaluateFidelityFloor 供治理门禁使用。
+- **P2 机制自动研究回路（SoL-Pi auto-research 方法论）**：新增 src/learning/mechanism-research.ts，把「候选机制」作为节点（mechanism:<slug>）走 proposed → in-trajectory → frozen → held-out → admitted|rejected。三条规则代码强制：准入必须有合格的 held-out 试验；冻结后不再接受 in-trajectory 试验（held-out 隔离）；终态不再接受试验。新增 graphflow mechanism propose|trial|freeze|admit|reject|list CLI，并在 graphflow diagnose 暴露 mechanisms 汇总。
+- **P1 工具结果投影（自动省 context）落地 dsh**：dsh 具备 surface-replace 原语（与原生 dsh-compaction-tool-result-pruner 同一 API），dsh/plugin.mjs 新增观察投影：在 session/event 的 tool/result 上先把原文归档到观察库（新增 CLI `graphflow observe pack|recall`），再用 handle 投影替换模型可见的表面节点（保留首尾 + 召回指令），并带 surfaceOp replace + sourceEventSeqs。默认开启（GRAPHFLOW_D_DSH_PROJECTION=0 关闭），全程 fail-open（禁用/低于阈值/打包失败/表面 API 缺失/append 抛错都退回原文）。与原生 pruner 的本质差别：原文精确可召回且逐字核验，而不是有损 marker。src/observations/host-hook.ts 的 projectToolResult 为进程内宿主的同一契约；HOSTS_WITH_TOOL_RESULT_PROJECTION 现为 ["deepseek-harness"]。其余宿主（opencode/Cursor/Codex/Gemini）暂无结果重写面，继续走 SKILL.md 显式 handle 协议。
+
+### Fixed
+
+- **toContextPressure 不再伪造 token**：仅提供 maxTokens（或仅 usedTokens）时此前会以默认 0 补齐并得出可用的压力比；现在要求「显式 ratio」或「used+max 双双有限且 max>0」，否则返回 undefined。
+- **远端 reducer 路由不得静默降级**：reduceObservation 在 strategy="llm" 且未传入 reducer 时返回 reducer-route-missing 的 fail-open 摘录，而不是悄悄退回本地 fingerprint 选择器；配置解析层同时把缺 provider/model 的 llm 策略降级为 fingerprint。
+
+### Changed
+
+- **governance release-gate 新增能力地板阈值**（均可选，保持向后兼容）：--min-efficiency-qualifying、--max-capability-regressions（默认 0）、--min-anchor-recall-percent、--min-body-coverage-percent。锚点召回/正文覆盖仅在存在样本时检查。
+
+### Documentation
+
+- 新增 docs/efficiency-mechanisms.md：SoL-Pi 借鉴的配置、四机制映射、效率/能力地板、机制自动研究 CLI、投影边界，以及「不要做」的负面清单。
+
 ## [1.17.1] - 2026-09-10
 
 ### Fixed

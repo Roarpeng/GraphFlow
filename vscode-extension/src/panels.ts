@@ -908,6 +908,10 @@ export function buildSettingsHtml(
   const indexMarkdown = settings.indexMarkdown !== false;
   const indexOfficeDocs = settings.indexOfficeDocs !== false;
   const embeddingProvider = settings.embeddingProvider === "transformers" ? "transformers" : "fnv";
+  const observationsEnabled = settings.observationsEnabled !== false;
+  const observationReduceEnabled = settings.observationReduceEnabled !== false;
+  const contextPressureEnabled = settings.contextPressureEnabled !== false;
+  const actionFusionEnabled = settings.actionFusionEnabled !== false;
   const anydocReady = Boolean(status?.anydocReady);
   const anydocLabel = anydocReady
     ? `就绪${status?.anydocVersion ? ` ${escapeHtml(status.anydocVersion)}` : ""}`
@@ -1039,6 +1043,17 @@ export function buildSettingsHtml(
           <label>L2 Anchors <input id="settings-layer-l2" name="l2" type="number" min="0" value="${settings.layerQuota.l2}" /></label>
           <label>L3 Anchors <input id="settings-layer-l3" name="l3" type="number" min="0" value="${settings.layerQuota.l3}" /></label>
         </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>效率机制（SoL-Pi）</h2>
+      <p class="flow-hint" style="margin-bottom: 10px;">默认全开（最佳配置）。逐项关闭即可。</p>
+      <div class="checks">
+        <label><input id="settings-observations-enabled" name="observationsEnabled" type="checkbox" ${observationsEnabled ? "checked" : ""} /> 大输出归档为句柄（ObservationPack）</label>
+        <label><input id="settings-observation-reduce" name="observationReduceEnabled" type="checkbox" ${observationReduceEnabled ? "checked" : ""} /> 日志压缩为可核验收据（Evidence-Preserving Reducer）</label>
+        <label><input id="settings-context-pressure" name="contextPressureEnabled" type="checkbox" ${contextPressureEnabled ? "checked" : ""} /> 按观测压力自适应预算 + 压缩建议（Online Context Compact）</label>
+        <label><input id="settings-action-fusion" name="actionFusionEnabled" type="checkbox" ${actionFusionEnabled ? "checked" : ""} /> 融合「编辑 + 验证」为一步（Action Fusion）</label>
       </div>
     </section>
 

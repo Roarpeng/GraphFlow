@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isUnsafeWorkspaceFallback } from "../../../config/discover-workspace.js";
-import { resolveConfig } from "../../../config/resolve";
+import { resolveConfig, resolveEfficiencyPolicy, type ResolvedContextPressurePolicy } from "../../../config/resolve";
 import { resolveGraphStorePath } from "../../../config/paths";
 import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
 import type { GraphEdge, GraphNode } from "../../../core/types";
@@ -10,6 +10,13 @@ import { GraphifyMcpClient } from "../../../graph/graphify-mcp-client";
 import {
   createContextRefillManager,
 } from "../../../graph/context-slicer";
+import {
+  buildCompactionSignal,
+  deriveAdaptiveBudget,
+  toContextPressure,
+  type ContextPressure,
+  type ObservedContextUsage,
+} from "../../../graph/context-pressure";
 import { indexWorkspaceFiles, clearGraphIndexArtifacts, hasPendingGraphIndexWork, indexSingleFile } from "../../../graph/file-indexer";
 import { GraphFileWatcher } from "../../../graph/file-watcher.js";
 import { extractNodeSourcePath } from "../../../graph/graph-utils";
@@ -224,21 +231,89 @@ export function withPostPackageAccounting(
   };
 }
 
+/**
+ * Build the opt-in context-pressure block (SoL-Pi "Online Context Compact"
+ * analog). GraphFlow cannot call the host's compaction API, so this is an
+ * advisory signal plus the effective budget actually used for packaging.
+ * `compaction` is emitted only when the caller supplies prefix tokens and a
+ * remaining-turn estimate — GraphFlow never fabricates either.
+ */
+function buildContextPressureBlock(params: {
+  policy: ResolvedContextPressurePolicy;
+  usage?: ObservedContextUsage;
+  pressure?: ContextPressure;
+  effectiveMaxTokens: number;
+  query: string;
+}): NonNullable<ContextPreviewResult["contextPressure"]> {
+  const { policy, usage, pressure, effectiveMaxTokens, query } = params;
+  const block: NonNullable<ContextPreviewResult["contextPressure"]> = {
+    enabled: true,
+    budgetMode: policy.maxContextTokens === "auto" ? "auto" : "fixed",
+    effectiveMaxContextTokens: effectiveMaxTokens,
+  };
+  if (!pressure) return block;
+
+  block.usedTokens = pressure.usedTokens;
+  block.maxTokens = pressure.maxTokens;
+  block.pressureRatio = pressure.pressureRatio;
+
+  const remaining = usage?.remainingTurnsEstimate;
+  if (pressure.usedTokens > 0 && typeof remaining === "number" && Number.isFinite(remaining) && remaining >= 0) {
+    block.compaction = buildCompactionSignal({
+      boundaryLabel: `context preview: ${query.slice(0, 120)}`,
+      continuationContext: query,
+      prefixTokens: pressure.usedTokens,
+      remainingTurnsEstimate: remaining,
+      cacheWriteReadRatio: policy.cacheWriteReadRatio,
+      windowPressure: pressure.pressureRatio,
+      minSavingRatio: policy.minSavingRatio,
+    });
+  }
+  return block;
+}
+
 export async function previewContext(
   query: string,
   configPath?: string,
   rootDir?: string,
   englishQuery?: string,
-  dialogue?: PreviewDialogueOptions
+  dialogue?: PreviewDialogueOptions,
+  contextPressure?: ObservedContextUsage
 ): Promise<ContextPreviewResult> {
   const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath, rootDir ? { rootDir } : undefined), rootDir ? { rootDir } : undefined);
   const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
 
+  // GF-3 / Online Context Compact: observed-pressure budget + compaction signal.
+  // Disabled by default; when enabled, observed pressure overrides the global cap.
+  const pressurePolicy = resolveEfficiencyPolicy(config).contextPressure;
+  const observedPressure = pressurePolicy.enabled ? toContextPressure(contextPressure) : undefined;
+  const effectiveMaxTokens = pressurePolicy.enabled
+    ? deriveAdaptiveBudget({
+        configuredMax: pressurePolicy.maxContextTokens,
+        defaultMax: config.graphPolicy.maxContextTokens,
+        ...(observedPressure ? { observed: observedPressure } : {}),
+      })
+    : config.graphPolicy.maxContextTokens;
+  const pressureBlock = pressurePolicy.enabled
+    ? buildContextPressureBlock({
+        policy: pressurePolicy,
+        ...(contextPressure ? { usage: contextPressure } : {}),
+        ...(observedPressure ? { pressure: observedPressure } : {}),
+        effectiveMaxTokens,
+        query,
+      })
+    : undefined;
+
   const { getCachedContext, cacheContextResult } = await import("../../../graph/context-cache.js");
-  const cached = getCachedContext(query, workspaceRoot);
+  // Observed pressure is per-call, so a cached package under a different budget
+  // would be stale. Bypass the cache only when an observation actually changes
+  // the budget; without one the effective budget is the configured default.
+  const bypassCache = pressurePolicy.enabled && observedPressure !== undefined;
+  const cached = bypassCache ? undefined : getCachedContext(query, workspaceRoot);
   const graphClient = createGraphClient(config);
   if (cached) {
-    return attachWorkbenchThenDialogue(cached, graphClient, config, query, dialogue);
+    const attached = await attachWorkbenchThenDialogue(cached, graphClient, config, query, dialogue);
+    return pressureBlock ? { ...attached, contextPressure: pressureBlock } : attached;
   }
 
   if (config.graphPolicy.autoIndexOnPreview) {
@@ -280,7 +355,9 @@ export async function previewContext(
   const enableAdaptiveBudget =
     compressionPolicy?.enableAdaptiveBudget !== false &&
     (compressionPolicy?.enableAdaptiveBudget === true || taskMode === "complex");
-  if (enableAdaptiveBudget) {
+  // Observed-pressure budgeting (GF-3) owns the budget when enabled, so the
+  // complexity-based taskMode estimate must not overwrite it.
+  if (enableAdaptiveBudget && !pressurePolicy.enabled) {
     packageOptions.taskMode = taskMode;
   }
 
@@ -292,13 +369,13 @@ export async function previewContext(
     graphClient,
     query,
     query,
-    config.graphPolicy.maxContextTokens,
+    effectiveMaxTokens,
     packageOptions
   );
 
   const refill = createContextRefillManager(
     graphClient,
-    config.graphPolicy.maxContextTokens,
+    effectiveMaxTokens,
     packageOptions
   );
   await refill.initialPackage(query);
@@ -338,16 +415,18 @@ export async function previewContext(
     summary: pkg.summaryChannel,
     anchors: pkg.anchorChannel,
     tokenBudget: {
-      maxContextTokens: config.graphPolicy.maxContextTokens,
+      maxContextTokens: effectiveMaxTokens,
       estimatedRawTokens: rawTokenEstimate,
       compressedTokens: pkg.tokenEstimate,
       estimatedSavingsPercent: calculateSavingsPercent(rawTokenEstimate, pkg.tokenEstimate),
-      budgetUsedPercent: calculateBudgetUsedPercent(pkg.tokenEstimate, config.graphPolicy.maxContextTokens),
+      budgetUsedPercent: calculateBudgetUsedPercent(pkg.tokenEstimate, effectiveMaxTokens),
     },
     ...(queryTranslationDelegation ?? {}),
   };
 
-  cacheContextResult(query, workspaceRoot, result);
+  if (!bypassCache) {
+    cacheContextResult(query, workspaceRoot, result);
+  }
 
   const attached = await attachWorkbenchThenDialogue(result, graphClient, config, query, dialogue);
 
@@ -369,7 +448,7 @@ export async function previewContext(
     // Savings tracking is best-effort; don't fail the preview if it errors
   }
 
-  return attached;
+  return pressureBlock ? { ...attached, contextPressure: pressureBlock } : attached;
 }
 
 async function attachWorkbenchThenDialogue(

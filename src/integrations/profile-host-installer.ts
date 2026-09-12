@@ -38,6 +38,27 @@ import {
   removeSkillFromTargets,
   type SkillInstallResult,
 } from "./skill-installer";
+import {
+  getOpenCodePluginStatus,
+  installOpenCodePlugin,
+  uninstallOpenCodePlugin,
+} from "./opencode-plugin";
+import {
+  getGeminiHooksForHostStatus,
+  installGeminiHooksForHost,
+  uninstallGeminiHooksForHost,
+} from "./gemini-hooks";
+import {
+  getCodexHooksForHostStatus,
+  installCodexHooksForHost,
+  uninstallCodexHooksForHost,
+} from "./codex-hooks";
+
+export interface ProfileHostExtraInstaller {
+  install: (options: { home?: string }) => { status: string; filePath?: string; message?: string };
+  uninstall: (options: { home?: string }) => { status: string; filePath?: string; message?: string };
+  status: (options: { home?: string }) => { detected: boolean; installed: boolean; path?: string };
+}
 
 export interface ProfileHostSpec {
   /**
@@ -50,6 +71,8 @@ export interface ProfileHostSpec {
   skillTargets?: readonly string[];
   /** `getAgentInstructionTargets().agent` names owned by this host. */
   instructionTargets?: readonly string[];
+  /** Optional host-specific extra install (plugin file or native hook config). */
+  extra?: ProfileHostExtraInstaller;
 }
 
 /**
@@ -74,18 +97,39 @@ export const PROFILE_HOST_SPECS: Readonly<Record<string, ProfileHostSpec>> = {
     instructionTargets: ["Kilo Code"],
   },
   pearai: { profileIds: ["pearai"] },
-  gemini: { profileIds: ["gemini", "gemini-windows"], instructionTargets: ["Gemini"] },
+  gemini: {
+    profileIds: ["gemini", "gemini-windows"],
+    instructionTargets: ["Gemini"],
+    extra: {
+      install: installGeminiHooksForHost,
+      uninstall: uninstallGeminiHooksForHost,
+      status: getGeminiHooksForHostStatus,
+    },
+  },
   codex: {
     profileIds: ["codex", "codex-windows"],
     skillTargets: ["Codex", "Codex (agents)"],
     instructionTargets: ["Codex"],
+    extra: {
+      install: installCodexHooksForHost,
+      uninstall: uninstallCodexHooksForHost,
+      status: getCodexHooksForHostStatus,
+    },
   },
   antigravity: { profileIds: ["antigravity"], skillTargets: ["Antigravity"] },
   "amazon-q": { profileIds: ["amazon-q"] },
   zed: { profileIds: ["zed"] },
   continue: { profileIds: ["continue"] },
   qoder: { profileIds: ["qoder"], skillTargets: ["Qoder", "Qoder CN"] },
-  opencode: { profileIds: ["opencode"], instructionTargets: ["Opencode"] },
+  opencode: {
+    profileIds: ["opencode"],
+    instructionTargets: ["Opencode"],
+    extra: {
+      install: installOpenCodePlugin,
+      uninstall: uninstallOpenCodePlugin,
+      status: getOpenCodePluginStatus,
+    },
+  },
 };
 
 export const PROFILE_HOST_IDS = Object.keys(PROFILE_HOST_SPECS);
@@ -113,9 +157,11 @@ export interface ProfileHostStatus {
   mcpInstalled: boolean;
   skillInstalled?: boolean;
   rulesInstalled?: boolean;
+  extraInstalled?: boolean;
   mcpPath?: string;
   skillPath?: string;
   rulesPath?: string;
+  extraPath?: string;
   mcpTargets: ProfileHostMcpTarget[];
 }
 
@@ -216,8 +262,10 @@ export function installProfileHost(
   const instructions = spec.instructionTargets
     ? skillParts(installInstructionsToTargets(spec.instructionTargets))
     : [];
+  const extra =
+    spec.extra && spec.extra.status(options).detected ? spec.extra.install(options) : undefined;
 
-  const parts = [...mcpParts(mcp), ...skills, ...instructions];
+  const parts = [...mcpParts(mcp), ...skills, ...instructions, ...(extra ? [extra] : [])];
   if (parts.length === 0) {
     return { status: "skipped", message: `${hostId} has no MCP target on this machine` };
   }
@@ -238,8 +286,9 @@ export function uninstallProfileHost(
   const instructions = spec.instructionTargets
     ? skillParts(removeInstructionsFromTargets(spec.instructionTargets))
     : [];
+  const extra = spec.extra ? spec.extra.uninstall(_options) : undefined;
 
-  const parts = [...mcpRemoveParts(mcp), ...skills, ...instructions];
+  const parts = [...mcpRemoveParts(mcp), ...skills, ...instructions, ...(extra ? [extra] : [])];
   const status = rollupStatus(parts);
   if (status === "skipped") {
     return { status: "skipped", message: "no GraphFlow files for this host" };
@@ -300,6 +349,12 @@ export function getProfileHostStatus(
   }
   if (skillInstalled !== undefined) status.skillInstalled = skillInstalled;
   if (rulesInstalled !== undefined) status.rulesInstalled = rulesInstalled;
+
+  if (spec.extra) {
+    const extra = spec.extra.status(_options);
+    status.extraInstalled = extra.installed;
+    if (extra.path !== undefined) status.extraPath = extra.path;
+  }
 
   return status;
 }

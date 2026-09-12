@@ -27,6 +27,9 @@ runs.json
 .vscode/mcp.json
 vscode-extension/vendor/
 .joycode/
+# Local agent/harness scratch (not project content)
+.omo/
+PearAI/
 tsc_output.txt
 .gemini/
 .codex/

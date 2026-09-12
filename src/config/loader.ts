@@ -105,6 +105,14 @@ export function validateConfigDetailed(path = "graphflow.config.json"): ConfigVa
     }
   }
 
+  const efficiency = inspectEfficiencyPolicy(parsed.efficiencyPolicy);
+  for (const message of efficiency.errors) {
+    issues.push({ severity: "error", field: "efficiencyPolicy", message });
+  }
+  for (const message of efficiency.warnings) {
+    issues.push({ severity: "warning", field: "efficiencyPolicy", message });
+  }
+
   // Check provider API keys
   for (const [name, cfg] of Object.entries(parsed.providers ?? {})) {
     if (!cfg.apiKey && !cfg.baseUrl) {
@@ -197,7 +205,58 @@ function resolveEnvTemplates(value: unknown): unknown {
   return value;
 }
 
+interface EfficiencyIssues {
+  errors: string[];
+  warnings: string[];
+}
+
+/**
+ * Shared efficiency-policy validation used by both the throwing loader and the
+ * detailed reporter. Numeric range violations are errors; a remote ("llm")
+ * reducer without an explicit provider+model is reported too (the resolver
+ * downgrades it to "fingerprint", so it is a warning at runtime).
+ */
+function inspectEfficiencyPolicy(policy: GraphFlowConfig["efficiencyPolicy"]): EfficiencyIssues {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (!policy) return { errors, warnings };
+
+  const cp = policy.contextPressure;
+  if (cp) {
+    if (cp.maxContextTokens !== undefined && cp.maxContextTokens !== "auto") {
+      if (typeof cp.maxContextTokens !== "number" || !Number.isFinite(cp.maxContextTokens) || cp.maxContextTokens <= 0) {
+        errors.push('efficiencyPolicy.contextPressure.maxContextTokens must be a positive number or "auto"');
+      }
+    }
+    if (cp.cacheWriteReadRatio !== undefined && (!Number.isFinite(cp.cacheWriteReadRatio) || cp.cacheWriteReadRatio < 0)) {
+      errors.push("efficiencyPolicy.contextPressure.cacheWriteReadRatio must be a finite non-negative number");
+    }
+    if (cp.minSavingRatio !== undefined && (!Number.isFinite(cp.minSavingRatio) || cp.minSavingRatio < 0 || cp.minSavingRatio > 1)) {
+      errors.push("efficiencyPolicy.contextPressure.minSavingRatio must be within [0, 1]");
+    }
+  }
+
+  const red = policy.observations?.reduce;
+  if (red) {
+    if (red.strategy !== undefined && red.strategy !== "fingerprint" && red.strategy !== "llm") {
+      errors.push('efficiencyPolicy.observations.reduce.strategy must be "fingerprint" or "llm"');
+    }
+    if (red.strategy === "llm" && (!red.provider || !red.model)) {
+      warnings.push(
+        'efficiencyPolicy.observations.reduce.strategy "llm" without provider+model; falling back to "fingerprint"'
+      );
+    }
+  }
+
+  return { errors, warnings };
+}
+
 export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
+  const efficiency = inspectEfficiencyPolicy(input.efficiencyPolicy);
+  if (efficiency.errors.length > 0) {
+    throw new Error(`Invalid config: ${efficiency.errors.join("; ")}.`);
+  }
+
   if (!input.tiers?.smart?.provider || !input.tiers?.economy?.provider) {
     throw new Error("Invalid config: tiers.smart and tiers.economy are required.");
   }

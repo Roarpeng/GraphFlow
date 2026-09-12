@@ -73,6 +73,19 @@ export interface TaskRunResult {
     insightSummary?: string;
     /** 多 Agent 协作编排：每个任务节点建议的 agent 专业领域映射 */
     agentAssignments?: Array<{ taskId: string; specialty: AgentSpecialty }>;
+    /**
+     * GF-4 / Action Fusion (opt-in): fused steps where an edit and its
+     * immediately following validation command collapse into one action.
+     */
+    steps?: Array<{
+      id: string;
+      action: "edit" | "run" | "validate";
+      target?: string;
+      command?: string;
+      dependsOn?: string[];
+    }>;
+    /** True when {@link steps} carries at least one fused edit+validate unit. */
+    fused?: boolean;
   };
   /** Bridge+DAG 混合模式：本地 DAG 执行结果摘要 */
   localExecution?: {
@@ -146,6 +159,8 @@ export interface OrchestrateOptions {
   enableGraphCompression?: boolean;
   /** Adaptively size the context token budget from task complexity. Auto-enabled for complex tasks unless false. */
   enableAdaptiveBudget?: boolean;
+  /** GF-4 / Action Fusion: attach fused edit+validate steps to the executionDescriptor. Default false. */
+  enableActionFusion?: boolean;
   /** Return module-level RepoMap overview when budget is tight. Default false. */
   enableRepoMapFallback?: boolean;
   /** Run Six Hats plan_insight before complex DAG planning. Default true for complex tasks. */
