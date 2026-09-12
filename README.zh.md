@@ -2,13 +2,13 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.17.1-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.18.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（对现实 top-K 文件读取口径 **95.6%**，见[双基线](benchmarks/RESULTS.md)） · 跨会话学习飞轮。
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
-**v1.17.1** 已发：团队共享记忆 MVP（`graphflow team serve` + RBAC）、**全部 19 个宿主的 install / uninstall / doctor 统一走 HostAdapter**（4 个手写切片 + 通用 profile 切片）、飞轮公开复现（`npm run proof:flywheel`）、Serena 双 MCP 指南，以及 R4 `context-package-core` 与 `runOrchestration` 拆分。v1.14 把对话图做成一等资产（时间边、召回、fork/回放）。v1.12–v1.13 的 fidelity / 治理平面仍在。
+**v1.18.0** 已发：借鉴 NVIDIA SoL-Pi 新增**四大效率机制**（默认全开，可在 **GraphFlow: Settings** 逐项关闭）——大输出归档为句柄（ObservationPack）、日志压缩为**逐字核验**收据（Evidence-Preserving Reducer）、按观测压力自适应预算 + 压缩建议（Online Context Compact）、编辑+验证融合（Action Fusion）；dsh 侧在模型表面**自动投影**大工具结果（默认开，`GRAPHFLOW_D_DSH_PROJECTION=0` 关）。治理面新增**配对效率/能力地板门禁**与**机制自动研究回路**（`graphflow mechanism`，held-out 隔离强制）。同时收口宿主 hooks（Cursor / Gemini / Codex 原生 hooks + opencode 插件）与 HostAdapter doctor。
 
 ## 快速开始
 
@@ -34,7 +34,7 @@ MCP 入口：
 
 Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `graphflow_plan`。没有 LLM API Key 时会桥接到宿主 Agent（agent-delegated）。需要符号级精确编辑时，把 Serena 作为第二个 MCP server 并列挂载——见 [GraphFlow + Serena 联合方案](docs/graphflow-serena.zh.md)（配置示例：[`examples/graphflow-serena.mcp.json`](examples/graphflow-serena.mcp.json)）。
 
-## 本版要点（v1.17）
+## 本版要点（v1.18）
 
 | 能力 | 说明 |
 | --- | --- |

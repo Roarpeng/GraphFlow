@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-[![npm version](https://img.shields.io/badge/npm-1.17.1-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.18.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **The memory & context harness for coding agents.** Local-first code knowledge graph · bounded context compression (95.6% vs a realistic top-K-files read; see [both baseline arms](benchmarks/RESULTS.md)) · cross-session learning flywheel.
 
@@ -86,7 +86,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 
 > The differentiator is the **learning flywheel**: graph indexing and token compression are replicable; project-private experience (skills, lessons, decisions) accumulated across sessions is not — it compounds with use. Serena is a complement, not a competitor — see [GraphFlow + Serena: better together](docs/graphflow-serena.md) ([中文](docs/graphflow-serena.zh.md); [comparison](docs/comparison.md)).
 
-## Core capabilities (v1.17+)
+## Core capabilities (v1.18+)
 
 | Module | Capability |
 | --- | --- |
