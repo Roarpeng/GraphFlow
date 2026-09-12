@@ -91,10 +91,12 @@ cd 工作区 && graphflow graph index . && graphflow dialogue list --json
 | 重启后没有 `mcp__graphflow__*` 工具 | 确认 profile `package.json` 的 `dsh.profile.bundles` 含 `@roarpeng/graphflow`；`dsh plugin --profile web list`；重启 harness |
 | 面板空白/加载失败 | 确认工作区已 `graphflow graph index .`（无图则无节点）；点"刷新"；检查会话 cwd 是否正确 |
 | 不想自动记录 | 环境变量 `GRAPHFLOW_AUTO_CAPTURE=0` |
+| 不想自动投影大工具结果 | 环境变量 `GRAPHFLOW_D_DSH_PROJECTION=0`（默认开：把超阈值 `tool/result` 归档为句柄并替换模型可见内容，fail-open） |
 | 卸载 | `dsh plugin --profile web remove @roarpeng/graphflow` 后重启 |
 
 ## 相关文档
 
 - `web/README.md`：知识节点栏实现说明与静态打包路线
-- `ROADMAP.md`：进化方向（R0-R4）
+- `ROADMAP.md`：进化方向（R0-R6）
+- [efficiency-mechanisms.md](efficiency-mechanisms.md)：四机制、效率/能力门禁、机制自动研究回路
 - `plugin.json`：dsh 插件清单（能力/安装/用法）
