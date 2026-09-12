@@ -20,6 +20,10 @@ Before broad code exploration, implementation, debugging, review, planning, or a
 
 Do not scan the whole repository, recursively inspect many files, or read large files before trying GraphFlow context.
 
+## Workspace root (`rootDir`)
+
+Pass `rootDir` = the absolute path of the project you are working in. **Never** pass your home directory, AppData, or an unexpanded `${workspaceFolder}` placeholder — GraphFlow refuses unsafe workspace roots and the call fails. If a tool answers `unsafe workspace root`, retry the same call without `rootDir` (the server then uses its configured workspace) or with the project path.
+
 ## VS Code / Copilot MCP setup
 
 Ensure GraphFlow MCP is configured in `~/.config/Code/User/mcp.json` (Linux) or project `.vscode/mcp.json` under the `servers` key:

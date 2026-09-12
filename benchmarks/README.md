@@ -47,6 +47,15 @@ npm run proof:flywheel                # essential public suite + checklist
 | `npm run bench:token` | Token savings | `run-token-benchmark.ts` | `.cache/token-bench-results.json` |
 | `npm run bench:skill-ab` | Skill flywheel A/B (injection + end-to-end P1-2) | `run-skill-ab-benchmark.ts` + `run-skill-ab.ts` | `.cache/skill-injection-results.json`, `.cache/skill-ab-results.json` |
 | `npm run bench:memory` | Episodic-memory A/B (P3) | `run-memory-ab.ts` | `.cache/memory-ab-results.json` |
+| `npm run benchmark:plugin-ab` | Plugin ON/OFF token A/B (SoL-Pi paired efficiency) | `run-plugin-ab.ts` | `.cache/plugin-ab-results.json` |
+| `npm run benchmark:real-task-ab` | Real-task plugin ON/OFF (context cost + retrievability guard) | `run-real-task-ab.ts` | `.cache/real-task-ab-results.json`, `REAL-TASK-AB-RESULTS.md` |
+
+`benchmark:plugin-ab` runs offline (`--mode micro`, the ObservationPack
+first-insertion lever) or pairs two real DSH sessions (`--mode session`, reading
+provider-reported token usage from the session projection cache). `--mode plan`
+prints the two-run protocol. It writes the paired comparison through the same
+`efficiency-report.ts` the governance release gate reads. Design and controls:
+[`docs/efficiency-ab-test-design.md`](../docs/efficiency-ab-test-design.md).
 
 All JSON artifacts are written under `benchmarks/.cache/` (gitignored) and
 carry a standard reproducibility envelope: `schemaVersion`, `benchmark`,

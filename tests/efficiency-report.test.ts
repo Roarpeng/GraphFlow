@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  appendEfficiencyRecord,
   evaluateEfficiencyComparison,
   evaluateEfficiencyFloor,
   evaluateFidelityFloor,
@@ -112,6 +113,30 @@ describe("efficiency report persistence and floor", () => {
     };
     expect(evaluateEfficiencyFloor(report, { minQualifying: 3, maxCapabilityRegressions: 0 }).ok).toBe(true);
     expect(evaluateEfficiencyFloor(report, { minQualifying: 4 }).ok).toBe(false);
+  });
+
+  it("persists a precomputed record verbatim instead of re-scoring it", () => {
+    const cfg = config();
+    appendEfficiencyRecord(cfg, {
+      query: "mechanism:custom-tolerance",
+      baseline: { tokens: 1000, score: 1, responseCount: 4 },
+      packaged: { tokens: 600, score: 0.9, responseCount: 4 },
+      source: "benchmark",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      tokenSavingRatio: 0.4,
+      scoreDeltaRatio: -0.1,
+      responseCountDeltaRatio: 0,
+      qualifies: true,
+      reasons: [],
+      mechanismId: "mechanism:custom-tolerance",
+    });
+    const persisted = getEfficiencyReport(cfg).recentRecords.find(
+      (record) => record.query === "mechanism:custom-tolerance"
+    );
+    // A re-evaluation with the default 0.05 tolerance would flip this to false.
+    expect(persisted?.qualifies).toBe(true);
+    expect(persisted?.reasons).toEqual([]);
+    expect(persisted?.mechanismId).toBe("mechanism:custom-tolerance");
   });
 });
 

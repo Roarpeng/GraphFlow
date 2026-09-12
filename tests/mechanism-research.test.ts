@@ -117,6 +117,27 @@ describe("mechanism trials, held-out isolation and admission", () => {
     expect(result.failures.join(";")).toMatch(/capability-regression:score/);
   });
 
+  it("surfaces the exact evaluated record to the efficiency sink", async () => {
+    const client = memoryClient();
+    // tolerance 0.2: a 0.1 score dip must still qualify. If the sink re-scored
+    // with the default 0.05 it would persist the opposite verdict.
+    const state = await proposeMechanism(client, { ...proposal, name: "Sink trial", tolerance: 0.2 });
+    const seen: Array<{ qualifies: boolean; scoreDeltaRatio?: number; query: string }> = [];
+    await recordMechanismTrial(client, {
+      id: state.id,
+      phase: "in-trajectory",
+      baseline: { tokens: 1000, score: 1, responseCount: 4 },
+      packaged: { tokens: 600, score: 0.9, responseCount: 4 },
+      onComparison: (record) => {
+        seen.push({ qualifies: record.qualifies, scoreDeltaRatio: record.scoreDeltaRatio, query: record.query });
+      },
+    });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.qualifies).toBe(true);
+    expect(seen[0]?.scoreDeltaRatio).toBeCloseTo(-0.1);
+    expect(seen[0]?.query).toBe(state.claim);
+  });
+
   it("rejects terminally and reports aggregate status", async () => {
     const client = memoryClient();
     await proposeMechanism(client, { ...proposal, name: "Keep one" });

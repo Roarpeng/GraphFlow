@@ -440,6 +440,17 @@ export function createMcpServer(
       }
       const message = error instanceof Error ? error.message : "Unknown tool execution error";
       wrapper.sendLogNotification("error", `Tool '${call.name}' failed: ${message}`);
+      const recovery = buildWorkspaceRootRecovery(message);
+      if (recovery) {
+        // A missing/unsafe workspace is a caller-argument problem, not a
+        // protocol failure: answer with an actionable isError result so the
+        // model can retry with rootDir instead of watching the call die as an
+        // opaque -32603 internal error.
+        return {
+          isError: true,
+          content: [{ type: "text", text: `${message}\n\n${recovery}` }],
+        };
+      }
       throw new McpError(ErrorCode.InternalError, message);
     }
   }
@@ -459,6 +470,26 @@ function respond(id: number | string | null, result: unknown): JsonRpcResponse {
     id,
     result,
   };
+}
+
+/**
+ * Actionable recovery text for workspace-resolution failures (unsafe home/AppData
+ * cwd, unsafe explicit rootDir). Returned as a recoverable `isError` tool result:
+ * the invariant "never index home/AppData" is unchanged, but the caller learns how
+ * to fix the call instead of seeing the session die on -32603.
+ */
+function buildWorkspaceRootRecovery(message: string): string | undefined {
+  if (!/unsafe workspace root/i.test(message)) {
+    return undefined;
+  }
+  const envRoot = process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim();
+  return [
+    "GraphFlow could not resolve a workspace for this call.",
+    `- server cwd: ${process.cwd()}`,
+    `- GRAPHFLOW_WORKSPACE_ROOT: ${envRoot ? envRoot : "(unset)"}`,
+    "Retry this same call with rootDir set to the absolute path of the project you are working in (never the home directory, AppData, or an unexpanded ${workspaceFolder} placeholder).",
+    "If this host started GraphFlow from your home directory, set GRAPHFLOW_WORKSPACE_ROOT to the project path in its MCP server config as well.",
+  ].join("\n");
 }
 
 function respondError(id: number | string | null, error: unknown): JsonRpcResponse {

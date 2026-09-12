@@ -14,7 +14,14 @@ import {
   rejectMechanism,
   type MechanismFamily,
 } from "../../learning/mechanism-research";
-import type { EfficiencyArm } from "../../learning/efficiency-report";
+import {
+  appendEfficiencyRecord,
+  evaluateEfficiencyFloor,
+  getEfficiencyReport,
+  resetEfficiencyReport,
+  resolveEfficiencyReportPath,
+  type EfficiencyArm,
+} from "../../learning/efficiency-report";
 
 import {
   diagnoseRouting,
@@ -580,7 +587,8 @@ async function executeCommand(command: string, args: string[], configPath?: stri
 
   if (command === "mechanism") {
     const subcommand = args[0];
-    const client = createGraphClient(resolveConfig(configPath));
+    const graphflowConfig = resolveConfig(configPath);
+    const client = createGraphClient(graphflowConfig);
     const readNumberFlag = (flag: string): number | undefined => {
       const raw = readCliFlagValue(args, flag);
       if (raw === undefined) return undefined;
@@ -640,6 +648,11 @@ async function executeCommand(command: string, args: string[], configPath?: stri
           baseline,
           packaged,
           ...(episodeId ? { episodeId } : {}),
+          // Persist the exact evaluated record so the release-gate capability
+          // floor sees real trials, not just the mechanism Decision node.
+          onComparison: (record) => {
+            appendEfficiencyRecord(graphflowConfig, record);
+          },
         });
         return { command: "mechanism-trial", data, legacyText: data.status + "; trials=" + data.trials.length };
       }
@@ -677,6 +690,27 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     } finally {
       client.close?.();
     }
+  }
+
+  if (command === "efficiency") {
+    const graphflowConfig = resolveConfig(configPath);
+    if (args[0] === "reset") {
+      const data = resetEfficiencyReport(graphflowConfig);
+      return { command: "efficiency-reset", data, legacyText: "path=" + data.path + "; reset=" + data.reset };
+    }
+    const report = getEfficiencyReport(graphflowConfig);
+    const floor = evaluateEfficiencyFloor(report, { maxCapabilityRegressions: 0 });
+    const percent = (report.averageTokenSavingRatio * 100).toFixed(2);
+    return {
+      command: "efficiency",
+      data: { path: resolveEfficiencyReportPath(graphflowConfig), report, floor },
+      legacyText:
+        "comparisons=" + report.totalComparisons +
+        "; qualifying=" + report.qualifying +
+        "; disqualified=" + report.disqualified +
+        "; avgSaving=" + percent + "%" +
+        "; capabilityRegressions=" + report.capabilityRegressions,
+    };
   }
 
   if (command === "insight" && args[0] === "submit") {

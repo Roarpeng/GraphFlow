@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.18.1] - 2026-09-12
+
+### Fixed
+
+- **跨宿主 unsafe workspace root 加固（dsh / opencode glue）**：dsh glue 的工作区此前只读 `payload/agent/session.cwd`，dsh 从 `$HOME` 启动时宿主进程 cwd 胜出，首轮 hint 因此把 `rootDir=/home/<user>` 喂给模型（MCP 硬拒 → 整次调用失败）。现在优先取会话头 `session.header.cwd`（含 `subagent/*` 直接传入的裸 session 对象），遇到 home/AppData/未展开占位符会跳过；hint 自身也不再输出任何 unsafe `rootDir`——无法确定时直接省略，由服务端按 `GRAPHFLOW_WORKSPACE_ROOT` / 发现逻辑兜底。opencode 插件同理：改用宿主传入的 `{ directory, worktree }` 作为 CLI 子进程 cwd，不再继承宿主进程 cwd（此前在项目外启动会把回复记到错误工作区，被拒后静默丢弃）。
+- **MCP 边界：unsafe workspace root 变成可恢复错误，不再 `-32603`**：显式 `rootDir` 或 cwd 落在 home/AppData 时，工具调用返回 `isError: true` 的结果，附 server cwd、当前 `GRAPHFLOW_WORKSPACE_ROOT` 与「改用项目绝对路径重试」的指引；此前作为协议错误抛出，整次调用对模型不可恢复。**安全策略未放宽：仍然拒绝 home/AppData，只是拒绝方式可操作。**
+- **新增 `CLAUDE_PROJECT_DIR` 工作区发现提示**：Claude Code ≥2.1.157 会把它注入 MCP stdio 子进程；从家目录启动的 Claude Code 现在能自动解析出会话项目，而不是让每个工具调用失败（unsafe 取值仍会被跳过）。
+- **`sync:surfaces` 镜像映射错误**：此前把 Trae 规则同时写进 `.agent/rules`（属 Antigravity）与 `.claude/rules`（属 Claude Code），`sync:surfaces --check` 在 v1.18.0 上一直是 DIRTY；现按安装器真实来源映射，并补上 `.cursor/rules`、`.trae`/`.agent` skills、`.windsurfrules`、`AGENTS.md`，`--check` 通过。
+- **规则/技能写入 `rootDir` 契约**：4 个规则模板、规范 SKILL.md、根 `CLAUDE.md`/`AGENTS.md` 与托管指令块（GEMINI.md、`.windsurfrules` 等）统一说明——`rootDir` 必须是项目绝对路径，禁止 home/AppData/未展开 `${workspaceFolder}`；遇到 `unsafe workspace root` 就省略 `rootDir` 重试。
+- **新增跨宿主安装守卫测试**（`tests/m81-host-install-workspace-guard.test.ts`）：沙箱 HOME 下安装全部已迁移宿主，断言任何写出的 `cwd` / `GRAPHFLOW_WORKSPACE_ROOT` 都不会指向安装者 cwd、HOME、AppData 或沙箱外路径（并校验 dsh 的 MCP 行保持 `!!js process.cwd()` 动态形式）。
+
+### Added
+
+- **插件 ON/OFF 配对效率 A/B harness**：新增 `benchmarks/plugin-ab-lib.ts`、`benchmark:plugin-ab`（DSH 插件开/关双臂，沿用 SoL-Pi 配对双臂 + 能力地板判据）与 `benchmark:real-task-ab`（离线、确定性、免 API Key 的真实任务「起步 token 成本」对比），并附设计文档 `docs/efficiency-ab-test-design.md` 与实测结果 `benchmarks/REAL-TASK-AB-RESULTS.md`。
+- **`graphflow efficiency [show|reset]` CLI**：直接查看配对效率报告与能力地板判定（release-gate 读取同一份数据）。
+- **机制试验写入效率报告**：`recordMechanismTrial` 新增 `onComparison` sink，配合新的 `appendEfficiencyRecord()` 把**已评估**的记录原样落进 `graphflow-out/efficiency.json`（不再被默认容差重算），机制 trial 因此对 release-gate 的能力地板可见，而不只存在于 mechanism Decision 节点里。
+
 ## [1.18.0] - 2026-09-12
 
 ### Added

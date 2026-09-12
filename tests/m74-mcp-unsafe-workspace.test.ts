@@ -1,11 +1,14 @@
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ensureMcpWorkspaceEnv,
   isUnsafeWorkspaceFallback,
 } from "../src/config/discover-workspace";
 import { resolveRuntimeWorkspaceRoot } from "../src/config/workspace-root";
+import { createMcpServer } from "../src/surfaces/mcp/server";
 import { createTempProjectRoot, rmTrackedRoots } from "./helpers/temp-workspace";
 
 /**
@@ -102,4 +105,35 @@ describe("M74 MCP unsafe workspace regression", () => {
     expect(resolved).toBe(resolve(project));
     expect(process.env.GRAPHFLOW_WORKSPACE_ROOT).toBe(resolve(project));
   });
+
+  it("returns a recoverable isError result for an unsafe rootDir instead of a protocol error", async () => {
+    const server = createMcpServer();
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "m74-unsafe-root", version: "1.0.0" });
+    try {
+      await server.sdkServer.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      // The safety invariant is unchanged: home is still refused. But the caller
+      // now gets an isError result it can act on (retry with a real rootDir)
+      // rather than an opaque -32603 that kills the tool call.
+      const result = await client.callTool({
+        name: "graphflow_context",
+        arguments: { query: "unsafe root probe", rootDir: homedir() },
+      });
+
+      expect(result.isError).toBe(true);
+      const text = result.content
+        .filter((block): block is { type: "text"; text: string } => block.type === "text")
+        .map((block) => block.text)
+        .join("\n");
+      expect(text).toMatch(/unsafe workspace root/i);
+      expect(text).toMatch(/Retry this same call with rootDir/);
+      expect(text).toContain(homedir());
+    } finally {
+      await client.close().catch(() => undefined);
+      await server.sdkServer.close().catch(() => undefined);
+    }
+  });
+
 });

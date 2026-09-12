@@ -51,6 +51,15 @@ GraphFlow is a graph-based context and planning service backed by a persistent M
 - Skip GraphFlow for complex tasks
 - Use grep for codebase exploration before `graphflow_context`
 
+## Workspace root (`rootDir`)
+
+Every tool resolves its workspace from, in order: the `rootDir` argument, `GRAPHFLOW_WORKSPACE_ROOT`, project config, then discovery from the process cwd.
+
+- Pass `rootDir` = the **absolute path of the project you are working in**.
+- **Never** pass your home directory, AppData, a bundled runtime directory, or an unexpanded `${workspaceFolder}` placeholder. GraphFlow refuses unsafe roots (`unsafe workspace root`) instead of indexing them, so the call fails.
+- On `unsafe workspace root`: retry the **same call without `rootDir`** (the server then uses its configured workspace / discovery) or with the session's project path. Do not retry the same unsafe path.
+- If the host started the MCP server from your home directory, set `GRAPHFLOW_WORKSPACE_ROOT` to the project path in its MCP server config.
+
 ### Trae / Trae CN setup (Rules + Skill + MCP)
 
 Trae loads **Rules every turn** and **Skills on demand**. GraphFlow `install` writes:

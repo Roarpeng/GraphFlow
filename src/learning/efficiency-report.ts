@@ -221,6 +221,26 @@ function recomputeReport(records: EfficiencyComparisonRecord[]): EfficiencyRepor
   return report;
 }
 
+/**
+ * Append an already-evaluated record to graphflow-out/efficiency.json.
+ *
+ * Producers that evaluate with their own tolerance (e.g. a mechanism trial,
+ * which carries its capability floor on the mechanism state) must persist the
+ * exact record they evaluated. Re-evaluating here would silently re-score the
+ * trial with the default tolerance, so this sink never recomputes the verdict.
+ */
+export function appendEfficiencyRecord(
+  config: GraphFlowConfig,
+  record: EfficiencyComparisonRecord
+): { report: EfficiencyReport; path: string } {
+  const path = resolveEfficiencyReportPath(config);
+  const report = loadReport(path);
+  const records = [record, ...report.recentRecords].slice(0, MAX_RECENT_RECORDS);
+  const next = recomputeReport(records);
+  saveReport(path, next);
+  return { report: next, path };
+}
+
 /** Append one paired comparison to graphflow-out/efficiency.json and return the recomputed report. */
 export function recordEfficiencyComparison(
   config: GraphFlowConfig,
@@ -228,12 +248,8 @@ export function recordEfficiencyComparison(
   options: { now?: string; tolerance?: number } = {}
 ): { record: EfficiencyComparisonRecord; report: EfficiencyReport; path: string } {
   const record = evaluateEfficiencyComparison(input, options);
-  const path = resolveEfficiencyReportPath(config);
-  const report = loadReport(path);
-  const records = [record, ...report.recentRecords].slice(0, MAX_RECENT_RECORDS);
-  const next = recomputeReport(records);
-  saveReport(path, next);
-  return { record, report: next, path };
+  const { report, path } = appendEfficiencyRecord(config, record);
+  return { record, report, path };
 }
 
 export function getEfficiencyReport(config: GraphFlowConfig): EfficiencyReport {
