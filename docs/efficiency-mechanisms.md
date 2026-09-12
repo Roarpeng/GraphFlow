@@ -1,7 +1,10 @@
 # Efficiency mechanisms (SoL-Pi borrow)
 
-> Status: P0/P1/P2 of the SoL-Pi adoption are implemented and opt-in. Nothing
-> here is enabled by default; a missing config section leaves every mechanism off.
+> Status: P0/P1/P2 of the SoL-Pi adoption are implemented. Every mechanism is
+> ON by default (`efficiencyPolicy` is the "best config"); switch any of them
+> off from the **GraphFlow: Settings** page or by setting its section to `false`.
+> Explicit calls (`graphflow_context` with `content`/`handle`, `reduce: true`)
+> are never gated.
 
 Source: NVIDIA [SoL-Pi](https://nvlabs.github.io/SoL-Pi/) — `efficiency for efficiency`.
 SoL-Pi searches harness mechanisms under a *capability floor*: a token saving
@@ -42,7 +45,7 @@ The flags govern automatic/config-driven behaviour only.
 
 | Mechanism | GraphFlow surface | Notes |
 | --- | --- | --- |
-| ObservationPack | `graphflow_context` `content`/`handle`/`page`/`range` | content-addressed store under `.graphflow/observations/`; head/tail excerpt + exact paged recall |
+| ObservationPack | `graphflow_context` `content`/`handle`/`page`/`range` | content-addressed store under `.graphflow/observations/`; head/tail excerpt + exact paged recall of the **stored** bytes. `redactOnStore` (default `true`) redacts secret-like spans before storage, so recall is byte-exact modulo that declared transform; set it `false` to prove raw losslessness |
 | Evidence-Preserving Reducer | `graphflow_context` `reduce: true` | every retained line is re-verified verbatim against the archive; `strategy: "llm"` needs an explicit `provider` + `model`, otherwise the resolver stays `fingerprint` and an llm reduce fails open with `reducer-route-missing` |
 | Online Context Compact | `graphflow_context` `contextPressure` arg + result block | budget is scaled by *observed* pressure; `compaction` is an economic advisory and is emitted only when `usedTokens` + `remainingTurnsEstimate` are supplied. GraphFlow never fabricates pressure |
 | Action Fusion | `graphflow_run` `executionDescriptor.steps` / `fused` | an edit immediately followed by run/validate collapses into one action unit. Execution stays with the host |
@@ -67,6 +70,13 @@ graphflow governance release-gate \
   --min-anchor-recall-percent 100 \
   --min-body-coverage-percent 80
 ```
+
+**Producers.** `graphflow mechanism trial` appends the exact record it
+evaluated (its own tolerance, never re-scored with the default) to this report,
+so real trials feed the floor instead of only the mechanism's Decision node.
+Inspect or clear it with `graphflow efficiency [show|reset]`.
+[`benchmarks/run-plugin-ab.ts`](../benchmarks/run-plugin-ab.ts) is the plugin
+ON/OFF harness that can also drive the same report from real DSH sessions.
 
 Anchor recall and body coverage come from `graphflow-out/context-fidelity.json`
 and are only checked when samples exist, so existing gates keep their behaviour.

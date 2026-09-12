@@ -25,6 +25,7 @@ const tempRoots: string[] = [];
 const envKeys = [
   "GRAPHFLOW_WORKSPACE_ROOT",
   "CURSOR_PROJECT_DIR",
+  "CLAUDE_PROJECT_DIR",
   "VSCODE_CWD",
   "VSCODE_WORKSPACE_FOLDER",
   "WORKSPACE_FOLDER_PATHS",
@@ -101,6 +102,28 @@ describe("M75 MCP home-cwd discovery after install", () => {
 
     const runtimeRoot = resolveRuntimeWorkspaceRoot({ fromDir: home });
     expect(runtimeRoot).toBe(resolve(project));
+  });
+
+  it("uses CLAUDE_PROJECT_DIR when MCP cwd is homedir", () => {
+    const project = createTempProject("m75-claude-project-dir");
+    const home = homedir();
+    process.env.CLAUDE_PROJECT_DIR = project;
+    mockCwd(home);
+
+    expect(discoverWorkspaceRoot(home)).toBe(resolve(project));
+
+    const ensured = ensureMcpWorkspaceEnv(home);
+    expect(ensured).toBe(resolve(project));
+  });
+
+  it("ignores an unsafe CLAUDE_PROJECT_DIR", () => {
+    const home = homedir();
+    process.env.CLAUDE_PROJECT_DIR = home;
+    mockCwd(home);
+
+    expect(discoverWorkspaceRoot(home)).toBeUndefined();
+    // Still refuses indexing, but never through the home hint.
+    expect(() => resolveRuntimeWorkspaceRoot({ fromDir: home })).toThrow(/unsafe workspace root/i);
   });
 
   it("ignores unresolved ${workspaceFolder} placeholder env", () => {

@@ -89,7 +89,8 @@ export async function projectToolResult(
  * "deepseek-harness" is wired through dsh/plugin.mjs: it reuses dsh's public
  * surface-replace primitive (the same one its native
  * dsh-compaction-tool-result-pruner uses), archives the exact bytes first, and
- * is OFF unless GRAPHFLOW_D_DSH_PROJECTION=1. Other hosts have no result-rewrite
+ * is ON by default (set GRAPHFLOW_D_DSH_PROJECTION=0/false/off/no/disabled to
+ * turn it off). Other hosts have no result-rewrite
  * surface yet and must use the explicit graphflow_context content/handle protocol.
  */
 export const HOSTS_WITH_TOOL_RESULT_PROJECTION: readonly string[] = ["deepseek-harness"];

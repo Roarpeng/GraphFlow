@@ -1,9 +1,10 @@
 import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
+import { isUnsafeWorkspaceFallback } from "../src/config/discover-workspace";
 import {
   DSH_GLUE_PACKAGE,
   DSH_GLUE_ROW_ID,
@@ -21,9 +22,11 @@ import {
   buildHintMessage,
   closePendingEpisodeForCwd,
   isAutoCaptureEnabled,
+  isUnsafeWorkspaceRoot,
   latestPendingEpisodeId,
   loadGraphFlowSkillRegistration,
   resolveConnectionService,
+  resolveWorkspaceCwd,
 } from "../dsh/plugin.mjs";
 
 const tempRoots: string[] = [];
@@ -410,6 +413,94 @@ describe("dsh ESM glue plugin", () => {
     expect(resolveConnectionService({ get: () => ({ rpc: { handle() {} } }) })?.rpc).toBeDefined();
     const journal = join(makeTempRoot("gf-dsh-journal-"), "empty.jsonl");
     expect(latestPendingEpisodeId(journal)).toBeUndefined();
+  });
+});
+
+/**
+ * dsh is usually started from `$HOME`, so the host process cwd is `/home/<user>`
+ * while the session header carries the real workspace. The glue used to read
+ * only payload/agent/session `cwd` + `config.cwd`, so the first-turn hint said
+ * `rootDir=/home/<user>`; the MCP guard then rejected every `graphflow_context`
+ * call with `Refusing to use unsafe workspace root from rootDir` (MCP -32603).
+ */
+describe("workspace cwd resolution (unsafe rootDir guard)", () => {
+  it("prefers the session header cwd over the host process cwd", () => {
+    const project = makeTempRoot("gf-dsh-workspace-");
+    const home = homedir();
+
+    // Shape observed in dsh 1.9.x: the agent carries the session; the session
+    // header holds the workspace, while the process/payload cwd is $HOME.
+    expect(
+      resolveWorkspaceCwd({ cwd: home, agent: { session: { id: "s1", header: { cwd: project } } } }, home)
+    ).toBe(project);
+    expect(resolveWorkspaceCwd({ agent: { cwd: home, session: { header: { cwd: project } } } }, home)).toBe(
+      project
+    );
+    expect(resolveWorkspaceCwd({ session: { header: { cwd: project } } }, home)).toBe(project);
+    // `subagent/start|end` hand the bare session object straight in.
+    expect(resolveWorkspaceCwd({ id: "s1", header: { cwd: project } }, home)).toBe(project);
+  });
+
+  it("skips unsafe candidates and keeps the first non-empty cwd for journaling", () => {
+    const project = makeTempRoot("gf-dsh-workspace-");
+    const home = homedir();
+
+    // Unsafe payload cwd + safe session header → project.
+    expect(resolveWorkspaceCwd({ cwd: home, session: { header: { cwd: project } } }, home)).toBe(project);
+    // Nothing safe anywhere: still a deterministic cwd (dialogue/journal paths).
+    expect(resolveWorkspaceCwd({ cwd: home, agent: { session: { header: { cwd: home } } } }, home)).toBe(home);
+    // Placeholders are never a workspace.
+    expect(
+      resolveWorkspaceCwd({ cwd: "${workspaceFolder}", session: { header: { cwd: project } } }, home)
+    ).toBe(project);
+    expect(resolveWorkspaceCwd({ cwd: "${workspaceFolder}" }, home)).toBe(home);
+  });
+
+  it("never advertises an unsafe rootDir in the first-turn hint", () => {
+    const project = makeTempRoot("gf-dsh-workspace-");
+    const home = homedir();
+
+    expect(buildContextHint(project)).toContain(`rootDir=${project}`);
+
+    const unsafeHint = buildContextHint(home);
+    expect(unsafeHint).not.toContain("rootDir=");
+    expect(unsafeHint).toContain("graphflow_context");
+    expect(unsafeHint).toContain("omit rootDir");
+
+    const unsafeMessage = buildHintMessage(home);
+    expect(unsafeMessage.content[0]?.text).not.toContain("rootDir=");
+    expect(unsafeMessage.source).toEqual({ kind: "plugin", plugin: "graphflow-dsh", form: "instructions" });
+
+    // Placeholders would create a literal "${workspaceFolder}" directory.
+    expect(buildContextHint("${workspaceFolder}")).not.toContain("rootDir=");
+  });
+
+  it("keeps isUnsafeWorkspaceRoot in sync with the runtime workspace guard", () => {
+    const cases: Array<string | undefined> = [
+      undefined,
+      "",
+      "   ",
+      homedir(),
+      join(homedir(), "proj"),
+      tmpdir(),
+      join(tmpdir(), "gf-proj"),
+      makeTempRoot("gf-dsh-workspace-"),
+      "/usr/local/src/app",
+      "/",
+      "/home",
+      "/mnt/c/Windows/System32",
+      "/Program Files/GraphFlow",
+      "/srv/project/System Volume Information",
+    ];
+    for (const value of cases) {
+      if (value === undefined || !value.trim()) {
+        // The glue treats a blank/absent root as unusable; the runtime guard is
+        // only ever called with a real path string.
+        expect(isUnsafeWorkspaceRoot(value)).toBe(true);
+        continue;
+      }
+      expect(isUnsafeWorkspaceRoot(value)).toBe(isUnsafeWorkspaceFallback(value));
+    }
   });
 });
 

@@ -14,6 +14,10 @@ Before code exploration, implementation, debugging, review, planning, or archite
 
 **Do NOT** recursively grep the whole repository or read large files before GraphFlow preview.
 
+## Workspace root (`rootDir`)
+
+Pass `rootDir` = the absolute path of the project you are working in. **Never** pass your home directory, AppData, or an unexpanded `${workspaceFolder}` placeholder — GraphFlow refuses unsafe workspace roots and the call fails. If a tool answers `unsafe workspace root`, retry the same call without `rootDir` (the server then uses its configured workspace) or with the project path.
+
 ## Chinese / CJK queries
 
 Code symbols are mostly English. For Chinese user questions:

@@ -2,13 +2,13 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.18.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.18.1-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（对现实 top-K 文件读取口径 **95.6%**，见[双基线](benchmarks/RESULTS.md)） · 跨会话学习飞轮。
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
-**v1.18.0** 已发：借鉴 NVIDIA SoL-Pi 新增**四大效率机制**（默认全开，可在 **GraphFlow: Settings** 逐项关闭）——大输出归档为句柄（ObservationPack）、日志压缩为**逐字核验**收据（Evidence-Preserving Reducer）、按观测压力自适应预算 + 压缩建议（Online Context Compact）、编辑+验证融合（Action Fusion）；dsh 侧在模型表面**自动投影**大工具结果（默认开，`GRAPHFLOW_D_DSH_PROJECTION=0` 关）。治理面新增**配对效率/能力地板门禁**与**机制自动研究回路**（`graphflow mechanism`，held-out 隔离强制）。同时收口宿主 hooks（Cursor / Gemini / Codex 原生 hooks + opencode 插件）与 HostAdapter doctor。
+**v1.18.1** 已发：**跨宿主 workspace root 加固**——dsh / opencode 插件改用真实会话工作区、规则与技能写入 `rootDir` 契约、MCP 把 unsafe root 从 `-32603` 协议崩溃改为**可恢复的错误 + 修复指引**（仍然拒绝 home/AppData），并新增 `CLAUDE_PROJECT_DIR` 发现与跨宿主安装守卫测试；同时补上**插件 ON/OFF 配对效率 A/B harness**（`benchmark:plugin-ab` / `benchmark:real-task-ab`）与 `graphflow efficiency` CLI。v1.18.0 的**四大效率机制**（ObservationPack、Evidence-Preserving Reducer、Online Context Compact、Action Fusion，默认全开，可在 **GraphFlow: Settings** 逐项关闭）与治理面**配对效率/能力地板门禁**、**机制自动研究回路**（held-out 隔离强制）继续有效。
 
 ## 快速开始
 

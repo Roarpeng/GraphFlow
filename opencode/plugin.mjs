@@ -65,10 +65,38 @@ export function extractTextPart(event) {
 }
 
 /**
- * Spawn the graphflow CLI once, resolving when it closes, errors, or times out.
- * Never rejects.
+ * Workspace directory for the CLI children.
+ *
+ * opencode calls each plugin with `{ project, client, $, directory, worktree }`.
+ * The glue used to ignore them and let every child inherit the *host process*
+ * cwd, so a session opened outside the project (or with a subdirectory cwd)
+ * recorded its reply into the wrong workspace — and when that cwd is `$HOME`
+ * GraphFlow refuses it outright and the fill is dropped silently. Prefer the
+ * git worktree root, then the session directory, then `config.cwd`.
+ * @param {any} input opencode plugin context
+ * @param {string} [fallbackCwd]
+ * @returns {string|undefined}
  */
-function runCli(args, config) {
+export function resolveWorkspaceDirectory(input, fallbackCwd) {
+  const project = input?.project;
+  const candidates = [
+    input?.worktree,
+    input?.directory,
+    project?.worktree,
+    project?.directory,
+    typeof fallbackCwd === "string" ? fallbackCwd : undefined,
+  ];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+/**
+ * Spawn the graphflow CLI once, resolving when it closes, errors, or times out.
+ * Never rejects. `cwd` is the session workspace resolved by the caller.
+ */
+function runCli(args, config, cwd) {
   const spawnFn = config.spawn ?? spawn;
   const env = config.env ?? process.env;
   const bin = env.GRAPHFLOW_HOOK_BIN?.trim() || "graphflow";
@@ -90,7 +118,12 @@ function runCli(args, config) {
     }, FILL_TIMEOUT_MS);
     let child;
     try {
-      child = spawnFn(bin, args, { stdio: ["ignore", "ignore", "ignore"], env, detached: false });
+      child = spawnFn(bin, args, {
+        stdio: ["ignore", "ignore", "ignore"],
+        env,
+        detached: false,
+        ...(typeof cwd === "string" && cwd.trim() ? { cwd: cwd.trim() } : {}),
+      });
     } catch {
       done();
       return;
@@ -107,7 +140,7 @@ function runCli(args, config) {
 /**
  * Create an opencode plugin function. Tests inject `spawn`/`env`; production
  * uses the real `node:child_process` spawn and `process.env`.
- * @param {{ spawn?: typeof spawn, env?: NodeJS.ProcessEnv, log?: { warn?: (msg: string) => void }, configPath?: string }} [config]
+ * @param {{ spawn?: typeof spawn, env?: NodeJS.ProcessEnv, log?: { warn?: (msg: string) => void }, configPath?: string, cwd?: string }} [config]
  */
 export function createGraphFlowPlugin(config = {}) {
   const env = config.env ?? process.env;
@@ -115,7 +148,11 @@ export function createGraphFlowPlugin(config = {}) {
   /** @type {Map<string, string>} */
   const lastTextBySession = new Map();
 
-  return async () => {
+  // opencode hands the session workspace to the plugin function
+  // (`{ project, client, $, directory, worktree }`); resolve it once so every
+  // CLI child runs in the project instead of inheriting the host process cwd.
+  return async (input = {}) => {
+    const workspace = resolveWorkspaceDirectory(input, config.cwd);
     return {
       event: async ({ event }) => {
         try {
@@ -138,8 +175,8 @@ export function createGraphFlowPlugin(config = {}) {
             if (!reply) return;
             const cfgArgs = config.configPath ? ["--config", config.configPath] : [];
             // Both commands are idempotent tip fills; order mirrors dsh/plugin.mjs.
-            await runCli([...cfgArgs, "context", "preview", "--reply", reply], config);
-            await runCli([...cfgArgs, "dialogue", "record", "--reply", reply], config);
+            await runCli([...cfgArgs, "context", "preview", "--reply", reply], config, workspace);
+            await runCli([...cfgArgs, "dialogue", "record", "--reply", reply], config, workspace);
           }
         } catch (error) {
           try {

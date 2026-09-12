@@ -20,7 +20,12 @@
 import type { GraphNode } from "../core/types";
 import type { GraphClient } from "../graph/client-factory";
 import { isStopwordOnlyName } from "./skill-admission";
-import { evaluateEfficiencyComparison, type EfficiencyArm } from "./efficiency-report";
+import {
+  evaluateEfficiencyComparison,
+  type EfficiencyArm,
+  type EfficiencyComparisonInput,
+  type EfficiencyComparisonRecord,
+} from "./efficiency-report";
 
 export const MECHANISM_SCHEMA_VERSION = 1;
 export const MECHANISM_ID_PREFIX = "mechanism:";
@@ -210,6 +215,13 @@ export interface RecordTrialInput {
   packaged: EfficiencyArm;
   episodeId?: string;
   now?: string;
+  /**
+   * Optional sink for the evaluated paired record. A host passes this to persist
+   * the same comparison into graphflow-out/efficiency.json, so a mechanism trial
+   * is visible to the governance capability floor instead of only to the
+   * mechanism's own Decision node.
+   */
+  onComparison?: (record: EfficiencyComparisonRecord) => void;
 }
 
 export async function recordMechanismTrial(client: GraphClient, input: RecordTrialInput): Promise<MechanismState> {
@@ -220,10 +232,19 @@ export async function recordMechanismTrial(client: GraphClient, input: RecordTri
     throw new Error("held-out isolation: mechanism " + state.id + " is frozen; in-trajectory trials are no longer accepted");
   }
 
-  const evaluation = evaluateEfficiencyComparison(
-    { query: state.claim, baseline: input.baseline, packaged: input.packaged, source: "benchmark", ...(input.episodeId ? { episodeId: input.episodeId } : {}), mechanismId: state.id },
-    { tolerance: state.capabilityFloor.tolerance, ...(input.now ? { now: input.now } : {}) }
-  );
+  const comparison: EfficiencyComparisonInput = {
+    query: state.claim,
+    baseline: input.baseline,
+    packaged: input.packaged,
+    source: "benchmark",
+    ...(input.episodeId ? { episodeId: input.episodeId } : {}),
+    mechanismId: state.id,
+  };
+  const evaluation = evaluateEfficiencyComparison(comparison, {
+    tolerance: state.capabilityFloor.tolerance,
+    ...(input.now ? { now: input.now } : {}),
+  });
+  input.onComparison?.(evaluation);
   const trial: MechanismTrial = {
     id: state.id + ":trial:" + (state.trials.length + 1),
     phase: input.phase,

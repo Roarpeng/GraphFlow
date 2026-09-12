@@ -28,8 +28,8 @@
  */
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const name = "graphflow-dsh";
@@ -153,8 +153,76 @@ export function latestPendingEpisodeId(journalPath) {
   return undefined;
 }
 
+/**
+ * Windows/system segments that must never be suggested as a GraphFlow workspace.
+ * The MCP-side guard (`assertSafeWorkspaceRoot` → `isUnsafeWorkspaceFallback` in
+ * `src/config/discover-workspace.ts`) refuses an explicit tool `rootDir` that
+ * resolves to one of these, so the glue must never put such a path in the hint:
+ * a bad hint makes every `graphflow_context` call fail with an opaque MCP error.
+ * Kept inline (no import of the CJS dist) because this glue is a synchronous,
+ * dependency-free ESM entry; `dsh-plugin-glue.test.ts` cross-checks the two
+ * implementations so they cannot drift apart silently.
+ * @param {unknown} dir
+ * @returns {boolean}
+ */
+export function isUnsafeWorkspaceRoot(dir) {
+  if (typeof dir !== "string" || !dir.trim()) return true;
+  const normalized = resolve(dir).replace(/\\/g, "/").toLowerCase();
+  if (normalized === homedir().replace(/\\/g, "/").toLowerCase()) return true;
+
+  const localAppData = process.env.LOCALAPPDATA?.replace(/\\/g, "/").toLowerCase();
+  if (localAppData && normalized === localAppData) return true;
+  const roamingAppData = process.env.APPDATA?.replace(/\\/g, "/").toLowerCase();
+  if (roamingAppData && normalized === roamingAppData) return true;
+
+  const protectedSegments = new Set([
+    "elevateddiagnostics",
+    "system volume information",
+    "$recycle.bin",
+  ]);
+  if (normalized.split("/").filter(Boolean).some((segment) => protectedSegments.has(segment))) {
+    return true;
+  }
+  return ["/program files/", "/program files (x86)/", "/windows/"].some((marker) =>
+    normalized.includes(marker)
+  );
+}
+
+/** Unexpanded IDE placeholders (e.g. `${workspaceFolder}`) are never a real root. */
+function isPlaceholderWorkspaceRoot(value) {
+  return /\$\{[^}]+\}/.test(value) || /\$[A-Z_][A-Z0-9_]*/.test(value);
+}
+
+/**
+ * A path the MCP layer will accept as an explicit `rootDir`: non-empty, fully
+ * expanded, and not the home directory / AppData / a protected system folder.
+ * @param {unknown} value
+ * @returns {string|undefined}
+ */
+function safeWorkspaceRoot(value) {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || isPlaceholderWorkspaceRoot(trimmed)) return undefined;
+  return isUnsafeWorkspaceRoot(trimmed) ? undefined : trimmed;
+}
+
+/**
+ * First-turn context hint.
+ *
+ * The hint must carry a root the MCP guards accept. dsh is frequently launched
+ * from `$HOME`, so the *host process* cwd is often `/home/<user>` — an unsafe
+ * root that `graphflow_context` rejects outright (`Refusing to use unsafe
+ * workspace root from rootDir`, surfaced as MCP -32603). When no safe root is
+ * known, omit `rootDir` entirely: the MCP server then falls back to its
+ * configured `GRAPHFLOW_WORKSPACE_ROOT` / discovery instead of failing.
+ * @param {string} [cwd]
+ */
 export function buildContextHint(cwd = process.cwd()) {
-  return `GraphFlow: before large code reads, call mcp__graphflow__graphflow_context with rootDir=${cwd}. Do not dump SKILL.md.`;
+  const rootDir = safeWorkspaceRoot(cwd);
+  if (!rootDir) {
+    return "GraphFlow: before large code reads, call mcp__graphflow__graphflow_context (omit rootDir — the server resolves the session workspace). Do not dump SKILL.md.";
+  }
+  return `GraphFlow: before large code reads, call mcp__graphflow__graphflow_context with rootDir=${rootDir}. Do not dump SKILL.md.`;
 }
 
 /**
@@ -1146,19 +1214,43 @@ function payloadAgent(payload) {
   return payload;
 }
 
+/**
+ * Workspace of the agent/session behind an event payload.
+ *
+ * Priority: the session header cwd — the workspace the sandbox/permission layer
+ * (and the GraphFlow MCP `rootDir`) uses — then the payload/agent/session `cwd`
+ * fields, then the configured fallback. Unsafe candidates (home/AppData) are
+ * skipped as long as a safe one exists, because passing them on as `rootDir`
+ * makes every GraphFlow tool call fail. The first non-empty candidate is
+ * returned when nothing is safe, so journal/dialogue paths stay deterministic
+ * (`buildContextHint` independently refuses to advertise an unsafe root).
+ * @param {object} [payload]
+ * @param {string} [fallbackCwd]
+ * @returns {string}
+ */
 export function resolveWorkspaceCwd(payload, fallbackCwd = process.cwd()) {
   const agent = payloadAgent(payload);
   const session = payload?.session ?? agent?.session;
   const candidates = [
+    agent?.session?.header?.cwd,
+    payload?.session?.header?.cwd,
+    session?.header?.cwd,
+    // `subagent/start|end` pass a bare session object (`{ id, header }`).
+    agent?.header?.cwd,
+    payload?.header?.cwd,
     payload?.cwd,
     agent?.cwd,
     session?.cwd,
     typeof fallbackCwd === "string" ? fallbackCwd : undefined,
   ];
+  let first = undefined;
   for (const value of candidates) {
-    if (typeof value === "string" && value.trim()) return value;
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    if (!trimmed) continue;
+    if (!first && !isPlaceholderWorkspaceRoot(trimmed)) first = trimmed;
+    if (safeWorkspaceRoot(trimmed)) return trimmed;
   }
-  return process.cwd();
+  return first ?? process.cwd();
 }
 
 function buildOutcomeArgs(episodeId, success) {

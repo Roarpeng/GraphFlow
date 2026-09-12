@@ -14,6 +14,10 @@ const MAX_WALK_DEPTH = 30;
 const IDE_WORKSPACE_ENV_KEYS = [
   "GRAPHFLOW_WORKSPACE_ROOT",
   "CURSOR_PROJECT_DIR",
+  // Claude Code ≥2.1.157 exports CLAUDE_PROJECT_DIR to MCP stdio servers (and
+  // hooks), so a server spawned with cwd=$HOME can still resolve the session
+  // workspace instead of refusing every tool call.
+  "CLAUDE_PROJECT_DIR",
   "VSCODE_CWD",
   "VSCODE_WORKSPACE_FOLDER",
   // Cursor injects this on MCP child processes (single path or path.delimiter-separated).

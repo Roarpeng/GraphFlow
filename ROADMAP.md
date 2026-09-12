@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-09-12（v1.18.0 发版：SoL-Pi 效率机制全链路 + 宿主 hooks 收口——四机制默认开、dsh 自动投影、配对效率/能力门禁、机制自动研究回路）
+> 最后更新：2026-09-12（v1.18.1 发版：跨宿主 unsafe workspace root 加固 + 插件 ON/OFF 配对效率 A/B harness——dsh/opencode glue 用会话工作区、MCP 可恢复错误、CLAUDE_PROJECT_DIR 发现、rootDir 契约写入规则/技能）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -44,6 +44,8 @@
 | v1.17.0 | 2026-09-09 | **证据诚实性冲刺（深度调研驱动）** | 修复 L3 对话打包在生产路径的死代码（对话改为 additive-LAST，永不挤掉代码锚点）；打包后 token 记账（`unbudgetedTokens`/`accountedTokens`，节省率对真实总量计算）；token 节省新增现实对照臂（**95.6%** vs 之前的 98.5% 上界口径）；CI fidelity 证据去同义反复（期望锚点独立于返回锚点 + 真正度量 bodyCoverage）；proven 证据改为可观测（`userConfirmed:false`、`testResult` 由信号观测）；技能准入 `wouldDegradeLibrary` 修正 + `admitSkillToProvisional` 冷启动层；对话写入边界密钥脱敏；修复 security-audit 缺 import 导致的连续 3 周静默失败 | ✅ |
 
 | v1.18.0 | 2026-09-12 | **SoL-Pi 效率机制 + 宿主 hooks 收口** | 四机制默认开（ObservationPack / Evidence-Preserving Reducer / Online Context Compact / Action Fusion）；dsh 自动投影（默认开、fail-open）；配对效率/能力地板 + release-gate 阈值；机制自动研究回路（held-out 隔离强制）；Cursor/Gemini/Codex hooks + opencode 插件 | ✅ |
+
+| v1.18.1 | 2026-09-12 | **跨宿主 workspace root 加固 + 插件 AB harness** | dsh glue 取 `session.header.cwd`、hint 不再输出 unsafe `rootDir`；opencode 插件用宿主 `directory/worktree`；MCP 把 unsafe root 变成可恢复 `isError`（不再 `-32603`，安全策略不变）；新增 `CLAUDE_PROJECT_DIR` 发现；rootDir 契约写入规则/技能/托管指令块；`sync:surfaces` 映射修复 + 跨宿主安装守卫测试；插件 ON/OFF 配对效率 A/B harness + `graphflow efficiency` CLI | ✅ |
 
 ## 下一阶段
 

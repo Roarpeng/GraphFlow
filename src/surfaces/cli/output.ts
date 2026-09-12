@@ -49,6 +49,7 @@ export function buildCliUsage(): string {
     "  artifact import [path] [--json] [--config <path>]",
     "  stats [--json] [--config <path>]",
     "  stats reset [--json] [--config <path>]",
+    "  efficiency [show|reset] [--json] [--config <path>]  # paired-efficiency report + capability floor read by release-gate",
     "  skill insights [--json] [--config <path>]",
     "  skill export [path] [--json] [--config <path>]",
     "  skill import [path] [--json] [--config <path>]",
