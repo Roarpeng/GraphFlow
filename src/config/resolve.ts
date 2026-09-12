@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import type { GraphFlowConfig } from "./schema";
+import type { EfficiencyPolicyConfig, GraphFlowConfig } from "./schema";
+import type { ObservationPolicy } from "../observations/types";
 import { loadConfigSafe } from "./loader";
 import { mergeGraphFlowConfig } from "./merge";
 import { getDefaultConfig } from "./defaults";
@@ -148,3 +149,168 @@ function loadLayer(path: string): GraphFlowConfig {
   }
   return result.config;
 }
+
+// ---------------------------------------------------------------------------
+// SoL-Pi-style efficiency mechanisms (unified policy)
+//
+// Pure and deterministic: turns the optional efficiencyPolicy config section
+// into fully effective policy objects. The default is the BEST configuration
+// (every mechanism ON); a user can switch any mechanism off from the
+// graphflow-settings page, and an explicit false in config also wins.
+// These flags govern config-driven / automatic behaviour only. Explicit API
+// calls (graphflow_context with content/handle, reduce:true, a caller-supplied
+// executionDescriptor) remain explicit intent and are not gated here.
+// ---------------------------------------------------------------------------
+
+export interface ResolvedObservationReducePolicy {
+  enabled: boolean;
+  strategy: "fingerprint" | "llm";
+  maxReceiptTokens: number;
+  maxSourceBytes: number;
+  /** Present only when strategy is "llm" (explicit remote route). */
+  provider?: string;
+  model?: string;
+}
+
+export interface ResolvedObservationEfficiencyPolicy {
+  enabled: boolean;
+  inlineThresholdBytes: number;
+  headBytes: number;
+  tailBytes: number;
+  maxStoreBytes: number;
+  ttlDays: number;
+  redactOnStore: boolean;
+  reduce: ResolvedObservationReducePolicy;
+}
+
+export interface ResolvedContextPressurePolicy {
+  enabled: boolean;
+  /** "auto" scales the default budget by observed pressure; a number pins it. */
+  maxContextTokens: number | "auto";
+  cacheWriteReadRatio: number;
+  minSavingRatio: number;
+}
+
+export interface ResolvedEfficiencyPolicy {
+  observations: ResolvedObservationEfficiencyPolicy;
+  contextPressure: ResolvedContextPressurePolicy;
+  actionFusion: { enabled: boolean };
+}
+
+export const DEFAULT_EFFICIENCY_POLICY: ResolvedEfficiencyPolicy = {
+  observations: {
+    enabled: true,
+    inlineThresholdBytes: 8192,
+    headBytes: 2048,
+    tailBytes: 1536,
+    maxStoreBytes: 268435456, // 256 MiB
+    ttlDays: 14,
+    redactOnStore: true,
+    reduce: {
+      enabled: true,
+      strategy: "fingerprint",
+      maxReceiptTokens: 400,
+      maxSourceBytes: 2097152, // 2 MiB
+    },
+  },
+  contextPressure: {
+    enabled: true,
+    maxContextTokens: "auto",
+    cacheWriteReadRatio: 12.5,
+    minSavingRatio: 0.2,
+  },
+  actionFusion: { enabled: true },
+};
+
+/** Finite number >= 0, else the fallback. Guards NaN/Infinity/negatives. */
+function nonNegative(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+/** Finite number > 0, else the fallback. */
+function positive(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/** Clamp a finite number into [0, 1], else the fallback. */
+function ratio01(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(Math.max(value, 0), 1);
+}
+
+/**
+ * Resolve the optional efficiency section over the disabled defaults.
+ *
+ * Note: reduce.strategy "llm" without both provider and model is downgraded
+ * to "fingerprint" — a remote reducer route is never implied.
+ */
+export function resolveEfficiencyPolicy(
+  config?: { efficiencyPolicy?: EfficiencyPolicyConfig } | GraphFlowConfig | undefined
+): ResolvedEfficiencyPolicy {
+  const section = config?.efficiencyPolicy;
+  const obs = section?.observations;
+  const cp = section?.contextPressure;
+  const af = section?.actionFusion;
+  const red = obs?.reduce;
+
+  const strategy = red?.strategy === "llm" ? "llm" : "fingerprint";
+  const provider = typeof red?.provider === "string" && red.provider.trim() ? red.provider.trim() : undefined;
+  const model = typeof red?.model === "string" && red.model.trim() ? red.model.trim() : undefined;
+  // A remote reducer route must be explicit: without provider + model we stay local.
+  const effectiveStrategy = strategy === "llm" && provider && model ? "llm" : "fingerprint";
+
+  const configuredMax =
+    cp?.maxContextTokens === "auto"
+      ? "auto"
+      : typeof cp?.maxContextTokens === "number" && Number.isFinite(cp.maxContextTokens) && cp.maxContextTokens > 0
+        ? Math.max(1, Math.round(cp.maxContextTokens))
+        : DEFAULT_EFFICIENCY_POLICY.contextPressure.maxContextTokens;
+
+  return {
+    observations: {
+      enabled: obs?.enabled ?? DEFAULT_EFFICIENCY_POLICY.observations.enabled,
+      inlineThresholdBytes: positive(obs?.inlineThresholdBytes, DEFAULT_EFFICIENCY_POLICY.observations.inlineThresholdBytes),
+      headBytes: positive(obs?.headBytes, DEFAULT_EFFICIENCY_POLICY.observations.headBytes),
+      tailBytes: positive(obs?.tailBytes, DEFAULT_EFFICIENCY_POLICY.observations.tailBytes),
+      maxStoreBytes: positive(obs?.maxStoreBytes, DEFAULT_EFFICIENCY_POLICY.observations.maxStoreBytes),
+      ttlDays: nonNegative(obs?.ttlDays, DEFAULT_EFFICIENCY_POLICY.observations.ttlDays),
+      redactOnStore: obs?.redactOnStore !== false,
+      reduce: {
+        enabled: red?.enabled ?? DEFAULT_EFFICIENCY_POLICY.observations.reduce.enabled,
+        strategy: effectiveStrategy,
+        maxReceiptTokens: positive(red?.maxReceiptTokens, DEFAULT_EFFICIENCY_POLICY.observations.reduce.maxReceiptTokens),
+        maxSourceBytes: positive(red?.maxSourceBytes, DEFAULT_EFFICIENCY_POLICY.observations.reduce.maxSourceBytes),
+        ...(effectiveStrategy === "llm" && provider ? { provider } : {}),
+        ...(effectiveStrategy === "llm" && model ? { model } : {}),
+      },
+    },
+    contextPressure: {
+      enabled: cp?.enabled ?? DEFAULT_EFFICIENCY_POLICY.contextPressure.enabled,
+      maxContextTokens: configuredMax,
+      cacheWriteReadRatio: nonNegative(cp?.cacheWriteReadRatio, DEFAULT_EFFICIENCY_POLICY.contextPressure.cacheWriteReadRatio),
+      minSavingRatio: ratio01(cp?.minSavingRatio, DEFAULT_EFFICIENCY_POLICY.contextPressure.minSavingRatio),
+    },
+    actionFusion: { enabled: af?.enabled ?? DEFAULT_EFFICIENCY_POLICY.actionFusion.enabled },
+  };
+}
+
+/** Project the resolved efficiency policy onto the observation store's policy shape. */
+export function toObservationPolicy(policy: ResolvedEfficiencyPolicy): ObservationPolicy {
+  const o = policy.observations;
+  return {
+    enabled: o.enabled,
+    inlineThresholdBytes: o.inlineThresholdBytes,
+    headBytes: o.headBytes,
+    tailBytes: o.tailBytes,
+    maxStoreBytes: o.maxStoreBytes,
+    ttlDays: o.ttlDays,
+    redactOnStore: o.redactOnStore,
+    reduce: {
+      enabled: o.reduce.enabled,
+      strategy: o.reduce.strategy,
+      maxReceiptTokens: o.reduce.maxReceiptTokens,
+      maxSourceBytes: o.reduce.maxSourceBytes,
+    },
+  };
+}
+

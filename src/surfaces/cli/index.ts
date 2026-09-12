@@ -2,6 +2,20 @@
 
 import { readFileSync } from "node:fs";
 
+import { resolveConfig, resolveEfficiencyPolicy, toObservationPolicy } from "../../config/resolve";
+import { packObservation, recallObservation } from "../../observations/index";
+import { createGraphClient } from "../../graph/client-factory";
+import {
+  admitMechanism,
+  freezeMechanism,
+  getMechanismReport,
+  proposeMechanism,
+  recordMechanismTrial,
+  rejectMechanism,
+  type MechanismFamily,
+} from "../../learning/mechanism-research";
+import type { EfficiencyArm } from "../../learning/efficiency-report";
+
 import {
   diagnoseRouting,
   diagnoseRoutingResult,
@@ -158,6 +172,16 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     const data = diagnoseRoutingResult(configPath);
     const { probeTeamDiagnosis } = await import("../team/diagnose.js");
     data.team = await probeTeamDiagnosis(configPath);
+    try {
+      const mechanismClient = createGraphClient(resolveConfig(configPath));
+      try {
+        (data as unknown as Record<string, unknown>).mechanisms = await getMechanismReport(mechanismClient);
+      } finally {
+        mechanismClient.close?.();
+      }
+    } catch {
+      // Mechanism status is advisory; diagnose must stay best-effort.
+    }
     return {
       command: "diagnose",
       data,
@@ -472,11 +496,27 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       const minProvenSkills = Number.parseInt(readCliFlagValue(args, "--min-proven-skills") ?? "1", 10);
       const minFidelitySamples = Number.parseInt(readCliFlagValue(args, "--min-fidelity-samples") ?? "1", 10);
       const maxPendingRatio = Number.parseFloat(readCliFlagValue(args, "--max-pending-ratio") ?? "0.5");
+      const minEfficiencyQualifying = readCliFlagValue(args, "--min-efficiency-qualifying");
+      const maxCapabilityRegressions = readCliFlagValue(args, "--max-capability-regressions");
+      const minAnchorRecallPercent = readCliFlagValue(args, "--min-anchor-recall-percent");
+      const minBodyCoveragePercent = readCliFlagValue(args, "--min-body-coverage-percent");
       try {
         const data = releaseGate(configPath, {
           minProvenSkills,
           minFidelitySamples,
           maxPendingRatio,
+          ...(minEfficiencyQualifying !== undefined
+            ? { minEfficiencyQualifying: Number.parseInt(minEfficiencyQualifying, 10) }
+            : {}),
+          ...(maxCapabilityRegressions !== undefined
+            ? { maxCapabilityRegressions: Number.parseInt(maxCapabilityRegressions, 10) }
+            : {}),
+          ...(minAnchorRecallPercent !== undefined
+            ? { minAnchorRecallPercent: Number.parseFloat(minAnchorRecallPercent) }
+            : {}),
+          ...(minBodyCoveragePercent !== undefined
+            ? { minBodyCoveragePercent: Number.parseFloat(minBodyCoveragePercent) }
+            : {}),
         });
         return {
           command: "governance-release-gate",
@@ -492,6 +532,151 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     console.log("Usage: graphflow governance <knowledge-upsert|review-queue|review|trace|merge-artifacts|sign-artifact|verify-artifact-signature|quarantine|retention|profiles|release-gate>");
     process.exitCode = 1;
     return undefined;
+  }
+
+  if (command === "observe") {
+    const subcommand = args[0];
+    const config = resolveConfig(configPath);
+    const rootDir = readCliFlagValue(args, "--root") ?? config.graphPolicy.workspaceRoot ?? process.cwd();
+    const policy = toObservationPolicy(resolveEfficiencyPolicy(config));
+    if (subcommand === "pack") {
+      const file = readCliFlagValue(args, "--file");
+      if (!file) {
+        console.log("Usage: graphflow observe pack --file <path> [--root <dir>] [--json]");
+        process.exitCode = 1;
+        return undefined;
+      }
+      const content = readFileSync(file, "utf8");
+      const data = await packObservation({ rootDir, content, policy });
+      return {
+        command: "observe-pack",
+        data,
+        legacyText: data.fallback ? "pack-failed: " + data.reason : data.handle + "; lines=" + data.lines,
+      };
+    }
+    if (subcommand === "recall") {
+      const handle = readCliFlagValue(args, "--handle");
+      if (!handle) {
+        console.log("Usage: graphflow observe recall --handle <gfo:...> [--root <dir>] [--page N] [--json]");
+        process.exitCode = 1;
+        return undefined;
+      }
+      const pageRaw = readCliFlagValue(args, "--page");
+      const data = await recallObservation({
+        rootDir,
+        handle,
+        ...(pageRaw !== undefined ? { page: Number.parseInt(pageRaw, 10) } : {}),
+      });
+      return {
+        command: "observe-recall",
+        data,
+        legacyText: data.expired ? "expired" : "recalled; lines=" + data.lines,
+      };
+    }
+    console.log("Usage: graphflow observe <pack|recall> [--json] [--config <path>]");
+    process.exitCode = 1;
+    return undefined;
+  }
+
+  if (command === "mechanism") {
+    const subcommand = args[0];
+    const client = createGraphClient(resolveConfig(configPath));
+    const readNumberFlag = (flag: string): number | undefined => {
+      const raw = readCliFlagValue(args, flag);
+      if (raw === undefined) return undefined;
+      const value = Number.parseFloat(raw);
+      return Number.isFinite(value) ? value : undefined;
+    };
+    const readArm = (prefix: string): EfficiencyArm | undefined => {
+      const tokens = readNumberFlag("--" + prefix + "-tokens");
+      if (tokens === undefined) return undefined;
+      const turns = readNumberFlag("--" + prefix + "-turns");
+      const toolCalls = readNumberFlag("--" + prefix + "-tool-calls");
+      const responseCount = readNumberFlag("--" + prefix + "-responses");
+      const score = readNumberFlag("--" + prefix + "-score");
+      return {
+        tokens,
+        ...(turns !== undefined ? { turns } : {}),
+        ...(toolCalls !== undefined ? { toolCalls } : {}),
+        ...(responseCount !== undefined ? { responseCount } : {}),
+        ...(score !== undefined ? { score } : {}),
+      };
+    };
+    try {
+      if (subcommand === "propose") {
+        const name = readCliFlagValue(args, "--name");
+        const family = readCliFlagValue(args, "--family") as MechanismFamily | undefined;
+        const claim = readCliFlagValue(args, "--claim");
+        const metric = readCliFlagValue(args, "--metric");
+        if (!name || !family || !claim || !metric) {
+          console.log("Usage: graphflow mechanism propose --name <name> --family <tools|context|observation|delegation|prompt|method> --claim <text> --metric <tokens> [--tolerance 0.05]");
+          process.exitCode = 1;
+          return undefined;
+        }
+        const tolerance = readNumberFlag("--tolerance");
+        const data = await proposeMechanism(client, {
+          name,
+          family,
+          claim,
+          efficiencyMetric: metric,
+          ...(tolerance !== undefined ? { tolerance } : {}),
+        });
+        return { command: "mechanism-propose", data, legacyText: data.id };
+      }
+      if (subcommand === "trial") {
+        const id = readCliFlagValue(args, "--id");
+        const phase = readCliFlagValue(args, "--phase");
+        const baseline = readArm("baseline");
+        const packaged = readArm("packaged");
+        if (!id || (phase !== "in-trajectory" && phase !== "held-out") || !baseline || !packaged) {
+          console.log("Usage: graphflow mechanism trial --id <id> --phase <in-trajectory|held-out> --baseline-tokens <n> --packaged-tokens <n> [--baseline-score --packaged-score --baseline-responses --packaged-responses --episode <id>]");
+          process.exitCode = 1;
+          return undefined;
+        }
+        const episodeId = readCliFlagValue(args, "--episode");
+        const data = await recordMechanismTrial(client, {
+          id,
+          phase,
+          baseline,
+          packaged,
+          ...(episodeId ? { episodeId } : {}),
+        });
+        return { command: "mechanism-trial", data, legacyText: data.status + "; trials=" + data.trials.length };
+      }
+      if (subcommand === "freeze") {
+        const id = readCliFlagValue(args, "--id");
+        if (!id) { console.log("Usage: graphflow mechanism freeze --id <id>"); process.exitCode = 1; return undefined; }
+        const data = await freezeMechanism(client, id);
+        return { command: "mechanism-freeze", data, legacyText: data.id + "; frozen" };
+      }
+      if (subcommand === "admit") {
+        const id = readCliFlagValue(args, "--id");
+        if (!id) { console.log("Usage: graphflow mechanism admit --id <id> [--reason <text>]"); process.exitCode = 1; return undefined; }
+        const reason = readCliFlagValue(args, "--reason");
+        const result = await admitMechanism(client, id, { ...(reason ? { reason } : {}) });
+        if (!result.admitted) {
+          console.error("mechanism " + id + " not admitted: " + result.failures.join("; "));
+          process.exitCode = 1;
+        }
+        return { command: "mechanism-admit", data: result, legacyText: result.admitted ? "admitted" : "rejected" };
+      }
+      if (subcommand === "reject") {
+        const id = readCliFlagValue(args, "--id");
+        const reason = readCliFlagValue(args, "--reason") ?? "rejected by operator";
+        if (!id) { console.log("Usage: graphflow mechanism reject --id <id> [--reason <text>]"); process.exitCode = 1; return undefined; }
+        const data = await rejectMechanism(client, id, reason);
+        return { command: "mechanism-reject", data, legacyText: data.id + "; rejected" };
+      }
+      if (subcommand === "list") {
+        const report = await getMechanismReport(client);
+        return { command: "mechanism-list", data: report, legacyText: "total=" + report.total + "; admitted=" + report.admitted + "; rejected=" + report.rejected };
+      }
+      console.log("Usage: graphflow mechanism <propose|trial|freeze|admit|reject|list>");
+      process.exitCode = 1;
+      return undefined;
+    } finally {
+      client.close?.();
+    }
   }
 
   if (command === "insight" && args[0] === "submit") {

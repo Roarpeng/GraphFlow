@@ -80,6 +80,26 @@ export function getDefaultConfig(): GraphFlowConfig {
       minSimilarity: 0.05,
       enableFullGraphVectorRecall: false,
     },
+    // SoL-Pi-style efficiency mechanisms. Default = best config (all ON);
+    // switch any mechanism off from the graphflow-settings page or here.
+    efficiencyPolicy: {
+      observations: {
+        enabled: true,
+        inlineThresholdBytes: 8192,
+        headBytes: 2048,
+        tailBytes: 1536,
+        ttlDays: 14,
+        redactOnStore: true,
+        reduce: { enabled: true, strategy: "fingerprint", maxReceiptTokens: 400 },
+      },
+      contextPressure: {
+        enabled: true,
+        maxContextTokens: "auto",
+        cacheWriteReadRatio: 12.5,
+        minSavingRatio: 0.2,
+      },
+      actionFusion: { enabled: true },
+    },
   });
 }
 

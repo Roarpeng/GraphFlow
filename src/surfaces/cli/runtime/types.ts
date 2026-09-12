@@ -85,6 +85,24 @@ export interface ContextPreviewResult {
   workbench?: import("../../../learning/workbench-topic").WorkbenchContextView;
   /** What this preview wrote into the dialogue/workbench graph. */
   dialogueCapture?: DialogueCapture;
+  /**
+   * SoL-Pi-style "Online Context Compact" advisory (opt-in via
+   * `efficiencyPolicy.contextPressure.enabled`). Reports the effective budget
+   * actually used for packaging and, when the caller supplies prefix tokens +
+   * a remaining-turn estimate, an economic compaction recommendation. GraphFlow
+   * cannot call the host's compaction API; this is a signal the host may act on.
+   */
+  contextPressure?: {
+    enabled: true;
+    /** "auto" scales the default by observed pressure; "fixed" pins a number. */
+    budgetMode: "auto" | "fixed";
+    /** Budget GraphFlow actually packed against for this preview. */
+    effectiveMaxContextTokens: number;
+    usedTokens?: number;
+    maxTokens?: number;
+    pressureRatio?: number;
+    compaction?: import("../../../graph/context-pressure.js").CompactionSignal;
+  };
 }
 
 export interface DialogueCapture {
@@ -149,6 +167,14 @@ export interface GraphFlowSettings {
   embeddingProvider?: "fnv" | "transformers";
   /** Extension-only: download @firecrawl/anydoc on activate. */
   downloadAnydoc?: boolean;
+  /**
+   * SoL-Pi-style efficiency mechanisms. All default ON (best config); the
+   * graphflow-settings page can switch each one off.
+   */
+  observationsEnabled?: boolean;
+  observationReduceEnabled?: boolean;
+  contextPressureEnabled?: boolean;
+  actionFusionEnabled?: boolean;
 }
 
 export type GraphFlowSettingsInput = Omit<GraphFlowSettings, "configPath">;

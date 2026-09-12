@@ -12,6 +12,7 @@
     "mcp.json",
     "cordis.patch.yml",
     "dsh",
+    "opencode",
     "web",
     "skills",
     "src/surfaces/trae-skill",

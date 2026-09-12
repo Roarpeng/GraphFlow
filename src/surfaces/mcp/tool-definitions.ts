@@ -84,6 +84,49 @@ export function getToolDefinitions(): ToolDefinition[] {
         properties: {
           query: { type: "string", description: "Query to preview. Be specific about what you need to understand." },
           anchorId: { type: "string", description: "The anchor id returned by graphflow_context preview (e.g. 'symbol:src/foo.ts:abc123'). Use this instead of query to expand an anchor." },
+          content: {
+            type: "string",
+            description:
+              "Large payload to archive as an observation handle (returns handle + head/tail excerpt). Use to avoid replaying huge tool outputs or logs.",
+          },
+          handle: {
+            type: "string",
+            description:
+              "Observation handle (gfo:…) returned by content packaging. Recall exact bytes (with page/range), or pass reduce:true for a verified receipt.",
+          },
+          reduce: {
+            type: "boolean",
+            description:
+              "With handle/content: return a verified receipt whose retained lines are each verbatim-checked against the archived source (fail-open to an excerpt on mismatch).",
+          },
+          page: {
+            type: "number",
+            description: "0-based page for handle recall (200 lines per page). Ignored when range is given.",
+          },
+          range: {
+            type: "array",
+            items: { type: "number" },
+            description: "Inclusive 1-based [startLine, endLine] for handle recall.",
+          },
+          maxReceiptTokens: {
+            type: "number",
+            description: "Token cap for the verified receipt (default 400).",
+          },
+          contextPressure: {
+            type: "object",
+            description:
+              "Optional observed host context-window usage. When efficiencyPolicy.contextPressure is enabled, this switches packaging to an observed-pressure budget and returns a compaction signal. Omit when unknown — GraphFlow never fabricates pressure.",
+            properties: {
+              usedTokens: { type: "number", description: "Tokens currently used in the host context window." },
+              maxTokens: { type: "number", description: "Host context-window size in tokens." },
+              pressureRatio: { type: "number", description: "usedTokens/maxTokens when the host reports it directly." },
+              remainingTurnsEstimate: {
+                type: "number",
+                description: "Projected turns still to run; enables the economic compaction signal.",
+              },
+            },
+            additionalProperties: false,
+          },
           englishQuery: {
             type: "string",
             description: "Optional English code-search keywords when query is Chinese/CJK.",

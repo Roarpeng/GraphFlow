@@ -145,7 +145,7 @@ npx @roarpeng/graphflow install
 
 | Tool | Purpose | Call Frequency |
 |------|---------|---------------|
-| `graphflow_context` | Preview compressed context (query) or expand anchor (anchorId) | **Highest** - default first step |
+| `graphflow_context` | Preview compressed context (query), expand anchor (anchorId), or archive/recall oversized outputs (content/handle) | **Highest** - default first step |
 
 ### Planning Tools (High Frequency)
 
@@ -434,6 +434,69 @@ graphflow_diagnose(configPath?)
 
 ---
 
+### Workflow 8: Large-output observations & efficiency mechanisms (opt-in)
+
+Every efficiency mechanism is **off by default** (`efficiencyPolicy` in
+`graphflow.config.json`). Enabling one never gates an explicit call: passing
+`content`/`handle`, `reduce:true`, or reading a returned `executionDescriptor`
+is explicit intent and always works.
+
+#### Observation handles (ObservationPack)
+
+Archive a large tool output or log instead of replaying it in every later request:
+
+```
+Step 1: graphflow_context({ content: "<full output>", rootDir })
+        → { handle: "gfo:…", head, tail, sizeBytes, lines }
+Step 2: Keep the handle + head/tail excerpt in context; drop the full body.
+Step 3: Recall exact bytes when needed:
+        graphflow_context({ handle: "gfo:…", page: 0 })              # 200 lines/page
+        graphflow_context({ handle: "gfo:…", range: [start, end] })   # inclusive 1-based
+Step 4: Reduce a long diagnostic log to a verified receipt:
+        graphflow_context({ handle: "gfo:…", reduce: true, maxReceiptTokens: 400 })
+```
+
+The receipt's retained lines are each re-read from the archive and checked
+**verbatim**; any mismatch returns a bounded excerpt (`fallback: true`) instead
+of the receipt. `efficiencyPolicy.observations` controls the inline threshold,
+head/tail sizes, TTL, redaction, and whether reduction is local (`fingerprint`)
+or an explicit remote model (`strategy: "llm"` requires `provider` + `model`;
+without them the resolver stays local and a strategy-`llm` reduce fails open).
+
+#### Observed-pressure budget & compaction signal (Online Context Compact)
+
+```
+graphflow_context({
+  query: "<question>",
+  contextPressure: { usedTokens: 120000, maxTokens: 200000, remainingTurnsEstimate: 8 }
+})
+```
+
+With `efficiencyPolicy.contextPressure.enabled: true`, GraphFlow packs against a
+budget scaled by the observed pressure (`maxContextTokens: "auto"`) and returns a
+`contextPressure` block with `effectiveMaxContextTokens` and, when
+`remainingTurnsEstimate` is supplied, an economic `compaction` recommendation.
+Omit `contextPressure` when unknown — GraphFlow never fabricates it.
+
+#### Fused action steps (Action Fusion)
+
+With `efficiencyPolicy.actionFusion.enabled: true`, `graphflow_run`'s
+`executionDescriptor` carries `steps` (`fused: true`) where an edit and its
+immediately following validation command collapse into one action. Execute the
+edit and its `command` in a single tool call to save one model round trip.
+
+```json
+{
+  "efficiencyPolicy": {
+    "observations": { "enabled": true, "inlineThresholdBytes": 8192 },
+    "contextPressure": { "enabled": true, "maxContextTokens": "auto", "cacheWriteReadRatio": 12.5 },
+    "actionFusion": { "enabled": true }
+  }
+}
+```
+
+---
+
 ## Tool Selection Decision Tree
 
 ```
@@ -503,6 +566,7 @@ Always pay attention to `tokenBudget`:
 | `compressedTokens` | What GraphFlow's compressed output uses |
 | `estimatedSavingsPercent` | Percentage saved (typically 70-95%) |
 | `budgetUsedPercent` | How much of the budget is used |
+| `contextPressure` | Present only when observed-pressure budgeting is enabled: `effectiveMaxContextTokens` plus an optional `compaction` signal |
 
 **Rule of thumb:** If `budgetUsedPercent < 50%`, you can safely expand more anchors.
 

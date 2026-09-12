@@ -71,7 +71,11 @@ describe("HostAdapter registry", () => {
     expect(getHostAdapter("kimi-code")?.toolPrefix).toBe("mcp__graphflow__");
     expect(hostsWithCapability("hooks").map((adapter) => adapter.id)).toEqual([
       "deepseek-harness",
+      "cursor",
       "claude-code",
+      "gemini",
+      "codex",
+      "opencode",
     ]);
   });
 

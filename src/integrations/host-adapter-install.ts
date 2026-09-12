@@ -189,10 +189,12 @@ function fromCursorStatus(status: CursorHostStatus): HostAdapterHostStatus {
     mcpInstalled: status.mcpInstalled,
     rulesInstalled: status.rulesInstalled,
     skillInstalled: status.skillInstalled,
+    hooksInstalled: status.hooksInstalled,
     home: status.home,
     mcpPath: status.mcpPath,
     rulesPath: status.rulesPath,
     skillPath: status.skillPath,
+    hooksPath: status.hooksPath,
     mcpTargets: status.mcpTargets,
   };
 }
@@ -248,6 +250,8 @@ function fromProfileStatus(status: ProfileHostStatus): HostAdapterHostStatus {
   if (status.rulesPath !== undefined) mapped.rulesPath = status.rulesPath;
   if (status.skillInstalled !== undefined) mapped.skillInstalled = status.skillInstalled;
   if (status.rulesInstalled !== undefined) mapped.rulesInstalled = status.rulesInstalled;
+  if (status.extraInstalled !== undefined) mapped.hooksInstalled = status.extraInstalled;
+  if (status.extraPath !== undefined) mapped.hooksPath = status.extraPath;
   return mapped;
 }
 

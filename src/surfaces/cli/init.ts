@@ -31,6 +31,7 @@ import {
 } from "../../integrations/dsh-harness-installer";
 import {
   CLAUDE_CODE_HOST_ADAPTER_ID,
+  CURSOR_HOST_ADAPTER_ID,
   DSH_HOST_ADAPTER_ID,
   HOST_ADAPTER_MIGRATED_IDS,
   KIMI_CODE_HOST_ADAPTER_ID,
@@ -41,6 +42,9 @@ import {
 } from "../../integrations/host-adapter-install";
 import { getHostAdapter } from "../../integrations/host-adapter";
 import { PROFILE_HOST_IDS, isProfileHost } from "../../integrations/profile-host-installer";
+import { OPENCODE_HOST_ADAPTER_ID } from "../../integrations/opencode-plugin";
+import { GEMINI_HOST_ADAPTER_ID } from "../../integrations/gemini-hooks";
+import { CODEX_HOST_ADAPTER_ID } from "../../integrations/codex-hooks";
 
 /** Agent ids written by a HostAdapter slice — excluded from the legacy doctor loops. */
 const HOST_ADAPTER_MCP_IDS = new Set<string>([
@@ -680,11 +684,19 @@ function pushHostAdapterDoctorChecks(checks: DoctorCheckItem[], hostId: string):
     });
   }
 
-  if (hostId === CLAUDE_CODE_HOST_ADAPTER_ID && status.settingsPath) {
+  const hooksPath = status.hooksPath ?? status.settingsPath;
+  if (
+    (hostId === CLAUDE_CODE_HOST_ADAPTER_ID ||
+      hostId === CURSOR_HOST_ADAPTER_ID ||
+      hostId === OPENCODE_HOST_ADAPTER_ID ||
+      hostId === GEMINI_HOST_ADAPTER_ID ||
+      hostId === CODEX_HOST_ADAPTER_ID) &&
+    hooksPath
+  ) {
     checks.push({
       category: "hooks",
-      agent: "Claude Code hooks",
-      path: status.settingsPath,
+      agent: `${status.agent} hooks`,
+      path: hooksPath,
       scope: "user",
       status: toDoctorStatus(status.hooksInstalled ?? false, true),
       detected: true,

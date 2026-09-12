@@ -36,7 +36,7 @@ export const HOST_ADAPTERS: readonly HostAdapter[] = [
   {
     id: "cursor",
     displayName: "Cursor",
-    capabilities: ["mcp-stdio", "skills", "rules"],
+    capabilities: ["mcp-stdio", "skills", "rules", "hooks"],
     homeMarker: ".cursor",
   },
   {
@@ -83,13 +83,13 @@ export const HOST_ADAPTERS: readonly HostAdapter[] = [
   {
     id: "gemini",
     displayName: "Gemini CLI",
-    capabilities: ["mcp-stdio", "rules"],
+    capabilities: ["mcp-stdio", "rules", "hooks"],
     homeMarker: ".gemini",
   },
   {
     id: "codex",
     displayName: "Codex",
-    capabilities: ["mcp-stdio", "skills", "rules"],
+    capabilities: ["mcp-stdio", "skills", "rules", "hooks"],
     homeMarker: ".codex",
   },
   {
@@ -110,7 +110,7 @@ export const HOST_ADAPTERS: readonly HostAdapter[] = [
   {
     id: "opencode",
     displayName: "Opencode",
-    capabilities: ["mcp-stdio", "rules"],
+    capabilities: ["mcp-stdio", "rules", "hooks"],
     homeMarker: ".config/opencode",
   },
 ] as const;

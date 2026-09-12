@@ -27,7 +27,8 @@
  * client panel (web/client.js).
  */
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -36,6 +37,8 @@ export const name = "graphflow-dsh";
 const PLUGIN_ID = "graphflow-dsh";
 const AUTO_CAPTURE_ENV = "GRAPHFLOW_AUTO_CAPTURE";
 const CAPTURE_REPLY_ENV = "GRAPHFLOW_CAPTURE_REPLY";
+const PROJECTION_ENV = "GRAPHFLOW_D_DSH_PROJECTION";
+const PROJECTION_THRESHOLD_BYTES = 8192;
 const JOURNAL_RELATIVE = join(".graphflow", "session-journal.jsonl");
 /** Reply text is clipped before it is passed as a function arg or argv element. */
 const REPLY_CLIP_MAX = 4000;
@@ -1199,6 +1202,127 @@ export function closePendingEpisodeForCwd(cwd, config = {}) {
   }
 }
 
+/**
+ * Observation projection (SoL-Pi ObservationPack at the host surface).
+ *
+ * dsh exposes the same surface-replace primitive its native
+ * @deepseek-ai/dsh-compaction-tool-result-pruner uses:
+ *   session.append("tool/result", data, { surfaceOp: { op: "replace",
+ *     startSeq, endSeq }, sourceEventSeqs })
+ * GraphFlow archives the exact bytes first, then replaces the over-budget
+ * result with a handle projection that keeps the head/tail and tells the
+ * model how to recall exact pages. ON by default (best config); set
+ * GRAPHFLOW_D_DSH_PROJECTION=0 to disable. Every failure is swallowed so the
+ * harness loop is never broken.
+ */
+export function isObservationProjectionEnabled(env = process.env) {
+  const raw = env[PROJECTION_ENV]?.trim().toLowerCase();
+  // Default ON (best config): only an explicit falsy value disables it.
+  return !(raw === "0" || raw === "false" || raw === "off" || raw === "no" || raw === "disabled");
+}
+
+/** Concatenate the text blocks of one dsh tool-result event; "" when absent. */
+export function extractToolResultText(event) {
+  const content = event?.data?.message?.content;
+  if (!Array.isArray(content)) return "";
+  const parts = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const nested = Array.isArray(block.content) ? block.content : [block];
+    for (const inner of nested) {
+      if (inner && inner.type === "text" && typeof inner.text === "string") parts.push(inner.text);
+    }
+  }
+  return parts.join("\n");
+}
+
+/** The handle projection inserted in place of the archived tool result. */
+export function buildObservationProjection(tool, packed) {
+  return [
+    "[graphflow observation " + tool + "] handle=" + packed.handle + " lines=" + packed.lines + " bytes=" + packed.sizeBytes,
+    packed.head,
+    "...",
+    packed.tail,
+    "(recall exact bytes with graphflow_context handle=" + packed.handle + ")",
+  ].join("\n");
+}
+
+/**
+ * Archive one text through the local GraphFlow CLI (observe pack). Returns
+ * the parsed pack result, or undefined on any failure. Temp-file transport
+ * keeps redaction in the tested TypeScript store instead of duplicating it
+ * here. Never throws.
+ */
+async function packObservationViaCli(text, workspace, config) {
+  const file = join(
+    tmpdir(),
+    "graphflow-obs-" + process.pid + "-" + Date.now() + "-" + Math.random().toString(36).slice(2) + ".txt"
+  );
+  try {
+    writeFileSync(file, text, "utf8");
+    const captured = await spawnCliCapture(["observe", "pack", "--file", file, "--json"], workspace, config);
+    const parsed = parseCliOut(captured);
+    if (!parsed || typeof parsed.handle !== "string") return undefined;
+    return parsed;
+  } catch {
+    return undefined;
+  } finally {
+    try {
+      unlinkSync(file);
+    } catch {
+      // temp cleanup is best-effort
+    }
+  }
+}
+
+/**
+ * Replace one over-budget tool/result surface node with a GraphFlow handle
+ * projection. `packText` is injectable for tests. Returns a small result
+ * object; never throws and never rejects.
+ * @param {{session?: object, event?: object, workspace?: string, config?: object, packText?: (text: string) => Promise<object|undefined>}} params
+ */
+export async function projectToolResultEvent(params = {}) {
+  const { session, event, workspace, config = {}, packText } = params;
+  try {
+    if (!isObservationProjectionEnabled(envOf(config))) return { projected: false, reason: "disabled" };
+    if (!event || event.type !== "tool/result") return { projected: false, reason: "not-tool-result" };
+    if (!session || typeof session.append !== "function") return { projected: false, reason: "no-surface-api" };
+    const message = event?.data?.message;
+    if (!message || typeof message !== "object") return { projected: false, reason: "no-message" };
+    const text = extractToolResultText(event);
+    if (!text) return { projected: false, reason: "no-text" };
+    if (Buffer.byteLength(text, "utf8") <= PROJECTION_THRESHOLD_BYTES) return { projected: false, reason: "below-threshold" };
+
+    const packer = typeof packText === "function" ? packText : (value) => packObservationViaCli(value, workspace, config);
+    const packed = await packer(text);
+    if (!packed || typeof packed.handle !== "string") return { projected: false, reason: "pack-failed" };
+
+    const tool = String(event?.data?.name ?? event?.data?.callName ?? message?.source?.name ?? "tool");
+    const blocks = Array.isArray(message.content) ? message.content : [];
+    const head = blocks.length > 0 ? blocks[0] : { type: "tool-result", content: [] };
+    const replacementMessage = {
+      ...message,
+      content: [{ ...head, content: [{ type: "text", text: buildObservationProjection(tool, packed) }] }],
+    };
+    const appended = session.append(
+      "tool/result",
+      { ...event.data, message: replacementMessage },
+      {
+        surfaceOp: { op: "replace", startSeq: event.seq, endSeq: event.seq },
+        sourceEventSeqs: [event.seq],
+      }
+    );
+    return {
+      projected: true,
+      handle: packed.handle,
+      originalSeq: event.seq,
+      replacementSeq: appended && typeof appended === "object" ? appended.seq : undefined,
+    };
+  } catch (error) {
+    return { projected: false, reason: "error", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 function registerSkill(ctx, config) {
   const skills = ctx?.skills;
   if (!skills || typeof skills.register !== "function") return;
@@ -1317,6 +1441,18 @@ export function apply(ctx, config = {}) {
       try {
         if (!session || typeof session !== "object") return;
         const type = event?.type;
+        if (type === "tool/result") {
+          // ObservationPack projection (opt-in, fail-open): archive the raw
+          // result and replace the surface node with a handle projection.
+          const projectionWorkspace = session?.header?.cwd ?? config.cwd;
+          projectToolResultEvent({
+            session,
+            event,
+            workspace: projectionWorkspace,
+            config,
+          }).catch(() => {});
+          return;
+        }
         if (type === "assistant/message") {
           if (event?.data?.interrupted || event?.interrupted) return;
           const text = extractMessageText(sessionEventMessage(event));

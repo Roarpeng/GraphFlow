@@ -74,6 +74,10 @@
       indexOfficeDocs: getChecked("settings-index-office"),
       embeddingProvider: getString("settings-embedding-provider") || "fnv",
       downloadAnydoc: getChecked("settings-index-office"),
+      observationsEnabled: getChecked("settings-observations-enabled"),
+      observationReduceEnabled: getChecked("settings-observation-reduce"),
+      contextPressureEnabled: getChecked("settings-context-pressure"),
+      actionFusionEnabled: getChecked("settings-action-fusion"),
     };
   }
 

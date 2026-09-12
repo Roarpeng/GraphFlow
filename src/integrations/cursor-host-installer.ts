@@ -25,6 +25,12 @@ import {
   resolveCursorRulesSourcePath,
   resolveSkillSourcePath,
 } from "./skill-installer";
+import {
+  getCursorHooksStatus,
+  installCursorHooks,
+  uninstallCursorHooks,
+  type CursorHooksResult,
+} from "./cursor-hooks";
 
 export const CURSOR_HOST_ADAPTER_ID = "cursor";
 export const CURSOR_HOME_ENV = "GRAPHFLOW_CURSOR_HOME";
@@ -35,6 +41,7 @@ export interface CursorHostInstallResult {
   status: "created" | "updated" | "skipped" | "error";
   filePath?: string;
   message?: string;
+  hooks?: CursorHooksResult;
 }
 
 export interface CursorHostMcpTarget {
@@ -52,10 +59,13 @@ export interface CursorHostStatus {
   mcpInstalled: boolean;
   rulesInstalled: boolean;
   skillInstalled: boolean;
+  hooksInstalled: boolean;
   home: string;
   mcpPath: string;
   rulesPath: string;
   skillPath: string;
+  hooksPath: string;
+  hooksDir: string;
   mcpTargets: CursorHostMcpTarget[];
 }
 
@@ -72,12 +82,21 @@ export function resolveCursorHome(override?: string): string {
   return isolatedCursorHome(override) ?? join(homedir(), ".cursor");
 }
 
-function cursorPaths(home: string): { mcpPath: string; rulesPath: string; skillPath: string; skillsRoot: string } {
+function cursorPaths(home: string): {
+  mcpPath: string;
+  rulesPath: string;
+  skillPath: string;
+  skillsRoot: string;
+  hooksPath: string;
+  hooksDir: string;
+} {
   return {
     mcpPath: join(home, "mcp.json"),
     rulesPath: join(home, "rules", "graphflow.mdc"),
     skillPath: join(home, "skills", "graphflow", "SKILL.md"),
     skillsRoot: join(home, "skills"),
+    hooksPath: join(home, "hooks.json"),
+    hooksDir: join(home, "graphflow-hooks"),
   };
 }
 
@@ -203,7 +222,8 @@ function installCursorRulesAt(home: string): { status: "created" | "updated" | "
 
 function resultFromParts(
   parts: Array<{ status: string; filePath?: string; message?: string }>,
-  fallbackPath: string
+  fallbackPath: string,
+  hooks?: CursorHooksResult
 ): CursorHostInstallResult {
   const status = rollupStatus(parts);
   const filePath = parts.find((part) => part.filePath)?.filePath ?? fallbackPath;
@@ -213,6 +233,7 @@ function resultFromParts(
     .join("; ");
   const result: CursorHostInstallResult = { status, filePath };
   if (message) result.message = message;
+  if (hooks) result.hooks = hooks;
   return result;
 }
 
@@ -223,6 +244,11 @@ export function getCursorHostStatus(options: { home?: string } = {}): CursorHost
   const agent = cursorDisplayName();
 
   if (isolated) {
+    const hooks = getCursorHooksStatus({
+      cursorHome: home,
+      hooksPath: paths.hooksPath,
+      hooksDir: paths.hooksDir,
+    });
     const detected = existsSync(home);
     const mcpInstalled = detected && isMcpServerInstalled(paths.mcpPath);
     const rulesInstalled = existsSync(paths.rulesPath);
@@ -235,10 +261,13 @@ export function getCursorHostStatus(options: { home?: string } = {}): CursorHost
       mcpInstalled,
       rulesInstalled,
       skillInstalled,
+      hooksInstalled: hooks.installed,
       home,
       mcpPath: paths.mcpPath,
       rulesPath: paths.rulesPath,
       skillPath: paths.skillPath,
+      hooksPath: paths.hooksPath,
+      hooksDir: paths.hooksDir,
       mcpTargets: detected
         ? [{ path: paths.mcpPath, installed: mcpInstalled, scope: "user", agentName: agent }]
         : [],
@@ -247,7 +276,8 @@ export function getCursorHostStatus(options: { home?: string } = {}): CursorHost
 
   const mcp = getMcpInstallStatus().filter((item) => item.agentId === "cursor" || item.agentId === "cursor-windows");
   const skill = getAgentSkillStatus().find((item) => item.agent === "Cursor skill");
-  const detected = mcp.length > 0 || existsSync(home) || detectedCursorProfileIds().length > 0;
+  const hooks = getCursorHooksStatus();
+  const detected = mcp.length > 0 || hooks.detected || existsSync(home) || detectedCursorProfileIds().length > 0;
   const mcpInstalled = mcp.some((item) => item.installed);
   const skillInstalled = skill?.installed ?? existsSync(paths.skillPath);
   const rulesInstalled = existsSync(paths.rulesPath);
@@ -259,10 +289,13 @@ export function getCursorHostStatus(options: { home?: string } = {}): CursorHost
     mcpInstalled,
     rulesInstalled,
     skillInstalled,
+    hooksInstalled: hooks.installed,
     home,
     mcpPath: mcp[0]?.configPath ?? paths.mcpPath,
     rulesPath: paths.rulesPath,
     skillPath: skill?.configPath ?? paths.skillPath,
+    hooksPath: hooks.hooksPath,
+    hooksDir: hooks.hooksDir,
     mcpTargets: mcp.map((item) => ({
       path: item.configPath,
       installed: item.installed,
@@ -284,7 +317,8 @@ export function installCursorHost(options: { home?: string } = {}): CursorHostIn
     const mcp = writeCursorMcp(paths.mcpPath);
     const rules = installCursorRulesAt(home);
     const skill = installCursorSkillAt(paths.skillsRoot);
-    return resultFromParts([mcp, rules, skill], paths.mcpPath);
+    const hooks = installCursorHooks({ hooksPath: paths.hooksPath, hooksDir: paths.hooksDir });
+    return resultFromParts([mcp, rules, skill, hooks], paths.mcpPath, hooks);
   }
 
   const ids = detectedCursorProfileIds();
@@ -301,6 +335,10 @@ export function installCursorHost(options: { home?: string } = {}): CursorHostIn
   const skill = existsSync(home)
     ? installCursorSkillAt(paths.skillsRoot)
     : { status: "skipped" as const, filePath: paths.skillPath, message: "Cursor skill marker not found" };
+  const hooksStatus = getCursorHooksStatus();
+  const hooks: CursorHooksResult = hooksStatus.detected
+    ? installCursorHooks({ hooksPath: hooksStatus.hooksPath, hooksDir: hooksStatus.hooksDir })
+    : { status: "skipped", filePath: hooksStatus.hooksPath, message: "Cursor not detected" };
 
   return resultFromParts(
     [
@@ -314,8 +352,10 @@ export function installCursorHost(options: { home?: string } = {}): CursorHostIn
         ...(item.message ? { message: item.message } : {}),
       })),
       skill,
+      hooks,
     ],
-    mcp[0]?.configPath ?? paths.mcpPath
+    mcp[0]?.configPath ?? paths.mcpPath,
+    hooks
   );
 }
 
@@ -331,10 +371,12 @@ export function uninstallCursorHost(options: { home?: string } = {}): CursorHost
     const mcpRemoved = existsSync(paths.mcpPath) ? removeMcpEntry(paths.mcpPath, "mcpServers", "graphflow") : false;
     const rulesRemoved = removeGraphFlowOwnedFile(paths.rulesPath);
     const skillRemoved = removeAgentSkill(paths.skillsRoot);
-    if (!mcpRemoved && !rulesRemoved && !skillRemoved) {
+    const hooks = uninstallCursorHooks(paths.hooksPath, paths.hooksDir);
+    const hooksRemoved = hooks.status === "updated";
+    if (!mcpRemoved && !rulesRemoved && !skillRemoved && !hooksRemoved) {
       return { status: "skipped", filePath: paths.mcpPath, message: "no GraphFlow Cursor files" };
     }
-    return { status: "updated", filePath: paths.mcpPath, message: "removed GraphFlow Cursor MCP + rules + skill" };
+    return { status: "updated", filePath: paths.mcpPath, message: "removed GraphFlow Cursor MCP + rules + skill + hooks" };
   }
 
   const mcp = [
@@ -348,9 +390,13 @@ export function uninstallCursorHost(options: { home?: string } = {}): CursorHost
       ? removeGraphFlowOwnedFile(join(appData, "Cursor", "User", "rules", "graphflow.mdc"))
       : false;
   const skillRemoved = removeAgentSkill(paths.skillsRoot);
+  const hooksStatus = getCursorHooksStatus();
+  const hooks = hooksStatus.detected
+    ? uninstallCursorHooks(hooksStatus.hooksPath, hooksStatus.hooksDir)
+    : { status: "skipped" as const, filePath: hooksStatus.hooksPath, message: "Cursor not detected" };
   const mcpRemoved = mcp.some((item) => item.removed);
-  if (!mcpRemoved && !rulesRemoved && !appDataRules && !skillRemoved) {
+  if (!mcpRemoved && !rulesRemoved && !appDataRules && !skillRemoved && hooks.status !== "updated") {
     return { status: "skipped", filePath: paths.mcpPath, message: "no GraphFlow Cursor files" };
   }
-  return { status: "updated", filePath: paths.mcpPath, message: "removed GraphFlow Cursor MCP + rules + skill" };
+  return { status: "updated", filePath: paths.mcpPath, message: "removed GraphFlow Cursor MCP + rules + skill + hooks" };
 }

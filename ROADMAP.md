@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-09-09（v1.17.0：证据诚实性冲刺——L3 对话死代码修复、token 记账与双口径节省、CI 证据去同义反复、对话密钥脱敏）
+> 最后更新：2026-09-12（R6 P0–P2 全部落地：opt-in 开关、观测句柄、观测压力预算、融合动作；配对效率报告 + 能力地板门禁；机制自动研究回路；dsh 自动投影层（默认关、fail-open））
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -96,6 +96,23 @@
 | **P0** | **W2 对话图进入上下文引擎** | ✅ | `graph-search` 新增 `searchDialogueTurns`（默认隐藏被取代轮，`includeSuperseded` 可选回看历史）；preview 附加 `dialogueHits`（MCP `graphflow_context` 同步）+ CLI `dialogue search`。**v1.17.0 更正**：v1.14.0 声称的「L3 打包命中对话轮」当时**只存在于非生产打包器** `buildLayeredContextPackage`，生产路径 `previewContext` 走 `buildEnhancedContextPackage`，故该能力对用户从未生效（5 个测试只覆盖非生产打包器所以 CI 全绿）。现两个打包器均在**所有代码锚点阶段之后**调用 `injectDialogueTurns`，共享同一 `budget`，对话命中纯增量、**可证明**永不挤掉代码 Symbol/File 锚点（`tests/retrieval-golden.test.ts` 的 "cli help flags" 用例即是此前接线错误被门禁捕获的证据） |
 | **P0** | **W3 多 Agent 轨迹 + fork/回放** | ✅ | dsh glue 监听 `subagent/start|end` 写 `agent-trace` Decision 节点（`GRAPHFLOW_CAPTURE_TRACE` 开关、身份去重、绝不抛入 harness 循环）；`forkDialogueSession` 显式分叉（跨 session next_section 主干 + same_topic 溯源边）；`walkDialoguePath` 回放路径（fork 边界标注）；CLI `dialogue fork --from` / `list --path` / `traces` |
 | **P1** | **W4 面板与导出** | ✅ | `/gf` RPC 数据通道扩展返回 traces；web 面板对话轮显示「修正过结论/fork/跳转」徽章 + Agent 轨迹区块；`artifact export-memory` 新增 `dialogues.md`（会话分组、修正链标注、轨迹列表，含 superseded 历史标记） |
+
+### R6 · 效率机制（SoL-Pi 借鉴，2026-09-10 P0 收口）
+
+> 来源：NVIDIA [SoL-Pi](https://nvlabs.github.io/SoL-Pi/) 的「efficiency for efficiency」——用 auto-research 搜索 harness 效率机制，受 capability floor 约束。GraphFlow 以**宿主无关的 MCP 记忆/上下文层**复现其边界：不接管工具执行、不调用宿主 compaction，只提供可核验的证据与建议。
+
+| 优先级 | 事项 | 状态 | 说明与依据 |
+| --- | --- | --- | --- |
+| **P0** | **统一效率开关** | ✅ | efficiencyPolicy.{observations,contextPressure,actionFusion} **默认全开（最佳配置）**，graphflow-settings 页可逐项关闭；显式 MCP 调用（content/handle、reduce）不受开关限制 |
+| **P0** | **GF-2 观测句柄（ObservationPack + Evidence-Preserving Reducer）** | ✅ | graphflow_context 折入 content/handle/reduce/page/range；阈值/TTL/脱敏/reducer 路由来自配置；SKILL.md 写明协议。逐字核验、fail-open |
+| **P0** | **GF-3 观测压力预算 + 压缩信号（Online Context Compact）** | ✅ | graphflow_context 新增 contextPressure 入参；effectiveMaxContextTokens 由 deriveAdaptiveBudget("auto") 得出；compaction 为经济性建议（需 prefix + remainingTurns，绝不编造）。启用时绕过 context 缓存 |
+| **P0** | **GF-4 融合动作步骤（Action Fusion）** | ✅ | graphflow_run bridge 的 executionDescriptor 新增 steps/fused；edit 紧跟 run/validate 合并为一个动作建议，**执行仍归宿主** |
+| **P0** | **远端 reducer 显式路由** | ✅ | strategy="llm" 必须显式 provider+model，否则降级 fingerprint；reduceObservation 在 llm 无 reducer 时 reducer-route-missing fail-open |
+| **P1** | **自动投影层（真正省 context）** | ✅ dsh | dsh 具备 surface-replace 原语（与原生 dsh-compaction-tool-result-pruner 同一 API：session.append("tool/result", data, { surfaceOp: { op: "replace", startSeq, endSeq } })）。dsh/plugin.mjs 在 session/event 的 tool/result 上归档原文（新增 CLI observe pack/recall）并用 handle 投影替换表面节点；默认开（GRAPHFLOW_D_DSH_PROJECTION=0 关闭），全程 fail-open。与原生 pruner 的差别：原文精确可召回 + 逐字核验，而非有损 marker。其余宿主（opencode/Cursor/Codex/Gemini）暂无结果重写面 |
+| **P1** | **效率/能力双指标门禁** | ✅ | efficiency-report.ts 配对双臂（tokens/turns/responseCount/score），response-count 劣化即判「少干活」；governance release-gate 新增 --min-efficiency-qualifying / --max-capability-regressions / --min-anchor-recall-percent / --min-body-coverage-percent |
+| **P2** | **机制自动研究回路（auto-research）** | ✅ | mechanism-research.ts：proposed → in-trajectory → frozen → held-out → admitted/rejected；准入需合格 held-out，冻结后拒绝 in-trajectory（隔离），终态拒绝新试验；graphflow mechanism CLI + diagnose 汇总 |
+| **P2** | **负面教训 guardrails** | ✅ | docs/efficiency-mechanisms.md §6：不把粗暴简短/早压缩当机制、不在首次插入后才削减输出、不按训练命中泛化剪枝、按生命周期门控观测、上线前关闭休眠机制 |
+| **P2** | **efficiency for efficiency（效率反哺搜索）** | ⬜ | 长期：用更低 per-run 成本扩大可执行环境/轨迹/机制搜索预算。当前无复现实验，仅作为方向保留 |
 
 ### R0 · 让飞轮真的转起来（P0，决定项目本质）
 

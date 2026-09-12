@@ -40,6 +40,8 @@ Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `gra
 | --- | --- |
 | **Harness** | 记忆动态、按任务召回（图锚点 + 压缩摘要 + 历史 episode + skill），有明确 L0–L3 token 预算；**打包后追加的载荷也计入预算**（`dialogueHits` 单独报为 `unbudgetedTokens`） |
 | **Token 节省（双口径）** | 对现实 top-K 文件读取 **95.6%**；对朴素 grep 基线 98.5%。两者回答不同问题，**不可互换**；现实口径无法自我膨胀。见 [benchmarks/RESULTS.md](benchmarks/RESULTS.md) |
+| **效率机制（SoL-Pi 借鉴）** | 默认**全开**、可在 **GraphFlow: Settings** 逐项关闭：大输出归档为句柄（ObservationPack）、日志压缩为**逐字核验**收据（Evidence-Preserving Reducer）、按观测压力自适应预算 + 压缩建议（Online Context Compact）、编辑+验证融合（Action Fusion）；dsh 侧在模型表面自动投影大结果（`GRAPHFLOW_D_DSH_PROJECTION=0` 关）。见 [docs/efficiency-mechanisms.md](docs/efficiency-mechanisms.md) |
+| **效率/能力门禁 + 机制自动研究** | 配对双臂报告落 `graphflow-out/efficiency.json`，`governance release-gate` 新增 `--min-efficiency-qualifying` / `--max-capability-regressions` / `--min-anchor-recall-percent` / `--min-body-coverage-percent`；候选机制走 `graphflow mechanism propose\|trial\|freeze\|admit\|reject\|list`（held-out 隔离、代码强制） |
 | **对话图** | 对话在所有代码锚点阶段**之后**注入，纯增量、可证明不挤掉 Symbol/File 锚点；落盘前做**密钥脱敏**（API Key / Bearer / JWT / 连接串 / PEM），`GRAPHFLOW_DIALOGUE_REDACT=0` 可关 |
 | **飞轮复现** | `npm run proof:flywheel` 离线串检索 / skill A/B / memory A/B；见 [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md) |
 | **团队记忆** | `graphflow team serve`：tenant 隔离 + viewer/contributor/admin；非 loopback 默认强制认证；`diagnose` 报告连通与 RBAC。见 [docs/team-memory-security.md](docs/team-memory-security.md) |

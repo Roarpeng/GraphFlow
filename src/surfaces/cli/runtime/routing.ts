@@ -10,7 +10,7 @@ import {
   type AgentWorkItem,
   type SkillConditionOptions,
 } from "../../../core/agent-delegation";
-import { resolveConfig } from "../../../config/resolve";
+import { resolveConfig, resolveEfficiencyPolicy } from "../../../config/resolve";
 import { resolveLearningPath } from "../../../config/paths";
 import { orchestrate, type OrchestrateOptions } from "../../../core/orchestrator";
 import type { TaskRunResult } from "../../../core/types";
@@ -126,6 +126,7 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
         ? { enableGraphCompression: config.graphPolicy.compression.enableGraphCompression }
         : {}),
       ...(enableAdaptiveBudget ? { enableAdaptiveBudget: true } : {}),
+      ...(resolveEfficiencyPolicy(config).actionFusion.enabled ? { enableActionFusion: true } : {}),
       ...(config.graphPolicy.compression?.enableRepoMapFallback
         ? { enableRepoMapFallback: true }
         : {}),
