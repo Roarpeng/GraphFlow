@@ -104,4 +104,4 @@ graphflow --json context preview "how does context slicing budget tokens?"
 
 **Fallback:** `npx @roarpeng/graphflow install` for Rules / multi-agent wiring when the host does not load Agent Plugins.
 
-See also [experience-memory.md](experience-memory.md) for how episodes and skills turn outcomes into organizational memory.
+See also [experience-memory.md](experience-memory.md) for how episodes and skills turn outcomes into organizational memory, and [efficiency-mechanisms.md](efficiency-mechanisms.md) for the opt-out-able efficiency mechanisms (ObservationPack, verified receipts, observed-pressure budget, Action Fusion) and the paired efficiency/capability floor.
