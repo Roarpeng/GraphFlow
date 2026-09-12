@@ -75,7 +75,7 @@ describe("evaluateEfficiencyComparison", () => {
 describe("efficiency report persistence and floor", () => {
   it("persists paired comparisons, aggregates, and resets", () => {
     const cfg = config();
-    expect(resolveEfficiencyReportPath(cfg).endsWith("graphflow-out/efficiency.json")).toBe(true);
+    expect(resolveEfficiencyReportPath(cfg).replace(/\\/g, "/").endsWith("graphflow-out/efficiency.json")).toBe(true);
     expect(getEfficiencyReport(cfg).totalComparisons).toBe(0);
 
     recordEfficiencyComparison(cfg, { query: "a", baseline: { tokens: 1000, responseCount: 5 }, packaged: { tokens: 500, responseCount: 5 } });
