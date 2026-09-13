@@ -2,13 +2,13 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.18.1-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.18.2-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（对现实 top-K 文件读取口径 **95.6%**，见[双基线](benchmarks/RESULTS.md)） · 跨会话学习飞轮。
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
-**v1.18.1** 已发：**跨宿主 workspace root 加固**——dsh / opencode 插件改用真实会话工作区、规则与技能写入 `rootDir` 契约、MCP 把 unsafe root 从 `-32603` 协议崩溃改为**可恢复的错误 + 修复指引**（仍然拒绝 home/AppData），并新增 `CLAUDE_PROJECT_DIR` 发现与跨宿主安装守卫测试；同时补上**插件 ON/OFF 配对效率 A/B harness**（`benchmark:plugin-ab` / `benchmark:real-task-ab`）与 `graphflow efficiency` CLI。v1.18.0 的**四大效率机制**（ObservationPack、Evidence-Preserving Reducer、Online Context Compact、Action Fusion，默认全开，可在 **GraphFlow: Settings** 逐项关闭）与治理面**配对效率/能力地板门禁**、**机制自动研究回路**（held-out 隔离强制）继续有效。
+**v1.18.2** 已发：修复 VS Code 扩展「GraphFlow MCP 自动安装失败: Invalid string length」——面板/状态路径不再自动索引整个工作区，图存储改为**紧凑 + 分块写入**（不再物化 512MB+ 单个字符串），新增**分块读取器**（实测 901 MB / 590 万条边可读），扩展启动步骤互相隔离并在失败时打印 stack。v1.18.1 的跨宿主 workspace root 加固与 v1.18.0 的四大效率机制继续有效。
 
 ## 快速开始
 

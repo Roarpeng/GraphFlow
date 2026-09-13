@@ -789,7 +789,21 @@ export async function rebuildGraph(
 
 export async function inspectGraph(
   configPath?: string,
-  options?: { nodeLimit?: number; edgeLimit?: number; rootDir?: string }
+  options?: {
+    nodeLimit?: number;
+    edgeLimit?: number;
+    rootDir?: string;
+    /**
+     * Index the workspace when the store is empty (default true — `graphflow
+     * inspect` and the CLI expect a populated graph).
+     *
+     * Status/panel callers MUST pass false: the VS Code extension's MCP
+     * auto-install calls `getSettingsPanelStatus()`, and silently indexing a
+     * whole repository there is both an unbounded side effect and, on large
+     * workspaces, the write that used to die with "Invalid string length".
+     */
+    autoIndex?: boolean;
+  }
 ): Promise<GraphSnapshotResult> {
   const config = bindRuntimeWorkspaceRoot(
     resolveConfig(configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
@@ -860,7 +874,7 @@ export async function inspectGraph(
   }
 
   let store = loadGraphStore(config);
-  if (store.nodes.length === 0) {
+  if (store.nodes.length === 0 && options?.autoIndex !== false) {
     const graphClient = createGraphClient(config);
     const indexOptions = config.graphPolicy.includeExtensions
       ? { includeExtensions: config.graphPolicy.includeExtensions }
