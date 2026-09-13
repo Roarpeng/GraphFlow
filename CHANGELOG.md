@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.18.2] - 2026-09-13
+
+### Fixed
+
+- **VS Code 扩展「GraphFlow MCP 自动安装失败: Invalid string length」（已完整复现并定位）**：扩展的 MCP 自动安装（`runMcpBootstrap`）会调用 `getSettingsPanelStatus()`，而它经 `inspectGraph` **自动索引整个工作区**；文件传输随后把整张图当作**一个 JSON 字符串**序列化（`JSON.stringify(store, null, 2)`）。对文档密集型仓库，索引器会产出约 **590 万条** `references` 边（实测 ragflow：5,939,794 边 / 91,684 节点），pretty-print 后的 payload 超过 V8 单字符串上限（64 位约 512 MB）→ `JSON.stringify` 抛 `RangeError: Invalid string length`，用户看到的就是安装失败（且图存储长期只有节点、`edges: 0`，因为边写入每次都死在这一步）。修复分四层：
+  - **面板/状态路径改为只读**：`inspectGraph` 新增 `autoIndex`（默认 `true`，CLI 行为不变），`getSettingsPanelStatus()` 传 `false` —— “安装 MCP”/面板刷新不再建图（实测：打开大型仓库时从"索引到崩溃"变为 12ms 返回，且不写盘）；建图仍由显式命令与激活后的自动索引负责。
+  - **写盘不再物化单个巨串**：小图（≤20k 元素）仍美观打印；大图改为**紧凑 + 分块写入**（4MB 缓冲区，逐元素序列化），写入前不再构造完整 payload。实测同一仓库 901 MB 图存储写入成功。
+  - **新增分块读取器**（`src/graph/graph-store-json-chunks.ts`）：超过单字符串上限的 store 逐元素增量解析，跨任意 chunk 边界可恢复（含跨边界的多字节 UTF-8，截断文档报错而非半读）。实测 901 MB / 5,939,794 边 20 秒读完；`readFileGraphStore` 与 `GraphifyFileClient` 均自动路由到它。
+  - **扩展启动步骤互相隔离**：安装、探测、模型指南、面板统计各自捕获异常；面板统计失败不再被报成「MCP 安装失败」，失败时同时把 `err.stack` 写入 GraphFlow 输出通道（此前只有一行 `err.message`，本次 bug 正是因此难以定位）。
+
+### Added
+
+- **`tests/m82-graph-store-write-safety.test.ts`**：锁定四条保证——面板状态只读（不建图、不写盘）、`inspectGraph` 默认仍建图（CLI 行为不回退）、`autoIndex:false` 不触碰存储、小图美观打印 / 大图紧凑分块且可往返解析、超限存储走分块读取、跨 chunk 边界（含 1 字符 chunk 与多字节字符）解析一致、截断文档被拒绝。
+
 ## [1.18.1] - 2026-09-12
 
 ### Fixed

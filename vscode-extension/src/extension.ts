@@ -690,6 +690,25 @@ async function runMcpBootstrap(
       ? join(extensionPath, "mcp-launcher.cmd")
       : join(extensionPath, "mcp-launcher.cjs");
   const cwdRoot = workspaceRoot ?? process.cwd();
+  // The four runtime calls below are independent: an MCP install that succeeded
+  // must not be reported as failed because a status/diagnose call threw (e.g. a
+  // graph store that is too large to read). Only the install call itself can
+  // fail the bootstrap; the rest degrade to an output-channel line.
+  const logStepFailure = (step: string, err: unknown): void => {
+    const message = err instanceof Error ? err.message : String(err);
+    output.appendLine(`[GraphFlow] ${step} failed: ${message}`);
+    if (err instanceof Error && err.stack) {
+      output.appendLine(err.stack);
+    }
+  };
+  const runOptionalStep = async <T>(step: string, run: () => Promise<T>): Promise<T | undefined> => {
+    try {
+      return await run();
+    } catch (err) {
+      logStepFailure(step, err);
+      return undefined;
+    }
+  };
 
   try {
     const results = await runGraphFlow(cwdRoot, (runtime) =>
@@ -709,11 +728,17 @@ async function runMcpBootstrap(
 
     const successes = results.filter((result) => result.status === "injected" || result.status === "created");
     const updated = results.filter((result) => result.status === "updated");
-    const detected = await runGraphFlow(cwdRoot, (runtime) => Promise.resolve(runtime.detectInstalledAgents()));
-    const guide = await runGraphFlow(cwdRoot, (runtime) =>
-      Promise.resolve(runtime.formatModelConfigGuide(workspaceRoot))
+    const detected =
+      (await runOptionalStep("agent detection", () =>
+        runGraphFlow(cwdRoot, (runtime) => Promise.resolve(runtime.detectInstalledAgents()))
+      )) ?? [];
+    const guide =
+      (await runOptionalStep("model config guide", () =>
+        runGraphFlow(cwdRoot, (runtime) => Promise.resolve(runtime.formatModelConfigGuide(workspaceRoot)))
+      )) ?? "";
+    const panelStatus = await runOptionalStep("settings panel status", () =>
+      runGraphFlow(cwdRoot, (runtime) => runtime.getSettingsPanelStatus())
     );
-    const panelStatus = await runGraphFlow(cwdRoot, (runtime) => runtime.getSettingsPanelStatus());
 
     output.appendLine("[GraphFlow] MCP auto-install results:");
     for (const result of results) {
@@ -735,7 +760,7 @@ async function runMcpBootstrap(
     }
 
     if (!options.forceNotify && successes.length === 0) {
-      return { results, mcpAgents: panelStatus.mcpAgents };
+      return { results, mcpAgents: panelStatus?.mcpAgents ?? [] };
     }
 
     const agentNames = detected.map((agent) => agent.name).join(", ") || "未检测到";
@@ -748,7 +773,7 @@ async function runMcpBootstrap(
           void vscode.commands.executeCommand("graphflow.showSettings");
         }
       });
-      return { results, mcpAgents: panelStatus.mcpAgents };
+      return { results, mcpAgents: panelStatus?.mcpAgents ?? [] };
     }
 
     const allNotified = [...successes, ...updated];
@@ -769,10 +794,15 @@ async function runMcpBootstrap(
           void vscode.commands.executeCommand("workbench.action.files.openFolder");
         }
       });
-    return { results, mcpAgents: panelStatus.mcpAgents };
+    return { results, mcpAgents: panelStatus?.mcpAgents ?? [] };
   } catch (err) {
     const text = err instanceof Error ? err.message : String(err);
     output.appendLine(`[GraphFlow] MCP auto-install failed: ${text}`);
+    if (err instanceof Error && err.stack) {
+      // The stack is the only way to localise an opaque message such as
+      // "Invalid string length"; the notification keeps the short message.
+      output.appendLine(err.stack);
+    }
     if (options.forceNotify) {
       vscode.window.showErrorMessage(`GraphFlow MCP 自动安装失败: ${text}`);
     }

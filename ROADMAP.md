@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-09-12（v1.18.1 发版：跨宿主 unsafe workspace root 加固 + 插件 ON/OFF 配对效率 A/B harness——dsh/opencode glue 用会话工作区、MCP 可恢复错误、CLAUDE_PROJECT_DIR 发现、rootDir 契约写入规则/技能）
+> 最后更新：2026-09-13（v1.18.2 发版：VS Code 扩展「MCP 自动安装失败: Invalid string length」修复——面板状态只读、图存储紧凑分块写入、超限分块读取、扩展启动步骤隔离）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -46,6 +46,8 @@
 | v1.18.0 | 2026-09-12 | **SoL-Pi 效率机制 + 宿主 hooks 收口** | 四机制默认开（ObservationPack / Evidence-Preserving Reducer / Online Context Compact / Action Fusion）；dsh 自动投影（默认开、fail-open）；配对效率/能力地板 + release-gate 阈值；机制自动研究回路（held-out 隔离强制）；Cursor/Gemini/Codex hooks + opencode 插件 | ✅ |
 
 | v1.18.1 | 2026-09-12 | **跨宿主 workspace root 加固 + 插件 AB harness** | dsh glue 取 `session.header.cwd`、hint 不再输出 unsafe `rootDir`；opencode 插件用宿主 `directory/worktree`；MCP 把 unsafe root 变成可恢复 `isError`（不再 `-32603`，安全策略不变）；新增 `CLAUDE_PROJECT_DIR` 发现；rootDir 契约写入规则/技能/托管指令块；`sync:surfaces` 映射修复 + 跨宿主安装守卫测试；插件 ON/OFF 配对效率 A/B harness + `graphflow efficiency` CLI | ✅ |
+
+| v1.18.2 | 2026-09-13 | **VS Code 安装失败修复（大图序列化）** | 面板状态只读（不再自动建图）；图存储写盘紧凑 + 分块（不再物化 512MB+ 单串）；新增分块读取器（901MB / 590 万边实测可读）；扩展启动步骤相互隔离 + 失败打印 stack；tests/m82 | ✅ |
 
 ## 下一阶段
 

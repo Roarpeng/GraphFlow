@@ -1,17 +1,21 @@
 import { randomBytes } from "node:crypto";
 import {
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { GraphEdge, GraphNode } from "../core/types";
 import { logger } from "../utils/logger";
 import { tokenizeForIndex, nodeSearchableText } from "./graph-utils";
+import { readGraphStoreFileChunked } from "./graph-store-json-chunks";
 
 interface GraphStore {
   nodes: GraphNode[];
@@ -66,6 +70,111 @@ export function getGraphifyFileStoreParseCount(): number {
 export function resetGraphifyFileStoreCacheForTests(): void {
   graphifyFileStoreCache.clear();
   graphifyFileStoreParseCount = 0;
+}
+
+/**
+ * Stores with at most this many elements (nodes + edges) are pretty-printed so
+ * nodes stay human-readable in editors. Bigger stores are written compact and in
+ * chunks: `JSON.stringify(store, null, 2)` on a multi-million-edge workspace
+ * graph exceeds V8's maximum string length (~512 MB on 64-bit) and throws
+ * `RangeError: Invalid string length` — surfaced to users as
+ * "GraphFlow MCP 自动安装失败: Invalid string length" in the VS Code extension.
+ */
+export const GRAPH_STORE_PRETTY_PRINT_MAX_ELEMENTS = 20_000;
+
+/** Flush the accumulating chunk at this size; peak string memory while writing. */
+const GRAPH_STORE_WRITE_CHUNK_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Refuse to read a store above this size: `readFileSync(path, "utf8")` on a
+ * bigger file throws `ERR_STRING_TOO_LONG` (a V8 string-length failure with a
+ * confusing message). Failing loudly with the path + size keeps the cause
+ * actionable; silently returning an empty store would trigger a re-index loop.
+ */
+export const GRAPH_STORE_MAX_READ_BYTES = 512 * 1024 * 1024;
+
+/** Actionable error for a store too large to read as one string (shared). */
+export function graphStoreTooLargeError(storePath: string, sizeBytes: number): Error {
+  const sizeMb = Math.round(sizeBytes / (1024 * 1024));
+  const limitMb = Math.round(GRAPH_STORE_MAX_READ_BYTES / (1024 * 1024));
+  return new Error(
+    `Graph store is too large to read (${sizeMb} MB at ${storePath}, limit ${limitMb} MB). ` +
+      "Remove the file and run a rebuild, or narrow graphPolicy.includeExtensions."
+  );
+}
+
+function serializeStoreElement(value: unknown, kind: "node" | "edge"): string {
+  try {
+    return JSON.stringify(value);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to serialize graph store ${kind}: ${message}`);
+  }
+}
+
+/**
+ * Write the whole store as one JSON document without ever materializing it as a
+ * single string (compact form, chunked writes).
+ */
+function streamGraphStore(
+  filePath: string,
+  store: GraphStore,
+  chunkBytes: number = GRAPH_STORE_WRITE_CHUNK_BYTES
+): void {
+  const fd = openSync(filePath, "w");
+  let buffer = "";
+  const flush = (): void => {
+    if (buffer.length > 0) {
+      writeSync(fd, buffer);
+      buffer = "";
+    }
+  };
+  const push = (text: string): void => {
+    buffer += text;
+    if (buffer.length >= chunkBytes) flush();
+  };
+  try {
+    push('{"nodes":[');
+    for (let i = 0; i < store.nodes.length; i += 1) {
+      push(`${i === 0 ? "" : ","}${serializeStoreElement(store.nodes[i], "node")}`);
+    }
+    push('],"edges":[');
+    for (let i = 0; i < store.edges.length; i += 1) {
+      push(`${i === 0 ? "" : ","}${serializeStoreElement(store.edges[i], "edge")}`);
+    }
+    push("]}\n");
+    flush();
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Persist a store to `filePath` (exported for tests).
+ *
+ * Pretty output is attempted first for small stores; anything that cannot be
+ * stringified in one piece (or that exceeds the element budget) falls back to
+ * the chunked compact writer instead of failing with "Invalid string length".
+ */
+export function writeGraphStoreFile(
+  filePath: string,
+  store: GraphStore,
+  options: { prettyPrintMaxElements?: number; chunkBytes?: number } = {}
+): void {
+  const budget = options.prettyPrintMaxElements ?? GRAPH_STORE_PRETTY_PRINT_MAX_ELEMENTS;
+  if (store.nodes.length + store.edges.length <= budget) {
+    try {
+      writeFileSync(filePath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+      return;
+    } catch (error) {
+      // Fall through to the streaming writer (e.g. a few very large nodes).
+      logger.warn(
+        { error: error instanceof Error ? error.message : String(error), filePath },
+        "Graph store pretty-print failed; falling back to the chunked writer"
+      );
+    }
+  }
+  streamGraphStore(filePath, store, options.chunkBytes);
 }
 
 function statIfExists(absPath: string): FileStat | null {
@@ -230,6 +339,27 @@ export class GraphifyFileClient {
       return cached;
     }
 
+    if (current !== null && current.size > GRAPH_STORE_MAX_READ_BYTES) {
+      // Above the single-string limit: parse in bounded chunks instead of
+      // throwing ERR_STRING_TOO_LONG from readFileSync.
+      try {
+        const chunked = readGraphStoreFileChunked(absPath);
+        const entry: StoreCacheEntry = {
+          store: { nodes: chunked.nodes as GraphNode[], edges: chunked.edges as GraphEdge[] },
+          index: null,
+          stat: current,
+        };
+        graphifyFileStoreCache.set(absPath, entry);
+        return entry;
+      } catch (error) {
+        logger.warn(
+          { error: error instanceof Error ? error.message : String(error), absPath },
+          "Chunked graph store read failed"
+        );
+        throw graphStoreTooLargeError(absPath, current.size);
+      }
+    }
+
     const store = current === null ? { nodes: [], edges: [] } : this.parseStoreFile(absPath);
     const entry: StoreCacheEntry = { store, index: null, stat: current };
     graphifyFileStoreCache.set(absPath, entry);
@@ -268,13 +398,18 @@ export class GraphifyFileClient {
   private writeStore(store: GraphStore): void {
     const dir = dirname(this.storePath);
     mkdirSync(dir, { recursive: true });
-    // Pretty-print so nodes/edges are human-readable in editors (not one giant line).
-    const payload = `${JSON.stringify(store, null, 2)}\n`;
     const tempPath = join(
       dir,
       `.graphflow-graph-${process.pid}-${randomBytes(4).toString("hex")}.tmp`
     );
-    writeFileSync(tempPath, payload, "utf8");
+    try {
+      // Small graphs stay pretty-printed (human-readable); large ones are
+      // written compact + chunked so the payload never becomes one giant string.
+      writeGraphStoreFile(tempPath, store);
+    } catch (error) {
+      rmSync(tempPath, { force: true });
+      throw error;
+    }
     // Windows 上 rename 可能因文件锁定而失败，添加重试机制
     const maxRetries = 5;
     for (let i = 0; i < maxRetries; i++) {

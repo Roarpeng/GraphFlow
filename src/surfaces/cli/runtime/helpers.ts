@@ -4,6 +4,9 @@ import type { GraphEdge, GraphNode } from "../../../core/types";
 import type { GraphFlowConfig } from "../../../config/schema";
 import { resolveGraphStorePath } from "../../../config/paths";
 import { GraphifySqliteClient } from "../../../graph/sqlite-client";
+import { readGraphStoreFileChunked } from "../../../graph/graph-store-json-chunks";
+import { GRAPH_STORE_MAX_READ_BYTES } from "../../../graph/graphify-file-client";
+import { logger } from "../../../utils/logger";
 import type { GraphClient } from "../../../graph/client-factory";
 import type { SkillInsightItem } from "./types.js";
 
@@ -50,9 +53,33 @@ export async function resolveGraphStoreAfterIndex(
   return loadGraphStore(config);
 }
 
-export function readFileGraphStore(storePath: string): { nodes: GraphNode[]; edges: GraphEdge[] } {
+export function readFileGraphStore(
+  storePath: string,
+  options: { singleStringLimitBytes?: number } = {}
+): { nodes: GraphNode[]; edges: GraphEdge[] } {
   if (!storePath || !existsSync(storePath)) {
     return { nodes: [], edges: [] };
+  }
+
+  // `readFileSync(path, "utf8")` cannot materialize a store above V8's maximum
+  // string length; parse those in bounded chunks instead of reporting "no graph"
+  // (which would look like an empty workspace and trigger a re-index loop).
+  const limit = options.singleStringLimitBytes ?? GRAPH_STORE_MAX_READ_BYTES;
+  const sizeBytes = getFileSize(storePath);
+  if (sizeBytes > limit) {
+    try {
+      const chunked = readGraphStoreFileChunked(storePath);
+      return {
+        nodes: chunked.nodes as GraphNode[],
+        edges: chunked.edges as GraphEdge[],
+      };
+    } catch (error) {
+      logger.warn(
+        { error: error instanceof Error ? error.message : String(error), storePath },
+        "Chunked graph store read failed"
+      );
+      return { nodes: [], edges: [] };
+    }
   }
 
   try {

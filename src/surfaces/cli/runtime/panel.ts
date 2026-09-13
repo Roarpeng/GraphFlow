@@ -96,7 +96,14 @@ export async function testRoutingAndIndexGraph(
 
 export async function getSettingsPanelStatus(configPath?: string): Promise<SettingsPanelStatusData> {
   const config = resolveConfig(configPath);
-  const snapshot = await inspectGraph(configPath, { nodeLimit: 1, edgeLimit: 1 });
+  // Read-only: the panel/status path must never index. The VS Code extension
+  // calls this from its MCP auto-install (runMcpBootstrap) and from panel
+  // refreshes — indexing a whole repository there is an unbounded side effect,
+  // and on multi-million-edge workspaces the graph-store write used to fail with
+  // "Invalid string length", which the extension reported as
+  // "GraphFlow MCP 自动安装失败". A missing store simply reports 0 nodes; the
+  // explicit index/rebuild commands still populate it.
+  const snapshot = await inspectGraph(configPath, { nodeLimit: 1, edgeLimit: 1, autoIndex: false });
   const storePath = resolveGraphStorePath(config);
   let graphLastModified: string | null = null;
   if (existsSync(storePath)) {
