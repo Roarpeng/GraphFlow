@@ -16,6 +16,16 @@ export interface GraphStoreSnapshot {
 export interface GraphClient {
   upsertNodes(nodes: GraphNode[]): Promise<void>;
   upsertEdges(edges: GraphEdge[]): Promise<void>;
+  /**
+   * Merge nodes and edges in ONE backend round trip.
+   *
+   * Backends whose write rewrites the whole store (the file transport: one JSON
+   * document) must implement this — indexing a single file otherwise rewrites
+   * the entire store twice (read + write each time), which dominates incremental
+   * indexing on large workspaces. Implementations must treat an empty batch as a
+   * no-op and never touch storage.
+   */
+  upsertGraph?(batch: { nodes?: GraphNode[]; edges?: GraphEdge[] }): Promise<void>;
   queryByKeyword(query: string): Promise<GraphNode[]>;
   readSnapshot?(): GraphStoreSnapshot;
   getNodesByIds?(ids: string[]): Promise<GraphNode[]>;
@@ -42,6 +52,14 @@ class InMemoryGraphClientAdapter implements GraphClient {
 
   async upsertEdges(edges: GraphEdge[]): Promise<void> {
     this.client.upsertEdges(edges);
+  }
+
+  async upsertGraph(batch: { nodes?: GraphNode[]; edges?: GraphEdge[] }): Promise<void> {
+    const nodes = batch.nodes ?? [];
+    const edges = batch.edges ?? [];
+    if (nodes.length === 0 && edges.length === 0) return;
+    if (nodes.length > 0) this.client.upsertNodes(nodes);
+    if (edges.length > 0) this.client.upsertEdges(edges);
   }
 
   async queryByKeyword(query: string): Promise<GraphNode[]> {
@@ -94,6 +112,24 @@ class MutationAwareGraphClient implements GraphClient {
   async upsertEdges(edges: GraphEdge[]): Promise<void> {
     await this.inner.upsertEdges(edges);
     const touched = new Set<string>();
+    for (const edge of edges) {
+      touched.add(edge.from);
+      touched.add(edge.to);
+    }
+    markGraphMutated(touched);
+  }
+
+  async upsertGraph(batch: { nodes?: GraphNode[]; edges?: GraphEdge[] }): Promise<void> {
+    const nodes = batch.nodes ?? [];
+    const edges = batch.edges ?? [];
+    if (nodes.length === 0 && edges.length === 0) return;
+    if (this.inner.upsertGraph) {
+      await this.inner.upsertGraph(batch);
+    } else {
+      if (nodes.length > 0) await this.inner.upsertNodes(nodes);
+      if (edges.length > 0) await this.inner.upsertEdges(edges);
+    }
+    const touched = new Set<string>(nodes.map((node) => node.id));
     for (const edge of edges) {
       touched.add(edge.from);
       touched.add(edge.to);

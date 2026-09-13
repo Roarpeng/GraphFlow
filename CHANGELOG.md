@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.18.3] - 2026-09-13
+
+### Performance
+
+- **大型项目索引提速 3.7–4×（实测 ragflow：5,492 文件 / 78,160 符号）**：首建 **34.7–37.6s → 9.5s**（4 workers）/ 16.2s（单线程），图存储 **855–860MB → 193MB**。三处改动叠加：
+  - **reference 边预算**：跳过"定义文件数 > N"的通用名（DF 停用词，`graphPolicy.referenceEdgeMaxDefinitionFiles`，默认 10；0=不限）并限制每文件引用边数（`referenceEdgeMaxPerFile`，默认 500）。实测 575 万 → **99 万条** references（−83%）；此前 1.87 万个名字贡献了 575 万条边，`__init__` 一个名字就有 46.9 万条（定义于 414 个文件）。质量有验证：`ci-release-evidence` 三个 golden 探针 recall 保持 **1.00**，`fidelity-anchor-recall` 88 → **91**。
+  - **worker 池并行解析**（`worker_threads`，默认 cores−1、上限 8；`graphPolicy.indexWorkers`、`GRAPHFLOW_INDEX_WORKERS=0` 可关）：解析阶段 fan-out，缓存/剪枝/写库仍在主线程；实测同仓库 **15.95s → 9.50s（1.68×）**，且图**逐项一致**（91,680 节点 / 1,113,739 边 / 989,218 refs）。worker 创建或单任务失败都会自动降级为进程内解析，绝不让索引失败。
+  - **索引扫描更聪明**：尊重 `.gitignore`（`git ls-files --cached --others --exclude-standard`，精确语义；`graphPolicy.respectGitIgnore: false` 可关，非 git 仓库自动回退目录遍历），并跳过 lockfile / minified bundle / source map / 生成代码（`*_pb2.py`、`*.pb.go`、`*.g.dart`、`*.generated.*` …）。
+- **增量保存不再重写整库**：file 传输新增**追加式 delta 段**（`graphflow-graph.json.delta.jsonl`）+ 阈值压缩（默认 8MB）。仅当 base 存储 ≥ 4MB 才启用，小/中型项目保持"单个自包含 JSON、字节级不变"的历史布局。实测 11.2MB 图库：**单文件保存 0.27s 且 base 未被重写**（delta 3.5KB），无变更重跑 0.04s；`vacuum()` 与重建会把 delta 压缩回单文件。所有内部读取路径（`loadGraphStore` 等）都会合并 base + delta。
+- **机械优化（消除 O(store) 放大）**：`upsertGraph()` 让节点+边**一次读写**（此前 `upsertNodes` + `upsertEdges` = 两次整库重写）；**空批次完全不触碰存储**（watcher 空跑不再重写）；**边键集合缓存**（增量写入不再每次重建百万级 key 集合）；批量索引的 **per-file prune 合并为一次批量删除**（此前每个文件一次整库重写 —— 大型仓库增量索引会因此卡死；实测已修复：原先 >120s 卡死 → 13.1s）。
+
+### Added
+
+- **配置**：`graphPolicy.respectGitIgnore`（默认 true）、`referenceEdgeMaxDefinitionFiles`（默认 10）、`referenceEdgeMaxPerFile`（默认 500）、`indexWorkers`（默认 auto；0 = 关闭 worker 池）。
+- **测试**：`m83-index-scan-budget`（DF 过滤、每文件上限、增量路径同预算、生成/锁文件识别、真实 git 仓库 `.gitignore` 生效与可关闭）、`m84-index-worker-pool`（worker 计数/门槛/入口解析、注入式调度与容错、共享解析核心）、`m85-incremental-store-delta`（追加不重写 base、阈值压缩、删除走 delta、vacuum、截断行容错、重建清理）、`m82` 扩到 10 条。
+
 ## [1.18.2] - 2026-09-13
 
 ### Fixed

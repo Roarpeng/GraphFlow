@@ -57,6 +57,12 @@ import {
   buildSingleFileCallAndInheritEdges,
 } from "./file-indexer-edges.js";
 import { buildPlcEdges } from "./language-indexers/plcopen-xml.js";
+import { parseFileForIndex } from "./file-parse-core.js";
+import {
+  createFileParsePool,
+  shouldUseWorkerPool,
+  type FileParsePool,
+} from "./file-parse-pool.js";
 
 // ── Batch workspace indexing ─────────────────────────────────────────
 
@@ -69,6 +75,12 @@ interface FileProcessResult {
   cacheEntry: { mtimeMs: number; hash: string; numNodes: number };
   /** Present when an office/PDF file was converted and structurally indexed. */
   documentSemantic?: DocumentSemanticTarget;
+  /**
+   * Node ids to drop from the store before the re-indexed nodes are written.
+   * Batch indexing collects them and issues ONE delete instead of one store
+   * mutation per file (which on a large store meant a full rewrite per file).
+   */
+  pruneIds?: string[];
 }
 
 /**
@@ -83,11 +95,58 @@ async function processFile(
   cacheState: import("./file-indexer-cache.js").CacheState,
   forceReindex: boolean,
   client: GraphClient,
+  pool?: FileParsePool,
+  pruneIndex?: Map<string, string[]>,
 ): Promise<FileProcessResult | null> {
   const relPath = file.relPath;
   const mtimeMs = file.mtimeMs;
   const prev = cacheState[relPath];
   const officeDoc = isOfficeDocumentPath(relPath);
+
+  // Off-thread read + hash + parse. Office/PDF files keep the in-process path
+  // (their converter is async and may spawn its own work).
+  if (pool && !officeDoc) {
+    if (!forceReindex && prev && prev.mtimeMs === mtimeMs) {
+      return null;
+    }
+    try {
+      const outcome = await pool.run({
+        relPath,
+        absPath: file.absPath,
+        size: file.size,
+        ...(prev?.hash ? { prevHash: prev.hash } : {}),
+        ...(forceReindex ? { forceReindex: true } : {}),
+      });
+      if (outcome.unchanged) {
+        return null;
+      }
+      if (!outcome.fileNodes || !outcome.parsedEntry) {
+        throw new Error("index worker returned no parse result");
+      }
+      const workerPruneIds = pruneIndex ? (pruneIndex.get(relPath) ?? []) : undefined;
+      if (workerPruneIds === undefined && (client.deleteNode ?? client.deleteNodes)) {
+        await pruneFileFromGraph(client, [relPath]);
+      }
+      return {
+        ...(workerPruneIds ? { pruneIds: workerPruneIds } : {}),
+        relPath,
+        fileNodes: outcome.fileNodes,
+        fileEdges: outcome.fileEdges ?? [],
+        parsedEntry: outcome.parsedEntry,
+        cacheEntry: {
+          mtimeMs,
+          hash: outcome.currentHash,
+          numNodes: outcome.fileNodes.length,
+        },
+      };
+    } catch (error) {
+      // Fail-open: parse this file in-process rather than dropping it.
+      logger.warn(
+        { relPath, error: error instanceof Error ? error.message : String(error) },
+        "index worker failed for file; falling back to in-process parsing"
+      );
+    }
+  }
 
   let content = "";
   let currentHash = "";
@@ -139,73 +198,30 @@ async function processFile(
     currentHash = createHash("md5").update(content).digest("hex");
   }
 
-  // 清理该文件在图存储中的旧节点（不同 relPath 的节点互不重叠，并行安全）
-  if (client.deleteNode ?? client.deleteNodes) {
+  // 旧节点在图存储中的清理：批量索引时交给调用方一次性执行（每个文件单独
+  // 删除会导致大图每次保存都重写整库）；单文件索引路径仍立即删除。
+  const pruneIds = pruneIndex ? (pruneIndex.get(relPath) ?? []) : undefined;
+  if (pruneIds === undefined && (client.deleteNode ?? client.deleteNodes)) {
     await pruneFileFromGraph(client, [relPath]);
   }
 
-  const fileNodeId = `file:${relPath}`;
-  const moduleNodeId = `module:${moduleKey(relPath)}`;
-  const indexer = officeDoc ? markdownIndexer : getIndexerForFile(relPath);
-  const language = officeDoc
-    ? "document"
-    : (indexer?.language ?? (extOf(relPath).replace(/^\./, "") || "text"));
-
-  let declared: IndexedSymbol[] = [];
-  let imports: string[] = [];
-  let fileCalls: CallRelation[] = [];
-  let fileInherits: InheritRelation[] = [];
-
-  if (indexer) {
-    const extracted = await indexer.extract(relPath, content);
-    // 同文件同名符号在此统一消歧：首个保留旧 ID，冲突项追加确定性哈希段
-    declared = assignSymbolNodeIds(relPath, extracted.symbols);
-    imports = extracted.imports.map((imp) => imp.module);
-    fileCalls = extracted.calls ?? [];
-    fileInherits = extracted.inherits ?? [];
-  }
-
-  const { nodes: fileNodes, edges: fileEdges } = buildFileNodesAndEdges(
-    relPath, file.size, language, declared, imports
-  );
-
-  if (officeDoc) {
-    const fileNode = fileNodes.find((n) => n.id === fileNodeId);
-    if (fileNode?.metadata) {
-      fileNode.metadata.sourceFormat = extOf(relPath).replace(/^\./, "") || "document";
-      fileNode.metadata.convertedVia = "anydoc";
-      fileNode.metadata.indexedAs = "markdown";
-    }
-  }
-
-  if ((language === "markdown" || language === "document") && declared.length > 0) {
-    const docEdges = buildDocumentEdges(fileNodeId, declared);
-    fileEdges.push(...docEdges);
-  }
-
-  if (language === "plcopen" && declared.length > 0) {
-    const plcEdges = buildPlcEdges(fileNodeId, declared, imports);
-    fileEdges.push(...plcEdges);
-  }
+  const parsedResult = await parseFileForIndex({
+    relPath,
+    content,
+    size: file.size,
+    ...(officeDoc ? { officeDoc: true } : {}),
+  });
 
   return {
+    ...(pruneIds ? { pruneIds } : {}),
     relPath,
-    fileNodes,
-    fileEdges,
-    parsedEntry: {
-      relPath,
-      fileNodeId,
-      moduleNodeId,
-      declared,
-      content,
-      scannable: Boolean(indexer),
-      calls: fileCalls,
-      inherits: fileInherits,
-    },
+    fileNodes: parsedResult.fileNodes,
+    fileEdges: parsedResult.fileEdges,
+    parsedEntry: parsedResult.parsedEntry,
     cacheEntry: {
       mtimeMs,
       hash: currentHash,
-      numNodes: fileNodes.length,
+      numNodes: parsedResult.fileNodes.length,
     },
     ...(documentSemantic ? { documentSemantic } : {}),
   };
@@ -237,7 +253,9 @@ export async function indexWorkspaceFiles(
     cacheState = {};
   }
 
-  const scanned = walkScannableFiles(rootDir, includeExtensions, maxFileSizeBytes);
+  const scanned = walkScannableFiles(rootDir, includeExtensions, maxFileSizeBytes, {
+    ...(options?.respectGitIgnore === false ? { respectGitIgnore: false } : {}),
+  });
   const currentRelPaths = new Set(scanned.map((file) => file.relPath));
 
   if (client.deleteNode ?? client.deleteNodes) {
@@ -256,7 +274,27 @@ export async function indexWorkspaceFiles(
   const parsed: ParsedFile[] = [];
   const documentTargets: DocumentSemanticTarget[] = [];
 
+  const pruneIndex =
+    client.deleteNode ?? client.deleteNodes
+      ? buildPrunableNodeIndex(client.readSnapshot?.())
+      : undefined;
+  const deletedNodeIds = new Set<string>();
+
+  const pool = shouldUseWorkerPool(scanned.length, {
+    ...(typeof options?.indexWorkers === "number" ? { indexWorkers: options.indexWorkers } : {}),
+  })
+    ? createFileParsePool(
+        typeof options?.indexWorkers === "number" && options.indexWorkers > 0
+          ? { workerCount: options.indexWorkers }
+          : {}
+      )
+    : undefined;
+  if (pool) {
+    logger.info({ workers: pool.size, files: scanned.length }, "工作区索引使用 worker 池并行解析");
+  }
+
   let processedCount = 0;
+  try {
   for (let i = 0; i < scanned.length; i += concurrency) {
     if (signal?.aborted) {
       logger.info({ processed: processedCount, total: scanned.length }, "工作区索引已取消");
@@ -274,12 +312,15 @@ export async function indexWorkspaceFiles(
         if (signal?.aborted) {
           return Promise.resolve<FileProcessResult | null>(null);
         }
-        return processFile(file, cacheState, forceReindex, client);
+        return processFile(file, cacheState, forceReindex, client, pool, pruneIndex);
       })
     );
 
     for (const result of batchResults) {
       if (result) {
+        if (result.pruneIds) {
+          for (const id of result.pruneIds) deletedNodeIds.add(id);
+        }
         nodes.push(...result.fileNodes);
         edges.push(...result.fileEdges);
         parsed.push(result.parsedEntry);
@@ -299,6 +340,11 @@ export async function indexWorkspaceFiles(
     }
   }
 
+  } finally {
+    // Parsing is done: release the workers before the write phase.
+    pool?.close();
+  }
+
   const symbolIndex = new Map<string, IndexedSymbol[]>();
   for (const file of parsed) {
     for (const symbol of file.declared) {
@@ -308,7 +354,14 @@ export async function indexWorkspaceFiles(
     }
   }
 
-  const { edges: refEdges, referenceCount } = buildBatchReferenceEdges(parsed, symbolIndex);
+  const { edges: refEdges, referenceCount } = buildBatchReferenceEdges(parsed, symbolIndex, {
+    ...(typeof options?.referenceEdgeMaxDefinitionFiles === "number"
+      ? { maxDefinitionFiles: options.referenceEdgeMaxDefinitionFiles }
+      : {}),
+    ...(typeof options?.referenceEdgeMaxPerFile === "number"
+      ? { maxEdgesPerFile: options.referenceEdgeMaxPerFile }
+      : {}),
+  });
   for (const edge of refEdges) edges.push(edge);
 
   const { edges: callEdges, callEdgeCount } = buildBatchCallEdges(parsed, symbolIndex);
@@ -325,8 +378,30 @@ export async function indexWorkspaceFiles(
     }
   }
 
-  await client.upsertNodes(nodes);
-  await client.upsertEdges(dedupEdges(edges));
+  // One read + one write for both halves: two separate upserts would rewrite
+  // the whole store twice (see GraphifyFileClient.upsertGraph). A batch with
+  // nothing to persist (no changed file) must not touch the store at all.
+  // Dedupe once here (the builders only dedupe per source file); the client then
+  // dedupes against the stored edges without re-checking the batch.
+  if (deletedNodeIds.size > 0) {
+    // One delete for the whole run, before the re-indexed nodes are written.
+    const ids = Array.from(deletedNodeIds);
+    if (client.deleteNodes) {
+      await client.deleteNodes(ids);
+    } else if (client.deleteNode) {
+      for (const id of ids) await client.deleteNode(id);
+    }
+  }
+
+  const batchedEdges = dedupEdges(edges);
+  if (nodes.length > 0 || batchedEdges.length > 0) {
+    if (client.upsertGraph) {
+      await client.upsertGraph({ nodes, edges: batchedEdges });
+    } else {
+      if (nodes.length > 0) await client.upsertNodes(nodes);
+      if (batchedEdges.length > 0) await client.upsertEdges(batchedEdges);
+    }
+  }
 
   saveCacheState(cachePath, cacheState);
 
@@ -359,7 +434,14 @@ export async function indexSingleFile(
   client: GraphClient,
   rootDir: string,
   absPath: string,
-  options?: { includeExtensions?: string[]; maxFileSizeBytes?: number; embeddingProvider?: import("../learning/embeddings.js").EmbeddingProvider }
+  options?: Pick<
+    FileIndexerOptions,
+    | "includeExtensions"
+    | "maxFileSizeBytes"
+    | "embeddingProvider"
+    | "referenceEdgeMaxDefinitionFiles"
+    | "referenceEdgeMaxPerFile"
+  >
 ): Promise<{
   indexedFiles: number;
   indexedSymbols: number;
@@ -490,7 +572,15 @@ export async function indexSingleFile(
   const snapshot = client.readSnapshot?.();
   if (snapshot && indexer) {
     const { edges: refEdges, referenceCount: refCount } = buildSingleFileReferenceEdges(
-      fileNodeId, relPath, content, declared, snapshot.nodes
+      fileNodeId, relPath, content, declared, snapshot.nodes,
+      {
+        ...(typeof options?.referenceEdgeMaxDefinitionFiles === "number"
+          ? { maxDefinitionFiles: options.referenceEdgeMaxDefinitionFiles }
+          : {}),
+        ...(typeof options?.referenceEdgeMaxPerFile === "number"
+          ? { maxEdgesPerFile: options.referenceEdgeMaxPerFile }
+          : {}),
+      }
     );
     edges.push(...refEdges);
     referenceCount = refCount;
@@ -513,8 +603,20 @@ export async function indexSingleFile(
     }
   }
 
-  await client.upsertNodes(nodes);
-  await client.upsertEdges(dedupEdges(edges));
+  // One read + one write for both halves: two separate upserts would rewrite
+  // the whole store twice (see GraphifyFileClient.upsertGraph). A batch with
+  // nothing to persist (no changed file) must not touch the store at all.
+  // Dedupe once here (the builders only dedupe per source file); the client then
+  // dedupes against the stored edges without re-checking the batch.
+  const batchedEdges = dedupEdges(edges);
+  if (nodes.length > 0 || batchedEdges.length > 0) {
+    if (client.upsertGraph) {
+      await client.upsertGraph({ nodes, edges: batchedEdges });
+    } else {
+      if (nodes.length > 0) await client.upsertNodes(nodes);
+      if (batchedEdges.length > 0) await client.upsertEdges(batchedEdges);
+    }
+  }
 
   // Update cache entry for this file
   cacheState[relPath] = {
@@ -551,6 +653,34 @@ export async function indexSingleFile(
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────
+
+/**
+ * Map every file's node ids by relPath in ONE pass over the snapshot, so a
+ * re-index can prune a file without scanning the whole graph per file.
+ */
+function buildPrunableNodeIndex(
+  snapshot: { nodes: GraphNode[] } | undefined
+): Map<string, string[]> {
+  const index = new Map<string, string[]>();
+  if (!snapshot) return index;
+  for (const node of snapshot.nodes) {
+    let relPath: string | undefined;
+    if (node.id.startsWith("file:")) {
+      relPath = node.id.slice("file:".length);
+    } else if (node.id.startsWith("symbol:")) {
+      const rest = node.id.slice("symbol:".length);
+      const idx = rest.indexOf(":");
+      relPath = idx > 0 ? rest.slice(0, idx) : undefined;
+    } else if (typeof node.metadata?.file === "string") {
+      relPath = node.metadata.file;
+    }
+    if (!relPath) continue;
+    const list = index.get(relPath);
+    if (list) list.push(node.id);
+    else index.set(relPath, [node.id]);
+  }
+  return index;
+}
 
 async function pruneFileFromGraph(client: GraphClient, relPaths: string[]): Promise<void> {
   if (!client.readSnapshot || (!client.deleteNode && !client.deleteNodes)) {

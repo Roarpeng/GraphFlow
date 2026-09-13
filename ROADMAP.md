@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-09-13（v1.18.2 发版：VS Code 扩展「MCP 自动安装失败: Invalid string length」修复——面板状态只读、图存储紧凑分块写入、超限分块读取、扩展启动步骤隔离）
+> 最后更新：2026-09-13（v1.18.3 发版：大型项目索引提速 3.7–4×——DF 边预算 + worker 池并行解析 + .gitignore 扫描；增量保存改为追加式 delta 段）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -48,6 +48,8 @@
 | v1.18.1 | 2026-09-12 | **跨宿主 workspace root 加固 + 插件 AB harness** | dsh glue 取 `session.header.cwd`、hint 不再输出 unsafe `rootDir`；opencode 插件用宿主 `directory/worktree`；MCP 把 unsafe root 变成可恢复 `isError`（不再 `-32603`，安全策略不变）；新增 `CLAUDE_PROJECT_DIR` 发现；rootDir 契约写入规则/技能/托管指令块；`sync:surfaces` 映射修复 + 跨宿主安装守卫测试；插件 ON/OFF 配对效率 A/B harness + `graphflow efficiency` CLI | ✅ |
 
 | v1.18.2 | 2026-09-13 | **VS Code 安装失败修复（大图序列化）** | 面板状态只读（不再自动建图）；图存储写盘紧凑 + 分块（不再物化 512MB+ 单串）；新增分块读取器（901MB / 590 万边实测可读）；扩展启动步骤相互隔离 + 失败打印 stack；tests/m82 | ✅ |
+
+| v1.18.3 | 2026-09-13 | **大项目索引提速 + 增量存储** | DF 停用词边预算（575万→99万 references）+ 每文件上限；worker 池并行解析（15.95s→9.50s，图逐项一致）；尊重 .gitignore 并跳过生成/锁文件；file 传输追加式 delta 段（单文件保存 0.27s 且不重写 base）；upsertGraph 合并写入 / 空批次短路 / prune 合并为批量删除 | ✅ |
 
 ## 下一阶段
 
