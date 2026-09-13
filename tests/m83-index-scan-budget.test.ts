@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildBatchReferenceEdges,
@@ -54,6 +54,9 @@ function parsedFile(relPath: string, content: string, declared: IndexedSymbol[] 
     inherits: [],
   } as unknown as ParsedFile;
 }
+
+/** Workspace-relative POSIX path (portable across Windows/Linux tests). */
+const rel = (root: string, p: string): string => relative(root, p).replace(/\\/g, "/");
 
 const symbol = (relPath: string, name: string): IndexedSymbol =>
   ({ nodeId: `symbol:${relPath}:${name}`, name, file: relPath }) as unknown as IndexedSymbol;
@@ -146,7 +149,7 @@ describe("M83 walker skip rules", () => {
     writeFileSync(join(root, "package-lock.json"), "{}\n");
     writeFileSync(join(root, "app.min.js"), "var a=1;\n");
 
-    const found = walkFiles(root, [".ts", ".js", ".json"]).map((p) => p.replace(root + "/", ""));
+    const found = walkFiles(root, [".ts", ".js", ".json"]).map((p) => rel(root, p));
 
     expect(found).toEqual(["src/app.ts"]);
   });
@@ -165,12 +168,10 @@ describe("M83 walker skip rules", () => {
     writeFileSync(join(root, "src", "secrets.local.ts"), "export const s = 1;\n");
     writeFileSync(join(root, "generated", "client.ts"), "export const c = 1;\n");
 
-    const respected = walkFiles(root, [".ts"]).map((p) => p.replace(root + "/", "")); 
+    const respected = walkFiles(root, [".ts"]).map((p) => rel(root, p));
     expect(respected).toEqual(["src/app.ts"]);
 
-    const disabled = walkFiles(root, [".ts"], { respectGitIgnore: false })
-      .map((p) => p.replace(root + "/", ""))
-      .sort();
+    const disabled = walkFiles(root, [".ts"], { respectGitIgnore: false }).map((p) => rel(root, p)).sort();
     expect(disabled).toEqual(["generated/client.ts", "src/app.ts", "src/secrets.local.ts"]);
 
     // walkScannableFiles must scan exactly the same set as walkFiles.

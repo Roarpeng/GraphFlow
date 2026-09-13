@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.18.4] - 2026-09-13
+
+### Fixed
+
+- **Windows 平台验证失败（v1.18.3 的回归）**：1.18.3 让 Windows CI 的 `Test` 步骤失败——(1) `m83` 测试用 `"/"` 拼相对路径，在 Windows 上拿到绝对路径（已改为 `path.relative` + 正斜杠归一化）；(2) 解析 worker 池在 TypeScript 源码（`tsx`/vitest）下用 `--import tsx` 启动 worker，Windows 上启动开销大且不稳定，拖慢到超时。现在 **worker 池只在编译产物（`file-parse-worker.js`）下启用**，源码/测试/`tsx` 运行一律走进程内解析（同一图，确定性）；worker 池仍由 m84 的注入式调度测试与 dist 端到端实测覆盖。
+- **worker 池门槛改为按规模**：线程切换有固定成本（worker 启动 ≈4×150ms + 结果克隆），实测 1.2k 小文件仅打平、5.5k 文件 / 50MB 源码 1.68×。门槛改为 `文件数 ≥ 200 且总字节 ≥ 1MB`（`graphPolicy.indexWorkers` 显式指定时同样遵守该门槛）。
+- `git ls-files` 扫描加 `-c core.quotepath=false`，避免非 ASCII 路径被 C 风格转义后与真实路径不匹配。
+
+> 说明：v1.18.3 的 npm 包已发布成功，但 Marketplace 发布被 Windows 验证阻塞（`publish-marketplace` 依赖 `validate`，后者失败即跳过），因此以 1.18.4 重新发布；功能改动与 v1.18.3 相同。
+
 ## [1.18.3] - 2026-09-13
 
 ### Performance

@@ -280,7 +280,9 @@ export async function indexWorkspaceFiles(
       : undefined;
   const deletedNodeIds = new Set<string>();
 
+  const scannedBytes = scanned.reduce((sum, file) => sum + file.size, 0);
   const pool = shouldUseWorkerPool(scanned.length, {
+    totalBytes: scannedBytes,
     ...(typeof options?.indexWorkers === "number" ? { indexWorkers: options.indexWorkers } : {}),
   })
     ? createFileParsePool(

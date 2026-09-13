@@ -2,13 +2,13 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.18.3-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.18.4-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（对现实 top-K 文件读取口径 **95.6%**，见[双基线](benchmarks/RESULTS.md)） · 跨会话学习飞轮。
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
-**v1.18.3** 已发：**大型项目索引提速 3.7–4×**（实测 ragflow 5,492 文件：首建 35s → **9.5s**，图存储 860MB → **193MB**）——reference 边 DF 停用词预算 + 每文件上限（575 万 → 99 万条 references，golden fidelity recall 保持 1.00）、**worker 池并行解析**（图逐项一致，可 `graphPolicy.indexWorkers`/`GRAPHFLOW_INDEX_WORKERS` 控制）、索引**尊重 `.gitignore`** 并跳过生成/锁文件、file 传输**追加式 delta 段**（大库单文件保存不再重写整个 JSON，实测 0.27s）。v1.18.2 的 VS Code 安装失败修复与 v1.18.1/1.18.0 的能力继续有效。
+**v1.18.4** 已发：**大型项目索引提速 3.7–4×**（实测 ragflow 5,492 文件：首建 35s → **9.5s**，图存储 860MB → **193MB**）——reference 边 DF 停用词预算 + 每文件上限（575 万 → 99 万条 references，golden fidelity recall 保持 1.00）、**worker 池并行解析**（图逐项一致，可 `graphPolicy.indexWorkers`/`GRAPHFLOW_INDEX_WORKERS` 控制）、索引**尊重 `.gitignore`** 并跳过生成/锁文件、file 传输**追加式 delta 段**（大库单文件保存不再重写整个 JSON，实测 0.27s）。v1.18.2 的 VS Code 安装失败修复与 v1.18.1/1.18.0 的能力继续有效。
 
 ## 快速开始
 

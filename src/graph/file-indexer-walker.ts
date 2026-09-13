@@ -116,7 +116,18 @@ export function readGitVisibleFiles(rootDir: string): Set<string> | undefined {
   try {
     const result = spawnSync(
       "git",
-      ["-C", rootDir, "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+      [
+        "-C",
+        rootDir,
+        // Never C-quote non-ASCII paths: we compare against raw filesystem paths.
+        "-c",
+        "core.quotepath=false",
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "-z",
+      ],
       { encoding: "buffer", maxBuffer: 256 * 1024 * 1024 }
     );
     if (result.status !== 0 || !result.stdout) {
