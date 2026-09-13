@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-09-13（v1.18.4：修复 v1.18.3 的 Windows 验证回归——worker 池仅编译产物启用、规模门槛；功能同 1.18.3 的大项目提速 3.7–4× + 增量存储）
+> 最后更新：2026-09-13（v1.18.5：DSH 插件市场收录合规——`dsh` 显式声明 + disclosure 披露块 + 市场/GitHub 安装指引；全局配置凭据文件收紧为 0600）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -52,6 +52,8 @@
 | v1.18.3 | 2026-09-13 | **大项目索引提速 + 增量存储** | DF 停用词边预算（575万→99万 references）+ 每文件上限；worker 池并行解析（15.95s→9.50s，图逐项一致）；尊重 .gitignore 并跳过生成/锁文件；file 传输追加式 delta 段（单文件保存 0.27s 且不重写 base）；upsertGraph 合并写入 / 空批次短路 / prune 合并为批量删除 | ✅ |
 
 | v1.18.4 | 2026-09-13 | **Windows CI 修复（1.18.3 回归）** | worker 池仅编译产物启用、门槛改为 文件≥200 且 ≥1MB；m83 测试跨平台路径；git quotepath=false；功能与 v1.18.3 相同 | ✅ |
+
+| v1.18.5 | 2026-09-13 | **DSH 市场收录合规 + 凭据文件 0600** | `dsh.plugin/kind` 显式声明、disclosure（D1/D3/D4 + offline_mode/jurisdiction）、规范 topics/关键词、README 市场与 GitHub 安装 + 单注册路径警示；`~/.graphflow.config.json` 以 0600 写入并收紧既有文件 | ✅ |
 
 ## 下一阶段
 

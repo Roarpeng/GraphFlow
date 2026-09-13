@@ -2,7 +2,9 @@
 
 English | [中文](README.zh.md)
 
-[![npm version](https://img.shields.io/badge/npm-1.18.4-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.18.5-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
+[![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
 > **The memory & context harness for coding agents.** Local-first code knowledge graph · bounded context compression (95.6% vs a realistic top-K-files read; see [both baseline arms](benchmarks/RESULTS.md)) · cross-session learning flywheel.
 
@@ -257,6 +259,20 @@ GraphFlow 是 [DeepSeek Harness](https://www.deepseek.com/harness/en/) 的 [`dsh
 dsh plugin --profile web add @roarpeng/graphflow
 npx @deepseek-ai/dsh web
 ```
+
+**从插件市场安装（一键）：** GraphFlow 已按 [`dsh-plugin` 收录规范](https://github.com/topics/dsh-plugin) 打标（`dsh-plugin` / `cordis-plugin` / `deepseek-harness`），市场每 2 小时自动扫描该 topic，可在 [DSH 插件市场](https://github.com/dsh-market/dsh-market) 或 [DSH-Plugins-Marketplace](https://github.com/bradeGithub/DSH-Plugins-Marketplace) 里搜 `GraphFlow` 一键安装。
+
+**从 GitHub 安装（跟随 main 分支）：**
+
+```bash
+dsh plugin --profile web add github:Roarpeng/GraphFlow
+```
+
+> ⚠️ **只选一条注册路径**：市场 / `dsh plugin … add` 会自动把 `dsh.bundle` 的 `cordis.patch.yml` 注册进 profile；此时**不要**再跑 `npx @roarpeng/graphflow install`（它会写 `$DSH_HOME/cordis.patch.yml` 这层 overlay），两条注册叠加会导致重复加载。反之，用了 home overlay 就不必再 add。
+
+**市场收录类型：** `cordis-plugin`（`package.json` 的 `dsh.bundle.patch` → `cordis.patch.yml`）。仓库不提交 `dist/`（源码型），市场安装时会先询问「安装依赖并执行构建」，确认后执行 `npm install` + `npm run build`（构建离线可用）。
+
+**披露（disclosure，[STANDARD §9](https://github.com/bradeGithub/DSH-Plugins-Marketplace/blob/main/STANDARD.md)）：** 本地优先——索引、压缩、召回、图存储全部离线（默认本地 hash 向量），`cloud: false` 场景可用；仅当你为 `graphflow_plan` / `graphflow_run` 配置了 LLM provider 时才访问云端端点（`api.deepseek.com` / `api.openai.com` / `api.anthropic.com` / `dashscope.aliyuncs.com` / `ark.cn-beijing.volces.com`）。API Key 只从环境变量或全局配置读取，全局配置 `~/.graphflow.config.json` 以 **0600** 写入（1.18.5 起），日志中脱敏。完整字段见 `package.json` 的 `disclosure`。
 
 **或在已有 `~/.dsh` 时写 home 级 overlay（对所有 profile 生效）：**
 
