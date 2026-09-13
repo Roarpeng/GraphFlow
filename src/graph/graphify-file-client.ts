@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
+  appendFileSync,
   closeSync,
   existsSync,
   mkdirSync,
@@ -22,6 +23,91 @@ interface GraphStore {
   edges: GraphEdge[];
 }
 
+/**
+ * Incremental writes append to a delta log next to the store instead of
+ * rewriting the whole JSON document. On a large workspace (hundreds of MB) every
+ * save used to cost one full read + rewrite; now a small batch is an append.
+ * The log is compacted back into the base file once it grows past the threshold
+ * (or immediately for large batches and deletes), so the base file always stays
+ * a plain, self-contained graph store.
+ */
+export const GRAPH_STORE_DELTA_SUFFIX = ".delta.jsonl";
+/** Compact the delta into the base store once it exceeds this size. */
+export const GRAPH_STORE_DELTA_COMPACT_BYTES = 8 * 1024 * 1024;
+/**
+ * Only large base stores use a delta log. Below this size a full rewrite is
+ * cheap, so small/medium projects keep the historical layout: exactly one
+ * self-contained JSON file, byte-identical to before.
+ */
+export const GRAPH_STORE_DELTA_MIN_BASE_BYTES = 4 * 1024 * 1024;
+
+interface DeltaUpsertOp {
+  op: "upsert";
+  nodes?: GraphNode[];
+  edges?: GraphEdge[];
+}
+
+interface DeltaDeleteOp {
+  op: "delete";
+  nodeIds?: string[];
+  edges?: Array<{ from: string; to: string; relation: GraphEdge["relation"] }>;
+}
+
+type DeltaOp = DeltaUpsertOp | DeltaDeleteOp;
+
+export function graphStoreDeltaPath(storePath: string): string {
+  return `${storePath}${GRAPH_STORE_DELTA_SUFFIX}`;
+}
+
+const deltaPathFor = graphStoreDeltaPath;
+
+/** Merge a delta log into a base store (applied in file order). */
+export function applyGraphStoreDelta(
+  base: GraphStore,
+  deltaContents: string
+): GraphStore {
+  const nodeMap = new Map(base.nodes.map((node) => [node.id, node]));
+  let edges = [...base.edges];
+  let edgeKeys = new Set(edges.map((edge) => `${edge.from}::${edge.relation}::${edge.to}`));
+
+  for (const line of deltaContents.split("\n")) {
+    if (!line.trim()) continue;
+    let op: DeltaOp;
+    try {
+      op = JSON.parse(line) as DeltaOp;
+    } catch {
+      // A torn trailing line (crash mid-append) must not poison the store.
+      logger.warn({ deltaLine: line.slice(0, 120) }, "skipping malformed graph store delta line");
+      continue;
+    }
+    if (op.op === "upsert") {
+      for (const node of op.nodes ?? []) nodeMap.set(node.id, node);
+      for (const edge of op.edges ?? []) {
+        const key = `${edge.from}::${edge.relation}::${edge.to}`;
+        if (edgeKeys.has(key)) continue;
+        edgeKeys.add(key);
+        edges.push(edge);
+      }
+    } else if (op.op === "delete") {
+      const ids = new Set(op.nodeIds ?? []);
+      const removedEdges = new Set(
+        (op.edges ?? []).map((edge) => `${edge.from}::${edge.relation}::${edge.to}`)
+      );
+      if (ids.size === 0 && removedEdges.size === 0) continue;
+      for (const id of ids) nodeMap.delete(id);
+      edges = edges.filter(
+        (edge) =>
+          !ids.has(edge.from) &&
+          !ids.has(edge.to) &&
+          !removedEdges.has(`${edge.from}::${edge.relation}::${edge.to}`)
+      );
+      edgeKeys = new Set(edges.map((edge) => `${edge.from}::${edge.relation}::${edge.to}`));
+    }
+  }
+
+  return { nodes: Array.from(nodeMap.values()), edges };
+}
+
 /** Recorded file identity used to validate a cache entry (mtime + size). */
 interface FileStat {
   mtimeMs: number;
@@ -42,6 +128,14 @@ interface FileStat {
 interface StoreCacheEntry {
   store: GraphStore;
   index: Map<string, Set<string>> | null;
+  /**
+   * Lazily built `edgeKey` set for `store.edges`. Rebuilt at most once per store
+   * load and kept in sync by writes, so an incremental save no longer re-keys
+   * every existing edge (millions of template strings) on each write.
+   */
+  edgeKeys: Set<string> | null;
+  /** Stat of the delta log when this entry was validated (null when absent). */
+  deltaStat: FileStat | null;
   stat: FileStat | null;
 }
 
@@ -198,36 +292,148 @@ function sameStat(a: FileStat | null, b: FileStat | null): boolean {
 }
 
 export class GraphifyFileClient {
-  constructor(private readonly storePath: string) {}
+  constructor(
+    private readonly storePath: string,
+    private readonly options: {
+      deltaCompactBytes?: number;
+      /** Base-store size above which incremental writes use a delta log. */
+      deltaMinBaseBytes?: number;
+    } = {}
+  ) {}
 
-  async upsertNodes(nodes: GraphNode[]): Promise<void> {
-    const store = this.readStore();
-    const map = new Map(store.nodes.map((node) => [node.id, node]));
-
-    for (const node of nodes) {
-      map.set(node.id, node);
+  /**
+   * Merge nodes and edges into the store with a SINGLE read + write.
+   *
+   * The store is one JSON document, so every mutation rewrites the whole file:
+   * on a large workspace (millions of edges / hundreds of MB) two separate
+   * upserts per indexed file cost two full rewrites — the dominant cost of
+   * incremental indexing. Callers that have both halves (the file indexer, the
+   * file watcher) must use this instead of calling the two methods in sequence.
+   *
+   * An empty batch is a no-op and never touches the file: the watcher fires on
+   * saves that changed nothing indexable, and a needless rewrite there is pure
+   * latency.
+   *
+   * Contract: the incoming `edges` must already be unique (the file builders
+   * dedupe per source; the legacy `upsertEdges` dedupes its batch before
+   * delegating). This method dedupes against the STORE, which is what makes
+   * re-indexing idempotent.
+   */
+  async upsertGraph(batch: { nodes?: GraphNode[]; edges?: GraphEdge[] }): Promise<void> {
+    const incomingNodes = batch.nodes ?? [];
+    const incomingEdges = batch.edges ?? [];
+    if (incomingNodes.length === 0 && incomingEdges.length === 0) {
+      return;
     }
 
-    this.writeStore({
-      nodes: Array.from(map.values()),
-      edges: [...store.edges],
-    });
-  }
+    const entry = this.readStoreEntry();
+    const store = entry.store;
+    const nodeMap = new Map(store.nodes.map((node) => [node.id, node]));
+    for (const node of incomingNodes) {
+      nodeMap.set(node.id, node);
+    }
 
-  async upsertEdges(edges: GraphEdge[]): Promise<void> {
-    const store = this.readStore();
-    const next: GraphStore = { nodes: [...store.nodes], edges: [...store.edges] };
-    const edgeKeys = new Set(next.edges.map((edge) => this.edgeKey(edge)));
-
-    for (const edge of edges) {
-      const key = this.edgeKey(edge);
-      if (!edgeKeys.has(key)) {
-        edgeKeys.add(key);
-        next.edges.push(edge);
+    const next: GraphStore = { nodes: Array.from(nodeMap.values()), edges: [...store.edges] };
+    let edgeKeys: Set<string> | null = entry.edgeKeys;
+    if (incomingEdges.length > 0) {
+      if (next.edges.length === 0) {
+        // Nothing to dedupe against: append directly and let the key set be
+        // rebuilt lazily if a later write needs it.
+        for (const edge of incomingEdges) next.edges.push(edge);
+        edgeKeys = null;
+      } else {
+        if (!edgeKeys) {
+          edgeKeys = new Set(next.edges.map((edge) => this.edgeKey(edge)));
+        }
+        for (const edge of incomingEdges) {
+          const key = this.edgeKey(edge);
+          if (edgeKeys.has(key)) continue;
+          edgeKeys.add(key);
+          next.edges.push(edge);
+        }
       }
     }
 
-    this.writeStore(next);
+    const addedEdges = next.edges.length - store.edges.length;
+    const upsertOp: DeltaUpsertOp = {
+      op: "upsert",
+      ...(incomingNodes.length > 0 ? { nodes: incomingNodes } : {}),
+      ...(incomingEdges.length > 0 && addedEdges > 0
+        ? { edges: next.edges.slice(store.edges.length, store.edges.length + addedEdges) }
+        : {}),
+    };
+    if (this.tryAppendDelta(entry, upsertOp, next, edgeKeys)) {
+      return;
+    }
+    this.writeStore(next, edgeKeys);
+  }
+
+  /**
+   * Append an operation to the delta log when it is small relative to the store.
+   * Returns false when the caller must compact (large batch, no base file yet, or
+   * the log would outgrow its threshold).
+   */
+  private tryAppendDelta(
+    entry: StoreCacheEntry,
+    op: DeltaOp,
+    nextStore: GraphStore,
+    edgeKeys: Set<string> | null
+  ): boolean {
+    if (entry.stat === null) {
+      return false;
+    }
+    const minBaseBytes = this.options.deltaMinBaseBytes ?? GRAPH_STORE_DELTA_MIN_BASE_BYTES;
+    if (entry.stat.size < minBaseBytes) {
+      // Small store: a plain rewrite is cheaper (and keeps one file on disk).
+      return false;
+    }
+    const storeElements = entry.store.nodes.length + entry.store.edges.length;
+    const addedElements =
+      op.op === "upsert"
+        ? (op.nodes?.length ?? 0) + (op.edges?.length ?? 0)
+        : (op.nodeIds?.length ?? 0) + (op.edges?.length ?? 0);
+    if (addedElements === 0) {
+      return false;
+    }
+    const compactBytes = this.options.deltaCompactBytes ?? GRAPH_STORE_DELTA_COMPACT_BYTES;
+    const deltaBytes = entry.deltaStat?.size ?? 0;
+    if (addedElements > Math.max(200, Math.ceil(storeElements * 0.05))) {
+      return false;
+    }
+    if (deltaBytes + addedElements * 160 > compactBytes) {
+      return false;
+    }
+    const deltaPath = resolve(deltaPathFor(resolve(this.storePath)));
+    try {
+      mkdirSync(dirname(deltaPath), { recursive: true });
+      appendFileSync(deltaPath, `${JSON.stringify(op)}\n`, "utf8");
+      this.updateCacheAfterWrite(nextStore, edgeKeys, statIfExists(deltaPath));
+      return true;
+    } catch (error) {
+      logger.warn(
+        { error: error instanceof Error ? error.message : String(error), deltaPath },
+        "graph store delta append failed; falling back to a full rewrite"
+      );
+      return false;
+    }
+  }
+
+  async upsertNodes(nodes: GraphNode[]): Promise<void> {
+    await this.upsertGraph({ nodes });
+  }
+
+  async upsertEdges(edges: GraphEdge[]): Promise<void> {
+    // Legacy entry point: callers may hand over duplicates, so dedupe the batch
+    // here (upsertGraph requires unique input and skips the in-batch check).
+    const seen = new Set<string>();
+    const unique: GraphEdge[] = [];
+    for (const edge of edges) {
+      const key = this.edgeKey(edge);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(edge);
+    }
+    await this.upsertGraph({ edges: unique });
   }
 
   readSnapshot(): GraphStore {
@@ -334,23 +540,20 @@ export class GraphifyFileClient {
   private readStoreEntry(): StoreCacheEntry {
     const absPath = resolve(this.storePath);
     const current = statIfExists(absPath);
+    const deltaPath = resolve(deltaPathFor(absPath));
+    const deltaStat = statIfExists(deltaPath);
     const cached = graphifyFileStoreCache.get(absPath);
-    if (cached && sameStat(cached.stat, current)) {
+    if (cached && sameStat(cached.stat, current) && sameStat(cached.deltaStat, deltaStat)) {
       return cached;
     }
 
+    let base: GraphStore | undefined;
     if (current !== null && current.size > GRAPH_STORE_MAX_READ_BYTES) {
       // Above the single-string limit: parse in bounded chunks instead of
       // throwing ERR_STRING_TOO_LONG from readFileSync.
       try {
         const chunked = readGraphStoreFileChunked(absPath);
-        const entry: StoreCacheEntry = {
-          store: { nodes: chunked.nodes as GraphNode[], edges: chunked.edges as GraphEdge[] },
-          index: null,
-          stat: current,
-        };
-        graphifyFileStoreCache.set(absPath, entry);
-        return entry;
+        base = { nodes: chunked.nodes as GraphNode[], edges: chunked.edges as GraphEdge[] };
       } catch (error) {
         logger.warn(
           { error: error instanceof Error ? error.message : String(error), absPath },
@@ -360,10 +563,35 @@ export class GraphifyFileClient {
       }
     }
 
-    const store = current === null ? { nodes: [], edges: [] } : this.parseStoreFile(absPath);
-    const entry: StoreCacheEntry = { store, index: null, stat: current };
+    const store = base ?? (current === null ? { nodes: [], edges: [] } : this.parseStoreFile(absPath));
+    const merged = this.applyDelta(store, deltaPath, deltaStat);
+    const entry: StoreCacheEntry = {
+      store: merged,
+      index: null,
+      stat: current,
+      edgeKeys: null,
+      deltaStat,
+    };
     graphifyFileStoreCache.set(absPath, entry);
     return entry;
+  }
+
+  /** Merge the delta log (when present) into a freshly loaded base store. */
+  private applyDelta(base: GraphStore, deltaPath: string, deltaStat: FileStat | null): GraphStore {
+    if (deltaStat === null || deltaStat.size === 0) {
+      return base;
+    }
+    let contents: string;
+    try {
+      contents = readFileSync(deltaPath, "utf8");
+    } catch (error) {
+      logger.warn(
+        { error: error instanceof Error ? error.message : String(error), deltaPath },
+        "graph store delta unreadable; using the base store"
+      );
+      return base;
+    }
+    return applyGraphStoreDelta(base, contents);
   }
 
   private parseStoreFile(absPath: string): GraphStore {
@@ -395,7 +623,7 @@ export class GraphifyFileClient {
     }
   }
 
-  private writeStore(store: GraphStore): void {
+  private writeStore(store: GraphStore, edgeKeys: Set<string> | null = null): void {
     const dir = dirname(this.storePath);
     mkdirSync(dir, { recursive: true });
     const tempPath = join(
@@ -410,6 +638,11 @@ export class GraphifyFileClient {
       rmSync(tempPath, { force: true });
       throw error;
     }
+    // A successful base write supersedes any delta log.
+    const deltaPath = deltaPathFor(this.storePath);
+    if (existsSync(deltaPath)) {
+      rmSync(deltaPath, { force: true });
+    }
     // Windows 上 rename 可能因文件锁定而失败，添加重试机制
     const maxRetries = 5;
     for (let i = 0; i < maxRetries; i++) {
@@ -418,7 +651,7 @@ export class GraphifyFileClient {
         // Write-through: only after the rename succeeded does the cache move to
         // the new store. On failure the previous entry (matching the untouched
         // file on disk) stays valid.
-        this.updateCacheAfterWrite(store);
+        this.updateCacheAfterWrite(store, edgeKeys);
         return;
       } catch (error) {
         const nodeError = error as NodeJS.ErrnoException;
@@ -433,7 +666,11 @@ export class GraphifyFileClient {
   }
 
   /** Record the freshly written store (and its on-disk stat) in the cache. */
-  private updateCacheAfterWrite(store: GraphStore): void {
+  private updateCacheAfterWrite(
+    store: GraphStore,
+    edgeKeys: Set<string> | null,
+    deltaStat: FileStat | null = null
+  ): void {
     const absPath = resolve(this.storePath);
     let stat: FileStat | null = null;
     try {
@@ -443,7 +680,7 @@ export class GraphifyFileClient {
       // Extremely unlikely immediately after rename; leave stat null so the
       // next read re-validates from disk.
     }
-    graphifyFileStoreCache.set(absPath, { store, index: null, stat });
+    graphifyFileStoreCache.set(absPath, { store, index: null, stat, edgeKeys, deltaStat });
   }
 
   private edgeKey(edge: GraphEdge): string {
@@ -457,20 +694,41 @@ export class GraphifyFileClient {
   async deleteNodes(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
     const idSet = new Set(ids);
-    const store = this.readStore();
-    this.writeStore({
+    const entry = this.readStoreEntry();
+    const store = entry.store;
+    const next: GraphStore = {
       nodes: store.nodes.filter((n) => !idSet.has(n.id)),
       edges: store.edges.filter((e) => !(idSet.has(e.from) || idSet.has(e.to))),
-    });
+    };
+    // A per-file prune during a re-index must not rewrite the whole store.
+    if (this.tryAppendDelta(entry, { op: "delete", nodeIds: ids }, next, null)) {
+      return;
+    }
+    this.writeStore(next, null);
+  }
+
+  /** Compact the delta log into the base store (no-op when there is none). */
+  vacuum(): void {
+    const deltaPath = deltaPathFor(this.storePath);
+    if (!existsSync(deltaPath)) {
+      return;
+    }
+    const entry = this.readStoreEntry();
+    this.writeStore(entry.store, entry.edgeKeys);
   }
 
   async deleteEdge(from: string, to: string, relation: GraphEdge["relation"]): Promise<void> {
-    const store = this.readStore();
-    this.writeStore({
+    const entry = this.readStoreEntry();
+    const store = entry.store;
+    const next: GraphStore = {
       nodes: [...store.nodes],
       edges: store.edges.filter(
         (e) => !(e.from === from && e.to === to && e.relation === relation)
       ),
-    });
+    };
+    if (this.tryAppendDelta(entry, { op: "delete", edges: [{ from, to, relation }] }, next, null)) {
+      return;
+    }
+    this.writeStore(next, null);
   }
 }

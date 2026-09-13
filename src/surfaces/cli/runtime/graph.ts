@@ -62,8 +62,8 @@ import {
   parseWorkbenchTopic,
   topicPendingReply,
 } from "../../../learning/workbench-topic.js";
-import { buildEmbeddingOptions,
-} from "./env.js";
+import { buildEmbeddingOptions } from "./env.js";
+import { graphStoreDeltaPath } from "../../../graph/graphify-file-client.js";
 import {
   calculateBudgetUsedPercent,
   calculateSavingsPercent,
@@ -129,8 +129,10 @@ function graphStoreNeedsIndexing(config: GraphFlowConfig): boolean {
     }
     return true;
   }
+  const deltaPath = graphStoreDeltaPath(storePath);
   if (!existsSync(storePath)) {
-    return true;
+    // A delta-only state still means there is graph data to read.
+    return !existsSync(deltaPath);
   }
   if (config.graphPolicy.transport === "sqlite" || config.graphPolicy.transport === "auto") {
     return false;
@@ -272,6 +274,34 @@ function buildContextPressureBlock(params: {
   return block;
 }
 
+/**
+ * Index options derived from the resolved config. Kept in one place so every
+ * indexing entry point (preview, index, single file, watcher) scans the same
+ * file set and applies the same reference-edge budget.
+ */
+function buildIndexOptions(config: GraphFlowConfig): {
+  includeExtensions?: string[];
+  respectGitIgnore?: boolean;
+  referenceEdgeMaxDefinitionFiles?: number;
+  referenceEdgeMaxPerFile?: number;
+  indexWorkers?: number;
+} {
+  const graphPolicy = config.graphPolicy;
+  return {
+    ...(graphPolicy.includeExtensions ? { includeExtensions: graphPolicy.includeExtensions } : {}),
+    ...(graphPolicy.respectGitIgnore === false ? { respectGitIgnore: false } : {}),
+    ...(typeof graphPolicy.referenceEdgeMaxDefinitionFiles === "number"
+      ? { referenceEdgeMaxDefinitionFiles: graphPolicy.referenceEdgeMaxDefinitionFiles }
+      : {}),
+    ...(typeof graphPolicy.referenceEdgeMaxPerFile === "number"
+      ? { referenceEdgeMaxPerFile: graphPolicy.referenceEdgeMaxPerFile }
+      : {}),
+    ...(typeof graphPolicy.indexWorkers === "number"
+      ? { indexWorkers: graphPolicy.indexWorkers }
+      : {}),
+  };
+}
+
 export async function previewContext(
   query: string,
   configPath?: string,
@@ -318,9 +348,7 @@ export async function previewContext(
 
   if (config.graphPolicy.autoIndexOnPreview) {
     const root = config.graphPolicy.workspaceRoot ?? process.cwd();
-    const indexOptions = config.graphPolicy.includeExtensions
-      ? { includeExtensions: config.graphPolicy.includeExtensions }
-      : undefined;
+    const indexOptions = buildIndexOptions(config);
     if (hasPendingGraphIndexWork(root, indexOptions) || graphStoreNeedsIndexing(config)) {
       await indexWorkspaceFiles(graphClient, root, {
         ...indexOptions,
@@ -713,9 +741,7 @@ export async function indexGraph(
   const { invalidateContextCache } = await import("../../../graph/context-cache.js");
   invalidateContextCache(targetDir);
 
-  const indexOptions = config.graphPolicy.includeExtensions
-    ? { includeExtensions: config.graphPolicy.includeExtensions }
-    : undefined;
+  const indexOptions = buildIndexOptions(config);
 
   const indexed = await indexWorkspaceFiles(graphClient, targetDir, {
     ...indexOptions,
@@ -750,9 +776,7 @@ export async function indexFile(
     ? filePath
     : join(root, filePath);
 
-  const indexOptions = config.graphPolicy.includeExtensions
-    ? { includeExtensions: config.graphPolicy.includeExtensions }
-    : undefined;
+  const indexOptions = buildIndexOptions(config);
 
   const result = await indexSingleFile(graphClient, root, absPath, indexOptions);
   return { ...result, path: absPath };
@@ -770,9 +794,7 @@ export async function rebuildGraph(
 
   clearGraphIndexArtifacts(targetDir, storePath);
 
-  const indexOptions = config.graphPolicy.includeExtensions
-    ? { includeExtensions: config.graphPolicy.includeExtensions }
-    : undefined;
+  const indexOptions = buildIndexOptions(config);
 
   const indexed = await indexWorkspaceFiles(graphClient, targetDir, {
     ...indexOptions,
@@ -876,9 +898,7 @@ export async function inspectGraph(
   let store = loadGraphStore(config);
   if (store.nodes.length === 0 && options?.autoIndex !== false) {
     const graphClient = createGraphClient(config);
-    const indexOptions = config.graphPolicy.includeExtensions
-      ? { includeExtensions: config.graphPolicy.includeExtensions }
-      : undefined;
+    const indexOptions = buildIndexOptions(config);
     await indexWorkspaceFiles(graphClient, config.graphPolicy.workspaceRoot ?? process.cwd(), {
       ...indexOptions,
     });
@@ -958,9 +978,7 @@ export async function getSkillInsights(
   let store = loadGraphStore(config);
   if (store.nodes.length === 0) {
     const graphClient = createGraphClient(config);
-    const indexOptions = config.graphPolicy.includeExtensions
-      ? { includeExtensions: config.graphPolicy.includeExtensions }
-      : undefined;
+    const indexOptions = buildIndexOptions(config);
     await indexWorkspaceFiles(graphClient, config.graphPolicy.workspaceRoot ?? process.cwd(), {
       ...indexOptions,
     });

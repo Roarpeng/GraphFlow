@@ -5,7 +5,11 @@ import type { GraphFlowConfig } from "../../../config/schema";
 import { resolveGraphStorePath } from "../../../config/paths";
 import { GraphifySqliteClient } from "../../../graph/sqlite-client";
 import { readGraphStoreFileChunked } from "../../../graph/graph-store-json-chunks";
-import { GRAPH_STORE_MAX_READ_BYTES } from "../../../graph/graphify-file-client";
+import {
+  GRAPH_STORE_MAX_READ_BYTES,
+  applyGraphStoreDelta,
+  graphStoreDeltaPath,
+} from "../../../graph/graphify-file-client";
 import { logger } from "../../../utils/logger";
 import type { GraphClient } from "../../../graph/client-factory";
 import type { SkillInsightItem } from "./types.js";
@@ -84,15 +88,23 @@ export function readFileGraphStore(
 
   try {
     const raw = readFileSync(storePath, "utf8");
-    if (!raw.trim()) {
-      return { nodes: [], edges: [] };
-    }
+    const base: { nodes: GraphNode[]; edges: GraphEdge[] } = raw.trim()
+      ? (() => {
+          const parsed = JSON.parse(raw) as Partial<{ nodes: GraphNode[]; edges: GraphEdge[] }>;
+          return { nodes: parsed.nodes ?? [], edges: parsed.edges ?? [] };
+        })()
+      : { nodes: [], edges: [] };
 
-    const parsed = JSON.parse(raw) as Partial<{ nodes: GraphNode[]; edges: GraphEdge[] }>;
-    return {
-      nodes: parsed.nodes ?? [],
-      edges: parsed.edges ?? [],
-    };
+    // Incremental writes land in a delta log; readers must see both.
+    const deltaPath = graphStoreDeltaPath(storePath);
+    if (!existsSync(deltaPath)) {
+      return base;
+    }
+    try {
+      return applyGraphStoreDelta(base, readFileSync(deltaPath, "utf8"));
+    } catch {
+      return base;
+    }
   } catch {
     return { nodes: [], edges: [] };
   }

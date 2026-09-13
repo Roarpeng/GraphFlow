@@ -36,6 +36,59 @@ function symbolFileOf(nodeId: string): string {
   return idx > 0 ? rest.slice(0, idx) : rest;
 }
 
+/**
+ * Reference-edge budget.
+ *
+ * `references` edges connect a file to EVERY definition sharing a name it
+ * mentions, so ubiquitous identifiers dominate the graph: measured on a
+ * 5.5k-file Python/Go repo, 5.75M reference edges came from 18.7k names, with
+ * `__init__` alone contributing 469k (defined in 414 files). Those edges are
+ * noise for context selection and they are what makes large workspaces slow to
+ * index (and the store hundreds of MB).
+ *
+ * `maxDefinitionFiles` drops such names (document-frequency pruning, the classic
+ * IR stopword rule); `maxEdgesPerFile` caps the long tail per source file.
+ * Both are configurable (`graphPolicy.referenceEdgeMax*`), 0 disables a limit.
+ */
+export interface ReferenceEdgeBudget {
+  maxDefinitionFiles?: number;
+  maxEdgesPerFile?: number;
+}
+
+export const DEFAULT_REFERENCE_MAX_DEFINITION_FILES = 10;
+export const DEFAULT_REFERENCE_MAX_EDGES_PER_FILE = 500;
+
+function resolveBudget(budget: ReferenceEdgeBudget = {}): { maxDf: number; maxPerFile: number } {
+  const maxDf = budget.maxDefinitionFiles ?? DEFAULT_REFERENCE_MAX_DEFINITION_FILES;
+  const maxPerFile = budget.maxEdgesPerFile ?? DEFAULT_REFERENCE_MAX_EDGES_PER_FILE;
+  return {
+    maxDf: Number.isFinite(maxDf) && maxDf > 0 ? Math.floor(maxDf) : 0,
+    maxPerFile: Number.isFinite(maxPerFile) && maxPerFile > 0 ? Math.floor(maxPerFile) : 0,
+  };
+}
+
+/** Distinct definition files per name (document frequency). */
+function computeDefinitionFileCounts(
+  entries: Iterable<[string, { file: string }[]]>
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const [name, defs] of entries) {
+    const files = new Set<string>();
+    for (const def of defs) files.add(def.file);
+    counts.set(name, files.size);
+  }
+  return counts;
+}
+
+export interface ReferenceEdgeBuildResult {
+  edges: GraphEdge[];
+  referenceCount: number;
+  /** Names skipped because they are defined across too many files. */
+  skippedCommonNames?: number;
+  /** Source files that hit the per-file edge cap. */
+  cappedFiles?: number;
+}
+
 /** Prefix trie over symbol vocabulary for O(|content|) pre-filter scans. */
 export interface SymbolTrieNode {
   children: Map<string, SymbolTrieNode>;
@@ -105,10 +158,14 @@ export function trieContainsAnySymbol(content: string, root: SymbolTrieNode): bo
  */
 export function buildBatchReferenceEdges(
   parsed: ParsedFile[],
-  symbolIndex: Map<string, IndexedSymbol[]>
-): { edges: GraphEdge[]; referenceCount: number } {
+  symbolIndex: Map<string, IndexedSymbol[]>,
+  budget: ReferenceEdgeBudget = {}
+): ReferenceEdgeBuildResult {
+  const { maxDf, maxPerFile } = resolveBudget(budget);
   const edges: GraphEdge[] = [];
   let referenceCount = 0;
+  let skippedCommonNames = 0;
+  let cappedFiles = 0;
   const identifierRe = /\b\w{3,}\b/g;
 
   // Nothing can be referenced — skip the regex scan over every file entirely.
@@ -116,12 +173,27 @@ export function buildBatchReferenceEdges(
     return { edges, referenceCount };
   }
 
+  const definitionFileCounts =
+    maxDf > 0
+      ? computeDefinitionFileCounts(
+          [...symbolIndex].map(([name, defs]) => [
+            name,
+            defs.map((def) => ({ file: symbolFileOf(def.nodeId) })),
+          ])
+        )
+      : undefined;
+
   // 标识符词表：把 per-token 的长度/黑名单/索引判断折叠为一次 Set 命中。
   const vocabulary = new Set<string>();
   for (const name of symbolIndex.keys()) {
-    if (name.length >= 3 && !REFERENCE_SKIPLIST.has(name)) {
-      vocabulary.add(name);
+    if (name.length < 3 || REFERENCE_SKIPLIST.has(name)) {
+      continue;
     }
+    if (definitionFileCounts && (definitionFileCounts.get(name) ?? 0) > maxDf) {
+      skippedCommonNames += 1;
+      continue;
+    }
+    vocabulary.add(name);
   }
   const symbolTrie = buildSymbolTrie(vocabulary);
 
@@ -147,10 +219,13 @@ export function buildBatchReferenceEdges(
       continue;
     }
     const seenThisFile = new Set<string>();
+    let edgesThisFile = 0;
+    let capped = false;
     // matchAll iterates without materializing a giant intermediate array of
     // every identifier (large files can yield tens of thousands of matches).
     const seenIdent = new Set<string>();
     for (const match of file.content.matchAll(identifierRe)) {
+      if (capped) break;
       const name = match[0];
       if (seenIdent.has(name)) continue;
       seenIdent.add(name);
@@ -164,19 +239,26 @@ export function buildBatchReferenceEdges(
           continue;
         }
         for (const def of defs) {
+          if (maxPerFile > 0 && edgesThisFile >= maxPerFile) {
+            capped = true;
+            break;
+          }
           const key = `${file.fileNodeId}|${def.nodeId}`;
           if (seenThisFile.has(key)) {
             continue;
           }
           seenThisFile.add(key);
           edges.push({ from: file.fileNodeId, to: def.nodeId, relation: "references" });
+          edgesThisFile += 1;
           referenceCount += 1;
         }
+        if (capped) break;
       }
     }
+    if (capped) cappedFiles += 1;
   }
 
-  return { edges, referenceCount };
+  return { edges, referenceCount, skippedCommonNames, cappedFiles };
 }
 
 /**
@@ -275,10 +357,13 @@ export function buildSingleFileReferenceEdges(
   relPath: string,
   content: string,
   declared: IndexedSymbol[],
-  snapshotNodes: GraphNode[]
-): { edges: GraphEdge[]; referenceCount: number } {
+  snapshotNodes: GraphNode[],
+  budget: ReferenceEdgeBudget = {}
+): ReferenceEdgeBuildResult {
+  const { maxDf, maxPerFile } = resolveBudget(budget);
   const edges: GraphEdge[] = [];
   let referenceCount = 0;
+  let skippedCommonNames = 0;
   const ownNames = new Set(declared.map((s) => s.name));
 
   const symbolIndex = new Map<string, { nodeId: string; file: string }[]>();
@@ -290,12 +375,18 @@ export function buildSingleFileReferenceEdges(
     symbolIndex.set(node.metadata.name as string, list);
   }
 
+  const definitionFileCounts =
+    maxDf > 0 ? computeDefinitionFileCounts(symbolIndex) : undefined;
+
   // 标识符词表：per-token 的长度/黑名单/索引判断折叠为一次 Set 命中。
   const vocabulary = new Set<string>();
   for (const name of symbolIndex.keys()) {
-    if (name.length >= 3 && !REFERENCE_SKIPLIST.has(name)) {
-      vocabulary.add(name);
+    if (name.length < 3 || REFERENCE_SKIPLIST.has(name)) continue;
+    if (definitionFileCounts && (definitionFileCounts.get(name) ?? 0) > maxDf) {
+      skippedCommonNames += 1;
+      continue;
     }
+    vocabulary.add(name);
   }
 
   // Trie 预过滤：文件中不存在任何词表符号时，跳过整个正则扫描（短路）。
@@ -308,8 +399,13 @@ export function buildSingleFileReferenceEdges(
   if (!matches) return { edges, referenceCount };
 
   const seenIdent = new Set<string>();
+  let capped = false;
 
   for (const name of matches) {
+    if (maxPerFile > 0 && referenceCount >= maxPerFile) {
+      capped = true;
+      break;
+    }
     if (seenIdent.has(name)) continue;
     seenIdent.add(name);
     if (!vocabulary.has(name)) continue;
@@ -317,12 +413,17 @@ export function buildSingleFileReferenceEdges(
     const defs = symbolIndex.get(name);
     if (!defs || defs.length === 0) continue;
     for (const def of defs) {
+      if (maxPerFile > 0 && referenceCount >= maxPerFile) {
+        capped = true;
+        break;
+      }
       edges.push({ from: fileNodeId, to: def.nodeId, relation: "references" });
       referenceCount += 1;
     }
+    if (capped) break;
   }
 
-  return { edges, referenceCount };
+  return { edges, referenceCount, skippedCommonNames, cappedFiles: capped ? 1 : 0 };
 }
 
 /**

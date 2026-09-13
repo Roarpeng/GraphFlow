@@ -108,6 +108,25 @@ export interface GraphFlowConfig {
     enableDialogueThread?: boolean;
     workspaceRoot?: string;
     includeExtensions?: string[];
+    /**
+     * Skip files git ignores when indexing (exact semantics via `git ls-files
+     * --exclude-standard`). Default true; ignored outside git checkouts.
+     */
+    respectGitIgnore?: boolean;
+    /**
+     * Reference edges (file → definition) are skipped for names defined in more
+     * than this many files — ubiquitous identifiers (`__init__`, `result`, …)
+     * otherwise dominate the graph. Default 10; 0 disables the limit.
+     */
+    referenceEdgeMaxDefinitionFiles?: number;
+    /** Max reference edges per source file. Default 500; 0 disables the cap. */
+    referenceEdgeMaxPerFile?: number;
+    /**
+     * Worker threads used to parse files during indexing. `0` disables the pool
+     * (in-process parsing), a positive number pins the count, absent = auto
+     * (cores - 1, capped). `GRAPHFLOW_INDEX_WORKERS=0` disables it globally.
+     */
+    indexWorkers?: number;
     transport: "memory" | "mcp-http" | "file" | "sqlite" | "auto";
     /**
      * Graphify team-backend endpoint (transport: "mcp-http" only). Must be an

@@ -3,19 +3,24 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDefaultConfig } from "../src/config/defaults";
 import {
   readGraphStoreFileChunked,
   readGraphStoreFromChunks,
 } from "../src/graph/graph-store-json-chunks";
-import { writeGraphStoreFile } from "../src/graph/graphify-file-client";
+import {
+  GraphifyFileClient,
+  resetGraphifyFileStoreCacheForTests,
+  writeGraphStoreFile,
+} from "../src/graph/graphify-file-client";
 import type { GraphEdge, GraphNode } from "../src/core/types";
 import { readFileGraphStore } from "../src/surfaces/cli/runtime/helpers";
 import { inspectGraph } from "../src/surfaces/cli/runtime/graph";
@@ -222,5 +227,88 @@ describe("M82 graph store write safety", () => {
 
     // A truncated document is rejected rather than silently half-read.
     expect(() => readGraphStoreFromChunks(chunks(document.slice(0, -5), 3))).toThrow(/truncated/i);
+  });
+});
+
+describe("M82 incremental store writes", () => {
+  const node = (id: string): GraphNode => ({ id, type: "File", content: id });
+  const edge = (from: string, to: string): GraphEdge => ({ from, to, relation: "references" });
+
+  it("never touches the store for an empty batch (watcher no-op runs)", async () => {
+    const dir = makeWorkspace("gf-m82-noop-");
+    const storePath = join(dir, "graphflow-graph.json");
+    const client = new GraphifyFileClient(storePath);
+    await client.upsertGraph({ nodes: [node("file:a.ts")], edges: [edge("file:a.ts", "file:b.ts")] });
+    const before = statSync(storePath);
+
+    await client.upsertGraph({ nodes: [], edges: [] });
+    await client.upsertNodes([]);
+    await client.upsertEdges([]);
+
+    const after = statSync(storePath);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+    expect(after.size).toBe(before.size);
+    // No temp files leaked either.
+    expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("merges nodes and edges with a single store write", async () => {
+    const dir = makeWorkspace("gf-m82-batched-");
+    const storePath = join(dir, "graphflow-graph.json");
+    // deltaCompactBytes 0 forces the base-rewrite path (the incremental append
+    // path is covered by M85).
+    const client = new GraphifyFileClient(storePath, { deltaCompactBytes: 0 });
+    await client.upsertNodes([node("file:a.ts")]);
+
+    const writeSpy = vi.spyOn(
+      GraphifyFileClient.prototype as unknown as { writeStore: (store: unknown) => void },
+      "writeStore"
+    );
+    await client.upsertGraph({ nodes: [node("file:b.ts")], edges: [edge("file:b.ts", "file:a.ts")] });
+
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    writeSpy.mockRestore();
+
+    const parsed = readFileGraphStore(storePath);
+    expect(parsed.nodes.map((n) => n.id).sort()).toEqual(["file:a.ts", "file:b.ts"]);
+    expect(parsed.edges).toEqual([edge("file:b.ts", "file:a.ts")]);
+  });
+
+  it("appends a small batch to the delta log without rewriting the base", async () => {
+    const dir = makeWorkspace("gf-m82-delta-");
+    const storePath = join(dir, "graphflow-graph.json");
+    const client = new GraphifyFileClient(storePath, { deltaMinBaseBytes: 0 });
+    await client.upsertNodes([node("file:a.ts")]);
+
+    const writeSpy = vi.spyOn(
+      GraphifyFileClient.prototype as unknown as { writeStore: (store: unknown) => void },
+      "writeStore"
+    );
+    await client.upsertGraph({ nodes: [node("file:b.ts")], edges: [edge("file:b.ts", "file:a.ts")] });
+    expect(writeSpy).not.toHaveBeenCalled();
+    writeSpy.mockRestore();
+
+    resetGraphifyFileStoreCacheForTests();
+    const parsed = new GraphifyFileClient(storePath).readSnapshot();
+    expect(parsed.nodes.map((n) => n.id).sort()).toEqual(["file:a.ts", "file:b.ts"]);
+    expect(parsed.edges).toEqual([edge("file:b.ts", "file:a.ts")]);
+  });
+
+  it("keeps legacy upsertNodes/upsertEdges semantics (delegating, deduped)", async () => {
+    const dir = makeWorkspace("gf-m82-legacy-");
+    const storePath = join(dir, "graphflow-graph.json");
+    const client = new GraphifyFileClient(storePath);
+
+    await client.upsertNodes([node("file:a.ts")]);
+    await client.upsertEdges([edge("file:a.ts", "file:b.ts"), edge("file:a.ts", "file:b.ts")]);
+    await client.upsertNodes([{ ...node("file:a.ts"), content: "updated" }]);
+
+    // Reads go through the client (base + delta), not the raw base file.
+    resetGraphifyFileStoreCacheForTests();
+    const parsed = new GraphifyFileClient(storePath).readSnapshot();
+    expect(parsed.nodes).toHaveLength(1);
+    expect(parsed.nodes[0]?.content).toBe("updated");
+    expect(parsed.edges).toHaveLength(1);
+    resetGraphifyFileStoreCacheForTests();
   });
 });

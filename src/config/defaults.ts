@@ -1,6 +1,10 @@
 import type { GraphFlowConfig } from "./schema";
 import { validateConfig } from "./loader";
 import { DEFAULT_INCLUDE_EXTENSIONS } from "./include-extensions.js";
+import {
+  DEFAULT_REFERENCE_MAX_DEFINITION_FILES,
+  DEFAULT_REFERENCE_MAX_EDGES_PER_FILE,
+} from "../graph/file-indexer-edges.js";
 import { CANONICAL_EMBEDDING_MODEL } from "./embedding-model.js";
 
 export const SCAFFOLD_TIERS = {
@@ -39,6 +43,9 @@ export function getDefaultConfig(): GraphFlowConfig {
       enableDialogueThread: true,
       workspaceRoot: process.cwd(),
       includeExtensions: [...DEFAULT_INCLUDE_EXTENSIONS],
+      respectGitIgnore: true,
+      referenceEdgeMaxDefinitionFiles: DEFAULT_REFERENCE_MAX_DEFINITION_FILES,
+      referenceEdgeMaxPerFile: DEFAULT_REFERENCE_MAX_EDGES_PER_FILE,
       // 默认使用 auto 后端：sqlite 优先（FTS5 索引，避免大仓库下整文件读写放大），
       // better-sqlite3 可选依赖缺失时透明降级为 file JSON 存储（见 client-factory）。
       // 用户配置中显式声明的 transport（包括 "file"）保持不变，不做迁移。

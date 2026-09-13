@@ -6,6 +6,7 @@
  */
 
 import { readFileSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { GRAPH_STORE_DELTA_SUFFIX } from "./graphify-file-client.js";
 import { join, dirname } from "node:path";
 import { logger } from "../utils/logger.js";
 import {
@@ -68,6 +69,7 @@ export function clearGraphIndexArtifacts(rootDir: string, graphStorePath: string
   const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
   const vectorsPath = join(rootDir, CACHE_DIR, "vectors.db");
   rmSync(graphStorePath, { force: true });
+  rmSync(`${graphStorePath}${GRAPH_STORE_DELTA_SUFFIX}`, { force: true });
   rmSync(cachePath, { force: true });
   rmSync(vectorsPath, { force: true });
 }
@@ -75,7 +77,10 @@ export function clearGraphIndexArtifacts(rootDir: string, graphStorePath: string
 /** Returns true when workspace files changed since last index (or cache is empty). */
 export function hasPendingGraphIndexWork(
   rootDir: string,
-  options?: Pick<FileIndexerOptions, "includeExtensions" | "maxFileSizeBytes" | "forceReindex">
+  options?: Pick<
+    FileIndexerOptions,
+    "includeExtensions" | "maxFileSizeBytes" | "forceReindex" | "respectGitIgnore"
+  >
 ): boolean {
   const includeExtensions = options?.includeExtensions ?? DEFAULT_EXTENSIONS;
   const maxFileSizeBytes = options?.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE;
@@ -86,7 +91,9 @@ export function hasPendingGraphIndexWork(
 
   const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
   const cacheState = loadCacheState(cachePath, false);
-  const scanned = walkScannableFiles(rootDir, includeExtensions, maxFileSizeBytes);
+  const scanned = walkScannableFiles(rootDir, includeExtensions, maxFileSizeBytes, {
+    ...(options?.respectGitIgnore === false ? { respectGitIgnore: false } : {}),
+  });
   const currentRelPaths = new Set(scanned.map((file) => file.relPath));
 
   for (const relPath of Object.keys(cacheState)) {
