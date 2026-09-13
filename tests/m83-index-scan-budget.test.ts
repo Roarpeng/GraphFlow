@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildBatchReferenceEdges,
@@ -10,6 +10,7 @@ import {
 } from "../src/graph/file-indexer-edges";
 import {
   isGeneratedOrLockFile,
+  normalizePath,
   walkFiles,
   walkScannableFiles,
 } from "../src/graph/file-indexer-walker";
@@ -31,6 +32,11 @@ function makeTempDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   tempRoots.push(dir);
   return dir;
+}
+
+/** walkFiles returns absolute paths; compare as repo-relative POSIX. */
+function repoRelative(root: string, absPath: string): string {
+  return normalizePath(relative(root, absPath));
 }
 
 afterEach(() => {
@@ -146,7 +152,7 @@ describe("M83 walker skip rules", () => {
     writeFileSync(join(root, "package-lock.json"), "{}\n");
     writeFileSync(join(root, "app.min.js"), "var a=1;\n");
 
-    const found = walkFiles(root, [".ts", ".js", ".json"]).map((p) => p.replace(root + "/", ""));
+    const found = walkFiles(root, [".ts", ".js", ".json"]).map((p) => repoRelative(root, p));
 
     expect(found).toEqual(["src/app.ts"]);
   });
@@ -165,11 +171,11 @@ describe("M83 walker skip rules", () => {
     writeFileSync(join(root, "src", "secrets.local.ts"), "export const s = 1;\n");
     writeFileSync(join(root, "generated", "client.ts"), "export const c = 1;\n");
 
-    const respected = walkFiles(root, [".ts"]).map((p) => p.replace(root + "/", "")); 
+    const respected = walkFiles(root, [".ts"]).map((p) => repoRelative(root, p));
     expect(respected).toEqual(["src/app.ts"]);
 
     const disabled = walkFiles(root, [".ts"], { respectGitIgnore: false })
-      .map((p) => p.replace(root + "/", ""))
+      .map((p) => repoRelative(root, p))
       .sort();
     expect(disabled).toEqual(["generated/client.ts", "src/app.ts", "src/secrets.local.ts"]);
 
