@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **M83 Windows validate**：`walkFiles` 返回绝对路径，测试用 `root + "/"` 剥前缀在 Windows 上匹配失败（收到 `C:\\...\\src\\app.ts`）。改为 `normalizePath(relative(root, absPath))`，与 `walkScannableFiles` 一致。
+
 ## [1.18.3] - 2026-09-13
 
 ### Performance
