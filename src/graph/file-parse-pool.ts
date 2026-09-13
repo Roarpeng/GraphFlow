@@ -59,8 +59,13 @@ export interface FileParsePool {
   close(): void;
 }
 
-/** Files below this count are not worth the thread hand-off. */
-export const MIN_FILES_FOR_WORKERS = 24;
+/**
+ * Thread hand-off costs worker startup (~4 x 150 ms) plus result cloning, so it
+ * only pays off on workspaces with real parsing work. Measured: 1.2k small files
+ * ~= break-even; 5.5k files / ~40 MB of source = 1.68x. Gate on both counts.
+ */
+export const MIN_FILES_FOR_WORKERS = 200;
+export const MIN_BYTES_FOR_WORKERS = 1_000_000;
 const MAX_WORKERS = 8;
 const DISABLE_ENV = "GRAPHFLOW_INDEX_WORKERS";
 
@@ -94,21 +99,25 @@ export function defaultWorkerCount(): number {
 }
 
 /**
- * Resolve the worker entry next to the running module: the published build ships
- * `file-parse-worker.js`; TypeScript sources need the `tsx` loader.
+ * Resolve the worker entry next to the running module.
+ *
+ * Only the COMPILED entry (`file-parse-worker.js`, i.e. published builds) is
+ * used: running the TypeScript source in a worker needs a loader (`tsx`), which
+ * makes worker startup expensive and environment-dependent (notably slow on
+ * Windows CI) for a benefit that only matters on large workspaces. Dev, tests
+ * and `tsx` runs therefore stay in-process.
  */
 export function resolveParseWorkerEntry(
   currentModule: string
 ): { path: string; execArgv: string[] } | undefined {
-  const extension = extname(currentModule) || ".js";
-  const candidate = join(dirname(currentModule), `file-parse-worker${extension}`);
+  if (extname(currentModule) !== ".js") {
+    return undefined;
+  }
+  const candidate = join(dirname(currentModule), "file-parse-worker.js");
   if (!existsSync(candidate)) {
     return undefined;
   }
-  return {
-    path: candidate,
-    execArgv: extension === ".ts" ? ["--import", "tsx"] : [],
-  };
+  return { path: candidate, execArgv: [] };
 }
 
 export interface CreateFileParsePoolOptions {
@@ -268,10 +277,16 @@ export function createFileParsePool(
 /** True when a workspace is large enough (and workers allowed) to thread. */
 export function shouldUseWorkerPool(
   fileCount: number,
-  options?: { indexWorkers?: number }
+  options?: { indexWorkers?: number; totalBytes?: number }
 ): boolean {
   if (options?.indexWorkers === 0) return false;
-  if (typeof options?.indexWorkers === "number" && options.indexWorkers > 0) return fileCount >= 4;
   if (workersDisabledByEnv()) return false;
-  return fileCount >= MIN_FILES_FOR_WORKERS;
+  const totalBytes = options?.totalBytes ?? Number.POSITIVE_INFINITY;
+  const bigEnough = fileCount >= MIN_FILES_FOR_WORKERS && totalBytes >= MIN_BYTES_FOR_WORKERS;
+  // An explicit positive count still respects the workload gate (threads for a
+  // handful of files would be pure overhead).
+  if (typeof options?.indexWorkers === "number" && options.indexWorkers > 0) {
+    return bigEnough;
+  }
+  return bigEnough;
 }

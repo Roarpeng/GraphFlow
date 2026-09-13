@@ -93,25 +93,28 @@ describe("M84 index worker pool", () => {
   });
 
   it("only threads workspaces big enough, and honours the off switch", () => {
-    expect(shouldUseWorkerPool(1000)).toBe(true);
-    expect(shouldUseWorkerPool(3)).toBe(false);
-    expect(shouldUseWorkerPool(1000, { indexWorkers: 0 })).toBe(false);
-    expect(shouldUseWorkerPool(2, { indexWorkers: 4 })).toBe(false);
-    expect(shouldUseWorkerPool(50, { indexWorkers: 4 })).toBe(true);
+    expect(shouldUseWorkerPool(1000, { totalBytes: 5_000_000 })).toBe(true);
+    expect(shouldUseWorkerPool(1000, { totalBytes: 10_000 })).toBe(false);
+    expect(shouldUseWorkerPool(100, { totalBytes: 50_000_000 })).toBe(false);
+    expect(shouldUseWorkerPool(1000, { totalBytes: 5_000_000, indexWorkers: 0 })).toBe(false);
+    expect(shouldUseWorkerPool(50, { totalBytes: 5_000_000, indexWorkers: 4 })).toBe(false);
+    expect(shouldUseWorkerPool(1000, { totalBytes: 5_000_000, indexWorkers: 4 })).toBe(true);
   });
 
-  it("resolves the worker entry next to the running module", () => {
+  it("resolves the compiled worker entry and skips TypeScript sources", () => {
     const dir = makeTempDir("gf-m84-entry-");
-    const modulePath = join(dir, "file-parse-pool.ts");
-    writeFileSync(join(dir, "file-parse-worker.ts"), "export {};\n");
-
-    expect(resolveParseWorkerEntry(modulePath)).toEqual({
-      path: join(dir, "file-parse-worker.ts"),
-      execArgv: ["--import", "tsx"],
+    // Compiled build: worker next to the running .js module.
+    writeFileSync(join(dir, "file-parse-worker.js"), "export {};\n");
+    expect(resolveParseWorkerEntry(join(dir, "file-parse-pool.js"))).toEqual({
+      path: join(dir, "file-parse-worker.js"),
+      execArgv: [],
     });
+    // TypeScript sources run in-process (no tsx loader inside workers).
+    writeFileSync(join(dir, "file-parse-worker.ts"), "export {};\n");
+    expect(resolveParseWorkerEntry(join(dir, "file-parse-pool.ts"))).toBeUndefined();
     // No sibling worker entry in this directory → pool must not be created.
     const emptyDir = makeTempDir("gf-m84-empty-");
-    expect(resolveParseWorkerEntry(join(emptyDir, "file-parse-pool.ts"))).toBeUndefined();
+    expect(resolveParseWorkerEntry(join(emptyDir, "file-parse-pool.js"))).toBeUndefined();
   });
 
   it("dispatches tasks round-robin and resolves with the worker outcome", async () => {
