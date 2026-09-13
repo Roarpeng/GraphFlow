@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getDefaultConfig, getDefaultOverlayConfig } from "./defaults";
@@ -49,11 +49,29 @@ export function migrateGlobalGraphFlowConfig(options?: { configPath?: string }):
       ...parsed.graphPolicy,
       includeExtensions: upgraded,
     };
-    writeFileSync(path, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    writeConfigSecure(path, `${JSON.stringify(parsed, null, 2)}\n`);
     return { path, status: "migrated", message: `includeExtensions upgraded (${current.length} → ${upgraded.length})` };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { path, status: "skipped", message };
+  }
+}
+
+/**
+ * Persist a config file that may hold provider credentials.
+ *
+ * The global config (`~/.graphflow.config.json`) is where a configured
+ * `providers.<name>.apiKey` ends up, so it is written 0600 (owner-only) and an
+ * existing file is tightened on every save. This is what the DSH plugin
+ * disclosure declares (`api_keys[].storage: "file-0600"`); it is a no-op where
+ * the platform has no POSIX modes (Windows).
+ */
+export function writeConfigSecure(path: string, contents: string): void {
+  writeFileSync(path, contents, { encoding: "utf8", mode: 0o600 });
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    // Best effort: Windows ACLs / read-only mounts.
   }
 }
 
@@ -75,11 +93,7 @@ export function ensureGlobalGraphFlowConfig(options?: { configPath?: string }): 
     if (!existsSync(parentDir)) {
       mkdirSync(parentDir, { recursive: true });
     }
-    writeFileSync(
-      path,
-      `${JSON.stringify({ ...config, graphPolicy }, null, 2)}\n`,
-      "utf8"
-    );
+    writeConfigSecure(path, `${JSON.stringify({ ...config, graphPolicy }, null, 2)}\n`);
     return { path, status: "created" };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

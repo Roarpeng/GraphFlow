@@ -2,13 +2,15 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.18.4-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.18.5-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
+[![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
 > **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（对现实 top-K 文件读取口径 **95.6%**，见[双基线](benchmarks/RESULTS.md)） · 跨会话学习飞轮。
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
-**v1.18.4** 已发：**大型项目索引提速 3.7–4×**（实测 ragflow 5,492 文件：首建 35s → **9.5s**，图存储 860MB → **193MB**）——reference 边 DF 停用词预算 + 每文件上限（575 万 → 99 万条 references，golden fidelity recall 保持 1.00）、**worker 池并行解析**（图逐项一致，可 `graphPolicy.indexWorkers`/`GRAPHFLOW_INDEX_WORKERS` 控制）、索引**尊重 `.gitignore`** 并跳过生成/锁文件、file 传输**追加式 delta 段**（大库单文件保存不再重写整个 JSON，实测 0.27s）。v1.18.2 的 VS Code 安装失败修复与 v1.18.1/1.18.0 的能力继续有效。
+**v1.18.5** 已发：**DSH 插件市场收录合规**——`dsh` 显式声明（cordis-plugin）、disclosure 披露块（云端/凭据/权限）、规范 topics 与关键词、README 增加市场一键安装 + GitHub 直装 + 「只选一条注册路径」警示；同时把 `~/.graphflow.config.json`（可能含 provider API Key）收紧为 **0600**。v1.18.3/1.18.4 的大项目提速（3.7–4×）与增量存储继续有效。
 
 ## 快速开始
 
@@ -94,6 +96,18 @@ GraphFlow 本身就是一个 **dsh 插件包**（topic：`dsh-plugin`）。`pack
 核心价值：本地 AST 知识图谱、L1–L3 分层压缩（token 节省**双口径**并列——对现实 top-K 文件读取 **95.6%**，对朴素 grep 基线 98.5%，两者回答不同问题、不可互换）、跨会话 Episodic / Skill 飞轮。GraphFlow **不执行代码**，只给宿主 Agent 压缩上下文和计划；对话写入边界默认做密钥脱敏（`GRAPHFLOW_DIALOGUE_REDACT=0` 可关）。Workbench 数据走 MCP `graphflow_context` / `graphflow_diagnose` 即可。
 
 ### 安装
+
+**方式 0：插件市场一键装（推荐）**
+
+GraphFlow 已按 [`dsh-plugin` 收录规范](https://github.com/topics/dsh-plugin) 打标（`dsh-plugin` / `cordis-plugin` / `deepseek-harness` / `cordis`），市场每 2 小时自动扫描该 topic——可在 [DSH 插件市场](https://github.com/dsh-market/dsh-market) 或 [DSH-Plugins-Marketplace](https://github.com/bradeGithub/DSH-Plugins-Marketplace) 搜 `GraphFlow` 一键安装/更新。也支持 GitHub 直装：
+
+```bash
+dsh plugin --profile web add github:Roarpeng/GraphFlow
+```
+
+> ⚠️ **只选一条注册路径**：市场 / `dsh plugin … add` 会自动把 `dsh.bundle` 的 `cordis.patch.yml` 注册进 profile；此时不要再跑 `npx @roarpeng/graphflow install`（它写 `$DSH_HOME/cordis.patch.yml` overlay），两条注册叠加会重复加载。市场判定类型为 **cordis-plugin**；仓库不提交 `dist/`（源码型），安装时会先询问「安装依赖并执行构建」，确认后执行 `npm install` + `npm run build`（离线可用）。
+
+**披露（disclosure）**：本地优先——索引/压缩/召回/图存储全离线（默认本地 hash 向量，无需 API Key）；仅当为 `graphflow_plan` / `graphflow_run` 配置 LLM provider 时才访问云端端点（`api.deepseek.com` / `api.openai.com` / `api.anthropic.com` / `dashscope.aliyuncs.com` / `ark.cn-beijing.volces.com`）。API Key 只从环境变量或全局配置读取；`~/.graphflow.config.json` 自 **1.18.5** 起以 **0600** 写入，日志脱敏。完整字段见 `package.json` 的 `disclosure`。
 
 **方式 A：装进某个 profile（推荐）**
 

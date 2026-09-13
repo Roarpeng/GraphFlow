@@ -14,7 +14,7 @@ import {
   resolveEfficiencyPolicy,
   resolveWritableConfigPath,
 } from "../../../config/resolve";
-import { resolveGlobalConfigPath } from "../../../config/scaffold";
+import { resolveGlobalConfigPath, writeConfigSecure } from "../../../config/scaffold";
 import { stripWorkspaceRootForGlobalPersist } from "../../../config/workspace-root";
 import type { GraphFlowConfig } from "../../../config/schema";
 import { readRawConfig } from "./helpers.js";
@@ -226,7 +226,12 @@ export function saveGraphFlowSettings(
   }
   const persisted =
     actualPath === resolveGlobalConfigPath() ? stripWorkspaceRootForGlobalPersist(updated) : updated;
-  writeFileSync(actualPath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
+  if (actualPath === resolveGlobalConfigPath()) {
+    // Provider API keys live in the global config: keep it owner-only.
+    writeConfigSecure(actualPath, `${JSON.stringify(persisted, null, 2)}\n`);
+  } else {
+    writeFileSync(actualPath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
+  }
   return getGraphFlowSettings(actualPath);
 }
 

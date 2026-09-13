@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "1.18.4",
+  "version": "1.18.5",
   "publishConfig": {
     "access": "public"
   },
@@ -111,9 +111,16 @@
     "cursor",
     "claude-code",
     "dsh-plugin",
-    "deepseek-harness"
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugins",
+    "deepseek-harness-plugin",
+    "cordis",
+    "cordis-plugin"
   ],
   "dsh": {
+    "plugin": true,
+    "kind": "server",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -159,5 +166,44 @@
   "optionalDependencies": {
     "@firecrawl/anydoc": "^0.1.7",
     "better-sqlite3": "^12.10.0"
+  },
+  "disclosure": {
+    "cloud": true,
+    "network": [
+      "https://api.deepseek.com",
+      "https://api.openai.com",
+      "https://api.anthropic.com",
+      "https://dashscope.aliyuncs.com",
+      "https://ark.cn-beijing.volces.com"
+    ],
+    "offline_mode": true,
+    "api_keys": [
+      {
+        "env": "DEEPSEEK_API_KEY",
+        "storage": "file-0600"
+      },
+      {
+        "env": "OPENAI_API_KEY",
+        "storage": "file-0600"
+      },
+      {
+        "env": "ANTHROPIC_API_KEY",
+        "storage": "file-0600"
+      },
+      {
+        "env": "DASHSCOPE_API_KEY",
+        "storage": "file-0600"
+      },
+      {
+        "env": "ARK_API_KEY",
+        "storage": "file-0600"
+      }
+    ],
+    "permissions": {
+      "filesystem": "read workspace sources; write graphflow-out/, .graphflow/, .graphflow-cache/ in the workspace; global config ~/.graphflow.config.json (0600)",
+      "network": "LLM provider APIs listed in disclosure.network, only when a provider is configured; indexing/context/compression need no network",
+      "environment": "read provider API keys from environment variables (disclosure.api_keys); no environment writes"
+    },
+    "jurisdiction": []
   }
 }

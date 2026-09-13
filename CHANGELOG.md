@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.18.5] - 2026-09-13
+
+### Added
+
+- **DSH 插件市场收录合规（按 [STANDARD](https://github.com/bradeGithub/DSH-Plugins-Marketplace/blob/main/STANDARD.md)）**：`package.json` 的 `dsh` 块补齐显式声明（`plugin: true` / `kind: "server"`，`bundle.patch` → `cordis.patch.yml`，市场据此判为 **cordis-plugin**）；补齐规范关键词（`dsh`、`dsh-plugins`、`deepseek-harness-plugin`、`cordis`、`cordis-plugin`）；新增 **disclosure 披露块**（D1 云端依赖 + 端点、D3 凭据处理、D4 权限声明，另含 `offline_mode`/`jurisdiction`）——本地索引/压缩/召回/图存储全离线，仅配置了 LLM provider 时才访问云端端点。
+- **README（中英）**：新增 DSH 徽章、插件市场一键安装与 `dsh plugin --profile web add github:Roarpeng/GraphFlow` 两种路径，并按 STANDARD §6.4 明确「**只选一条注册路径**」（市场/`dsh plugin add` 与 `npx @roarpeng/graphflow install` 的 home overlay 不要叠加，否则重复加载）；披露摘要与市场类型说明（源码型 → 安装时询问并执行构建）。
+
+### Security
+
+- **全局配置以 0600 写入**：`~/.graphflow.config.json` 可能保存 `providers.<name>.apiKey`，现在创建/迁移/通过设置面板保存时都写为**属主可读写**，并会收紧已存在文件的权限（此前是 0600 &~ umask = 0644，同机其他用户可读）。这也是 disclosure 中 `api_keys[].storage: "file-0600"` 的依据；测试 `tests/m86-config-file-mode.test.ts`（新增 3 条）在 POSIX 上断言模式位。
+
 ## [1.18.4] - 2026-09-13
 
 ### Fixed
