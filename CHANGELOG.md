@@ -16,7 +16,7 @@ All notable changes to this project are documented in this file.
 ### Added
 
 - **配置**：`graphPolicy.respectGitIgnore`（默认 true）、`referenceEdgeMaxDefinitionFiles`（默认 10）、`referenceEdgeMaxPerFile`（默认 500）、`indexWorkers`（默认 auto；0 = 关闭 worker 池）。
-- **测试**：`m83-index-scan-budget`（DF 过滤、每文件上限、增量路径同预算、生成/锁文件识别、真实 git 仓库 `.gitignore` 生效与可关闭）、`m84-index-worker-pool`（worker 计数/门槛/入口解析、注入式调度与容错、共享解析核心）、`m85-incremental-store-delta`（追加不重写 base、阈值压缩、删除走 delta、vacuum、截断行容错、重建清理）、`m82` 扩到 10 条。
+- **测试**：`m83-index-scan-budget`（DF 过滤、每文件上限、增量路径同预算、生成/锁文件识别、真实 git 仓库 `.gitignore` 生效与可关闭）、`m84-index-worker-pool`（worker 计数/门槛/入口解析、注入式调度与容错、共享解析核心）、`m85-incremental-store-delta`（追加不重写 base、阈值压缩、删除走 delta、vacuum、截断行容错、重建清理）、`m82` 扩到 10 条。m83 walker 用例用 `normalizePath(relative(root, abs))` 断言，不再 `replace(root + "/")`（Windows 上剥不掉盘符绝对路径）。
 
 ## [1.18.2] - 2026-09-13
 
