@@ -164,6 +164,36 @@ now ["deepseek-harness"].
 - Evict stale observations deterministically before adding a summarizer.
 - Disable dormant mechanisms at configuration time.
 
+## 7. Efficiency for efficiency (R6 closeout — reinvestment)
+
+The closing turn of the SoL-Pi loop: mechanisms admitted under a capability
+floor produce real savings, and a share of those savings is reinvested as
+**search budget** so the loop can afford more mechanism trials.
+`src/learning/efficiency-reinvest.ts` implements it inside GraphFlow's
+boundary — advisory bookkeeping, never auto-execution:
+
+```
+graphflow mechanism reinvest            # dry-run: show the next budget + suggestions
+graphflow mechanism reinvest --apply    # consume the pending receipts into the ledger
+```
+
+- **Only qualifying arms fund the search.** A comparison disqualified by
+  `no-efficiency-gain` or a capability regression never funds the trials that
+  would validate it — the floor's honesty rule carried into the treasury.
+- **Every efficiency.json record funds the budget exactly once.** Receipt
+  fingerprints are persisted to `graphflow-out/efficiency-reinvest.json`
+  (`consumedFingerprints` + cumulative `appliedBudgetTokens`); re-applying is a
+  no-op, and a corrupt ledger fails open to empty.
+- **Budget = new qualifying savings × ratio (default 0.5), capped at
+  `maxBudgetTokens` (default 200k).** Config lives under
+  `efficiencyPolicy.reinvest` (enabled/ratio/maxBudgetTokens/estimatedTrialTokens),
+  ON by default like every other mechanism.
+- **Suggestions, not actions.** The plan orders fundable next trials by
+  evidence value — `frozen` mechanisms (one held-out from admission) first,
+  then `in-trajectory`, then fresh `proposed`; terminal `admitted`/`rejected`
+  mechanisms are never suggested. Trial execution always stays with the
+  operator/host (`graphflow mechanism trial`).
+
 ## See also
 
 - [context-contract.md](context-contract.md) — savings vs fidelity

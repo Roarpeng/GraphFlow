@@ -106,6 +106,7 @@ export function getDefaultConfig(): GraphFlowConfig {
         minSavingRatio: 0.2,
       },
       actionFusion: { enabled: true },
+      reinvest: { enabled: true, ratio: 0.5, maxBudgetTokens: 200_000, estimatedTrialTokens: 4_000 },
     },
   });
 }

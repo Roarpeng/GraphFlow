@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.18.8] - 2026-09-14
+
+### Added
+
+- **R6 收官：efficiency for efficiency（效率反哺搜索，SoL-Pi 闭环最后一块）**：新增 `src/learning/efficiency-reinvest.ts` + `graphflow mechanism reinvest [--apply]`。合格配对节省（仅 qualifying——被 `no-efficiency-gain` / 能力回退取消资格的比较**不得为其验证搜索出资**）按 `efficiencyPolicy.reinvest.ratio`（默认 0.5，`maxBudgetTokens` 默认 200k）折算为机制试验预算；收据指纹记账于 `graphflow-out/efficiency-reinvest.json`（每条 efficiency.json 记录只出资一次，重复 apply 幂等，损坏账本 fail-open）；输出下一步试验建议（`frozen`→held-out 优先、`in-trajectory`/`proposed` 次之，终态机制不再建议），**试验执行仍归操作者/宿主**（advisory 边界不变）。默认开启，可经设置页/配置关闭。测试 `tests/m88-efficiency-reinvest.test.ts`（7 条：预算推导/上限/disabled/建议排序/幂等 apply/dry-run 零写入/账本 fail-open）。至此 SoL-Pi 借鉴（R6）P0/P1/P2 全部 ✅。
+
 ## [1.18.7] - 2026-09-14
 
 ### Fixed
