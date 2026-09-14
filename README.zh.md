@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.18.8-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.19.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
@@ -10,7 +10,7 @@
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
-**v1.18.8** 已发：**R6 全部收口（SoL-Pi 闭环最后一块）**——efficiency for efficiency 落地：合格配对节省按比例折算为机制试验搜索预算，收据指纹记账（每条记录只出资一次），`graphflow mechanism reinvest [--apply]` 输出预算与下一步试验建议（frozen→held-out 优先），执行仍归操作者。v1.18.7 的握手时序修复与 R7 演化方向、v1.18.6 的 ZCode 宿主支持继续有效。
+**v1.19.0** 已发：**R8「省钱与靠谱双主线」五模块齐发**——working-set 预取（消灭探索轮次）、图 diff 质询清单（近零成本质量门）、subagent 出生证（token 复利）、时点事实查询（白领事实漂移防线）、任务预算报价（事前决策）。核心逻辑：压缩 prompt 省加法，消灭探索轮省乘法；图知道全量调用关系而 agent 不知道。
 
 ## 快速开始
 

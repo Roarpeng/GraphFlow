@@ -26,7 +26,13 @@ import {
   applyReinvestment,
   loadReinvestLedger,
   pendingFingerprints,
+  resolveReinvestLedgerPath,
 } from "../../learning/efficiency-reinvest";
+import { issueSpawnReceipt } from "../../graph/spawn-receipt";
+import { quoteTask } from "../../learning/task-quote";
+import { buildChallengeList } from "../../graph/diff-challenge";
+import { queryFactsAt } from "../../graph/temporal-facts";
+import { computeWorkingSet } from "../../graph/working-set";
 
 import {
   diagnoseRouting,
@@ -745,6 +751,176 @@ async function executeCommand(command: string, args: string[], configPath?: stri
         "; disqualified=" + report.disqualified +
         "; avgSaving=" + percent + "%" +
         "; capabilityRegressions=" + report.capabilityRegressions,
+    };
+  }
+
+  if (command === "working-set") {
+    // R8-1: prefetch candidates for the active working set — kill exploration
+    // turns (each turn re-pays the whole history; this turns a multiply into
+    // an add).
+    const filesRaw = readCliFlagValue(args, "--files");
+    if (!filesRaw) {
+      console.log("Usage: graphflow working-set --files <a.ts,b.ts> [--max-files N] [--json] [--config <path>]");
+      process.exitCode = 1;
+      return undefined;
+    }
+    const touchedFiles = filesRaw.split(",").map((f) => f.trim()).filter(Boolean);
+    const maxFilesRaw = readCliFlagValue(args, "--max-files");
+    const maxFiles = maxFilesRaw !== undefined ? Number.parseFloat(maxFilesRaw) : undefined;
+    const graphflowConfig = resolveConfig(configPath);
+    const client = createGraphClient(graphflowConfig);
+    try {
+      const data = await computeWorkingSet(client, {
+        touchedFiles,
+        ...(maxFiles !== undefined && Number.isFinite(maxFiles)
+          ? { maxFiles: Math.max(1, Math.round(maxFiles)) }
+          : {}),
+      });
+      return {
+        command: "working-set",
+        data,
+        legacyText:
+          "prefetch=[" + data.files.map((f) => f.reason + ":" + f.path).join(", ") + "]" +
+          "; potentiallyAvoidedReads=" + data.potentiallyAvoidedReads +
+          "; budgetHintTokens=" + data.budgetHintTokens,
+      };
+    } finally {
+      client.close?.();
+    }
+  }
+
+  if (command === "spawn-receipt") {
+    // R8-3: compact subagent birth receipt — anchors + retrieval instructions
+    // instead of copying the parent's full background text.
+    const task = readCliFlagValue(args, "--task");
+    if (!task) {
+      console.log('Usage: graphflow spawn-receipt --task "<text>" [--query "<text>"] [--max-anchors N] [--json]');
+      process.exitCode = 1;
+      return undefined;
+    }
+    const query = readCliFlagValue(args, "--query");
+    const maxAnchorsRaw = readCliFlagValue(args, "--max-anchors");
+    const maxAnchors = maxAnchorsRaw !== undefined ? Number.parseFloat(maxAnchorsRaw) : undefined;
+    const graphflowConfig = resolveConfig(configPath);
+    const client = createGraphClient(graphflowConfig);
+    try {
+      const data = await issueSpawnReceipt(client, {
+        task,
+        ...(query !== undefined ? { query } : {}),
+        ...(maxAnchors !== undefined && Number.isFinite(maxAnchors) ? { maxAnchors: Math.max(1, Math.round(maxAnchors)) } : {}),
+      });
+      return {
+        command: "spawn-receipt",
+        data,
+        legacyText:
+          "receiptTokens=" + data.estimatedReceiptTokens +
+          "; anchors=[" + data.anchors.map((a) => a.kind + ":" + a.label).join(", ") + "]" +
+          "; task=" + data.task,
+      };
+    } finally {
+      client.close?.();
+    }
+  }
+
+  if (command === "facts" && args[0] === "ask") {
+    // R8-4: temporal fact lookup — answer with the version effective at the
+    // requested point in time, not every historical version.
+    const question = readCliFlagValue(args, "--question") ?? readCliFlagValue(args, "--query");
+    if (!question) {
+      console.log('Usage: graphflow facts ask --question "<text>" [--as-of <iso-date>] [--limit N] [--json] [--config <path>]');
+      process.exitCode = 1;
+      return undefined;
+    }
+    const asOf = readCliFlagValue(args, "--as-of");
+    const limitRaw = readCliFlagValue(args, "--limit");
+    const limit = limitRaw !== undefined ? Number.parseFloat(limitRaw) : undefined;
+    const graphflowConfig = resolveConfig(configPath);
+    const client = createGraphClient(graphflowConfig);
+    try {
+      const data = await queryFactsAt(client, {
+        query: question,
+        ...(asOf !== undefined ? { asOf } : {}),
+        ...(limit !== undefined && Number.isFinite(limit) ? { limit: Math.max(1, Math.round(limit)) } : {}),
+      });
+      return {
+        command: "facts-ask",
+        data,
+        legacyText:
+          "asOf=" + data.asOf +
+          "; effective=" + data.effective.length +
+          "; supersededAtPoint=" + data.supersededAtPoint.length +
+          (data.unresolved ? "; UNRESOLVED — " + data.advisory : ""),
+      };
+    } finally {
+      client.close?.();
+    }
+  }
+
+  if (command === "challenge") {
+    // R8-2: graph-diff challenge list — the graph knows every caller the
+    // agent does not; questions only, zero execution.
+    const filesRaw = readCliFlagValue(args, "--files");
+    if (!filesRaw) {
+      console.log("Usage: graphflow challenge --files <a.ts,b.ts> [--max N] [--json] [--config <path>]");
+      process.exitCode = 1;
+      return undefined;
+    }
+    const touchedFiles = filesRaw.split(",").map((f) => f.trim()).filter(Boolean);
+    const maxRaw = readCliFlagValue(args, "--max");
+    const maxChallenges = maxRaw !== undefined ? Number.parseFloat(maxRaw) : undefined;
+    const graphflowConfig = resolveConfig(configPath);
+    const client = createGraphClient(graphflowConfig);
+    try {
+      const data = await buildChallengeList(client, {
+        touchedFiles,
+        ...(maxChallenges !== undefined && Number.isFinite(maxChallenges)
+          ? { maxChallenges: Math.max(1, Math.round(maxChallenges)) }
+          : {}),
+      });
+      return {
+        command: "challenge",
+        data,
+        legacyText:
+          "challenges=" + data.challenges.length + "/" + data.total +
+          (data.truncated ? " (truncated)" : "") +
+          (data.challenges.length > 0
+            ? "\n" + data.challenges.map((c, i) => "  " + (i + 1) + ". [" + c.kind + "] " + c.question).join("\n")
+            : "; no graph-provable challenges for the given files"),
+      };
+    } finally {
+      client.close?.();
+    }
+  }
+
+  if (command === "quote") {
+    // R8-5: task budget quote from paired-efficiency history. Honest
+    // confidence — never fabricates precision when samples are thin.
+    const estimateRaw = readCliFlagValue(args, "--estimate-tokens");
+    const estimate = estimateRaw !== undefined ? Number.parseFloat(estimateRaw) : NaN;
+    if (!Number.isFinite(estimate)) {
+      console.log("Usage: graphflow quote --estimate-tokens <n> [--min-samples N] [--json] [--config <path>]");
+      process.exitCode = 1;
+      return undefined;
+    }
+    const minSamplesRaw = readCliFlagValue(args, "--min-samples");
+    const minSamples = minSamplesRaw !== undefined ? Number.parseFloat(minSamplesRaw) : undefined;
+    const graphflowConfig = resolveConfig(configPath);
+    const report = getEfficiencyReport(graphflowConfig);
+    const ledger = loadReinvestLedger(resolveReinvestLedgerPath(graphflowConfig));
+    const data = quoteTask(report, {
+      estimatedTaskTokens: estimate,
+      ...(minSamples !== undefined && Number.isFinite(minSamples) ? { minSamples: Math.max(1, Math.round(minSamples)) } : {}),
+      ...(ledger.appliedBudgetTokens > 0 ? { ledger } : {}),
+    });
+    return {
+      command: "quote",
+      data,
+      legacyText:
+        "estimate=" + data.estimatedTaskTokens +
+        "; assisted=" + data.estimatedAssistedTokens +
+        "; saving=" + data.estimatedSavingTokens +
+        "; samples=" + data.qualifyingSamples +
+        "; confidence=" + data.confidence,
     };
   }
 

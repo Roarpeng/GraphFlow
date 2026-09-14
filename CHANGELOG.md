@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.19.0] - 2026-09-14
+
+### Added — R8「省钱与靠谱双主线」（五模块齐发）
+
+核心洞察：agent 最大的 token 黑洞是"找东西的探索轮次"（每轮探索都是带全量历史的完整模型调用——压缩 prompt 省加法，消灭探索轮省乘法）；可靠性最便宜的形态是不跑测试的质量门。五项全部落地：
+
+- **R8-1 Working set 预取**：`src/graph/working-set.ts`——以 touched 文件为活跃工作集，沿 references/calls 边扩展 caller/callee/test-for 相关文件生成预取包；诚实计数 `potentiallyAvoidedReads`，不乘臆测系数（tests/m89）。
+- **R8-2 图 diff 质询清单**：`src/graph/diff-challenge.ts` + `graphflow challenge --files`——改完代码后图谱生成三类质询（external-caller / requirement-link / deleted-symbol）还给 agent 回答；近零成本质量门，激活 Engineering KG 存量；不声称检测签名变更，只质询图上可证事实（tests/m90）。
+- **R8-3 subagent 出生证**：`src/graph/spawn-receipt.ts` + `graphflow spawn-receipt`——父 agent 发紧凑收据（任务 + 图锚点 + 取回指令）替代背景文本复制；subagent 用 `graphflow_context` 按需展开（tests/m91）。
+- **R8-4 时点事实查询**：`src/graph/temporal-facts.ts` + `graphflow facts ask`——对话图 bi-temporal 语义产品化：按 asOf 返回仍有效结论（effective）与已被取代历史（supersededAtPoint）；白领"事实漂移"防线（tests/m92）。
+- **R8-5 任务预算报价**：`src/learning/task-quote.ts` + `graphflow quote`——效率历史变事前决策工具；样本不足 confidence=insufficient-samples + 保守折半 + advisory 明说，绝不编造（tests/m93）。
+
 ## [1.18.8] - 2026-09-14
 
 ### Added

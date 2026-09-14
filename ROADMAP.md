@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-09-14（v1.18.8：**R6 全部收口**——efficiency for efficiency 落地（合格节省折算机制搜索预算 + 收据记账 + `graphflow mechanism reinvest`）；v1.18.7：ZCode 宿主支持、MCP stdio 握手时序修复、R7 演化方向（含 SoL-Pi 效率赛道补充））
+> 最后更新：2026-09-14（v1.19.0：**R8「省钱与靠谱双主线」五模块齐发**——working-set 预取 / 图 diff 质询清单 / subagent 出生证 / 时点事实查询 / 任务预算报价；v1.18.8：R6 全部收口；v1.18.7：ZCode 宿主 + 握手时序修复 + R7 演化方向）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -174,6 +174,18 @@
 | **P2** | 集成健壮性：unsafe-cwd 下 rootDir 生效 | ✅ | dsh dogfood 实证：`resolveConfig()` 先于工具级 rootDir 绑定并抛 unsafe-cwd 错，MCP 工具全灭；已改为 `resolveConfig(configPath, { rootDir })` 贯穿 runtime 调用点，安全检查不放宽 |
 | **P2** | 工作区发现边界：临时目录不得被当作项目根 | ✅ | MCP 以 cwd 位于 `%TEMP%` 启动会写下 `graphflow-out/graphflow-graph.json`，该弱标记曾让向上发现对所有临时目录下的项目都返回临时根；新增 `isSystemTempDirectory()` 遍历边界 + `discoverWorkspaceRoot(..., { extraBoundaries })` 测试钩子，m49 回归覆盖 |
 | **P2** | 文档编码守卫 | ✅ | v1.15.4 版本号提交把两个 README 的约 100 个多字节字符打成 `?` 并随 npm 发布；已按 v1.15.3 文档提交重建，并新增「文档必须合法 UTF-8」+「README.zh.md 徽章与 package.json 一致」CI 守卫 |
+
+### R8 · 省钱与靠谱双主线（2026-09-14 深度思考版）
+
+> 来源：单作者自由思考推进。核心洞察：**agent 最大的 token 黑洞不是 prompt 大小，而是"找东西的探索轮次"**（每轮探索都是带全量历史的完整模型调用，第 N 轮的 grep 比第一轮贵 N 倍——压缩 prompt 省的是加法，消灭探索轮省的是乘法）；**可靠性最便宜的形态是不跑测试的质量门**（图知道全量调用关系，agent 不知道——"不知道自己不知道"是坏活儿的根源）。R8 五项全部服务"省钱、出好活儿"。
+
+| 优先级 | 事项 | 状态 | 说明与依据 |
+| --- | --- | --- | --- |
+| **P0** | **R8-1 Working set 预取（消灭探索轮次）** | ✅ v1.19.0 | `src/graph/working-set.ts`：以本轮 touched 文件为活跃工作集，沿 references/calls 边扩展出 caller/callee/test-for 相关文件，作为预取包随 context 返回；诚实计数 `potentiallyAvoidedReads`（agent 不必自己打开的文件数），不乘臆测系数 |
+| **P0** | **R8-2 图 diff 质询清单（近零成本质量门）** | ✅ v1.19.0 | `src/graph/diff-challenge.ts` + `graphflow challenge --files`：改完代码后由图谱生成三类质询（external-caller 外部调用方 / requirement-link 需求关联 / deleted-symbol 删除残留）还给 agent 自己回答；不执行测试、只提问；激活 Engineering KG 的 Requirement 存量节点。诚实边界：不声称检测签名变更，只质询图上可证的事实 |
+| **P1** | **R8-3 subagent 出生证（token 复利）** | ✅ v1.19.0 | `src/graph/spawn-receipt.ts` + `graphflow spawn-receipt`：父 agent 给 subagent 发紧凑收据（任务 + 图锚点 + 取回指令）替代大段背景文本；subagent 用 `graphflow_context` 按需展开。同样材料抄 N 遍 → 一张 `estimatedReceiptTokens` 收据 |
+| **P1** | **R8-4 时点事实查询（白领：事实漂移防线）** | ✅ v1.19.0 | `src/graph/temporal-facts.ts` + `graphflow facts ask`：复用对话图 bi-temporal 语义（supersedes/validAt/invalidAt），按 asOf 时点返回仍然有效的结论（effective）与已被取代的历史（supersededAtPoint 供追溯）；问"现在适用哪版"答一版而非三版 |
+| **P1** | **R8-5 任务预算报价（省钱从事后报表变成事前决策）** | ✅ v1.19.0 | `src/learning/task-quote.ts` + `graphflow quote`：用配对效率历史给任务报价（预估 token × 平均节省率）；样本不足时 confidence=insufficient-samples 并保守折半，advisory 明说——绝不编造精确数字；可附 reinvest 搜索预算余额 |
 
 ### R7 · 演化方向（2026-09 横向调研版）
 
