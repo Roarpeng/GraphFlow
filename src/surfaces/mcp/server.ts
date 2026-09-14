@@ -92,6 +92,12 @@ interface JsonRpcNotification {
 
 /** Servers whose SDK transport is currently connected, so notifications can be emitted. */
 const connectedServers = new WeakSet<McpServer>();
+/**
+ * Servers that finished the initialize handshake. Strict stdio clients
+ * (e.g. ZCode) choke when a notification hits stdout before the initialize
+ * response, so log/progress notifications stay suppressed until this fires.
+ */
+const initializedServers = new WeakSet<McpServer>();
 
 const DIAGNOSE_RESOURCE_URI = "graphflow://diagnose";
 const STATS_RESOURCE_URI = "graphflow://stats";
@@ -335,6 +341,13 @@ export function createMcpServer(
     }
     throw new McpError(ErrorCode.MethodNotFound, `Method not found: ${request.method}`);
   };
+  // Notifications may only hit the wire after the initialize handshake —
+  // early background output (e.g. the file watcher's startup log) breaks
+  // strict stdio clients that expect the response first. The SDK fires this
+  // instance callback when the client's `initialized` notification arrives.
+  sdkServer.oninitialized = () => {
+    initializedServers.add(wrapper);
+  };
 
   const wrapper: McpServer = {
     serverInfo: {
@@ -344,7 +357,7 @@ export function createMcpServer(
     tools,
     sdkServer,
     sendProgress(progressToken: string | number, progress: number, total: number): void {
-      if (!connectedServers.has(wrapper)) {
+      if (!connectedServers.has(wrapper) || !initializedServers.has(wrapper)) {
         return;
       }
       void sdkServer
@@ -357,7 +370,7 @@ export function createMcpServer(
         });
     },
     sendLogNotification(level: LoggingLevel, message: string): void {
-      if (!connectedServers.has(wrapper)) {
+      if (!connectedServers.has(wrapper) || !initializedServers.has(wrapper)) {
         return;
       }
       void sdkServer
