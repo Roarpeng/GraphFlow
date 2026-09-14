@@ -82,12 +82,20 @@ describe("M87 ZCode host", () => {
       const config = JSON.parse(readFileSync(configPath, "utf8")) as {
         mcp?: { servers?: Record<string, { command?: string; args?: string[] }> };
       };
-      expect(config.mcp?.servers?.graphflow?.command).toBe("npx");
-      expect(config.mcp?.servers?.graphflow?.args).toEqual([
-        "-y",
-        "--package=@roarpeng/graphflow",
-        "graphflow-mcp",
-      ]);
+      const server = config.mcp?.servers?.graphflow;
+      expect(server?.command).toBeTruthy();
+      expect(server?.args).toContain("graphflow-mcp");
+      expect(server?.args).toContain("--package=@roarpeng/graphflow");
+      if (process.platform === "win32") {
+        expect(server?.command?.toLowerCase()).toMatch(/node(\.exe)?$/);
+      } else {
+        expect(server?.command).toBe("npx");
+        expect(server?.args).toEqual([
+          "-y",
+          "--package=@roarpeng/graphflow",
+          "graphflow-mcp",
+        ]);
+      }
 
       expect(existsSync(join(home, ".zcode", "skills", "graphflow", "SKILL.md"))).toBe(true);
       const agents = readFileSync(join(home, ".zcode", "AGENTS.md"), "utf8");
