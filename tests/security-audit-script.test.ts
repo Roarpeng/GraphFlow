@@ -13,6 +13,21 @@ describe("security-audit script", () => {
     }
   });
 
+  it("pins production-audit overrides so the weekly cron stays green", () => {
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
+      overrides?: Record<string, string>;
+    };
+    expect(pkg.overrides).toMatchObject({
+      "@hono/node-server": "1.19.17",
+      "body-parser": "2.3.0",
+      "fast-uri": "3.1.6",
+      hono: "4.13.7",
+      "ip-address": "10.7.0",
+      qs: "6.16.0",
+      sharp: "0.35.4",
+    });
+  });
+
   it("imports join from node:path so the scheduled audit can start", () => {
     const src = readFileSync(join(process.cwd(), "scripts/security-audit.cjs"), "utf8");
     expect(src).toMatch(/require\(["']node:path["']\)/);
