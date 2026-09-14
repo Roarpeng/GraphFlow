@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **ZCode Windows validate**：`m87` 把 MCP `command` 写死为 `npx`。Windows 上 `resolveWindowsNpxLaunch` 会写成 `node.exe` + `npx-cli.js`（与 Cursor/Claude/Codex 相同）。测试改为断言 command 存在，且 args 末尾仍是 `-y --package=@roarpeng/graphflow graphflow-mcp`。
+
 ## [1.18.6] - 2026-09-14
 
 ### Added
