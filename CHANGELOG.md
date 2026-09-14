@@ -11,7 +11,7 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
-- **ROADMAP R7 演化方向（2026-09 横向调研版）**：基于对云端记忆 API（Mem0/Zep-Graphiti/Letta）、索引派（codebase-memory-mcp/Continue+Ollama）、反索引派（Cline）与 Agent Skills 开放标准生态（~40 平台、AGENTS.md 在野 57k+）的横向对比，确定六条演化主线：R7-a 学习飞轮产物以标准 Agent Skills 包分发、R7-b 零配置本地语义召回默认开、R7-c 跨仓库/monorepo 图谱、R7-d 隐私威胁模型 + 审计面、R7-e 业界记忆基准接入、R7-f 团队记忆企业化。
+- **ROADMAP R7 演化方向（2026-09 横向调研版）**：基于对云端记忆 API（Mem0/Zep-Graphiti/Letta）、索引派（codebase-memory-mcp/Continue+Ollama）、反索引派（Cline）、Agent Skills 开放标准生态（~40 平台、AGENTS.md 在野 57k+）与**效率机制赛道（NVIDIA SoL-Pi：绑 Pi 单宿主）**的横向对比，确定演化主线：R7-a 学习飞轮产物以标准 Agent Skills 包分发、R7-b 零配置本地语义召回默认开、R7-c 跨仓库/monorepo 图谱、R7-d 隐私威胁模型 + 审计面、R7-e 业界记忆基准接入、R7-f 团队记忆企业化。（发布后补充：R7-g 效率机制投影面宿主泛化、R7-h 效率证据可审计公开格式——补入第五赛道调研后新增，见 ROADMAP。）
 
 ## [1.18.6] - 2026-09-14
 
