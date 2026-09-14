@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **周更 Security Audit 生产依赖 advisory**：`npm audit --omit=dev` 扫到 MCP SDK 传递的 `hono` / `@hono/node-server` / `fast-uri` / `ip-address` / `body-parser` / `qs`，以及 `@huggingface/transformers` 传递的 `sharp`。`package.json` `overrides` 钉到已修复版本（hono 4.13.7、node-server 1.19.17、fast-uri 3.1.6、ip-address 10.7.0、body-parser 2.3.0、qs 6.16.0、sharp 0.35.4），不升 MCP/transformers 主版本。
+
 ## [1.18.5] - 2026-09-13
 
 ### Added
