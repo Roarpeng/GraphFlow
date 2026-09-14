@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Security
+
+- **周一定时 `npm audit --omit=dev`**：MCP SDK / transformers 传递依赖（hono、@hono/node-server、body-parser、fast-uri、ip-address、qs、sharp）用 npm `overrides` 钉到已修复版本，使 Security Audit workflow 能通过。直连依赖版本不变。
+
 ## [1.18.5] - 2026-09-13
 
 ### Added
