@@ -80,13 +80,26 @@ describe("M87 ZCode host", () => {
       const configPath = join(home, ".zcode", "cli", "config.json");
       expect(existsSync(configPath)).toBe(true);
       const config = JSON.parse(readFileSync(configPath, "utf8")) as {
-        mcp?: { servers?: Record<string, { command?: string; args?: string[] }> };
+        mcp?: {
+          servers?: Record<string, {
+            command?: string;
+            args?: string[];
+            env?: Record<string, string>;
+            timeoutMs?: number;
+            type?: string;
+          }>;
+        };
       };
       // Windows launchers use an absolute node + npx-cli.js path instead of
       // bare "npx", so assert the package/target args, not the command.
-      const args = config.mcp?.servers?.graphflow?.args ?? [];
+      const entry = config.mcp?.servers?.graphflow;
+      const args = entry?.args ?? [];
       expect(args).toContain("--package=@roarpeng/graphflow");
       expect(args).toContain("graphflow-mcp");
+      // ZCode never expands ${...} in config-file entries; the injector must
+      // drop the literal placeholder and raise the 30s default timeout.
+      expect(entry?.env?.GRAPHFLOW_WORKSPACE_ROOT).toBeUndefined();
+      expect(entry?.timeoutMs).toBe(120000);
 
       expect(existsSync(join(home, ".zcode", "skills", "graphflow", "SKILL.md"))).toBe(true);
       const agents = readFileSync(join(home, ".zcode", "AGENTS.md"), "utf8");

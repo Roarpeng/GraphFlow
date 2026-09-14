@@ -1794,6 +1794,34 @@ function getZcodeServers(json: Record<string, unknown>): Record<string, McpServe
   return (mcp.servers as Record<string, McpServerNode> | undefined) ?? {};
 }
 
+/**
+ * ZCode specifics on top of the standard stdio node:
+ * - config-file MCP entries never expand `${...}` templates, so the literal
+ *   `${workspaceFolder}` placeholder must not reach GRAPHFLOW_WORKSPACE_ROOT
+ *   (the server treats it as an unsafe root and falls back every call);
+ * - the default connect timeout is 30s, which a first-run `npx` download of
+ *   GraphFlow's native deps (onnxruntime-node) can exceed — raise it.
+ */
+function formatZcodeMcpEntry(
+  node: McpServerNode
+): McpServerNode & { type?: "stdio"; timeoutMs?: number } {
+  const env: Record<string, string> = { ...(node.env ?? {}) };
+  if (env.GRAPHFLOW_WORKSPACE_ROOT === "${workspaceFolder}") {
+    delete env.GRAPHFLOW_WORKSPACE_ROOT;
+  }
+  const entry: McpServerNode & { type?: "stdio"; timeoutMs?: number } = {
+    ...node,
+    type: "stdio",
+    timeoutMs: 120000,
+  };
+  if (Object.keys(env).length > 0) {
+    entry.env = env;
+  } else {
+    delete entry.env;
+  }
+  return entry;
+}
+
 function injectIntoZcodeConfig(
   configPath: string,
   serverName: string,
@@ -1804,7 +1832,7 @@ function injectIntoZcodeConfig(
   const mcp = (json.mcp as Record<string, unknown> | undefined) ?? {};
   const servers = getZcodeServers(json);
   const serverExisted = !!servers[serverName];
-  servers[serverName] = node;
+  servers[serverName] = formatZcodeMcpEntry(node);
   json.mcp = { ...mcp, servers };
   writeJsonConfig(configPath, json);
   if (!existed) return "created";
