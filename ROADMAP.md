@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-09-14（v1.18.7：ZCode 宿主支持（MCP + Skill + AGENTS.md）；MCP stdio 握手时序修复；新增 R7 演化方向（2026-09 横向调研版））
+> 最后更新：2026-09-14（v1.18.8：**R6 全部收口**——efficiency for efficiency 落地（合格节省折算机制搜索预算 + 收据记账 + `graphflow mechanism reinvest`）；v1.18.7：ZCode 宿主支持、MCP stdio 握手时序修复、R7 演化方向（含 SoL-Pi 效率赛道补充））
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -128,7 +128,7 @@
 | **P1** | **效率/能力双指标门禁** | ✅ | efficiency-report.ts 配对双臂（tokens/turns/responseCount/score），response-count 劣化即判「少干活」；governance release-gate 新增 --min-efficiency-qualifying / --max-capability-regressions / --min-anchor-recall-percent / --min-body-coverage-percent |
 | **P2** | **机制自动研究回路（auto-research）** | ✅ | mechanism-research.ts：proposed → in-trajectory → frozen → held-out → admitted/rejected；准入需合格 held-out，冻结后拒绝 in-trajectory（隔离），终态拒绝新试验；graphflow mechanism CLI + diagnose 汇总 |
 | **P2** | **负面教训 guardrails** | ✅ | docs/efficiency-mechanisms.md §6：不把粗暴简短/早压缩当机制、不在首次插入后才削减输出、不按训练命中泛化剪枝、按生命周期门控观测、上线前关闭休眠机制 |
-| **P2** | **efficiency for efficiency（效率反哺搜索）** | ⬜ | 长期：用更低 per-run 成本扩大可执行环境/轨迹/机制搜索预算。当前无复现实验，仅作为方向保留 |
+| **P2** | **efficiency for efficiency（效率反哺搜索）** | ✅ | `efficiency-reinvest.ts`：合格配对节省（仅 qualifying——无效率收益/能力回退者不得为其验证搜索出资）× ratio（默认 0.5，上限 200k）折算为机制试验预算；收据指纹记账（`graphflow-out/efficiency-reinvest.json`，每条记录只出资一次，损坏 fail-open）；`graphflow mechanism reinvest [--apply]` 输出预算 + 下一步试验建议（frozen→held-out 优先，终态机制不再建议），执行仍归操作者/宿主。**R6 至此全部收口** |
 
 ### R0 · 让飞轮真的转起来（P0，决定项目本质）
 

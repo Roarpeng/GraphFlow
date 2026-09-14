@@ -22,6 +22,11 @@ import {
   resolveEfficiencyReportPath,
   type EfficiencyArm,
 } from "../../learning/efficiency-report";
+import {
+  applyReinvestment,
+  loadReinvestLedger,
+  pendingFingerprints,
+} from "../../learning/efficiency-reinvest";
 
 import {
   diagnoseRouting,
@@ -684,7 +689,37 @@ async function executeCommand(command: string, args: string[], configPath?: stri
         const report = await getMechanismReport(client);
         return { command: "mechanism-list", data: report, legacyText: "total=" + report.total + "; admitted=" + report.admitted + "; rejected=" + report.rejected };
       }
-      console.log("Usage: graphflow mechanism <propose|trial|freeze|admit|reject|list>");
+      if (subcommand === "reinvest") {
+        // Efficiency-for-efficiency (R6 closeout): convert qualifying paired
+        // savings into an advisory trial budget. Dry-run by default; --apply
+        // consumes the record fingerprints exactly once.
+        const apply = args.includes("--apply");
+        const efficiency = getEfficiencyReport(graphflowConfig);
+        const mechanismReport = await getMechanismReport(client).catch(() => undefined);
+        const result = applyReinvestment(graphflowConfig, efficiency, {
+          ...(graphflowConfig.efficiencyPolicy?.reinvest !== undefined
+            ? { reinvestConfig: graphflowConfig.efficiencyPolicy.reinvest }
+            : {}),
+          apply,
+        });
+        const plan = result.plan;
+        const data = {
+          ...result,
+          mechanismReport,
+          pendingFingerprints: pendingFingerprints(efficiency, result.dryRun ? loadReinvestLedger(result.path) : result.ledger),
+        };
+        const legacyText = !plan.enabled
+          ? "reinvest disabled (efficiencyPolicy.reinvest.enabled=false)"
+          : (apply ? "applied +" + result.appliedBudgetTokens : "dry-run +" + plan.budgetTokens) +
+            " tokens; savings(new)=" + plan.newSavingsTokens +
+            "; ratio=" + plan.ratio +
+            "; cappedBy=" + String(plan.cappedBy) +
+            "; trials=" + plan.estimatedTrials +
+            "; suggestions=[" + plan.suggestions.map((s) => s.mechanismId + ":" + s.phase).join(", ") + "]" +
+            "; ledger=" + result.path;
+        return { command: apply ? "mechanism-reinvest-apply" : "mechanism-reinvest", data, legacyText };
+      }
+      console.log("Usage: graphflow mechanism <propose|trial|freeze|admit|reject|list|reinvest>");
       process.exitCode = 1;
       return undefined;
     } finally {

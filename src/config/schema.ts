@@ -83,6 +83,21 @@ export interface EfficiencyPolicyConfig {
   observations?: ObservationEfficiencyConfig;
   contextPressure?: ContextPressureEfficiencyConfig;
   actionFusion?: ActionFusionEfficiencyConfig;
+  /**
+   * Efficiency-for-efficiency reinvestment (SoL-Pi closeout): converts
+   * qualifying paired savings into an advisory mechanism-trial budget.
+   */
+  reinvest?: ReinvestEfficiencyPolicyConfig;
+}
+
+export interface ReinvestEfficiencyPolicyConfig {
+  enabled?: boolean;
+  /** Share of new qualifying savings convertible to search budget (0..1). Default 0.5. */
+  ratio?: number;
+  /** Per-round budget cap. Default 200000. */
+  maxBudgetTokens?: number;
+  /** Assumed cost of one mechanism trial. Default 4000. */
+  estimatedTrialTokens?: number;
 }
 
 export interface GraphFlowConfig {
