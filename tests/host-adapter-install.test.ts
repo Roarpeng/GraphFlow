@@ -421,9 +421,27 @@ describe("M16 HostAdapter CLI wiring", () => {
   });
 
   it("install report still exposes claudeCodeHooks after HostAdapter routing", () => {
-    const report = buildInstallReport(process.cwd(), { bootstrapGraph: false });
-    expect(report.claudeCodeHooks).toMatchObject({
-      status: expect.stringMatching(/^(created|updated|skipped|error)$/),
-    });
+    // buildInstallReport rewrites every detected agent home; isolate HOME so
+    // the real agent configs on this machine stay untouched.
+    const home = makeTempRoot("gf-report-shape-");
+    const prevProfile = process.env.USERPROFILE;
+    const prevHome = process.env.HOME;
+    const prevAppData = process.env.APPDATA;
+    if (process.platform === "win32") process.env.USERPROFILE = home;
+    else process.env.HOME = home;
+    process.env.APPDATA = join(home, "AppData", "Roaming");
+    try {
+      const report = buildInstallReport(process.cwd(), { bootstrapGraph: false });
+      expect(report.claudeCodeHooks).toMatchObject({
+        status: expect.stringMatching(/^(created|updated|skipped|error)$/),
+      });
+    } finally {
+      if (prevProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = prevProfile;
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      if (prevAppData === undefined) delete process.env.APPDATA;
+      else process.env.APPDATA = prevAppData;
+    }
   });
 });

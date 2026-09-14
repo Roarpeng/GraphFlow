@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   buildInstallReport,
   formatInstallLegacyText,
@@ -6,13 +9,55 @@ import {
 } from "../src/surfaces/cli/init";
 import { buildCliUsage } from "../src/surfaces/cli/output";
 
+const tempRoots: string[] = [];
+
+function makeTempRoot(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempRoots.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  for (const dir of tempRoots.splice(0)) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  }
+});
+
+// buildInstallReport rewrites configs for every detected agent home; isolate
+// HOME so the machine running the suite keeps its real agent configs intact.
+function withIsolatedHome<T>(run: () => T): T {
+  const home = makeTempRoot("gf-isolated-home-");
+  const prevProfile = process.env.USERPROFILE;
+  const prevHome = process.env.HOME;
+  const prevAppData = process.env.APPDATA;
+  if (process.platform === "win32") process.env.USERPROFILE = home;
+  else process.env.HOME = home;
+  process.env.APPDATA = join(home, "AppData", "Roaming");
+  try {
+    return run();
+  } finally {
+    if (prevProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = prevProfile;
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevAppData === undefined) delete process.env.APPDATA;
+    else process.env.APPDATA = prevAppData;
+  }
+}
+
 describe("install JSON report for agent self-check", () => {
   it("documents install --json in CLI usage", () => {
     expect(buildCliUsage()).toContain("install [--json]");
   });
 
   it("returns structured install actions plus post-install doctor checks", () => {
-    const report = buildInstallReport(process.cwd(), { bootstrapGraph: false });
+    const report = withIsolatedHome(() =>
+      buildInstallReport(process.cwd(), { bootstrapGraph: false })
+    );
 
     expect(report).toMatchObject({
       command: "install",
@@ -77,7 +122,9 @@ describe("install JSON report for agent self-check", () => {
   });
 
   it("formats human-readable install text from the same report", () => {
-    const report = buildInstallReport(process.cwd(), { bootstrapGraph: false });
+    const report = withIsolatedHome(() =>
+      buildInstallReport(process.cwd(), { bootstrapGraph: false })
+    );
     const text = formatInstallLegacyText(report);
     expect(text).toContain("[START] Installing GraphFlow");
     expect(text).toContain("[FINISH] Installation complete");

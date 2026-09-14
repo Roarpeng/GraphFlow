@@ -89,13 +89,31 @@ describe("Claude Code hooks status helper", () => {
 
 describe("install/doctor wire Claude Code hooks", () => {
   it("includes claudeCodeHooks in InstallReport and formats it in legacy text", () => {
-    const report = buildInstallReport(process.cwd(), { bootstrapGraph: false });
-    expect(report.claudeCodeHooks).toMatchObject({
-      status: expect.stringMatching(/^(created|updated|skipped|error)$/),
-    });
-    const text = formatInstallLegacyText(report);
-    expect(text).toMatch(/Claude Code hooks/i);
-    expect(text).toMatch(/DeepSeek Harness/i);
+    // buildInstallReport rewrites every detected agent home; isolate HOME so
+    // the real agent configs on this machine stay untouched.
+    const home = makeTempRoot("gf-hooks-install-");
+    const prevProfile = process.env.USERPROFILE;
+    const prevHome = process.env.HOME;
+    const prevAppData = process.env.APPDATA;
+    if (process.platform === "win32") process.env.USERPROFILE = home;
+    else process.env.HOME = home;
+    process.env.APPDATA = join(home, "AppData", "Roaming");
+    try {
+      const report = buildInstallReport(process.cwd(), { bootstrapGraph: false });
+      expect(report.claudeCodeHooks).toMatchObject({
+        status: expect.stringMatching(/^(created|updated|skipped|error)$/),
+      });
+      const text = formatInstallLegacyText(report);
+      expect(text).toMatch(/Claude Code hooks/i);
+      expect(text).toMatch(/DeepSeek Harness/i);
+    } finally {
+      if (prevProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = prevProfile;
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      if (prevAppData === undefined) delete process.env.APPDATA;
+      else process.env.APPDATA = prevAppData;
+    }
   });
 
   it("doctor reports hooks check when Claude Code is detected", () => {
