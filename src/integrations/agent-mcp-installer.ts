@@ -82,7 +82,7 @@ export interface McpAgentInstallStatus {
   installed: boolean;
 }
 
-export type McpConfigFormat = "json" | "codex-toml" | "opencode";
+export type McpConfigFormat = "json" | "codex-toml" | "opencode" | "zcode";
 
 export interface AgentProfile {
   id: string;
@@ -660,6 +660,9 @@ function isGraphflowMcpInstalled(
   }
   if (configFormat === "opencode") {
     return isOpencodeMcpInstalled(configPath, serverName);
+  }
+  if (configFormat === "zcode") {
+    return isZcodeMcpInstalled(configPath, serverName);
   }
   const json = readJsonConfig(configPath);
   const servers = (json[serversKey] as Record<string, McpServerNode> | undefined) ?? {};
@@ -1761,6 +1764,67 @@ function isOpencodeMcpInstalled(
   return !!servers[serverName];
 }
 
+/**
+ * ZCode keeps user MCP servers nested at `mcp.servers` inside
+ * `~/.zcode/cli/config.json` (workspace: `<repo>/.zcode/config.json`) with the
+ * standard stdio node shape (command / args / env).
+ */
+function getZcodeServers(json: Record<string, unknown>): Record<string, McpServerNode> {
+  const mcp = (json.mcp as Record<string, unknown> | undefined) ?? {};
+  return (mcp.servers as Record<string, McpServerNode> | undefined) ?? {};
+}
+
+function injectIntoZcodeConfig(
+  configPath: string,
+  serverName: string,
+  node: McpServerNode
+): "injected" | "created" | "updated" {
+  const existed = existsSync(configPath);
+  const json = readJsonConfig(configPath);
+  const mcp = (json.mcp as Record<string, unknown> | undefined) ?? {};
+  const servers = getZcodeServers(json);
+  const serverExisted = !!servers[serverName];
+  servers[serverName] = node;
+  json.mcp = { ...mcp, servers };
+  writeJsonConfig(configPath, json);
+  if (!existed) return "created";
+  if (!serverExisted) return "injected";
+  return "updated";
+}
+
+function removeZcodeMcpEntry(configPath: string, serverName: string): boolean {
+  if (!existsSync(configPath)) {
+    return false;
+  }
+  const json = readJsonConfig(configPath);
+  const mcp = (json.mcp as Record<string, unknown> | undefined) ?? {};
+  const servers = getZcodeServers(json);
+  if (!servers[serverName]) {
+    return false;
+  }
+  delete servers[serverName];
+  if (Object.keys(servers).length === 0) {
+    delete mcp.servers;
+    if (Object.keys(mcp).length === 0) {
+      delete json.mcp;
+    } else {
+      json.mcp = mcp;
+    }
+  } else {
+    json.mcp = { ...mcp, servers };
+  }
+  writeJsonConfig(configPath, json);
+  return true;
+}
+
+function isZcodeMcpInstalled(configPath: string, serverName: string): boolean {
+  if (!existsSync(configPath)) {
+    return false;
+  }
+  const json = readJsonConfig(configPath);
+  return !!getZcodeServers(json)[serverName];
+}
+
 function formatCodexMcpTomlBlock(serverName: string, node: McpServerNode): string {
   const args =
     node.args.length > 0 ? `args = [${node.args.map((arg) => JSON.stringify(arg)).join(", ")}]` : undefined;
@@ -1813,6 +1877,9 @@ function injectIntoAgentConfig(
   }
   if (configFormat === "opencode") {
     return injectIntoOpencodeConfig(configPath, serverName, node);
+  }
+  if (configFormat === "zcode") {
+    return injectIntoZcodeConfig(configPath, serverName, node);
   }
   return injectIntoConfig(configPath, serversKey, serverName, node);
 }
@@ -2034,6 +2101,8 @@ export function uninstallMcpFromDetectedAgents(options?: McpRemoveOptions): McpR
           removed = removeCodexMcpEntry(userTarget.configPath, serverName);
         } else if (userTarget.configFormat === "opencode") {
           removed = removeOpencodeMcpEntry(userTarget.configPath, serverName);
+        } else if (userTarget.configFormat === "zcode") {
+          removed = removeZcodeMcpEntry(userTarget.configPath, serverName);
         } else {
           removed = removeMcpEntry(userTarget.configPath, userTarget.serversKey, serverName);
         }
@@ -2074,6 +2143,8 @@ export function uninstallMcpFromDetectedAgents(options?: McpRemoveOptions): McpR
             removed = removeCodexMcpEntry(configPath, serverName);
           } else if (workspaceTarget.configFormat === "opencode") {
             removed = removeOpencodeMcpEntry(configPath, serverName);
+          } else if (workspaceTarget.configFormat === "zcode") {
+            removed = removeZcodeMcpEntry(configPath, serverName);
           } else {
             removed = removeMcpEntry(configPath, workspaceTarget.serversKey, serverName);
           }

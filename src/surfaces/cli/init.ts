@@ -72,6 +72,7 @@ const HOST_ADAPTER_SKILL_AGENTS = new Set<string>([
   "Qoder skill",
   "Qoder CN skill",
   "Opencode skill",
+  "ZCode skill",
 ]);
 
 /** Instruction target names written by a HostAdapter slice — excluded from the legacy doctor loops. */

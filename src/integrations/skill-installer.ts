@@ -750,6 +750,11 @@ export function getAgentSkillTargets(): Array<{
       markerDir: resolveKimiCodeHome(),
       skillsRoot: join(resolveKimiCodeHome(), "skills"),
     },
+    {
+      agent: "ZCode",
+      markerDir: join(home, ".zcode"),
+      skillsRoot: join(home, ".zcode", "skills"),
+    },
   ];
 }
 

@@ -113,6 +113,12 @@ export const HOST_ADAPTERS: readonly HostAdapter[] = [
     capabilities: ["mcp-stdio", "rules", "hooks"],
     homeMarker: ".config/opencode",
   },
+  {
+    id: "zcode",
+    displayName: "ZCode",
+    capabilities: ["mcp-stdio", "skills"],
+    homeMarker: ".zcode",
+  },
 ] as const;
 
 export function getHostAdapter(id: string): HostAdapter | undefined {
