@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.18.5-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.18.6-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
@@ -10,7 +10,7 @@
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
-**v1.18.5** 已发：**DSH 插件市场收录合规**——`dsh` 显式声明（cordis-plugin）、disclosure 披露块（云端/凭据/权限）、规范 topics 与关键词、README 增加市场一键安装 + GitHub 直装 + 「只选一条注册路径」警示；同时把 `~/.graphflow.config.json`（可能含 provider API Key）收紧为 **0600**。v1.18.3/1.18.4 的大项目提速（3.7–4×）与增量存储继续有效。
+**v1.18.6** 已发：**ZCode 宿主支持**——`graphflow install` 自动检测 `~/.zcode`，向 `~/.zcode/cli/config.json` 的嵌套 `mcp.servers` 注入 MCP 服务器，并安装技能（`~/.zcode/skills/graphflow/`）与全局指令受管块（`~/.zcode/AGENTS.md`）。v1.18.5 的 DSH 插件市场收录合规（cordis-plugin 声明、disclosure 披露块、全局配置 0600）与 v1.18.3/1.18.4 的大项目提速（3.7–4×）继续有效。
 
 ## 快速开始
 
@@ -47,7 +47,7 @@ Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `gra
 | **对话图** | 对话在所有代码锚点阶段**之后**注入，纯增量、可证明不挤掉 Symbol/File 锚点；落盘前做**密钥脱敏**（API Key / Bearer / JWT / 连接串 / PEM），`GRAPHFLOW_DIALOGUE_REDACT=0` 可关 |
 | **飞轮复现** | `npm run proof:flywheel` 离线串检索 / skill A/B / memory A/B；见 [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md) |
 | **团队记忆** | `graphflow team serve`：tenant 隔离 + viewer/contributor/admin；非 loopback 默认强制认证；`diagnose` 报告连通与 RBAC。见 [docs/team-memory-security.md](docs/team-memory-security.md) |
-| **HostAdapter** | **全部 19 个宿主**的 install / uninstall / doctor 统一走注册表：4 个手写切片（Cursor / Claude Code / DeepSeek Harness / Kimi Code）+ 通用 profile 切片（Trae、VS Code、Windsurf、Cline、Roo、Kilo、PearAI、Gemini、Codex、Antigravity、Amazon Q、Zed、Continue、Qoder、Opencode） |
+| **HostAdapter** | **全部 20 个宿主**的 install / uninstall / doctor 统一走注册表：4 个手写切片（Cursor / Claude Code / DeepSeek Harness / Kimi Code）+ 通用 profile 切片（Trae、VS Code、Windsurf、Cline、Roo、Kilo、PearAI、Gemini、Codex、Antigravity、Amazon Q、Zed、Continue、Qoder、Opencode、ZCode） |
 | **Serena** | 并列第二个 MCP：context/plan → Serena 编辑 → `report_outcome` |
 
 完整英文对照与基准数字：[README.md](README.md)。

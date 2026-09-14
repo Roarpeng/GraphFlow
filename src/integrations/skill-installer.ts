@@ -488,6 +488,14 @@ export function getAgentInstructionTargets(): Array<{
     filePath: join(home, ".config", "opencode", "AGENTS.md"),
   });
 
+  // ZCode 全局指令：~/.zcode/AGENTS.md
+  targets.push({
+    agent: "ZCode",
+    markerDir: join(home, ".zcode"),
+    destDir: join(home, ".zcode"),
+    filePath: join(home, ".zcode", "AGENTS.md"),
+  });
+
   // Kimi Code 全局指令：~/.kimi-code/AGENTS.md（或 $KIMI_CODE_HOME / GRAPHFLOW_KIMI_CODE_HOME）
   const kimiHome = resolveKimiCodeHome();
   targets.push({

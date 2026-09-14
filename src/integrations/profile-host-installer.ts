@@ -5,7 +5,7 @@
  * DeepSeek Harness, Cursor, Claude Code, and Kimi Code with hand-written
  * slices. This module migrates the **remaining** profile-registry hosts
  * (Trae, VS Code, Windsurf, Cline, Roo Code, Kilo Code, PearAI, Gemini,
- * Codex, Antigravity, Amazon Q, Zed, Continue, Qoder, Opencode) with ONE
+ * Codex, Antigravity, Amazon Q, Zed, Continue, Qoder, Opencode, ZCode) with ONE
  * generic slice driven by `PROFILE_HOST_SPECS`, so `installViaHostAdapter`
  * becomes the single install / uninstall / status entry point for every host.
  *
@@ -130,7 +130,7 @@ export const PROFILE_HOST_SPECS: Readonly<Record<string, ProfileHostSpec>> = {
       status: getOpenCodePluginStatus,
     },
   },
-  zcode: { profileIds: ["zcode"], skillTargets: ["ZCode"] },
+  zcode: { profileIds: ["zcode"], skillTargets: ["ZCode"], instructionTargets: ["ZCode"] },
 };
 
 export const PROFILE_HOST_IDS = Object.keys(PROFILE_HOST_SPECS);

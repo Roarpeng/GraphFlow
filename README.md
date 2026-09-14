@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-[![npm version](https://img.shields.io/badge/npm-1.18.5-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.18.6-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
@@ -295,7 +295,7 @@ npx @roarpeng/graphflow uninstall  # remove MCP + Skill + Rules + hooks
 npx @roarpeng/graphflow init       # write a minimal project config
 ```
 
-Supported: Cursor, VS Code, Trae (incl. CN), Claude Code, Windsurf, Cline, Roo Code, Kilo Code, Gemini CLI, Codex, Antigravity, Opencode, Qoder, Amazon Q, Zed, Continue, DeepSeek Harness (`dsh`), Kimi Code CLI, and more (15+). **Every** registered host goes through the HostAdapter registry (`installViaHostAdapter`); the legacy installers now only cover host-scoped extras (Trae user Skills, project-level rules).
+Supported: Cursor, VS Code, Trae (incl. CN), Claude Code, Windsurf, Cline, Roo Code, Kilo Code, Gemini CLI, Codex, Antigravity, Opencode, Qoder, Amazon Q, Zed, Continue, DeepSeek Harness (`dsh`), Kimi Code CLI, ZCode, and more (15+). **Every** registered host goes through the HostAdapter registry (`installViaHostAdapter`); the legacy installers now only cover host-scoped extras (Trae user Skills, project-level rules).
 
 | Path | When to use |
 | --- | --- |

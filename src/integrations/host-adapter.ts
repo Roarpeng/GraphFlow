@@ -116,7 +116,7 @@ export const HOST_ADAPTERS: readonly HostAdapter[] = [
   {
     id: "zcode",
     displayName: "ZCode",
-    capabilities: ["mcp-stdio", "skills"],
+    capabilities: ["mcp-stdio", "skills", "rules"],
     homeMarker: ".zcode",
   },
 ] as const;
