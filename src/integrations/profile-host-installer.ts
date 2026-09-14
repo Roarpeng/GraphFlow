@@ -130,6 +130,7 @@ export const PROFILE_HOST_SPECS: Readonly<Record<string, ProfileHostSpec>> = {
       status: getOpenCodePluginStatus,
     },
   },
+  zcode: { profileIds: ["zcode"], skillTargets: ["ZCode"] },
 };
 
 export const PROFILE_HOST_IDS = Object.keys(PROFILE_HOST_SPECS);

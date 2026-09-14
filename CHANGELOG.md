@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **ZCode 宿主支持**：新增 `zcode` HostAdapter（capabilities: `mcp-stdio` + `skills`）。`graphflow install` 现在会检测 `~/.zcode` 并完成两件事：(1) 向 `~/.zcode/cli/config.json` 的 **`mcp.servers`**（ZCode 嵌套结构，新增 `configFormat: "zcode"`）注入 `graphflow` stdio MCP 服务器；(2) 将 `skills/graphflow/SKILL.md` 复制到 `~/.zcode/skills/graphflow/`。工作区级 `.zcode/config.json` 目标同步支持，`doctor` / `uninstall` 均已覆盖（注入/检测/移除均为幂等操作）。
+
 ## [1.18.5] - 2026-09-13
 
 ### Added
