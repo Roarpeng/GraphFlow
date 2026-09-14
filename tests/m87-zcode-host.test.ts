@@ -82,8 +82,10 @@ describe("M87 ZCode host", () => {
       const config = JSON.parse(readFileSync(configPath, "utf8")) as {
         mcp?: { servers?: Record<string, { command?: string; args?: string[] }> };
       };
-      expect(config.mcp?.servers?.graphflow?.command).toBe("npx");
-      expect(config.mcp?.servers?.graphflow?.args).toEqual([
+      const server = config.mcp?.servers?.graphflow;
+      expect(server?.command).toBeTruthy();
+      // Unix writes `npx`; Windows writes `node.exe` + npx-cli.js (see resolveWindowsNpxLaunch).
+      expect(server?.args?.slice(-3)).toEqual([
         "-y",
         "--package=@roarpeng/graphflow",
         "graphflow-mcp",
