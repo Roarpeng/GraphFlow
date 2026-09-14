@@ -177,16 +177,18 @@
 
 ### R7 · 演化方向（2026-09 横向调研版）
 
-> 来源：2026-09 对四个赛道的横向调研——云端记忆 API（Mem0 ~55k star / Supermemory）、时序知识图谱记忆（Zep + Graphiti，bi-temporal 71.2% 基准）、索引派（codebase-memory-mcp：158 语言 / 本地图谱 / 多宿主；Continue + Ollama 本地嵌入；Kilo Code 内置索引）、反索引派（Cline 明确不做 RAG，主张按需检索 + 隐私）、标准生态（Agent Skills 开放标准已获 ~40 平台采用，AGENTS.md 在野 57k+）。核心判断：**GraphFlow 的「本地优先图谱 + 学习飞轮 + 20 宿主 harness」组合在开源阵营没有直接同类**——索引派没有学习飞轮，记忆 API 派不做代码 AST，运行时派（Letta）绑自家执行面。演化主线 = 把这个组合位变成标准件。
+> 来源：2026-09 对五个赛道的横向调研——云端记忆 API（Mem0 ~55k star / Supermemory）、时序知识图谱记忆（Zep + Graphiti，bi-temporal 71.2% 基准）、索引派（codebase-memory-mcp：158 语言 / 本地图谱 / 多宿主；Continue + Ollama 本地嵌入；Kilo Code 内置索引）、反索引派（Cline 明确不做 RAG，主张按需检索 + 隐私）、**效率机制赛道（NVIDIA [SoL-Pi](https://nvlabs.github.io/SoL-Pi/)：四机制 + 自动研究回路 + capability floor，官方口径省 ~49% token，但绑定 Pi agent；各宿主原生 compaction / pruner 有损且无证据链）**。核心判断：**GraphFlow 的「本地优先图谱 + 学习飞轮 + 20 宿主 harness + SoL-Pi 式效率机制（R6）」组合在开源阵营没有直接同类**——索引派没有学习飞轮，记忆 API 派不做代码 AST，运行时派（Letta）绑自家执行面，效率派（SoL-Pi）绑 Pi 单宿主。演化主线 = 把这个组合位变成标准件，其中 R6 效率机制是 GraphFlow 独有的「跨宿主 + 可核验」复现（byte-exact 召回 + 逐字核验回执，对 SoL-Pi 的机制黑箱与原生 pruner 的有损 marker 形成代差）。
 
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
 | **P0** | **R7-a 对齐 Agent Skills 开放标准做「记忆层分发」** | 🟡 | SKILL.md export/import 已有（v1.12）；下一步：导出的技能包对齐 agentskills.io 规范（标准 frontmatter + 渐进披露），让 GraphFlow 学到的项目经验能以标准 Agent Skills 包被 ~40 平台直接安装——「学习飞轮的产物可分发」是索引派与记忆派都没有的能力 |
+| **P0** | **R7-g 效率机制投影面扩展（R6 的宿主泛化）** | 🟡 | 「首插前缩减」目前只有 dsh 具备 surface-replace 原语（`HOSTS_WITH_TOOL_RESULT_PROJECTION = ["deepseek-harness"]`）；opencode / Cursor / Codex / Gemini / ZCode 均无结果重写面，只能走显式 content/handle 协议。跟踪各宿主的 compaction/结果重写 API 演进（MCP 生态若出现标准化的 tool-result rewrite 面则第一时间接入），把 SoL-Pi 式机制的适用面从 1 个宿主扩到 N 个——这是对 SoL-Pi 绑 Pi 的结构性优势兑现 |
 | **P1** | **R7-b 零配置本地语义召回默认开** | 🟡 | canonical 嵌入模型 `Xenova/bge-base-zh-v1.5` 已统一（R4），但默认召回仍是 hash 向量；目标：检测到本地 ONNX 运行时可用时自动启用语义召回（对标 Continue + Ollama 的本地索引体验，保持零 Key、零云依赖） |
 | **P1** | **R7-c 跨仓库 / monorepo 图谱** | ⬜ | repo map 被认为是 monorepo 最成熟上下文方案；Sourcegraph 走多仓语义图。GraphFlow 图天然是其超集（符号 + 调用链 + 概念 + 对话），加 cross-repo 边（依赖声明 / import 外部解析）即可覆盖「在 A 仓问 B 仓的实现」场景 |
 | **P1** | **R7-d 隐私威胁模型文档 + 审计面** | ⬜ | Cline「不索引」vs 索引派的隐私争论热度高，本地优先是 GraphFlow 的结构性差异化；产出 `docs/threat-model.md`（数据流图 / 出网点枚举 / disclosure 字段映射）+ `graphflow audit`（列出所有落盘路径与出网端点），把「本地优先」从口号变成可核验 |
 | **P2** | **R7-e 业界记忆基准接入** | ⬜ | `proof:flywheel` 已是自证复现包；接入跨厂商记忆基准（LOCOMO / LongMemEval 类）跑分并公开数据，把「对话图 + 修正链」的时序记忆能力放到公认标尺上（对标 Zep 的 71.2% 口径） |
 | **P2** | **R7-f 团队记忆企业化** | 🟡 | team serve + RBAC 已是 MVP；企业 wishlist（OIDC IdP UI、审批流界面、托管多活）保持，按社区需求排序 |
+| **P2** | **R7-h 效率证据可审计公开格式** | ⬜ | `efficiency.json`（配对双臂 + 三重不合格判据）与 `context-fidelity.json` 已是内部格式；将其定为公开 schema 并随包发布，配合 `mechanism` 生命周期（proposed → held-out → admitted）输出「效率声明可审计」报告——SoL-Pi 的 capability floor 理念在开源跨宿主场景目前没有可核验载体，GraphFlow 可以成为事实标准 |
 
 ### 建议版本节奏
 
