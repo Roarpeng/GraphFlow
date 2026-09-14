@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.18.6-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.18.7-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
@@ -10,7 +10,7 @@
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
-**v1.18.6** 已发：**ZCode 宿主支持**——`graphflow install` 自动检测 `~/.zcode`，向 `~/.zcode/cli/config.json` 的嵌套 `mcp.servers` 注入 MCP 服务器，并安装技能（`~/.zcode/skills/graphflow/`）与全局指令受管块（`~/.zcode/AGENTS.md`）。v1.18.5 的 DSH 插件市场收录合规（cordis-plugin 声明、disclosure 披露块、全局配置 0600）与 v1.18.3/1.18.4 的大项目提速（3.7–4×）继续有效。
+**v1.18.7** 已发：**MCP stdio 握手时序修复 + 测试隔离收口 + R7 演化方向**——握手前抑制 stdout 通知（严格客户端不再启动失败）；install/uninstall 测试全部 HOME 隔离（跑测试不再重写/删除真实宿主配置与技能）；ROADMAP 基于横向调研新增 R7 六条演化主线。v1.18.6 的 ZCode 宿主支持（MCP + Skill + AGENTS.md 三件套）继续有效。
 
 ## 快速开始
 

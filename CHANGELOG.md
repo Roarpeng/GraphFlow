@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.18.7] - 2026-09-14
+
+### Fixed
+
+- **MCP stdio 握手时序（严格客户端启动失败）**：stdio 服务器曾在 `initialize` 响应之前把 `notifications/message`（文件监视器启动日志）写到 stdout，严格按序等待响应的客户端（实测 ZCode）握手失败。`sendLogNotification` / `sendProgress` 现在以 SDK `oninitialized` 回调（客户端 `initialized` 通知到达）为门，握手完成前一律抑制，日志仅走 stderr。端到端实测：stdout 首行即 initialize 响应，`initialized` → `tools/list` 全链路干净。
+- **测试不再重写/删除真实宿主配置与技能**：`buildInstallReport` 会重写所有检测到的宿主配置、`uninstallAllSkillsAndRules` 会扫除真实 HOME 下全部技能目录——此前 4 个 install 测试与 1 个 uninstall 测试未隔离 HOME，本机跑一次全量测试即静默撤销手工修复的 `~/.zcode/cli/config.json` 并删除 `~/.zcode/skills/graphflow/`。五个测试全部改用临时 HOME/APPDATA 隔离（uninstall 测试跑后以 md5 校验真实技能完好）。
+
+### Added
+
+- **ROADMAP R7 演化方向（2026-09 横向调研版）**：基于对云端记忆 API（Mem0/Zep-Graphiti/Letta）、索引派（codebase-memory-mcp/Continue+Ollama）、反索引派（Cline）与 Agent Skills 开放标准生态（~40 平台、AGENTS.md 在野 57k+）的横向对比，确定六条演化主线：R7-a 学习飞轮产物以标准 Agent Skills 包分发、R7-b 零配置本地语义召回默认开、R7-c 跨仓库/monorepo 图谱、R7-d 隐私威胁模型 + 审计面、R7-e 业界记忆基准接入、R7-f 团队记忆企业化。
+
 ## [1.18.6] - 2026-09-14
 
 ### Added
