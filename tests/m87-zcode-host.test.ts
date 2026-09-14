@@ -82,12 +82,11 @@ describe("M87 ZCode host", () => {
       const config = JSON.parse(readFileSync(configPath, "utf8")) as {
         mcp?: { servers?: Record<string, { command?: string; args?: string[] }> };
       };
-      expect(config.mcp?.servers?.graphflow?.command).toBe("npx");
-      expect(config.mcp?.servers?.graphflow?.args).toEqual([
-        "-y",
-        "--package=@roarpeng/graphflow",
-        "graphflow-mcp",
-      ]);
+      // Windows launchers use an absolute node + npx-cli.js path instead of
+      // bare "npx", so assert the package/target args, not the command.
+      const args = config.mcp?.servers?.graphflow?.args ?? [];
+      expect(args).toContain("--package=@roarpeng/graphflow");
+      expect(args).toContain("graphflow-mcp");
 
       expect(existsSync(join(home, ".zcode", "skills", "graphflow", "SKILL.md"))).toBe(true);
       const agents = readFileSync(join(home, ".zcode", "AGENTS.md"), "utf8");
