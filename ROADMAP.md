@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-09-13（v1.18.5：DSH 插件市场收录合规——`dsh` 显式声明 + disclosure 披露块 + 市场/GitHub 安装指引；全局配置凭据文件收紧为 0600）
+> 最后更新：2026-09-14（v1.18.7：ZCode 宿主支持（MCP + Skill + AGENTS.md）；MCP stdio 握手时序修复；新增 R7 演化方向（2026-09 横向调研版））
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -54,6 +54,10 @@
 | v1.18.4 | 2026-09-13 | **Windows CI 修复（1.18.3 回归）** | worker 池仅编译产物启用、门槛改为 文件≥200 且 ≥1MB；m83 测试跨平台路径；git quotepath=false；功能与 v1.18.3 相同 | ✅ |
 
 | v1.18.5 | 2026-09-13 | **DSH 市场收录合规 + 凭据文件 0600** | `dsh.plugin/kind` 显式声明、disclosure（D1/D3/D4 + offline_mode/jurisdiction）、规范 topics/关键词、README 市场与 GitHub 安装 + 单注册路径警示；`~/.graphflow.config.json` 以 0600 写入并收紧既有文件 | ✅ |
+
+| v1.18.6 | 2026-09-14 | **ZCode 宿主支持** | `zcode` HostAdapter（MCP 嵌套 `mcp.servers` 注入 + Skill + `~/.zcode/AGENTS.md` 受管指令块）；zcode 注入器硬化（显式 `type: stdio`、`timeoutMs: 120000`、丢弃 ZCode 不展开的 `${workspaceFolder}` 字面量）；宿主计数 19→20 | ✅ |
+
+| v1.18.7 | 2026-09-14 | **MCP stdio 握手时序修复 + 测试隔离收口** | 握手完成前抑制 `notifications/message`/`notifications/progress`（文件监视器启动日志曾抢在 initialize 响应之前写 stdout，严格客户端握手失败）；4 个 install 测试 + uninstall 扫除测试补 HOME 隔离（测试不再重写/删除真实宿主配置与技能）；ROADMAP 新增 R7 演化方向 | ✅ |
 
 ## 下一阶段
 
@@ -171,12 +175,25 @@
 | **P2** | 工作区发现边界：临时目录不得被当作项目根 | ✅ | MCP 以 cwd 位于 `%TEMP%` 启动会写下 `graphflow-out/graphflow-graph.json`，该弱标记曾让向上发现对所有临时目录下的项目都返回临时根；新增 `isSystemTempDirectory()` 遍历边界 + `discoverWorkspaceRoot(..., { extraBoundaries })` 测试钩子，m49 回归覆盖 |
 | **P2** | 文档编码守卫 | ✅ | v1.15.4 版本号提交把两个 README 的约 100 个多字节字符打成 `?` 并随 npm 发布；已按 v1.15.3 文档提交重建，并新增「文档必须合法 UTF-8」+「README.zh.md 徽章与 package.json 一致」CI 守卫 |
 
+### R7 · 演化方向（2026-09 横向调研版）
+
+> 来源：2026-09 对四个赛道的横向调研——云端记忆 API（Mem0 ~55k star / Supermemory）、时序知识图谱记忆（Zep + Graphiti，bi-temporal 71.2% 基准）、索引派（codebase-memory-mcp：158 语言 / 本地图谱 / 多宿主；Continue + Ollama 本地嵌入；Kilo Code 内置索引）、反索引派（Cline 明确不做 RAG，主张按需检索 + 隐私）、标准生态（Agent Skills 开放标准已获 ~40 平台采用，AGENTS.md 在野 57k+）。核心判断：**GraphFlow 的「本地优先图谱 + 学习飞轮 + 20 宿主 harness」组合在开源阵营没有直接同类**——索引派没有学习飞轮，记忆 API 派不做代码 AST，运行时派（Letta）绑自家执行面。演化主线 = 把这个组合位变成标准件。
+
+| 优先级 | 事项 | 状态 | 说明与依据 |
+| --- | --- | --- | --- |
+| **P0** | **R7-a 对齐 Agent Skills 开放标准做「记忆层分发」** | 🟡 | SKILL.md export/import 已有（v1.12）；下一步：导出的技能包对齐 agentskills.io 规范（标准 frontmatter + 渐进披露），让 GraphFlow 学到的项目经验能以标准 Agent Skills 包被 ~40 平台直接安装——「学习飞轮的产物可分发」是索引派与记忆派都没有的能力 |
+| **P1** | **R7-b 零配置本地语义召回默认开** | 🟡 | canonical 嵌入模型 `Xenova/bge-base-zh-v1.5` 已统一（R4），但默认召回仍是 hash 向量；目标：检测到本地 ONNX 运行时可用时自动启用语义召回（对标 Continue + Ollama 的本地索引体验，保持零 Key、零云依赖） |
+| **P1** | **R7-c 跨仓库 / monorepo 图谱** | ⬜ | repo map 被认为是 monorepo 最成熟上下文方案；Sourcegraph 走多仓语义图。GraphFlow 图天然是其超集（符号 + 调用链 + 概念 + 对话），加 cross-repo 边（依赖声明 / import 外部解析）即可覆盖「在 A 仓问 B 仓的实现」场景 |
+| **P1** | **R7-d 隐私威胁模型文档 + 审计面** | ⬜ | Cline「不索引」vs 索引派的隐私争论热度高，本地优先是 GraphFlow 的结构性差异化；产出 `docs/threat-model.md`（数据流图 / 出网点枚举 / disclosure 字段映射）+ `graphflow audit`（列出所有落盘路径与出网端点），把「本地优先」从口号变成可核验 |
+| **P2** | **R7-e 业界记忆基准接入** | ⬜ | `proof:flywheel` 已是自证复现包；接入跨厂商记忆基准（LOCOMO / LongMemEval 类）跑分并公开数据，把「对话图 + 修正链」的时序记忆能力放到公认标尺上（对标 Zep 的 71.2% 口径） |
+| **P2** | **R7-f 团队记忆企业化** | 🟡 | team serve + RBAC 已是 MVP；企业 wishlist（OIDC IdP UI、审批流界面、托管多活）保持，按社区需求排序 |
+
 ### 建议版本节奏
 
 - ~~v1.10–v1.13~~：v1.13.0 已发布——真实证据链、fidelity 指标、O(1) 技能读路径、SKILL.md 互操作、自适应遗忘、Engineering KG 概念层、MCP Streamable HTTP 和治理/release-gate 平面。
 - ~~v1.14–v1.15~~：v1.15.5 已发布——对话图 2.0、团队共享记忆 MVP（`graphflow team serve` + RBAC，已落地）、HostAdapter（DSH / Cursor / Claude Code / Kimi Code）、飞轮公开复现包、Serena 双 MCP 指南、R4 `context-package-core` + 测试隔离。
 - ~~下一拍~~：已收口——其余 15 个宿主迁到通用 profile 切片（`HostAdapter` 覆盖全部 19 宿主），`runOrchestration` 已拆为 `orchestrator-phases.ts` 四阶段。
-- **下一拍**：企业 wishlist（OIDC IdP UI / 审批流界面 / 托管多活）；飞轮 dogfood 样本积累（proven skill 靠真实使用而非合成证据）。
+- **下一拍**：R7 演化方向（见上节）——R7-a Agent Skills 标准分发与 R7-d 隐私威胁模型优先；企业 wishlist（OIDC IdP UI / 审批流界面 / 托管多活）与飞轮 dogfood 样本积累并行。
 - **长期**：R4 工程债随版本消化
 
 ## 如何参与
