@@ -70,15 +70,33 @@ describe("uninstall skills and rules", () => {
     mkdirSync(wsSkills, { recursive: true });
     writeFileSync(join(wsSkills, "SKILL.md"), "graphflow_context\n", "utf8");
 
-    const results = uninstallAllSkillsAndRules(root);
-    const removedPaths = results.filter((r) => r.removed).map((r) => r.path);
+    // uninstallAllSkillsAndRules also sweeps user-level agent skills
+    // (~/.cursor/skills/graphflow etc. via getAgentSkillTargets()); isolate
+    // HOME so the machine running the suite keeps its real skills installed.
+    const prevProfile = process.env.USERPROFILE;
+    const prevHome = process.env.HOME;
+    const prevAppData = process.env.APPDATA;
+    if (process.platform === "win32") process.env.USERPROFILE = root;
+    else process.env.HOME = root;
+    process.env.APPDATA = join(root, "AppData", "Roaming");
+    try {
+      const results = uninstallAllSkillsAndRules(root);
+      const removedPaths = results.filter((r) => r.removed).map((r) => r.path);
 
-    expect(existsSync(skillDir)).toBe(false);
-    expect(existsSync(join(rulesDir, "graphflow.mdc"))).toBe(false);
-    expect(existsSync(agentSkills)).toBe(false);
-    expect(existsSync(wsSkills)).toBe(false);
-    expect(removedPaths.some((p) => p.includes(".trae"))).toBe(true);
-    expect(removedPaths.some((p) => p.includes("graphflow.mdc"))).toBe(true);
+      expect(existsSync(skillDir)).toBe(false);
+      expect(existsSync(join(rulesDir, "graphflow.mdc"))).toBe(false);
+      expect(existsSync(agentSkills)).toBe(false);
+      expect(existsSync(wsSkills)).toBe(false);
+      expect(removedPaths.some((p) => p.includes(".trae"))).toBe(true);
+      expect(removedPaths.some((p) => p.includes("graphflow.mdc"))).toBe(true);
+    } finally {
+      if (prevProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = prevProfile;
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      if (prevAppData === undefined) delete process.env.APPDATA;
+      else process.env.APPDATA = prevAppData;
+    }
   });
 
   it("removeMcpEntry clears workspace mcp.json graphflow server", () => {
