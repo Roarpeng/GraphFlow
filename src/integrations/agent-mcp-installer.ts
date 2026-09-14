@@ -599,6 +599,26 @@ export function buildAgentProfiles(): AgentProfile[] {
       // MCP is a YAML cordis.patch.yml overlay, not JSON mcpServers — see dsh-harness-installer.
       userTargets: [],
     },
+    {
+      id: "zcode",
+      name: "ZCode",
+      markerPaths: [join(home, ".zcode"), join(appData, "zcode")],
+      // ZCode nests user MCP servers at mcp.servers in ~/.zcode/cli/config.json.
+      userTargets: [
+        {
+          configPath: join(home, ".zcode", "cli", "config.json"),
+          serversKey: "mcpServers",
+          configFormat: "zcode",
+        },
+      ],
+      workspaceRelativePaths: [
+        {
+          relativePath: join(".zcode", "config.json"),
+          serversKey: "mcpServers",
+          configFormat: "zcode",
+        },
+      ],
+    },
   ];
 
   if (wslWindowsHome) {

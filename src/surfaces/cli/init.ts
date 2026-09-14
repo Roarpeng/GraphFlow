@@ -85,6 +85,7 @@ const HOST_ADAPTER_INSTRUCTION_AGENTS = new Set<string>([
   "Gemini",
   "Codex",
   "Opencode",
+  "ZCode",
 ]);
 
 const isWindows = process.platform === "win32";
