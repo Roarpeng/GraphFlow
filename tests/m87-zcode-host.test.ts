@@ -171,9 +171,15 @@ describe("M87 ZCode host", () => {
   });
 
   it("resolveGlobalGraphflowInstall tolerates BOM, CRLF and stray banner lines (Windows npm stdout)", () => {
-    const expected = (root: string) =>
+    const serverOf = (root: string) =>
       join(root, "@roarpeng", "graphflow", "dist", "surfaces", "mcp", "server.js");
-    // BOM + CRLF (Windows npm), banner line before the path, blank lines.
+    // Compare against the same join() the probe uses — on win32, a POSIX
+    // `/usr/...` root is still joined with backslashes, so `p.includes("\\")`
+    // cannot tell Windows npm stdout from a Unix fixture.
+    const allowed = new Set([
+      serverOf("C:\\npm\\node_modules"),
+      serverOf("/usr/lib/node_modules"),
+    ]);
     for (const raw of [
       "\uFEFFC:\\npm\\node_modules\r\n",
       "npm warn config\r\n\r\nC:\\npm\\node_modules\r\n",
@@ -181,9 +187,10 @@ describe("M87 ZCode host", () => {
     ]) {
       const found = resolveGlobalGraphflowInstall({
         runNpmRoot: () => raw,
-        exists: (p) => p === expected(p.includes("\\") ? "C:\\npm\\node_modules" : "/usr/lib/node_modules"),
+        exists: (p) => allowed.has(p),
       });
-      expect(found).toBeDefined();
+      expect(found, JSON.stringify(raw)).toBeDefined();
+      expect(allowed.has(found!.serverPath)).toBe(true);
     }
   });
 

@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **M87 Windows validate**：`resolveGlobalGraphflowInstall` 容错测试用 `p.includes("\\")` 判断 Windows/Unix fixture。win32 上 `path.join("/usr/...")` 也会带反斜杠，Unix 样本被当成 Windows 路径，`exists` mock 恒为 false。改为对两种 root 都用同一套 `join()` 结果做匹配。
+
 ## [1.19.2] - 2026-09-15
 
 ### Fixed — 跨平台加固（Windows / Linux / macOS）
