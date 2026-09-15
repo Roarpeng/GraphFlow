@@ -34,6 +34,28 @@ MCP 入口：
 }
 ```
 
+### 注册 Skill + MCP 到本机 Agent（一条命令）
+
+```bash
+npx @roarpeng/graphflow@latest doctor     # 先自检：列出本机检测到的 Agent
+npx @roarpeng/graphflow@latest install    # 向所有检测到的 Agent 注册（幂等，可重跑）
+npx @roarpeng/graphflow@latest uninstall  # 一键移除所有 Agent 上的注册
+```
+
+`install` 自动扫描本机 20 个宿主的检测标记（`~/.zcode`、`~/.cursor`、`~/.claude`、`~/.codex`、`~/.config/opencode` 等），对每个**检测到的**宿主写入三件套（以 ZCode 为例，其余宿主路径由 HostAdapter 注册表管理）：
+
+| 注册物 | 位置 | 内容 |
+| --- | --- | --- |
+| MCP 服务器 | `~/.zcode/cli/config.json` → `mcp.servers.graphflow` | stdio 启动 `graphflow-mcp`（10 个工具） |
+| Skill | `~/.zcode/skills/graphflow/SKILL.md` | 按需触发的图谱上下文技能 |
+| 全局指令 | `~/.zcode/AGENTS.md`（受管块） | GraphFlow 优先规则（append-with-markers，不动用户内容） |
+
+注意事项：
+
+- **注册后需重启对应 Agent（或新开会话）**才会加载 MCP 与技能，运行中的进程不会热加载配置。
+- 经常使用建议全局安装省去每次 npx 解析：`npm install -g @roarpeng/graphflow`，之后直接 `graphflow install` / `graphflow doctor`。
+- DSH（DeepSeek Harness）走插件路径 `dsh plugin --profile web add @roarpeng/graphflow`，与 `install` **二选一**，叠加会重复加载（见下文 DSH 章节）。
+
 Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `graphflow_plan`。没有 LLM API Key 时会桥接到宿主 Agent（agent-delegated）。需要符号级精确编辑时，把 Serena 作为第二个 MCP server 并列挂载——见 [GraphFlow + Serena 联合方案](docs/graphflow-serena.zh.md)（配置示例：[`examples/graphflow-serena.mcp.json`](examples/graphflow-serena.mcp.json)）。
 
 ## 本版要点（v1.18）
