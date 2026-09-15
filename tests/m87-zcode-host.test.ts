@@ -170,6 +170,46 @@ describe("M87 ZCode host", () => {
     expect(resolveGlobalGraphflowInstall({ runNpmRoot: () => "", exists: () => true })).toBeUndefined();
   });
 
+  it("resolveGlobalGraphflowInstall tolerates BOM, CRLF and stray banner lines (Windows npm stdout)", () => {
+    const expected = (root: string) =>
+      join(root, "@roarpeng", "graphflow", "dist", "surfaces", "mcp", "server.js");
+    // BOM + CRLF (Windows npm), banner line before the path, blank lines.
+    for (const raw of [
+      "\uFEFFC:\\npm\\node_modules\r\n",
+      "npm warn config\r\n\r\nC:\\npm\\node_modules\r\n",
+      "\n\n/usr/lib/node_modules\n\n",
+    ]) {
+      const found = resolveGlobalGraphflowInstall({
+        runNpmRoot: () => raw,
+        exists: (p) => p === expected(p.includes("\\") ? "C:\\npm\\node_modules" : "/usr/lib/node_modules"),
+      });
+      expect(found).toBeDefined();
+    }
+  });
+
+  it("on Windows the injected direct entry resolves to an existing node + server.js", () => {
+    if (process.platform !== "win32") return; // covered by validate-platforms (windows-latest)
+    const probe = resolveGlobalGraphflowInstall();
+    if (probe === undefined) return; // no global install on this runner — npx fallback path
+    const home = makeTempRoot("gf-zcode-win-direct-");
+    mkdirSync(join(home, ".zcode"), { recursive: true });
+    withIsolatedHome(home, () => {
+      installMcpToDetectedAgents({
+        strategy: "npx",
+        installScope: "user",
+        agentIdsOverride: ["zcode"],
+        preferGlobalInstall: true,
+      });
+      const entry = (JSON.parse(readFileSync(join(home, ".zcode", "cli", "config.json"), "utf8")) as {
+        mcp?: { servers?: Record<string, { command?: string; args?: string[] }> };
+      }).mcp?.servers?.graphflow;
+      // command must be an existing node binary (short-path form allowed) and
+      // args[0] must be the globally-installed server.js.
+      expect(existsSync(entry?.args?.[0] ?? "")).toBe(true);
+      expect(existsSync(entry?.command ?? "") || entry?.command === "node").toBe(true);
+    });
+  });
+
   it("adapter installs the full three-piece set and reports status", () => {
     const home = makeTempRoot("gf-zcode-adapter-");
     mkdirSync(join(home, ".zcode"), { recursive: true });

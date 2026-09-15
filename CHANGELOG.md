@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.19.2] - 2026-09-15
+
+### Fixed — 跨平台加固（Windows / Linux / macOS）
+
+- **全局安装探测容错（v1.19.1 引入路径的加固）**：`npm root -g` 的 stdout 在 Windows 上可能带 UTF-8 BOM、CRLF 或混入 banner 输出——原 `trim()` 实现会被污染导致探测失败（安全回退 npx 但直连失效）。现剥 BOM + 按 CRLF/LF 切分 + 取**最后一个非空行**（npm 的路径输出在 stdout 末尾）。测试覆盖 BOM / banner 前置 / 空行三种污染形态。
+- **Windows 平台门控直连验证**：新增 win32-only 测试——真实全局安装存在时，注入的直连条目 `command` 必须是磁盘上存在的 node 二进制（短路径形态允许或裸 `node`）、`args[0]` 必须是存在的全局 `server.js`。由 `validate-platforms (windows-latest)` CI 矩阵执行。
+- 既有跨平台矩阵确认覆盖：CI 已在 ubuntu(node 20/22) / windows-latest / macos-latest 三平台跑全量测试；直连条目的空格路径加固（短路径化 / 裸 `node` 回退）复用 `sanitizeMcpServerNodeForWindowsClients` 既有逻辑并有 m63 win32 门控测试。
+
 ## [1.19.1] - 2026-09-14
 
 ### Fixed

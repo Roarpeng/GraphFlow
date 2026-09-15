@@ -87,7 +87,18 @@ export function resolveGlobalGraphflowInstall(
     (() => execSync("npm root -g", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim());
   const exists = deps.exists ?? existsSync;
   try {
-    const root = runNpmRoot();
+    const raw = runNpmRoot();
+    if (!raw) return undefined;
+    // Cross-platform hygiene: strip a UTF-8 BOM (seen on Windows npm stdout)
+    // and take the LAST non-empty line — the root path is npm's final stdout
+    // line, so any stray banner/notice output before it cannot poison the
+    // path. CRLF is handled by the split.
+    const root = raw
+      .replace(/^\uFEFF/, "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .pop();
     if (!root) return undefined;
     const runtimeRoot = join(root, "@roarpeng", "graphflow");
     const serverPath = join(runtimeRoot, "dist", "surfaces", "mcp", "server.js");
