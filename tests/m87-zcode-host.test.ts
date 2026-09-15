@@ -171,19 +171,23 @@ describe("M87 ZCode host", () => {
   });
 
   it("resolveGlobalGraphflowInstall tolerates BOM, CRLF and stray banner lines (Windows npm stdout)", () => {
-    const expected = (root: string) =>
-      join(root, "@roarpeng", "graphflow", "dist", "surfaces", "mcp", "server.js");
     // BOM + CRLF (Windows npm), banner line before the path, blank lines.
-    for (const raw of [
-      "\uFEFFC:\\npm\\node_modules\r\n",
-      "npm warn config\r\n\r\nC:\\npm\\node_modules\r\n",
-      "\n\n/usr/lib/node_modules\n\n",
-    ]) {
+    // The expected server path is computed with the SAME join as the
+    // implementation, so the assertion is separator-agnostic (win32 rewrites
+    // forward-slash inputs to backslashes).
+    const cases: Array<[string, string]> = [
+      ["\uFEFFC:\\npm\\node_modules\r\n", "C:\\npm\\node_modules"],
+      ["npm warn config\r\n\r\nC:\\npm\\node_modules\r\n", "C:\\npm\\node_modules"],
+      ["\n\n/usr/lib/node_modules\n\n", "/usr/lib/node_modules"],
+    ];
+    for (const [raw, root] of cases) {
+      const serverPath = join(root, "@roarpeng", "graphflow", "dist", "surfaces", "mcp", "server.js");
       const found = resolveGlobalGraphflowInstall({
         runNpmRoot: () => raw,
-        exists: (p) => p === expected(p.includes("\\") ? "C:\\npm\\node_modules" : "/usr/lib/node_modules"),
+        exists: (p) => p === serverPath,
       });
-      expect(found).toBeDefined();
+      expect(found, `raw=${JSON.stringify(raw)}`).toBeDefined();
+      expect(found?.serverPath).toBe(serverPath);
     }
   });
 
