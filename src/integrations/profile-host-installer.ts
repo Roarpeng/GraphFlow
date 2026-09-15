@@ -73,6 +73,11 @@ export interface ProfileHostSpec {
   instructionTargets?: readonly string[];
   /** Optional host-specific extra install (plugin file or native hook config). */
   extra?: ProfileHostExtraInstaller;
+  /**
+   * Write a direct node + server.js MCP entry when a globally-installed
+   * @roarpeng/graphflow exists (falls back to the npx launcher otherwise).
+   */
+  preferGlobalInstall?: boolean;
 }
 
 /**
@@ -130,7 +135,7 @@ export const PROFILE_HOST_SPECS: Readonly<Record<string, ProfileHostSpec>> = {
       status: getOpenCodePluginStatus,
     },
   },
-  zcode: { profileIds: ["zcode"], skillTargets: ["ZCode"], instructionTargets: ["ZCode"] },
+  zcode: { profileIds: ["zcode"], skillTargets: ["ZCode"], instructionTargets: ["ZCode"], preferGlobalInstall: true },
 };
 
 export const PROFILE_HOST_IDS = Object.keys(PROFILE_HOST_SPECS);
@@ -244,6 +249,7 @@ function mcpInstallOptions(spec: ProfileHostSpec, options: ProfileHostInstallOpt
     installScope: "user",
     agentIdsOverride:
       options.agentIdsOverride !== undefined ? [...options.agentIdsOverride] : [...spec.profileIds],
+    ...(spec.preferGlobalInstall ? { preferGlobalInstall: true } : {}),
   };
 }
 

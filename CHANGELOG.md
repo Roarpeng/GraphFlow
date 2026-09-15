@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.19.1] - 2026-09-14
+
+### Fixed
+
+- **Windows ZCode「启动中」卡死（npx 冷启动超时）**：npx 条目首次需下载完整包及原生依赖（`onnxruntime-node`，Windows 上数百 MB），120s 连接超时内常无法完成。`install` 现对 ZCode 启用 `preferGlobalInstall`：探测到全局安装（`npm root -g` 下的 `@roarpeng/graphflow/dist/surfaces/mcp/server.js`）时自动写入 **node + server.js 直连条目**（`cwd`=包根，秒级启动、无网络依赖；复用既有 node-bundled 形状与 Windows 空格路径加固）；无全局安装回退现行 npx 条目。探测失败（无 npm/路径不存在/空输出）一律 fail-open 回退。README（中英）注册小节补充 Windows 首启慢的说明与解法。测试 m87 扩至 6 条（npx 回退锁定 / 直连条目 / 探测函数三态 fail-open / adapter 三件套）。
+
 ## [1.19.0] - 2026-09-14
 
 ### Added — R8「省钱与靠谱双主线」（五模块齐发）
