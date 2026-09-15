@@ -286,6 +286,28 @@ npx @roarpeng/graphflow install
 
 ## Agent integrations
 
+### Register Skill + MCP on your machine (one command)
+
+```bash
+npx @roarpeng/graphflow@latest doctor     # self-check: list agents detected on this machine
+npx @roarpeng/graphflow@latest install    # register into every detected agent (idempotent, safe to re-run)
+npx @roarpeng/graphflow@latest uninstall  # remove the registration from every agent
+```
+
+`install` scans the detection markers of all 20 hosts (`~/.zcode`, `~/.cursor`, `~/.claude`, `~/.codex`, `~/.config/opencode`, …) and writes a three-piece set into every host it finds (paths shown for ZCode; every host is owned by the HostAdapter registry):
+
+| Registered | Location | Content |
+| --- | --- | --- |
+| MCP server | `~/.zcode/cli/config.json` → `mcp.servers.graphflow` | stdio launch of `graphflow-mcp` (10 tools) |
+| Skill | `~/.zcode/skills/graphflow/SKILL.md` | on-demand graph-context skill |
+| Global instructions | `~/.zcode/AGENTS.md` (managed block) | GraphFlow context-first rule (append-with-markers, user content untouched) |
+
+Notes:
+
+- **Restart the agent (or open a new session) after installing** — running processes never hot-reload MCP config or skills.
+- For daily use, install globally to skip the per-run npx resolution: `npm install -g @roarpeng/graphflow`, then plain `graphflow install` / `graphflow doctor`.
+- DSH (DeepSeek Harness) uses the plugin path `dsh plugin --profile web add @roarpeng/graphflow` — pick **one** registration path, never both (double loading).
+
 Use **`npx @roarpeng/graphflow install` as the fallback** when you need Rules, multi-agent wiring, or a host that does not load Agent Plugins:
 
 ```bash
