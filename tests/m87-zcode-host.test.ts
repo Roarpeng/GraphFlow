@@ -174,16 +174,21 @@ describe("M87 ZCode host", () => {
     const expected = (root: string) =>
       join(root, "@roarpeng", "graphflow", "dist", "surfaces", "mcp", "server.js");
     // BOM + CRLF (Windows npm), banner line before the path, blank lines.
-    for (const raw of [
-      "\uFEFFC:\\npm\\node_modules\r\n",
-      "npm warn config\r\n\r\nC:\\npm\\node_modules\r\n",
-      "\n\n/usr/lib/node_modules\n\n",
+    // Pass the npm root per case — do not guess from `path.includes("\\")`.
+    // On win32, `path.join("/usr/lib/node_modules", ...)` still contains
+    // backslashes, so that heuristic treats a POSIX root as a Windows path
+    // and the mock `exists` returns false (`found` undefined).
+    for (const { raw, root } of [
+      { raw: "\uFEFFC:\\npm\\node_modules\r\n", root: "C:\\npm\\node_modules" },
+      { raw: "npm warn config\r\n\r\nC:\\npm\\node_modules\r\n", root: "C:\\npm\\node_modules" },
+      { raw: "\n\n/usr/lib/node_modules\n\n", root: "/usr/lib/node_modules" },
     ]) {
       const found = resolveGlobalGraphflowInstall({
         runNpmRoot: () => raw,
-        exists: (p) => p === expected(p.includes("\\") ? "C:\\npm\\node_modules" : "/usr/lib/node_modules"),
+        exists: (p) => p === expected(root),
       });
       expect(found).toBeDefined();
+      expect(found?.runtimeRoot).toBe(join(root, "@roarpeng", "graphflow"));
     }
   });
 

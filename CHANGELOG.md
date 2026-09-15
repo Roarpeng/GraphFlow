@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **m87 全局安装探测测试（Windows）**：`exists` mock 用 `path.includes("\\")` 猜平台。win32 上 `path.join("/usr/lib/node_modules", …)` 仍含反斜杠，POSIX 用例被当成 Windows 路径比较，导致 `found` 为 undefined、`validate-platforms (windows-latest)` 失败。现按用例传入明确 npm root。
+
 ## [1.19.2] - 2026-09-15
 
 ### Fixed — 跨平台加固（Windows / Linux / macOS）
