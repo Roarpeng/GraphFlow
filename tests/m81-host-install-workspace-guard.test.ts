@@ -35,6 +35,24 @@ const { isUnsafeWorkspaceFallback } = await import("../src/config/discover-works
 const { HOST_ADAPTER_MIGRATED_IDS, installViaHostAdapter } = await import(
   "../src/integrations/host-adapter-install"
 );
+const { resolveGlobalGraphflowInstall } = await import(
+  "../src/integrations/agent-mcp-installer"
+);
+
+/**
+ * Stable machine-level paths that ARE allowed in host configs: a
+ * globally-installed GraphFlow package (npm prefix lives under $HOME for many
+ * setups — e.g. ~/.npm-global — but the entry is intentional and survives
+ * shell restarts) and the node binary that launches it.
+ */
+const GLOBAL_INSTALL = resolveGlobalGraphflowInstall();
+const ALLOWED_STABLE_PATHS = new Set<string>(
+  [
+    GLOBAL_INSTALL?.serverPath,
+    GLOBAL_INSTALL?.runtimeRoot,
+    process.execPath,
+  ].filter((value): value is string => typeof value === "string")
+);
 
 const extraRoots: string[] = [];
 
@@ -129,6 +147,8 @@ describe("M81 host install workspace guard", () => {
         for (const value of extractWorkspaceValues(content)) {
           if (!value) continue;
           if (value === "${workspaceFolder}" || value === "${workspaceFolder}/") continue;
+          // Intentional stable paths (global install / node binary) are exempt.
+          if (ALLOWED_STABLE_PATHS.has(resolve(value))) continue;
           // Relative paths (".", "./sub") are host-resolved, not baked.
           if (!value.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(value)) continue;
           const resolved = resolve(value);

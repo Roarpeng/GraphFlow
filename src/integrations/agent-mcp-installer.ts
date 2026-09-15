@@ -57,6 +57,45 @@ export interface McpInstallOptions {
    * Codex does not expand VS Code/Cursor placeholders.
    */
   omitWorkspaceFolderPlaceholder?: boolean;
+  /**
+   * When true and a globally-installed @roarpeng/graphflow is found
+   * (`npm root -g`), write a direct node + server.js entry instead of the
+   * npx launcher — npx cold-start (first download of onnxruntime-node &
+   * friends) can exceed any connect timeout on Windows.
+   */
+  preferGlobalInstall?: boolean;
+  /** Test hook: override the global-install probe. `null` forces the npx path. */
+  globalInstallOverride?: GlobalGraphflowInstall | null;
+}
+
+export interface GlobalGraphflowInstall {
+  serverPath: string;
+  runtimeRoot: string;
+}
+
+/**
+ * Resolve a globally-installed GraphFlow (`npm install -g
+ * @roarpeng/graphflow`). Returns undefined when npm is missing, the command
+ * fails, or the package's dist server is not on disk — callers fall back to
+ * the npx launcher.
+ */
+export function resolveGlobalGraphflowInstall(
+  deps: { runNpmRoot?: () => string; exists?: (path: string) => boolean } = {}
+): GlobalGraphflowInstall | undefined {
+  const runNpmRoot =
+    deps.runNpmRoot ??
+    (() => execSync("npm root -g", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim());
+  const exists = deps.exists ?? existsSync;
+  try {
+    const root = runNpmRoot();
+    if (!root) return undefined;
+    const runtimeRoot = join(root, "@roarpeng", "graphflow");
+    const serverPath = join(runtimeRoot, "dist", "surfaces", "mcp", "server.js");
+    if (!exists(serverPath)) return undefined;
+    return { serverPath, runtimeRoot };
+  } catch {
+    return undefined;
+  }
 }
 
 export interface DetectedAgent {
@@ -2043,10 +2082,34 @@ export function installMcpToDetectedAgents(options: McpInstallOptions): McpInsta
   }
 
   const installScope = options.installScope ?? "user";
+  // Direct node + server.js entry when a global install exists — the npx
+  // launcher's cold-start download can exceed any connect timeout (Windows
+  // field report: stuck on "starting" until timeout). `globalInstallOverride:
+  // null` pins the npx fallback (test hook); an object pins the direct entry.
+  const probeOverride = options.globalInstallOverride;
+  const globalInstall = options.preferGlobalInstall
+    ? probeOverride === null
+      ? undefined
+      : probeOverride ?? resolveGlobalGraphflowInstall()
+    : undefined;
+  const effectiveOptions: McpInstallOptions =
+    globalInstall !== undefined
+      ? {
+          ...options,
+          strategy: "node-bundled",
+          bundledServerPath: globalInstall.serverPath,
+          bundledRuntimeRoot: globalInstall.runtimeRoot,
+          // Same node that runs this installer; drop session-temporary paths
+          // (fnm multishells) so the entry survives shell restarts.
+          ...(isUsableNodeCommand(process.execPath) && !isEphemeralNodePath(process.execPath)
+            ? { nodeCommand: process.execPath }
+            : {}),
+        }
+      : options;
   const targets = resolveTargetsForAgents(agentIds, options.workspaceRoot, installScope);
   for (const target of targets) {
     try {
-      const { workspaceRoot, ...restOptions } = options;
+      const { workspaceRoot, ...restOptions } = effectiveOptions;
       const windowsHost =
         Boolean(restOptions.windowsHost) ||
         isWindows() ||

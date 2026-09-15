@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.19.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.19.1-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
@@ -10,7 +10,7 @@
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
-**v1.19.0** 已发：**R8「省钱与靠谱双主线」五模块齐发**——working-set 预取（消灭探索轮次）、图 diff 质询清单（近零成本质量门）、subagent 出生证（token 复利）、时点事实查询（白领事实漂移防线）、任务预算报价（事前决策）。核心逻辑：压缩 prompt 省加法，消灭探索轮省乘法；图知道全量调用关系而 agent 不知道。
+**v1.19.1** 已发：**修复 Windows ZCode「启动中」卡死**——npx 冷启动下载原生依赖可超时；`install` 检测到全局安装时自动写 node + server.js 直连条目（秒级启动、无网络依赖），无全局安装回退 npx。v1.19.0 的 R8 五模块（working-set / challenge / spawn-receipt / facts / quote）继续有效。
 
 ## 快速开始
 
@@ -53,6 +53,7 @@ npx @roarpeng/graphflow@latest uninstall  # 一键移除所有 Agent 上的注�
 注意事项：
 
 - **注册后需重启对应 Agent（或新开会话）**才会加载 MCP 与技能，运行中的进程不会热加载配置。
+- **Windows 首次启动慢/卡在"启动中"**：npx 条目首次要从 registry 下载完整包及原生依赖（`onnxruntime-node`，Windows 上数百 MB），可能超过连接超时。解决：`npm install -g @roarpeng/graphflow` 后重跑 `install`——检测到全局安装会自动写入 **node + server.js 直连条目**（秒级启动、不再依赖网络）；未全局安装时回退 npx 条目。
 - 经常使用建议全局安装省去每次 npx 解析：`npm install -g @roarpeng/graphflow`，之后直接 `graphflow install` / `graphflow doctor`。
 - DSH（DeepSeek Harness）走插件路径 `dsh plugin --profile web add @roarpeng/graphflow`，与 `install` **二选一**，叠加会重复加载（见下文 DSH 章节）。
 

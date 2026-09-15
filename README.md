@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-[![npm version](https://img.shields.io/badge/npm-1.19.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.19.1-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
@@ -305,6 +305,7 @@ npx @roarpeng/graphflow@latest uninstall  # remove the registration from every a
 Notes:
 
 - **Restart the agent (or open a new session) after installing** — running processes never hot-reload MCP config or skills.
+- **Windows first launch stuck on "starting"**: the npx entry downloads the full package plus native deps (`onnxruntime-node`, hundreds of MB on Windows) on first run and can exceed the connect timeout. Fix: `npm install -g @roarpeng/graphflow`, then re-run `install` — when a global install is detected the injector writes a **direct node + server.js entry** (sub-second launch, no network dependency); without one it falls back to the npx entry.
 - For daily use, install globally to skip the per-run npx resolution: `npm install -g @roarpeng/graphflow`, then plain `graphflow install` / `graphflow doctor`.
 - DSH (DeepSeek Harness) uses the plugin path `dsh plugin --profile web add @roarpeng/graphflow` — pick **one** registration path, never both (double loading).
 

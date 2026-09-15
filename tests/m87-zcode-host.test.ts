@@ -2,7 +2,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildAgentProfiles } from "../src/integrations/agent-mcp-installer";
+import {
+  buildAgentProfiles,
+  installMcpToDetectedAgents,
+  resolveGlobalGraphflowInstall,
+} from "../src/integrations/agent-mcp-installer";
 import { getHostAdapter } from "../src/integrations/host-adapter";
 import {
   getHostAdapterInstallStatus,
@@ -73,9 +77,17 @@ describe("M87 ZCode host", () => {
     mkdirSync(join(home, ".zcode"), { recursive: true });
 
     withIsolatedHome(home, () => {
-      const created = installViaHostAdapter("zcode");
-      expect(created.hostId).toBe("zcode");
-      expect(["created", "injected"]).toContain(created.status);
+      // Direct installer call with the global-install probe pinned to null:
+      // this case locks the npx fallback shape regardless of whether the
+      // machine running the suite has a global install.
+      const results = installMcpToDetectedAgents({
+        strategy: "npx",
+        installScope: "user",
+        agentIdsOverride: ["zcode"],
+        preferGlobalInstall: true,
+        globalInstallOverride: null,
+      });
+      expect(results.some((r) => r.agentId === "zcode")).toBe(true);
 
       const configPath = join(home, ".zcode", "cli", "config.json");
       expect(existsSync(configPath)).toBe(true);
@@ -101,6 +113,73 @@ describe("M87 ZCode host", () => {
       expect(entry?.env?.GRAPHFLOW_WORKSPACE_ROOT).toBeUndefined();
       expect(entry?.timeoutMs).toBe(120000);
 
+      // Idempotent re-run keeps one server entry.
+      installMcpToDetectedAgents({
+        strategy: "npx",
+        installScope: "user",
+        agentIdsOverride: ["zcode"],
+        preferGlobalInstall: true,
+        globalInstallOverride: null,
+      });
+      const again = JSON.parse(readFileSync(configPath, "utf8")) as {
+        mcp?: { servers?: Record<string, unknown> };
+      };
+      expect(Object.keys(again.mcp?.servers ?? {})).toEqual(["graphflow"]);
+    });
+  });
+
+  it("writes a direct node + server.js entry when a global install exists", () => {
+    const home = makeTempRoot("gf-zcode-global-");
+    mkdirSync(join(home, ".zcode"), { recursive: true });
+    const globalRoot = makeTempRoot("gf-zcode-global-pkg-");
+    const serverPath = join(globalRoot, "dist", "surfaces", "mcp", "server.js");
+
+    withIsolatedHome(home, () => {
+      installMcpToDetectedAgents({
+        strategy: "npx",
+        installScope: "user",
+        agentIdsOverride: ["zcode"],
+        preferGlobalInstall: true,
+        globalInstallOverride: { serverPath, runtimeRoot: globalRoot },
+      });
+      const configPath = join(home, ".zcode", "cli", "config.json");
+      const entry = (JSON.parse(readFileSync(configPath, "utf8")) as {
+        mcp?: { servers?: Record<string, { command?: string; args?: string[]; cwd?: string; env?: Record<string, string> }> };
+      }).mcp?.servers?.graphflow;
+      // Direct launch: node + absolute server.js, package root as cwd, and no
+      // NODE/NPX_CLI launcher env left over from the npx path.
+      expect(entry?.args?.[0]).toBe(serverPath);
+      expect(entry?.cwd).toBe(globalRoot);
+      expect(entry?.env?.NODE).toBeUndefined();
+      expect(entry?.env?.NPX_CLI).toBeUndefined();
+      expect(entry?.args ?? []).not.toContain("--package=@roarpeng/graphflow");
+    });
+  });
+
+  it("resolveGlobalGraphflowInstall probes npm root -g and fails open", () => {
+    const found = resolveGlobalGraphflowInstall({
+      runNpmRoot: () => "/opt/node/lib/node_modules",
+      exists: (p) => p.endsWith(join("@roarpeng", "graphflow", "dist", "surfaces", "mcp", "server.js")),
+    });
+    expect(found?.runtimeRoot).toBe(join("/opt/node/lib/node_modules", "@roarpeng", "graphflow"));
+    expect(found?.serverPath).toBe(join(found!.runtimeRoot, "dist", "surfaces", "mcp", "server.js"));
+
+    // npm missing / server.js absent / empty root all fail open to undefined.
+    expect(resolveGlobalGraphflowInstall({ runNpmRoot: () => { throw new Error("npm not found"); }, exists: () => true })).toBeUndefined();
+    expect(resolveGlobalGraphflowInstall({ runNpmRoot: () => "/x", exists: () => false })).toBeUndefined();
+    expect(resolveGlobalGraphflowInstall({ runNpmRoot: () => "", exists: () => true })).toBeUndefined();
+  });
+
+  it("adapter installs the full three-piece set and reports status", () => {
+    const home = makeTempRoot("gf-zcode-adapter-");
+    mkdirSync(join(home, ".zcode"), { recursive: true });
+
+    withIsolatedHome(home, () => {
+      const created = installViaHostAdapter("zcode");
+      expect(created.hostId).toBe("zcode");
+      expect(["created", "injected", "updated"]).toContain(created.status);
+
+      expect(existsSync(join(home, ".zcode", "cli", "config.json"))).toBe(true);
       expect(existsSync(join(home, ".zcode", "skills", "graphflow", "SKILL.md"))).toBe(true);
       const agents = readFileSync(join(home, ".zcode", "AGENTS.md"), "utf8");
       expect(agents).toContain("graphflow");
@@ -110,13 +189,6 @@ describe("M87 ZCode host", () => {
       expect(status?.mcpInstalled).toBe(true);
       expect(status?.skillInstalled).toBe(true);
       expect(status?.rulesInstalled).toBe(true);
-
-      // Idempotent re-run keeps one server entry.
-      installViaHostAdapter("zcode");
-      const again = JSON.parse(readFileSync(configPath, "utf8")) as {
-        mcp?: { servers?: Record<string, unknown> };
-      };
-      expect(Object.keys(again.mcp?.servers ?? {})).toEqual(["graphflow"]);
     });
   });
 
