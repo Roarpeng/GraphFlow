@@ -33,6 +33,7 @@ import { quoteTask } from "../../learning/task-quote";
 import { buildChallengeList } from "../../graph/diff-challenge";
 import { queryFactsAt } from "../../graph/temporal-facts";
 import { computeWorkingSet } from "../../graph/working-set";
+import { runAudit, formatAuditLegacyText } from "../../audit/audit.js";
 
 import {
   diagnoseRouting,
@@ -890,6 +891,27 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     } finally {
       client.close?.();
     }
+  }
+
+  if (command === "audit") {
+    // R9: closing audit — aggregate follow-through findings (dangling deps,
+    // orphan files, container/loader refs, doc drift) before calling it done.
+    const since = readCliFlagValue(args, "--since");
+    const strict = args.includes("--strict");
+    const graphflowConfig = resolveConfig(configPath);
+    const data = await runAudit(
+      {
+        ...(since !== undefined ? { since } : {}),
+        ...(strict ? { strict: true } : {}),
+      },
+      process.cwd(),
+      graphflowConfig
+    );
+    return {
+      command: "audit",
+      data,
+      legacyText: formatAuditLegacyText(data),
+    };
   }
 
   if (command === "quote") {

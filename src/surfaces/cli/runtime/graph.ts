@@ -489,14 +489,35 @@ async function attachWorkbenchThenDialogue(
   // Historical recall (Conversation Graph W2b) is read-only, so it runs even
   // when this preview must not record a dialogue turn.
   const withHits = await attachDialogueHits(result, client, query);
+  // R9 promise ledger: surface unresolved obligations from earlier sessions
+  // on the FIRST context of a session — "干着干着就忘了" heals at open.
+  const withReminders = await attachPromiseReminder(withHits, client);
   if (dialogue?.recordDialogue === false) {
-    return withHits;
+    return withReminders;
   }
-  const withWorkbench = await attachWorkbenchTopic(withHits, client, config, query, dialogue);
+  const withWorkbench = await attachWorkbenchTopic(withReminders, client, config, query, dialogue);
   if (withWorkbench.workbench) {
     return withWorkbench;
   }
-  return attachDialogueThread(withHits, client, config, query, dialogue);
+  return attachDialogueThread(withReminders, client, config, query, dialogue);
+}
+
+/** Attach the open promise-ledger reminder when previous sessions left work dangling. */
+async function attachPromiseReminder(
+  result: ContextPreviewResult,
+  client: GraphClient
+): Promise<ContextPreviewResult> {
+  try {
+    const { listOpenPromises, formatOpenPromiseReminder } = await import(
+      "../../../audit/promise-ledger.js"
+    );
+    const open = await listOpenPromises(client);
+    const reminder = formatOpenPromiseReminder(open);
+    if (reminder === undefined) return result;
+    return { ...result, pendingFollowThroughs: reminder };
+  } catch {
+    return result; // ledger failure never blocks context packaging
+  }
 }
 
 /**

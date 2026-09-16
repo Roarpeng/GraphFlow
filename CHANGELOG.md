@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.20.0] - 2026-09-15
+
+### Added — R9 承诺账本 + 收尾审计（Promise Ledger / Closing Audit）
+
+针对 dogfood 实证痛点：agent 长任务"干着干着就忘了"——新依赖忘安装、新文件忘接线/注入容器、驱动忘加载、文档忘更新。问题本质是**承诺没有账本**：义务在任务中段产生、收尾时无人清点。R9 从可观测副作用登记义务并在三个触点对账（不猜意图、只对账事实、质询不阻断）：
+
+- **检查器矩阵**：依赖 lock 一致性（npm v1/v3、pip+poetry/Pipfile.lock）、孤儿文件接线（图 inbound 边数为零即未接线）、文档一致性（CLI 变更 vs README、版本徽章 vs package.json）。
+- **声明式规则引擎**：容器引用/驱动加载等项目特定义务由 `graphflow.audit.json` 配置（`filePattern` + `mustBeReferencedBy` glob），内置零项目类型假设；glob 引擎零依赖自研（`**`/`*`/`?`/`{a,b}`）。
+- **基线策略**：默认 git 未提交工作区（agent 会话的天然收尾窗口）；`--since <ref>` 扩大；无 git 降级为纯状态检查。
+- **`graphflow audit` CLI** + **outcome 前置审计**：`report_outcome success` 前自动跑审计——默认温和（findings 附进 episode 证据并提醒）；`GRAPHFLOW_AUDIT_STRICT=1` 严格模式拒绝在有未决项时上报成功。
+- **跨会话提醒**：会话结束未决项写入图上承诺账本（`promise-ledger:<sessionId>`）；下次会话首次 `graphflow_context` 附带"上次会话有 N 项未收尾"；审计清零自动 resolve。
+
 ## [1.19.2] - 2026-09-15
 
 ### Fixed — 跨平台加固（Windows / Linux / macOS）

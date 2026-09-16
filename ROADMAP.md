@@ -175,6 +175,17 @@
 | **P2** | 工作区发现边界：临时目录不得被当作项目根 | ✅ | MCP 以 cwd 位于 `%TEMP%` 启动会写下 `graphflow-out/graphflow-graph.json`，该弱标记曾让向上发现对所有临时目录下的项目都返回临时根；新增 `isSystemTempDirectory()` 遍历边界 + `discoverWorkspaceRoot(..., { extraBoundaries })` 测试钩子，m49 回归覆盖 |
 | **P2** | 文档编码守卫 | ✅ | v1.15.4 版本号提交把两个 README 的约 100 个多字节字符打成 `?` 并随 npm 发布；已按 v1.15.3 文档提交重建，并新增「文档必须合法 UTF-8」+「README.zh.md 徽章与 package.json 一致」CI 守卫 |
 
+### R9 · 承诺账本 + 收尾审计（Promise Ledger / Closing Audit，2026-09-15）
+
+> 来源：dogfood 实证痛点——agent 长任务中"干着干着就忘了"：新增驱动忘记加载、新依赖忘记安装、新文件忘记注入容器/接线到环境、新命令忘记写文档。问题本质不是记忆而是**承诺没有账本**：义务在任务中段产生、收尾时无人清点。R9 把"可观测的副作用"登记为义务并在三个触点对账（不猜意图、只对账事实）。
+
+| 优先级 | 事项 | 状态 | 说明与依据 |
+| --- | --- | --- | --- |
+| **P0** | **检查器矩阵 + 规则引擎** | ✅ v1.20.0 | 内置检查器：依赖 lock 一致性（npm v1/v3 锁、pip+poetry/Pipfile）、孤儿文件接线（图 inbound 边）、文档一致性（CLI 变更 vs README、版本徽章）；容器引用/驱动加载等由 `graphflow.audit.json` 声明式规则表达（`filePattern` + `mustBeReferencedBy` glob，零硬编码项目类型） |
+| **P0** | **基线策略** | ✅ v1.20.0 | 默认 git 未提交工作区（tracked diff + untracked——正是 agent 会话的收尾窗口）；`--since <ref>` 扩大；无 git 项目降级状态性检查（tests/m94） |
+| **P0** | **`graphflow audit` CLI + outcome 前置审计** | ✅ v1.20.0 | 聚合器并发跑检查器（单个失败记 -1 不中断）；`report_outcome success` 前自动审计：默认温和（findings 附进 episode 证据 + 提醒），`GRAPHFLOW_AUDIT_STRICT=1` 升级为拒绝上报成功直到清零 |
+| **P1** | **跨会话提醒（治"干着干着忘了"的杀手锏）** | ✅ v1.20.0 | 会话结束未决项写入图上承诺账本（`promise-ledger:<sessionId>` Decision 节点）；**下一次会话首次 `graphflow_context` 返回附带"上次会话有 N 项未收尾"**；再次审计清零自动 resolve（tests/m98） |
+
 ### R8 · 省钱与靠谱双主线（2026-09-14 深度思考版）
 
 > 来源：单作者自由思考推进。核心洞察：**agent 最大的 token 黑洞不是 prompt 大小，而是"找东西的探索轮次"**（每轮探索都是带全量历史的完整模型调用，第 N 轮的 grep 比第一轮贵 N 倍——压缩 prompt 省的是加法，消灭探索轮省的是乘法）；**可靠性最便宜的形态是不跑测试的质量门**（图知道全量调用关系，agent 不知道——"不知道自己不知道"是坏活儿的根源）。R8 五项全部服务"省钱、出好活儿"。
