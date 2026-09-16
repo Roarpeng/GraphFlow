@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-[![npm version](https://img.shields.io/badge/npm-1.20.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.20.1-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
@@ -108,6 +108,8 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | **Observability** | `graphflow_diagnose` / `route diagnose`: provider health + graph stats + token savings + **flywheel health** (auto-capture, episodes, skills by class, session journal) + workbench outline |
 | **Agent surfaces** | CLI `--json`; MCP stdio and Streamable HTTP (stateless JSON or stateful SSE, 10 tools); auto-install into 15+ agents (incl. **Codex Windows NODE/NPX_CLI short-path MCP**). **HostAdapter** registry owns install · uninstall · doctor for **every** registered host: 4 hand-written slices (Cursor / Claude Code / DeepSeek Harness / Kimi Code) + a generic profile-backed slice for the rest |
 | **Evidence & governance** | Outcome evidence packages (commit/diff/tests), evidence backfill, tamper-evident audit chains, ADR/Invariant/APIContract/Test review states, artifact three-way merge/signing/encryption, retention/quarantine, release gates |
+| **Closing audit / promise ledger (R9)** | Cures "干着干着就忘了": obligations derived from observable side effects — dependency-lock consistency (npm v1/v3, pip+poetry/Pipfile), orphan files with zero graph wiring, declarative `graphflow.audit.json` rules (driver loading / container injection: `filePattern` + `mustBeReferencedBy` globs), doc drift (CLI vs README, version badge). Baseline = uncommitted git working tree (`--since <ref>` to widen). Touchpoints: `graphflow audit` CLI; automatic pre-check before `report_outcome success` (advisory, or refusing via `GRAPHFLOW_AUDIT_STRICT=1`); **cross-session reminder** — the first `graphflow_context` of a session surfaces "上次会话有 N 项未收尾" from the on-graph promise ledger. See [docs/closing-audit.md](docs/closing-audit.md) |
+| **Savings & reliability duo (R8)** | `working-set` prefetch (kill exploration turns — each turn re-pays the whole history), `challenge` graph-diff questions (the graph knows every caller the agent does not), `spawn-receipt` (subagents inherit anchors, not copied context), `facts ask` temporal lookup (effective vs superseded at a point in time), `quote` honest task budget from paired-efficiency history |
 | **Engineering quality** | TypeScript strict; vitest suite; `npm run ci` includes extension packaging and smoke tests |
 
 ### Positioning
@@ -161,6 +163,8 @@ graphflow outcome backfill --evidence evidence.jsonl  # close pending episodes w
 graphflow governance release-gate         # enforce proven-skill/fidelity/pending gates
 graphflow skill sync export                # export team skill pack + golden queries (share via git)
 graphflow skill sync import                # import team skill pack (MERGE; --force to overwrite) + golden merge into .graphflow/team-golden.json
+graphflow challenge --files a.ts,b.ts      # R8-2: graph-diff challenge list after edits (callers / requirements / deleted symbols)
+graphflow audit                            # R9: closing audit — dangling deps / unwired files / unreferenced configs / doc drift
 graphflow route diagnose                   # routing diagnostics
 graphflow learn nightly                    # nightly learning
 graphflow doctor                           # install self-check
