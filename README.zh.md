@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.20.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.20.1-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
@@ -10,7 +10,7 @@
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
-**v1.20.0** 已发：**R9 承诺账本 + 收尾审计**——治 agent「干着干着就忘了」：依赖/孤儿文件/文档内置检查器 + `graphflow.audit.json` 声明式规则（容器引用/驱动加载）；默认对账 git 未提交工作区；`report_outcome` 前自动审计（GRAPHFLOW_AUDIT_STRICT=1 严格拒报成功）；跨会话提醒「上次会话有 N 项未收尾」。
+**v1.20.1** 已发：**R9 文档收口**——新增 docs/closing-audit.md（三触点/检查器矩阵/声明式规则示例/基线/诚实边界）；README 中英补 R9/R8 能力行与 CLI 参考。v1.20.0 的 R9 承诺账本 + 收尾审计完整可用。
 
 ## 快速开始
 
@@ -59,10 +59,12 @@ npx @roarpeng/graphflow@latest uninstall  # 一键移除所有 Agent 上的注�
 
 Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `graphflow_plan`。没有 LLM API Key 时会桥接到宿主 Agent（agent-delegated）。需要符号级精确编辑时，把 Serena 作为第二个 MCP server 并列挂载——见 [GraphFlow + Serena 联合方案](docs/graphflow-serena.zh.md)（配置示例：[`examples/graphflow-serena.mcp.json`](examples/graphflow-serena.mcp.json)）。
 
-## 本版要点（v1.18）
+## 本版要点（v1.20）
 
 | 能力 | 说明 |
 | --- | --- |
+| **R9 承诺账本 + 收尾审计** | 治「干着干着就忘了」：依赖 lock 一致性 / 孤儿文件接线 / 文档漂移内置检查器 + `graphflow.audit.json` 声明式规则（容器引用、驱动加载）；默认对账 git 未提交工作区；`graphflow audit` CLI + `report_outcome success` 前自动审计（`GRAPHFLOW_AUDIT_STRICT=1` 严格拒报成功）；**跨会话提醒**——下次会话首次 `graphflow_context` 返回「上次会话有 N 项未收尾」。见 [docs/closing-audit.md](docs/closing-audit.md) |
+| **R8 省钱与靠谱双主线** | `working-set` 预取（消灭探索轮次）、`challenge` 图 diff 质询、`spawn-receipt` 出生证、`facts ask` 时点查询、`quote` 诚实任务报价 |
 | **Harness** | 记忆动态、按任务召回（图锚点 + 压缩摘要 + 历史 episode + skill），有明确 L0–L3 token 预算；**打包后追加的载荷也计入预算**（`dialogueHits` 单独报为 `unbudgetedTokens`） |
 | **Token 节省（双口径）** | 对现实 top-K 文件读取 **95.6%**；对朴素 grep 基线 98.5%。两者回答不同问题，**不可互换**；现实口径无法自我膨胀。见 [benchmarks/RESULTS.md](benchmarks/RESULTS.md) |
 | **效率机制（SoL-Pi 借鉴）** | 默认**全开**、可在 **GraphFlow: Settings** 逐项关闭：大输出归档为句柄（ObservationPack）、日志压缩为**逐字核验**收据（Evidence-Preserving Reducer）、按观测压力自适应预算 + 压缩建议（Online Context Compact）、编辑+验证融合（Action Fusion）；dsh 侧在模型表面自动投影大结果（`GRAPHFLOW_D_DSH_PROJECTION=0` 关）。见 [docs/efficiency-mechanisms.md](docs/efficiency-mechanisms.md) |

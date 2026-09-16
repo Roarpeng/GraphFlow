@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.20.1] - 2026-09-16
+
+### Docs — R9/R9 文档收口
+
+- 新增 **[docs/closing-audit.md](docs/closing-audit.md)**：R9 承诺账本 + 收尾审计完整文档——三个触点（CLI / outcome 前置 / 跨会话提醒）、内置检查器矩阵、`graphflow.audit.json` 声明式规则示例（驱动加载 / 容器注入）、基线策略、诚实边界。
+- README（英文）core capabilities 新增 R9 与 R8 两行 + CLI quick reference 补 `challenge` / `audit` 两行；README（中文）「本版要点」升至 v1.20 并新增 R9/R8 行。
+
 ## [1.20.0] - 2026-09-15
 
 ### Added — R9 承诺账本 + 收尾审计（Promise Ledger / Closing Audit）
