@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.19.2-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.20.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
@@ -10,7 +10,7 @@
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
-**v1.19.2** 已发：**跨平台加固**——全局安装探测容错 Windows npm stdout 的 BOM/CRLF/banner 污染（取末非空行）；新增 win32 门控直连验证测试（command 必须为存在 node、args[0] 必须为存在 server.js），由三平台 CI 矩阵执行。v1.19.1 的全局直连与 v1.19.0 的 R8 五模块继续有效。
+**v1.20.0** 已发：**R9 承诺账本 + 收尾审计**——治 agent「干着干着就忘了」：依赖/孤儿文件/文档内置检查器 + `graphflow.audit.json` 声明式规则（容器引用/驱动加载）；默认对账 git 未提交工作区；`report_outcome` 前自动审计（GRAPHFLOW_AUDIT_STRICT=1 严格拒报成功）；跨会话提醒「上次会话有 N 项未收尾」。
 
 ## 快速开始
 

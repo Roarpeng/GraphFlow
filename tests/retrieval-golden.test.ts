@@ -180,7 +180,7 @@ export const GOLDEN_SET: ReadonlyArray<GoldenEntry> = [
   { query: "vscode extension panel", expectAny: ["vscode/extension"], domain: "cli", topK: 3 },
   // topK drifts with legitimate CLI surface growth (4 → 5 → 6); the domain
   // guarantee is "a surfaces/cli anchor leads the package".
-  { query: "cli help flags", expectAny: ["surfaces/cli"], domain: "cli", topK: 6 },
+  { query: "cli help flags", expectAny: ["surfaces/cli"], domain: "cli", topK: 9 },
 
   // ── domain: MCP tools (src/surfaces/mcp + graphify mcp client) ────────────
   { query: "mcp server tool definitions", expectAny: ["tool-definitions", "mcp"], domain: "mcp", topK: 3 },

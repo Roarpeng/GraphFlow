@@ -83,6 +83,13 @@ export interface ContextPreviewResult {
   dialogueHits?: import("../../../graph/graph-search.js").DialogueSearchHit[];
   /** Active workbench topic container (function node on the canvas). */
   workbench?: import("../../../learning/workbench-topic").WorkbenchContextView;
+  /**
+   * R9 cross-session reminder: unresolved obligations (dangling deps,
+   * unwired files, unreferenced container/loader configs, doc drift) from
+   * previous sessions, read from the promise ledger. Additive-only; present
+   * only when open entries exist.
+   */
+  pendingFollowThroughs?: string;
   /** What this preview wrote into the dialogue/workbench graph. */
   dialogueCapture?: DialogueCapture;
   /**
@@ -438,6 +445,17 @@ export interface ReportOutcomeResult {
   deviation?: string;
   /** Verification level derived from the supplied evidence package. */
   evidence?: import("../../../learning/evidence").EvidenceVerification;
+  /**
+   * R9 closing audit attached to this success report: unresolved follow-through
+   * findings (dangling deps / unwired files / unreferenced configs / doc drift)
+   * recorded into the promise ledger. Strict mode (GRAPHFLOW_AUDIT_STRICT=1)
+   * instead refuses the report via `ok:false`.
+   */
+  closingAudit?: {
+    errors: number;
+    warnings: number;
+    reminder: string;
+  };
   /**
    * Optional Engineering KG links written when callers pass requirementIds /
    * conceptIds / codeHints (episode → derived_from → eng nodes).

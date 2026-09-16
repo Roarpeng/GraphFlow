@@ -75,6 +75,7 @@ export function buildCliUsage(): string {
     "  knowledge extract [--all|--session <name|id>] [--limit N] [--dry-run] [--json]  # deterministic Concept/Requirement extraction from dialogue turns",
     "  working-set --files <a.ts,b.ts> [--max-files N] [--json] [--config <path>]  # R8-1: prefetch candidates for the active working set (callers/callees/tests)",
     "  challenge --files <a.ts,b.ts> [--max N] [--json] [--config <path>]  # R8-2: graph-diff challenge list after edits (external callers / requirements / deleted symbols)",
+    "  audit [--since <ref>] [--strict] [--json] [--config <path>]  # R9: closing audit — dangling deps/orphan files/container&loader refs/doc drift before calling it done",
     "  spawn-receipt --task \"<text>\" [--query \"<text>\"] [--max-anchors N] [--json] [--config <path>]  # R8-3: compact subagent birth receipt (anchors + retrieval instructions)",
     "  facts ask --question \"<text>\" [--as-of <iso-date>] [--limit N] [--json] [--config <path>]  # R8-4: temporal fact lookup (effective vs superseded conclusions at a point in time)",
     "  quote --estimate-tokens <n> [--min-samples N] [--json] [--config <path>]  # R8-5: task budget quote from paired-efficiency history (honest confidence)",

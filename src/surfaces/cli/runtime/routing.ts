@@ -679,6 +679,47 @@ export async function reportOutcome(
     }
   }
 
+  // R9 closing audit: before a success report stands, reconcile observable
+  // follow-through obligations (deps installed? files wired? configs
+  // referencing new artifacts? docs updated?). Default is advisory — findings
+  // ride on the result and enter the promise ledger for the next session's
+  // opening reminder. GRAPHFLOW_AUDIT_STRICT=1 refuses success while findings
+  // remain (ok=false). A clean audit resolves open ledger entries.
+  let closingAudit: ReportOutcomeResult["closingAudit"];
+  if (success) {
+    try {
+      const { runAudit } = await import("../../../audit/audit.js");
+      const audit = await runAudit(
+        {},
+        config.graphPolicy.workspaceRoot ?? process.cwd(),
+        config
+      );
+      const { recordPromiseLedger, resolvePromisesIfClean } = await import(
+        "../../../audit/promise-ledger.js"
+      );
+      if (audit.findings.length > 0) {
+        await recordPromiseLedger(graphClient, {
+          sessionId: updated.id,
+          recordedAt: new Date().toISOString(),
+          findingIds: audit.findings.map((finding) => finding.id),
+          messages: audit.findings.map((finding) => `[${finding.kind}] ${finding.message}`),
+          status: "open",
+        });
+        const reminder =
+          `收尾审计未清零：${audit.summary.errors} 项错误 / ${audit.summary.warnings} 项警告` +
+          `（已登记承诺账本，下次会话开局提醒；graphflow audit 查看明细）`;
+        if (audit.strict && !audit.ok) {
+          return { ok: false, reason: `strict 模式拒绝上报成功：${reminder}` };
+        }
+        closingAudit = { errors: audit.summary.errors, warnings: audit.summary.warnings, reminder };
+      } else {
+        await resolvePromisesIfClean(graphClient, []);
+      }
+    } catch {
+      // Audit failure never blocks outcome reporting (fail-open).
+    }
+  }
+
   return {
     ok: true,
     episodeId: updated.id,
@@ -687,6 +728,7 @@ export async function reportOutcome(
     ...(updated.deviation !== undefined ? { deviation: updated.deviation } : {}),
     ...(evidenceInput ? { evidence: verifyOutcomeEvidence(updated.evidence) } : {}),
     ...(engineeringLinks ? { engineeringLinks } : {}),
+    ...(closingAudit ? { closingAudit } : {}),
   };
 }
 
