@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { resolveRuntimeCwd, requireWorkspaceFolder } from "./workspace";
 import {
   buildAgentWorkItemsHtml,
@@ -683,12 +684,40 @@ async function runMcpBootstrap(
   mcpAgents: Awaited<ReturnType<GraphFlowRuntime["getSettingsPanelStatus"]>>["mcpAgents"];
 } | undefined> {
   const extensionPath = context.extensionPath;
-  const bundledRuntimeRoot = join(extensionPath, "vendor", "graphflow");
+  const stableRoot = join(homedir(), ".graphflow", "runtime");
+  // One-command + never-dangling contract: sync the bundled runtime + launcher
+  // into the STABLE home (outside any versioned extension directory) and point
+  // every MCP entry there. IDE upgrades delete old extension directories —
+  // entries pointing at them were the recurring "Cannot find module
+  // mcp-launcher.cjs" field reports. Sync failure falls back to the extension
+  // copy for THIS install; the next activation retries the sync.
+  let launchRoot = extensionPath;
+  try {
+    const { cpSync, mkdirSync } = await import("node:fs");
+    mkdirSync(stableRoot, { recursive: true });
+    cpSync(join(extensionPath, "vendor", "graphflow"), stableRoot, { recursive: true, force: true });
+    for (const launcher of ["mcp-launcher.cjs", "mcp-launcher.cmd"]) {
+      const source = join(extensionPath, launcher);
+      if (existsSync(source)) {
+        cpSync(source, join(stableRoot, launcher), { force: true });
+      }
+    }
+    if (existsSync(join(stableRoot, "dist", "surfaces", "mcp", "server.js"))) {
+      launchRoot = stableRoot;
+      output.appendLine(`[GraphFlow] Stable runtime synced: ${stableRoot}`);
+    } else {
+      output.appendLine(`[GraphFlow] Stable runtime sync incomplete; using extension copy this run.`);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    output.appendLine(`[GraphFlow] Stable runtime sync failed (${message}); using extension copy this run.`);
+  }
+  const bundledRuntimeRoot = launchRoot === stableRoot ? stableRoot : join(extensionPath, "vendor", "graphflow");
   const bundledServerPath = join(bundledRuntimeRoot, "dist", "surfaces", "mcp", "server.js");
   const launcherPath =
     process.platform === "win32"
-      ? join(extensionPath, "mcp-launcher.cmd")
-      : join(extensionPath, "mcp-launcher.cjs");
+      ? join(launchRoot, "mcp-launcher.cmd")
+      : join(launchRoot, "mcp-launcher.cjs");
   const cwdRoot = workspaceRoot ?? process.cwd();
   // The four runtime calls below are independent: an MCP install that succeeded
   // must not be reported as failed because a status/diagnose call threw (e.g. a

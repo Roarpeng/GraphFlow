@@ -907,6 +907,30 @@ export function repairDanglingGraphflowMcpEntries(options: { workspaceRoot?: str
 }
 
 /**
+ * Stable runtime home: `~/.graphflow/runtime`. The VSIX keeps a self-contained
+ * copy of its bundled runtime + launcher here and points MCP entries at it, so
+ * entries survive extension upgrades (IDEs delete the old versioned extension
+ * directory — the historical source of every dangling-launcher report).
+ */
+export function stableRuntimeRoot(): string {
+  return join(homedir(), ".graphflow", "runtime");
+}
+
+/**
+ * Resolve the stable runtime copy (VSIX-managed). Returns undefined when the
+ * copy has not been synced yet — callers fall through to npx.
+ */
+export function resolveStableRuntimeInstall(
+  deps: { exists?: (path: string) => boolean } = {}
+): GlobalGraphflowInstall | undefined {
+  const exists = deps.exists ?? existsSync;
+  const runtimeRoot = stableRuntimeRoot();
+  const serverPath = join(runtimeRoot, "dist", "surfaces", "mcp", "server.js");
+  if (!exists(serverPath)) return undefined;
+  return { serverPath, runtimeRoot };
+}
+
+/**
  * Public probe: does the `graphflow` entry in this config file launch a
  * missing file? Shape-aware via the profile registry (zcode/opencode
  * nesting, TOML skipped).
@@ -2251,7 +2275,7 @@ export function installMcpToDetectedAgents(options: McpInstallOptions): McpInsta
   const globalInstall = options.preferGlobalInstall
     ? probeOverride === null
       ? undefined
-      : probeOverride ?? resolveGlobalGraphflowInstall()
+      : probeOverride ?? resolveGlobalGraphflowInstall() ?? resolveStableRuntimeInstall()
     : undefined;
   const effectiveOptions: McpInstallOptions =
     globalInstall !== undefined
