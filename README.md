@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-[![npm version](https://img.shields.io/badge/npm-1.21.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.22.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 

@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.22.0] - 2026-09-18
+
+### Fixed — VSIX 安装同样一键完成，且条目永不因升级悬空（三平台）
+
+「再好的项目，安装不上也是扯淡」——两种安装方式现在都是一条命令全自动，且写入的 MCP 条目在任何升级路径下都不会悬空：
+
+- **稳定运行时目录 `~/.graphflow/runtime/`**：VSIX 激活时把自带 runtime + launcher 同步到该稳定目录（IDE 升级会删除带版本号的扩展目录——历史上所有 `Cannot find module mcp-launcher.cjs` 悬空报告的根源），MCP 条目全部指向稳定路径；每次激活刷新副本，升级 = 自动重写。同步失败 fail-open 回退扩展副本，下次激活重试。
+- **CLI 直连候选链**：`preferGlobalInstall` 解析顺序变为 npm 全局包 → 稳定 runtime → npx 回退——只装 VSIX（没装 npm 包）的用户经 CLI 重装时也能拿到直连条目而非 npx。
+- **三平台保证**：全部路径经 `os.homedir()` + `path.join`；`fs.cpSync` 跨平台复制；由既有 ubuntu(node20/22)/windows/macos CI 矩阵验证。npm 路径（v1.21.0 的 postinstall 全自动）不变。
+- 测试 m100（3 条）：稳定根路径（隔离 HOME）、探测命中/未同步 fail-open、直连候选链永不悬空（直连条目引用文件必须存在）。
+
 ## [1.21.0] - 2026-09-18
 
 ### Fixed — 一条命令承诺：`npm install -g @roarpeng/graphflow` = 安装 + 注册 + 检测 + 修复
