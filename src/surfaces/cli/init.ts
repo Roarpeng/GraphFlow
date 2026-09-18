@@ -356,6 +356,11 @@ export function buildInstallReport(
     strategy: "npx",
     installScope: "user",
     workspaceRoot,
+    // Must match the HostAdapter slices: without this the legacy sweep runs
+    // AFTER them and overwrites direct-launch entries (global install /
+    // stable runtime) back to npx — the zcode direct entry silently never
+    // survived a full `graphflow install` until this flag (postmortem R1).
+    preferGlobalInstall: true,
   });
   const dshHarness: DshHarnessInstallResult = {
     status: dshInstalled.status === "unsupported" ? "skipped" : dshInstalled.status,

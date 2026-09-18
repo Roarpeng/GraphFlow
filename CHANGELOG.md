@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.23.1] - 2026-09-18
+
+### Fixed — 潜伏自 v1.19.1：完整 install 流程覆盖直连条目
+
+- **legacy sweep 覆盖 bug**：`buildInstallReport` 在 HostAdapter 写完直连条目后，后续的全宿主 npx sweep 再写一遍，把直连覆盖回 npx——**zcode 直连在完整 `graphflow install` 里从未生效过**（单测全绿因为都绕过了完整流程；本机端到端复现定位）。修复：legacy sweep 加 `preferGlobalInstall: true` 与 adapter 一致。端到端验证：完整 install 后条目 = 稳定 node + 全局 server.js + cwd=包根。
+- **新增 [docs/postmortem-windows-install.md](docs/postmortem-windows-install.md)**：v1.18.6→v1.23.1 六次安装故障的根因表 + **八条守则**（端到端冒烟非 existsSync / 配置只指向稳定目录 / 启动链优先级 / peer 显式声明 / install 带悬空修复 / 文档标 shell / 干净环境发版前演练 / registry 不可控自保）+ 支持排障速查表。
+
 ## [1.23.0] - 2026-09-18
 
 ### Fixed — Windows 双故障根因修复（v1.22.0 回归 + npx peer 丢失）
