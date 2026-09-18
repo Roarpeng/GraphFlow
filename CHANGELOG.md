@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.21.0] - 2026-09-18
+
+### Fixed — 一条命令承诺：`npm install -g @roarpeng/graphflow` = 安装 + 注册 + 检测 + 修复
+
+Windows 实战暴露的链路缺陷：postinstall 全局安装时走的是旧的手工组装流程（只装部分宿主 + 强制 npx 条目），既不覆盖 20 宿主三件套也不做全局直连，更不会修复悬空条目——用户一条命令后仍需手动折腾。彻底收敛：
+
+- **postinstall 全局分支改为调用完整 CLI `install`**（单一事实来源）：20 宿主 HostAdapter 三件套注册 + 全局安装直连条目 + 悬空修复 + doctor 摘要，一条命令全部完成；本地安装/CI 行为不变。
+- **悬空 MCP 条目检测 + 自动修复**：新增 `repairDanglingGraphflowMcpEntries`——扫描所有检测宿主的 `graphflow` 条目，`command`/`args` 中的绝对路径指向已不存在的文件（典型：IDE 升级删除了旧扩展目录的 `mcp-launcher.cjs`）→ `graphflow install` 开头自动重写为当前最佳形态（全局直连优先）。`install` 输出新增 `[REPAIRED]` 行。
+- **doctor 悬空可见性**：MCP 检查对条目启动目标做存在性校验，悬空标 `missing (dangling entry)` 并给出死路径与修复指引（`graphflow install` 一键重写）；覆盖 legacy 与 HostAdapter 两条检查路径。
+- 测试 m99（4 条）：死扩展 launcher 检测 + doctor 标记、健康条目不误报、修复重写为可启动形态、无悬空时 no-op。
+
 ## [1.20.1] - 2026-09-16
 
 ### Docs — R9/R9 文档收口

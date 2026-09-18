@@ -346,6 +346,9 @@ export function getProfileHostStatus(
       installed: item.installed,
       scope: item.scope,
       agentName: item.agentName,
+      ...(item.dangling === true
+        ? { dangling: true as const, danglingTargets: item.danglingTargets ?? [] }
+        : {}),
     })),
   };
 

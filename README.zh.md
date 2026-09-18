@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.20.1-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.21.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
@@ -10,7 +10,7 @@
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
-**v1.20.1** 已发：**R9 文档收口**——新增 docs/closing-audit.md（三触点/检查器矩阵/声明式规则示例/基线/诚实边界）；README 中英补 R9/R8 能力行与 CLI 参考。v1.20.0 的 R9 承诺账本 + 收尾审计完整可用。
+**v1.21.0** 已发：**一条命令承诺**——`npm install -g @roarpeng/graphflow` = 安装+注册+检测+修复全完成：postinstall 全局安装自动跑完整 CLI install（20 宿主三件套 + 全局直连 + 悬空条目修复 + doctor 摘要）；doctor 对 MCP 条目启动目标做存在性校验，悬空标 missing 并一键重写。
 
 ## 快速开始
 
@@ -37,6 +37,10 @@ MCP 入口：
 ### 注册 Skill + MCP 到本机 Agent（一条命令）
 
 ```bash
+```bash
+npm install -g @roarpeng/graphflow   # 一条命令（含安装）：全局安装的 postinstall 自动完成注册+检测+悬空修复
+```
+
 npx @roarpeng/graphflow@latest doctor     # 先自检：列出本机检测到的 Agent
 npx @roarpeng/graphflow@latest install    # 向所有检测到的 Agent 注册（幂等，可重跑）
 npx @roarpeng/graphflow@latest uninstall  # 一键移除所有 Agent 上的注册

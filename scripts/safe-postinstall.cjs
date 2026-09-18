@@ -532,50 +532,33 @@ function main() {
       console.log("[GraphFlow] 首次安装，将安装所有 Skill/Rules/MCP 文件");
     }
 
-    const skillSourceDir = getSkillSourceDir();
-    const traeDirs = getTraeUserDirs();
-
-    const skillResults = [];
-    if (skillSourceDir && traeDirs.length > 0) {
-      for (const trae of traeDirs) {
-        const result = installSkill(trae.skillsDir, skillSourceDir);
-        skillResults.push({ agent: trae.name, ...result });
-        console.log(`[GraphFlow] Skill for ${trae.name}: ${result.status}${result.reason ? ` (${result.reason})` : ""}`);
+    // ── 一条命令承诺：全局安装 = 注册 + 检测 + 悬空修复 全自动 ──
+    // The full CLI install is the single source of truth (20 hosts via the
+    // HostAdapter registry, three-piece registration, direct-launch entries
+    // when a global install exists, dangling-entry repair, doctor summary).
+    // The legacy hand-rolled steps below were a partial fork of that flow and
+    // are what left users with npx-only or dangling entries.
+    const cliInstallPath = join(__dirname, "..", "dist", "surfaces", "cli", "index.js");
+    if (existsSync(cliInstallPath)) {
+      console.log("[GraphFlow] 运行完整安装（注册 MCP + Skill + 指令；自动修复悬空条目）...");
+      const installResult = spawnSync(process.execPath, [cliInstallPath, "install"], {
+        encoding: "utf8",
+        timeout: 120_000,
+        env: { ...process.env, GRAPHFLOW_SKIP_POSTINSTALL: "1" },
+      });
+      const installOut = `${installResult.stdout || ""}${installResult.stderr || ""}`.trim();
+      if (installOut) {
+        for (const line of installOut.split(/\r?\n/).slice(-60)) {
+          console.log(`[GraphFlow] ${line}`);
+        }
       }
-    }
-
-    // ─── Qoder Skill 安装（国际版 ~/.qoder/skills + CN 版 ~/.qoder-cn/skills） ───
-    const qoderDirs = getQoderUserDirs();
-    if (skillSourceDir && qoderDirs.length > 0) {
-      for (const qoder of qoderDirs) {
-        const result = installSkill(qoder.skillsDir, skillSourceDir);
-        skillResults.push({ agent: qoder.name, ...result });
-        console.log(`[GraphFlow] Skill for ${qoder.name}: ${result.status}${result.reason ? ` (${result.reason})` : ""}`);
+      if (installResult.status !== 0) {
+        console.warn("[GraphFlow] 完整安装返回非零退出码（核心已安装）。可手动重跑: graphflow install");
+      } else {
+        console.log("[GraphFlow] 安装+注册+检测 完成。重启各 Agent 后生效。");
       }
-    }
-
-    const mcpResult = runMcpInstaller();
-    if (mcpResult.status === "installed" && Array.isArray(mcpResult.details)) {
-      for (const item of mcpResult.details) {
-        console.log(`[GraphFlow] MCP for ${item.agentName} (${item.scope}): ${item.status}`);
-      }
-    } else if (mcpResult.status === "skipped") {
-      console.log(`[GraphFlow] MCP install skipped: ${mcpResult.reason}`);
-    } else if (mcpResult.status === "error") {
-      console.log(`[GraphFlow] MCP install encountered errors: ${mcpResult.error || "unknown"}`);
-      console.log("[GraphFlow] You can manually run: npx @roarpeng/graphflow install");
-    }
-
-    // ─── Cursor Rules 安装 ───
-    const cursorRulesResult = installCursorRules();
-    if (cursorRulesResult) {
-      console.log(`[GraphFlow] Cursor Rules: ${cursorRulesResult.status}${cursorRulesResult.reason ? ` (${cursorRulesResult.reason})` : ""}`);
-    }
-
-    // ─── Claude Code 约定安装 ───
-    const claudeMdResult = installClaudeMd();
-    if (claudeMdResult) {
-      console.log(`[GraphFlow] Claude Code 约定: ${claudeMdResult.status}${claudeMdResult.reason ? ` (${claudeMdResult.reason})` : ""}`);
+    } else {
+      console.warn("[GraphFlow] dist 未构建，跳过自动注册。请运行: graphflow install");
     }
 
     // 写入当前版本号标记文件
@@ -591,6 +574,7 @@ function main() {
     console.warn("[GraphFlow]   npx @roarpeng/graphflow install");
   }
 }
+
 
 if (require.main === module) {
   main();
