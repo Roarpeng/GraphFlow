@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import { resolveConfig, resolveEfficiencyPolicy, toObservationPolicy } from "../../config/resolve";
 import { packObservation, recallObservation } from "../../observations/index";
@@ -1758,6 +1760,39 @@ function formatValidationResult(data: ConfigValidationResult): string {
   return lines.join("\n");
 }
 
+/**
+ * First-run bootstrap backstop. Runs at most once per machine (guarded by the
+ * postinstall version marker). Covers two real-world holes in the one-command
+ * promise: (a) npm mirrors serving stale/partial packages whose postinstall
+ * did nothing visible, (b) `ignore-scripts=true` environments that skip
+ * postinstall entirely. The first real command completes registration; help /
+ * version stay read-only.
+ */
+async function runFirstUseBootstrap(command: string): Promise<void> {
+  if (process.env.GRAPHFLOW_SKIP_POSTINSTALL === "1" || process.env.CI === "true") return;
+  if (command === "help" || command === "--help" || command === "-h" || command === "version" || command === "--version" || command === "-v") return;
+  const markerPath = join(homedir(), ".graphflow-install-version");
+  try {
+    if (existsSync(markerPath)) return;
+    console.log("[GraphFlow] 首次使用检测：尚未完成注册（postinstall 可能被跳过或镜像包不完整），自动执行安装注册...");
+    // Lazy require (not a top-level import): init.ts and this entrypoint
+    // would form an import cycle otherwise.
+    const { buildInstallReport, formatInstallLegacyText } = require("./init") as typeof import("./init");
+    const report = buildInstallReport(process.cwd());
+    console.log(formatInstallLegacyText(report));
+    writeFileSync(markerPath, getCliVersion(), "utf8");
+    console.log("[GraphFlow] 首次注册完成。若上方出现 Skill source not found，说明镜像包不完整——请用官方源重装：npm install -g @roarpeng/graphflow --registry=https://registry.npmjs.org");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[GraphFlow] 首次注册失败（不影响当前命令）：${message}。可手动执行 graphflow install。`);
+    try {
+      writeFileSync(markerPath, getCliVersion(), "utf8");
+    } catch {
+      // marker write failure → retried on the next command; harmless.
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const options = parseCliOptions(process.argv.slice(2));
   const command = options.command;
@@ -1767,6 +1802,13 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+
+  // First-run bootstrap backstop: mirrors can serve stale/partial packages
+  // and `ignore-scripts` environments skip postinstall silently — either way
+  // the user lands here never having registered. The first graphflow command
+  // completes the registration automatically (once), so "install and run" is
+  // one command even on those machines.
+  await runFirstUseBootstrap(command);
 
   if (command === "help" || command === "--help" || command === "-h") {
     console.log(buildCliUsage());
