@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.22.1] - 2026-09-18
+
+### Fixed — 首次运行自动注册兜底（镜像残缺包 / ignore-scripts 环境的"一条命令"补洞）
+
+Windows 实战：用户从 npm 镜像装到**旧版（1.20.1）且包内容残缺**（skills 资产缺失、postinstall 静默）——注册从未发生且用户零感知。新增兜底：`graphflow` 命令**首次执行**时检测到版本标记文件不存在（postinstall 从未成功跑过）→ 自动执行完整安装注册（含悬空修复）并写入标记，仅此一次；help/version 保持只读不触发。输出中若出现 `Skill source not found` 会明确提示镜像包不完整并给出官方源重装命令。CI/GRAPHFLOW_SKIP_POSTINSTALL 环境不触发。
+
 ## [1.22.0] - 2026-09-18
 
 ### Fixed — VSIX 安装同样一键完成，且条目永不因升级悬空（三平台）
