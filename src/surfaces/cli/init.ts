@@ -20,7 +20,10 @@ import {
   formatModelConfigGuide,
   getMcpInstallStatus,
   installMcpToDetectedAgents,
+  probeDanglingGraphflowEntry,
+  repairDanglingGraphflowMcpEntries,
   uninstallMcpFromDetectedAgents,
+  type DanglingRepairResult,
   type McpInstallResult,
   type McpRemoveResult,
 } from "../../integrations/agent-mcp-installer";
@@ -303,6 +306,8 @@ export interface InstallReport {
   /** True when MCP install had no errors and doctor reports no missing items. */
   ok: boolean;
   remediation: string[];
+  /** R9+: dead-entry repairs (entries launching missing files) performed before injection. */
+  repairs: DanglingRepairResult[];
 }
 
 export interface BuildInstallReportOptions {
@@ -316,6 +321,10 @@ export function buildInstallReport(
 ): InstallReport {
   const bootstrapGraph = options.bootstrapGraph !== false;
   const globalConfig = ensureGlobalGraphFlowConfig();
+  // One-command promise: repair dead entries (extension launchers removed by
+  // IDE upgrades, moved installs) BEFORE the normal injection pass so the
+  // injector's overwrite lands on a clean slate.
+  const repairs = repairDanglingGraphflowMcpEntries({ workspaceRoot });
   // HostAdapter is the per-host install authority for every registry host:
   // hand-written slices (DSH / Cursor / Claude Code / Kimi Code) and the generic
   // profile-backed slice for the rest. Adding a host no longer needs edits here.
@@ -427,6 +436,7 @@ export function buildInstallReport(
       status: globalConfig.status,
       ...(globalConfig.message ? { message: globalConfig.message } : {}),
     },
+    repairs,
     skills,
     mcp,
     claudeCodeHooks,
@@ -441,6 +451,12 @@ export function formatInstallLegacyText(report: InstallReport): string {
   const lines: string[] = [];
   lines.push("[START] Installing GraphFlow — global config + skills/rules + MCP...");
 
+  for (const repair of report.repairs) {
+    const icon = repair.repaired ? "[REPAIRED]" : "[WARN]";
+    lines.push(
+      `${icon} dangling MCP entry for ${repair.agentName}: ${repair.danglingTargets.join(", ")} -> rewritten (${repair.configPath})${repair.message ? ` (${repair.message})` : ""}`
+    );
+  }
   if (report.globalConfig.status === "created") {
     lines.push(`[CREATED] Global config: ${report.globalConfig.path}`);
   } else if (report.globalConfig.status === "error") {
@@ -647,13 +663,17 @@ function pushHostAdapterDoctorChecks(checks: DoctorCheckItem[], hostId: string):
   const mcpTargets = status.mcpTargets ?? [];
   if (mcpTargets.length > 0) {
     for (const target of mcpTargets) {
+      const dangling = probeDanglingGraphflowEntry(target.path);
       checks.push({
         category: "mcp",
-        agent: target.agentName ?? status.agent,
+        agent: dangling ? `${target.agentName ?? status.agent} (dangling entry)` : target.agentName ?? status.agent,
         path: target.path,
         scope: target.scope ?? "user",
-        status: toDoctorStatus(target.installed, true),
+        status: dangling ? "missing" : toDoctorStatus(target.installed, true),
         detected: true,
+        ...(dangling
+          ? { message: `launches missing file(s): ${dangling.danglingTargets.join(", ")} — run \`graphflow install\` to rewrite` }
+          : {}),
       });
     }
   } else if (status.mcpPath) {
@@ -736,11 +756,16 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
     if (HOST_ADAPTER_MCP_IDS.has(status.agentId)) continue;
     checks.push({
       category: "mcp",
-      agent: status.agentName,
+      agent: status.dangling === true ? `${status.agentName} (dangling entry)` : status.agentName,
       path: status.configPath,
       scope: status.scope,
-      status: toDoctorStatus(status.installed, status.detected),
+      // A dangling entry is worse than missing: the agent keeps retrying a
+      // dead launch target. Doctor flags it as missing with the dead path.
+      status: status.dangling === true ? "missing" : toDoctorStatus(status.installed, status.detected),
       detected: status.detected,
+      ...(status.dangling === true
+        ? { message: `launches missing file(s): ${(status.danglingTargets ?? []).join(", ")} — run \`graphflow install\` to rewrite` }
+        : {}),
     });
   }
 

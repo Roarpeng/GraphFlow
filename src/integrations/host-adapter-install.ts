@@ -113,6 +113,8 @@ export interface HostAdapterHostStatus {
     installed: boolean;
     scope?: "user" | "workspace";
     agentName?: string;
+    dangling?: true;
+    danglingTargets?: string[];
   }>;
 }
 

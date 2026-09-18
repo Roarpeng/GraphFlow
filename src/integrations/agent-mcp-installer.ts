@@ -130,6 +130,9 @@ export interface McpAgentInstallStatus {
   scope: "user" | "workspace";
   detected: boolean;
   installed: boolean;
+  /** Present when the entry exists but launches a missing file (dead launcher path). */
+  dangling?: true;
+  danglingTargets?: string[];
 }
 
 export type McpConfigFormat = "json" | "codex-toml" | "opencode" | "zcode";
@@ -774,11 +777,158 @@ export function getMcpInstallStatus(serverName = "graphflow"): McpAgentInstallSt
           serverName,
           userTarget.configFormat ?? "json"
         ),
+        ...(findDanglingEntryTargets(userTarget.configPath, userTarget.serversKey, serverName, userTarget.configFormat ?? "json") ?? {}),
       });
     }
   }
 
   return statuses;
+}
+
+/**
+ * Field report shape: a `graphflow` entry exists but the file it launches is
+ * gone (typical: an entry pointing at an old extension directory's
+ * mcp-launcher.cjs after the IDE upgraded and removed that directory).
+ */
+export interface DanglingEntryInfo {
+  /** True when the entry references at least one absolute path that no longer exists. */
+  dangling: true;
+  /** The dead path(s) the entry currently points at. */
+  danglingTargets: string[];
+}
+
+function isLikelyFilePath(value: string): boolean {
+  if (!value) return false;
+  // Absolute paths only — bare commands ("npx", "node") resolve via PATH and
+  // cannot be existence-checked portably.
+  return value.startsWith("/") || value.startsWith("\\\\") || /^[A-Za-z]:[\\/]/.test(value);
+}
+
+function collectEntryPathLikeValues(entry: unknown): string[] {
+  if (typeof entry !== "object" || entry === null) return [];
+  const record = entry as Record<string, unknown>;
+  const values: string[] = [];
+  if (typeof record.command === "string" && isLikelyFilePath(record.command)) {
+    values.push(record.command);
+  }
+  if (Array.isArray(record.args)) {
+    for (const arg of record.args) {
+      if (typeof arg === "string" && isLikelyFilePath(arg)) values.push(arg);
+    }
+  }
+  return values;
+}
+
+/**
+ * Read one config file's `graphflow` entry and report whether it launches a
+ * missing file. Returns undefined when the entry is absent or unreadable —
+ * dangling detection must never crash status reporting.
+ */
+function findDanglingEntryTargets(
+  configPath: string,
+  serversKey: McpServersKey,
+  serverName: string,
+  configFormat: McpConfigFormat
+): DanglingEntryInfo | undefined {
+  if (configFormat === "codex-toml") {
+    // TOML command/args live in free-form text; skip precise dangling checks.
+    return undefined;
+  }
+  try {
+    if (!existsSync(configPath)) return undefined;
+    const json = readJsonConfig(configPath);
+    let entry: unknown;
+    if (configFormat === "opencode") {
+      entry = ((json.mcp as Record<string, unknown> | undefined) ?? {})[serverName];
+    } else if (configFormat === "zcode") {
+      entry = (((json.mcp as Record<string, unknown> | undefined) ?? {}).servers as Record<string, unknown> | undefined)?.[serverName];
+    } else {
+      entry = (json[serversKey] as Record<string, unknown> | undefined)?.[serverName];
+    }
+    if (entry === undefined) return undefined;
+    const pathLike = collectEntryPathLikeValues(entry);
+    const dead = pathLike.filter((p) => !existsSync(p));
+    if (dead.length === 0) return undefined;
+    return { dangling: true, danglingTargets: dead };
+  } catch {
+    return undefined;
+  }
+}
+
+export interface DanglingRepairResult {
+  agentId: string;
+  agentName: string;
+  configPath: string;
+  repaired: boolean;
+  danglingTargets: string[];
+  message?: string;
+}
+
+/**
+ * One-command repair: rewrite every detected host's `graphflow` entry whose
+ * launch target no longer exists (dead extension launcher paths after IDE
+ * upgrades, moved global installs, ...). Rewrites go through the normal
+ * injector, so the replacement entry is the current best shape (direct
+ * launch when a global install exists, npx otherwise). Idempotent and
+ * fail-open per target.
+ */
+export function repairDanglingGraphflowMcpEntries(options: { workspaceRoot?: string } = {}): DanglingRepairResult[] {
+  const results: DanglingRepairResult[] = [];
+  const seenAgent = new Set<string>();
+  for (const status of getMcpInstallStatus()) {
+    if (seenAgent.has(status.agentId)) continue;
+    seenAgent.add(status.agentId);
+    // Exact-shape re-read via the profile registry (handles zcode/opencode
+    // nesting and TOML skips) — status.dangling is the fast path hint.
+    const dangling =
+      findExactDanglingInfo(status.configPath, "graphflow") ??
+      (status.dangling === true
+        ? { dangling: true as const, danglingTargets: status.danglingTargets ?? [] }
+        : undefined);
+    if (!dangling) continue;
+    const reinstalled = installMcpToDetectedAgents({
+      strategy: "npx",
+      installScope: "user",
+      agentIdsOverride: [status.agentId],
+      preferGlobalInstall: true,
+      ...(options.workspaceRoot ? { workspaceRoot: options.workspaceRoot } : {}),
+    });
+    const ok = reinstalled.some((r) => r.agentId === status.agentId && r.status !== "error");
+    results.push({
+      agentId: status.agentId,
+      agentName: status.agentName,
+      configPath: status.configPath,
+      repaired: ok,
+      danglingTargets: dangling.danglingTargets,
+      ...(ok ? {} : { message: reinstalled.find((r) => r.agentId === status.agentId)?.message ?? "reinstall failed" }),
+    });
+  }
+  return results;
+}
+
+/**
+ * Public probe: does the `graphflow` entry in this config file launch a
+ * missing file? Shape-aware via the profile registry (zcode/opencode
+ * nesting, TOML skipped).
+ */
+export function probeDanglingGraphflowEntry(configPath: string, serverName = "graphflow"): DanglingEntryInfo | undefined {
+  return findExactDanglingInfo(configPath, serverName);
+}
+
+function findExactDanglingInfo(configPath: string, serverName: string): DanglingEntryInfo | undefined {
+  for (const profile of buildAgentProfiles()) {
+    for (const target of profile.userTargets) {
+      if (target.configPath !== configPath) continue;
+      const found = findDanglingEntryTargets(
+        target.configPath,
+        target.serversKey,
+        serverName,
+        target.configFormat ?? "json"
+      );
+      if (found) return found;
+    }
+  }
+  return undefined;
 }
 
 const MCP_STDIO_ENV: Record<string, string> = {

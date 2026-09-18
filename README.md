@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-[![npm version](https://img.shields.io/badge/npm-1.20.1-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.21.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
@@ -293,6 +293,10 @@ npx @roarpeng/graphflow install
 ### Register Skill + MCP on your machine (one command)
 
 ```bash
+```bash
+npm install -g @roarpeng/graphflow   # one command including the install: global postinstall registers, checks, and repairs automatically
+```
+
 npx @roarpeng/graphflow@latest doctor     # self-check: list agents detected on this machine
 npx @roarpeng/graphflow@latest install    # register into every detected agent (idempotent, safe to re-run)
 npx @roarpeng/graphflow@latest uninstall  # remove the registration from every agent
