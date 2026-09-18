@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.23.0] - 2026-09-18
+
+### Fixed — Windows 双故障根因修复（v1.22.0 回归 + npx peer 丢失）
+
+- **稳定 runtime 布局 bug（v1.22.0 引入，本次修复）**：v1.22.0 把 vendor **内容**铺到 `~/.graphflow/runtime/` 根，但 launcher 按 `__dirname/vendor/graphflow/...` 定位 → `server not found: ...\runtime\vendor\graphflow\...`。现统一镜像扩展布局（`runtime/vendor/graphflow/dist/...`），且 launcher 增加**双布局回退**（vendor 布局 → 扁平布局），CLI 稳定探测同时接受两种布局（兼容 v1.22.0 已写入的扁平副本）。
+- **npx 缓存 `Cannot find module 'ajv'`（peer 丢失免疫）**：`ajv-formats`（SDK 传递依赖）的 peer `ajv` 在镜像残缺/npx 解析下会丢失（现场：缓存里 ajv-formats 在、ajv 不在）。现将 **ajv + ajv-formats 显式声明为直接依赖**——任何解析路径下都强制存在。
+- launcher 冒烟测试（vendored 布局定位 server）；m100 更新双布局断言；全量 195 文件 / 1435 测试。
+
 ## [1.22.1] - 2026-09-18
 
 ### Fixed — 首次运行自动注册兜底（镜像残缺包 / ignore-scripts 环境的"一条命令"补洞）

@@ -917,17 +917,23 @@ export function stableRuntimeRoot(): string {
 }
 
 /**
- * Resolve the stable runtime copy (VSIX-managed). Returns undefined when the
- * copy has not been synced yet — callers fall through to npx.
+ * Resolve the stable runtime copy (VSIX-managed). The canonical layout mirrors
+ * the extension (`~/.graphflow/runtime/vendor/graphflow/dist/...`); the flat
+ * legacy layout (`~/.graphflow/runtime/dist/...`, written by v1.22.0) is
+ * accepted too. Returns undefined when no copy has been synced — callers fall
+ * through to npx.
  */
 export function resolveStableRuntimeInstall(
   deps: { exists?: (path: string) => boolean } = {}
 ): GlobalGraphflowInstall | undefined {
   const exists = deps.exists ?? existsSync;
   const runtimeRoot = stableRuntimeRoot();
-  const serverPath = join(runtimeRoot, "dist", "surfaces", "mcp", "server.js");
-  if (!exists(serverPath)) return undefined;
-  return { serverPath, runtimeRoot };
+  const vendored = join(runtimeRoot, "vendor", "graphflow");
+  for (const root of [vendored, runtimeRoot]) {
+    const serverPath = join(root, "dist", "surfaces", "mcp", "server.js");
+    if (exists(serverPath)) return { serverPath, runtimeRoot: root };
+  }
+  return undefined;
 }
 
 /**

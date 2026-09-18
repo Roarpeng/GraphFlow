@@ -58,13 +58,21 @@ describe("M100 stable runtime (VSIX one-command, never-dangling entries)", () =>
     withIsolatedHome(home, () => {
       // No synced copy yet → undefined (callers fall through to npx).
       expect(resolveStableRuntimeInstall()).toBeUndefined();
-      // Sync the layout the VSIX writes (~/.graphflow/runtime/dist/...).
-      mkdirSync(join(home, ".graphflow", "runtime", "dist", "surfaces", "mcp"), { recursive: true });
+      // Canonical layout the VSIX writes (~/.graphflow/runtime/vendor/graphflow/dist/...).
+      mkdirSync(join(home, ".graphflow", "runtime", "vendor", "graphflow", "dist", "surfaces", "mcp"), { recursive: true });
       writeFileSync(
-        join(home, ".graphflow", "runtime", "dist", "surfaces", "mcp", "server.js"),
+        join(home, ".graphflow", "runtime", "vendor", "graphflow", "dist", "surfaces", "mcp", "server.js"),
         "// server",
         "utf8"
       );
+      expect(resolveStableRuntimeInstall()).toMatchObject({
+        runtimeRoot: join(home, ".graphflow", "runtime", "vendor", "graphflow"),
+        serverPath: join(home, ".graphflow", "runtime", "vendor", "graphflow", "dist", "surfaces", "mcp", "server.js"),
+      });
+      // Legacy flat layout (v1.22.0) is still accepted.
+      rmSync(join(home, ".graphflow"), { recursive: true, force: true });
+      mkdirSync(join(home, ".graphflow", "runtime", "dist", "surfaces", "mcp"), { recursive: true });
+      writeFileSync(join(home, ".graphflow", "runtime", "dist", "surfaces", "mcp", "server.js"), "// server", "utf8");
       expect(resolveStableRuntimeInstall()).toMatchObject({
         runtimeRoot: join(home, ".graphflow", "runtime"),
         serverPath: join(home, ".graphflow", "runtime", "dist", "surfaces", "mcp", "server.js"),
@@ -77,7 +85,7 @@ describe("M100 stable runtime (VSIX one-command, never-dangling entries)", () =>
     mkdirSync(join(home, ".zcode"), { recursive: true });
     withIsolatedHome(home, () => {
       // Sync the VSIX-style stable runtime inside the isolated HOME.
-      const stableDir = join(home, ".graphflow", "runtime");
+      const stableDir = join(home, ".graphflow", "runtime", "vendor", "graphflow");
       mkdirSync(join(stableDir, "dist", "surfaces", "mcp"), { recursive: true });
       writeFileSync(join(stableDir, "dist", "surfaces", "mcp", "server.js"), "// server", "utf8");
 

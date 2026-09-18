@@ -9,13 +9,24 @@ process.env.GRAPHFLOW_MCP_STDIO = "1";
 process.env.GRAPHFLOW_LOG_JSON = "1";
 
 const extensionRoot = __dirname;
-const runtimeRoot = path.join(extensionRoot, "vendor", "graphflow");
-const serverPath = path.join(runtimeRoot, "dist", "surfaces", "mcp", "server.js");
+// Layout 1 (extension dir / stable runtime with vendor/): launcher sits next
+// to vendor/graphflow. Layout 2 (flat stable runtime): dist sits next to the
+// launcher. Try both so the launcher works from the extension directory AND
+// from ~/.graphflow/runtime regardless of which sync layout wrote it.
+const serverCandidates = [
+  path.join(extensionRoot, "vendor", "graphflow", "dist", "surfaces", "mcp", "server.js"),
+  path.join(extensionRoot, "dist", "surfaces", "mcp", "server.js"),
+];
+const serverPath = serverCandidates.find((candidate) => existsSync(candidate));
 
-if (!existsSync(serverPath)) {
-  console.error(`[GraphFlow MCP launcher] server not found: ${serverPath}`);
+if (!serverPath) {
+  console.error(
+    `[GraphFlow MCP launcher] server not found in any of:\n${serverCandidates.map((c) => `  - ${c}`).join("\n")}`
+  );
   process.exit(1);
 }
+// server.js = <root>/dist/surfaces/mcp/server.js → runtime root is 4 levels up.
+const runtimeRoot = path.dirname(path.dirname(path.dirname(path.dirname(serverPath))));
 
 function isWsl() {
   if (process.platform !== "linux") {

@@ -695,14 +695,20 @@ async function runMcpBootstrap(
   try {
     const { cpSync, mkdirSync } = await import("node:fs");
     mkdirSync(stableRoot, { recursive: true });
-    cpSync(join(extensionPath, "vendor", "graphflow"), stableRoot, { recursive: true, force: true });
+    // Mirror the extension layout (vendor/graphflow) so the launcher's
+    // __dirname/vendor/graphflow resolution works unchanged from the stable
+    // home; the launcher itself also accepts a flat dist/ layout.
+    cpSync(join(extensionPath, "vendor"), join(stableRoot, "vendor"), { recursive: true, force: true });
     for (const launcher of ["mcp-launcher.cjs", "mcp-launcher.cmd"]) {
       const source = join(extensionPath, launcher);
       if (existsSync(source)) {
         cpSync(source, join(stableRoot, launcher), { force: true });
       }
     }
-    if (existsSync(join(stableRoot, "dist", "surfaces", "mcp", "server.js"))) {
+    if (
+      existsSync(join(stableRoot, "vendor", "graphflow", "dist", "surfaces", "mcp", "server.js")) ||
+      existsSync(join(stableRoot, "dist", "surfaces", "mcp", "server.js"))
+    ) {
       launchRoot = stableRoot;
       output.appendLine(`[GraphFlow] Stable runtime synced: ${stableRoot}`);
     } else {
@@ -712,7 +718,8 @@ async function runMcpBootstrap(
     const message = err instanceof Error ? err.message : String(err);
     output.appendLine(`[GraphFlow] Stable runtime sync failed (${message}); using extension copy this run.`);
   }
-  const bundledRuntimeRoot = launchRoot === stableRoot ? stableRoot : join(extensionPath, "vendor", "graphflow");
+  const bundledRuntimeRoot =
+    launchRoot === stableRoot ? join(stableRoot, "vendor", "graphflow") : join(extensionPath, "vendor", "graphflow");
   const bundledServerPath = join(bundledRuntimeRoot, "dist", "surfaces", "mcp", "server.js");
   const launcherPath =
     process.platform === "win32"
