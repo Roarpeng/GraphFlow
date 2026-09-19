@@ -4,57 +4,31 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 
 扩展**内置 GraphFlow runtime**，安装 VSIX 后**不需要**工作区存在 GraphFlow 源码，也**不需要**运行 `npm run start`。
 
-## 当前版本
+## 版本与获取
 
-- Extension / runtime：**1.23.2**
 - 市场身份：`roarpeng.graphflow`（displayName **GraphFlow Context & Memory**）
-- 对应 VSIX：`../artifacts/graphflow-1.23.2.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
+- VSIX：[GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases) 的最新 `graphflow-<version>.vsix`，或本地 `npm run package:extension` 产物
+- 各版本变更历史见仓库 [CHANGELOG.md](../CHANGELOG.md)
 
 ## Office/PDF 文档转换（anydoc）
 
 在 **GraphFlow: Settings** 的「图谱」区块勾选 **Office / PDF**，需要时点 **安装解析器**。扩展会把 `@firecrawl/anydoc` 下到 `~/.graphflow/optional-deps`。关掉该项会跳过 Office/PDF，源码建图不受影响。
 
-## v1.18.x 要点
+## 核心能力
 
-- **大型项目索引提速 3.7–4×（v1.18.5）**：reference 边 DF 停用词预算 + 每文件上限（实测 ragflow 575 万→99 万条边，存储 860MB→193MB，首建 35s→9.5s）；解析改用 worker 池；索引尊重 `.gitignore` 并跳过生成/锁文件；增量保存改为追加式 delta 段（大库单文件保存从"重写整个 JSON"变为追加几 KB）
-- **MCP 自动安装不再因大图失败（v1.18.5）**：面板/状态路径改为只读，安装时不再自动索引整个工作区；图存储大图改为紧凑 + 分块写入、新增分块读取（超大图不再触发 `Invalid string length`）；启动步骤互相隔离，统计失败不再误报为安装失败
-
-- **跨宿主 workspace root 加固（v1.18.5）**：dsh / opencode 插件改用真实会话工作区；MCP 对 home/AppData 等 unsafe `rootDir` 返回**可恢复的错误 + 修复指引**（不再整次调用失败，安全策略不变）；新增 `CLAUDE_PROJECT_DIR` 工作区发现；规则/技能与托管指令块写入 `rootDir` 契约
-- **效率机制（SoL-Pi 借鉴，默认全开）**：**GraphFlow: Settings → 效率机制** 可逐项开关——大输出归档为句柄（ObservationPack）、日志压缩为逐字核验收据（Evidence-Preserving Reducer）、按观测压力自适应预算 + 压缩建议（Online Context Compact）、编辑+验证融合（Action Fusion）
-- **dsh 自动投影**：DeepSeek Harness 上把超阈值工具结果归档为句柄并替换模型可见内容；`GRAPHFLOW_D_DSH_PROJECTION=0` 关闭
-- **效率/能力门禁**：`governance release-gate` 新增 `--min-efficiency-qualifying` / `--max-capability-regressions` / `--min-anchor-recall-percent` / `--min-body-coverage-percent`
-- **宿主 hooks 扩展**：Cursor / Gemini / Codex 原生 hooks + opencode 插件安装切片；HostAdapter 的 doctor 覆盖 hooks
-
-## v1.17.x 要点
-
-- **证据诚实性（v1.17.0）**：token 节省改为**双口径**并列——对现实 top-K 文件读取 **95.6%**，对朴素 grep 基线 98.5%。两者回答不同问题，不可互换；现实中口径无法自我膨胀。打包后追加的载荷（对话召回行、工作台提示行）现计入 token 预算，`dialogueHits` 单独报为 `unbudgetedTokens`
-- **对话图真正接入上下文引擎（v1.17.0）**：修复 v1.14 声称的「L3 对话打包」在生产路径上的死代码。对话内容现在**在所有代码锚点阶段之后**注入，纯增量，可证明不会挤掉 Symbol / File 锚点
-- **对话写入边界密钥脱敏（v1.17.0）**：`userQuery` / `assistantReply` / 会话名等在落盘前清洗 API Key、Bearer/JWT、含凭据连接串与 PEM 私钥；`GRAPHFLOW_DIALOGUE_REDACT=0` 可关闭
-- **技能准入（v1.17.0）**：新增 `provisional` 冷启动层（可用作提示、绝不当作 proven 呈现或同步）；`proven` 仍严格要求 ≥2 个去重成功 episode
-- **安全审计修复（v1.17.0）**：`scripts/security-audit.cjs` 缺 `node:path` 导入导致每周安全审计连续 3 周静默失败，已修复并加入回归测试
-
-## v1.16.x 要点
-
-- **HostAdapter 覆盖全部 19 个宿主（v1.16.0）**：install / uninstall / doctor 统一走注册表——4 个手写切片（Cursor / Claude Code / DeepSeek Harness / Kimi Code）+ 通用 profile 切片（Trae、VS Code、Windsurf、Cline、Roo Code、Kilo Code、PearAI、Gemini、Codex、Antigravity、Amazon Q、Zed、Continue、Qoder、Opencode）。新增宿主不再需要改 CLI
-- **编排层拆分（v1.16.0）**：`runOrchestration` 拆为四个具名阶段（simple / plan / bridge / llm-DAG），行为逐字保持
-- **修复（v1.16.0）**：临时目录残留图谱不再劫持工作区发现；上游 README UTF-8 损坏修复并加入编码守卫
-
-## v1.15.x 要点（历史）
-
-- **团队记忆 diagnose（v1.15.0）**：`graphflow team serve` 提供 tenant 隔离 + viewer/contributor/admin RBAC；`graphflow diagnose` / `graphflow_diagnose` 报告 team 连通、authMode、tenant、RBAC、是否降级到本地。安全模型见 [docs/team-memory-security.md](../docs/team-memory-security.md)
-- **飞轮公开复现（v1.15.2）**：仓库根目录 `npm run proof:flywheel`（离线、无需 API Key）；指南 [docs/flywheel-reproduction.md](../docs/flywheel-reproduction.md)。Serena 双 MCP：[docs/graphflow-serena.md](../docs/graphflow-serena.md)
-- **R4 打包去重（v1.15.3）**：共享 `context-package-core`；对外 MCP/CLI `context preview` 行为不变
-
-对话图 2.0（v1.14：时间边、召回、fork/回放）与 v1.13 治理平面仍在 runtime 中。
-
-## v1.9.x 要点（历史）
-
-- **工作台脉络（v1.9.14）**：复杂任务先 `graphflow_plan`，画布上是功能节点。活动栏 **工作台脉络** 默认收起；**GraphFlow: Workbench Tree** / Chat `/tree` 唤醒。偏离自动 Fork 旁支。
-- **DeepSeek Harness 插件（v1.9.14）**：`dsh plugin --profile web add @roarpeng/graphflow`
-- **记忆透明化**：`graphflow memory list|search|forget`；Skill Insights 的 memoryAttribution 区块；记忆 ROI 基准见仓库 `benchmarks/`（不在此复述数字）
-- **技能四分类 + skill sync 双向 MERGE**；检索 golden set 回归门禁；扩展改名为 `graphflow`
-
-更早：Goal 对齐（v1.8）、词干匹配 / PageRank LRU / HNSW / `transport: auto`、agent-delegated plan bridge、`doctor --json`。
+- **大型项目索引性能**：reference 边停用词预算 + 每文件上限；解析用 worker 池；索引尊重 `.gitignore` 并跳过生成/锁文件；增量保存为追加式 delta 段（大库单文件保存只追加几 KB）
+- **一键安装 + 条目永不悬空**：VSIX 激活自动同步运行时到稳定目录 `~/.graphflow/runtime/`，MCP 条目指向稳定路径；npm 全局安装 = 安装 + 注册 + 检测 + 修复
+- **MCP 安装不因大图失败**：安装路径只读不自动索引；图存储紧凑 + 分块读写（超大图不触发 `Invalid string length`）
+- **跨宿主 workspace root 加固**：MCP 对 home/AppData 等 unsafe `rootDir` 返回可恢复错误 + 修复指引；支持 `CLAUDE_PROJECT_DIR` 工作区发现
+- **效率机制（默认全开，Settings 可逐项关）**：大输出归档为句柄（ObservationPack）、日志压缩为逐字核验收据（Evidence-Preserving Reducer）、按观测压力自适应预算 + 压缩建议（Online Context Compact）、编辑+验证融合（Action Fusion）；dsh 侧自动投影大结果（`GRAPHFLOW_D_DSH_PROJECTION=0` 关）
+- **证据诚实性**：token 节省双口径并列——对现实 top-K 文件读取 / 对朴素 grep 基线；打包后追加的载荷计入 token 预算
+- **对话图**：对话内容在所有代码锚点阶段之后注入（纯增量，不挤掉 Symbol/File 锚点）；落盘前密钥脱敏（`GRAPHFLOW_DIALOGUE_REDACT=0` 可关）
+- **技能飞轮 + 准入**：`provisional` 冷启动层可用作提示、绝不当作 proven 呈现；`proven` 严格要求 ≥2 个去重成功 episode
+- **HostAdapter 注册表**：全部 20 个宿主的 install / uninstall / doctor 统一走注册表，新增宿主不需要改 CLI
+- **团队记忆**：`graphflow team serve` 提供 tenant 隔离 + viewer/contributor/admin RBAC；`diagnose` 报告连通与 RBAC
+- **飞轮公开复现**：仓库根目录 `npm run proof:flywheel`（离线、无需 API Key）
+- **工作台脉络**：复杂任务 `graphflow_plan` 播种功能主题容器，活动栏 **工作台脉络** 树（默认收起），偏离自动 Fork 旁支
+- **Serena 双 MCP**：context/plan → Serena 编辑 → `report_outcome`，见 [docs/graphflow-serena.md](../docs/graphflow-serena.md)
 
 ## 安装 VSIX（最终用户）
 
@@ -69,9 +43,10 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 ### 方式 B：命令行
 
 ```bash
-code --install-extension graphflow-1.23.2.vsix
+# <version> 替换为你下载的版本号
+code --install-extension graphflow-<version>.vsix
 # Cursor CLI（若已安装）：
-cursor --install-extension graphflow-1.23.2.vsix
+cursor --install-extension graphflow-<version>.vsix
 ```
 
 ### 安装后推荐流程
@@ -135,7 +110,7 @@ graphflow memory forget <episodeId>           # 删除单条记忆
 
 直接发送 VSIX 文件即可，同事**无需** clone GraphFlow 仓库：
 
-1. 从 Releases 或本地 `artifacts/` 取得 `graphflow-1.23.2.vsix`
+1. 从 Releases 或本地 `artifacts/` 取得最新 `graphflow-<version>.vsix`
 2. 按上文「安装 VSIX」步骤安装
 3. 打开项目 → Settings → 建立图谱
 
@@ -186,7 +161,7 @@ npm run package:extension
 **MCP 未自动安装**
 
 - 命令面板 → **GraphFlow: Install MCP to Agents**
-- 或终端：`npx @roarpeng/graphflow@1.23.2 install`
+- 或终端：`npx @roarpeng/graphflow install`
 
 **图谱为空 / Preview 0 anchors**
 
@@ -195,7 +170,7 @@ npm run package:extension
 
 **MCP 报错 `unsafe workspace root from discovery: /home/...`**
 
-- 升级到 **1.18.5+**，然后 Settings → **安装 / 更新 MCP**，Reload Window
+- 升级到最新版，然后 Settings → **安装 / 更新 MCP**，Reload Window
 - 工具调用务必传 `rootDir`（项目绝对路径）
 - CLI：`graphflow doctor --json` 查看 MCP/Skill 注册状态
 

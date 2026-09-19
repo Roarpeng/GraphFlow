@@ -8,10 +8,15 @@ import { getToolDefinitions } from "../src/surfaces/mcp/server";
 /**
  * Doc/code consistency guard (inspired by ponytail's check-rule-copies.js).
  *
- * The MCP tool list and version number are a single source of truth in code.
- * Docs that hand-maintain copies of them drift silently (we shipped a README
- * claiming v0.6.13 / 177 tests while code was 0.6.15 / 45 files). These tests
- * make that drift a CI failure instead of a release-day surprise.
+ * The MCP tool list is a single source of truth in code. Docs that
+ * hand-maintain copies of it (or of the package version) drift silently — we
+ * shipped a README claiming v0.6.13 / 177 tests while code was 0.6.15 / 45
+ * files, and later bumped README.md while the Chinese badge and the extension
+ * VSIX filenames lagged a release behind. Policy since v1.23.2: user-facing
+ * docs are VERSION-LESS by design (dynamic npm badge, `<version>` placeholders,
+ * unversioned npx commands); per-release history lives only in CHANGELOG.md.
+ * These tests make any reintroduced hardcoded version a CI failure instead of
+ * a release-day chore.
  */
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -39,7 +44,7 @@ const DOC_FILES = [
   "CLAUDE.md",
 ];
 
-/** Every user-facing README that a release must keep in step with package.json. */
+/** Every user-facing README that must stay version-less. */
 const README_SURFACES = [
   "README.md",
   "README.zh.md",
@@ -89,12 +94,18 @@ describe("Doc/code consistency", () => {
     expect(extPkg.version).toBe(rootPkg.version);
   });
 
-  it("README version badge/line matches package.json", () => {
-    const version = readJson("package.json").version as string;
-    const readme = read("README.md");
-    // README must mention the current version somewhere and must NOT claim an
-    // older 0.6.x line once we've moved past it.
-    expect(readme, `README should reference current version ${version}`).toContain(version);
+  it("README uses the dynamic npm badge, never a hardcoded version badge", () => {
+    for (const file of ["README.md", "README.zh.md"]) {
+      const content = read(file);
+      expect(
+        content,
+        `${file} must use the dynamic npm badge (img.shields.io/npm/v/@roarpeng/graphflow)`
+      ).toContain("img.shields.io/npm/v/@roarpeng/graphflow");
+      expect(
+        content,
+        `${file} must not hardcode a static npm version badge`
+      ).not.toMatch(/badge\/npm-\d/);
+    }
   });
 
   it("README does not reference deleted docs/testing artifacts", () => {
@@ -107,40 +118,51 @@ describe("Doc/code consistency", () => {
     }
   });
 
-  it("every user-facing README references the current version", () => {
+  it("user-facing READMEs never hardcode the package version", () => {
     const version = readJson("package.json").version as string;
     for (const file of README_SURFACES) {
       const filePath = join(root, file);
       if (!existsSync(filePath)) continue;
-      // v1.15.4 bumped README.md but left the Chinese badge a release behind;
-      // v1.17.0 shipped while the extension README still said 1.15.3.
-      expect(read(file), `${file} should reference current version ${version}`).toContain(version);
+      // Releases must not require doc edits: the version number may only live
+      // in package metadata and CHANGELOG.md, never in user-facing docs.
+      expect(
+        read(file),
+        `${file} hardcodes the package version ${version} — use the dynamic badge / <version> placeholders instead`
+      ).not.toContain(version);
     }
   });
 
-  it("the extension README's install instructions match the current version", () => {
-    const version = readJson("package.json").version as string;
+  it("the extension README's install instructions are version-free", () => {
     const ext = read("vscode-extension/README.md");
 
-    // The Marketplace/Open VSX listing told users to install
-    // graphflow-1.15.3.vsix for several releases after 1.15.3. Pin every VSIX
-    // filename reference to the current version so that cannot recur.
-    const vsix = [...ext.matchAll(/graphflow-(\d+\.\d+\.\d+)\.vsix/g)].map((m) => m[1]);
-    expect(vsix.length, "extension README should reference a VSIX filename").toBeGreaterThan(0);
-    for (const ref of new Set(vsix)) {
-      expect(
-        ref,
-        `vscode-extension/README.md still tells users to install graphflow-${ref}.vsix`
-      ).toBe(version);
-    }
+    // Historically the Marketplace listing told users to install
+    // graphflow-1.15.3.vsix for several releases after 1.15.3. Placeholder
+    // filenames (<version>) make that whole failure class impossible.
+    const pinnedVsix = [...ext.matchAll(/graphflow-(\d+\.\d+\.\d+)\.vsix/g)].map((m) => m[1]);
+    expect(
+      pinnedVsix,
+      "extension README must use graphflow-<version>.vsix placeholders, not pinned filenames"
+    ).toEqual([]);
 
-    // Same for the npx install hint.
+    // Same for the npx install hint: unversioned always resolves to latest.
     const pinned = [...ext.matchAll(/@roarpeng\/graphflow@(\d+\.\d+\.\d+)/g)].map((m) => m[1]);
-    for (const ref of new Set(pinned)) {
+    expect(pinned, "extension README must not pin @roarpeng/graphflow@<version>").toEqual([]);
+  });
+
+  it("user-facing READMEs carry no version-annotated capability bullets", () => {
+    // "能力（v1.18.5）"-style annotations forced a doc sweep on every release.
+    // Capabilities are described as they are; history lives in CHANGELOG.md.
+    // Note: platform constraints like the VS Code engine `^1.99.0` are not
+    // package versions and are intentionally allowed.
+    for (const file of README_SURFACES) {
+      const filePath = join(root, file);
+      if (!existsSync(filePath)) continue;
+      const content = read(file);
+      const versionTags = content.match(/[（(]v\d+\.\d+(\.\d+)?[）)]/g) ?? [];
       expect(
-        ref,
-        `vscode-extension/README.md still pins @roarpeng/graphflow@${ref}`
-      ).toBe(version);
+        versionTags,
+        `${file} still annotates capabilities with version tags (${versionTags.join(", ")})`
+      ).toEqual([]);
     }
   });
 

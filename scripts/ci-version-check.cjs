@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
  * CI release-quality gate: assert the package version is consistent across
- * package.json, the latest CHANGELOG.md heading, and the README badge.
+ * package.json and the latest CHANGELOG.md heading, and that READMEs are
+ * version-less by design (dynamic npm badge, no hardcoded version strings)
+ * so a release never requires doc edits.
  *
  * Plain Node, zero dependencies, regex-based extraction so it can run without
  * `npm install`. Exits non-zero on any mismatch.
@@ -46,16 +48,18 @@ if (changelog !== null) {
   }
 }
 
-// --- README.md badge version -------------------------------------------------
+// --- README badges are dynamic, never hardcoded ------------------------------
 
 const readme = readFile("README.md");
-let readmeVersion = null;
 if (readme !== null) {
-  const badgeMatch = readme.match(/badge\/npm-([0-9][^-\s)]*)/);
-  if (badgeMatch) {
-    readmeVersion = badgeMatch[1];
-  } else {
-    fail("no npm version badge (shields.io 'badge/npm-...') found in README.md");
+  if (!/img\.shields\.io\/npm\/v\/@roarpeng%2Fgraphflow|img\.shields\.io\/npm\/v\/@roarpeng\/graphflow/.test(readme)) {
+    fail("README.md must use the dynamic npm badge (img.shields.io/npm/v/@roarpeng/graphflow)");
+  }
+  if (/badge\/npm-\d/.test(readme)) {
+    fail("README.md still hardcodes a static npm version badge — releases must not require doc edits");
+  }
+  if (readme.includes(pkgVersion)) {
+    fail(`README.md hardcodes the current version ${pkgVersion} — remove it so releases never touch docs`);
   }
 }
 
@@ -67,18 +71,13 @@ if (changelogVersion !== null && changelogVersion !== pkgVersion) {
     `CHANGELOG.md latest heading is [${changelogVersion}] but package.json is ${pkgVersion}`,
   );
 }
-if (readmeVersion !== null && readmeVersion !== pkgVersion) {
-  problems.push(
-    `README.md badge shows ${readmeVersion} but package.json is ${pkgVersion}`,
-  );
-}
 
 for (const problem of problems) {
   fail(problem);
 }
 
 if (process.exitCode) {
-  console.error(`[ci-version-check] versions must match: package.json=${pkgVersion} CHANGELOG=${changelogVersion ?? "n/a"} README=${readmeVersion ?? "n/a"}`);
+  console.error(`[ci-version-check] FAIL: package.json=${pkgVersion} CHANGELOG=${changelogVersion ?? "n/a"} (README must stay version-less)`);
 } else {
-  console.log(`[ci-version-check] OK: package.json / CHANGELOG.md / README.md all at ${pkgVersion}`);
+  console.log(`[ci-version-check] OK: package.json / CHANGELOG.md at ${pkgVersion}; README.md is version-less (dynamic badge)`);
 }
