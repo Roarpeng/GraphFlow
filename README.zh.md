@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.23.2-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/npm/v/@roarpeng/graphflow)](https://www.npmjs.com/package/@roarpeng/graphflow)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
@@ -10,7 +10,7 @@
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
-**v1.22.0** 已发：**VSIX 一键 + 永不悬空**——扩展激活自动同步运行时到稳定目录 `~/.graphflow/runtime/`，MCP 条目指向稳定路径（IDE 升级删旧扩展目录不再导致悬空）；CLI 直连候选链 npm全局→稳定runtime→npx。与 v1.21.0 的 npm 一键安装互补：两种安装方式都是装完即用，三平台一致。
+**一条命令安装承诺**：`npm i -g @roarpeng/graphflow` = 安装 + 注册 + 检测 + 修复；VSIX 激活同样自动完成注册，并把运行时同步到稳定目录 `~/.graphflow/runtime/`，MCP 条目指向稳定路径——IDE 升级删旧扩展目录不再导致悬空。两种安装方式都是装完即用，三平台一致。
 
 ## 快速开始
 
@@ -63,7 +63,7 @@ npx @roarpeng/graphflow@latest uninstall  # 一键移除所有 Agent 上的注�
 
 Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `graphflow_plan`。没有 LLM API Key 时会桥接到宿主 Agent（agent-delegated）。需要符号级精确编辑时，把 Serena 作为第二个 MCP server 并列挂载——见 [GraphFlow + Serena 联合方案](docs/graphflow-serena.zh.md)（配置示例：[`examples/graphflow-serena.mcp.json`](examples/graphflow-serena.mcp.json)）。
 
-## 本版要点（v1.20）
+## 核心能力
 
 | 能力 | 说明 |
 | --- | --- |
@@ -81,7 +81,7 @@ Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `gra
 
 完整英文对照与基准数字：[README.md](README.md)。
 
-## 工作台脉络（v1.9.14）
+## 工作台脉络
 
 日常 Chat 仍是单线。复杂任务用 `graphflow_plan` 播种**功能主题容器**（画布上是计划步骤，不是一轮一节点）。点击节点，把 `topicId` 传给 `graphflow_context` 即可在该功能上继续或回到主线。问法跑偏会 Fork 孤立旁支，主线不被刷脏。答完再调 `graphflow_context({ assistantReply })` 回填原文。树上的标题只用于显示；下一轮必读是 Goal + 祖先标题 + 该节点原文 Q/A。
 
@@ -136,7 +136,7 @@ dsh plugin --profile web add github:Roarpeng/GraphFlow
 
 > ⚠️ **只选一条注册路径**：市场 / `dsh plugin … add` 会自动把 `dsh.bundle` 的 `cordis.patch.yml` 注册进 profile；此时不要再跑 `npx @roarpeng/graphflow install`（它写 `$DSH_HOME/cordis.patch.yml` overlay），两条注册叠加会重复加载。市场判定类型为 **cordis-plugin**；仓库不提交 `dist/`（源码型），安装时会先询问「安装依赖并执行构建」，确认后执行 `npm install` + `npm run build`（离线可用）。
 
-**披露（disclosure）**：本地优先——索引/压缩/召回/图存储全离线（默认本地 hash 向量，无需 API Key）；仅当为 `graphflow_plan` / `graphflow_run` 配置 LLM provider 时才访问云端端点（`api.deepseek.com` / `api.openai.com` / `api.anthropic.com` / `dashscope.aliyuncs.com` / `ark.cn-beijing.volces.com`）。API Key 只从环境变量或全局配置读取；`~/.graphflow.config.json` 自 **1.18.5** 起以 **0600** 写入，日志脱敏。完整字段见 `package.json` 的 `disclosure`。
+**披露（disclosure）**：本地优先——索引/压缩/召回/图存储全离线（默认本地 hash 向量，无需 API Key）；仅当为 `graphflow_plan` / `graphflow_run` 配置 LLM provider 时才访问云端端点（`api.deepseek.com` / `api.openai.com` / `api.anthropic.com` / `dashscope.aliyuncs.com` / `ark.cn-beijing.volces.com`）。API Key 只从环境变量或全局配置读取；`~/.graphflow.config.json` 以 **0600** 权限写入，日志脱敏。完整字段见 `package.json` 的 `disclosure`。
 
 **方式 A：装进某个 profile（推荐）**
 

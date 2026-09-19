@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-[![npm version](https://img.shields.io/badge/npm-1.23.2-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/npm/v/@roarpeng/graphflow)](https://www.npmjs.com/package/@roarpeng/graphflow)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
@@ -88,7 +88,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 
 > The differentiator is the **learning flywheel**: graph indexing and token compression are replicable; project-private experience (skills, lessons, decisions) accumulated across sessions is not — it compounds with use. Serena is a complement, not a competitor — see [GraphFlow + Serena: better together](docs/graphflow-serena.md) ([中文](docs/graphflow-serena.zh.md); [comparison](docs/comparison.md)).
 
-## Core capabilities (v1.18+)
+## Core capabilities
 
 | Module | Capability |
 | --- | --- |
@@ -133,7 +133,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 
 **MCP workspace resolution**: the workspace is discovered automatically from the MCP client `cwd`; override with `GRAPHFLOW_WORKSPACE_ROOT`.
 
-## Workbench navigation (v1.9.14)
+## Workbench navigation
 
 Everyday chat stays a single thread. Complex work seeds a **workbench of function-topic containers** from `graphflow_plan` — one canvas node per plan step, not one node per turn. Click a node and pass `topicId` to `graphflow_context` to refine that function or return to the mainline. Drift auto-forks an isolated side branch (`co_occurs`); the trunk is not overwritten. After answering, call `graphflow_context({ assistantReply })` so the original reply is stored. Outline titles are display labels only; next-turn context is Goal + ancestor titles + the node's original Q/A.
 
@@ -276,7 +276,7 @@ dsh plugin --profile web add github:Roarpeng/GraphFlow
 
 **市场收录类型：** `cordis-plugin`（`package.json` 的 `dsh.bundle.patch` → `cordis.patch.yml`）。仓库不提交 `dist/`（源码型），市场安装时会先询问「安装依赖并执行构建」，确认后执行 `npm install` + `npm run build`（构建离线可用）。
 
-**披露（disclosure，[STANDARD §9](https://github.com/bradeGithub/DSH-Plugins-Marketplace/blob/main/STANDARD.md)）：** 本地优先——索引、压缩、召回、图存储全部离线（默认本地 hash 向量），`cloud: false` 场景可用；仅当你为 `graphflow_plan` / `graphflow_run` 配置了 LLM provider 时才访问云端端点（`api.deepseek.com` / `api.openai.com` / `api.anthropic.com` / `dashscope.aliyuncs.com` / `ark.cn-beijing.volces.com`）。API Key 只从环境变量或全局配置读取，全局配置 `~/.graphflow.config.json` 以 **0600** 写入（1.18.5 起），日志中脱敏。完整字段见 `package.json` 的 `disclosure`。
+**披露（disclosure，[STANDARD §9](https://github.com/bradeGithub/DSH-Plugins-Marketplace/blob/main/STANDARD.md)）：** 本地优先——索引、压缩、召回、图存储全部离线（默认本地 hash 向量），`cloud: false` 场景可用；仅当你为 `graphflow_plan` / `graphflow_run` 配置了 LLM provider 时才访问云端端点（`api.deepseek.com` / `api.openai.com` / `api.anthropic.com` / `dashscope.aliyuncs.com` / `ark.cn-beijing.volces.com`）。API Key 只从环境变量或全局配置读取，全局配置 `~/.graphflow.config.json` 以 **0600** 权限写入，日志中脱敏。完整字段见 `package.json` 的 `disclosure`。
 
 **或在已有 `~/.dsh` 时写 home 级 overlay（对所有 profile 生效）：**
 
