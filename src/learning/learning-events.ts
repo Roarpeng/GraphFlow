@@ -28,9 +28,25 @@ export function readFeedbackEvents(path: string): FeedbackEvent[] {
     return [];
   }
 
-  return readFileSync(path, "utf8")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as FeedbackEvent);
+  // A crash mid-append can leave a truncated final line; fail-open by skipping
+  // unparsable lines instead of breaking the whole nightly learning run.
+  const events: FeedbackEvent[] = [];
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = JSON.parse(trimmed) as FeedbackEvent;
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        typeof parsed.query === "string" &&
+        typeof parsed.passed === "boolean"
+      ) {
+        events.push(parsed);
+      }
+    } catch {
+      // skip corrupted line
+    }
+  }
+  return events;
 }

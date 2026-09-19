@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.23.2] - 2026-09-19
+
+### Fixed — 健壮性双修：文件锁死锁 + 夜间学习崩溃（覆盖率深挖）
+
+- **`src/utils/file-lock.ts` 陈旧锁死锁**：进程在 `openSync` 成功、`writeSync` 写入 pid **之前**崩溃会留下空 lock 文件；旧逻辑 `parseInt("")` 得 NaN 永远走不到清理分支，后续所有 `acquire` 只能空转到 30s 超时（且 `withFileLock` 直接抛错）。修复：空/非数字 pid 视为崩溃残留，文件年龄超过 10s 宽限窗口（避免与正在写 pid 的创建者竞态）即清理重试；`writeSync` 失败时不再泄漏 fd、不留半写锁文件。
+- **`src/learning/learning-events.ts` 损坏行崩溃**：`readFeedbackEvents` 对每行裸 `JSON.parse`，崩溃残留的半行数据会让整个夜间学习任务挂掉。修复：fail-open 跳过无法解析/形状不符的行（写入方仅产 `{query, passed, tokenCost, retries}`，已核实无误伤）。
+- **`src/routing/provider-executor.ts` skillHints 去重**：`formatPromptWithContext` 对重复 skill 提示不去重，重复词句白白消耗 prompt token；现保序去重后再截断。
+- **测试 195→199 文件 / 1435→1480 条全绿**：新增 m101（file-lock 8 条：互斥/超时/ESRCH 死进程回收/陈旧空锁回收/新建竞态保护）、m102（learning-events + nightly-trainer 双签名 + reflector 聚类 12 条：损坏行跳过、10MB 轮转、lesson 节点与 improves 边）、m103（5 个 provider 适配器 stub fetch 13 条：无 key 降级、strict 抛错、HTTP 错误、abort 传播、thinking 模式请求体、usage 解析）、m104（provider-executor + deepseek 工具循环 15 条：重试预算、401 不重试、断路器开启短路、中止传播、上下文通道上限、工具结果回填、轮数耗尽强制终答）。
+
 ## [1.23.1] - 2026-09-18
 
 ### Fixed — 潜伏自 v1.19.1：完整 install 流程覆盖直连条目
