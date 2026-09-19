@@ -53,9 +53,11 @@ export function getDefaultConfig(): GraphFlowConfig {
       graphStorePath: `${DEFAULT_OUTPUT_DIR}/graphflow-graph.sqlite`,
       maxContextTokens: 1500,
       layerQuota: { l1: 6, l2: 4, l3: 3 },
-      // P0-1: offline-safe default — FNV-1a hash embeddings, no model download.
-      // Opt into semantic recall by setting embeddingProvider: "transformers".
-      embeddingProvider: "fnv",
+      // R7-b: 零配置本地语义召回默认开 — 默认使用 resilient local 路径：
+      // 优先尝试 transformers 本地语义模型（Xenova/bge-base-zh-v1.5），
+      // 任何失败（缺包/无缓存/超时/加载错误）透明降级 FNV-1a hash，
+      // 保持零 Key、零云依赖。显式 "fnv" 仍可强制纯离线 hash。
+      embeddingProvider: "transformers",
       compression: {
         enableGraphCompression: true,
         enableAdaptiveBudget: true,

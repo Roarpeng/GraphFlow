@@ -82,6 +82,22 @@ export interface AuditChecker {
   run(changedFiles: string[], root: string, context: AuditContext): Promise<AuditFinding[]>;
 }
 
+/** R7-d privacy audit surface: verifiable local-first facts. */
+export interface PrivacyAuditFacts {
+  /** Workspace-relative artifact paths that exist on disk. */
+  existingPaths: string[];
+  /** Workspace-relative artifact paths that do not exist (never created). */
+  missingPaths: string[];
+  /** All network endpoints; each flagged whether it is required without config. */
+  endpoints: Array<{ url: string; requiredWithoutConfig: boolean; when: string }>;
+  /** Global config path + whether it exists + POSIX mode when readable. */
+  globalConfig: { path: string; exists: boolean; mode?: string };
+  /** Providers with a configured key (env or file) — boolean only, never values. */
+  configuredProviders: string[];
+  /** Whether any provider key is currently visible to the process. */
+  anyKeyConfigured: boolean;
+}
+
 export interface AuditContext {
   /** Load configured audit rules (graphflow.audit.json) — never throws. */
   loadRules(): AuditRuleSet;

@@ -34,18 +34,20 @@ function resolveConfiguredModelCacheDir(config: GraphFlowConfig): string | undef
 }
 
 /**
- * Effective embedding backend for vector recall (P0-1):
- *   - "fnv"          offline-safe default — deterministic FNV-1a hash embeddings
- *   - "transformers" optional semantic backend — lazily loads all-MiniLM-L6-v2
- *                    via @huggingface/transformers, transparently falling back
- *                    to FNV-1a on any load/cache/timeout failure
+ * Effective embedding backend for vector recall (R7-b: semantic-on by default):
+ *   - "transformers" default — resilient local path: try the canonical local
+ *                    semantic model first, transparently falling back to
+ *                    FNV-1a on any load/cache/timeout failure (zero Key, zero
+ *                    cloud). Set "fnv" explicitly to force pure-offline hash.
+ *   - "fnv"          explicit offline-safe opt-out — deterministic FNV-1a hash
+ *                    embeddings, no model download attempt.
  *   - "openai"       legacy remote embeddings (requires an API key)
  *
  * Resolution precedence: legacy explicit OpenAI (key present) wins over the new
  * switch so existing openai users keep working; otherwise the new
  * graphPolicy.embeddingProvider decides; finally the legacy embeddingPolicy
  * provider (hash → fnv) applies; the fallback default is the resilient local
- * transformers path (unchanged legacy behavior for configs without defaults).
+ * transformers path.
  */
 export function resolveEffectiveEmbeddingBackend(
   config: GraphFlowConfig

@@ -136,7 +136,7 @@ dsh plugin --profile web add github:Roarpeng/GraphFlow
 
 > ⚠️ **只选一条注册路径**：市场 / `dsh plugin … add` 会自动把 `dsh.bundle` 的 `cordis.patch.yml` 注册进 profile；此时不要再跑 `npx @roarpeng/graphflow install`（它写 `$DSH_HOME/cordis.patch.yml` overlay），两条注册叠加会重复加载。市场判定类型为 **cordis-plugin**；仓库不提交 `dist/`（源码型），安装时会先询问「安装依赖并执行构建」，确认后执行 `npm install` + `npm run build`（离线可用）。
 
-**披露（disclosure）**：本地优先——索引/压缩/召回/图存储全离线（默认本地 hash 向量，无需 API Key）；仅当为 `graphflow_plan` / `graphflow_run` 配置 LLM provider 时才访问云端端点（`api.deepseek.com` / `api.openai.com` / `api.anthropic.com` / `dashscope.aliyuncs.com` / `ark.cn-beijing.volces.com`）。API Key 只从环境变量或全局配置读取；`~/.graphflow.config.json` 以 **0600** 权限写入，日志脱敏。完整字段见 `package.json` 的 `disclosure`。
+**披露（disclosure）**：本地优先——索引/压缩/召回/图存储全离线（默认 resilient local 语义向量：优先本地 `Xenova/bge-base-zh-v1.5`，失败降级 FNV-1a hash，可用 `embeddingProvider: "fnv"` 强制纯离线，无需 API Key）；仅当为 `graphflow_plan` / `graphflow_run` 配置 LLM provider 时才访问云端端点（`api.deepseek.com` / `api.openai.com` / `api.anthropic.com` / `dashscope.aliyuncs.com` / `ark.cn-beijing.volces.com`）。API Key 只从环境变量或全局配置读取；`~/.graphflow.config.json` 以 **0600** 权限写入，日志脱敏。可执行核验：`graphflow audit --privacy`（见 `docs/threat-model.md`）。完整字段见 `package.json` 的 `disclosure`。
 
 **方式 A：装进某个 profile（推荐）**
 

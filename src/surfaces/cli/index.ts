@@ -25,6 +25,9 @@ import {
   type EfficiencyArm,
 } from "../../learning/efficiency-report";
 import {
+  writeEfficiencyEvidence,
+} from "../../learning/efficiency-evidence";
+import {
   applyReinvestment,
   loadReinvestLedger,
   pendingFingerprints,
@@ -742,6 +745,32 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       const data = resetEfficiencyReport(graphflowConfig);
       return { command: "efficiency-reset", data, legacyText: "path=" + data.path + "; reset=" + data.reset };
     }
+    if (args[0] === "export") {
+      // R7-h: versioned, shareable efficiency-evidence artifact with the
+      // honesty gate applied. The file is always written; the savings CLAIM
+      // is gated (capability floor), so publishable artifacts stay honest.
+      // Version comes from the GraphFlow package itself (resolved relative to
+      // this module), never from the workspace's package.json.
+      let version = "unknown";
+      try {
+        const pkgPath = join(__dirname, "..", "..", "..", "package.json");
+        version = (JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string }).version ?? "unknown";
+      } catch {
+        version = "unknown";
+      }
+      const result = writeEfficiencyEvidence(graphflowConfig, version);
+      return {
+        command: "efficiency-export",
+        data: result,
+        legacyText:
+          "path=" + result.path +
+          "; schemaVersion=" + result.artifact.schemaVersion +
+          "; comparisons=" + result.artifact.efficiency.totalComparisons +
+          "; qualifying=" + result.artifact.efficiency.qualifying +
+          "; gateAllowed=" + result.gate.allowed +
+          (result.gate.reasons.length > 0 ? "; gateReasons=[" + result.gate.reasons.join("|") + "]" : ""),
+      };
+    }
     const report = getEfficiencyReport(graphflowConfig);
     const floor = evaluateEfficiencyFloor(report, { maxCapabilityRegressions: 0 });
     const percent = (report.averageTokenSavingRatio * 100).toFixed(2);
@@ -898,6 +927,24 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   if (command === "audit") {
     // R9: closing audit — aggregate follow-through findings (dangling deps,
     // orphan files, container/loader refs, doc drift) before calling it done.
+    // R7-d: --privacy prints the verifiable local-first facts
+    // (docs/threat-model.md) instead of running the follow-through checkers.
+    if (args.includes("--privacy")) {
+      const { collectPrivacyFacts, formatPrivacyFacts } = await import("../../audit/checkers/privacy-checker.js");
+      const facts = collectPrivacyFacts(process.cwd());
+      // Single print path: main() prints legacyText (or data JSON). Manual
+      // console.log here would duplicate the summary (legacyText is always
+      // emitted by formatCliResult in non-JSON mode).
+      return {
+        command: "audit-privacy",
+        data: facts,
+        legacyText: [
+          formatPrivacyFacts(facts),
+          `existing: ${facts.existingPaths.join(", ") || "-"}`,
+          `endpoints: ${facts.endpoints.map((e) => `${e.url} [${e.when}]`).join("; ")}`,
+        ].join("\n"),
+      };
+    }
     const since = readCliFlagValue(args, "--since");
     const strict = args.includes("--strict");
     const graphflowConfig = resolveConfig(configPath);
@@ -1307,6 +1354,8 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     const direction = args[1]?.trim().toLowerCase();
     if (direction !== "export" && direction !== "import") {
       console.log("Usage: graphflow skill markdown <export|import> [path] [--force]");
+      console.log("  export: writes spec layout <dir>/<spec-name>/SKILL.md (+ references/ when oversized)");
+      console.log("  import: directory scans accept <dir>/SKILL.md only; a single file path may have any name");
       process.exitCode = 1;
       return undefined;
     }
@@ -1320,7 +1369,7 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       return {
         command: "skill-markdown-export",
         data,
-        legacyText: `path=${data.outputDir}; files=${data.fileCount}; bytes=${data.bytes}; compositesSkipped=${data.skippedComposites}`,
+        legacyText: `path=${data.outputDir}; files=${data.fileCount}; referenceFiles=${data.referenceFileCount}; bytes=${data.bytes}; compositesSkipped=${data.skippedComposites}; invalid=${data.invalid.length}`,
       };
     }
     const rootDir = readCliFlagValue(args, "--root-dir");
@@ -1332,7 +1381,7 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     return {
       command: "skill-markdown-import",
       data,
-      legacyText: `path=${data.inputPath}; imported=${data.imported}; updated=${data.updated}; skipped=${data.skipped}; total=${data.total}`,
+      legacyText: `path=${data.inputPath}; imported=${data.imported}; updated=${data.updated}; skipped=${data.skipped}; total=${data.total}; invalid=${data.invalid.length}`,
     };
   }
 

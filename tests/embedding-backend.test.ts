@@ -12,7 +12,6 @@ import {
   createHashEmbeddingProvider,
   createResilientLocalEmbeddingProvider,
   EMBEDDING_DIM,
-  HASH_EMBEDDING_MODEL,
 } from "../src/learning/embeddings";
 import {
   configureEmbeddingQualityBackend,
@@ -61,30 +60,29 @@ describe("P0-1 semantic embedding backend", () => {
     resetEmbeddingQualityStats();
   });
 
-  it("default config stays fnv (offline-safe, no transformers attempt)", async () => {
+  it("default config is transformers (R7-b semantic-on, resilient local with hash fallback)", async () => {
     const config = getDefaultConfig();
-    expect(config.graphPolicy.embeddingProvider).toBe("fnv");
-    expect(resolveEffectiveEmbeddingBackend(config)).toBe("fnv");
+    expect(config.graphPolicy.embeddingProvider).toBe("transformers");
+    expect(resolveEffectiveEmbeddingBackend(config)).toBe("transformers");
 
+    // Intent only — do NOT call embed() here: the resilient provider would
+    // attempt a real transformers pipeline load (network + 60s timeout).
+    // Fallback behaviour is covered by the resilient-provider tests below.
     const provider = createEmbeddingProviderFromConfig(config);
     expect(provider).toBeDefined();
-    const vec = await provider!.embed("graph context compression");
-    expect(vec).toHaveLength(EMBEDDING_DIM);
 
     const summary = getEmbeddingQualitySummary();
-    expect(summary.provider).toBe("hash");
-    expect(summary.model).toBe(HASH_EMBEDDING_MODEL);
-    expect(summary.backend).toBe("hash");
-    // FNV-1a active → diagnose reports "off"
-    expect(resolveActiveEmbeddingBackend(config)).toBe("off");
+    expect(summary.provider).toBe("transformers");
+    // Diagnose reports semantic intent before the first embed settles
+    expect(resolveActiveEmbeddingBackend(config)).toBe("semantic");
   });
 
-  it("explicit fnv wins over the legacy transformers default", () => {
-    const config = defaultConfigWith({
+  it("explicit fnv opts out to pure-offline hash; unset/legacy defaults stay semantic-on", () => {
+    const explicitFnv = defaultConfigWith({
       embeddingProvider: "fnv",
       embeddingPolicy: { provider: "transformers" },
     });
-    expect(resolveEffectiveEmbeddingBackend(config)).toBe("fnv");
+    expect(resolveEffectiveEmbeddingBackend(explicitFnv)).toBe("fnv");
   });
 
   it("legacy explicit openai provider (with key) keeps working", () => {

@@ -17,6 +17,9 @@
  *    the fair counterfactual for tool-to-tool comparisons.
  *
  * Run with:  npm run benchmark            (Arm B top-K: add --anchor-top-k=N)
+ *            --corpus=<path>              (measure an EXTERNAL repo instead of
+ *                                          this repository; queries default to
+ *                                          a generic set, override --queries=a,b,c)
  *
  * Outputs:
  *   - benchmarks/RESULTS.md            (human-readable report)
@@ -31,8 +34,9 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
 
 import { encode } from "gpt-tokenizer/model/gpt-4o";
@@ -110,6 +114,14 @@ const DEFAULT_ANCHOR_TOP_K = 10;
  * exceed it) and keeps one pathological file from dominating the baseline.
  */
 const TOPK_MAX_LINES_PER_FILE = 1500;
+
+/**
+ * Benchmark scope root. Defaults to this repository; `--corpus=<path>` points
+ * it at an external repo so results are not measured on the engine's own
+ * source tree (anti-self-referential-corpus, docs/benchmark-standards.md §0).
+ * Mutated once at startup by main().
+ */
+let CORPUS_ROOT: string = REPO_ROOT;
 
 /** Representative queries that hit real symbols / concepts in this repository. */
 const QUERIES: readonly string[] = [
@@ -238,6 +250,68 @@ function parseAnchorTopK(argv: readonly string[]): number {
   return DEFAULT_ANCHOR_TOP_K;
 }
 
+/**
+ * External-corpus support (anti-self-referential-corpus): `--corpus=<path>`
+ * runs the whole benchmark against a DIFFERENT repository so the numbers are
+ * not produced on the engine's own source tree. `--queries=a,b,c` overrides
+ * the query set (external corpora need corpus-appropriate queries).
+ */
+export interface CorpusOptions {
+  /** Absolute corpus root; undefined = this repository (legacy default). */
+  root?: string;
+  queries?: string[];
+}
+
+/** Generic queries that work on almost any TypeScript/JavaScript repository. */
+const EXTERNAL_CORPUS_DEFAULT_QUERIES: readonly string[] = [
+  "configuration",
+  "error handling",
+  "async function",
+  "types interface",
+  "file system",
+  "test setup",
+  "logging",
+  "path resolution",
+];
+
+export function parseCorpusOptions(argv: readonly string[]): CorpusOptions {
+  const options: CorpusOptions = {};
+  for (const arg of argv) {
+    const corpusMatch = /^--corpus=(.+)$/.exec(arg);
+    if (corpusMatch?.[1]) {
+      const root = resolve(process.cwd(), corpusMatch[1].trim());
+      if (!existsSync(root) || !statSync(root).isDirectory()) {
+        throw new Error(`--corpus path does not exist or is not a directory: ${root}`);
+      }
+      options.root = root;
+    }
+    const queriesMatch = /^--queries=(.+)$/.exec(arg);
+    if (queriesMatch?.[1]) {
+      const queries = queriesMatch[1]
+        .split(",")
+        .map((q) => q.trim())
+        .filter((q) => q.length > 0);
+      if (queries.length > 0) options.queries = queries;
+    }
+  }
+  return options;
+}
+
+/** Test/CLI-facing alias for the generic external-corpus query set. */
+export const CORPUS_QUERIES = EXTERNAL_CORPUS_DEFAULT_QUERIES;
+
+/** Convenience wrapper: just the --corpus root from argv (undefined when absent). */
+export function parseCorpusRoot(argv: readonly string[]): string | undefined {
+  return parseCorpusOptions(argv).root;
+}
+
+/** Standalone savings math shared by the runner and tests. */
+export function savingsPercent(baselineTokens: number, graphflowTokens: number): number {
+  return baselineTokens > 0
+    ? Math.max(0, ((baselineTokens - graphflowTokens) / baselineTokens) * 100)
+    : 0;
+}
+
 /** Per-query measurement of the realistic arm (`baselineTopKFilesFullText`). */
 interface TopKFilesBaseline {
   /** Token count of the distinct resolved files, read in full (line-capped). */
@@ -278,7 +352,7 @@ function resolveAnchorToSourceFile(anchorId: string): string | undefined {
   if (!candidate || !candidate.trim()) {
     return undefined;
   }
-  const abs = isAbsolute(candidate) ? candidate : resolve(REPO_ROOT, candidate);
+  const abs = isAbsolute(candidate) ? candidate : resolve(CORPUS_ROOT, candidate);
   try {
     return statSync(abs).isFile() ? abs : undefined;
   } catch {
@@ -328,7 +402,7 @@ function measureTopKFilesBaseline(
       cappedFiles += 1;
     }
     tokens += countTokens(content);
-    resolvedFiles.push(relative(REPO_ROOT, abs).split("\\").join("/"));
+    resolvedFiles.push(relative(CORPUS_ROOT, abs).split("\\").join("/"));
   }
 
   return { tokens, files: resolvedFiles.length, resolvedFiles, unresolvedAnchors, cappedFiles };
@@ -341,7 +415,7 @@ function writeBenchmarkConfig(): void {
     ...base,
     graphPolicy: {
       ...base.graphPolicy,
-      workspaceRoot: REPO_ROOT,
+      workspaceRoot: CORPUS_ROOT,
       graphStorePath: join(CACHE_DIR, "benchmark-graph.json"),
       // Keep zero-cost graph-structure compression, drop network/LLM steps so
       // the benchmark is deterministic and runs without any API key.
@@ -384,6 +458,8 @@ function buildResultsMarkdown(
     indexedFiles: number | null;
     durationMs: number;
     anchorTopK: number;
+    /** Present when the run measured an external corpus (`--corpus=<path>`). */
+    corpusRoot?: string;
   }
 ): string {
   const rows = results
@@ -437,7 +513,7 @@ npm install && npm run benchmark   # Node ≥ 20，离线运行，无需 API key
 
 GraphFlow compresses the context an LLM agent needs for a query into a small
 summary + anchor package, instead of pushing whole source files into the prompt.
-Across **${results.length}** representative queries against this repository, this run
+Across **${results.length}** representative queries against ${meta.corpusRoot !== undefined ? "the external corpus" : "this repository"}, this run
 reports **two baseline arms**. They answer different questions — quote them
 separately, never interchangeably:
 
@@ -496,7 +572,7 @@ ${topKTotalRow}
   }
 - Realistic-arm anchor top-K: ${meta.anchorTopK} (\`--anchor-top-k=N\`), per-file cap: ${TOPK_MAX_LINES_PER_FILE} lines
 - Benchmark wall-clock: ${(meta.durationMs / 1000).toFixed(1)}s
-
+${meta.corpusRoot !== undefined ? "- **Corpus (external, anti-self-referential): `" + meta.corpusRoot + "`** — every number in this section was measured against that repository, not GraphFlow's own source tree.\n" : ""}
 ## Methodology & honest caveats
 
 **Arm A — naive grep baseline (\`baselineGrepTopFilesFullText\`, existing)** —
@@ -582,6 +658,9 @@ npm install
 npm run benchmark
 # Arm B anchor top-K is configurable (default ${DEFAULT_ANCHOR_TOP_K}):
 npx tsx benchmarks/run-token-benchmark.ts --anchor-top-k=15
+# External corpus (anti-self-referential): measure a DIFFERENT repository.
+# Queries default to a generic set; override with --queries=a,b,c:
+npx tsx benchmarks/run-token-benchmark.ts --corpus=/path/to/other-repo --queries="router,cache layer"
 \`\`\`
 
 No API key is required. The script builds its own isolated graph under
@@ -597,11 +676,39 @@ ${TOKEN_END}
 `;
 }
 
-async function main(): Promise<void> {
+export interface TokenBenchmarkRunOptions {
+  /** External corpus root (`--corpus` equivalent); undefined = this repository. */
+  corpusRoot?: string;
+  /** Override the human-readable results file (default benchmarks/RESULTS.md). */
+  resultsPath?: string;
+}
+
+/**
+ * Programmatic entry point. When invoked as a script (node/tsx), runs with the
+ * CLI argv; when imported (tests, other benchmarks), runs only when called
+ * explicitly — importing must never trigger a full benchmark run.
+ */
+export async function runTokenBenchmark(options: TokenBenchmarkRunOptions = {}): Promise<void> {
   const startedAt = Date.now();
   const anchorTopK = parseAnchorTopK(process.argv.slice(2));
+  let corpusRoot = options.corpusRoot;
+  const queriesOverrideRaw = options.resultsPath !== undefined || options.corpusRoot !== undefined
+    ? undefined
+    : parseCorpusOptions(process.argv.slice(2)).queries;
+  if (corpusRoot === undefined && options.resultsPath === undefined) {
+    corpusRoot = parseCorpusOptions(process.argv.slice(2)).root;
+  }
+  if (corpusRoot !== undefined) {
+    CORPUS_ROOT = corpusRoot;
+  }
+  const queries = queriesOverrideRaw ??
+    (CORPUS_ROOT !== REPO_ROOT ? [...EXTERNAL_CORPUS_DEFAULT_QUERIES] : [...QUERIES]);
+  const usingExternalCorpus = CORPUS_ROOT !== REPO_ROOT;
   process.stdout.write("GraphFlow token-savings benchmark\n");
   process.stdout.write(`Repo root: ${REPO_ROOT}\n`);
+  if (usingExternalCorpus) {
+    process.stdout.write(`Corpus root: ${CORPUS_ROOT} (external — results are NOT measured on this repository)\n`);
+  }
   process.stdout.write(
     `Realistic arm (baselineTopKFilesFullText): top-${anchorTopK} anchors resolved to distinct ` +
       `files, counted in full (cap ${TOPK_MAX_LINES_PER_FILE} lines/file; change with --anchor-top-k=N)\n\n`
@@ -613,7 +720,7 @@ async function main(): Promise<void> {
   let indexedFiles: number | null = null;
   let nodeCount: number | null = null;
   try {
-    const indexResult = await indexGraph(REPO_ROOT, CONFIG_PATH);
+    const indexResult = await indexGraph(CORPUS_ROOT, CONFIG_PATH);
     indexedFiles = indexResult.indexedFiles;
     process.stdout.write(
       `  indexed ${formatNumber(indexResult.indexedFiles)} files, ` +
@@ -624,7 +731,13 @@ async function main(): Promise<void> {
   }
 
   process.stdout.write("Scanning source tree for baseline...\n");
-  const rawFiles = collectSourceFiles(BASELINE_SCAN_DIR);
+  // Prefer <corpus>/src when it exists (both this repo and typical TS repos);
+  // otherwise fall back to scanning the corpus root itself.
+  let baselineScanDir = join(CORPUS_ROOT, "src");
+  if (!existsSync(baselineScanDir)) {
+    baselineScanDir = CORPUS_ROOT;
+  }
+  const rawFiles = collectSourceFiles(baselineScanDir);
   const sourceFiles = rawFiles.map((path) => {
     const content = readFileSync(path, "utf8");
     return { path, content, lower: content.toLowerCase() };
@@ -633,9 +746,9 @@ async function main(): Promise<void> {
 
   const results: QueryResult[] = [];
 
-  for (const query of QUERIES) {
+  for (const query of queries) {
     const baseline = measureBaseline(query, sourceFiles);
-    const preview = await previewContext(query, CONFIG_PATH, REPO_ROOT);
+    const preview = await previewContext(query, CONFIG_PATH, CORPUS_ROOT);
 
     // Independent measurement: re-tokenize the exact text an agent receives
     // (summary strings + anchor pointer lines) with gpt-tokenizer. We use this
@@ -736,11 +849,15 @@ async function main(): Promise<void> {
       topKFilesBaselineFiles: totalTopKFilesFiles,
       topKFilesSavings: totalTopKFilesSavings,
     },
-    { nodeCount, indexedFiles, durationMs, anchorTopK }
+    { nodeCount, indexedFiles, durationMs, anchorTopK, ...(usingExternalCorpus ? { corpusRoot: CORPUS_ROOT } : {}) }
   );
 
-  writeResultsMarkdown(markdown);
-  process.stdout.write(`\nWrote ${relative(REPO_ROOT, RESULTS_PATH)}\n`);
+  const resultsTargetPath = options.resultsPath ?? RESULTS_PATH;
+  const jsonTargetPath = options.resultsPath
+    ? options.resultsPath.replace(/\.md$/, ".json")
+    : JSON_PATH;
+  writeResultsMarkdown(markdown, resultsTargetPath);
+  process.stdout.write(`\nWrote ${relative(REPO_ROOT, resultsTargetPath)}\n`);
 
   // Machine-readable artifact: pin the run to a commit + date so third parties
   // can reproduce (and attribute) the exact numbers. The inputs are recorded
@@ -764,8 +881,10 @@ async function main(): Promise<void> {
         "Arm B (new, realistic): the ranker's top-K anchors (inputs.anchorTopK) resolved to distinct real source files on disk, read in full (inputs.topKFilesMaxLinesPerFile line cap). Numbers: totals.baselineTopKFilesFullText and results[].baselineTopKFilesFullText (incl. resolvedFiles for independent re-tokenization).",
     },
     inputs: {
-      queries: [...QUERIES],
-      baselineScanDir: relative(REPO_ROOT, BASELINE_SCAN_DIR),
+      queries,
+      corpus: usingExternalCorpus
+        ? { kind: "external", root: CORPUS_ROOT }
+        : { kind: "this-repository", root: relative(REPO_ROOT, BASELINE_SCAN_DIR) },
       baselineMaxFilesPerQuery: BASELINE_MAX_FILES_PER_QUERY,
       baselineExtensions: [...BASELINE_EXTENSIONS],
       anchorTopK,
@@ -800,8 +919,8 @@ async function main(): Promise<void> {
       },
     })),
   };
-  writeFileSync(JSON_PATH, JSON.stringify(jsonPayload, null, 2), "utf8");
-  process.stdout.write(`Wrote ${relative(REPO_ROOT, JSON_PATH)}\n`);
+  writeFileSync(jsonTargetPath, JSON.stringify(jsonPayload, null, 2), "utf8");
+  process.stdout.write(`Wrote ${relative(REPO_ROOT, jsonTargetPath)}\n`);
 }
 
 /**
@@ -811,10 +930,10 @@ async function main(): Promise<void> {
  * only when RESULTS.md has no appended sections at all is the whole file
  * (re)written by the token benchmark alone.
  */
-function writeResultsMarkdown(markdown: string): void {
+function writeResultsMarkdown(markdown: string, targetPath: string = RESULTS_PATH): void {
   let full = "";
   try {
-    full = readFileSync(RESULTS_PATH, "utf8");
+    full = readFileSync(targetPath, "utf8");
   } catch {
     full = "";
   }
@@ -822,18 +941,22 @@ function writeResultsMarkdown(markdown: string): void {
   const endIdx = full.indexOf(TOKEN_END);
   if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
     const next = full.slice(endIdx + TOKEN_END.length);
-    writeFileSync(RESULTS_PATH, `${full.slice(0, startIdx)}${markdown}${next}`, "utf8");
+    writeFileSync(targetPath, `${full.slice(0, startIdx)}${markdown}${next}`, "utf8");
     return;
   }
   const p12Idx = full.indexOf(P12_BEGIN);
   if (p12Idx !== -1) {
-    writeFileSync(RESULTS_PATH, `${markdown}${full.slice(p12Idx)}`, "utf8");
+    writeFileSync(targetPath, `${markdown}${full.slice(p12Idx)}`, "utf8");
     return;
   }
-  writeFileSync(RESULTS_PATH, markdown, "utf8");
+  writeFileSync(targetPath, markdown, "utf8");
 }
 
-main().catch((error) => {
-  process.stderr.write(`Benchmark failed: ${String(error instanceof Error ? error.stack : error)}\n`);
-  process.exitCode = 1;
-});
+// Run only when executed directly (node/tsx benchmarks/run-token-benchmark.ts),
+// never on import (tests and other benchmark scripts import helpers here).
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  runTokenBenchmark().catch((error) => {
+    process.stderr.write(`Benchmark failed: ${String(error instanceof Error ? error.stack : error)}\n`);
+    process.exitCode = 1;
+  });
+}

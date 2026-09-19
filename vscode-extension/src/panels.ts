@@ -907,7 +907,8 @@ export function buildSettingsHtml(
   const mcpStatusLines = renderMcpStatusLines(status?.mcpAgents ?? []);
   const indexMarkdown = settings.indexMarkdown !== false;
   const indexOfficeDocs = settings.indexOfficeDocs !== false;
-  const embeddingProvider = settings.embeddingProvider === "transformers" ? "transformers" : "fnv";
+  // R7-b: semantic-on by default — only an explicit "fnv" opts out.
+  const embeddingProvider = settings.embeddingProvider === "fnv" ? "fnv" : "transformers";
   const observationsEnabled = settings.observationsEnabled !== false;
   const observationReduceEnabled = settings.observationReduceEnabled !== false;
   const contextPressureEnabled = settings.contextPressureEnabled !== false;
@@ -1034,8 +1035,8 @@ export function buildSettingsHtml(
           </label>
           <label>语义召回
             <select id="settings-embedding-provider" name="embeddingProvider">
-              <option value="fnv"${embeddingProvider === "fnv" ? " selected" : ""}>FNV（离线）</option>
-              <option value="transformers"${embeddingProvider === "transformers" ? " selected" : ""}>transformers（本地语义）</option>
+              <option value="transformers"${embeddingProvider === "transformers" ? " selected" : ""}>transformers（本地语义，默认）</option>
+              <option value="fnv"${embeddingProvider === "fnv" ? " selected" : ""}>FNV（纯离线）</option>
             </select>
           </label>
           <label>Max Context Tokens <input id="settings-max-context-tokens" name="maxContextTokens" type="number" min="1" value="${settings.maxContextTokens}" /></label>

@@ -72,7 +72,7 @@
       graphStorePath: getString("settings-graph-store-path"),
       indexMarkdown: getChecked("settings-index-markdown"),
       indexOfficeDocs: getChecked("settings-index-office"),
-      embeddingProvider: getString("settings-embedding-provider") || "fnv",
+      embeddingProvider: getString("settings-embedding-provider") || "transformers",
       downloadAnydoc: getChecked("settings-index-office"),
       observationsEnabled: getChecked("settings-observations-enabled"),
       observationReduceEnabled: getChecked("settings-observation-reduce"),

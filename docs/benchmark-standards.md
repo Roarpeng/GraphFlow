@@ -36,6 +36,7 @@
 ### 2.2 输入数据（固定）
 - **查询集**：8 条 golden 查询，硬编码于 `benchmarks/run-token-benchmark.ts` 的 `QUERIES` 常量：`orchestrator`、`context compression`、`model routing`、`graph index`、`token savings`、`semantic enrichment`、`preview context`、`skill flywheel`。固定输入，不可配置。
 - **被测语料**：仓库自身的 `src/` 树（baseline 扫描范围；忽略 `node_modules`、`dist`、`.git`、`graphflow-out`、`graphify-out`、`.cache`、`tests`、`__tests__`）。
+- **外部语料模式（反自指，v1.24.0 起）**：`tsx benchmarks/run-token-benchmark.ts --corpus=<path> [--queries=a,b,c]` 可把整套双臂测量指向**另一个仓库**（默认查询集换为通用 8 条 `EXTERNAL_CORPUS_DEFAULT_QUERIES`，可用 `--queries` 覆盖）。结果文件同步标注出处：RESULTS.md 段落带 `Corpus (external, anti-self-referential)` 行，机器 JSON `inputs.corpus.kind: "external"` + 语料根路径。**三方复现引用数字时建议先在自选仓库跑外部语料模式**——这是对"语料 = 引擎自身源码"自指质疑的直接回应（§0）。
 - **Baseline 参数**：每查询最多整读命中分数最高的 10 个文件（`BASELINE_MAX_FILES_PER_QUERY = 10`），扩展名 `.ts`/`.tsx`。
 
 ### 2.3 运行命令
