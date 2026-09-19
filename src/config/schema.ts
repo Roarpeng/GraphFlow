@@ -162,12 +162,11 @@ export interface GraphFlowConfig {
       l3: number;
     };
     /**
-     * Embedding backend for vector recall (P0-1). Default "fnv" is
-     * zero-config and offline-safe: deterministic FNV-1a bag-of-tokens
-     * embeddings, no downloads. Set "transformers" to lazily load
-     * all-MiniLM-L6-v2 via @huggingface/transformers (downloaded once, then
-     * cached) for semantic query + node embeddings; any failure (missing
-     * model cache, timeout, load error) transparently falls back to FNV-1a.
+     * Embedding backend for vector recall (R7-b: semantic-on by default).
+     * "transformers" = resilient local: try the canonical local semantic model
+     * first (Xenova/bge-base-zh-v1.5 via @huggingface/transformers), transparently
+     * falling back to FNV-1a on any failure. "fnv" = explicit offline-safe
+     * opt-out: deterministic FNV-1a bag-of-tokens embeddings, no downloads.
      */
     embeddingProvider?: "fnv" | "transformers";
     /**

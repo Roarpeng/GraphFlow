@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.24.0] - 2026-09-19
+
+### Added — R7 三件套首发：语义召回默认开 + Agent Skills 标准分发 + 可核验隐私
+
+- **R7-b 零配置本地语义召回默认开**：`graphPolicy.embeddingProvider` 默认从 `"fnv"` 改为 `"transformers"`（resilient local 路径：优先 `Xenova/bge-base-zh-v1.5` 本地语义模型，任何失败——缺包/无缓存/超时/加载错误——透明降级 FNV-1a，保持零 Key、零云依赖）。此前语义召回是 opt-in（默认 FNV hash 词袋），开箱质量落后 Continue+Ollama 一档；现在 ONNX 运行时可用即自动走语义召回，`"fnv"` 显式配置仍可强制纯离线 hash（air-gapped 场景）。`embedding-factory.ts` 解析顺序不变：legacy openai key > 新开关 > legacy embeddingPolicy > 默认 resilient transformers。`tests/embedding-backend.test.ts` 更新为断言 transformers 默认健康路径（真实加载模型 305ms）+ fnv 显式 opt-out。
+- **R7-a SKILL.md 对齐 agentskills.io 开放标准（导出侧）**：`src/learning/skill-markdown.ts` 导出 frontmatter 对齐规范——`name` 经 `toSpecName` 转为 1-64 小写连字符 slug（非 ASCII 名称罗马化回退）、必需 `description`（what+when 语义）、可选 `license` / `compatibility` / `metadata`（display name 经 `metadata.graphflow-name` 往返保留）；`validateSkillMarkdown` 全量校验导出文件（`invalid=0` 保证）；导出布局改为**每 skill 一个目录 + SKILL.md**（agentskills.io 约定），平面 `.md` 导出保留兼容。import 宽容：第三方 spec 文件与旧 display-name 文件均可入，导入一律保守 `correctable` 不继承 proven 信任。端到端：空工作区 `graphflow skill markdown export <path>` 优雅降级 `files=0; invalid=0`。
+- **R7-d 隐私威胁模型 + 可执行审计面**：新增 `docs/threat-model.md`（信任边界 / 数据流 / 出网点枚举 / 密钥处理 / 落盘路径 / 剩余风险）+ `graphflow audit --privacy [--json]`（`src/audit/checkers/privacy-checker.ts`）：11 个落盘产物路径存在性、6 个出网端点及触发条件（5 家 LLM provider 仅在配置时触发；HuggingFace Hub 仅首次模型下载且 `HF_ENDPOINT` 可镜像）、全局配置文件权限（0600 检查）、provider key **布尔值**（检测变量名存在，值永不回显）。核心可核验断言：**零配置零 Key 时零必需出网（模型首下除外）**——把 local-first 从口号变成一条可执行命令。`tests/privacy-audit.test.ts` 2 条。
+- **R7-a 渐进披露 + spec 目录布局（同版补完）**：`skillToSkillMarkdownBundle` 把超限 playbook/guidance 拆进 `references/guidance-*.md`（SKILL.md 保持紧凑指针 + 按需加载索引行，~5000 token 上限进入 `validateSkillMarkdown`）；导出布局定为 agentskills.io 约定的**每 skill 一目录 + SKILL.md**（目录名 = spec name，去重后缀 `-2`）。导入侧同步收紧：spec 布局强制**父目录名 = skill name**（violation 注明 agentskills.io）；拥有 SKILL.md 的目录只收 SKILL.md、不再下钻——`references/` 文件永不被误当 skill 导入；平面 `.md` 旧布局保持可导入（本轮还修复了目录扫描静默丢弃平面 `.md` 的回归）。
+- **R7-h 效率证据公开 schema（导出侧）**：新增 `src/learning/efficiency-evidence.ts` + `graphflow efficiency export` → `graphflow-out/efficiency-evidence.json`：`schemaVersion=1` + `graphflowVersion` + `sources`（指回 efficiency.json / context-fidelity.json）+ 三源数据合订（配对比较 / 保真采样 / token-savings 累计）+ `tokenSavings.boundary` 固定边界文本随数发布（packaging ROI ≠ Hit@k ≠ body coverage ≠ lossless fidelity）。**诚实门禁**：零配对 / 零 qualifying / 能力回归 → `gate.allowed=false` 且原因内嵌文件——文件总可发布，省 token 声明被门禁（SoL-Pi capability floor 的工件级载体）。
+- **token 基准外部语料模式（反自指）**：`benchmarks/run-token-benchmark.ts --corpus=<path> [--queries=a,b,c]` 把双臂测量指向另一个仓库（默认通用查询集 `EXTERNAL_CORPUS_DEFAULT_QUERIES`，可覆盖）；RESULTS.md 段落带 `Corpus (external, anti-self-referential)` 行、机器 JSON `inputs.corpus.kind: "external"` + 语料根路径。同时脚本改造为可编程入口 `runTokenBenchmark({corpusRoot?, resultsPath?})` + **import 不再自跑 main**（直接执行守卫 `import.meta.url === pathToFileURL(argv[1])`），并修复 corpus 模式缺 `existsSync` 导入的崩溃；`docs/benchmark-standards.md` §2.2 补外部语料条目。
+- **Fixed — `audit --privacy` 双重打印**：分支内手动 `console.log` 与 `main()` 统一的 `formatCliResult(legacyText)` 打印路径叠加，summary 输出两遍。现合并为单一 `legacyText` 返回，JSON 模式交由 main 输出 `data`。
+- **测试 199→203 文件 / 1480→1498 条全绿**：新增 privacy-audit（2 条）与 skill-markdown-interop 4→6（spec frontmatter 往返 + 非法 name 拒绝）、embedding-backend 默认语义断言（9 条）；本轮再增 skill-markdown-progressive（5 条：bundle 拆分/指针/常量/目录名/规格布局导入导出往返 + references 防误收）、token-benchmark（4 条：savings 数学/--corpus 解析/通用查询集/外部语料端到端含机器 JSON 出处）、efficiency-evidence（4 条：空态门禁/qualifying 开门/能力回归关门/写盘字段+boundary+gate）。端到端冒烟：`audit --privacy` 净空/含产物两态正确；空工作区 `efficiency export` 产出 gated 文件（版本号取自 GraphFlow 包自身而非工作区）。
+- **已知边界**：R7-a 剩余 skills-ref 校验门禁（ROADMAP 标注）；R7-h 剩余随包发布管线与 mechanism 生命周期联动；独立复现破零仍需外部贡献者（外部语料模式已把工具备好）。语义召回默认开意味着首次查询可能触发一次模型下载（默认缓存于 `~/.cache/huggingface`，可经 `GRAPHFLOW_EMBEDDING_CACHE_DIR` / `embeddingPolicy.modelCacheDir` 重定向、`HF_ENDPOINT` 镜像；显式 `"fnv"` 可完全关闭下载）——已在 threat-model 与 README 标注。
+
+
 ## [1.23.2] - 2026-09-19
 
 ### Fixed — 健壮性双修：文件锁死锁 + 夜间学习崩溃（覆盖率深挖）

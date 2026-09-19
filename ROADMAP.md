@@ -204,14 +204,14 @@
 
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
-| **P0** | **R7-a 对齐 Agent Skills 开放标准做「记忆层分发」** | 🟡 | SKILL.md export/import 已有（v1.12）；下一步：导出的技能包对齐 agentskills.io 规范（标准 frontmatter + 渐进披露），让 GraphFlow 学到的项目经验能以标准 Agent Skills 包被 ~40 平台直接安装——「学习飞轮的产物可分发」是索引派与记忆派都没有的能力 |
+| **P0** | **R7-a 对齐 Agent Skills 开放标准做「记忆层分发」** | ✅ v1.24.0（导出 + 渐进披露） | SKILL.md export 已对齐 agentskills.io（slug name 1-64 小写连字符 + 必需 description what+when + license/compatibility/metadata + `toSpecName/isSpecName/validateSkillMarkdown`）；**渐进披露拆分**：`skillToSkillMarkdownBundle` 把超限 playbook/guidance 拆进 `references/guidance-*.md`（SKILL.md 保持紧凑指针，~5000 token 上限校验入 `validateSkillMarkdown`），导出一律「每 skill 一目录 + SKILL.md」布局（目录名 = spec name）；导入侧强制 spec 目录名、拥有 SKILL.md 的目录不再下钻（references/ 永不被误当 skill），平面 `.md` 旧布局保持可导入。import 宽容（第三方 spec 文件与旧 display name 均可入），仍保守 `correctable` 不继承信任。剩余：skills-ref 校验门禁 |
 | **P0** | **R7-g 效率机制投影面扩展（R6 的宿主泛化）** | 🟡 | 「首插前缩减」目前只有 dsh 具备 surface-replace 原语（`HOSTS_WITH_TOOL_RESULT_PROJECTION = ["deepseek-harness"]`）；opencode / Cursor / Codex / Gemini / ZCode 均无结果重写面，只能走显式 content/handle 协议。跟踪各宿主的 compaction/结果重写 API 演进（MCP 生态若出现标准化的 tool-result rewrite 面则第一时间接入），把 SoL-Pi 式机制的适用面从 1 个宿主扩到 N 个——这是对 SoL-Pi 绑 Pi 的结构性优势兑现 |
-| **P1** | **R7-b 零配置本地语义召回默认开** | 🟡 | canonical 嵌入模型 `Xenova/bge-base-zh-v1.5` 已统一（R4），但默认召回仍是 hash 向量；目标：检测到本地 ONNX 运行时可用时自动启用语义召回（对标 Continue + Ollama 的本地索引体验，保持零 Key、零云依赖） |
+| **P1** | **R7-b 零配置本地语义召回默认开** | ✅ v1.24.0 | 默认 `graphPolicy.embeddingProvider: "transformers"`（resilient local：优先 `Xenova/bge-base-zh-v1.5`，任何失败透明降级 FNV-1a，保持零 Key 零云）；显式 `"fnv"` 仍可强制纯离线 hash。diagnose 首 embed 前报 semantic intent，fallback 后报 off |
 | **P1** | **R7-c 跨仓库 / monorepo 图谱** | ⬜ | repo map 被认为是 monorepo 最成熟上下文方案；Sourcegraph 走多仓语义图。GraphFlow 图天然是其超集（符号 + 调用链 + 概念 + 对话），加 cross-repo 边（依赖声明 / import 外部解析）即可覆盖「在 A 仓问 B 仓的实现」场景 |
-| **P1** | **R7-d 隐私威胁模型文档 + 审计面** | ⬜ | Cline「不索引」vs 索引派的隐私争论热度高，本地优先是 GraphFlow 的结构性差异化；产出 `docs/threat-model.md`（数据流图 / 出网点枚举 / disclosure 字段映射）+ `graphflow audit`（列出所有落盘路径与出网端点），把「本地优先」从口号变成可核验 |
+| **P1** | **R7-d 隐私威胁模型文档 + 审计面** | ✅ v1.24.0 | `docs/threat-model.md`（信任边界 / 数据流 / 出网点枚举 / 密钥处理 / 落盘路径 / 剩余风险）+ `graphflow audit --privacy` 可执行审计（11 落盘路径存在性 + 6 出网端点触发条件 + 全局配置 0600 + provider key 布尔值，值永不回显）+ `tests/privacy-audit.test.ts`。断言：零配置时零必需出网（模型首下除外） |
 | **P2** | **R7-e 业界记忆基准接入** | ⬜ | `proof:flywheel` 已是自证复现包；接入跨厂商记忆基准（LOCOMO / LongMemEval 类）跑分并公开数据，把「对话图 + 修正链」的时序记忆能力放到公认标尺上（对标 Zep 的 71.2% 口径） |
 | **P2** | **R7-f 团队记忆企业化** | 🟡 | team serve + RBAC 已是 MVP；企业 wishlist（OIDC IdP UI、审批流界面、托管多活）保持，按社区需求排序 |
-| **P2** | **R7-h 效率证据可审计公开格式** | ⬜ | `efficiency.json`（配对双臂 + 三重不合格判据）与 `context-fidelity.json` 已是内部格式；将其定为公开 schema 并随包发布，配合 `mechanism` 生命周期（proposed → held-out → admitted）输出「效率声明可审计」报告——SoL-Pi 的 capability floor 理念在开源跨宿主场景目前没有可核验载体，GraphFlow 可以成为事实标准 |
+| **P2** | **R7-h 效率证据可审计公开格式** | 🟡 v1.24.0（导出侧） | `graphflow efficiency export` 产出 `graphflow-out/efficiency-evidence.json`（`schemaVersion=1` + `graphflowVersion` + `sources` 指回 efficiency.json / context-fidelity.json + 三源数据合订 + `tokenSavings.boundary` 固定口径边界文本「packaging ROI ≠ fidelity」随数发布）+ **诚实门禁**（零配对 / 零 qualifying / 能力回归 → `gate.allowed=false` 原因内嵌文件；文件总可发布、省 token 声明被门禁）。剩余：随 npm 包发布管线 + mechanism 生命周期（proposed → held-out → admitted）联动输出「效率声明可审计」报告——SoL-Pi capability floor 在开源跨宿主场景的可核验载体 |
 
 ### 建议版本节奏
 

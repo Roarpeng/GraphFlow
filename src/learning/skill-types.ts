@@ -112,6 +112,16 @@ export interface SkillState {
    */
   guidance?: string;
   /**
+   * Human-readable what+when summary (agentskills.io `description`, 1-1024
+   * chars). Round-tripped through SKILL.md export/import; advisory for
+   * ranking, never a trust signal.
+   */
+  description?: string;
+  /** SPDX-style license label carried through SKILL.md export (optional). */
+  license?: string;
+  /** Environment requirements note (agentskills.io `compatibility`, ≤500 chars). */
+  compatibility?: string;
+  /**
    * Itemized playbook bullets with helpful/harmful counters (ACE / SkillOpt-lite).
    * Guidance is derived from these bullets when present.
    */

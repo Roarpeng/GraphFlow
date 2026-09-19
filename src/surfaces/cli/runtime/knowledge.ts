@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { extname, isAbsolute, join } from "node:path";
+import { basename, dirname, extname, isAbsolute, join } from "node:path";
 
 import type { GraphEdge } from "../../../core/types";
 import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
@@ -11,7 +11,10 @@ import {
 } from "../../../graph/knowledge-extraction";
 import {
   parseSkillMarkdown,
-  skillToSkillMarkdown,
+  skillDirectoryFor,
+  skillToSkillMarkdownBundle,
+  toSpecName,
+  validateSkillMarkdown,
 } from "../../../learning/skill-markdown";
 import { parseSkillState, serializeAtomic } from "../../../learning/skill-store";
 import { dialogueSessionIdFor, listDialogueTurns } from "../../../learning/dialogue-thread";
@@ -36,6 +39,10 @@ export interface SkillMarkdownExportResult {
   fileCount: number;
   bytes: number;
   skippedComposites: number;
+  /** Progressive-disclosure reference files written under <skill>/references/. */
+  referenceFileCount: number;
+  /** agentskills.io validation violations across exported files (empty = all valid). */
+  invalid: Array<{ file: string; violations: string[] }>;
 }
 
 export async function exportSkillsToMarkdownRuntime(
@@ -56,7 +63,9 @@ export async function exportSkillsToMarkdownRuntime(
   let bytes = 0;
   let fileCount = 0;
   let skippedComposites = 0;
-  const usedNames = new Set<string>();
+  let referenceFileCount = 0;
+  const invalid: Array<{ file: string; violations: string[] }> = [];
+  const usedDirs = new Set<string>();
   for (const node of snapshot.nodes) {
     if (node.type !== "Skill") continue;
     const state = parseSkillState(node.content);
@@ -64,21 +73,35 @@ export async function exportSkillsToMarkdownRuntime(
       if (node.content.includes('"kind":"composite"')) skippedComposites += 1;
       continue;
     }
-    const base = state.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "skill";
-    let fileName = `${base}.md`;
+    // agentskills.io layout: one directory per skill, SKILL.md inside, and
+    // the directory name MUST equal the spec name. Oversized guidance moves
+    // to references/ (progressive disclosure) so the body stays a pointer.
+    let dirName = skillDirectoryFor(state);
+    const base = toSpecName(state.name);
     let suffix = 2;
-    while (usedNames.has(fileName.toLowerCase())) {
-      fileName = `${base}-${suffix}.md`;
+    while (usedDirs.has(dirName.toLowerCase())) {
+      dirName = `${base}-${suffix}`;
       suffix += 1;
     }
-    usedNames.add(fileName.toLowerCase());
-    const markdown = skillToSkillMarkdown(state);
-    const filePath = join(outputDir, fileName);
-    writeFileSync(filePath, markdown, "utf8");
-    bytes += Buffer.byteLength(markdown);
+    usedDirs.add(dirName.toLowerCase());
+    const bundle = skillToSkillMarkdownBundle(state);
+    const violations = validateSkillMarkdown(bundle.markdown);
+    const relPath = `${dirName}/SKILL.md`;
+    if (violations.length > 0) invalid.push({ file: relPath, violations });
+    const skillDir = join(outputDir, dirName);
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), bundle.markdown, "utf8");
+    bytes += Buffer.byteLength(bundle.markdown);
     fileCount += 1;
+    for (const reference of bundle.references) {
+      const refPath = join(skillDir, ...reference.path.split("/"));
+      mkdirSync(dirname(refPath), { recursive: true });
+      writeFileSync(refPath, reference.content, "utf8");
+      bytes += Buffer.byteLength(reference.content);
+      referenceFileCount += 1;
+    }
   }
-  return { outputDir, fileCount, bytes, skippedComposites };
+  return { outputDir, fileCount, bytes, skippedComposites, referenceFileCount, invalid };
 }
 
 export interface SkillMarkdownImportResult {
@@ -87,19 +110,43 @@ export interface SkillMarkdownImportResult {
   updated: number;
   skipped: number;
   total: number;
+  /** Files rejected by agentskills.io validation (name/description/shape). */
+  invalid: Array<{ file: string; violations: string[] }>;
 }
 
+/**
+ * Collect importable skill markdown files. Spec layout is one directory per
+ * skill with SKILL.md inside (plus references/*.md that are NOT skills), so a
+ * directory scan only accepts files named SKILL.md. A single explicitly given
+ * file may have any name (hand-written or third-party paths).
+ */
 function collectMarkdownFiles(path: string): string[] {
   if (!statSync(path).isDirectory()) {
-    return [path];
+    return extname(path).toLowerCase() === ".md" ? [path] : [];
+  }
+  const entries = readdirSync(path, { withFileTypes: true });
+  // agentskills.io layout: a directory owning SKILL.md IS a skill directory —
+  // collect only that SKILL.md and never descend (references/ etc. are
+  // resources of the skill, never importable skills themselves).
+  if (entries.some((entry) => entry.isFile() && entry.name.toLowerCase() === "skill.md")) {
+    return [join(path, "SKILL.md")];
   }
   const files: string[] = [];
-  for (const entry of readdirSync(path, { withFileTypes: true })) {
+  for (const entry of entries) {
     const child = join(path, entry.name);
     if (entry.isDirectory()) files.push(...collectMarkdownFiles(child));
-    else if (entry.isFile() && extname(entry.name).toLowerCase() === ".md") files.push(child);
+    // Legacy flat layout: any .md file below a directory that does not own a
+    // SKILL.md stays importable.
+    else if (entry.isFile() && extname(entry.name).toLowerCase() === ".md") {
+      files.push(child);
+    }
   }
   return files.sort();
+}
+
+/** True when the file lives at `<dir>/SKILL.md` (spec layout, not flat legacy). */
+function isSpecLayoutFile(file: string): boolean {
+  return basename(file).toLowerCase() === "skill.md";
 }
 
 async function existingSkillUpdatedAt(client: GraphClient, id: string): Promise<number | undefined> {
@@ -127,11 +174,40 @@ export async function importSkillsFromMarkdownRuntime(
   let imported = 0;
   let updated = 0;
   let skipped = 0;
+  const invalid: Array<{ file: string; violations: string[] }> = [];
   for (const file of files) {
-    const state = parseSkillMarkdown(readFileSync(file, "utf8"));
+    const raw = readFileSync(file, "utf8");
+    // Spec gate: reject files that violate agentskills.io shape before parsing.
+    // Missing description is advisory (importable); bad name/shape is rejected.
+    const violations = validateSkillMarkdown(raw).filter(
+      (v) => !v.startsWith("description is required")
+    );
+    if (violations.length > 0) {
+      invalid.push({ file, violations });
+      skipped += 1;
+      continue;
+    }
+    const state = parseSkillMarkdown(raw);
     if (!state) {
       skipped += 1;
       continue;
+    }
+    // agentskills.io: the parent directory name must equal the skill name.
+    // Only enforced for spec-layout files; flat legacy exports (name.md at
+    // the scan root) stay importable.
+    if (isSpecLayoutFile(file)) {
+      const parentDir = basename(dirname(file));
+      const specName = toSpecName(state.name);
+      if (parentDir.toLowerCase() !== specName.toLowerCase()) {
+        invalid.push({
+          file,
+          violations: [
+            `directory name "${parentDir}" must equal the skill name "${specName}" (agentskills.io)`,
+          ],
+        });
+        skipped += 1;
+        continue;
+      }
     }
     const previousUpdatedAt = await existingSkillUpdatedAt(client, state.id);
     if (
@@ -146,7 +222,7 @@ export async function importSkillsFromMarkdownRuntime(
     if (previousUpdatedAt === undefined) imported += 1;
     else updated += 1;
   }
-  return { inputPath, imported, updated, skipped, total: files.length };
+  return { inputPath, imported, updated, skipped, total: files.length, invalid };
 }
 
 export interface DialogueKnowledgeExtractionResult {

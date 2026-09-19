@@ -62,7 +62,7 @@ cursor --install-extension graphflow-<version>.vsix
 
 > **无需 LLM** 即可使用：结构建图、Context Preview（FNV-1a hash 向量召回兜底）、知识图谱可视化、记忆审计、MCP 工具。
 >
-> **关于语义模型**：VSIX **不**捆绑 `@huggingface/transformers` 模型（约 100MB+）。默认 `fnv` 离线可用；启用 `transformers` 时模型懒加载，无缓存/失败会告警并自动降级回 FNV。
+> **关于语义模型**：VSIX **不**捆绑 `@huggingface/transformers` 模型（约 100MB+）。默认 `transformers`（resilient local：优先本地语义，失败自动降级 FNV-1a）；选 `fnv` 可强制纯离线 hash。模型懒加载，无缓存/失败会告警并自动降级回 FNV。
 >
 > **关于 anydoc**：在 **GraphFlow: Settings** 勾选 Office / PDF；解析器下载到 `~/.graphflow/optional-deps`。
 
