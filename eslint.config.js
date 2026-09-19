@@ -4,6 +4,7 @@ const tsParser = require("@typescript-eslint/parser");
 module.exports = [
   {
     ignores: [
+      "coverage/**",
       "dist/**",
       "node_modules/**",
       "vscode-extension/vendor/**",

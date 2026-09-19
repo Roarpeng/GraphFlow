@@ -114,10 +114,11 @@ async function resolveFileNode(
 /**
  * 数 File 节点的入边（fail-open，任一查询失败只少计不计错）：
  * - 指向该文件的 imports/references 入边（谁导入/引用了它）；
- * - defines 反向：该文件 defines 出边的符号被其它文件 references 的入边数
- *   （File→Symbol references 是文件引用外部符号的唯一表达，故入边要落在符号上）。
+ * - defines 反向：该文件 defines 出边的符号被其它文件 references **或 calls**
+ *   的入边数（File→Symbol references 是文件引用外部符号的唯一表达；跨文件
+ *   函数调用则记为 calls 边——只数 references 会把纯函数模块误判成孤儿）。
  */
-async function countInboundEdges(client: GraphClient, nodeId: string): Promise<number> {
+export async function countInboundEdges(client: GraphClient, nodeId: string): Promise<number> {
   const neighbors = client.getNeighbors?.bind(client);
   if (!neighbors) return 0;
   let count = 0;
@@ -131,7 +132,7 @@ async function countInboundEdges(client: GraphClient, nodeId: string): Promise<n
     const defined = await neighbors([nodeId], ["defines"], "out");
     const symbolIds = defined.map((entry) => entry.node.id);
     if (symbolIds.length > 0) {
-      const refs = await neighbors(symbolIds, ["references"], "in");
+      const refs = await neighbors(symbolIds, ["references", "calls"], "in");
       count += refs.length;
     }
   } catch {

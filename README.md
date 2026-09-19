@@ -36,7 +36,7 @@ It is also **local-first and portable**: everything runs offline with no API key
 All headline numbers come from a **public, reproducible benchmark suite** ([benchmarks/README.md](benchmarks/README.md)) with published methodology ([docs/benchmark-standards.md](docs/benchmark-standards.md)) and machine-readable JSON dumps pinned to commits. Authoritative percentages live in the tracked RESULTS markdown; this package does not invent new scores.
 
 - **Token savings, two arms — quote them separately** (8-query suite, independently re-counted with `gpt-tokenizer`): **95.6%** against the fair counterfactual (the same ranker's top-10 anchors resolved to real files and read in full: 136,265 → 6,044 tokens) and **98.5%** against a naive term-frequency grep baseline (410,725 → 6,044), whose denominator is an upper bound by construction. The realistic arm cannot inflate itself: anchors pointing at fewer or smaller files make its savings *smaller*. Details: [benchmarks/RESULTS.md](benchmarks/RESULTS.md)
-- **132-query golden retrieval set** in CI (Hit@5 = 100%, MRR = 0.836, NDCG@5 = 0.601); downloadable open dataset: [`benchmarks/datasets/retrieval-golden-v1.json`](benchmarks/datasets/retrieval-golden-v1.json) — run `npm run bench:retrieval`
+- **132-query golden retrieval set** in CI (Hit@5 = 100%, MRR = 0.779, NDCG@5 = 0.638); downloadable open dataset: [`benchmarks/datasets/retrieval-golden-v1.json`](benchmarks/datasets/retrieval-golden-v1.json) — run `npm run bench:retrieval`
 - **Skill A/B: 100% vs 61.5%** task success with the flywheel on vs off (26 tasks)
 - **Memory ROI: 100% vs 56.5%** with episodic memory on vs off (62 tasks, with attribution chains)
 
@@ -97,7 +97,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | **Knowledge graph** | 12-language AST indexing; File / Module / Symbol + **Concept / Requirement**; cross-layer edges `documents` / `implements` / `derived_from`; Office/PDF → Markdown via optional **`@firecrawl/anydoc`** (MIT). **CLI/npm**: optionalDependency. **VSIX**: not bundled; on activate the extension **auto-downloads the current-OS binary** into `~/.graphflow/optional-deps` when `graphflow.downloadAnydoc` is true (default). Disable the setting to skip network; source indexing still works. |
 | **Context compression** | L1/L2/L3 layered anchors; graph compression (edge weights + PageRank, LRU cache); stem-matching recall (orchestrate ↔ orchestration); vector recall + RRF; RepoMap overview; adaptive budget; **post-packaging accounting** (dialogue recall lines and workbench prompt lines count against the reported budget; `dialogueHits` reported separately as `unbudgetedTokens` so savings are computed on the true total) |
 | **Efficiency mechanisms (SoL-Pi borrow)** | **ObservationPack** (oversized outputs → content-addressed handle + exact paged recall), **Evidence-Preserving Reducer** (log → bounded receipt whose retained lines are re-verified verbatim), **Online Context Compact** (observed-pressure budget + economic compaction signal), **Action Fusion** (fused edit+validate steps on the bridge descriptor). **All on by default**, individually switchable in **GraphFlow: Settings**; **dsh automatic projection** rewrites over-budget tool results on the model surface (`GRAPHFLOW_D_DSH_PROJECTION=0` to disable); paired **efficiency/capability floor** (`graphflow-out/efficiency.json` + `governance release-gate` thresholds); **mechanism auto-research loop** (`graphflow mechanism`, held-out isolation). See [docs/efficiency-mechanisms.md](docs/efficiency-mechanisms.md) |
-| **Retrieval & fidelity** | Golden-set regression gate (132 queries, Hit@5=100%, MRR=0.836, NDCG@5=0.601); separate anchor-recall and normalized body-coverage metrics persisted beside token savings |
+| **Retrieval & fidelity** | Golden-set regression gate (132 queries, Hit@5=100%, MRR=0.779, NDCG@5=0.638); separate anchor-recall and normalized body-coverage metrics persisted beside token savings |
 | **Vector index** | In-process memoization + disk persistence (fingerprint-checked, seconds to restore after MCP restart) |
 | **Storage backends** | `file` / `memory` / `sqlite` (FTS5, tokenizer-enhanced `searchtext`, camelCase searchable) / **`auto` (sqlite-first with fallback)** / `mcp-http` |
 | **Learning flywheel** | Episodic memory, reflection, skill nodes (score ±1, bounded [-20,20]), nightly training, adaptive evidence-aware forgetting, **auto-capture + Claude Code hooks (on by default)**, **SkillOpt-lite** bounded guidance edits, four-class lifecycle + **canary gate for synced skills**, portable SKILL.md import/export (agentskills.io spec layout: one dir per skill + progressive-disclosure `references/`), auditable efficiency evidence (`graphflow efficiency export` → `graphflow-out/efficiency-evidence.json`), `npm run backfill:episodes`, contribution reports (`skill report` / `graphflow_diagnose` / `route diagnose`) |
@@ -200,9 +200,9 @@ A missing/malformed endpoint fails at config validation; connection or runtime r
 - **Comprehensive**: [COMPREHENSIVE-RESULTS.md](benchmarks/COMPREHENSIVE-RESULTS.md) — P1–P6 six-dimension evaluation, overall **92.9%** (indexing 100% / compression 64.9% / planning 100% / learning 100% / bridge 100% / performance 99.7%)
 - **Independent-style**: [INDEPENDENT-RESULTS.md](benchmarks/INDEPENDENT-RESULTS.md) — CodeGraph-style 5-domain evaluation, Hit@5 **96%**, token savings **96.6%**, overall **96.2%**
 - **SWE-bench-style**: [SWE-BENCH-RESULTS.md](benchmarks/SWE-BENCH-RESULTS.md) — self-built 12-instance context-readiness eval; [SWE-BENCH-REAL-RESULTS.md](benchmarks/SWE-BENCH-REAL-RESULTS.md) — Flask real-project 10-instance file-recall eval (48.3%)
-- **Token savings**: [RESULTS.md](benchmarks/RESULTS.md) — 8 representative queries, **98.2%** savings, re-counted with independent gpt-tokenizer
-- **Retrieval quality**: [RETRIEVAL-EVAL-RESULTS.md](benchmarks/RETRIEVAL-EVAL-RESULTS.md) — 132 queries, Hit@5=100%, MRR=0.836, NDCG@5=0.601
-- **Skill flywheel A/B**: [SKILL-AB-RESULTS.md](benchmarks/SKILL-AB-RESULTS.md) — injection rate 100%, recall 100%, overhead 25.6 tok/task
+- **Token savings**: [RESULTS.md](benchmarks/RESULTS.md) — 8 representative queries, **95.6% realistic / 98.5% naive-grep** savings (two baseline arms — quote them separately), re-counted with independent gpt-tokenizer
+- **Retrieval quality**: [RETRIEVAL-EVAL-RESULTS.md](benchmarks/RETRIEVAL-EVAL-RESULTS.md) — 132 queries, Hit@5=100%, MRR=0.779, NDCG@5=0.638
+- **Skill flywheel A/B**: [SKILL-AB-RESULTS.md](benchmarks/SKILL-AB-RESULTS.md) — after the noise gate: 0% hint injection, 100% episode recall, ~15 tok/task overhead; the ROI claim is the success-proxy pair above (100% vs 61.5%)
 
 ## VS Code / Cursor extension
 
@@ -293,10 +293,10 @@ npx @roarpeng/graphflow install
 ### Register Skill + MCP on your machine (one command)
 
 ```bash
-```bash
 npm install -g @roarpeng/graphflow   # one command including the install: global postinstall registers, checks, and repairs automatically
 ```
 
+```bash
 npx @roarpeng/graphflow@latest doctor     # self-check: list agents detected on this machine
 npx @roarpeng/graphflow@latest install    # register into every detected agent (idempotent, safe to re-run)
 npx @roarpeng/graphflow@latest uninstall  # remove the registration from every agent
@@ -354,7 +354,7 @@ npm install
 npm run ci        # lint + build + tests + extension packaging + smoke
 ```
 
-Requires Node.js ≥ 20, npm ≥ 10. Expected: lint clean, build succeeds, 961 tests pass.
+Requires Node.js ≥ 20, npm ≥ 10. Expected: lint clean, build succeeds, full vitest suite green.
 
 ## Project structure
 
@@ -374,7 +374,7 @@ GraphFlow/
 │   └── surfaces/
 │       ├── cli/        # CLI + runtime
 │       └── mcp/        # MCP server (10 tools)
-├── tests/              # 142 files / 961 tests (incl. governance foundation and MCP HTTP/stdio matrix)
+├── tests/              # vitest suite (unit + governance + MCP HTTP/stdio matrix)
 ├── benchmarks/         # comprehensive + independent + SWE-bench + token savings + skill A/B (reproducible)
 ├── docs/               # ATP spec + context contract + experience memory + flywheel reproduction + GraphFlow/Serena
 ├── examples/           # ATP producer + team-memory config + GraphFlow/Serena dual-MCP snippet

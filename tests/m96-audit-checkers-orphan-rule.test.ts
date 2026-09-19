@@ -68,6 +68,40 @@ describe("M96 orphan-file checker", () => {
     expect(findings.map((f) => f.id)).toEqual(["orphan-file:src/real.go"]);
   });
 
+  it("excludes tool config files that carry source extensions (eslint.config.js …)", async () => {
+    const findings = await checker.run(
+      ["eslint.config.js", "vitest.config.ts", "src/real.ts"],
+      "/tmp/any",
+      stubContext({ probe: () => ({ inboundEdges: 0 }) })
+    );
+    expect(findings.map((f) => f.id)).toEqual(["orphan-file:src/real.ts"]);
+  });
+
+  it("excludes package.json manifest entries (bin/main/exports incl. dist→src layout)", async () => {
+    const root = makeTempRoot("gf-m96-manifest-");
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify({
+        main: "dist/index.js",
+        bin: { graphflow: "dist/surfaces/cli/index.js" },
+        exports: { "./web": "./web/plugin.mjs" },
+      }),
+      "utf8"
+    );
+    const findings = await checker.run(
+      ["src/surfaces/cli/index.ts", "src/index.ts", "web/plugin.mjs", "src/still-orphan.ts"],
+      root,
+      stubContext({ probe: () => ({ inboundEdges: 0 }) })
+    );
+    expect(findings.map((f) => f.id)).toEqual(["orphan-file:src/still-orphan.ts"]);
+  });
+
+  it("missing/invalid package.json is fail-open (no manifest exclusions)", async () => {
+    const root = makeTempRoot("gf-m96-nopkg-");
+    const findings = await checker.run(["src/surfaces/cli/index.ts"], root, stubContext({ probe: () => ({ inboundEdges: 0 }) }));
+    expect(findings.map((f) => f.id)).toEqual(["orphan-file:src/surfaces/cli/index.ts"]);
+  });
+
   it("skips when probe returns undefined (graph unavailable — never guess)", async () => {
     const findings = await checker.run(["src/new.ts"], "/tmp/any", stubContext({ probe: () => undefined }));
     expect(findings).toEqual([]);

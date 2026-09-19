@@ -49,6 +49,7 @@ export function collectPrivacyFacts(
   options?: {
     globalConfigPath?: string;
     env?: NodeJS.ProcessEnv;
+    platform?: NodeJS.Platform;
   }
 ): PrivacyAuditFacts {
   const env = options?.env ?? process.env;
@@ -84,6 +85,18 @@ export function collectPrivacyFacts(
     (name) => typeof env[name] === "string" && (env[name] as string).trim().length > 0
   );
 
+  // The documented invariant is a 0600 global config (docs/threat-model.md,
+  // disclosure `api_keys[].storage: "file-0600"`). Reporting the mode without
+  // judging it let stale 0644/0666 files pass silently — the audit now flags
+  // them. POSIX-only: Windows modes are not owner/group/other bitmasks.
+  const warnings: string[] = [];
+  const platform = options?.platform ?? process.platform;
+  if (globalExists && mode !== undefined && platform !== "win32" && mode !== "0600") {
+    warnings.push(
+      `global-config-mode: ${globalPath} is ${mode}, expected 0600 — run chmod 600 on it (this file may hold provider API keys; see docs/threat-model.md)`
+    );
+  }
+
   return {
     existingPaths,
     missingPaths,
@@ -95,6 +108,7 @@ export function collectPrivacyFacts(
     },
     configuredProviders: [...configuredProviders],
     anyKeyConfigured: configuredProviders.length > 0,
+    warnings,
   };
 }
 
@@ -104,6 +118,7 @@ export function formatPrivacyFacts(facts: PrivacyAuditFacts): string {
     `network: ${facts.endpoints.length} known endpoints, ${facts.endpoints.filter((e) => e.requiredWithoutConfig).length} required without config`,
     `globalConfig: ${facts.globalConfig.path} (${facts.globalConfig.exists ? `exists${facts.globalConfig.mode ? `, mode ${facts.globalConfig.mode}` : ""}` : "absent"})`,
     `providers: ${facts.anyKeyConfigured ? facts.configuredProviders.join(",") : "none configured (fully offline)"}`,
+    ...(facts.warnings.length > 0 ? [`warnings: ${facts.warnings.length}`] : []),
   ];
   return lines.join("; ");
 }

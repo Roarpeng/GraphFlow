@@ -430,3 +430,51 @@ export function validateSkillMarkdown(markdown: string): string[] {
 export function skillDirectoryFor(state: SkillState): string {
   return toSpecName(state.name);
 }
+
+/**
+ * Progressive-disclosure pointer lines in a SKILL.md body, e.g.
+ * `- details: references/guidance-1.md (load on demand)`. These are the
+ * promises the body makes about load-on-demand files living beside it.
+ */
+export function extractSkillReferences(markdown: string): string[] {
+  const parsed = parseFrontmatter(markdown);
+  if (!parsed) return [];
+  const refs: string[] = [];
+  for (const rawLine of parsed.body.split(/\r?\n/)) {
+    const match = /^[-*]\s+details:\s*(\S+)\s*\(.*\)\s*$/.exec(rawLine.trim());
+    if (match?.[1]) refs.push(match[1]);
+  }
+  return refs;
+}
+
+/**
+ * R7-a skills-ref gate: validate the bundle as a whole, not just the
+ * SKILL.md text. A well-formed SKILL.md whose pointer targets are missing is
+ * a dangling promise — an agent following `- details: references/...` would
+ * hit a missing file. Exported bundles are pointer⇄file 1:1 by construction,
+ * so any violation means the exporter (or a later hand-edit) broke the layout.
+ */
+export function validateSkillBundle(bundle: SkillMarkdownBundle): string[] {
+  const violations = validateSkillMarkdown(bundle.markdown);
+  const referenced = extractSkillReferences(bundle.markdown);
+  const presentPaths = bundle.references.map((reference) => reference.path);
+  const presentSet = new Set(presentPaths);
+  const referencedSet = new Set(referenced);
+
+  for (const ref of referenced) {
+    if (!/^references\/[a-z0-9][a-z0-9._-]*\.md$/.test(ref)) {
+      violations.push(
+        `reference path "${ref}" must be a relative references/*.md path (no traversal, no absolute paths)`
+      );
+    }
+    if (!presentSet.has(ref)) {
+      violations.push(`dangling reference "${ref}" — SKILL.md points at it but the bundle has no such file`);
+    }
+  }
+  for (const path of presentPaths) {
+    if (!referencedSet.has(path)) {
+      violations.push(`orphan reference file "${path}" — bundle ships it but SKILL.md never points at it`);
+    }
+  }
+  return violations;
+}

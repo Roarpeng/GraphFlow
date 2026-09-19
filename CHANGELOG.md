@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.24.1] - 2026-09-19
+
+### Fixed — 收尾审计修复批次（promise-vs-reality 对账的五处缺口）
+
+对外承诺审计（README/ROADMAP/CHANGELOG vs 代码/测试/基准实测）发现五类"承诺没有完全闭环"的缺口，本批全部收口：
+
+- **`audit --privacy` 0600 从"显示"变"判定"**：`PrivacyAuditFacts` 新增 `warnings` 数组——全局配置存在且 POSIX mode ≠ 0600 时产出违规 finding（含 chmod 修复指引；Windows 无 POSIX 位、mode 不可读、文件不存在均不误报，`platform` 可注入测试）。此前审计只打印 mode 不做合规判定，本机 `~/.graphflow.config.json` 实际 0664（比修复前的 0644 还松）却零报警——README 承诺的"0600 检查"名不副实。CLI 输出把 warnings 逐行附在摘要后。
+- **存量全局配置自动收紧**：`ensureGlobalGraphFlowConfig` 对已存在文件 best-effort `chmod 0600`（此前只在保存/迁移时收紧，v1.18.5 之前写入的旧文件可永远带错误权限）；`graphflow install` / `init` 路径即修复，`result.message` 注明 tightened。
+- **R7-a skills-ref 校验门禁收口**：新增 `extractSkillReferences` / `validateSkillBundle`（`src/learning/skill-markdown.ts`）——渐进披露指针⇄`references/` 文件**双向完整性**：悬空指针（SKILL.md 指向缺失文件）、孤儿文件（打包了但从未被指向）、越权路径（`../`、非 `references/*.md`）均计 invalid；导出 CLI（`skill markdown export`）已从单文件校验切换到整包校验。ROADMAP R7-a 至此无剩余项。
+- **检索基准再基线（v1.12→v1.24 语料漂移）**：`RETRIEVAL-EVAL-RESULTS.md` 停留在 2026-08-04 语料（MRR 0.836 / NDCG@5 0.671），自指语料随 src/ 增长已漂移。连跑两次确认**确定性**（仅时间戳/耗时不同）后在当前树再生成：**Hit@5=100% 保持，MRR=0.779，NDCG@5=0.638**；冻结声明目录 `flywheel-proof-claims.json`、README（×3 处）、`docs/flywheel-reproduction.md` 按"再测量→声明与报告同步更新"协议一并更新。顺带修正两处既有不一致：README NDCG 0.601 ≠ 目录权威 0.671（同为旧口径漂移）；README skill A/B 行"injection 100% / 25.6 tok"与已提交报告（噪声门后 0% hint injection / 100% episode recall / ~15 tok）矛盾。
+- **文档漂移清理**：README 中英双语 "Register Skill + MCP" 小节嵌套损坏的 ```` ```bash ```` 代码块（渲染错乱）修复；README "98.2%" 单口径残留改为双臂口径（95.6% / 98.5%）；"961 tests / 142 files" 过期计数改 count-free 措辞（evergreen 政策）；ROADMAP 头部"最后更新 v1.19.0"更新至当前版本；`flywheel-reproduction.md` token 行 98.2%（274,434→4,928，旧一代口径）对齐当前双臂。
+- **eslint 零警告**：`coverage/`（生成物，已 gitignore）加入 eslint ignores，此前 3 条 unused eslint-disable 警告来自该目录的 vendored 文件。
+- **R9 orphan 检查器 dogfood 三修（误报根因）**：用本批未提交改动自证时发现孤儿检查在真实图上系统性误报——① **`calls` 边未计入**（v1.20.0 引入的真 bug）：跨文件函数调用在图中记为 `calls` 边而非 `references`，`countInboundEdges` 只数 references，纯函数模块（如 orphan-checker.ts 自己）一律被判 0 入边；现 references+calls 都计（单测用 stub 图回归锁定）。② **带源码扩展名的工具配置文件漏排除**：模块头注释承诺"配置文件天然排除"但实现只排除非源码扩展名，`eslint.config.js` / `vitest.config.ts` 被误报；补 `*.config.{js,cjs,mjs,ts,…}` 排除。③ **package.json 清单入口未排除**：`bin` / `main` / `module` / `exports` 指向的文件（含 dist→src 布局映射）是图根节点、设计上零入边；`src/surfaces/cli/index.ts`（bin 入口）被误报；读不到/解析失败 fail-open。修后 dogfood：22 文件脏树 `graphflow audit` 零 findings。
+- **测试 203→203 文件 / 1498→1512 条全绿**：privacy-audit 2→5（非 0600 告警 / 0600 通过 / Windows 跳过）、m86 3→4（ensure 收紧存量文件）、skill-markdown-progressive 5→10（门禁 5 条：导出器自产 bundle 通过 / 指针提取 / 悬空 / 孤儿 / 越权路径）、m96 补 3 条（工具配置排除 / 清单入口排除 / 无 package.json fail-open）、m97 补 2 条（calls 边计数 / 真 孤儿仍报 0）。本机 dogfood：`audit --privacy` 先报警 0664 → chmod 600 → 复跑零 warning；`proof:flywheel` 8 项检查全 ok。
+
 ## [1.24.0] - 2026-09-19
 
 ### Added — R7 三件套首发：语义召回默认开 + Agent Skills 标准分发 + 可核验隐私

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -48,5 +48,49 @@ describe("R7-d privacy audit (verifiable local-first)", () => {
     expect(facts.anyKeyConfigured).toBe(true);
     // Values never leak into facts
     expect(JSON.stringify(facts)).not.toContain("sk-test");
+  });
+
+  it("flags a non-0600 global config as an invariant warning (POSIX)", () => {
+    const root = mkdtempSync(join(tmpdir(), "gf-privacy-mode-"));
+    const configPath = join(root, "graphflow.config.json");
+    writeFileSync(configPath, "{}\n", "utf8");
+    chmodSync(configPath, 0o644);
+
+    const facts = collectPrivacyFacts(root, { globalConfigPath: configPath, env: {} });
+
+    expect(facts.globalConfig.exists).toBe(true);
+    expect(facts.globalConfig.mode).toBe("0644");
+    expect(facts.warnings).toHaveLength(1);
+    expect(facts.warnings[0]).toContain("0644");
+    expect(facts.warnings[0]).toContain("0600");
+    expect(formatPrivacyFacts(facts)).toContain("warnings: 1");
+  });
+
+  it("a compliant 0600 global config produces no mode warning", () => {
+    const root = mkdtempSync(join(tmpdir(), "gf-privacy-ok-"));
+    const configPath = join(root, "graphflow.config.json");
+    writeFileSync(configPath, "{}\n", { encoding: "utf8", mode: 0o600 });
+    chmodSync(configPath, 0o600);
+
+    const facts = collectPrivacyFacts(root, { globalConfigPath: configPath, env: {} });
+
+    expect(facts.globalConfig.mode).toBe("0600");
+    expect(facts.warnings).toEqual([]);
+    expect(formatPrivacyFacts(facts)).not.toContain("warnings:");
+  });
+
+  it("POSIX mode judgment is skipped on Windows (no owner/group/other bits)", () => {
+    const root = mkdtempSync(join(tmpdir(), "gf-privacy-win-"));
+    const configPath = join(root, "graphflow.config.json");
+    writeFileSync(configPath, "{}\n", "utf8");
+    chmodSync(configPath, 0o644);
+
+    const facts = collectPrivacyFacts(root, {
+      globalConfigPath: configPath,
+      env: {},
+      platform: "win32",
+    });
+
+    expect(facts.warnings).toEqual([]);
   });
 });

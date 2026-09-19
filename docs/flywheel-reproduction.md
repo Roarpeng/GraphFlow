@@ -66,12 +66,16 @@ run (existing runners rewrite those files in the working tree).
 
 | Claim | Display | Source file (committed) |
 | --- | --- | --- |
-| Retrieval Hit@5 | **100.0%** | `benchmarks/RETRIEVAL-EVAL-RESULTS.md` (commit `3f457399c38026a48b529e88fce07de5af199a50`, 2026-08-04) |
-| Retrieval MRR | **0.836** | same |
-| Retrieval NDCG@5 | **0.671** | same |
+| Retrieval Hit@5 | **100.0%** | `benchmarks/RETRIEVAL-EVAL-RESULTS.md` (commit `4cda2976270d870d5c46770f30dda6f7df4eedd7`, 2026-09-19) |
+| Retrieval MRR | **0.779** | same |
+| Retrieval NDCG@5 | **0.638** | same |
 | Skill A/B success proxy | **ON 100.0% (26/26) vs OFF 61.5% (16/26)** | `benchmarks/RESULTS.md` P1-2 (2026-08-04) |
 | Memory A/B success proxy | **ON 100.0% (62/62) vs OFF 56.5% (35/62)** | `benchmarks/RESULTS.md` P3 (2026-08-04) |
-| Token savings (optional) | **98.2%** (274,434 → 4,928) | `benchmarks/RESULTS.md` token block (2026-08-04) |
+| Token savings (optional) | **95.6%** realistic arm (136,265 → 6,044) / **98.5%** naive-grep arm (410,725 → 6,044) | `benchmarks/RESULTS.md` token block (two baseline arms) |
+
+Retrieval was re-baselined on 2026-09-19 (v1.24-era corpus): the
+self-referential `src/` corpus grew through v1.12→v1.24, which shifts rank
+metrics (Hit@5 stays 100%); repeat runs on the same tree are deterministic.
 
 Honest scope (already documented in the source reports):
 
