@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **Windows skill markdown 测试 EBUSY**：`importSkillsFromMarkdownRuntime` / `exportSkillsToMarkdownRuntime` 打开默认 `auto`→sqlite 图库后不 `close()`，`afterEach` 删临时目录时 `graphflow-graph.sqlite` 仍被占用。现于 try/finally 关闭 client。
+
 ## [1.24.0] - 2026-09-19
 
 ### Added — R7 三件套首发：语义召回默认开 + Agent Skills 标准分发 + 可核验隐私
