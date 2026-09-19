@@ -36,7 +36,12 @@ const dirs: string[] = [];
 afterEach(() => {
   while (dirs.length > 0) {
     const dir = dirs.pop();
-    if (dir) rmSync(dir, { recursive: true, force: true });
+    if (!dir) continue;
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Windows: leftover sqlite handles used to EBUSY here; runtimes now close.
+    }
   }
 });
 
