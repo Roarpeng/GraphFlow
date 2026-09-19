@@ -37,10 +37,10 @@ MCP 入口：
 ### 注册 Skill + MCP 到本机 Agent（一条命令）
 
 ```bash
-```bash
 npm install -g @roarpeng/graphflow   # 一条命令（含安装）：全局安装的 postinstall 自动完成注册+检测+悬空修复
 ```
 
+```bash
 npx @roarpeng/graphflow@latest doctor     # 先自检：列出本机检测到的 Agent
 npx @roarpeng/graphflow@latest install    # 向所有检测到的 Agent 注册（幂等，可重跑）
 npx @roarpeng/graphflow@latest uninstall  # 一键移除所有 Agent 上的注册

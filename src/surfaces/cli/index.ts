@@ -942,6 +942,7 @@ async function executeCommand(command: string, args: string[], configPath?: stri
           formatPrivacyFacts(facts),
           `existing: ${facts.existingPaths.join(", ") || "-"}`,
           `endpoints: ${facts.endpoints.map((e) => `${e.url} [${e.when}]`).join("; ")}`,
+          ...facts.warnings,
         ].join("\n"),
       };
     }

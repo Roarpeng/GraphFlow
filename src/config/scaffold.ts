@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getDefaultConfig, getDefaultOverlayConfig } from "./defaults";
@@ -75,15 +75,40 @@ export function writeConfigSecure(path: string, contents: string): void {
   }
 }
 
+/**
+ * Best-effort tighten of a pre-existing global config that predates the 0600
+ * policy (or was written by another tool). `writeConfigSecure` only runs on
+ * save/migrate, so without this a stale 0644/0666 file keeps the wrong mode
+ * forever — `graphflow audit --privacy` flags it, install/init repair it.
+ */
+function tightenExistingConfigMode(path: string): boolean {
+  try {
+    const st = statSync(path);
+    if ((st.mode & 0o777) === 0o600) {
+      return false;
+    }
+    chmodSync(path, 0o600);
+    return true;
+  } catch {
+    // Best effort: Windows ACLs / read-only mounts — same policy as writeConfigSecure.
+    return false;
+  }
+}
+
 export function ensureGlobalGraphFlowConfig(options?: { configPath?: string }): ConfigScaffoldResult {
   const path = options?.configPath ?? resolveGlobalConfigPath();
   if (existsSync(path)) {
+    const tightened = tightenExistingConfigMode(path);
     try {
       migrateGlobalGraphFlowConfig({ configPath: path });
     } catch {
       // Migration failure is non-fatal — existing config is still usable.
     }
-    return { path, status: "skipped" };
+    return {
+      path,
+      status: "skipped",
+      ...(tightened ? { message: "tightened pre-existing config mode to 0600" } : {}),
+    };
   }
 
   try {

@@ -8,7 +8,8 @@
  * warning 不影响非 strict ok、legacyText 格式、usage 文本 audit 行。
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { formatAuditLegacyText, runAudit } from "../src/audit/audit";
+import { countInboundEdges, formatAuditLegacyText, runAudit } from "../src/audit/audit";
+import type { GraphClient } from "../src/graph/client-factory";
 import type { AuditBaseline } from "../src/audit/baseline";
 import type { AuditChecker, AuditContext, AuditFinding } from "../src/audit/types";
 import { buildCliUsage } from "../src/surfaces/cli/output";
@@ -281,5 +282,31 @@ describe("audit CLI 接线", () => {
     expect(usage).toContain(auditLine);
     expect(usage.indexOf("challenge --files")).toBeGreaterThanOrEqual(0);
     expect(usage.indexOf(auditLine)).toBeGreaterThan(usage.indexOf("challenge --files"));
+  });
+
+  it("countInboundEdges 把跨文件 calls 边计为入边（纯函数模块不是孤儿）", async () => {
+    // Regression: cross-file function usage is recorded as `calls` edges, not
+    // `references` — counting only references misjudged function-only modules
+    // (e.g. orphan-checker.ts itself) as unwired in real dogfood graphs.
+    const symbolId = "symbol:src/fn.ts:createHelper";
+    const client = {
+      getNeighbors: async (_ids: string[], relTypes: string[], direction: string) => {
+        if (direction === "out" && relTypes.includes("defines")) {
+          return [{ node: { id: symbolId, type: "Symbol" } }];
+        }
+        if (direction === "in" && relTypes.includes("references") && relTypes.includes("calls")) {
+          return [{ node: { id: "file:src/caller.ts", type: "File" } }];
+        }
+        return [];
+      },
+    } as unknown as GraphClient;
+    expect(await countInboundEdges(client, "file:src/fn.ts")).toBe(1);
+  });
+
+  it("countInboundEdges 无任何入边时如实返回 0（真孤儿仍会被点名）", async () => {
+    const client = {
+      getNeighbors: async () => [],
+    } as unknown as GraphClient;
+    expect(await countInboundEdges(client, "file:src/lonely.ts")).toBe(0);
   });
 });

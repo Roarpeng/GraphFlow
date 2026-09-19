@@ -96,6 +96,8 @@ export interface PrivacyAuditFacts {
   configuredProviders: string[];
   /** Whether any provider key is currently visible to the process. */
   anyKeyConfigured: boolean;
+  /** Invariant violations against docs/threat-model.md (e.g. non-0600 global config). */
+  warnings: string[];
 }
 
 export interface AuditContext {

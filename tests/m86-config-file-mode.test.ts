@@ -68,4 +68,21 @@ describe("M86 owner-only config writes", () => {
       expect(statSync(path).mode & 0o777).toBe(0o600);
     }
   });
+
+  it("tightens a stale pre-existing global config through ensureGlobalGraphFlowConfig", () => {
+    const dir = makeTempDir("gf-m86-ensure-");
+    const path = join(dir, "graphflow.config.json");
+    writeFileSync(path, '{ "graphPolicy": {} }\n', "utf8");
+    if (modesSupported) chmodSync(path, 0o664);
+
+    const result = ensureGlobalGraphFlowConfig({ configPath: path });
+
+    expect(result.status).toBe("skipped");
+    if (modesSupported) {
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+      expect(result.message).toContain("0600");
+    }
+    // Contents untouched by the mode repair
+    expect(readFileSync(path, "utf8")).toContain("graphPolicy");
+  });
 });

@@ -13,6 +13,7 @@ import {
   parseSkillMarkdown,
   skillDirectoryFor,
   skillToSkillMarkdownBundle,
+  validateSkillBundle,
   toSpecName,
   validateSkillMarkdown,
 } from "../../../learning/skill-markdown";
@@ -85,7 +86,9 @@ export async function exportSkillsToMarkdownRuntime(
     }
     usedDirs.add(dirName.toLowerCase());
     const bundle = skillToSkillMarkdownBundle(state);
-    const violations = validateSkillMarkdown(bundle.markdown);
+    // skills-ref gate: validate the whole bundle — dangling pointers to
+    // references/ files and orphan reference files both count as invalid.
+    const violations = validateSkillBundle(bundle);
     const relPath = `${dirName}/SKILL.md`;
     if (violations.length > 0) invalid.push({ file: relPath, violations });
     const skillDir = join(outputDir, dirName);

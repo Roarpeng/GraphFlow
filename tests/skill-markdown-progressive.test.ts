@@ -7,10 +7,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   SKILL_BODY_CHAR_LIMIT,
   SKILL_BODY_TOKEN_LIMIT,
+  extractSkillReferences,
   skillDirectoryFor,
   skillToSkillMarkdown,
   skillToSkillMarkdownBundle,
   toSpecName,
+  validateSkillBundle,
   validateSkillMarkdown,
 } from "../src/learning/skill-markdown";
 import {
@@ -87,6 +89,66 @@ describe("progressive disclosure bundle", () => {
     // The bundled export must repair it.
     const bundle = skillToSkillMarkdownBundle(skill(bullets.join("\n")));
     expect(validateSkillMarkdown(bundle.markdown)).toEqual([]);
+  });
+});
+
+describe("skills-ref gate (bundle reference integrity)", () => {
+  const bigSkill = () => {
+    const bullets = Array.from({ length: 500 }, (_, i) => `- rule ${i}: ${"x".repeat(40)}`);
+    return skillToSkillMarkdownBundle(skill(bullets.join("\n")));
+  };
+
+  it("exporter-produced bundles pass the gate (pointer ⇄ file 1:1)", () => {
+    const bundle = bigSkill();
+    expect(bundle.references.length).toBeGreaterThan(0);
+    expect(validateSkillBundle(bundle)).toEqual([]);
+    // Small bundle without references is also clean.
+    expect(validateSkillBundle(skillToSkillMarkdownBundle(skill("- small")))).toEqual([]);
+  });
+
+  it("extractSkillReferences returns pointer paths in body order", () => {
+    const bundle = bigSkill();
+    const refs = extractSkillReferences(bundle.markdown);
+    expect(refs.length).toBe(bundle.references.length);
+    for (const reference of bundle.references) {
+      expect(refs).toContain(reference.path);
+    }
+  });
+
+  it("flags a dangling pointer (SKILL.md points at a missing file)", () => {
+    const bundle = bigSkill();
+    const broken = { markdown: bundle.markdown, references: bundle.references.slice(1) };
+    const violations = validateSkillBundle(broken);
+    expect(violations.some((v) => v.includes("dangling reference"))).toBe(true);
+  });
+
+  it("flags an orphan reference file (shipped but never pointed at)", () => {
+    const bundle = bigSkill();
+    const orphan = {
+      markdown: bundle.markdown,
+      references: [
+        ...bundle.references,
+        { path: "references/extra-never-pointed.md", content: "# Extra\n" },
+      ],
+    };
+    const violations = validateSkillBundle(orphan);
+    expect(violations.some((v) => v.includes("orphan reference file"))).toBe(true);
+  });
+
+  it("rejects traversal / non-references pointer paths", () => {
+    const bundle = bigSkill();
+    const split = bundle.markdown.indexOf("\n---\n", 3);
+    const frontmatter = bundle.markdown.slice(0, split + 5);
+    const markdown = `${frontmatter}\n- keep reads targeted\n- details: ../evil.md (load on demand)\n`;
+    const violations = validateSkillBundle({
+      markdown,
+      references: [{ path: "../evil.md", content: "# Evil\n" }],
+    });
+    // The malformed pointer is flagged by the path-shape rule. The file itself
+    // is not an orphan (it IS pointed at) — traversal is the violation, not
+    // missing linkage.
+    expect(violations.some((v) => v.includes("must be a relative references/*.md path"))).toBe(true);
+    expect(violations.some((v) => v.includes("orphan reference file"))).toBe(false);
   });
 });
 

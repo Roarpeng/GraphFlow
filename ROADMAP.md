@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-09-14（v1.19.0：**R8「省钱与靠谱双主线」五模块齐发**——working-set 预取 / 图 diff 质询清单 / subagent 出生证 / 时点事实查询 / 任务预算报价；v1.18.8：R6 全部收口；v1.18.7：ZCode 宿主 + 握手时序修复 + R7 演化方向）
+> 最后更新：2026-09-19（v1.24.1：审计收尾修复——privacy audit 0600 合规判定 + 存量配置自动收紧 + skills-ref 门禁 + 检索基准再基线 + 文档漂移清理；v1.24.0：R7 三件套首发——语义召回默认开 / agentskills.io 标准分发（渐进披露）/ 可核验隐私审计面 / 效率证据导出 / 外部语料基准模式）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -204,7 +204,7 @@
 
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
-| **P0** | **R7-a 对齐 Agent Skills 开放标准做「记忆层分发」** | ✅ v1.24.0（导出 + 渐进披露） | SKILL.md export 已对齐 agentskills.io（slug name 1-64 小写连字符 + 必需 description what+when + license/compatibility/metadata + `toSpecName/isSpecName/validateSkillMarkdown`）；**渐进披露拆分**：`skillToSkillMarkdownBundle` 把超限 playbook/guidance 拆进 `references/guidance-*.md`（SKILL.md 保持紧凑指针，~5000 token 上限校验入 `validateSkillMarkdown`），导出一律「每 skill 一目录 + SKILL.md」布局（目录名 = spec name）；导入侧强制 spec 目录名、拥有 SKILL.md 的目录不再下钻（references/ 永不被误当 skill），平面 `.md` 旧布局保持可导入。import 宽容（第三方 spec 文件与旧 display name 均可入），仍保守 `correctable` 不继承信任。剩余：skills-ref 校验门禁 |
+| **P0** | **R7-a 对齐 Agent Skills 开放标准做「记忆层分发」** | ✅ v1.24.0（导出 + 渐进披露） | SKILL.md export 已对齐 agentskills.io（slug name 1-64 小写连字符 + 必需 description what+when + license/compatibility/metadata + `toSpecName/isSpecName/validateSkillMarkdown`）；**渐进披露拆分**：`skillToSkillMarkdownBundle` 把超限 playbook/guidance 拆进 `references/guidance-*.md`（SKILL.md 保持紧凑指针，~5000 token 上限校验入 `validateSkillMarkdown`），导出一律「每 skill 一目录 + SKILL.md」布局（目录名 = spec name）；导入侧强制 spec 目录名、拥有 SKILL.md 的目录不再下钻（references/ 永不被误当 skill），平面 `.md` 旧布局保持可导入。import 宽容（第三方 spec 文件与旧 display name 均可入），仍保守 `correctable` 不继承信任。**skills-ref 校验门禁已收口（v1.24.1）**：`extractSkillReferences` / `validateSkillBundle` 校验渐进披露指针⇄文件双向完整性（悬空指针 / 孤儿 references 文件 / 越权路径均计 invalid），导出 CLI 已接线 |
 | **P0** | **R7-g 效率机制投影面扩展（R6 的宿主泛化）** | 🟡 | 「首插前缩减」目前只有 dsh 具备 surface-replace 原语（`HOSTS_WITH_TOOL_RESULT_PROJECTION = ["deepseek-harness"]`）；opencode / Cursor / Codex / Gemini / ZCode 均无结果重写面，只能走显式 content/handle 协议。跟踪各宿主的 compaction/结果重写 API 演进（MCP 生态若出现标准化的 tool-result rewrite 面则第一时间接入），把 SoL-Pi 式机制的适用面从 1 个宿主扩到 N 个——这是对 SoL-Pi 绑 Pi 的结构性优势兑现 |
 | **P1** | **R7-b 零配置本地语义召回默认开** | ✅ v1.24.0 | 默认 `graphPolicy.embeddingProvider: "transformers"`（resilient local：优先 `Xenova/bge-base-zh-v1.5`，任何失败透明降级 FNV-1a，保持零 Key 零云）；显式 `"fnv"` 仍可强制纯离线 hash。diagnose 首 embed 前报 semantic intent，fallback 后报 off |
 | **P1** | **R7-c 跨仓库 / monorepo 图谱** | ⬜ | repo map 被认为是 monorepo 最成熟上下文方案；Sourcegraph 走多仓语义图。GraphFlow 图天然是其超集（符号 + 调用链 + 概念 + 对话），加 cross-repo 边（依赖声明 / import 外部解析）即可覆盖「在 A 仓问 B 仓的实现」场景 |
