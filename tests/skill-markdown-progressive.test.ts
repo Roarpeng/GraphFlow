@@ -1,8 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { GraphifySqliteClient } from "../src/graph/sqlite-client";
 
 import {
   SKILL_BODY_CHAR_LIMIT,
@@ -36,6 +38,8 @@ const dirs: string[] = [];
 afterEach(() => {
   while (dirs.length > 0) {
     const dir = dirs.pop();
+    // Runtime import/export now close the graph client first. Without that,
+    // Windows unlink of graphflow-out/graphflow-graph.sqlite throws EBUSY.
     if (dir) rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -152,5 +156,26 @@ describe("spec layout export/import roundtrip", () => {
     expect(result.imported).toBe(1);
     expect(result.invalid.length).toBe(1);
     expect(result.invalid[0].violations[0]).toContain("agentskills.io");
+  });
+
+  it("closes the graph client so Windows can delete the sqlite store", async () => {
+    const close = vi.spyOn(GraphifySqliteClient.prototype, "close");
+    try {
+      const ws = newWorkspace();
+      writeFileSync(
+        join(ws, "graphflow.config.json"),
+        JSON.stringify({ graphPolicy: { transport: "file", workspaceRoot: ws } })
+      );
+      const inDir = join(ws, "in");
+      mkdirSync(inDir, { recursive: true });
+      writeFileSync(join(inDir, "prefer-targeted-reads.md"), skillToSkillMarkdown(skill("- a")));
+      await importSkillsFromMarkdownRuntime(undefined, { rootDir: ws, inputPath: inDir });
+      const sqlite = join(ws, "graphflow-out", "graphflow-graph.sqlite");
+      if (existsSync(sqlite)) {
+        expect(close).toHaveBeenCalled();
+      }
+    } finally {
+      close.mockRestore();
+    }
   });
 });

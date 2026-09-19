@@ -45,12 +45,34 @@ export interface SkillMarkdownExportResult {
   invalid: Array<{ file: string; violations: string[] }>;
 }
 
+function closeGraphClient(client: GraphClient): void {
+  // sqlite holds a Windows file lock until close(); omitting this makes
+  // afterEach rmSync of the workspace fail with EBUSY (validate-platforms).
+  try {
+    void client.close?.();
+  } catch {
+    /* ignore close races */
+  }
+}
+
 export async function exportSkillsToMarkdownRuntime(
   configPath?: string,
   options?: { rootDir?: string; outputDir?: string }
 ): Promise<SkillMarkdownExportResult> {
   const config = resolveRuntimeConfig(configPath, options?.rootDir);
   const client = createGraphClient(config);
+  try {
+    return finishSkillMarkdownExport(client, config, options);
+  } finally {
+    closeGraphClient(client);
+  }
+}
+
+function finishSkillMarkdownExport(
+  client: GraphClient,
+  config: ReturnType<typeof resolveRuntimeConfig>,
+  options?: { rootDir?: string; outputDir?: string }
+): SkillMarkdownExportResult {
   const snapshot = client.readSnapshot?.() ?? { nodes: [], edges: [] };
   const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
   const outputDir = options?.outputDir
@@ -171,6 +193,19 @@ export async function importSkillsFromMarkdownRuntime(
 
   const files = collectMarkdownFiles(inputPath);
   const client = createGraphClient(config);
+  try {
+    return await finishSkillMarkdownImport(client, files, inputPath, options?.force);
+  } finally {
+    closeGraphClient(client);
+  }
+}
+
+async function finishSkillMarkdownImport(
+  client: GraphClient,
+  files: string[],
+  inputPath: string,
+  force?: boolean
+): Promise<SkillMarkdownImportResult> {
   let imported = 0;
   let updated = 0;
   let skipped = 0;
@@ -212,7 +247,7 @@ export async function importSkillsFromMarkdownRuntime(
     const previousUpdatedAt = await existingSkillUpdatedAt(client, state.id);
     if (
       previousUpdatedAt !== undefined &&
-      !options?.force &&
+      !force &&
       previousUpdatedAt >= state.updatedAt
     ) {
       skipped += 1;
@@ -251,39 +286,43 @@ export async function extractDialogueKnowledgeRuntime(
       ? options.sessionId
       : dialogueSessionIdFor(options.sessionId, workspaceRoot);
   const client = createGraphClient(config);
-  const turns = await listDialogueTurns(client, {
-    ...(sessionId ? { sessionId } : {}),
-    ...(options?.limit !== undefined ? { limit: options.limit } : {}),
-  });
-  const records: KnowledgeTurnRecord[] = turns.map((turn) => ({
-    turnId: turn.id,
-    query: turn.userQuery,
-    reply: turn.assistantReply,
-  }));
-  const fragment = extractEngineeringKnowledgeGraphFragment({ turns: records });
+  try {
+    const turns = await listDialogueTurns(client, {
+      ...(sessionId ? { sessionId } : {}),
+      ...(options?.limit !== undefined ? { limit: options.limit } : {}),
+    });
+    const records: KnowledgeTurnRecord[] = turns.map((turn) => ({
+      turnId: turn.id,
+      query: turn.userQuery,
+      reply: turn.assistantReply,
+    }));
+    const fragment = extractEngineeringKnowledgeGraphFragment({ turns: records });
 
-  // The extractor records source turn IDs in metadata. Emit one provenance
-  // edge per actual dialogue-turn node so Concept/Requirement remain auditable.
-  const edges: GraphEdge[] = [];
-  for (const node of fragment.nodes) {
-    const metadata = node.metadata as {
-      sourceTurnIds?: string[];
-    };
-    for (const sourceId of metadata.sourceTurnIds ?? []) {
-      edges.push({ from: node.id, to: sourceId, relation: "derived_from" });
+    // The extractor records source turn IDs in metadata. Emit one provenance
+    // edge per actual dialogue-turn node so Concept/Requirement remain auditable.
+    const edges: GraphEdge[] = [];
+    for (const node of fragment.nodes) {
+      const metadata = node.metadata as {
+        sourceTurnIds?: string[];
+      };
+      for (const sourceId of metadata.sourceTurnIds ?? []) {
+        edges.push({ from: node.id, to: sourceId, relation: "derived_from" });
+      }
     }
-  }
 
-  const apply = options?.apply ?? true;
-  if (apply) {
-    if (fragment.nodes.length > 0) await client.upsertNodes(fragment.nodes);
-    if (edges.length > 0) await client.upsertEdges(edges);
+    const apply = options?.apply ?? true;
+    if (apply) {
+      if (fragment.nodes.length > 0) await client.upsertNodes(fragment.nodes);
+      if (edges.length > 0) await client.upsertEdges(edges);
+    }
+    return {
+      scannedTurns: turns.length,
+      requirements: fragment.nodes.filter((node) => node.type === "Requirement").length,
+      concepts: fragment.nodes.filter((node) => node.type === "Concept").length,
+      edges: edges.length,
+      applied: apply,
+    };
+  } finally {
+    closeGraphClient(client);
   }
-  return {
-    scannedTurns: turns.length,
-    requirements: fragment.nodes.filter((node) => node.type === "Requirement").length,
-    concepts: fragment.nodes.filter((node) => node.type === "Concept").length,
-    edges: edges.length,
-    applied: apply,
-  };
 }
