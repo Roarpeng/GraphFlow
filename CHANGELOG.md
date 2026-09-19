@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **SKILL.md 导入/导出泄漏 sqlite 句柄（Windows）**：`importSkillsFromMarkdownRuntime` / `exportSkillsToMarkdownRuntime` / `extractDialogueKnowledgeRuntime` 打开图客户端后不 `close()`。Windows 上 `better-sqlite3` 锁住 `graphflow-out/graphflow-graph.sqlite`，`skill-markdown-progressive` 的 `afterEach rmSync` 报 `EBUSY`，`validate-platforms (windows-latest)` 失败。现 `try/finally` 释放句柄。
+
 ## [1.24.0] - 2026-09-19
 
 ### Added — R7 三件套首发：语义召回默认开 + Agent Skills 标准分发 + 可核验隐私
