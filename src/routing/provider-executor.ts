@@ -102,7 +102,11 @@ export function formatPromptWithContext(
     }
   }
 
-  const skills = (context?.skillHints ?? []).filter((s) => s && s.trim().length > 0);
+  const skills = Array.from(
+    new Set(
+      (context?.skillHints ?? []).filter((s) => s && s.trim().length > 0)
+    )
+  );
   if (skills.length > 0) {
     lines.push(`Skills to apply: ${skills.slice(0, MAX_SKILL_HINTS).join(", ")}`);
   }
