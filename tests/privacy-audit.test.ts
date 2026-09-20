@@ -50,7 +50,10 @@ describe("R7-d privacy audit (verifiable local-first)", () => {
     expect(JSON.stringify(facts)).not.toContain("sk-test");
   });
 
-  it("flags a non-0600 global config as an invariant warning (POSIX)", () => {
+  // POSIX mode bits are meaningless on Windows (chmod only toggles the
+  // read-only flag, so every file reads back 0666) — Windows semantics are
+  // covered by the injected-platform case below.
+  it.skipIf(process.platform === "win32")("flags a non-0600 global config as an invariant warning (POSIX)", () => {
     const root = mkdtempSync(join(tmpdir(), "gf-privacy-mode-"));
     const configPath = join(root, "graphflow.config.json");
     writeFileSync(configPath, "{}\n", "utf8");
@@ -66,7 +69,7 @@ describe("R7-d privacy audit (verifiable local-first)", () => {
     expect(formatPrivacyFacts(facts)).toContain("warnings: 1");
   });
 
-  it("a compliant 0600 global config produces no mode warning", () => {
+  it.skipIf(process.platform === "win32")("a compliant 0600 global config produces no mode warning", () => {
     const root = mkdtempSync(join(tmpdir(), "gf-privacy-ok-"));
     const configPath = join(root, "graphflow.config.json");
     writeFileSync(configPath, "{}\n", { encoding: "utf8", mode: 0o600 });

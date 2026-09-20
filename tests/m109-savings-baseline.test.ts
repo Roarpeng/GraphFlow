@@ -361,6 +361,16 @@ describe("raw baseline is anchored to the delivered anchor set (low-hit CJK quer
 
 afterAll(() => {
   for (const root of ROOTS) {
-    rmSync(root, { recursive: true, force: true });
+    // Windows: an open default-path sqlite handle makes an immediate unlink
+    // EBUSY. Retry, then treat a lingering lock as non-fatal (CI is ephemeral).
+    try {
+      rmSync(root, {
+        recursive: true,
+        force: true,
+        ...(process.platform === "win32" ? { maxRetries: 10, retryDelay: 100 } : {}),
+      });
+    } catch {
+      /* best-effort cleanup */
+    }
   }
 });
