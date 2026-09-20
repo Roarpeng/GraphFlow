@@ -38,7 +38,19 @@ const dirs: string[] = [];
 afterEach(() => {
   while (dirs.length > 0) {
     const dir = dirs.pop();
-    if (dir) rmSync(dir, { recursive: true, force: true });
+    if (!dir) continue;
+    // Windows: the runtime may leave the default-path sqlite store handle
+    // open briefly, making an immediate unlink EBUSY. Retry, and treat a
+    // lingering lock as non-fatal (CI runners are ephemeral).
+    try {
+      rmSync(dir, {
+        recursive: true,
+        force: true,
+        ...(process.platform === "win32" ? { maxRetries: 10, retryDelay: 100 } : {}),
+      });
+    } catch {
+      /* best-effort cleanup */
+    }
   }
 });
 

@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.25.1] - 2026-09-20
+
+### Fixed — Windows CI 平台适配（v1.24.0 起的 validate-platforms 红灯）
+
+- privacy-audit 的两个 POSIX mode 用例在 Windows 上 `skipIf`（chmod 只切只读位，任何文件都读回 0666；Windows 语义已由注入 platform 的用例覆盖）。
+- m109 / skill-markdown-progressive 的临时目录清理改为 Windows 安全（`maxRetries`+`retryDelay`+best-effort）：运行时遗留的默认路径 sqlite 句柄会令立即 unlink EBUSY。**已知遗留**：`transport:"file"` 的工作区内仍会出现默认 `graphflow-out/graphflow-graph.sqlite` 且句柄未关——连接生命周期泄漏需产品级修复（161e2fe 曾修过一次，v1.24.0 回归）。
+
 ## [1.25.0] - 2026-09-20
 
 ### Fixed — 承诺验收全量收口（6 差距 + SoL-Pi 审计，live 实测驱动）
