@@ -13,7 +13,7 @@ afterEach(() => {
   }
 });
 
-function createIsolatedConfig(): string {
+function createIsolatedConfig(textCopy: "auto" | "full" = "auto"): string {
   const root = mkdtempSync(join(tmpdir(), "graphflow-structured-"));
   const configPath = join(root, "graphflow.config.json");
   const config = getDefaultConfig();
@@ -21,6 +21,7 @@ function createIsolatedConfig(): string {
     configPath,
     JSON.stringify({
       ...config,
+      mcp: { ...config.mcp, textCopy },
       graphPolicy: {
         ...config.graphPolicy,
         // The MCP handler boundary has no client handle to dispose. Keep this
@@ -45,7 +46,7 @@ function parseText(response: ToolCallResponse): unknown {
 }
 
 describe("MCP structured tool results", () => {
-  it("returns structuredContent for diagnose while preserving its JSON text", async () => {
+  it("stubs the oversized diagnose text copy by default (mcp.textCopy=auto)", async () => {
     const configPath = createIsolatedConfig();
     const response = await executeToolCall({
       name: "graphflow_diagnose",
@@ -53,6 +54,31 @@ describe("MCP structured tool results", () => {
     });
     const structured = response.structuredContent as Record<string, unknown>;
 
+    // 大响应默认桩化：text 只携带定位信息，全量数据在 structuredContent。
+    // Oversized responses stub the text copy; full data lives in structuredContent.
+    const textCopy = parseText(response) as { stub: boolean; hint: string; bytes: number };
+    expect(textCopy.stub).toBe(true);
+    expect(textCopy.bytes).toBeGreaterThan(4096);
+    expect(textCopy.hint).toContain("structuredContent");
+    expect(Object.keys(structured).sort()).toEqual([
+      "flywheel",
+      "graph",
+      "health",
+      "runtimeTimeline",
+      "stats",
+    ]);
+  });
+
+  it("keeps the full diagnose text copy when mcp.textCopy is full", async () => {
+    const configPath = createIsolatedConfig("full");
+    const response = await executeToolCall({
+      name: "graphflow_diagnose",
+      arguments: { configPath },
+    });
+    const structured = response.structuredContent as Record<string, unknown>;
+
+    // 逃生门：full 策略下老客户端仍可从 text 副本 JSON.parse 到全量数据。
+    // Escape hatch: with "full", legacy clients still parse the full text copy.
     expect(structured).toEqual(parseText(response));
     expect(Object.keys(structured).sort()).toEqual([
       "flywheel",

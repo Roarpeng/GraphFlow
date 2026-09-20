@@ -1,10 +1,11 @@
-import { brainstormTask } from "../../../agents/brainstormer";
-import { planTasks } from "../../../agents/planner";
+import { tryBrainstormTaskLlm } from "../../../agents/brainstormer";
+import { tryPlanTasksLlm } from "../../../agents/planner";
 import { planInsight, type SixHatsInsight } from "../../../agents/insight";
 import { hasUsableLlmProvider } from "../../../config/llm-availability";
 import {
   buildAgentDelegatedPlanInsight,
   buildAgentDelegatedSimplePlan,
+  buildLlmDegradedSimplePlan,
   attachSkillConditionToPlanNodes,
   type AgentDelegationMode,
   type AgentWorkItem,
@@ -32,6 +33,7 @@ import {
   cleanupNoiseSkills,
   extractSkillAtoms,
   pruneFailedSkills,
+  pruneLegacyNoiseSkills,
   suggestSkillConditionHints,
 } from "../../../learning/skill-flywheel";
 import {
@@ -145,6 +147,7 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       status: result.status,
       attempts: result.attempts,
       feedback: result.feedback,
+      ...(result.result ? { result: result.result } : {}),
       ...(result.episodeId ? { episodeId: result.episodeId } : {}),
       ...(result.executionDescriptor ? { executionDescriptor: result.executionDescriptor } : {}),
     };
@@ -348,13 +351,25 @@ function diagnosisRoleToSelection(
 
 async function probeRoleConnectivity(
   role: "planner" | "worker",
-  selection: ModelSelection
+  selection: ModelSelection,
+  signal?: AbortSignal
 ): Promise<RoutingConnectivityProbe> {
   const started = Date.now();
+  // A genuine probe reply is a SHORT model answer to the greeting. Non-strict
+  // provider adapters mask failures by returning the PROMPT back as a fake
+  // completion (e.g. deepseek's `[deepseek:model] <prompt>` fallback on a
+  // missing key, 401, or network error) — so any reply that still contains
+  // the probe instruction, or a bracketed placeholder, is a masked failure,
+  // not connectivity. Reachability of baseUrl is NOT connectivity: only a
+  // full apikey+baseUrl+model round-trip that returns a real answer is.
+  const PROBE_INSTRUCTION = "Reply with exactly: ok";
   try {
-    const sample = await executeRolePrompt(role, "Reply with exactly: ok", selection);
+    const sample = await executeRolePrompt(role, PROBE_INSTRUCTION, selection, undefined, signal);
     const cleaned = sample.trim().slice(0, 120);
-      const ok = cleaned.length > 0 && !/^\[(openai|anthropic|bailian|doubao|deepseek):/i.test(cleaned);
+    const masked =
+      /^\[(openai|anthropic|bailian|doubao|deepseek):/i.test(cleaned) ||
+      cleaned.includes("Reply with exactly");
+    const ok = cleaned.length > 0 && cleaned.length <= 200 && !masked;
     return {
       role,
       provider: selection.provider,
@@ -377,7 +392,7 @@ async function probeRoleConnectivity(
                       : "OPENAI_API_KEY"
             ]?.trim()
               ? "Missing provider credentials (config not applied or apiKey empty)"
-              : "Provider returned placeholder/fallback output",
+              : "Provider returned placeholder/echo fallback output (masked failure), not a real completion",
           }),
     };
   } catch (error) {
@@ -434,28 +449,101 @@ export async function planAndBrainstormResult(
     return workbench ? { ...delegated, workbench } : delegated;
   }
 
-  const mode = triageTask(task);
-  const ideas = brainstormTask(task);
-  const nodes = attachSkillConditionToPlanNodes(
-    planTasks(task, skillCondition?.skillRefs).map((node) => ({
-      id: node.id,
-      description: node.description,
-      dependencies: node.dependencies,
-      ...(node.skillRefs && node.skillRefs.length > 0 ? { skillRefs: node.skillRefs } : {}),
-    })),
-    skillCondition
-  );
-
-  const result = {
-    mode,
-    ideas,
-    nodes,
-    nodesStatus: "final" as const,
-    complete: true,
-    requiresAgentBridge: false,
+  // LLM credentials exist → prefer real model-driven decomposition over the
+  // local template. Both calls are strictly bounded (never reject, resolve to
+  // null on failure); any failure/timeout degrades honestly to the heuristic
+  // template + agent bridge instead of posing as a final plan.
+  const withPlanLlmTimeout = <T>(promise: Promise<T | null>, ms: number): Promise<T | null> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+    });
   };
-  const workbench = await maybeSeedWorkbench(task, nodes, configPath);
-  return workbench ? { ...result, workbench } : result;
+  const rawTimeoutMs = Number.parseInt(process.env.GRAPHFLOW_PLAN_LLM_TIMEOUT_MS ?? "", 10);
+  const planLlmTimeoutMs = Number.isFinite(rawTimeoutMs) && rawTimeoutMs > 0 ? rawTimeoutMs : 15_000;
+  const selection = resolveModelForRole("planner", configPath);
+
+  // Pre-flight connectivity probe: a full apikey+baseUrl+model greeting
+  // round-trip. An unreachable/mis-credentialed/masked-failure provider would
+  // otherwise burn the full plan timeout on EVERY call before degrading.
+  // The probe is cancelled for real (AbortSignal into the provider fetch) so
+  // a slow provider leaves no zombie request behind.
+  const rawProbeMs = Number.parseInt(process.env.GRAPHFLOW_PLAN_PROBE_TIMEOUT_MS ?? "", 10);
+  const probeTimeoutMs = Number.isFinite(rawProbeMs) && rawProbeMs > 0 ? rawProbeMs : 5_000;
+  const probeController = new AbortController();
+  const probeTimer = setTimeout(() => probeController.abort(), probeTimeoutMs);
+  let probe: RoutingConnectivityProbe;
+  try {
+    probe = await probeRoleConnectivity("planner", selection, probeController.signal);
+  } finally {
+    clearTimeout(probeTimer);
+  }
+  if (!probe.ok) {
+    const bridged = buildLlmDegradedSimplePlan(
+      task,
+      skillCondition,
+      `planner connectivity probe failed: ${probe.error ?? "no usable reply"} ` +
+        `(latency ${probe.latencyMs}ms); bridging to the connected agent ` +
+        `without attempting the LLM plan (provider ${selection.provider}/${selection.model})`
+    );
+    const workbench = await maybeSeedWorkbench(task, bridged.nodes, configPath);
+    return workbench ? { ...bridged, workbench } : bridged;
+  }
+
+  const [llmIdeas, llmNodes] = await Promise.all([
+    withPlanLlmTimeout(tryBrainstormTaskLlm(task, selection), planLlmTimeoutMs),
+    withPlanLlmTimeout(
+      tryPlanTasksLlm(task, {
+        selection,
+        ...(skillCondition?.skillRefs ? { skillHints: skillCondition.skillRefs } : {}),
+      }),
+      planLlmTimeoutMs
+    ),
+  ]);
+
+  if (llmIdeas !== null && llmNodes !== null) {
+    const mode = triageTask(task);
+    const nodes = attachSkillConditionToPlanNodes(
+      llmNodes.map((node) => ({
+        id: node.id,
+        description: node.description,
+        dependencies: node.dependencies,
+        ...(node.skillRefs && node.skillRefs.length > 0 ? { skillRefs: node.skillRefs } : {}),
+      })),
+      skillCondition
+    );
+
+    const result = {
+      mode,
+      ideas: llmIdeas,
+      nodes,
+      nodesStatus: "final" as const,
+      complete: true,
+      requiresAgentBridge: false,
+    };
+    const workbench = await maybeSeedWorkbench(task, nodes, configPath);
+    return workbench ? { ...result, workbench } : result;
+  }
+
+  // LLM attempted but failed/timed out → keep template content, but mark it
+  // honestly as a non-final heuristic suggestion and attach the agent bridge.
+  const failedStages = [
+    llmIdeas === null ? "brainstorm" : null,
+    llmNodes === null ? "plan decomposition" : null,
+  ].filter((stage): stage is string => stage !== null);
+  const degraded = buildLlmDegradedSimplePlan(
+    task,
+    skillCondition,
+    `LLM ${failedStages.join(" + ")} failed or timed out after ${planLlmTimeoutMs}ms ` +
+      `(provider ${selection.provider}/${selection.model})`
+  );
+  const workbench = await maybeSeedWorkbench(task, degraded.nodes, configPath);
+  return workbench ? { ...degraded, workbench } : degraded;
 }
 
 export async function planAndBrainstorm(task: string, configPath?: string): Promise<string> {
@@ -598,10 +686,12 @@ export async function reportOutcome(
   const graphClient = createGraphClient(config);
 
   // P0-2: prune legacy pure-noise skill nodes (no symbol evidence) at load,
-  // before any new learning is applied in this process.
+  // before any new learning is applied in this process. Legacy task-clause /
+  // bare-symbol skills that predate the per-atom quality gates go too.
   if (config.skillPolicy?.enableSkillFlywheel) {
     try {
       await cleanupNoiseSkills(graphClient);
+      await pruneLegacyNoiseSkills(graphClient);
     } catch {
       // cleanup failure must not block the outcome report
     }

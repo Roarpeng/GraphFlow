@@ -183,6 +183,7 @@ export async function finalizeEpisode(
     attempts: run.attempts,
     ...(run.executionRounds ? { executionRounds: run.executionRounds } : {}),
     ...(run.feedback !== undefined ? { runFeedback: run.feedback } : {}),
+    ...(run.result ? { result: run.result } : {}),
   };
 
   const episode = await recordEpisode(options.graphClient, recordInput, options.embeddingProvider);

@@ -209,7 +209,10 @@ describe("M10 CLI runtime", () => {
         "update readme and add tests and refactor architecture module",
         configPath
       );
-      expect(output).toContain("mode=complex");
+      // Fake credentials: the LLM attempt fails honestly and the plan
+      // degrades to the agent-delegated bridge instead of a local template
+      // masquerading as a final LLM decomposition (m80 covers all paths).
+      expect(output).toContain("mode=agent-delegated");
       expect(output).toContain("ideas=");
       expect(output).toContain("plan=");
       expect(output).toContain("task-1");
@@ -321,7 +324,15 @@ describe("M10 CLI runtime", () => {
       expect(snapshot.edgeCount).toBeGreaterThan(0);
       expect(snapshot.sampleNodes.length).toBeGreaterThan(0);
       expect(snapshot.topRelations.length).toBeGreaterThan(0);
-      expect(Array.isArray(snapshot.workbenchOutline)).toBe(true);
+      // outline 默认不回显（响应预算），includeOutline=true 才返回数组。
+      // The outline is omitted by default; it is an array only on demand.
+      expect(snapshot.workbenchOutline).toBeUndefined();
+      const withOutline = await inspectGraph(configPath, {
+        nodeLimit: 8,
+        edgeLimit: 8,
+        includeOutline: true,
+      });
+      expect(Array.isArray(withOutline.workbenchOutline)).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

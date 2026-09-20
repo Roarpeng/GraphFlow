@@ -14,6 +14,15 @@ export interface ContextAnchorItem {
   id: string;
   type: GraphNode["type"];
   layer: ContextLayer;
+  /**
+   * Normalized 0..1 query relevance (`computeAnchorRelevance` in
+   * graph-search.ts): the share of query term tokens (CJK phrases and
+   * overlapping bigrams included) present in the node's searchable text.
+   * Attached post-pack by the slicer; absent when the anchor's node cannot
+   * be resolved from the hit list / snapshot. Pure reporting signal for the
+   * low-relevance query-translate trigger — it never gates packing.
+   */
+  relevance?: number;
 }
 
 export interface LayeredContextPackage {

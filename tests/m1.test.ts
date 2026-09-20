@@ -4,9 +4,11 @@ import { resolveModelForRole } from "../src/routing/model-router";
 import { validateTaskResult } from "../src/agents/validator";
 
 describe("M1 bootstrap behavior", () => {
-  it("routes planner to smart tier by default", () => {
+  // Planner rides the economy tier: the plan preview is latency-bounded and
+  // heavy smart-tier planners routinely blew the 15s budget (see model-router).
+  it("routes planner to economy tier by default", () => {
     const model = resolveModelForRole("planner");
-    expect(model.tier).toBe("smart");
+    expect(model.tier).toBe("economy");
   });
 
   it("routes worker to economy tier by default", () => {

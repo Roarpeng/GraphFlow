@@ -22,6 +22,9 @@ function createIsolatedConfig(): { configPath: string; cleanup: () => void } {
   const graphStorePath = join(tmpRoot, "graphflow-out", "graphflow-graph.json");
   const config = {
     ...getDefaultConfig(),
+    // 流程用例：保持 text 副本全量，序列化契约由 m106/mcp-structured 覆盖。
+    // Flow cases keep the full text copy; serialization is covered elsewhere.
+    mcp: { textCopy: "full" as const },
     graphPolicy: {
       ...getDefaultConfig().graphPolicy,
       transport: "file" as const,
@@ -74,7 +77,11 @@ describe("M55 MCP integration flows", () => {
 
   it("plan with mode=insight returns agent-delegated mode without API credentials", async () => {
     const configPath = join(tmpdir(), `gf-m55-${Date.now()}.json`);
-    writeFileSync(configPath, JSON.stringify({ ...getDefaultConfig(), providers: {} }), "utf8");
+    writeFileSync(
+      configPath,
+      JSON.stringify({ ...getDefaultConfig(), providers: {}, mcp: { textCopy: "full" } }),
+      "utf8"
+    );
     try {
       const response = await executeToolCall(
         {

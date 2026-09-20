@@ -34,6 +34,8 @@ export interface EpisodeRecord {
   createdAt: number;
   updatedAt: number;
   runFeedback?: string;
+  /** Worker's final textual answer (persisted so a COMPLETED episode stays auditable). */
+  result?: string;
   /**
    * P1 — Drift classification: WHY the work deviated from the original goal
    * anchor (or "none" when it stayed aligned). Makes deviation measurable and
@@ -92,6 +94,7 @@ export async function recordEpisode(
     createdAt: now,
     updatedAt: now,
       ...(episode.runFeedback !== undefined ? { runFeedback: episode.runFeedback } : {}),
+      ...(episode.result !== undefined ? { result: episode.result } : {}),
       ...(episode.deviation !== undefined ? { deviation: episode.deviation } : {}),
       ...(episode.evidence !== undefined ? { evidence: episode.evidence } : {}),
   };
@@ -484,6 +487,7 @@ function deserialize(node: GraphNode): EpisodeRecord | undefined {
       createdAt: parsed.createdAt ?? 0,
       updatedAt: parsed.updatedAt ?? 0,
       ...(parsed.runFeedback !== undefined ? { runFeedback: parsed.runFeedback } : {}),
+      ...(typeof parsed.result === "string" && parsed.result.length > 0 ? { result: parsed.result } : {}),
       ...(isDeviationKind(parsed.deviation) ? { deviation: parsed.deviation } : {}),
       ...(parsed.evidence ? { evidence: parsed.evidence as OutcomeEvidence } : {}),
     };

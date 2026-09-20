@@ -32,6 +32,7 @@ import { getHostAdapter } from "./host-adapter";
 import {
   getAgentInstructionStatus,
   getAgentSkillStatus,
+  type AgentInstructionStatus,
   installInstructionsToTargets,
   installSkillToTargets,
   removeInstructionsFromTargets,
@@ -306,7 +307,8 @@ export function uninstallProfileHost(
 /** Detect / status snapshot for one profile-backed host. */
 export function getProfileHostStatus(
   hostId: string,
-  _options: ProfileHostInstallOptions = {}
+  _options: ProfileHostInstallOptions = {},
+  statusFeed: { skill?: AgentInstructionStatus[]; instruction?: AgentInstructionStatus[] } = {}
 ): ProfileHostStatus | undefined {
   const spec = getProfileHostSpec(hostId);
   if (!spec) return undefined;
@@ -321,16 +323,28 @@ export function getProfileHostStatus(
 
   const mcpInstalled = mcp.some((item) => item.installed);
 
+  // statusFeed 仅测试注入用：生产路径走真实 skill/instruction 状态。
+  // statusFeed is test-only injection; production reads real statuses.
+  const skillPool = statusFeed.skill ?? getAgentSkillStatus();
+  const instructionPool = statusFeed.instruction ?? getAgentInstructionStatus();
+  // 只聚合「本机存在该表面」的目标：未检测到的目标（如未安装的 Qoder CN、
+  // 没有 ~/.roo 的 Roo Code）不参与 every()，否则会把已装好的表面拖成
+  // "missing"，doctor 与 install 的 "agent not detected → skip" 语义也会打架。
+  // Aggregate only DETECTED surfaces: an undetected target (Qoder CN not
+  // installed, Roo Code without ~/.roo) must not drag installed ones to
+  // "missing", and doctor must agree with install's "agent not detected → skip".
   const skillStatuses = (spec.skillTargets ?? [])
-    .map((name) => getAgentSkillStatus().find((item) => item.agent === `${name} skill`))
-    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+    .map((name) => skillPool.find((item) => item.agent === `${name} skill`))
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .filter((item) => item.detected);
   const skillInstalled = skillStatuses.length > 0
     ? skillStatuses.every((item) => item.installed)
     : undefined;
 
   const instructionStatuses = (spec.instructionTargets ?? [])
-    .map((name) => getAgentInstructionStatus().find((item) => item.agent === name))
-    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+    .map((name) => instructionPool.find((item) => item.agent === name))
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .filter((item) => item.detected);
   const rulesInstalled = instructionStatuses.length > 0
     ? instructionStatuses.every((item) => item.installed)
     : undefined;

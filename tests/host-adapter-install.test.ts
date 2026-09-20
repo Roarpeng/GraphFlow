@@ -14,7 +14,7 @@ import {
   installViaHostAdapter,
   uninstallViaHostAdapter,
 } from "../src/integrations/host-adapter-install";
-import { PROFILE_HOST_IDS, isProfileHost } from "../src/integrations/profile-host-installer";
+import { PROFILE_HOST_IDS, getProfileHostStatus, isProfileHost } from "../src/integrations/profile-host-installer";
 import { DSH_MCP_ROW_ID, DSH_PATCH_BEGIN } from "../src/integrations/dsh-harness-installer";
 import { SESSION_HOOK_SCRIPT } from "../src/integrations/claude-code-hooks";
 import { buildDoctorReport, buildInstallReport } from "../src/surfaces/cli/init";
@@ -443,5 +443,52 @@ describe("M16 HostAdapter CLI wiring", () => {
       if (prevAppData === undefined) delete process.env.APPDATA;
       else process.env.APPDATA = prevAppData;
     }
+  });
+});
+
+describe("profile host status aggregation ignores undetected surfaces", () => {
+  // 未检测到的表面不参与聚合（Qoder CN 未装不能拖垮 Qoder；无 ~/.roo 的
+  // Roo Code 不产 false），与 install 的 "agent not detected → skip" 对齐。
+  // Undetected surfaces must not join the aggregation, matching install's
+  // "agent not detected → skip" semantics.
+  it("qoder: installed Qoder skill stays installed despite undetected Qoder CN", () => {
+    const status = getProfileHostStatus("qoder", {}, {
+      skill: [
+        { agent: "Qoder skill", configPath: "/x/qoder/SKILL.md", detected: true, installed: true },
+        { agent: "Qoder CN skill", configPath: "/x/qoder-cn/SKILL.md", detected: false, installed: false },
+      ],
+    });
+    expect(status?.skillInstalled).toBe(true);
+    expect(status?.skillPath).toBe("/x/qoder/SKILL.md");
+  });
+
+  it("roo-code: no detected skill surface yields undefined (doctor skips)", () => {
+    const status = getProfileHostStatus("roo-code", {}, {
+      skill: [
+        { agent: "Roo Code skill", configPath: "/x/.roo/SKILL.md", detected: false, installed: false },
+      ],
+    });
+    expect(status?.skillInstalled).toBeUndefined();
+    expect(status?.skillPath).toBeUndefined();
+  });
+
+  it("cline: undetected instructions surface yields undefined rulesInstalled", () => {
+    const status = getProfileHostStatus("cline", {}, {
+      instruction: [
+        { agent: "Cline", configPath: "/x/Rules/graphflow.md", detected: false, installed: false },
+      ],
+    });
+    expect(status?.rulesInstalled).toBeUndefined();
+    expect(status?.rulesPath).toBeUndefined();
+  });
+
+  it("a genuinely missing skill on a detected agent still reports false", () => {
+    const status = getProfileHostStatus("roo-code", {}, {
+      skill: [
+        { agent: "Roo Code skill", configPath: "/x/.roo/SKILL.md", detected: true, installed: false },
+      ],
+    });
+    expect(status?.skillInstalled).toBe(false);
+    expect(status?.skillPath).toBe("/x/.roo/SKILL.md");
   });
 });

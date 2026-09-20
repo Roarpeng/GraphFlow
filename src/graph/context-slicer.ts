@@ -1,9 +1,11 @@
 import { logger } from "../utils/logger.js";
+import type { GraphNode } from "../core/types.js";
 import {
   extractConnectedSubgraph,
   computePageRank,
   blendWithCentrality,
 } from "./graph-compression.js";
+import { computeAnchorRelevance } from "./graph-search.js";
 import { buildRepoMap, formatRepoMapString } from "./repo-map.js";
 import { estimateContextBudget } from "./adaptive-budget.js";
 import { extractSymbolCandidates, fetchSymbolCandidates } from "./symbol-extract.js";
@@ -68,6 +70,40 @@ export {
   DEFAULT_MAX_SIBLING_FILES,
 } from "./hit-diversify.js";
 
+/**
+ * Attach normalized query relevance (`computeAnchorRelevance`) to every
+ * anchor whose node can be resolved from the ranked hit list or the client
+ * snapshot. Pure annotation: never reorders, drops, or re-sizes the channel;
+ * anchors that resolve through neither source keep `relevance` undefined
+ * and are ignored by the low-relevance trigger.
+ */
+function annotateAnchorRelevance(
+  pkg: LayeredContextPackage,
+  query: string,
+  englishQuery: string | undefined,
+  nodes: readonly GraphNode[]
+): LayeredContextPackage {
+  if (pkg.anchorChannel.length === 0) {
+    return pkg;
+  }
+  const byId = new Map<string, GraphNode>();
+  for (const node of nodes) {
+    if (node?.id && !byId.has(node.id)) {
+      byId.set(node.id, node);
+    }
+  }
+  if (byId.size === 0) {
+    return pkg;
+  }
+  const anchorChannel = pkg.anchorChannel.map((anchor) => {
+    const node = byId.get(anchor.id);
+    return node
+      ? { ...anchor, relevance: computeAnchorRelevance(node, query, englishQuery) }
+      : anchor;
+  });
+  return { ...pkg, anchorChannel };
+}
+
 export async function buildContextSlice(
   client: GraphClient,
   query: string,
@@ -109,7 +145,12 @@ export async function buildLayeredContextPackage(
   // budget left over after every code-anchor stage, so a recalled conversation
   // turn can never displace a Symbol/File anchor (the documented invariant).
   await injectDialogueTurns(client, query, options, state, budget);
-  return toLayeredPackage(state, budget);
+  return annotateAnchorRelevance(
+    toLayeredPackage(state, budget),
+    query,
+    options?.englishQuery,
+    [...hits, ...(snapshotNodes ?? [])]
+  );
 }
 
 export function createContextRefillManager(
@@ -262,5 +303,10 @@ export async function buildEnhancedContextPackage(
   // Same additive-LAST rule as the layered packer (see above): dialogue turns
   // ride on leftover budget and cannot push a code anchor out of the package.
   await injectDialogueTurns(client, query, options, state, budget);
-  return toLayeredPackage(state, budget);
+  return annotateAnchorRelevance(
+    toLayeredPackage(state, budget),
+    query,
+    options?.englishQuery,
+    [...hits, ...(snapshotNodes ?? [])]
+  );
 }

@@ -1,7 +1,7 @@
 import type { GraphClient } from "./client-factory";
 import type { GraphNode } from "../core/types";
 import type { DialogueTurnRecord } from "../learning/dialogue-thread";
-import { extractNodeSourcePath } from "./graph-utils";
+import { composeContextQuery, extractNodeSourcePath, nodeSearchableText, tokenizeForIndex } from "./graph-utils";
 
 export interface SymbolMatch {
   symbol: {
@@ -48,6 +48,31 @@ export interface DialogueSearchHit {
   correctionLine?: string;
   /** True when an earlier turn superseded THIS turn (it is historical context, not current truth). */
   superseded: boolean;
+}
+
+/**
+ * Bounded echo of `DialogueSearchHit` for `graphflow_context` responses:
+ * ids and structural marks verbatim, but `userQuery` is clipped to the
+ * shared echo budget (`MAX_ECHO_TURN_CHARS`, see `toDialogueThreadEchoView`)
+ * with `truncated` set when anything was cut. Full text stays in the graph
+ * store — anchor expansion reads the stored node, never this attached view.
+ * 回显瘦身视图：id/seq/sessionId 等结构字段原样，userQuery 裁成预览并标记
+ * truncated；全文留在图谱，anchorId 展开走 store 直读，不经过该视图。
+ */
+export interface DialogueHitPreview {
+  id: string;
+  seq: number;
+  sessionId: string;
+  title?: string;
+  summary?: string;
+  userQuery: string;
+  updatedAt: number;
+  /** Non-empty when this turn's conclusion supersedes an earlier one: "结论 X 已被修正为 Y". */
+  correctionLine?: string;
+  /** True when an earlier turn superseded THIS turn (it is historical context, not current truth). */
+  superseded: boolean;
+  /** Present (true) only when the stored `userQuery` exceeded the echo clip budget. */
+  truncated?: boolean;
 }
 
 function getSymbolName(node: GraphNode): string {
@@ -206,6 +231,46 @@ export async function searchGraphNodes(
 }
 
 // ───────────────── Conversation Graph W2b: dialogue turn recall ─────────────────
+
+/**
+ * Normalized 0..1 query relevance for one node: the share of query term
+ * tokens (original query + agent-translated English, with CJK phrases and
+ * overlapping bigrams) that occur in the node's searchable text.
+ *
+ * Substring containment rather than exact-token equality, so a query bigram
+ * matches inside a longer Chinese run in jsdoc/content — mirroring how
+ * `tokenizeCJK` builds overlapping bigrams on both sides.
+ *
+ * This is the per-anchor quality signal behind the CJK low-relevance
+ * query-translate trigger (`shouldDelegateQueryTranslation`): a pure-Chinese
+ * query whose anchors were only reached via workspace-path expansion shares
+ * no wording with them and scores ~0 even when the anchor count is high.
+ */
+export function computeAnchorRelevance(
+  node: GraphNode,
+  query: string,
+  englishQuery?: string
+): number {
+  const composed = composeContextQuery(query, englishQuery).trim();
+  if (!composed) {
+    return 0;
+  }
+  const tokens = tokenizeForIndex(composed);
+  if (tokens.length === 0) {
+    return 0;
+  }
+  const haystack = nodeSearchableText(node).toLowerCase();
+  if (!haystack) {
+    return 0;
+  }
+  let matched = 0;
+  for (const token of tokens) {
+    if (haystack.includes(token.toLowerCase())) {
+      matched += 1;
+    }
+  }
+  return matched / tokens.length;
+}
 
 /** Max dialogue hits returned per search. */
 const DIALOGUE_SEARCH_MAX = 5;

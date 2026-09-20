@@ -84,7 +84,8 @@ describe("deriveAdaptiveBudget", () => {
 
 describe("evaluateCompaction", () => {
   it("recommends when projected saving clears minSavingRatio under pressure", () => {
-    // replay = 10000 * 10 * 0.1 = 10000; rewrite = 10000 * 0.5 = 5000.
+    // replay = 10000 * 10 * 0.1 = 10000; compact = read 1000 + write 2500*0.5
+    // + post-compact replay 10*2500*0.1 = 4750 → saving 5250 (52.5%).
     const result = evaluateCompaction({
       prefixTokens: 10000,
       remainingTurnsEstimate: 10,
@@ -92,21 +93,42 @@ describe("evaluateCompaction", () => {
       windowPressure: 0.8,
     });
     expect(result.recommend).toBe(true);
-    expect(result.projectedSaving).toBeCloseTo(5000, 6);
+    expect(result.projectedSaving).toBeCloseTo(5250, 6);
+    expect(result.replayCost).toBeCloseTo(10000, 6);
+    expect(result.compactCost).toBeCloseTo(4750, 6);
     expect(result.reason).toContain("clears minSavingRatio");
   });
 
-  it("does not recommend when the rewrite costs more than future replay", () => {
-    // replay = 10000 * 3 * 0.1 = 3000; rewrite = 10000 * 0.5 = 5000.
+  it("does not recommend when the compact costs more than future replay", () => {
+    // replay = 10000 * 2 * 0.1 = 2000; compact = 1000 + 1250 + 2*2500*0.1
+    // = 2750 → saving -750.
     const result = evaluateCompaction({
       prefixTokens: 10000,
-      remainingTurnsEstimate: 3,
+      remainingTurnsEstimate: 2,
       cacheWriteReadRatio: 0.5,
       windowPressure: 0.8,
     });
     expect(result.recommend).toBe(false);
     expect(result.projectedSaving).toBeLessThan(0);
     expect(result.reason).toContain("does not clear minSavingRatio");
+  });
+
+  it("prices the COMPACTED output, never the full prefix at the write premium (live regression: -1.43M)", () => {
+    // Live acceptance shape (2026-09-20): usedTokens 120000, 6 turns left,
+    // cacheWriteReadRatio 12.5. The old formula priced the rewrite as
+    // 120000 * 12.5 = 1.5M → projectedSaving -1,428,000 (-1983%). The corrected
+    // model prices the compact: read 12000 + write 30000*12.5 + replay 6*30000*0.1
+    // = 405000 vs replay 72000 → saving -333000, a plausible magnitude.
+    const result = evaluateCompaction({
+      prefixTokens: 120000,
+      remainingTurnsEstimate: 6,
+      cacheWriteReadRatio: 12.5,
+      windowPressure: 0.6,
+    });
+    expect(result.recommend).toBe(false);
+    expect(result.projectedSaving).toBeCloseTo(-333000, 6);
+    expect(result.compactCost).toBeCloseTo(405000, 6);
+    expect(result.reason).toContain("compact 405000");
   });
 
   it("does not recommend below the window-pressure gate even with good economics", () => {
@@ -127,7 +149,7 @@ describe("evaluateCompaction", () => {
       cacheWriteReadRatio: 0.5,
       windowPressure: 0.8,
     };
-    // savingRatio 0.5 clears 0.2 but not 0.6.
+    // savingRatio 0.525 clears 0.2 but not 0.6.
     expect(evaluateCompaction({ ...input, minSavingRatio: 0.6 }).recommend).toBe(false);
     expect(evaluateCompaction({ ...input, minSavingRatio: 0.2 }).recommend).toBe(true);
   });

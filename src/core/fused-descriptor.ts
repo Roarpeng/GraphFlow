@@ -8,6 +8,15 @@
  * randomness — same input always yields the same steps with stable ids.
  */
 
+import { splitTaskClauses } from "../agents/task-clauses.js";
+
+/**
+ * Clause split for the task-text fallback only. Broader than
+ * splitTaskClauses (includes bare 并/且/，) because here a wrong split costs
+ * nothing — the fragments only feed step classification, never the planner.
+ */
+const TASK_FALLBACK_SPLIT = /;|；|。|然后|接着|随后|最后|并且|以及|同时|\band\b|并|且|，/i;
+
 export interface PlanNodeLike {
   id: string;
   description: string;
@@ -31,9 +40,13 @@ type FusedAction = FusedStep["action"];
  * boundary only, so common inflections (edits, testing, building) still match.
  */
 const ACTION_KEYWORDS: ReadonlyArray<{ action: FusedAction; pattern: RegExp }> = [
-  { action: "edit", pattern: /\b(edit|write|modify|update|create|implement|add|change|refactor|fix|patch)/i },
-  { action: "run", pattern: /\b(run|test|build|execute|compile)/i },
-  { action: "validate", pattern: /\b(validate|verify|check|lint|assert)/i },
+  // English verbs keep \b (avoid substring hits); CJK verbs match as plain
+  // substrings — \b does not apply to hanzi. Without the CJK rows a Chinese
+  // task's plan nodes classify to nothing and the descriptor never carries
+  // fused steps, which left GF-4 dark for the project's primary language.
+  { action: "edit", pattern: /\b(edit|write|modify|update|create|implement|add|change|refactor|fix|patch)|修改|编写|新增|实现|添加|更改|变更|重构|修复|写入|补丁/i },
+  { action: "run", pattern: /\b(run|test|build|execute|compile)|运行|执行|构建|编译|跑一?次/i },
+  { action: "validate", pattern: /\b(validate|verify|check|lint|assert)|验证|校验|检查|核对|确认|断言/i },
 ];
 
 function classifyDescription(description: string): FusedAction | undefined {
@@ -73,7 +86,21 @@ interface Draft {
  * target, command) are deduplicated keeping the first occurrence.
  */
 export function buildFusedSteps(input: { task: string; planNodes?: PlanNodeLike[] }): FusedStep[] {
-  const nodes = input.planNodes ?? [];
+  let nodes: PlanNodeLike[] = input.planNodes ?? [];
+  if (nodes.length === 0 && input.task.trim()) {
+    // Fallback for plan-less bridges (simple bridge tasks carry no plan
+    // nodes): split the TASK TEXT itself into clauses — "修改 X 并验证" is
+    // already an edit+validate pair waiting to be fused.
+    const clauses = splitTaskClauses(input.task).flatMap((clause) => clause.split(TASK_FALLBACK_SPLIT));
+    nodes = clauses
+      .map((clause) => clause.trim())
+      .filter((clause) => clause.length > 0)
+      .map((clause, index) => ({
+        id: `task-${index + 1}`,
+        description: clause,
+        dependencies: index > 0 ? [`task-${index}`] : [],
+      }));
+  }
   const consumed = new Set<number>();
   const drafts: Draft[] = [];
 

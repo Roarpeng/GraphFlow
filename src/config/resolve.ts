@@ -239,7 +239,9 @@ function ratio01(value: unknown, fallback: number): number {
 }
 
 /**
- * Resolve the optional efficiency section over the disabled defaults.
+ * Resolve the optional efficiency section over the best-by-default (all-ON)
+ * policy: an omitted or partial section inherits the enabled defaults, and
+ * only an explicit `false` switches a mechanism off.
  *
  * Note: reduce.strategy "llm" without both provider and model is downgraded
  * to "fingerprint" — a remote reducer route is never implied.

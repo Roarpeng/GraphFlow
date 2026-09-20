@@ -14,8 +14,19 @@ import {
   serializePlaybookGuidance,
 } from "./skill-types";
 
+/**
+ * Sanitize a skill atom into the id-safe segment of a `skill:` node id.
+ *
+ * CJK characters are preserved: previously every hanzi run collapsed into a
+ * single "-", so ALL Chinese lesson atoms mapped to the same degenerate
+ * `skill:-` node (distinct lessons overwrote each other). Keeping hanzi gives
+ * multi-word Chinese phrases stable, distinct ids; latin atoms are unchanged.
+ * Leading/trailing separators are trimmed so ids never start/end with "-".
+ */
 export function sanitizeAtom(skill: string): string {
-  return skill.replace(/[^a-z0-9]+/g, "-");
+  return skill
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 export function skillNodeId(skill: string): string {

@@ -199,6 +199,8 @@ Step 5: After answering the user, call graphflow_context({ assistantReply: "<ori
 
 Complex tasks: `graphflow_plan` seeds a **workbench** of topic containers (function nodes on the canvas). Pass `topicId` to refine a node or return to the mainline. Drift auto-forks an isolated side node; messages stay inside the topic — the canvas is not one-turn-one-node. Without a workbench, previews still record as dialogue-turn nodes (`resumeFromTurnId`). Workbench titles/Path labels are **display only**; next-turn context is Goal + path titles + local original Q/A.
 
+The response echoes workbench/dialogue history only as **message previews** (each clipped to ~160 chars with a `truncated` flag; every turn keeps its `id` for `resumeFromTurnId`). Full text stays in the graph store — expand with `graphflow_context(anchorId)` or view the whole history in the VS Code panel (Workbench Tree / `workbench tree`). Pass `recordDialogue: false` to disable the echo AND the recording for that call entirely.
+
 **Input - context (preview):**
 ```typescript
 {
@@ -208,6 +210,7 @@ Complex tasks: `graphflow_plan` seeds a **workbench** of topic containers (funct
   sessionId?: string;      // Dialogue session name (default "main")
   resumeFromTurnId?: string; // Continue from a clicked dialogue-turn node (legacy, no workbench)
   assistantReply?: string; // Original assistant answer to store on the pending turn/topic
+  recordDialogue?: boolean; // false = no workbench/dialogue echo AND no recording (per-call opt-out)
   configPath?: string;
   rootDir?: string;
 }
@@ -234,12 +237,14 @@ Complex tasks: `graphflow_plan` seeds a **workbench** of topic containers (funct
     estimatedSavingsPercent: number;
     budgetUsedPercent: number;
   };
+  unbudgetedTokens: number; // out-of-package payloads also delivered (dialogueHits, workbench/dialogue preview echoes)
+  accountedTokens: number;  // compressedTokens + unbudgetedTokens = the true delivered total
   agentWorkItems?: Array<{ id: string; kind: string; prompt: string }>; // CJK low-match delegation
   englishQuery?: string;
 }
 ```
 
-**Always report to user:** token savings %, anchor count, key summary findings
+**Always report to user:** `accountedTokens` (= `compressedTokens` + `unbudgetedTokens`) with the savings %, anchor count, key summary findings. Savings % alone understates the true delivered payload — quote the accounted total.
 
 ### Workflow 1b: Chinese / CJK queries (agent translates → English search)
 
@@ -443,12 +448,14 @@ graphflow_diagnose(configPath?)
 
 ---
 
-### Workflow 8: Large-output observations & efficiency mechanisms (opt-in)
+### Workflow 8: Large-output observations & efficiency mechanisms
 
-Every efficiency mechanism is **off by default** (`efficiencyPolicy` in
-`graphflow.config.json`). Enabling one never gates an explicit call: passing
-`content`/`handle`, `reduce:true`, or reading a returned `executionDescriptor`
-is explicit intent and always works.
+Every efficiency mechanism is **ON by default** — the default is the best
+configuration (`efficiencyPolicy` in `graphflow.config.json`; switch any of
+them off from the **GraphFlow: Settings** page or with an explicit `false`).
+Switching one off never gates an explicit call: passing `content`/`handle`,
+`reduce:true`, or reading a returned `executionDescriptor` is explicit intent
+and always works.
 
 #### Observation handles (ObservationPack)
 
@@ -481,18 +488,23 @@ graphflow_context({
 })
 ```
 
-With `efficiencyPolicy.contextPressure.enabled: true`, GraphFlow packs against a
+Online Context Compact is enabled by default: GraphFlow packs against a
 budget scaled by the observed pressure (`maxContextTokens: "auto"`) and returns a
 `contextPressure` block with `effectiveMaxContextTokens` and, when
-`remainingTurnsEstimate` is supplied, an economic `compaction` recommendation.
+`remainingTurnsEstimate` is supplied, an economic `compaction` recommendation
+(set `efficiencyPolicy.contextPressure.enabled: false` to disable).
 Omit `contextPressure` when unknown — GraphFlow never fabricates it.
 
 #### Fused action steps (Action Fusion)
 
-With `efficiencyPolicy.actionFusion.enabled: true`, `graphflow_run`'s
+Action Fusion is enabled by default: `graphflow_run`'s
 `executionDescriptor` carries `steps` (`fused: true`) where an edit and its
 immediately following validation command collapse into one action. Execute the
-edit and its `command` in a single tool call to save one model round trip.
+edit and its `command` in a single tool call to save one model round trip
+(set `efficiencyPolicy.actionFusion.enabled: false` to disable).
+
+These are the defaults — every mechanism ships ON; override any field in
+`graphflow.config.json` (or toggle per mechanism in **GraphFlow: Settings**):
 
 ```json
 {
@@ -571,13 +583,15 @@ Always pay attention to `tokenBudget`:
 | Field | Meaning |
 |-------|---------|
 | `maxContextTokens` | The configured budget (default 1500) |
-| `estimatedRawTokens` | What reading all relevant files raw would cost |
+| `estimatedRawTokens` | What reading all relevant files raw would cost (floored at the actual delivered size — never reported below it) |
 | `compressedTokens` | What GraphFlow's compressed output uses |
-| `estimatedSavingsPercent` | Percentage saved (typically 70-95%) |
+| `estimatedSavingsPercent` | Percentage saved, computed on `accountedTokens` (typically 70-95%) |
 | `budgetUsedPercent` | How much of the budget is used |
+| `unbudgetedTokens` | Out-of-package payloads the response also carries (dialogue recall hits, workbench/dialogue preview echoes) — counted outside `tokenBudget`, never hidden |
+| `accountedTokens` | `compressedTokens` + `unbudgetedTokens`: the true delivered total the savings % is computed on |
 | `contextPressure` | Present only when observed-pressure budgeting is enabled: `effectiveMaxContextTokens` plus an optional `compaction` signal |
 
-**Rule of thumb:** If `budgetUsedPercent < 50%`, you can safely expand more anchors.
+**Rule of thumb:** If `budgetUsedPercent < 50%`, you can safely expand more anchors. When reporting savings, quote `accountedTokens` too — savings % alone understates the real payload you received.
 
 ---
 
@@ -605,10 +619,10 @@ Always pay attention to `tokenBudget`:
 - Include lessons learned to improve future planning
 - This feeds the skill evolution flywheel
 
-### 5. Report Token Savings
-- Always mention `estimatedSavingsPercent` to the user
-- This demonstrates the value of GraphFlow
-- Include raw vs compressed token counts
+### 5. Report Token Savings (honest accounting)
+- Report `accountedTokens` = `compressedTokens` + `unbudgetedTokens`, together with `estimatedSavingsPercent`
+- Savings % is computed on the accounted total (it includes out-of-package payloads like dialogue hits and preview echoes); quoting only savings % understates the true delivered payload
+- Include raw (`estimatedRawTokens`) vs accounted token counts
 
 ### 6. Bridge Mode Mindset
 - `graphflow_run` returns plans, it doesn't execute them

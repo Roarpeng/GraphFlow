@@ -24,7 +24,7 @@ export interface ProviderConfig {
  * explicit intent and still operates when the flag is off.
  */
 export interface ObservationReducerConfig {
-  /** Enable reduction to a bounded receipt. Default false. */
+  /** Enable reduction to a bounded receipt. Default true (best config). */
   enabled?: boolean;
   /**
    * "fingerprint" (local, deterministic, default) or "llm" (delegate reading
@@ -43,7 +43,7 @@ export interface ObservationReducerConfig {
 }
 
 export interface ObservationEfficiencyConfig {
-  /** Archive oversized outputs behind a handle. Default false. */
+  /** Archive oversized outputs behind a handle. Default true (best config). */
   enabled?: boolean;
   /** Outputs at or below this size are returned inline (bytes). Default 8192. */
   inlineThresholdBytes?: number;
@@ -61,7 +61,7 @@ export interface ObservationEfficiencyConfig {
 }
 
 export interface ContextPressureEfficiencyConfig {
-  /** Enable observed-pressure budget + compaction signal. Default false. */
+  /** Enable observed-pressure budget + compaction signal. Default true (best config). */
   enabled?: boolean;
   /**
    * "auto" (default when enabled) scales graphPolicy.maxContextTokens by the
@@ -75,7 +75,7 @@ export interface ContextPressureEfficiencyConfig {
 }
 
 export interface ActionFusionEfficiencyConfig {
-  /** Attach fused edit+validate steps to executionDescriptors. Default false. */
+  /** Attach fused edit+validate steps to executionDescriptors. Default true (best config). */
   enabled?: boolean;
 }
 
@@ -91,6 +91,7 @@ export interface EfficiencyPolicyConfig {
 }
 
 export interface ReinvestEfficiencyPolicyConfig {
+  /** Default true (best config), like every other efficiency mechanism. */
   enabled?: boolean;
   /** Share of new qualifying savings convertible to search budget (0..1). Default 0.5. */
   ratio?: number;
@@ -98,6 +99,22 @@ export interface ReinvestEfficiencyPolicyConfig {
   maxBudgetTokens?: number;
   /** Assumed cost of one mechanism trial. Default 4000. */
   estimatedTrialTokens?: number;
+}
+
+export interface McpSurfaceConfig {
+  /**
+   * MCP 工具结果遗留 text 副本的策略：紧凑 JSON 超过 4KB 阈值时，"auto"
+   * （默认）把 text 降级为一行桩（structuredContent 仍是全量数据），
+   * 避免同时渲染 text+structuredContent 的宿主双倍付费；"full" 永不桩化，
+   * 是依赖 JSON.parse(text) 拿全量数据的老客户端的逃生门。
+   * Policy for the legacy text copy of MCP tool results: when the compact
+   * JSON exceeds the 4KB threshold, "auto" (default) degrades the text copy
+   * to a one-line stub (structuredContent still carries the full data) so
+   * hosts that render both text and structuredContent do not pay twice;
+   * "full" never stubs — the escape hatch for legacy clients that
+   * JSON.parse the text copy for full data.
+   */
+  textCopy?: "full" | "auto";
 }
 
 export interface GraphFlowConfig {
@@ -229,9 +246,13 @@ export interface GraphFlowConfig {
     /** Opt in to vector recall across all graph nodes with embeddings. Default false. */
     enableFullGraphVectorRecall?: boolean;
   };
+  /** MCP surface knobs (tool-result text copy policy). */
+  mcp?: McpSurfaceConfig;
   /**
-   * SoL-Pi-style efficiency mechanisms. Omitted sections leave their mechanism
-   * disabled; see {@link EfficiencyPolicyConfig}.
+   * SoL-Pi-style efficiency mechanisms. The default is the best configuration
+   * (every mechanism ON): an omitted or partial section leaves each mechanism
+   * at its enabled default, and only an explicit `false` turns one off.
+   * See {@link EfficiencyPolicyConfig}.
    */
   efficiencyPolicy?: EfficiencyPolicyConfig;
 }

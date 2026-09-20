@@ -10,6 +10,7 @@ import {
   buildPromptContext,
   maybeBuildSkillHints,
   maybeBuildGoalAnchors,
+  resolveAnchorSources,
 } from "./orchestrator-context.js";
 import {
   maybeFindSimilarEpisodes,
@@ -105,7 +106,18 @@ async function runOrchestration(
   const episodeSummaries = await Promise.all(
     similarEpisodes.map((ep) => summarizeEpisodeForPrompt(ep, effectiveOptions?.graphClient))
   );
-  const promptContext = buildPromptContext(contextPackage, skillHints, episodeSummaries, effectiveOptions, goalAnchors);
+  // Anchor sources must be resolved before the prompt context is frozen:
+  // bridge workers have no filesystem access, so the inlined excerpts are the
+  // only way the code reaches them (see resolveAnchorSources).
+  const anchorSources = await resolveAnchorSources(contextPackage, effectiveOptions, input.task);
+  const promptContext = buildPromptContext(
+    contextPackage,
+    skillHints,
+    episodeSummaries,
+    effectiveOptions,
+    goalAnchors,
+    anchorSources
+  );
   const promptContextLines = promptContext?.summaryChannel?.length ?? 0;
 
   const { mode, triageId } = await resolveTriage(input.task, effectiveOptions, routeDecisions, promptContext);

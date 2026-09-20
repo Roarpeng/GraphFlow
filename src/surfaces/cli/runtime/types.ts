@@ -5,7 +5,7 @@ import type { AgentWorkItem } from "../../../core/agent-delegation";
 
 export type { GraphSnapshotSampleEdge, GraphSnapshotSampleNode };
 import type { GraphFlowConfig } from "../../../config/schema";
-import type { DialogueThreadView } from "../../../learning/dialogue-thread";
+import type { DialogueThreadEchoView } from "../../../learning/dialogue-thread";
 import type { TeamDiagnosis } from "../../team/diagnose.js";
 
 export interface ContextPreviewResult {
@@ -41,6 +41,30 @@ export interface ContextPreviewResult {
      * present), so post-packaging additions no longer inflate the ROI.
      */
     estimatedSavingsPercent: number;
+    /**
+     * Deterministic grep+read-fragment baseline — the honest comparison for
+     * agents that already have grep+read, unlike `estimatedRawTokens` which
+     * assumes reading every matching file. Formula (see
+     * `estimateGrepBaselineTokens`): fs.stat bytes of the top L1 File anchor
+     * / 4 * 0.25 fragment share + 200 fixed grep overhead, capped at
+     * `estimatedRawTokens`; falls back to `estimatedRawTokens * 0.3` when the
+     * anchor file cannot be statted. Best-effort: omitted when decoration
+     * could not run.
+     * grep+读片段基线的确定性估算（对已有 grep+read 的 agent 的诚实对照，
+     * 区别于"读全部相关文件"的 estimatedRawTokens）：top L1 File anchor 的
+     * 字节数 / 4 × 0.25 + 200 固定 grep 开销，封顶 estimatedRawTokens；
+     * stat 失败回退 estimatedRawTokens × 0.3。尽力而为字段。
+     */
+    estimatedGrepBaselineTokens?: number;
+    /**
+     * Savings percent of the accounted payload against the grep baseline
+     * (`estimatedGrepBaselineTokens`) — same clamped [0,100] semantics and
+     * same denominator (`accountedTokens` when present) as
+     * `estimatedSavingsPercent`.
+     * accountedTokens 相对 grep 基线的节省百分比；与 estimatedSavingsPercent
+     * 相同的 [0,100] 截断语义和分母口径。
+     */
+    estimatedSavingsPercentVsGrep?: number;
     /** `compressedTokens / maxContextTokens` — budgeted share; excludes `unbudgetedTokens`. */
     budgetUsedPercent: number;
   };
@@ -73,16 +97,41 @@ export interface ContextPreviewResult {
     responseSchema?: Record<string, unknown>;
   }>;
   agentInstructions?: string;
-  /** Connected conversation spine (user Q + LLM A) for staying on the main thread. */
-  dialogueThread?: DialogueThreadView;
+  /**
+   * Connected conversation spine (user Q + LLM A) for staying on the main
+   * thread. Echo view: turn ids / seq / jumped verbatim, Q/A text clipped to
+   * previews (see `toDialogueThreadEchoView`).
+   */
+  dialogueThread?: DialogueThreadEchoView;
   /**
    * Historical dialogue turns recalled for this query (Conversation Graph
    * W2b). Additive-only: rides in its own field and never displaces code
    * anchors. Superseded turns are hidden unless the query history matters.
+   * Echo view — ids and marks verbatim, `userQuery` clipped to a preview
+   * with `truncated` set when cut; full text lives in the graph store.
+   * 回显瘦身视图：userQuery 裁成预览并标记 truncated；全文留在图谱直读。
+   * Under the hard response budget (see `response-budget.ts`) `userQuery` is
+   * the first hit field to drop, so it is optional on the wire.
    */
-  dialogueHits?: import("../../../graph/graph-search.js").DialogueSearchHit[];
-  /** Active workbench topic container (function node on the canvas). */
-  workbench?: import("../../../learning/workbench-topic").WorkbenchContextView;
+  dialogueHits?: Array<
+    Omit<import("../../../graph/graph-search.js").DialogueHitPreview, "userQuery"> & {
+      userQuery?: string;
+    }
+  >;
+  /**
+   * Response-budget degradation steps that actually executed, in ladder
+   * order ("outline" / "dialogueHits.userQuery" / "promptLines" /
+   * "dialogueHits"). Present only when the serialized response exceeded
+   * MAX_RESPONSE_BYTES and had to be slimmed (see `response-budget.ts`).
+   * 响应超预算时实际执行过的降级步骤，按序列出；未超预算则不出现。
+   */
+  degraded?: string[];
+  /**
+   * Active workbench topic container (function node on the canvas). Echo view:
+   * structure and ids verbatim, message text clipped to previews (see
+   * `toWorkbenchEchoView`); full text lives in the graph store.
+   */
+  workbench?: import("../../../learning/workbench-topic").WorkbenchEchoView;
   /**
    * R9 cross-session reminder: unresolved obligations (dangling deps,
    * unwired files, unreferenced container/loader configs, doc drift) from
@@ -210,6 +259,19 @@ export interface GraphSnapshotResult {
   sampleNodes: GraphSnapshotSampleNode[];
   sampleEdges: GraphSnapshotSampleEdge[];
   workbenchOutline?: import("../../../learning/workbench-topic").WorkbenchOutline[];
+  /**
+   * Slim resume pointer kept when the full outline is omitted
+   * (`inspectGraph` options `includeOutline` defaults to false): the most
+   * recently updated outline of THIS workspace — enough for a
+   * `graphflow_context({ topicId })` resume without the outline bulk. The
+   * full tree stays available via `includeOutline: true` or CLI
+   * `graphflow workbench tree`.
+   * 省略全量 outline 时保留的续聊指针（本工作区最近活跃主题）。
+   */
+  workbenchResume?: {
+    rootId: string;
+    activeTopicId: string;
+  };
 }
 
 export interface SkillInsightItem {
@@ -232,6 +294,8 @@ export interface RunTaskSummary {
   status: TaskStatus;
   attempts: number;
   feedback: string;
+  /** Worker's final textual answer (present on llm-mode completions). */
+  result?: string;
   episodeId?: string;
   executionDescriptor?: {
     action: "execute";
@@ -493,8 +557,11 @@ export interface ExpandAnchorResult {
   sourceLine?: number;
   sourceSnippet?: string;
   metadata?: Record<string, unknown>;
-  /** When expanding a dialogue-turn node: the session spine so the agent can resume. */
-  dialogueThread?: DialogueThreadView;
+  /**
+   * When expanding a dialogue-turn node: the session spine so the agent can
+   * resume. Echo view — turn ids verbatim, Q/A text clipped to previews.
+   */
+  dialogueThread?: DialogueThreadEchoView;
 }
 
 export interface LearningNightlyResult {

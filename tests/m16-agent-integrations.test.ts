@@ -12,6 +12,7 @@ import {
   executeToolCall,
   getToolDefinitions,
 } from "../src/surfaces/mcp/server";
+import { getDefaultConfig } from "../src/config/defaults";
 
 describe("M16 agent integrations", () => {
   it("parses json and config flags for CLI surfaces", () => {
@@ -74,7 +75,17 @@ describe("M16 agent integrations", () => {
     writeFileSync(
       sandboxConfigPath,
       JSON.stringify({
+        // 极简 config 过不了校验（budgetPolicy 缺失）会整体回退默认值，
+        // 因此这里必须展开完整默认 config 再覆写。
+        // A minimal config fails validation (missing budgetPolicy) and falls
+        // back to defaults entirely, so spread the full default config first.
+        ...getDefaultConfig(),
         providers: {},
+        // 本用例断言 text 副本内容（工具链路），不关心序列化策略；
+        // 关掉大响应桩化以保持原断言。序列化契约由 m106/mcp-structured 覆盖。
+        // This case asserts text-copy content (tool flow), not serialization;
+        // serialization contracts are covered by m106/mcp-structured tests.
+        mcp: { textCopy: "full" },
         tiers: {
           smart: { provider: "openai", model: "gpt-4.1" },
           economy: { provider: "openai", model: "gpt-4.1-mini" },
@@ -96,9 +107,10 @@ describe("M16 agent integrations", () => {
     expect(response.content[0]?.type).toBe("text");
     const text = response.content[0]?.text ?? "";
     // Default GraphFlow config has no usable LLM → simple plan bridges to the agent.
-    expect(text).toContain('"mode": "agent-delegated"');
-    expect(text).toContain('"triageMode": "complex"');
-    expect(text).toContain('"requiresAgentBridge": true');
+    // MCP 响应 text 副本是紧凑 JSON（无缩进空格），断言按紧凑格式写。
+    expect(text).toContain('"mode":"agent-delegated"');
+    expect(text).toContain('"triageMode":"complex"');
+    expect(text).toContain('"requiresAgentBridge":true');
     expect(text).toContain("simple-plan-decomposition");
   });
 

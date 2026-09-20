@@ -8,14 +8,6 @@ import {
 import { diagnoseRoutingResult } from "../src/surfaces/cli/runtime";
 import { createMcpServer, executeToolCall } from "../src/surfaces/mcp/server";
 
-function parseToolText(response: { content: Array<{ type: string; text?: string }> }): unknown {
-  const text = response.content[0]?.text;
-  if (text === undefined) {
-    throw new Error("MCP response did not include text content.");
-  }
-  return JSON.parse(text);
-}
-
 describe("M72 runtime timeline diagnose", () => {
   beforeEach(() => {
     clearRuntimeTimeline();
@@ -67,7 +59,10 @@ describe("M72 runtime timeline diagnose", () => {
       },
       createMcpServer()
     );
-    const result = parseToolText(response) as {
+    // diagnose 全量响应超过 text 桩化阈值：结构化字段从 structuredContent 读。
+    // The full diagnose response exceeds the text-stub threshold: read
+    // structured fields from structuredContent.
+    const result = response.structuredContent as {
       runtimeTimeline: { totalBuffered: number; recent: Array<{ id?: string }> };
     };
 

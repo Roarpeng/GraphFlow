@@ -507,6 +507,56 @@ export function buildAgentDelegatedSimplePlan(
   };
 }
 
+/**
+ * Honest degrade for graphflow_plan(mode="simple") when an LLM provider IS
+ * configured but the live call failed or timed out: the content stays the
+ * local heuristic template (never posing as a final decomposition) and the
+ * simple-plan bridge work items (stable ids) ride along for submit+merge.
+ */
+export function buildLlmDegradedSimplePlan(
+  task: string,
+  skillCondition: SkillConditionOptions | undefined,
+  reason: string
+): {
+  mode: "agent-delegated";
+  triageMode: "simple" | "complex";
+  ideas: string[];
+  nodes: SimplePlanNode[];
+  suggestedNodes: SimplePlanNode[];
+  agentWorkItems: AgentWorkItem[];
+  agentInstructions: string;
+  status: "awaiting-agent";
+  complete: false;
+  requiresAgentBridge: true;
+  nodesStatus: "suggested";
+} {
+  const delegated = buildAgentDelegatedSimplePlan(task, skillCondition);
+  const agentInstructions = [
+    "[AGENT-BRIDGE REQUIRED] GraphFlow LLM was configured but the planning call FAILED.",
+    `Reason: ${reason}`,
+    "The nodes/suggestedNodes fields below are a LOCAL HEURISTIC FALLBACK — not a finished plan.",
+    "",
+    delegated.agentInstructions.replace(
+      "[AGENT-BRIDGE REQUIRED] No GraphFlow LLM API key is configured.",
+      "[AGENT-BRIDGE REQUIRED] GraphFlow LLM is currently unavailable."
+    ),
+  ].join("\n");
+
+  return {
+    mode: "agent-delegated",
+    triageMode: delegated.triageMode,
+    ideas: delegated.ideas,
+    nodes: delegated.nodes,
+    suggestedNodes: delegated.suggestedNodes,
+    agentWorkItems: delegated.agentWorkItems,
+    agentInstructions,
+    status: "awaiting-agent",
+    complete: false,
+    requiresAgentBridge: true,
+    nodesStatus: "suggested",
+  };
+}
+
 function buildPlanReflectionWorkItem(task: string, optional: boolean): AgentWorkItem {
   return {
     id: "plan-reflection",
