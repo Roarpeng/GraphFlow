@@ -14,7 +14,7 @@
 import { planTasks, planTasksLlm } from "../agents/planner.js";
 import { brainstormTaskLlm } from "../agents/brainstormer.js";
 import { logger } from "../utils/logger.js";
-import { executeRolePrompt } from "../routing/provider-executor.js";
+import { executeRolePrompt, formatPromptContextEntries } from "../routing/provider-executor.js";
 import { executeDag } from "./dag-engine.js";
 import {
   summarizeInsightForContext,
@@ -99,6 +99,8 @@ export function makeDagNodeRunner(params: {
   executionMode?: OrchestrateOptions["executionMode"];
   forceLlm?: boolean;
   logMessage: string;
+  /** When supplied, captures each node's final worker answer text by node id. */
+  outputs?: Map<string, string>;
 }): (node: TaskNode) => Promise<boolean> {
   return async (node: TaskNode): Promise<boolean> => {
     logger.info({ nodeId: node.id, description: node.description }, params.logMessage);
@@ -123,6 +125,9 @@ export function makeDagNodeRunner(params: {
       ...promptContextSpread(params.promptContext),
       ...executionModeSpread,
     });
+    if (params.outputs && run.result) {
+      params.outputs.set(node.id, run.result);
+    }
     return run.status === "COMPLETED";
   };
 }
@@ -147,6 +152,7 @@ export async function runSimplePhase(shared: OrchestrationShared): Promise<TaskR
     ...(validatorSelection ? { validatorSelection } : {}),
     ...promptContextSpread(promptContext),
     ...(effectiveOptions?.executionMode ? { executionMode: effectiveOptions.executionMode } : {}),
+    ...(effectiveOptions?.enableActionFusion === true ? { enableActionFusion: true } : {}),
   });
   const finalRun = appendContextFeedback(run, contextPackage, promptContextLines, effectiveOptions);
   const withRoute = appendRouteFeedback(finalRun, routeDecisions, skillHints);
@@ -226,7 +232,12 @@ export function buildExecutionDescriptor(params: {
   insightSummary?: string;
   retryHints: string[];
   delegatedExtras: Record<string, unknown>;
-  /** GF-4 / Action Fusion: attach fused edit+validate steps. Default false. */
+  /**
+   * GF-4 / Action Fusion: attach fused edit+validate steps. No hard-coded
+   * default here: the runtime derives this from efficiencyPolicy.actionFusion
+   * (enabled by default), so fusion is effectively ON unless disabled in
+   * config; the bare parameter only reads as falsy when a caller omits it.
+   */
   enableActionFusion?: boolean;
 }): NonNullable<TaskRunResult["executionDescriptor"]> {
   const { task, planProjection, agentAssignments, contextStr, insightSummary, retryHints, delegatedExtras, enableActionFusion } = params;
@@ -276,11 +287,10 @@ export async function runBridgePhase(
     dependencies: node.dependencies,
     ...(node.assignedAgent ? { assignedAgent: node.assignedAgent } : {}),
   }));
-  const contextStr = promptContext
-    ? Object.entries(promptContext)
-        .map(([k, v]) => `${k}: ${typeof v === "string" ? v : JSON.stringify(v)}`)
-        .join("; ")
-    : "";
+  // Anchor sources ride in the descriptor as a readable fenced block: the
+  // external bridge agent has no GraphFlow graph access, so this string is
+  // its only view of the anchor code.
+  const contextStr = formatPromptContextEntries(promptContext);
   const insightSummary = planInsightBundle
     ? summarizeInsightForContext(planInsightBundle.insight)
     : undefined;
@@ -390,6 +400,7 @@ export async function runLlmDagPhase(
   let plan = shared.plan;
   const plannerDraft = shared.plannerDraft;
 
+  const nodeOutputs = new Map<string, string>();
   const runner = makeDagNodeRunner({
     routeDecisions,
     providerHealth: effectiveOptions?.providerHealth,
@@ -397,6 +408,7 @@ export async function runLlmDagPhase(
     promptContext,
     ...(effectiveOptions?.executionMode ? { executionMode: effectiveOptions.executionMode } : {}),
     logMessage: "Executing task node",
+    outputs: nodeOutputs,
   });
 
   let result = await executeDag(plan, runner);
@@ -430,12 +442,15 @@ export async function runLlmDagPhase(
     result = await executeDag(plan, runner);
   }
 
+  const completedAnswers = dagFinalAnswers(result.completed, nodeOutputs);
+
   if (result.failed.length > 0) {
     const run: TaskRunResult = {
       status: "HUMAN_REVIEW_REQUIRED",
       attempts: plan.length,
       feedback: `Failed tasks: ${result.failed.join(", ")}; plannerDraft=${shorten(plannerDraft)}`,
       executionRounds: result.rounds,
+      ...(completedAnswers ? { result: completedAnswers } : {}),
       replanRounds,
       ...(brainstormIdeas ? { brainstormIdeas } : {}),
     };
@@ -453,6 +468,7 @@ export async function runLlmDagPhase(
     attempts: plan.length,
     feedback: `Completed tasks: ${result.completed.join(", ")}; plannerDraft=${shorten(plannerDraft)}`,
     executionRounds: result.rounds,
+    ...(completedAnswers ? { result: completedAnswers } : {}),
     replanRounds,
     ...(brainstormIdeas ? { brainstormIdeas } : {}),
   };
@@ -465,6 +481,26 @@ export async function runLlmDagPhase(
     "Orchestration task completed successfully"
   );
   return finalizeEpisode(input.task, plan, withRoute, similarEpisodes, skillHints, effectiveOptions, triageId);
+}
+
+/**
+ * Final worker answer per completed DAG node, joined into the run's answer
+ * text. A COMPLETED DAG run must surface what the workers actually produced
+ * — not only the completion feedback line.
+ */
+function dagFinalAnswers(
+  nodeIds: string[],
+  outputs: Map<string, string>,
+  cap = 8_000
+): string | undefined {
+  const joined = nodeIds
+    .map((id) => (outputs.get(id) ?? "").trim())
+    .filter((text) => text.length > 0)
+    .join("\n\n");
+  if (joined.length === 0) {
+    return undefined;
+  }
+  return joined.length > cap ? `${joined.slice(0, cap)}\n…[truncated ${joined.length - cap} chars]` : joined;
 }
 
 export function projectPlan(plan: TaskNode[]): string {

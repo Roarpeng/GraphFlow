@@ -99,5 +99,11 @@ export function mergeGraphFlowConfig(base: GraphFlowConfig, overlay: GraphFlowCo
       ...base.embeddingPolicy,
       ...overlay.embeddingPolicy,
     },
+    // mcp / efficiencyPolicy 此前不在白名单里，双层 config 合并时会被静默丢弃
+    // （efficiencyPolicy 是既有丢失，mcp.textCopy 随 m106+ 桩化引入）——补齐合并。
+    // mcp / efficiencyPolicy were previously dropped by this whitelist merge
+    // (efficiencyPolicy pre-existing, mcp.textCopy new): merge them too.
+    mcp: { ...base.mcp, ...overlay.mcp },
+    efficiencyPolicy: { ...base.efficiencyPolicy, ...overlay.efficiencyPolicy },
   });
 }

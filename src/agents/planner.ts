@@ -73,23 +73,48 @@ export interface PlanTasksLlmOptions {
 const MAX_PLAN_NODES = 8;
 
 export async function planTasksLlm(task: string, options: PlanTasksLlmOptions): Promise<TaskNode[]> {
+  const nodes = await tryPlanTasksLlm(task, options);
+  return nodes ?? planTasks(task, options.skillHints);
+}
+
+/**
+ * Strict variant for callers that must distinguish a real LLM-produced plan
+ * from the local template fallback: resolves to null whenever the provider
+ * call throws, or the reply does not parse into at least one task node.
+ * It never rejects and never silently substitutes the heuristic template.
+ */
+export async function tryPlanTasksLlm(
+  task: string,
+  options: PlanTasksLlmOptions
+): Promise<TaskNode[] | null> {
   const prompt = buildPlannerPrompt(task, options);
-  let raw = "";
-  try {
-    raw = await executeRolePrompt("planner", prompt, options.selection, options.context);
-  } catch (error) {
-    logger.error({ error }, "Caught error");
-    return planTasks(task, options.skillHints);
-  }
+  // One immediate retry on a failed/unparseable attempt: fast models
+  // occasionally return an off-shape reply (observed ~1/3 of calls with
+  // deepseek-v4-flash — e.g. a bare {"ok":true} instead of the array); the
+  // second attempt lands within the same latency budget and makes the flake
+  // a rare event instead of a guaranteed template fallback.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let raw = "";
+    try {
+      // disableTools: pure text decomposition needs no provider tools, and
+      // the deepseek tool-loop wraps plain replies in a {"ok":true,...}
+      // confirmation envelope that defeats JSON-array parsing.
+      raw = await executeRolePrompt("planner", prompt, options.selection, options.context, undefined, {
+        disableTools: true,
+      });
+    } catch (error) {
+      logger.error({ error, attempt }, "Caught error");
+      continue;
+    }
 
-  const parsed = parsePlannerJson(raw);
-  if (!parsed || parsed.length === 0) {
-    return planTasks(task, options.skillHints);
+    const parsed = parsePlannerJson(raw);
+    if (parsed && parsed.length > 0) {
+      return parsed.slice(0, MAX_PLAN_NODES).map((item) =>
+        toNode(item.id, withSkillHints(item.description, options.skillHints), item.dependencies, options.skillHints)
+      );
+    }
   }
-
-  return parsed.slice(0, MAX_PLAN_NODES).map((item) =>
-    toNode(item.id, withSkillHints(item.description, options.skillHints), item.dependencies, options.skillHints)
-  );
+  return null;
 }
 
 function buildPlannerPrompt(task: string, options: PlanTasksLlmOptions): string {

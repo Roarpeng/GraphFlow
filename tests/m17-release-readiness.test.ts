@@ -85,7 +85,9 @@ describe("M17 release readiness", () => {
     const root = mkdtempSync(join(tmpdir(), "graphflow-router-defaults-"));
     const missingConfigPath = join(root, "missing.config.json");
     try {
-      expect(resolveModelForRole("planner", missingConfigPath).model).toBe("gpt-4.1");
+      // Planner rides the economy tier (see roleTierMap): the plan preview is
+      // latency-bounded and smart-tier planners routinely blew the budget.
+      expect(resolveModelForRole("planner", missingConfigPath).model).toBe("gpt-4.1-mini");
       expect(resolveModelForRole("worker", missingConfigPath).model).toBe("gpt-4.1-mini");
     } finally {
       rmSync(root, { recursive: true, force: true });

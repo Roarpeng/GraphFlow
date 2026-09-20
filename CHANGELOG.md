@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.25.0] - 2026-09-20
+
+### Fixed — 承诺验收全量收口（6 差距 + SoL-Pi 审计，live 实测驱动）
+
+当天对 SKILL.md 承诺做三轮 live 验收（真 deepseek、真 MCP、无 LLM 桥接回路），发现并修复 12 个真实缺陷，全部有 live 复验证据：
+
+- **graphflow_run 桥接 worker 3 连败 → 1 次过**：anchor 源码正文（≤8 个/24KB，单文件 6KB 头尾截断）内联进 worker prompt 与 executionDescriptor，附"已内联、勿请求文件"指示；worker 的最终答案以 `result` 字段外露（工具响应 + episode 记录双持久化，DAG 路径逐节点捕获），失败路径也保留最后输出。
+- **plan 模板冒充 LLM → 真 LLM 优先 + 诚实降级**：有 LLM 时真调 `planTasksLlm`/`brainstormTaskLlm`；前置**完整凭证问候探测**（apikey+baseUrl+model 真往返；echo 占位/可达但 401 均判不通，4-10ms 桥接不再白等 15s）；探测超时 AbortSignal 真取消；模板回退永不自称 `final`（`suggested` + agent 桥接工作项 + 失败原因）。planner 默认档 smart→economy（pro 稳定超 15s 预算）；分解调用禁用 deepseek tool-loop（其确认信封 `{"ok":true,…}` 使解析必败）+ 一次立即重试 + brainstorm 解析兼容信封 summary。
+- **CJK 低命中双缺陷**：低相关触发只认 anchorCount<3（永不达）→ 增加 top-5-by-score 均值 <0.25 维度（relevance 逐锚透传）；`estimatedRawTokens` 从全图模糊匹配改为按**交付 anchor 集**统计（live：338,869 → 522，垃圾检索诚实报 0% 节省）；低命中交付裁剪为仅 relevance>0 的锚（15→2）+ 中文 spine 说明行。
+- **assistantReply 无 query 被拒**（文档称 optional）→ 合成占位轮落库，幂等重试，回复永不丢弃。
+- **飞轮技能质量**：逐 atom 质量门（长度/结构停用词/逐 atom 符号证据/id ≤48 字符/总量 ≤4）+ `pruneLegacyNoiseSkills` 存量清理（名字即证据：路径片段/裸 token/连接词开头子句/未 seeded composite，hint 刷高的 uses 不豁免）接线进 reportOutcome；live 库存 8 条垃圾清零。
+- **SoL-Pi 收口**：四机制默认全开语义核实无漂移，4 份 SKILL.md "off by default" 谎言改口（sync 门禁绿）；compaction 经济模型修正（重写成本按**压缩后摘要**计价 + 计入压缩后重放，-1,428,000 → -333,000，信号新增 replayCost/compactCost 与成本构成）；**Action Fusion 两个盲区修复**（中文动词关键词缺失 + 无 plan 桥接描述符不挂 steps → 任务文本子句回退，live：`fused:true`，"修改 X 并验证"折叠为单一动作）。
+- **桥接描述符源码回退**：检索头被元节点占据时，任务文本**引用的文件路径**直接内联（`../`/node_modules 防护）。
+
+### 验证
+
+- 210 文件 / 1588 用例全绿；tsc/eslint/build/sync-surfaces 门禁全过。
+- live 验收矩阵：英文检索 15 锚全中；plan simple/insight（六帽 + 5-Why 链）真 LLM 产出；run llm 模式 COMPLETED+result+语义验证；无 LLM 桥接回路全通（plan 委派→agent 分解→insight merge→run 描述符→outcome 闭环）；artifact 导出→导入 8616 节点回路；release-gate 真实拦截（proven-skills 0<1）。
+
 ## [1.24.1] - 2026-09-19
 
 ### Fixed — 收尾审计修复批次（promise-vs-reality 对账的五处缺口）

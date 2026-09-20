@@ -105,7 +105,9 @@ describe("M37 config merge and routing", () => {
     const previousCwd = process.cwd();
     process.chdir(projectRoot);
     try {
-      expect(resolveModelForRole("planner").model).toBe("deepseek-v4-pro");
+      // Planner rides the economy tier by default (roleTierMap); the merged
+      // project tiers still decide the concrete model per tier.
+      expect(resolveModelForRole("planner").model).toBe("deepseek-v4-flash");
       expect(resolveModelForRole("worker").model).toBe("deepseek-v4-flash");
       expect(resolveModelForRole("validator").model).toBe("deepseek-v4-pro");
     } finally {

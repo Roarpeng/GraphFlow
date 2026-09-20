@@ -15,7 +15,12 @@ export interface ModelSelection {
 }
 
 const roleTierMap: Record<AgentRole, ModelTier> = {
-  planner: "smart",
+  // Plan preview is latency-bounded (GRAPHFLOW_PLAN_LLM_TIMEOUT_MS, 15s
+  // default): heavy "smart" planners routinely exceed that budget on real
+  // decomposition prompts, so every plan degraded to the template fallback.
+  // The economy model decomposes well within the budget — swap tiers in the
+  // config to override back.
+  planner: "economy",
   validator: "smart",
   worker: "economy",
   compressor: "economy",

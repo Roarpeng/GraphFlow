@@ -8,10 +8,12 @@
  *    configured value ("auto" scales the default by observed window pressure).
  * 2. `evaluateCompaction` / `buildCompactionSignal` — an economic check for
  *    online compaction: replaying a long prefix for the remaining turns costs
- *    ~remainingTurns * prefixTokens * CACHE_READ_FACTOR, while rewriting it
- *    once costs ~prefixTokens * cacheWriteReadRatio. Compaction is recommended
- *    only when the projected saving clears `minSavingRatio` AND the window is
- *    actually under pressure (> 0.5), so we never pay the rewrite cost early.
+ *    ~remainingTurns * prefixTokens * CACHE_READ_FACTOR, while compacting
+ *    costs a one-time summarize read + compact write (the COMPACTED size at
+ *    the cache-write premium) + remainingTurns * compacted * CACHE_READ_FACTOR.
+ *    Compaction is recommended only when the projected saving clears
+ *    `minSavingRatio` AND the window is actually under pressure (> 0.5), so
+ *    we never pay the rewrite cost early.
  */
 
 export interface ContextPressure {
@@ -37,6 +39,10 @@ export interface CompactionInput {
 export interface CompactionEvaluation {
   recommend: boolean;
   projectedSaving: number;
+  /** Keep-side cost: replaying the original prefix for the remaining turns. */
+  replayCost?: number;
+  /** Compact-side cost: summarize read + compact write + post-compact replay. */
+  compactCost?: number;
   reason: string;
 }
 
@@ -56,6 +62,8 @@ export interface CompactionSignal {
   boundaryLabel: string;
   continuationContext: string;
   projectedSaving: number;
+  replayCost?: number;
+  compactCost?: number;
   reason: string;
 }
 
@@ -108,6 +116,13 @@ const AUTO_BUDGET_MIN_RATIO = 0.25;
 const AUTO_BUDGET_MAX_MULTIPLIER = 2;
 /** Cached-prefix replay is priced at the cache-read discount (0.1x base). */
 const CACHE_READ_FACTOR = 0.1;
+/**
+ * Assumed shrink of an online compact: the rewritten prefix is ~25% of the
+ * original (4:1). The rewrite cost must price the COMPACTED output — pricing
+ * the full original prefix at the cache-write premium once produced absurd
+ * projections (e.g. -1.43M tokens for a 120K prefix).
+ */
+const DEFAULT_COMPACTION_OUTPUT_RATIO = 0.25;
 /** Default minimum projected-saving ratio required to recommend compaction. */
 const DEFAULT_MIN_SAVING_RATIO = 0.2;
 /** Compaction is only considered once the window is more than half full. */
@@ -178,12 +193,21 @@ export function deriveAdaptiveBudget(input: AdaptiveBudgetInput): number {
 }
 
 /**
- * Economic check for online compaction at a boundary. Compares the future
- * replay cost of the prefix (remainingTurns * prefixTokens * CACHE_READ_FACTOR)
- * against the one-time rewrite cost (prefixTokens * cacheWriteReadRatio) and
- * recommends compaction when the projected saving — normalized by the replay
- * cost — exceeds `minSavingRatio` (default 0.2) AND windowPressure > 0.5.
- * All inputs are sanitized; outputs are always finite.
+ * Economic check for online compaction at a boundary.
+ *
+ * KEEP (do nothing): each remaining turn replays the prefix at the
+ * cache-read discount → `remainingTurns * prefixTokens * CACHE_READ_FACTOR`.
+ *
+ * COMPACT (once): read the prefix once (cache-hit), write the COMPACTED
+ * prefix (`~prefixTokens * COMPACTION_OUTPUT_RATIO`) at the cache-write
+ * premium, then replay only the compacted prefix for the remaining turns:
+ * `prefixTokens * CACHE_READ_FACTOR + compacted * writeReadRatio
+ *   + remainingTurns * compacted * CACHE_READ_FACTOR`.
+ *
+ * Compaction is recommended when the projected saving — normalized by the
+ * keep/replay cost — exceeds `minSavingRatio` (default 0.2) AND
+ * windowPressure > 0.5, so we never pay the rewrite cost early. All inputs
+ * are sanitized; outputs are always finite.
  */
 export function evaluateCompaction(input: CompactionInput): CompactionEvaluation {
   const prefixTokens = toFiniteNonNegative(input.prefixTokens, 0);
@@ -195,22 +219,31 @@ export function evaluateCompaction(input: CompactionInput): CompactionEvaluation
       ? clamp(toFiniteNonNegative(input.minSavingRatio, DEFAULT_MIN_SAVING_RATIO), 0, 1)
       : DEFAULT_MIN_SAVING_RATIO;
 
-  const futureReplayCost = remainingTurns * prefixTokens * CACHE_READ_FACTOR;
-  const rewriteCost = prefixTokens * writeReadRatio;
-  const projectedSaving = futureReplayCost - rewriteCost;
-  const savingRatio = futureReplayCost > 0 ? projectedSaving / futureReplayCost : 0;
+  const compactedTokens = prefixTokens * DEFAULT_COMPACTION_OUTPUT_RATIO;
+  const replayCost = remainingTurns * prefixTokens * CACHE_READ_FACTOR;
+  const summarizeRead = prefixTokens * CACHE_READ_FACTOR;
+  const compactWrite = compactedTokens * writeReadRatio;
+  const postCompactReplay = remainingTurns * compactedTokens * CACHE_READ_FACTOR;
+  const compactCost = summarizeRead + compactWrite + postCompactReplay;
+  const projectedSaving = replayCost - compactCost;
+  const savingRatio = replayCost > 0 ? projectedSaving / replayCost : 0;
+  const costBreakdown = `replay ${Math.round(replayCost)} vs compact ${Math.round(compactCost)} (write ${Math.round(compactWrite)} + read ${Math.round(summarizeRead)} + post-compact replay ${Math.round(postCompactReplay)})`;
 
   if (windowPressure <= WINDOW_PRESSURE_THRESHOLD) {
     return {
       recommend: false,
       projectedSaving,
+      replayCost,
+      compactCost,
       reason: `window pressure ${windowPressure.toFixed(2)} <= ${WINDOW_PRESSURE_THRESHOLD.toFixed(2)}; compaction deferred until the window is under pressure`,
     };
   }
-  if (futureReplayCost <= 0) {
+  if (replayCost <= 0) {
     return {
       recommend: false,
       projectedSaving,
+      replayCost,
+      compactCost,
       reason: "no future replay cost to amortize (empty prefix or no remaining turns)",
     };
   }
@@ -218,13 +251,17 @@ export function evaluateCompaction(input: CompactionInput): CompactionEvaluation
     return {
       recommend: false,
       projectedSaving,
-      reason: `projected saving ${Math.round(projectedSaving)} tokens (${(savingRatio * 100).toFixed(1)}% of replay cost) does not clear minSavingRatio ${minSavingRatio.toFixed(2)}`,
+      replayCost,
+      compactCost,
+      reason: `projected saving ${Math.round(projectedSaving)} tokens (${(savingRatio * 100).toFixed(1)}% of replay cost) does not clear minSavingRatio ${minSavingRatio.toFixed(2)} — ${costBreakdown}`,
     };
   }
   return {
     recommend: true,
     projectedSaving,
-    reason: `projected saving ${Math.round(projectedSaving)} tokens (${(savingRatio * 100).toFixed(1)}% of replay cost) clears minSavingRatio ${minSavingRatio.toFixed(2)} at window pressure ${windowPressure.toFixed(2)}`,
+    replayCost,
+    compactCost,
+    reason: `projected saving ${Math.round(projectedSaving)} tokens (${(savingRatio * 100).toFixed(1)}% of replay cost) clears minSavingRatio ${minSavingRatio.toFixed(2)} at window pressure ${windowPressure.toFixed(2)} — ${costBreakdown}`,
   };
 }
 
@@ -246,6 +283,8 @@ export function buildCompactionSignal(input: CompactionSignalInput): CompactionS
     boundaryLabel: input.boundaryLabel,
     continuationContext: input.continuationContext,
     projectedSaving: evaluation.projectedSaving,
+    ...(evaluation.replayCost !== undefined ? { replayCost: evaluation.replayCost } : {}),
+    ...(evaluation.compactCost !== undefined ? { compactCost: evaluation.compactCost } : {}),
     reason: evaluation.reason,
   };
 }

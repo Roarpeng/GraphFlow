@@ -44,6 +44,16 @@ const MAX_REPLY_CHARS = 4_000;
 const MAX_RELATED_CODE = 6;
 const MAX_THREAD_PROMPT_TURNS = 6;
 const MIN_QUERY_CHARS = 4;
+/**
+ * Synthetic userQuery for reply-only turns. `graphflow_context` promises
+ * "query optional" when backfilling assistantReply, so a reply arriving with
+ * no query and no pending tip to fill is recorded as its own turn under this
+ * placeholder instead of being dropped as `query-too-short`. The literal
+ * doubles as the on-record marker: a synthetic tip never absorbs the NEXT
+ * reply-only answer (each answer keeps its own turn), while an identical
+ * retry inside the dedupe window reuses it (hook idempotency).
+ */
+export const REPLY_FILL_QUERY = "(assistant reply fill)";
 /** Cross-session same_topic links: minimum token-set overlap ratio. */
 const SAME_TOPIC_MIN_OVERLAP = 0.34;
 /** Max turns scanned per other session when linking same_topic edges. */
@@ -116,6 +126,82 @@ export interface DialogueThreadView {
   overlap: number;
   turns: DialogueTurnRecord[];
   promptLines: string[];
+}
+
+/**
+ * Echo-view clip budget: one turn's Q/A preview when the thread rides in a
+ * `graphflow_context` response. Stored turns may carry up to 4000 chars per
+ * side; the echo must stay a preview, not a replay.
+ * 回显视图裁剪预算：回显里的每轮 Q/A 一律裁成预览，完整原文留在图谱里。
+ */
+export const MAX_ECHO_TURN_CHARS = 200;
+
+/**
+ * Slimmed turn preview: `id` is kept verbatim (the resumeFromTurnId
+ * interaction depends on it), `seq` / `jumped` marks too; only the Q/A text
+ * is clipped, with `truncated: true` when anything was cut.
+ */
+export interface DialogueTurnEcho {
+  id: string;
+  seq: number;
+  jumped: boolean;
+  userQuery: string;
+  assistantReply: string;
+  truncated?: boolean;
+}
+
+/**
+ * Bounded echo of `DialogueThreadView` for `graphflow_context` responses and
+ * dialogue-turn anchor expansion: same envelope and turn ids, text clipped to
+ * previews. Full turn text stays in the graph store — read it via
+ * `loadDialogueThread` / `parseDialogueTurn` when the whole turn is needed.
+ * 响应回显专用瘦身视图：id/seq/jumped 原样，Q/A 文本裁剪；全文走图谱直读。
+ */
+export interface DialogueThreadEchoView {
+  sessionId: string;
+  sessionName: string;
+  tipTurnId?: string;
+  jumped: boolean;
+  overlap: number;
+  turns: DialogueTurnEcho[];
+  promptLines: string[];
+}
+
+/**
+ * Pure slimming pass over a dialogue thread view for response echo.
+ * 纯函数：不读取也不修改图谱，仅裁剪回显文本。
+ */
+export function toDialogueThreadEchoView(thread: DialogueThreadView): DialogueThreadEchoView {
+  return {
+    sessionId: thread.sessionId,
+    sessionName: thread.sessionName,
+    ...(thread.tipTurnId ? { tipTurnId: thread.tipTurnId } : {}),
+    jumped: thread.jumped,
+    overlap: thread.overlap,
+    turns: thread.turns.map(toEchoTurn),
+    promptLines: [...thread.promptLines],
+  };
+}
+
+function toEchoTurn(turn: DialogueTurnRecord): DialogueTurnEcho {
+  // clip() collapses whitespace first, so "was anything cut" must be judged on
+  // the normalized length — a merely multi-spaced turn is not truncated.
+  const truncated =
+    normalizedLength(turn.userQuery) > MAX_ECHO_TURN_CHARS ||
+    normalizedLength(turn.assistantReply) > MAX_ECHO_TURN_CHARS;
+  return {
+    id: turn.id,
+    seq: turn.seq,
+    jumped: turn.jumped,
+    userQuery: clip(turn.userQuery, MAX_ECHO_TURN_CHARS),
+    assistantReply: clip(turn.assistantReply, MAX_ECHO_TURN_CHARS),
+    ...(truncated ? { truncated: true } : {}),
+  };
+}
+
+/** Echo-normalized length — the truncated judgment must match clip()'s own collapse. 回显归一化长度：与 clip 的压缩语义保持一致。 */
+export function normalizedLength(text: string): number {
+  return text.replace(/\s+/g, " ").trim().length;
 }
 
 export function dialogueSessionIdFor(sessionName: string, workspaceRoot?: string): string {
@@ -356,11 +442,12 @@ export async function recordDialogueTurn(
   client: GraphClient,
   input: RecordDialogueTurnInput
 ): Promise<RecordDialogueTurnResult> {
-  const userQuery = clip(redactSecrets(input.userQuery), MAX_QUERY_CHARS);
+  let userQuery = clip(redactSecrets(input.userQuery), MAX_QUERY_CHARS);
   const now = input.now ?? Date.now();
   const sessionName = normalizeSessionName(input.sessionName);
   const sessionId = dialogueSessionIdFor(sessionName, input.workspaceRoot);
   const assistantReply = clip(redactSecrets(input.assistantReply ?? ""), MAX_REPLY_CHARS);
+  const hasReply = assistantReply.trim().length > 0;
 
   const session = (await loadSession(client, sessionId)) ?? {
     id: sessionId,
@@ -374,8 +461,14 @@ export async function recordDialogueTurn(
   const existingTurns = await listDialogueTurns(client, { sessionId, limit: 500 });
   const tip = existingTurns.find((turn) => turn.id === session.tipTurnId) ?? existingTurns[existingTurns.length - 1];
 
+  // Reply-only fill (`graphflow_context({ assistantReply })`, query omitted):
+  // when set, the turn below is created under REPLY_FILL_QUERY and the
+  // dedupe/reuse check is skipped so a fresh synthetic turn opens instead of
+  // clobbering a previous synthetic tip's answer.
+  let replyOnlyFill = false;
+
   if (userQuery.trim().length < MIN_QUERY_CHARS) {
-    if (assistantReply && tip) {
+    if (hasReply && tip && normalizeQuery(tip.userQuery) !== REPLY_FILL_QUERY) {
       const summary = deriveTurnSummary(assistantReply);
       const updated: DialogueTurnRecord = {
         ...tip,
@@ -392,10 +485,24 @@ export async function recordDialogueTurn(
       await persistSession(client, nextSession);
       return { recorded: true, reused: true, jumped: updated.jumped, turn: updated, session: nextSession };
     }
-    return { recorded: false, reused: false, jumped: false, skipped: "query-too-short" };
+    if (!hasReply) {
+      return { recorded: false, reused: false, jumped: false, skipped: "query-too-short" };
+    }
+    // A reply with no usable tip must never be dropped for lacking a query:
+    // an identical retry onto a fresh synthetic tip reuses it, anything else
+    // opens a new turn under the placeholder (fall through below).
+    if (
+      tip &&
+      shouldReuseTurn(tip, REPLY_FILL_QUERY, now) &&
+      normalizeQuery(tip.assistantReply) === normalizeQuery(assistantReply)
+    ) {
+      return { recorded: true, reused: true, jumped: tip.jumped, turn: tip, session };
+    }
+    replyOnlyFill = true;
+    userQuery = REPLY_FILL_QUERY;
   }
 
-  if (tip && shouldReuseTurn(tip, userQuery, now)) {
+  if (!replyOnlyFill && tip && shouldReuseTurn(tip, userQuery, now)) {
     const summary = assistantReply ? deriveTurnSummary(assistantReply) : undefined;
     const updated: DialogueTurnRecord = {
       ...tip,
@@ -805,7 +912,12 @@ function normalizeQuery(query: string): string {
   return query.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-function clip(text: string, max: number): string {
+/**
+ * Clip free text to a bounded echo preview (whitespace collapsed first);
+ * shared by the thread echo view and the dialogue-hit recall previews.
+ * 裁剪为有界回显预览（先压缩空白再截断）；线程回显与召回命中预览共用。
+ */
+export function clip(text: string, max: number): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= max) return normalized;
   return `${normalized.slice(0, max - 1)}…`;

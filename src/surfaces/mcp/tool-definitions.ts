@@ -82,7 +82,11 @@ export function getToolDefinitions(): ToolDefinition[] {
       inputSchema: {
         type: "object",
         properties: {
-          query: { type: "string", description: "Query to preview. Be specific about what you need to understand." },
+          query: {
+            type: "string",
+            description:
+              "Query to preview. Be specific about what you need to understand. May be omitted when the call only backfills assistantReply onto the pending turn/topic (or when anchorId / content / handle carries the intent); required only when no other intent is given.",
+          },
           anchorId: { type: "string", description: "The anchor id returned by graphflow_context preview (e.g. 'symbol:src/foo.ts:abc123'). Use this instead of query to expand an anchor." },
           content: {
             type: "string",
@@ -161,7 +165,7 @@ export function getToolDefinitions(): ToolDefinition[] {
     {
       name: "graphflow_plan",
       description:
-        "[Core] Generate a DAG-style task plan and seed a workbench of function-topic nodes (workbench.topics + workbench.outline). Click a topic and pass topicId to graphflow_context to refine or return to the mainline. Wake the collapsed outline later via graphflow_diagnose (graph.workbenchOutline) or CLI `graphflow workbench tree`. mode='simple' (default) for planning; mode='insight' for Six Hats + 5-Why. Without a GraphFlow LLM API key, BOTH modes bridge to you (the coding agent): simple returns mode='agent-delegated' with lightweight simple-plan-* work items plus optional suggestedNodes (heuristic, non-final); insight returns the full Six Hats work-item set. MUST answer via graphflow_insight (submit then merge). Do not treat suggested/placeholder plan as final.",
+        "[Core] Generate a DAG-style task plan and seed a workbench of function-topic nodes (workbench.topics + workbench.outline). Click a topic and pass topicId to graphflow_context to refine or return to the mainline. Wake the collapsed outline later via graphflow_diagnose with includeOutline=true (graph.workbenchOutline) or CLI `graphflow workbench tree`. mode='simple' (default) for planning; mode='insight' for Six Hats + 5-Why. Without a GraphFlow LLM API key, BOTH modes bridge to you (the coding agent): simple returns mode='agent-delegated' with lightweight simple-plan-* work items plus optional suggestedNodes (heuristic, non-final); insight returns the full Six Hats work-item set. MUST answer via graphflow_insight (submit then merge). Do not treat suggested/placeholder plan as final.",
       inputSchema: {
         type: "object",
         properties: {
@@ -225,7 +229,7 @@ export function getToolDefinitions(): ToolDefinition[] {
     {
       name: "graphflow_diagnose",
       description:
-        "[Maintenance] Return provider health, graph statistics, token savings, and the on-demand workbench outline (graph.workbenchOutline: mainline DAG + side branches). Click a topicId and pass it to graphflow_context to resume. Does not add an 11th tool.",
+        "[Maintenance] Return provider health, graph statistics, and token savings. The workbench outline (graph.workbenchOutline, workspace-filtered mainline DAG + side branches) is omitted by default and returned ONLY with includeOutline=true so responses stay small; a slim resume pointer (graph.workbenchResume.activeTopicId) is always present — click it and pass the topicId to graphflow_context to resume, and use CLI `graphflow workbench tree` for a standing outline view. Does not add an 11th tool.",
       inputSchema: {
         type: "object",
         properties: {
@@ -233,6 +237,11 @@ export function getToolDefinitions(): ToolDefinition[] {
           nodeLimit: { type: "number", description: "Max sample nodes for graph inspection." },
           edgeLimit: { type: "number", description: "Max sample edges for graph inspection." },
           rootDir: { type: "string", description: "Optional workspace root override." },
+          includeOutline: {
+            type: "boolean",
+            description:
+              "Optional: also return the workspace-filtered workbench outline (graph.workbenchOutline). Default false — the outline is on demand only (bulky); the active-topic resume pointer is always present, and CLI `graphflow workbench tree` shows the standing tree.",
+          },
         },
         additionalProperties: false,
       },

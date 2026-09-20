@@ -13,10 +13,12 @@ import {
 import { collectExpandedKeywordHits } from "../src/graph/query-expand";
 import {
   buildQueryTranslateWorkItem,
+  QUERY_TRANSLATE_LOW_RELEVANCE_THRESHOLD,
   shouldDelegateQueryTranslation,
 } from "../src/graph/query-translate";
 import { GraphifyFileClient } from "../src/graph/graphify-file-client";
 import { buildLayeredContextPackage } from "../src/graph/context-slicer";
+import type { ContextAnchorItem } from "../src/graph/context-slicer-types";
 
 describe("M61 CJK query expansion", () => {
   it("detects CJK text", () => {
@@ -170,6 +172,9 @@ describe("M61 CJK query expansion", () => {
     });
     expect(pkg.anchorChannel.length).toBeGreaterThan(0);
     expect(pkg.summaryChannel.join("\n")).toMatch(/Battle/i);
+    // Anchors now carry normalized query relevance; a node whose jsdoc
+    // literally contains the queried phrase scores high.
+    expect(pkg.anchorChannel[0]?.relevance).toBeGreaterThanOrEqual(0.5);
 
     rmSync(dir, { recursive: true, force: true });
   });
@@ -197,6 +202,29 @@ describe("M61 CJK query expansion", () => {
     expect(shouldDelegateQueryTranslation("战斗系统", 5)).toBe(false);
     expect(shouldDelegateQueryTranslation("battle", 0)).toBe(false);
     expect(shouldDelegateQueryTranslation("战斗", 0, "battle")).toBe(false);
+  });
+
+  it("shouldDelegateQueryTranslation: low anchor relevance delegates despite enough anchors", () => {
+    const mk = (relevance: number | undefined, n = 5): ContextAnchorItem[] =>
+      Array.from({ length: n }, (_, i) => ({
+        id: `file:src/a${i}.ts`,
+        type: "File",
+        layer: "L1" as const,
+        ...(relevance !== undefined ? { relevance } : {}),
+      }));
+    // Enough anchors, but the anchor head shares no wording with the CJK
+    // query (hits came from workspace-path expansion): delegate translation.
+    expect(shouldDelegateQueryTranslation("启动引导时序图里的初始化守卫在哪里处理？", 15, undefined, mk(0.05))).toBe(true);
+    // Literal CJK overlap in the anchor head: no delegation.
+    expect(shouldDelegateQueryTranslation("游戏战斗系统", 15, undefined, mk(0.8))).toBe(false);
+    // Exactly at the threshold is not low (trigger is strictly below).
+    expect(shouldDelegateQueryTranslation("游戏战斗系统", 15, undefined, mk(QUERY_TRANSLATE_LOW_RELEVANCE_THRESHOLD))).toBe(false);
+    // No relevance info at all: legacy anchor-count rule only.
+    expect(shouldDelegateQueryTranslation("游戏战斗系统", 15, undefined, mk(undefined))).toBe(false);
+    expect(shouldDelegateQueryTranslation("游戏战斗系统", 2, undefined, mk(undefined))).toBe(true);
+    // englishQuery presence still suppresses; non-CJK queries never delegate.
+    expect(shouldDelegateQueryTranslation("启动引导时序图里的初始化守卫在哪里处理？", 15, "boot guard init", mk(0.05))).toBe(false);
+    expect(shouldDelegateQueryTranslation("boot guard init", 15, undefined, mk(0.05))).toBe(false);
   });
 
   it("buildQueryTranslateWorkItem includes retry instructions", () => {

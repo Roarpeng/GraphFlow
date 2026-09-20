@@ -9,8 +9,22 @@ import type { GraphFlowConfig } from "../config/schema";
  * statistics so users can quantify ROI (return on investment) of using
  * GraphFlow's context compression.
  *
- * Stats are persisted to graphflow-out/token-savings.json as a simple
- * append-only log with aggregate counters.
+ * Stats are persisted to graphflow-out/token-savings.json as an append-only
+ * record log (`records`, plus the capped `recentRecords` view) with aggregate
+ * counters recomputed from that log.
+ *
+ * Probe exclusion rule / 探针排除规则：cumulative fields (`totalRuns`,
+ * `totalRawTokens`, `totalCompressedTokens`, `totalSavedTokens`,
+ * `averageSavingsPercent`, and derived `firstRunAt`/`lastRunAt`) EXCLUDE
+ * records with `rawTokens < MIN_COUNTED_RAW_TOKENS` (1000) — noise-level
+ * queries such as repeated demo/orchestrator smoke probes that water down the
+ * ROI; real code questions never come in below that magnitude. The raw
+ * records themselves are kept (`records` / `recentRecords`), never deleted.
+ * Aggregates are recomputed on load (read-side), so legacy files without the
+ * full log are re-derived from the retained `recentRecords` window — the
+ * stats self-heal from probe pollution on read.
+ * 累计口径排除 rawTokens < 1000 的噪声级探针记录；原始记录保留不删；聚合在
+ * 读取侧重算，旧文件（无全量日志）从保留的 recentRecords 窗口重算自愈。
  *
  * `savingsPercent` is packaging ROI (estimated-raw vs compressed tokens).
  * It is not retrieval Hit@k, body coverage, or lossless source fidelity —
@@ -44,6 +58,72 @@ export interface SavingsStats {
 }
 
 /**
+ * Minimum `rawTokens` for a record to count toward the cumulative stats.
+ * Below this magnitude a query is a smoke/probe (demo, orchestrator liveness
+ * checks) rather than a real code question, and counting it waters down the
+ * ROI. / 计入累计统计的 rawTokens 下限：低于该量级的是冒烟/探针查询。
+ */
+export const MIN_COUNTED_RAW_TOKENS = 1000;
+
+/** Persisted shape: the public stats plus the full append-only record log. */
+interface PersistedSavingsStats extends SavingsStats {
+  records: SavingsRecord[];
+}
+
+function emptySavingsStats(): SavingsStats {
+  return {
+    totalRuns: 0,
+    totalRawTokens: 0,
+    totalCompressedTokens: 0,
+    totalSavedTokens: 0,
+    averageSavingsPercent: 0,
+    firstRunAt: null,
+    lastRunAt: null,
+    recentRecords: [],
+  };
+}
+
+/**
+ * Recompute the cumulative fields from the record log, EXCLUDING probe-level
+ * records (`rawTokens < MIN_COUNTED_RAW_TOKENS` — see the header rule).
+ * 从记录日志重算累计字段，排除 rawTokens < 1000 的探针记录。
+ */
+function computeCountedAggregates(
+  records: readonly SavingsRecord[]
+): Pick<
+  SavingsStats,
+  | "totalRuns"
+  | "totalRawTokens"
+  | "totalCompressedTokens"
+  | "totalSavedTokens"
+  | "averageSavingsPercent"
+  | "firstRunAt"
+  | "lastRunAt"
+> {
+  const counted = records.filter((record) => record.rawTokens >= MIN_COUNTED_RAW_TOKENS);
+  const totalRawTokens = counted.reduce((sum, record) => sum + record.rawTokens, 0);
+  const totalCompressedTokens = counted.reduce((sum, record) => sum + record.compressedTokens, 0);
+  const totalSavedTokens = totalRawTokens - totalCompressedTokens;
+  // ISO timestamps sort lexicographically; order-independent so a legacy
+  // newest-first seeded window derives the same first/last as the log.
+  // ISO 时间戳可按字典序排序：与记录顺序无关（旧窗口按新到旧也能算对）。
+  const timestamps = counted
+    .map((record) => (typeof record.timestamp === "string" ? record.timestamp : ""))
+    .filter((value) => value.length > 0)
+    .sort();
+  return {
+    totalRuns: counted.length,
+    totalRawTokens,
+    totalCompressedTokens,
+    totalSavedTokens,
+    averageSavingsPercent:
+      totalRawTokens > 0 ? Math.round((totalSavedTokens / totalRawTokens) * 100) : 0,
+    firstRunAt: timestamps[0] ?? null,
+    lastRunAt: timestamps[timestamps.length - 1] ?? null,
+  };
+}
+
+/**
  * Explain that token savings is not information fidelity.
  * Preview summaries are pointers; expand File (or Read) for full source.
  */
@@ -62,54 +142,45 @@ function resolveStatsPath(config: GraphFlowConfig): string {
   return join(root, "graphflow-out", "token-savings.json");
 }
 
-function loadStats(statsPath: string): SavingsStats {
+function loadStats(statsPath: string): PersistedSavingsStats {
   if (!existsSync(statsPath)) {
-    return {
-      totalRuns: 0,
-      totalRawTokens: 0,
-      totalCompressedTokens: 0,
-      totalSavedTokens: 0,
-      averageSavingsPercent: 0,
-      firstRunAt: null,
-      lastRunAt: null,
-      recentRecords: [],
-    };
+    return { ...emptySavingsStats(), records: [] };
   }
 
   try {
     const raw = readFileSync(statsPath, "utf8");
-    const parsed = JSON.parse(raw) as SavingsStats;
+    const parsed = JSON.parse(raw) as Partial<PersistedSavingsStats>;
+    // 读取侧过滤 + 重算聚合：探针记录（rawTokens < 1000）不进累计口径。
+    // 旧文件没有全量 records 日志 → 从保留的 recentRecords 窗口重算（自愈）。
+    // Read-side filter + recompute: probes never reach the cumulative fields;
+    // legacy files without the full log re-derive from the retained window.
+    const records = Array.isArray(parsed.records)
+      ? parsed.records
+      : Array.isArray(parsed.recentRecords)
+        ? parsed.recentRecords
+        : [];
     return {
-      totalRuns: parsed.totalRuns ?? 0,
-      totalRawTokens: parsed.totalRawTokens ?? 0,
-      totalCompressedTokens: parsed.totalCompressedTokens ?? 0,
-      totalSavedTokens: parsed.totalSavedTokens ?? 0,
-      averageSavingsPercent: parsed.averageSavingsPercent ?? 0,
-      firstRunAt: parsed.firstRunAt ?? null,
-      lastRunAt: parsed.lastRunAt ?? null,
-      recentRecords: parsed.recentRecords ?? [],
+      ...computeCountedAggregates(records),
+      records,
+      recentRecords: Array.isArray(parsed.recentRecords) ? parsed.recentRecords : [],
     };
   } catch {
-    return {
-      totalRuns: 0,
-      totalRawTokens: 0,
-      totalCompressedTokens: 0,
-      totalSavedTokens: 0,
-      averageSavingsPercent: 0,
-      firstRunAt: null,
-      lastRunAt: null,
-      recentRecords: [],
-    };
+    return { ...emptySavingsStats(), records: [] };
   }
 }
 
-function saveStats(statsPath: string, stats: SavingsStats): void {
+function saveStats(statsPath: string, stats: PersistedSavingsStats): void {
   mkdirSync(dirname(statsPath), { recursive: true });
   writeFileSync(statsPath, JSON.stringify(stats, null, 2), "utf8");
 }
 
 /**
  * Record a single savings event and update cumulative stats.
+ *
+ * Every record is appended to the persisted log (raw records are never
+ * dropped); the cumulative counters are then recomputed through the probe
+ * exclusion rule (`rawTokens >= MIN_COUNTED_RAW_TOKENS`).
+ * 每条记录都完整落盘；累计口径经探针排除规则重算（rawTokens ≥ 1000 才计入）。
  *
  * @param config GraphFlow config
  * @param record The savings record to append
@@ -122,32 +193,38 @@ export function recordSavings(config: GraphFlowConfig, record: SavingsRecord): v
     kind: record.kind ?? "tokens-not-fidelity",
   };
 
-  stats.totalRuns += 1;
-  stats.totalRawTokens += stored.rawTokens;
-  stats.totalCompressedTokens += stored.compressedTokens;
-  stats.totalSavedTokens += stored.rawTokens - stored.compressedTokens;
-  stats.averageSavingsPercent =
-    stats.totalRawTokens > 0
-      ? Math.round((stats.totalSavedTokens / stats.totalRawTokens) * 100)
-      : 0;
-  stats.firstRunAt = stats.firstRunAt ?? stored.timestamp;
-  stats.lastRunAt = stored.timestamp;
-
+  const records = [...stats.records, stored];
   stats.recentRecords.unshift(stored);
   if (stats.recentRecords.length > MAX_RECENT_RECORDS) {
     stats.recentRecords = stats.recentRecords.slice(0, MAX_RECENT_RECORDS);
   }
 
-  saveStats(statsPath, stats);
+  saveStats(statsPath, {
+    ...computeCountedAggregates(records),
+    records,
+    recentRecords: stats.recentRecords,
+  });
 }
 
 /**
- * Get cumulative savings statistics.
+ * Get cumulative savings statistics (probe-filtered; see the header rule).
+ * The full record log stays internal — callers get the capped
+ * `recentRecords` view plus the recomputed cumulative fields.
  *
  * @param config GraphFlow config
  */
 export function getSavingsStats(config: GraphFlowConfig): SavingsStats {
-  return loadStats(resolveStatsPath(config));
+  const persisted = loadStats(resolveStatsPath(config));
+  return {
+    totalRuns: persisted.totalRuns,
+    totalRawTokens: persisted.totalRawTokens,
+    totalCompressedTokens: persisted.totalCompressedTokens,
+    totalSavedTokens: persisted.totalSavedTokens,
+    averageSavingsPercent: persisted.averageSavingsPercent,
+    firstRunAt: persisted.firstRunAt,
+    lastRunAt: persisted.lastRunAt,
+    recentRecords: persisted.recentRecords,
+  };
 }
 
 /**
@@ -161,17 +238,7 @@ export function resetSavingsStats(config: GraphFlowConfig): { path: string; rese
     return { path: statsPath, reset: false };
   }
 
-  const empty: SavingsStats = {
-    totalRuns: 0,
-    totalRawTokens: 0,
-    totalCompressedTokens: 0,
-    totalSavedTokens: 0,
-    averageSavingsPercent: 0,
-    firstRunAt: null,
-    lastRunAt: null,
-    recentRecords: [],
-  };
-  saveStats(statsPath, empty);
+  saveStats(statsPath, { ...emptySavingsStats(), records: [] });
   return { path: statsPath, reset: true };
 }
 

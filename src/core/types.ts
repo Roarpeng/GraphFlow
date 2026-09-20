@@ -41,6 +41,12 @@ export interface TaskRunResult {
   status: TaskStatus;
   attempts: number;
   feedback: string;
+  /**
+   * Worker's final textual answer. Surfaced on the run summary and persisted
+   * on the episode record — without it a COMPLETED run reports only the
+   * validator's note while the actual answer stays invisible to the caller.
+   */
+  result?: string;
   routeDecisions?: RouteDecision[];
   executionRounds?: string[][];
   validationSummary?: {

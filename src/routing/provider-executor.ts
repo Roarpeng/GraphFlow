@@ -41,6 +41,22 @@ const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
 const DEFAULT_CIRCUIT_OPEN_MS = 60_000;
 
+/**
+ * One inlined source excerpt attached to a prompt. Bridge-mode workers talk to
+ * a provider API with NO filesystem access, so the only way they can see the
+ * code an anchor points at is if the bytes ride inside the prompt itself.
+ */
+export interface AnchorSourceItem {
+  /** Anchor id from the context package (e.g. `file:src/x.ts`, `symbol:src/x.ts:<hash>`). */
+  id: string;
+  /** Repo-relative path (Symbols carry `path:line` for precise location). */
+  path: string;
+  /** Source text, already clamped to the anchor-source budgets. */
+  content: string;
+  /** True when the excerpt was head/tail truncated to fit the budget. */
+  truncated?: boolean;
+}
+
 export interface PromptContext {
   summaryChannel?: string[];
   skillHints?: string[];
@@ -51,11 +67,29 @@ export interface PromptContext {
    * what the task is ultimately for before any other context.
    */
   goalAnchors?: string[];
+  /**
+   * Inlined anchor source excerpts (see AnchorSourceItem). Rendered as fenced
+   * code blocks with an explicit "already inlined — do not request files"
+   * instruction so remote workers answer from the prompt instead of stalling
+   * on "cannot read file" replies.
+   */
+  anchorSources?: AnchorSourceItem[];
 }
+
+/**
+ * Fixed instruction shipped with every inlined source block. Workers without
+ * filesystem access otherwise refuse trivial tasks ("provide the file
+ * content"); this line tells them everything they need is already here.
+ */
+export const ANCHOR_SOURCE_INLINE_NOTE =
+  "以下源码已内联提供，直接基于它作答，不要请求或等待文件内容 " +
+  "(the source excerpts below are already inlined — answer directly from them, do not request or wait for file content).";
 
 const MAX_SUMMARY_LINES = 20;
 const MAX_SKILL_HINTS = 8;
 const MAX_GOAL_ANCHORS = 2;
+/** Defensive cap in the renderer; the resolver enforces the same budget. */
+const MAX_ANCHOR_SOURCES = 8;
 
 let lastProviderUsage: ProviderUsageStats | undefined;
 
@@ -71,7 +105,69 @@ function hasAnyContext(context?: PromptContext): boolean {
   const k = context.skillHints?.some((x) => x && x.trim().length > 0);
   const e = context.extraInstructions?.some((x) => x && x.trim().length > 0);
   const g = context.goalAnchors?.some((x) => x && x.trim().length > 0);
-  return Boolean(s || k || e || g);
+  const a = context.anchorSources?.some((x) => x && x.content && x.content.trim().length > 0);
+  return Boolean(s || k || e || g || a);
+}
+
+function fenceLanguageFor(path: string): string {
+  const ext = path.includes(".") ? path.slice(path.lastIndexOf(".") + 1) : "";
+  return /^[a-z0-9]{1,10}$/i.test(ext) ? ext.toLowerCase() : "";
+}
+
+/**
+ * Render inlined anchor sources as a readable block: the fixed inline
+ * instruction followed by one titled fenced code block per excerpt. Four
+ * backticks fence the block because TypeScript source frequently contains
+ * triple-backtick template literals.
+ */
+export function formatAnchorSourcesBlock(anchorSources?: AnchorSourceItem[]): string {
+  const items = (anchorSources ?? [])
+    .filter((item) => item && typeof item.content === "string" && item.content.trim().length > 0)
+    .slice(0, MAX_ANCHOR_SOURCES);
+  if (items.length === 0) {
+    return "";
+  }
+  const lines: string[] = [ANCHOR_SOURCE_INLINE_NOTE];
+  for (const item of items) {
+    const title = `${item.path}${item.truncated ? " (truncated)" : ""} [anchor ${item.id}]`;
+    lines.push("", `### ${title}`, "````" + fenceLanguageFor(item.path), item.content, "````");
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Append the inlined source block to a raw task prompt. `executeRolePrompt`
+ * routes the result into the provider request messages, so provider-side
+ * workers receive the source bytes even though the message builder in
+ * role-capabilities does not know about anchorSources yet.
+ */
+export function augmentPromptWithAnchorSources(prompt: string, context?: PromptContext): string {
+  const block = formatAnchorSourcesBlock(context?.anchorSources);
+  return block ? `${prompt}\n\n${block}` : prompt;
+}
+
+/**
+ * Flatten a PromptContext into the single-line `; `-joined form used by bridge
+ * executionDescriptor.context strings. Anchor sources are excluded from the
+ * JSON blob (a 24KB single-line JSON.stringify of source is unreadable) and
+ * appended as the readable fenced block instead.
+ */
+export function formatPromptContextEntries(context?: PromptContext): string {
+  if (!context) {
+    return "";
+  }
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(context)) {
+    if (key === "anchorSources") {
+      continue;
+    }
+    parts.push(`${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
+  }
+  const anchorBlock = formatAnchorSourcesBlock(context.anchorSources);
+  if (anchorBlock) {
+    parts.push(anchorBlock);
+  }
+  return parts.join("; ");
 }
 
 export function formatPromptWithContext(
@@ -117,6 +213,12 @@ export function formatPromptWithContext(
     for (const note of notes) {
       lines.push(`- ${note}`);
     }
+  }
+
+  const anchorBlock = formatAnchorSourcesBlock(context?.anchorSources);
+  if (anchorBlock) {
+    lines.push("");
+    lines.push(anchorBlock);
   }
 
   lines.push("Task:");
@@ -219,14 +321,22 @@ export async function executeRolePrompt(
   prompt: string,
   selection: ModelSelection,
   context?: PromptContext,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  opts?: { disableTools?: boolean }
 ): Promise<string> {
   const config = resolveConfig();
-  const request = buildProviderRequestForRole(role, prompt, selection, config, context);
+  // Anchor sources are inlined into the prompt itself (not just carried on the
+  // context object) so the message builder in role-capabilities — which does
+  // not know about anchorSources — still delivers the source bytes to the
+  // provider. Without this, remote workers correctly report they cannot read
+  // files and trivial tasks burn the whole retry budget.
+  const effectivePrompt = augmentPromptWithAnchorSources(prompt, context);
+  const request = buildProviderRequestForRole(role, effectivePrompt, selection, config, context);
   if (signal) {
     request.signal = signal;
   }
   const enableTools =
+    !opts?.disableTools &&
     role === "planner" &&
     !/^\s*Reply with exactly:\s*ok\s*$/i.test(prompt.trim()) &&
     shouldEnableProviderTools(selection, config);

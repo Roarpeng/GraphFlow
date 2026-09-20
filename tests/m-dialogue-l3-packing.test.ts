@@ -62,11 +62,13 @@ describe("dialogue turns packed into L3 context (Conversation Graph W2a, layered
       1500
     );
     for (const pkg of [layered, enhanced]) {
-      // The current (effective) turn is packed as an L3 anchor.
+      // The current (effective) turn is packed as an L3 anchor (relevance is
+      // the per-anchor quality score carried since the CJK low-relevance work).
       expect(pkg.anchorChannel).toContainEqual({
         id: correction.turn!.id,
         type: "Decision",
         layer: "L3",
+        relevance: expect.any(Number),
       });
       // The correction annotation line is present.
       expect(pkg.summaryChannel.some((line) => line.includes("已被修正"))).toBe(true);
@@ -211,11 +213,13 @@ describe("dialogue turns packed into L3 context (Conversation Graph W2a, layered
         id: "file:src/cache.ts",
         type: "File",
         layer: "L1",
+        relevance: expect.any(Number),
       });
       expect(pkg.anchorChannel).toContainEqual({
         id: "symbol:src/cache.ts:evict",
         type: "Symbol",
         layer: "L1",
+        relevance: expect.any(Number),
       });
       expect(pkg.tokenEstimate).toBeLessThanOrEqual(2000);
       expect(pkg.truncated).toBe(false);
@@ -230,11 +234,13 @@ describe("dialogue turns packed into L3 context (Conversation Graph W2a, layered
         id: "file:src/cache.ts",
         type: "File",
         layer: "L1",
+        relevance: expect.any(Number),
       });
       expect(pkg.anchorChannel).toContainEqual({
         id: "symbol:src/cache.ts:evict",
         type: "Symbol",
         layer: "L1",
+        relevance: expect.any(Number),
       });
       expect(pkg.tokenEstimate).toBeLessThanOrEqual(100);
       expect(pkg.truncated).toBe(true);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GraphifyClient } from "../src/graph/graphify-client";
 import {
+  REPLY_FILL_QUERY,
   dialogueSessionIdFor,
   formatDialogueThreadLines,
   isDialogueTurnNode,
@@ -148,6 +149,93 @@ describe("dialogue-thread knowledge graph", () => {
     expect(filled.reused).toBe(true);
     expect(filled.turn?.id).toBe(pending.turn?.id);
     expect(filled.turn?.assistantReply).toContain("原文回答");
+    expect(filled.session?.turnCount).toBe(1);
+  });
+
+  it("records a reply-only turn under the placeholder query when no tip exists", async () => {
+    const client = new GraphifyClient();
+    const result = await recordDialogueTurn(client, {
+      userQuery: "",
+      assistantReply: "没有待回填问题时补记的回答，必须落库可检索。",
+      workspaceRoot: "/repo",
+      now: 1_000,
+    });
+
+    expect(result.recorded).toBe(true);
+    expect(result.reused).toBe(false);
+    expect(result.turn?.userQuery).toBe(REPLY_FILL_QUERY);
+    expect(result.turn?.assistantReply).toContain("必须落库");
+    expect(result.session?.turnCount).toBe(1);
+
+    const turns = await listDialogueTurns(client, { sessionId: result.session!.id });
+    expect(turns).toHaveLength(1);
+    const thread = await loadDialogueThread(client, { workspaceRoot: "/repo" });
+    expect(thread?.turns.some((turn) => turn.assistantReply.includes("必须落库"))).toBe(true);
+  });
+
+  it("keeps consecutive reply-only answers as separate turns and dedupes identical retries", async () => {
+    const client = new GraphifyClient();
+    const first = await recordDialogueTurn(client, {
+      userQuery: "",
+      assistantReply: "第一条仅回答补记。",
+      workspaceRoot: "/repo",
+      now: 1_000,
+    });
+    const second = await recordDialogueTurn(client, {
+      userQuery: "",
+      assistantReply: "第二条仅回答补记。",
+      workspaceRoot: "/repo",
+      now: 1_200,
+    });
+    const retry = await recordDialogueTurn(client, {
+      userQuery: "",
+      assistantReply: "第二条仅回答补记。",
+      workspaceRoot: "/repo",
+      now: 1_400,
+    });
+
+    expect(second.recorded).toBe(true);
+    expect(second.turn?.id).not.toBe(first.turn?.id);
+    expect(second.turn?.parentTurnId).toBe(first.turn?.id);
+
+    expect(retry.recorded).toBe(true);
+    expect(retry.reused).toBe(true);
+    expect(retry.turn?.id).toBe(second.turn?.id);
+
+    const turns = await listDialogueTurns(client, { sessionId: first.session!.id });
+    expect(turns).toHaveLength(2);
+  });
+
+  it("still skips an empty query with no reply (query-too-short semantics kept)", async () => {
+    const client = new GraphifyClient();
+    const skipped = await recordDialogueTurn(client, {
+      userQuery: "",
+      assistantReply: "",
+      workspaceRoot: "/repo",
+      now: 1_000,
+    });
+    expect(skipped.recorded).toBe(false);
+    expect(skipped.skipped).toBe("query-too-short");
+    expect(await listDialogueTurns(client)).toHaveLength(0);
+  });
+
+  it("prefers backfilling a real pending tip over opening a placeholder turn (no regression)", async () => {
+    const client = new GraphifyClient();
+    const pending = await recordDialogueTurn(client, {
+      userQuery: "真实待答问题",
+      workspaceRoot: "/repo",
+      now: 1_000,
+    });
+    const filled = await recordDialogueTurn(client, {
+      userQuery: "",
+      assistantReply: "回答落在真实待答 turn 上。",
+      workspaceRoot: "/repo",
+      now: 1_100,
+    });
+
+    expect(filled.reused).toBe(true);
+    expect(filled.turn?.id).toBe(pending.turn?.id);
+    expect(filled.turn?.userQuery).toBe("真实待答问题");
     expect(filled.session?.turnCount).toBe(1);
   });
 

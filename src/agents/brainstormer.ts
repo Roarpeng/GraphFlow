@@ -27,9 +27,23 @@ export async function brainstormTaskLlm(
   selection: ModelSelection,
   context?: PromptContext
 ): Promise<string[]> {
+  return (await tryBrainstormTaskLlm(task, selection, context)) ?? brainstormTask(task);
+}
+
+/**
+ * Strict variant for callers that must distinguish real LLM ideas from the
+ * local template fallback: resolves to null when the provider call throws,
+ * the task is empty, or the reply yields no parsable idea lines. It never
+ * rejects and never silently substitutes the heuristic ideas.
+ */
+export async function tryBrainstormTaskLlm(
+  task: string,
+  selection: ModelSelection,
+  context?: PromptContext
+): Promise<string[] | null> {
   const normalized = task.trim();
   if (!normalized) {
-    return brainstormTask(task);
+    return null;
   }
 
   const prompt = [
@@ -39,20 +53,27 @@ export async function brainstormTaskLlm(
     `Task: ${normalized}`,
   ].join("\n");
 
-  let raw = "";
-  try {
-    raw = await executeRolePrompt("planner", prompt, selection, context);
-  } catch (error) {
-    logger.error({ error }, "Caught error");
-    return brainstormTask(task);
-  }
+  // One immediate retry (same rationale as tryPlanTasksLlm): an off-shape
+  // reply on the first attempt should not force the template fallback.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let raw = "";
+    try {
+      // disableTools: same rationale as tryPlanTasksLlm — the tool-loop's
+      // confirmation envelope would defeat idea-line parsing.
+      raw = await executeRolePrompt("planner", prompt, selection, context, undefined, {
+        disableTools: true,
+      });
+    } catch (error) {
+      logger.error({ error, attempt }, "Caught error");
+      continue;
+    }
 
-  const ideas = parseBrainstormIdeas(raw);
-  if (ideas.length === 0) {
-    return brainstormTask(task);
+    const ideas = parseBrainstormIdeas(raw);
+    if (ideas.length > 0) {
+      return ideas.slice(0, MAX_BRAINSTORM_IDEAS);
+    }
   }
-
-  return ideas.slice(0, MAX_BRAINSTORM_IDEAS);
+  return null;
 }
 
 function parseBrainstormIdeas(raw: string): string[] {
@@ -60,10 +81,23 @@ function parseBrainstormIdeas(raw: string): string[] {
     return [];
   }
 
-  return raw
+  // Some replies arrive as a confirmation envelope
+  // {"ok":true,"summary":"1) …\n2) …"} — the ideas live inside `summary`.
+  let text = raw;
+  const envelope = text.match(/^\s*\{\s*"ok"\s*:\s*true\s*,\s*"summary"\s*:\s*"([\s\S]*)"\s*\}\s*$/);
+  if (envelope?.[1]) {
+    try {
+      text = JSON.parse(`"${envelope[1]}"`);
+    } catch {
+      text = envelope[1];
+    }
+  }
+
+  return text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
+    .filter((line) => !line.startsWith("{"))
     .map((line) => line.replace(/^[-*•]\s*/, "").replace(/^\d+[\.\)、:：]\s*/, "").trim())
     .filter((line) => line.length > 0);
 }

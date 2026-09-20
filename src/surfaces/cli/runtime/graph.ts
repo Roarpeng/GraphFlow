@@ -20,7 +20,7 @@ import {
 import { indexWorkspaceFiles, clearGraphIndexArtifacts, hasPendingGraphIndexWork, indexSingleFile } from "../../../graph/file-indexer";
 import { GraphFileWatcher } from "../../../graph/file-watcher.js";
 import { extractNodeSourcePath } from "../../../graph/graph-utils";
-import { searchDialogueTurns } from "../../../graph/graph-search";
+import { searchDialogueTurns, type DialogueHitPreview, type DialogueSearchHit } from "../../../graph/graph-search";
 import { sampleGraphForSnapshot } from "../../../graph/snapshot-view.js";
 import {
   explainSavings,
@@ -45,12 +45,16 @@ import {
 import { parseSkillState } from "../../../learning/skill-store.js";
 import { logger } from "../../../utils/logger.js";
 import {
+  clip,
   formatDialogueThreadLines,
   isDialogueTurnNode,
   loadDialogueThread,
+  MAX_ECHO_TURN_CHARS,
+  normalizedLength,
   parseDialogueTurn,
   recordDialogueTurn,
   scoreTopicOverlap,
+  toDialogueThreadEchoView,
 } from "../../../learning/dialogue-thread.js";
 import {
   appendTopicMessage,
@@ -60,9 +64,12 @@ import {
   loadWorkbenchContext,
   loadWorkbenchOutlines,
   parseWorkbenchTopic,
+  toWorkbenchEchoView,
   topicPendingReply,
+  workbenchRootIdFor,
 } from "../../../learning/workbench-topic.js";
 import { buildEmbeddingOptions } from "./env.js";
+import { applyResponseBudget } from "./response-budget.js";
 import { graphStoreDeltaPath } from "../../../graph/graphify-file-client.js";
 import {
   calculateBudgetUsedPercent,
@@ -72,6 +79,7 @@ import {
   loadGraphStore,
   parseSkillInsight,
   resolveGraphStoreAfterIndex,
+  withGrepBaselineBudget,
 } from "./helpers.js";
 import type {
   CaptureAssistantReplyResult,
@@ -87,8 +95,12 @@ import type {
 } from "./types.js";
 import type { GraphFlowConfig } from "../../../config/schema";
 import {
+  anchorRelevanceQuality,
   buildQueryTranslateInstructions,
   buildQueryTranslateWorkItem,
+  QUERY_TRANSLATE_HIT_THRESHOLD,
+  QUERY_TRANSLATE_LOW_RELEVANCE_THRESHOLD,
+  QUERY_TRANSLATE_RELEVANCE_TOP_K_DELIVERED,
   shouldDelegateQueryTranslation,
 } from "../../../graph/query-translate.js";
 
@@ -234,11 +246,13 @@ export function withPostPackageAccounting(
 }
 
 /**
- * Build the opt-in context-pressure block (SoL-Pi "Online Context Compact"
- * analog). GraphFlow cannot call the host's compaction API, so this is an
- * advisory signal plus the effective budget actually used for packaging.
- * `compaction` is emitted only when the caller supplies prefix tokens and a
- * remaining-turn estimate — GraphFlow never fabricates either.
+ * Build the context-pressure block (SoL-Pi "Online Context Compact" analog).
+ * Enabled by default via efficiencyPolicy.contextPressure (explicit `false`
+ * opts out), so every preview carries it. GraphFlow cannot call the host's
+ * compaction API, so this is an advisory signal plus the effective budget
+ * actually used for packaging. `compaction` is emitted only when the caller
+ * supplies prefix tokens and a remaining-turn estimate — GraphFlow never
+ * fabricates either.
  */
 function buildContextPressureBlock(params: {
   policy: ResolvedContextPressurePolicy;
@@ -314,7 +328,8 @@ export async function previewContext(
   const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
 
   // GF-3 / Online Context Compact: observed-pressure budget + compaction signal.
-  // Disabled by default; when enabled, observed pressure overrides the global cap.
+  // Enabled by default (efficiencyPolicy.contextPressure.enabled); an explicit
+  // `false` disables it. When enabled, observed pressure overrides the global cap.
   const pressurePolicy = resolveEfficiencyPolicy(config).contextPressure;
   const observedPressure = pressurePolicy.enabled ? toContextPressure(contextPressure) : undefined;
   const effectiveMaxTokens = pressurePolicy.enabled
@@ -343,7 +358,10 @@ export async function previewContext(
   const graphClient = createGraphClient(config);
   if (cached) {
     const attached = await attachWorkbenchThenDialogue(cached, graphClient, config, query, dialogue);
-    return pressureBlock ? { ...attached, contextPressure: pressureBlock } : attached;
+    // 响应硬预算：超限按序降级并重算记账，避免宿主在自身传输上限处截断。
+    // Hard response budget: degrade in order so the host never truncates.
+    const budgeted = applyResponseBudget(attached);
+    return pressureBlock ? { ...budgeted, contextPressure: pressureBlock } : budgeted;
   }
 
   if (config.graphPolicy.autoIndexOnPreview) {
@@ -408,18 +426,17 @@ export async function previewContext(
   );
   await refill.initialPackage(query);
   const refillPreview = await refill.refill([query]);
-  const rawTokenEstimate = estimateRawContextTokens(
-    await resolveGraphStoreAfterIndex(config, graphClient),
+
+  const packedAnchorCount = pkg.anchorChannel.length;
+  // anchorChannel carries per-anchor relevance; a CJK query whose anchor head
+  // scores below QUERY_TRANSLATE_LOW_RELEVANCE_THRESHOLD delegates translation
+  // even when the anchor count alone would have cleared the threshold.
+  const queryTranslationDelegation = shouldDelegateQueryTranslation(
     query,
-    pkg.tokenEstimate
-  );
-
-  // Record cumulative token savings for ROI tracking — deferred until AFTER
-  // the post-packaging attach (see the end of this function) so the persisted
-  // ROI covers the true accounted payload, not just the layered package.
-
-  const anchorCount = pkg.anchorChannel.length;
-  const queryTranslationDelegation = shouldDelegateQueryTranslation(query, anchorCount, englishQuery)
+    packedAnchorCount,
+    englishQuery,
+    pkg.anchorChannel
+  )
     ? {
         agentWorkItems: [buildQueryTranslateWorkItem(query, workspaceRoot)],
         agentInstructions: buildQueryTranslateInstructions(query),
@@ -427,27 +444,78 @@ export async function previewContext(
       }
     : undefined;
 
+  // CJK 低命中处置 / CJK low-hit handling: when translation delegation fired
+  // via the LOW-RELEVANCE dimension (the count cleared the legacy threshold
+  // but the anchor head shares almost no wording with the query), the packed
+  // channel is dominated by zero-relevance filler from workspace-path
+  // expansion. Delivering ~15 unrelated anchors as if they were results
+  // wastes the caller's attention — trim the payload to anchors that actually
+  // matched (relevance > 0, capped), align summary + accounting with what is
+  // delivered, and say so on a spine line.
+  let deliveredAnchors: ContextPreviewResult["anchors"] = pkg.anchorChannel;
+  let deliveredSummary: string[] = pkg.summaryChannel;
+  const packedQuality = anchorRelevanceQuality(pkg.anchorChannel);
+  const lowRelevanceDelegation =
+    queryTranslationDelegation !== undefined &&
+    packedAnchorCount >= QUERY_TRANSLATE_HIT_THRESHOLD &&
+    packedQuality !== undefined &&
+    packedQuality < QUERY_TRANSLATE_LOW_RELEVANCE_THRESHOLD;
+  if (lowRelevanceDelegation) {
+    deliveredAnchors = pkg.anchorChannel
+      .filter((item) => typeof item.relevance === "number" && item.relevance > 0)
+      .slice(0, QUERY_TRANSLATE_RELEVANCE_TOP_K_DELIVERED);
+    const keptPaths = new Set(
+      deliveredAnchors.map((item) => {
+        const stem = item.id.replace(/^(file|symbol|module):/, "").replace(/:[0-9a-f]{6,}$/, "");
+        return stem.includes(":") ? stem.split(":")[0]! : stem;
+      })
+    );
+    const keptDecision = deliveredAnchors.some((item) => item.type === "Decision");
+    deliveredSummary = pkg.summaryChannel.filter(
+      (line) =>
+        (keptDecision && line.startsWith("Decision:")) ||
+        Array.from(keptPaths).some((path) => path.length > 0 && line.includes(path))
+    );
+    deliveredSummary = [
+      `[低相关中文命中] 仅 ${deliveredAnchors.length}/${packedAnchorCount} 个 anchor 与查询共享词元；其余已裁剪。请回答 query-translate-en 工作项并用 englishQuery 重试。`,
+      ...deliveredSummary,
+    ];
+  }
+  const deliveredTokenEstimate = estimateSummaryLinesTokens(deliveredSummary);
+
+  // Raw baseline over the DELIVERED anchor set — see estimateRawContextTokens.
+  const rawTokenEstimate = estimateRawContextTokens({
+    store: await resolveGraphStoreAfterIndex(config, graphClient),
+    query,
+    compressedTokens: deliveredTokenEstimate,
+    anchors: deliveredAnchors,
+  });
+
+  // Record cumulative token savings for ROI tracking — deferred until AFTER
+  // the post-packaging attach (see the end of this function) so the persisted
+  // ROI covers the true accounted payload, not just the layered package.
+
   const result: ContextPreviewResult = {
     query,
     ...(englishQuery?.trim() ? { englishQuery: englishQuery.trim() } : {}),
-    summaryCount: pkg.summaryChannel.length,
-    anchorCount,
-    tokenEstimate: pkg.tokenEstimate,
+    summaryCount: deliveredSummary.length,
+    anchorCount: deliveredAnchors.length,
+    tokenEstimate: deliveredTokenEstimate,
     truncated: pkg.truncated,
     anchorsByLayer: {
-      l1: pkg.anchorChannel.filter((item) => item.layer === "L1").length,
-      l2: pkg.anchorChannel.filter((item) => item.layer === "L2").length,
-      l3: pkg.anchorChannel.filter((item) => item.layer === "L3").length,
+      l1: deliveredAnchors.filter((item) => item.layer === "L1").length,
+      l2: deliveredAnchors.filter((item) => item.layer === "L2").length,
+      l3: deliveredAnchors.filter((item) => item.layer === "L3").length,
     },
     refillPreview,
-    summary: pkg.summaryChannel,
-    anchors: pkg.anchorChannel,
+    summary: deliveredSummary,
+    anchors: deliveredAnchors,
     tokenBudget: {
       maxContextTokens: effectiveMaxTokens,
       estimatedRawTokens: rawTokenEstimate,
-      compressedTokens: pkg.tokenEstimate,
-      estimatedSavingsPercent: calculateSavingsPercent(rawTokenEstimate, pkg.tokenEstimate),
-      budgetUsedPercent: calculateBudgetUsedPercent(pkg.tokenEstimate, effectiveMaxTokens),
+      compressedTokens: deliveredTokenEstimate,
+      estimatedSavingsPercent: calculateSavingsPercent(rawTokenEstimate, deliveredTokenEstimate),
+      budgetUsedPercent: calculateBudgetUsedPercent(deliveredTokenEstimate, effectiveMaxTokens),
     },
     ...(queryTranslationDelegation ?? {}),
   };
@@ -457,26 +525,30 @@ export async function previewContext(
   }
 
   const attached = await attachWorkbenchThenDialogue(result, graphClient, config, query, dialogue);
+  // 响应硬预算：超限按序降级并重算记账；ROI 也按降级后的真实下发量入账。
+  // Hard response budget applies before ROI recording so the persisted savings
+  // cover what was actually sent (the degraded payload), not the pre-cap one.
+  const budgeted = applyResponseBudget(attached);
 
   // ROI 记账延后到 attach 之后：持久化的节省统计必须覆盖真实下发总量
   // （budgeted + unbudgeted），否则 dialogue recall / workbench 行触发时
   // token-savings.json 会系统性乐观。/ Record cumulative token savings AFTER
   // the post-packaging attach so the persisted ROI uses the accounted total.
   try {
-    const accountedTokens = attached.accountedTokens ?? attached.tokenBudget.compressedTokens;
+    const accountedTokens = budgeted.accountedTokens ?? budgeted.tokenBudget.compressedTokens;
     recordSavings(config, {
       timestamp: new Date().toISOString(),
       query,
-      rawTokens: attached.tokenBudget.estimatedRawTokens,
+      rawTokens: budgeted.tokenBudget.estimatedRawTokens,
       compressedTokens: accountedTokens,
-      savingsPercent: attached.tokenBudget.estimatedSavingsPercent,
+      savingsPercent: budgeted.tokenBudget.estimatedSavingsPercent,
       source: "preview_context",
     });
   } catch {
     // Savings tracking is best-effort; don't fail the preview if it errors
   }
 
-  return pressureBlock ? { ...attached, contextPressure: pressureBlock } : attached;
+  return pressureBlock ? { ...budgeted, contextPressure: pressureBlock } : budgeted;
 }
 
 async function attachWorkbenchThenDialogue(
@@ -521,6 +593,30 @@ async function attachPromiseReminder(
 }
 
 /**
+ * Slim one recall hit to its echo preview (same pattern as the thread /
+ * workbench echo views): ids and structural marks verbatim, `userQuery`
+ * clipped to `MAX_ECHO_TURN_CHARS` with `truncated` set when cut.
+ * 纯函数：只裁剪文本，不读写图谱；结构与 id 原样，userQuery 裁成预览。
+ */
+function toDialogueHitPreview(hit: DialogueSearchHit): DialogueHitPreview {
+  // clip() collapses whitespace first, so "was anything cut" is judged on the
+  // normalized length — same convention as toEchoTurn.
+  const truncated = normalizedLength(hit.userQuery) > MAX_ECHO_TURN_CHARS;
+  return {
+    id: hit.id,
+    seq: hit.seq,
+    sessionId: hit.sessionId,
+    ...(hit.title ? { title: hit.title } : {}),
+    ...(hit.summary ? { summary: hit.summary } : {}),
+    userQuery: clip(hit.userQuery, MAX_ECHO_TURN_CHARS),
+    updatedAt: hit.updatedAt,
+    ...(hit.correctionLine ? { correctionLine: hit.correctionLine } : {}),
+    superseded: hit.superseded,
+    ...(truncated ? { truncated: true } : {}),
+  };
+}
+
+/**
  * Recall historical dialogue turns matching the query (Conversation Graph
  * W2b). Additive-only: hits ride in `dialogueHits` and never displace code
  * anchors; a correction-chain hit surfaces as one summary line so a
@@ -540,12 +636,22 @@ async function attachDialogueHits(
     const recallLines = corrected?.correctionLine
       ? [`Dialogue recall: ${corrected.correctionLine}`]
       : [];
-    // dialogueHits 在分层包之外附加下发 → 记为 unbudgeted；召回行进入
-    // summary → 与其他打包后追加行一样计入预算。/ The hits ride outside the
-    // layered package (unbudgeted); the recall line joins summary (budgeted).
+    // 回显瘦身：userQuery 裁成预览并标记 truncated；全文留在图谱，anchorId
+    // 展开走 store 直读，不经过这个附带视图。/ Echo slim previews: userQuery
+    // rides clipped with a truncated marker; full text stays in the graph
+    // store — anchor expansion reads the store, never this attached view.
+    const previews = hits.map(toDialogueHitPreview);
+    // dialogueHits 在分层包之外附加下发 → 按裁剪后的实际下发负载记为
+    // unbudgeted；召回行进入 summary → 与其他打包后追加行一样计入预算。
+    // / The slim hits ride outside the layered package and are measured as
+    // sent (unbudgeted); the recall line joins summary (budgeted).
     return {
-      ...withPostPackageAccounting(result, recallLines, estimateUnbudgetedPayloadTokens(hits)),
-      dialogueHits: hits,
+      ...withPostPackageAccounting(
+        result,
+        recallLines,
+        estimateUnbudgetedPayloadTokens(previews)
+      ),
+      dialogueHits: previews,
     };
   } catch (error) {
     logger.warn({ error }, "Dialogue recall attach failed");
@@ -583,10 +689,30 @@ async function attachWorkbenchTopic(
         `Forked: 当前问法偏离主线，已挂到孤立旁支。点回主线 topicId 可恢复主干。`
       );
     }
+    // 回显瘦身：active 主题的完整 messages（40×4000 字符上限）不下发，
+    // 消息裁成 160 字符预览并标记 truncated；全文留在图谱，走
+    // loadWorkbenchContext 直读。/ Echo the slim view: full topic messages
+    // never ride back — previews only; full text stays in the graph store.
+    const echoView = toWorkbenchEchoView({ ...view, promptLines });
     return {
-      // Workbench promptLines 前置进 summary → 计入预算（含 Forked 提示行）。
-      ...withPostPackageAccounting(result, promptLines, 0),
-      workbench: { ...view, promptLines },
+      // promptLines 前置进 summary → 计入预算（含 Forked 提示行）；瘦身视图
+      // 本身是包外附加负载 → 实测入账。promptLines 已按行计过预算，实测时
+      // 必须排除以免双算。/ promptLines are budgeted as prepended summary
+      // lines; the echo view rides outside the package and is measured as-is,
+      // with the already-budgeted promptLines excluded to avoid double count.
+      // 双基线字段（grep 基线）在此出口装饰：tokenBudget 字面量位于
+      // previewContext 组装区，由附件链出口统一补挂。/ Dual-baseline (grep)
+      // fields are decorated at the attach-chain exits because the tokenBudget
+      // literal itself lives in the previewContext assembly region.
+      ...withGrepBaselineBudget(
+        withPostPackageAccounting(
+          result,
+          promptLines,
+          estimateUnbudgetedPayloadTokens([{ ...echoView, promptLines: [] }])
+        ),
+        config
+      ),
+      workbench: echoView,
       dialogueCapture: {
         kind: "workbench",
         id: appended.topic.id,
@@ -609,7 +735,9 @@ async function attachDialogueThread(
   dialogue?: PreviewDialogueOptions
 ): Promise<ContextPreviewResult> {
   if (config.graphPolicy.enableDialogueThread === false) {
-    return result;
+    // 附件链出口统一补挂 grep 双基线字段（tokenBudget 字面量在组装区内）。
+    // Attach-chain exits carry the grep dual-baseline decoration.
+    return withGrepBaselineBudget(result, config);
   }
   try {
     const workspaceRoot = config.graphPolicy.workspaceRoot;
@@ -631,7 +759,7 @@ async function attachDialogueThread(
       ...(dialogue?.sessionId ? { sessionName: dialogue.sessionId } : {}),
     });
     if (!thread) {
-      return result;
+      return withGrepBaselineBudget(result, config);
     }
     const priorTokens = thread.turns
       .slice(0, -1)
@@ -649,19 +777,26 @@ async function attachDialogueThread(
     }
     const injectSpine = thread.turns.length >= 2;
     const tip = thread.turns[thread.turns.length - 1];
-    // Spine 注入 summary → 计入预算内；未注入时 promptLines 仅随
-    // dialogueThread 视图下发 → 记为 unbudgeted，保证真实负载对调用方可见。
-    // Spine lines injected into summary are budgeted; when the spine is not
-    // injected the same lines still ride in the dialogueThread view, so they
-    // are reported as unbudgeted instead of staying invisible.
-    const accounted = withPostPackageAccounting(
-      result,
-      injectSpine ? promptLines : [],
-      injectSpine ? 0 : estimateSummaryLinesTokens(promptLines)
+    // 回显瘦身：turns 的 id/seq/jumped 原样保留（resumeFromTurnId 交互依赖），
+    // Q/A 文本各裁成 200 字符预览；全文留在图谱直读。
+    const echoThread = toDialogueThreadEchoView({ ...thread, jumped, overlap, promptLines });
+    // Spine 注入 summary → 计入预算内；无论是否注入，瘦身视图本身都是包外
+    // 附加负载 → 实测入账。已按行计入预算的 promptLines 从实测负载中排除，
+    // 未注入时它们随视图下发 → 连同视图一起实测，保证不双算也不漏算。
+    // Spine lines injected into summary are budgeted; the echo view always
+    // rides outside the package and is measured as sent — minus the lines
+    // already counted as budgeted (injected spine), so nothing is double
+    // counted and nothing stays invisible.
+    const unbudgeted = injectSpine
+      ? estimateUnbudgetedPayloadTokens([{ ...echoThread, promptLines: [] }])
+      : estimateUnbudgetedPayloadTokens([echoThread]);
+    const accounted = withGrepBaselineBudget(
+      withPostPackageAccounting(result, injectSpine ? promptLines : [], unbudgeted),
+      config
     );
     return {
       ...accounted,
-      dialogueThread: { ...thread, jumped, overlap, promptLines },
+      dialogueThread: echoThread,
       ...(tip
         ? {
             dialogueCapture: {
@@ -675,7 +810,7 @@ async function attachDialogueThread(
     };
   } catch (error) {
     logger.warn({ error }, "Dialogue thread attach failed");
-    return result;
+    return withGrepBaselineBudget(result, config);
   }
 }
 
@@ -846,14 +981,36 @@ export async function inspectGraph(
      * workspaces, the write that used to die with "Invalid string length".
      */
     autoIndex?: boolean;
+    /**
+     * Include the workspace-filtered workbench outline in the snapshot
+     * (default false — diagnose responses stay small; the slim
+     * `workbenchResume` pointer is always kept). The full tree stays
+     * viewable via CLI `graphflow workbench tree`.
+     * 默认不带全量 outline，仅保留续聊指针；true 时按工作区过滤后回显。
+     */
+    includeOutline?: boolean;
   }
 ): Promise<GraphSnapshotResult> {
-  const config = bindRuntimeWorkspaceRoot(
-    resolveConfig(configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
+  // 裸 bindRuntimeWorkspaceRoot(resolved) 会从 cwd 重新发现并覆盖 config 已绑
+  // 定的 workspaceRoot——跨工作区 outline 过滤依赖正确的 root，必须保留
+  // resolveConfig 的显式绑定（与 getFlywheelReport 同口径）。/ A bare bind
+  // re-discovers from cwd and drops the config's explicit workspaceRoot; the
+  // cross-workspace outline filter needs the resolved root to survive.
+  const resolvedInspectConfig = resolveConfig(
+    configPath,
     options?.rootDir ? { rootDir: options.rootDir } : undefined
+  );
+  const config = bindRuntimeWorkspaceRoot(
+    resolvedInspectConfig,
+    options?.rootDir
+      ? { rootDir: options.rootDir }
+      : resolvedInspectConfig.graphPolicy.workspaceRoot
+        ? { projectWorkspaceRoot: resolvedInspectConfig.graphPolicy.workspaceRoot }
+        : undefined
   );
   const nodeLimit = Math.max(1, options?.nodeLimit ?? 96);
   const edgeLimit = Math.max(1, options?.edgeLimit ?? 160);
+  const includeOutline = options?.includeOutline === true;
   const emptyTypeCount: Record<GraphNode["type"], number> = {
     File: 0,
     Symbol: 0,
@@ -884,7 +1041,7 @@ export async function inspectGraph(
         topRelations: [],
         sampleNodes: [],
         sampleEdges: [],
-        workbenchOutline: [],
+        ...workbenchOutlineEchoFields([], config.graphPolicy.workspaceRoot, includeOutline),
       };
     }
     const relationCounts = new Map<GraphEdge["relation"], number>();
@@ -912,7 +1069,11 @@ export async function inspectGraph(
         edgeLimit,
         config.graphPolicy.workspaceRoot ?? process.cwd()
       ),
-      workbenchOutline: buildWorkbenchOutlines(remote.nodes, remote.edges),
+      ...workbenchOutlineEchoFields(
+        buildWorkbenchOutlines(remote.nodes, remote.edges),
+        config.graphPolicy.workspaceRoot,
+        includeOutline
+      ),
     };
   }
 
@@ -953,7 +1114,60 @@ export async function inspectGraph(
       edgeLimit,
       config.graphPolicy.workspaceRoot ?? process.cwd()
     ),
-    workbenchOutline: buildWorkbenchOutlines(store.nodes, store.edges),
+    ...workbenchOutlineEchoFields(
+      buildWorkbenchOutlines(store.nodes, store.edges),
+      config.graphPolicy.workspaceRoot,
+      includeOutline
+    ),
+  };
+}
+
+/**
+ * 跨工作区 outline 过滤 / Cross-workspace outline filter.
+ *
+ * workbench root/topic 节点不逐字存 workspaceRoot——创建时它被单向 hash 进
+ * rootId（workbenchRootIdFor(task, workspaceRoot)）。归属判定不是猜测：用存储
+ * 的 task + 当前 workspaceRoot 重算同一 hash 与 rootId 比对，一致 ⇒ 本工作区
+ * 创建的容器；不一致 ⇒ 其他工作区（或创建时未传 root），不回显。
+ * Root/topic nodes never store workspaceRoot verbatim — it is hashed into the
+ * rootId at creation. Ownership is verified, not guessed: recompute the same
+ * hash from the stored task plus the CURRENT workspaceRoot and compare with
+ * the rootId; non-matching outlines belong to another workspace (or were
+ * seeded without a root) and are not echoed.
+ */
+function filterWorkbenchOutlinesToWorkspace(
+  outlines: import("../../../learning/workbench-topic").WorkbenchOutline[],
+  workspaceRoot: string | undefined
+): import("../../../learning/workbench-topic").WorkbenchOutline[] {
+  return outlines.filter(
+    (outline) => workbenchRootIdFor(outline.task, workspaceRoot) === outline.rootId
+  );
+}
+
+/**
+ * diagnose/inspect 快照的 outline 回显装配 / Outline echo assembly for snapshots.
+ *
+ * 默认（includeOutline=false）：不带全量 outline——响应保持小巧，仅保留本工作
+ * 区最近活跃容器的续聊指针（workbenchResume.activeTopicId），graphflow_context
+ * ({ topicId }) 续聊不受影响。includeOutline=true 时按工作区过滤后回显全量
+ * outline（维持原字段语义）。两种模式下都先做跨工作区过滤。
+ * By default only a slim resume pointer survives; with includeOutline the
+ * workspace-filtered outline rides as before.
+ */
+function workbenchOutlineEchoFields(
+  outlines: import("../../../learning/workbench-topic").WorkbenchOutline[],
+  workspaceRoot: string | undefined,
+  includeOutline: boolean
+): Pick<GraphSnapshotResult, "workbenchOutline" | "workbenchResume"> {
+  // buildWorkbenchOutlines 按 root.updatedAt 倒序排列，owned[0] 即最近活跃。
+  // buildWorkbenchOutlines sorts roots by updatedAt desc — owned[0] is latest.
+  const owned = filterWorkbenchOutlinesToWorkspace(outlines, workspaceRoot);
+  const latest = owned[0];
+  return {
+    ...(includeOutline ? { workbenchOutline: owned } : {}),
+    ...(latest
+      ? { workbenchResume: { rootId: latest.rootId, activeTopicId: latest.activeTopicId } }
+      : {}),
   };
 }
 
@@ -964,9 +1178,25 @@ export async function listWorkbenchOutline(
   outlines: import("../../../learning/workbench-topic").WorkbenchOutline[];
   lines: string[];
 }> {
-  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath, rootDir ? { rootDir } : undefined), rootDir ? { rootDir } : undefined);
+  // 与 inspectGraph 同口径：保留 resolveConfig 的显式 workspaceRoot，避免裸
+  // bind 从 cwd 重新发现导致本工作区过滤误杀。/ Same bind discipline as
+  // inspectGraph: keep the resolved workspaceRoot for the workspace filter.
+  const resolvedOutlineConfig = resolveConfig(configPath, rootDir ? { rootDir } : undefined);
+  const config = bindRuntimeWorkspaceRoot(
+    resolvedOutlineConfig,
+    rootDir
+      ? { rootDir }
+      : resolvedOutlineConfig.graphPolicy.workspaceRoot
+        ? { projectWorkspaceRoot: resolvedOutlineConfig.graphPolicy.workspaceRoot }
+        : undefined
+  );
   const client = createGraphClient(config);
-  const outlines = await loadWorkbenchOutlines(client);
+  // CLI `workbench tree` 是 outline 的常驻视图：全量返回，但仅限本工作区。
+  // The CLI tree is the standing outline view: full, but workspace-scoped.
+  const outlines = filterWorkbenchOutlinesToWorkspace(
+    await loadWorkbenchOutlines(client),
+    config.graphPolicy.workspaceRoot
+  );
   return { outlines, lines: formatWorkbenchOutlineLines(outlines) };
 }
 
@@ -1760,7 +1990,10 @@ export async function expandAnchor(
       expanded.content = view.promptLines.join("\n");
       expanded.metadata = {
         ...(expanded.metadata ?? {}),
-        workbench: view,
+        // 瘦身回显：metadata.workbench 只带消息预览；需要全文时走
+        // loadWorkbenchContext 直读。/ Echo the slim view only; full message
+        // text is read on demand via loadWorkbenchContext.
+        workbench: toWorkbenchEchoView(view),
         topicId: view.active.id,
       };
     }
@@ -1771,7 +2004,8 @@ export async function expandAnchor(
       ...(config.graphPolicy.workspaceRoot ? { workspaceRoot: config.graphPolicy.workspaceRoot } : {}),
     });
     if (thread) {
-      expanded.dialogueThread = thread;
+      // 瘦身回显：turn id/seq/jumped 原样，Q/A 裁成预览；全文留在图谱直读。
+      expanded.dialogueThread = toDialogueThreadEchoView(thread);
       expanded.content = [
         `Dialogue turn #${turn?.seq ?? "?"} (${turn?.jumped ? "jump" : "mainline"})`,
         `Q: ${turn?.userQuery ?? node.content}`,

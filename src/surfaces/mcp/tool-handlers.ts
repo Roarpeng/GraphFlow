@@ -90,6 +90,12 @@ export async function executeToolCall(
 ): Promise<ToolCallResponse & { structuredContent: Record<string, unknown> }> {
   const args = call.arguments ?? {};
   const onProgress = makeProgressCallback(server, call.progressToken);
+  // mcp.textCopy 策略在入口一次性注入为模块级默认：structuredResponse 的全部
+  // 调用点无需逐处传参，读取失败时保持 "auto"（超阈值桩化）。
+  // Inject the mcp.textCopy policy once at the entry point as the module-wide
+  // default so no structuredResponse call site needs per-site threading; a
+  // failed config read keeps "auto" (stub oversized responses).
+  applyTextCopyConfig(readOptionalString(args.configPath));
 
   switch (call.name) {
     case "graphflow_run":
@@ -386,8 +392,11 @@ export async function executeToolCall(
           {
             type: "text",
             // Preserve the pre-structuredContent wire shape for clients that
-            // JSON.parse this field as a guide string.
-            text: JSON.stringify(skillGuide, null, 2),
+            // JSON.parse this field as a guide string. 紧凑序列化：缩进只是
+            // 传输开销，guide 字符串本身的换行会被转义，不影响 parse 语义。
+            // Compact serialization: the guide string's own newlines are
+            // escaped, so indentation here is pure transport overhead.
+            text: JSON.stringify(skillGuide),
           },
         ],
         structuredContent: { section, guide: skillGuide },
@@ -522,14 +531,101 @@ function dialogueKnowledgeOptions(args: Record<string, unknown>) {
   };
 }
 
-function structuredResponse(
-  data: unknown
+/** Policy for the legacy `content[0].text` copy of a tool result. */
+export type TextCopyPolicy = "full" | "auto";
+
+/**
+ * 大响应桩化阈值（UTF-8 字节）：auto 策略下紧凑 JSON 超过该值时，text 副本
+ * 降级为一行桩，structuredContent 仍携带全量数据。
+ * Oversized-response stub threshold (UTF-8 bytes): under the "auto" policy a
+ * compact JSON larger than this degrades the text copy to a one-line stub,
+ * while structuredContent still carries the full data.
+ */
+export const TEXT_STUB_THRESHOLD_BYTES = 4096;
+
+/** Module-wide default policy, injected from config once per executeToolCall. */
+let defaultTextCopyPolicy: TextCopyPolicy = "auto";
+
+/**
+ * 注入模块级默认 text 副本策略（来自 mcp.textCopy 配置，非法值回退 "auto"）。
+ * structuredResponse 的可选参数仍可逐次覆盖。
+ * Set the module-wide default text-copy policy (from the mcp.textCopy config;
+ * invalid values fall back to "auto"). A structuredResponse option can still
+ * override it per call.
+ */
+export function setDefaultTextCopyPolicy(policy: unknown): void {
+  defaultTextCopyPolicy = policy === "full" ? "full" : "auto";
+}
+
+/** Fail-open config read: any failure keeps the current default policy. */
+function applyTextCopyConfig(configPath?: string): void {
+  try {
+    setDefaultTextCopyPolicy(resolveConfig(configPath).mcp?.textCopy);
+  } catch {
+    setDefaultTextCopyPolicy(undefined);
+  }
+}
+
+/**
+ * 遗留 text 副本的桩摘要：data 对象上取首个非空 query/task/title 字符串
+ * （裁到 120 字符），否则退回通用标识。
+ * Stub summary for the legacy text copy: first non-empty query/task/title
+ * string field on the data object (clipped to 120 chars), else a generic label.
+ */
+function summarizeForStub(data: unknown): string {
+  if (isRecord(data)) {
+    for (const field of ["query", "task", "title"] as const) {
+      const value = data[field];
+      if (typeof value === "string" && value.trim()) {
+        return value.length > 120 ? value.slice(0, 120) : value;
+      }
+    }
+  }
+  return "graphflow response";
+}
+
+function serializeTextCopy(data: unknown, policy: TextCopyPolicy): string {
+  const compact = JSON.stringify(data);
+  const bytes = Buffer.byteLength(compact, "utf8");
+  // 阈值内（或策略为 "full"）维持全量紧凑 JSON：老客户端 JSON.parse(text)
+  // 的语义保持不变（数据与 structuredContent 同源）。
+  // Within the threshold (or under the "full" policy) the text copy stays the
+  // full compact JSON so legacy JSON.parse(text) clients keep working.
+  if (policy !== "auto" || bytes <= TEXT_STUB_THRESHOLD_BYTES) {
+    return compact;
+  }
+  // 大响应桩化：同时渲染 text+structuredContent 的宿主是双倍 token 开销，
+  // text 降级为一行桩，全量数据只在 structuredContent 里。
+  // Oversized responses are stubbed: hosts that render both text and
+  // structuredContent pay twice, so text degrades to a one-line stub and the
+  // full data lives only in structuredContent.
+  return JSON.stringify({
+    stub: true,
+    summary: summarizeForStub(data),
+    bytes,
+    hint: "full data in structuredContent",
+  });
+}
+
+interface StructuredResponseOptions {
+  /** 逐次覆盖模块级 text 副本策略。 / Per-call text-copy policy override. */
+  textCopy?: TextCopyPolicy;
+}
+
+export function structuredResponse(
+  data: unknown,
+  options?: StructuredResponseOptions
 ): ToolCallResponse & { structuredContent: Record<string, unknown> } {
   const response: ToolCallResponse = {
     content: [
       {
         type: "text",
-        text: JSON.stringify(data, null, 2),
+        // 遗留文本副本用紧凑 JSON：美化缩进在 MCP 传输与宿主渲染里是纯开销，
+        // 老客户端 JSON.parse 这份副本的语义不变（数据与 structuredContent 同源）。
+        // Legacy text copy is compact JSON: pretty indentation is pure overhead
+        // on the wire and in host rendering; clients that JSON.parse this copy
+        // see the same data as structuredContent, byte-for-byte unindented.
+        text: serializeTextCopy(data, options?.textCopy ?? defaultTextCopyPolicy),
       },
     ],
   };
@@ -581,15 +677,19 @@ function buildInspectOptions(args: Record<string, unknown>): {
   nodeLimit?: number;
   edgeLimit?: number;
   rootDir?: string;
+  /** diagnose 的 includeOutline 透传：默认不带全量 outline，仅保留续聊指针。 */
+  includeOutline?: boolean;
 } {
   const nodeLimit = readOptionalNumber(args.nodeLimit);
   const edgeLimit = readOptionalNumber(args.edgeLimit);
   const rootDir = readOptionalString(args.rootDir);
+  const includeOutline = readOptionalBoolean(args.includeOutline);
 
   return {
     ...(nodeLimit !== undefined ? { nodeLimit } : {}),
     ...(edgeLimit !== undefined ? { edgeLimit } : {}),
     ...(rootDir !== undefined ? { rootDir } : {}),
+    ...(includeOutline !== undefined ? { includeOutline } : {}),
   };
 }
 

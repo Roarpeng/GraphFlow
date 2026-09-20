@@ -22,6 +22,17 @@ const MAX_MESSAGE = 4_000;
 const MAX_MESSAGES_PER_TOPIC = 40;
 const DRIFT_OVERLAP_THRESHOLD = 0.18;
 
+/**
+ * Echo-view clip budgets: `graphflow_context` responses repeat the active
+ * workbench view verbatim, so every echoed text field is clipped to a preview.
+ * Without this cap the echo of a full topic (40 messages × 4000 stored chars,
+ * worst case ~160KB) rides back to the agent unaccounted.
+ * 回显视图裁剪预算：响应里逐字回显的字段一律裁成预览，完整原文留在图谱里。
+ */
+export const MAX_ECHO_TASK_CHARS = 200;
+export const MAX_ECHO_DESCRIPTION_CHARS = 200;
+export const MAX_ECHO_MESSAGE_CHARS = 160;
+
 export interface WorkbenchMessage {
   role: "user" | "assistant";
   content: string;
@@ -82,6 +93,87 @@ export interface WorkbenchOutline {
   task: string;
   activeTopicId: string;
   nodes: WorkbenchOutlineNode[];
+}
+
+/** One slimmed message preview inside the echo view; `truncated` marks clipped text. */
+export interface WorkbenchEchoMessage {
+  role: "user" | "assistant";
+  content: string;
+  at: number;
+  truncated?: boolean;
+}
+
+/**
+ * Slimmed active-topic record for response echo: ids and structural marks are
+ * preserved verbatim (topicId navigation), while text fields are clipped
+ * previews. `planStepId` is internal wiring and never echoed.
+ */
+export interface WorkbenchEchoTopic {
+  id: string;
+  rootId: string;
+  title: string;
+  description: string;
+  mainline: boolean;
+  isolated: boolean;
+  createdAt: number;
+  updatedAt: number;
+  messages: WorkbenchEchoMessage[];
+}
+
+/**
+ * Bounded echo of `WorkbenchContextView` for `graphflow_context` responses:
+ * same shape and ids, but every echoed text field is a clipped preview and
+ * clipped messages carry `truncated: true`. The outline already contains only
+ * preview lines, so it rides unchanged. Full message text stays in the graph
+ * store — read it via `loadWorkbenchContext` when the whole message is needed.
+ * 响应回显专用瘦身视图：结构/id 原样，文本一律裁剪；全文走图谱直读。
+ */
+export interface WorkbenchEchoView {
+  rootId: string;
+  task: string;
+  active: WorkbenchEchoTopic;
+  ancestors: Array<{ id: string; title: string }>;
+  isolated: boolean;
+  promptLines: string[];
+  outline?: WorkbenchOutline;
+}
+
+/**
+ * Pure slimming pass over a workbench context view for response echo.
+ * 纯函数：不读取也不修改图谱，仅裁剪回显文本。
+ */
+export function toWorkbenchEchoView(view: WorkbenchContextView): WorkbenchEchoView {
+  return {
+    rootId: view.rootId,
+    task: clip(view.task, MAX_ECHO_TASK_CHARS),
+    active: {
+      id: view.active.id,
+      rootId: view.active.rootId,
+      title: view.active.title,
+      description: clip(view.active.description, MAX_ECHO_DESCRIPTION_CHARS),
+      mainline: view.active.mainline,
+      isolated: view.active.isolated,
+      createdAt: view.active.createdAt,
+      updatedAt: view.active.updatedAt,
+      messages: view.active.messages.map(toEchoMessage),
+    },
+    ancestors: view.ancestors.map((item) => ({ id: item.id, title: item.title })),
+    isolated: view.isolated,
+    promptLines: [...view.promptLines],
+    ...(view.outline ? { outline: view.outline } : {}),
+  };
+}
+
+function toEchoMessage(message: WorkbenchMessage): WorkbenchEchoMessage {
+  // clip() collapses whitespace first, so "was anything cut" must be judged on
+  // the normalized length — a merely multi-spaced message is not truncated.
+  const normalized = message.content.replace(/\s+/g, " ").trim();
+  return {
+    role: message.role,
+    content: clip(normalized, MAX_ECHO_MESSAGE_CHARS),
+    at: message.at,
+    ...(normalized.length > MAX_ECHO_MESSAGE_CHARS ? { truncated: true } : {}),
+  };
 }
 
 export function workbenchRootIdFor(task: string, workspaceRoot?: string): string {

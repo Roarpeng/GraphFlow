@@ -6,7 +6,7 @@
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
-> **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（对现实 top-K 文件读取口径 **95.6%**，见[双基线](benchmarks/RESULTS.md)） · 跨会话学习飞轮。
+> **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（响应真正有界：压缩包之外，历史回显只以短预览下发；对现实 top-K 文件读取口径 **95.6%**，见[双基线](benchmarks/RESULTS.md)） · 跨会话学习飞轮。
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
@@ -69,7 +69,7 @@ Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `gra
 | --- | --- |
 | **R9 承诺账本 + 收尾审计** | 治「干着干着就忘了」：依赖 lock 一致性 / 孤儿文件接线 / 文档漂移内置检查器 + `graphflow.audit.json` 声明式规则（容器引用、驱动加载）；默认对账 git 未提交工作区；`graphflow audit` CLI + `report_outcome success` 前自动审计（`GRAPHFLOW_AUDIT_STRICT=1` 严格拒报成功）；**跨会话提醒**——下次会话首次 `graphflow_context` 返回「上次会话有 N 项未收尾」。见 [docs/closing-audit.md](docs/closing-audit.md) |
 | **R8 省钱与靠谱双主线** | `working-set` 预取（消灭探索轮次）、`challenge` 图 diff 质询、`spawn-receipt` 出生证、`facts ask` 时点查询、`quote` 诚实任务报价 |
-| **Harness** | 记忆动态、按任务召回（图锚点 + 压缩摘要 + 历史 episode + skill），有明确 L0–L3 token 预算；**打包后追加的载荷也计入预算**（`dialogueHits` 单独报为 `unbudgetedTokens`） |
+| **Harness** | 记忆动态、按任务召回（图锚点 + 压缩摘要 + 历史 episode + skill），有明确 L0–L3 token 预算；**打包外附加负载如实记账**（对话命中与 workbench/对话**预览回显**计入 `unbudgetedTokens`，`accountedTokens` = 压缩 + 包外负载，`estimatedSavingsPercent` 按该真实下发总量计算，`estimatedRawTokens` 不低于实际下发量；响应有界——回显为每条约 160 字符的消息预览并带 `truncated` 标记，全文留在图谱中，可经 `anchorId` 展开 / VS Code 面板查看；`recordDialogue: false` 完全关闭回显与记录） |
 | **Token 节省（双口径）** | 对现实 top-K 文件读取 **95.6%**；对朴素 grep 基线 98.5%。两者回答不同问题，**不可互换**；现实口径无法自我膨胀。见 [benchmarks/RESULTS.md](benchmarks/RESULTS.md) |
 | **效率机制（SoL-Pi 借鉴）** | 默认**全开**、可在 **GraphFlow: Settings** 逐项关闭：大输出归档为句柄（ObservationPack）、日志压缩为**逐字核验**收据（Evidence-Preserving Reducer）、按观测压力自适应预算 + 压缩建议（Online Context Compact）、编辑+验证融合（Action Fusion）；dsh 侧在模型表面自动投影大结果（`GRAPHFLOW_D_DSH_PROJECTION=0` 关）。见 [docs/efficiency-mechanisms.md](docs/efficiency-mechanisms.md) |
 | **效率/能力门禁 + 机制自动研究** | 配对双臂报告落 `graphflow-out/efficiency.json`，`governance release-gate` 新增 `--min-efficiency-qualifying` / `--max-capability-regressions` / `--min-anchor-recall-percent` / `--min-body-coverage-percent`；候选机制走 `graphflow mechanism propose\|trial\|freeze\|admit\|reject\|list`（held-out 隔离、代码强制） |

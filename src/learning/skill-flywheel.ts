@@ -127,6 +127,31 @@ function isPathLikePhrase(phrase: string): boolean {
   return phrase.includes("/") || PATH_EXT_RE.test(phrase);
 }
 
+/**
+ * True when the phrase carries no knowledge beyond its path reference: strip
+ * the path-like tokens and only stopword-ish words remain ("fix build for
+ * cache-layer.ts", "src/a/b.ts"). A sentence that merely REFERENCES a file
+ * but keeps meaningful words ("fix broken cache layer in cache-layer.ts",
+ * "prefer concise regression checks in regression-checks.ts") is a legitimate
+ * knowledge phrase and must survive — dropping it starved the flywheel of
+ * every lesson/task that mentions the file it touched.
+ */
+function isEssentiallyPathPhrase(phrase: string): boolean {
+  if (!isPathLikePhrase(phrase)) {
+    return false;
+  }
+  const remaining = phrase
+    .trim()
+    .split(/\s+/)
+    .filter((token) => !isPathLikeToken(token));
+  if (remaining.length === 0) {
+    return true;
+  }
+  return remaining.every(
+    (token) => STOPWORDS.has(token) || SKILL_ATOM_STOPWORDS.has(token)
+  );
+}
+
 function extractTokens(part: string): string[] {
   return part
     .split(/\s+/)
@@ -162,6 +187,178 @@ export function isAllStopwordPhrase(phrase: string): boolean {
   return tokens.every((token) => STOPWORDS.has(token));
 }
 
+/**
+ * 结构性停用词表（单 token skill atom 质量门）。
+ *
+ * Rationale: 这些是几乎每条 task/lesson 语料都会出现的通用编程与本项目
+ * 领域高频词（bridge、context、worker、prompt、token……），单独作为 atom
+ * 没有任何区分度——它们曾把飞轮派生污染成 skill:bridge / skill:context /
+ * skill:worker 这类纯噪音节点。规则：
+ *  - 仅作用于【单词】atom：命中即丢（多词短语仍走原有 isAllStopwordPhrase
+ *    门槛，短语中包含这些词不受影响）；
+ *  - 真正的项目符号（camelCase/snake_case 标识符、带扩展名文件名、路径）
+ *    不在此表中——它们靠逐 atom 符号证据门（atomHasOwnSymbolEvidence）放行，
+ *    例如 "compose_skill_id"、"planner"（planner.ts 的词干）。
+ */
+export const SKILL_ATOM_STOPWORDS: ReadonlySet<string> = new Set([
+  // 本项目（agent 编排/图谱记忆）领域高频词：处处出现、零区分度
+  "bridge", "context", "worker", "agent", "episode", "episodes",
+  "lesson", "lessons", "skill", "skills", "graph", "anchor", "anchors",
+  "prompt", "prompts", "model", "models", "provider", "providers",
+  "token", "tokens", "plan", "task", "tasks", "step", "steps", "phase",
+  "memory", "knowledge", "insight", "insights", "hint", "hints",
+  // 通用编程词汇：单词条目同样无区分度
+  "file", "files", "test", "tests", "testing", "code", "config", "configs",
+  "configuration", "refactor", "refactoring", "update", "create", "build",
+  "deploy", "cache", "client", "server", "index", "indexes", "schema",
+  "runtime", "plugin", "plugins", "package", "script", "scripts",
+  "command", "commands", "query", "queries", "service", "result", "results",
+  "output", "input", "handler", "runner", "node", "nodes", "edge", "edges",
+  "layer", "module", "parser", "filter", "stream", "session", "store",
+  "state", "event", "events", "error", "errors", "warning", "report",
+  "reports", "check", "checks", "list", "item", "items", "value", "values",
+  "name", "names", "type", "types", "data", "info", "detail", "details",
+  "default", "local", "global", "remote", "learn", "learning",
+]);
+
+/**
+ * 单个 skill atom 的最大长度（字符）。
+ *
+ * Rationale: atom 里的空格/标点会在 sanitizeAtom 中折叠成 "-"，整句 lesson
+ * 直接成为 atom 时会生成超长拼接 id（如
+ * skill:worker-deepseek-v4-flash-bridge-3-context-worker-）。超过本上限的
+ * atom 在词边界处截断；找不到词边界（无空格的长串）则整条跳过。
+ */
+export const MAX_SKILL_ATOM_LENGTH = 48;
+
+/**
+ * 一次学习语料最多派生的 atom 数。
+ *
+ * Rationale: 旧实现的 .slice(0, 8) 上限把 3 条 lessons 扇出成 8 个 skill
+ * 节点。派生量应与 lessons 数量同一量级（每条 lesson 至多沉淀一个可复用
+ * 知识点 + 少量符号 atom），同时天然限制 C(n,2) 的组合技能扇出。
+ */
+export const MAX_SKILL_ATOMS = 4;
+
+/** 拉丁/混合 atom 的最少字母数字字符数（"api" 这类 3 字符单词直接丢弃）。 */
+export const MIN_LATIN_ATOM_CHARS = 4;
+
+/** CJK atom（Segmenter 词/中文短语）的最少汉字数。 */
+export const MIN_CJK_ATOM_HANZI = 2;
+
+function countHanzi(text: string): number {
+  const matches = text.match(/[\u4e00-\u9fa5]/g);
+  return matches ? matches.length : 0;
+}
+
+/** 比较用的紧凑形态：去掉全部非字母数字/非汉字字符（"a-b_c" → "abc"）。 */
+function compactAtomForm(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]/g, "");
+}
+
+/**
+ * 长度门：拉丁/混合 atom 至少 MIN_LATIN_ATOM_CHARS 个字母数字；
+ * 含汉字的 atom 至少 MIN_CJK_ATOM_HANZI 个汉字。
+ */
+export function passesAtomLengthGate(atom: string): boolean {
+  const hanzi = countHanzi(atom);
+  if (hanzi > 0) {
+    return hanzi >= MIN_CJK_ATOM_HANZI;
+  }
+  const alnum = atom.match(/[a-z0-9]/g);
+  return (alnum ? alnum.length : 0) >= MIN_LATIN_ATOM_CHARS;
+}
+
+/** True when the atom is a single bare word (no whitespace inside). */
+export function isSingleTokenAtom(atom: string): boolean {
+  const trimmed = atom.trim();
+  return trimmed.length > 0 && !/\s/.test(trimmed);
+}
+
+/**
+ * 逐 atom 证据集：语料中全部项目符号的可比形态。
+ * 每个符号贡献：小写原文、紧凑形态（去分隔符）、文件名去扩展名词干
+ * （"planner.ts" → "planner"），供单 token atom 的精确匹配。
+ */
+export function buildAtomSymbolEvidenceSet(corpus: string): Set<string> {
+  const evidence = new Set<string>();
+  for (const symbol of extractProjectSymbols(corpus)) {
+    const lower = symbol.toLowerCase();
+    evidence.add(lower);
+    const compact = compactAtomForm(lower);
+    if (compact.length > 0) {
+      evidence.add(compact);
+    }
+    const base = lower.split("/").pop() ?? lower;
+    if (base.length > 0) {
+      evidence.add(base);
+    }
+    const stem = base.replace(/\.[a-z0-9]{1,8}$/, "");
+    if (stem.length > 0) {
+      evidence.add(stem);
+    }
+  }
+  return evidence;
+}
+
+/**
+ * 逐 atom 证据门：单 token atom 必须自身精确命中语料符号/文件名
+ * （原文、紧凑或词干形态），而不是搭语料整体判定的便车。
+ */
+export function atomHasOwnSymbolEvidence(atom: string, evidence: ReadonlySet<string>): boolean {
+  const lower = atom.trim().toLowerCase();
+  if (evidence.has(lower)) {
+    return true;
+  }
+  const compact = compactAtomForm(lower);
+  return compact.length > 0 && evidence.has(compact);
+}
+
+/**
+ * 拼接 id 防呆：超长 atom 在词边界截断到 MAX_SKILL_ATOM_LENGTH 内；
+ * 找不到词边界（无空格长串/整句无空格）返回 undefined 整条跳过。
+ */
+export function clipOverlongAtom(atom: string): string | undefined {
+  if (atom.length <= MAX_SKILL_ATOM_LENGTH) {
+    return atom;
+  }
+  const head = atom.slice(0, MAX_SKILL_ATOM_LENGTH);
+  const boundary = head.lastIndexOf(" ");
+  if (boundary < MIN_LATIN_ATOM_CHARS) {
+    return undefined;
+  }
+  // 截断后剥掉悬空的中文虚词/空白，避免 atom 以"…在"/"…的"收尾。
+  return head
+    .slice(0, boundary)
+    .replace(/[的了在是和与或及]+$/, "")
+    .trim();
+}
+
+/**
+ * 逐 atom 质量门（产出前过滤）：
+ *  - 单词 atom：命中结构性停用词即丢；长度门；且必须自身有符号证据。
+ *  - 多词短语 atom：维持原有门槛（非纯停用词、非 path-like）+ 长度门；
+ *    证据门不适用（短语本身就是合格的知识表述）。
+ */
+export function passesAtomQualityGate(
+  atom: string,
+  symbolEvidence: ReadonlySet<string>
+): boolean {
+  if (!atom || isBareStopword(atom) || isAllStopwordPhrase(atom)) {
+    return false;
+  }
+  if (!passesAtomLengthGate(atom)) {
+    return false;
+  }
+  if (isSingleTokenAtom(atom)) {
+    if (SKILL_ATOM_STOPWORDS.has(atom)) {
+      return false;
+    }
+    return atomHasOwnSymbolEvidence(atom, symbolEvidence);
+  }
+  return true;
+}
+
 export function extractSkillAtoms(task: string, evidence?: string[]): string[] {
   const corpus = [task, ...(evidence ?? [])].filter(Boolean).join(" ");
   // P0-2 quality gate: reject corpora that reference no project-specific symbols
@@ -171,15 +368,20 @@ export function extractSkillAtoms(task: string, evidence?: string[]): string[] {
     return [];
   }
   const normalized = corpus.trim().toLowerCase();
+  // 逐 atom 证据集：单 token atom 必须自身精确命中其中一项，而非搭语料
+  // 整体一次判定的便车（旧实现放行了 skill:bridge / skill:context 噪音）。
+  const symbolEvidence = buildAtomSymbolEvidenceSet(corpus);
 
+  // 中文整句按标点切成子短语，避免整句 lesson 直接成为一个 atom
+  // （整句进 id 会拼接成 skill:worker-deepseek-v4-flash-... 这类超长串）。
   const phrases = normalized
-    .split(/\band\b|,|;/i)
+    .split(/\band\b|,|;|，|；|、|。|！|？|：/i)
     .map((part) => part.trim())
     .filter((part) => part.length >= 3)
     .filter((part) => !isAllStopwordPhrase(part));
 
   const longPhrases = phrases.filter(
-    (part) => part.length >= 6 && !isPathLikePhrase(part)
+    (part) => part.length >= 6 && !isEssentiallyPathPhrase(part)
   );
   const shortPhrases = phrases.filter(
     (part) => part.length >= 3 && part.length < 6 && !isPathLikePhrase(part)
@@ -209,10 +411,14 @@ export function extractSkillAtoms(task: string, evidence?: string[]): string[] {
 
   const phraseHeadTokens = longPhrases.flatMap(extractSignificantTokensFromPhrase);
 
-  return dedup([...longPhrases, ...shortPhrases, ...phraseHeadTokens, ...tokenSkills, ...zhWords])
-    .filter((skill) => !isBareStopword(skill))
-    .filter((skill) => !isAllStopwordPhrase(skill))
-    .slice(0, 8);
+  // 逐 atom 质量门：截断超长 atom（整句防呆）→ 长度/停用词/证据门 →
+  // 去重 → 上限 MAX_SKILL_ATOMS（与 lessons 数量同量级，而非 token 扇出）。
+  return dedup(
+    [...longPhrases, ...shortPhrases, ...phraseHeadTokens, ...tokenSkills, ...zhWords]
+      .map(clipOverlongAtom)
+      .filter((atom): atom is string => atom !== undefined)
+      .filter((atom) => passesAtomQualityGate(atom, symbolEvidence))
+  ).slice(0, MAX_SKILL_ATOMS);
 }
 
 export interface SkillLearningOptions {
@@ -513,6 +719,97 @@ export async function cleanupNoiseSkills(
   }
 
   return { pruned: ids.length, ids, reclassified };
+}
+
+/** Path-like fragment inside a skill name (task-clause skills quote files). */
+const SKILL_NAME_PATH_FRAGMENT_RE = /[a-z0-9_-]+\.(ts|js|mjs|cjs|json|md|py|go|rs)\b|\//i;
+
+/**
+ * Prune LEGACY skill nodes that predate the per-atom quality gates and would
+ * never be admitted today:
+ *  - composites fused from a single episode's task clauses, and
+ *  - atomic skills whose name merely quotes a file path or is a bare single
+ *    token (no spaces) — e.g. `savings_not_fidelity_note` injected into every
+ *    unrelated plan/run as a hint.
+ * The NAME is the evidence, so hint-inflated `uses` does not exempt junk.
+ * Multi-word knowledge phrases survive; seeded skills always survive.
+ */
+export async function pruneLegacyNoiseSkills(
+  client: GraphClient
+): Promise<{ pruned: number; ids: string[]; kept: number }> {
+  const skillNodes = await listSkillNodes(client);
+  const ids: string[] = [];
+  let kept = 0;
+
+/** Clause-fragment openers: a name starting with a connective is a split task clause, not knowledge. */
+const SKILL_NAME_CLAUSE_OPENER_RE = /^(并|和|或|且|同时|然后|再|以及|加上|而)/;
+
+  const isLegacyJunk = (parsed: { id: string; name: string; score: number; uses: number; seeded?: boolean }): boolean => {
+    if (parsed.seeded === true) return false;
+    // The NAME itself is the evidence: a task clause quoting a file, a bare
+    // single token, a clause fragment starting with a connective, or a
+    // composite fused from one episode is not knowledge — no matter how often
+    // hint injection has inflated its `uses`.
+    if (SKILL_NAME_PATH_FRAGMENT_RE.test(parsed.name)) return true;
+    if (SKILL_NAME_CLAUSE_OPENER_RE.test(parsed.name.trim())) return true;
+    return !/\s/.test(parsed.name.trim());
+  };
+
+  for (const node of skillNodes) {
+    const atomic = parseSkillState(node.content);
+    if (atomic) {
+      if (isLegacyJunk(atomic)) {
+        ids.push(atomic.id);
+        if (client.deleteNode) {
+          await client.deleteNode(atomic.id);
+        } else {
+          await client.upsertNodes([
+            {
+              id: atomic.id,
+              type: "Skill",
+              content: serializeAtomic({
+                ...atomic,
+                hidden: true,
+                outcomeKind: "noise",
+                updatedAt: Date.now(),
+              }),
+            },
+          ]);
+        }
+        continue;
+      }
+      kept += 1;
+      continue;
+    }
+    const composite = parseCompositeState(node.content);
+    if (composite) {
+      // A composite is a co-occurrence fusion of two atoms from one episode —
+      // it carries no independent knowledge, so unseeded composites are
+      // always legacy junk regardless of name shape or inflated uses.
+      if (composite.seeded !== true) {
+        ids.push(composite.id);
+        if (client.deleteNode) {
+          await client.deleteNode(composite.id);
+        } else {
+          await client.upsertNodes([
+            {
+              id: composite.id,
+              type: "Skill",
+              content: serializeComposite({
+                ...composite,
+                outcomeKind: "noise",
+                updatedAt: Date.now(),
+              }),
+            },
+          ]);
+        }
+        continue;
+      }
+      kept += 1;
+    }
+  }
+
+  return { pruned: ids.length, ids, kept };
 }
 
 export async function applySkillLearning(

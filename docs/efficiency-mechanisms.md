@@ -148,6 +148,14 @@ leave the original result untouched. Unlike the native pruner's lossy marker,
 the archived bytes are recallable byte-exactly and a reduce receipt is
 verbatim-verified.
 
+Unlike the four `efficiencyPolicy` mechanisms (which live in
+`graphflow.config.json` / the **GraphFlow: Settings** page), this projection's
+toggle is a **dsh-side env var, not a GraphFlow config flag** — the projection
+runs inside the host's process on the host's session surface, before any
+GraphFlow config surface is consulted, so the gate belongs to the host
+environment. Its default is still ON (best config), matching the policy-side
+mechanisms; only the *place you flip it* differs.
+
 A host that cannot rewrite the model-visible result must **not** call the
 in-process projectToolResult contract: archiving without projection does not
 reduce context. Other hosts (opencode, Cursor, Codex, Gemini) have no

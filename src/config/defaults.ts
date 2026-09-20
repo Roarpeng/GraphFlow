@@ -89,6 +89,14 @@ export function getDefaultConfig(): GraphFlowConfig {
       minSimilarity: 0.05,
       enableFullGraphVectorRecall: false,
     },
+    mcp: {
+      // 大响应（紧凑 JSON > 4KB）的 text 副本默认桩化，structuredContent 保持
+      // 全量；设 "full" 保留全量 text 副本（老客户端逃生门）。
+      // Oversized responses (compact JSON > 4KB) stub the text copy by default
+      // while structuredContent keeps the full data; set "full" to keep the
+      // full text copy (escape hatch for legacy clients).
+      textCopy: "auto",
+    },
     // SoL-Pi-style efficiency mechanisms. Default = best config (all ON);
     // switch any mechanism off from the graphflow-settings page or here.
     efficiencyPolicy: {

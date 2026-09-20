@@ -4,6 +4,7 @@ import {
   applySkillLearning,
   cleanupNoiseSkills,
   extractSkillAtoms,
+  pruneLegacyNoiseSkills,
   suggestSkillHints,
 } from "../src/learning/skill-flywheel";
 import { skillNodeId, serializeAtomic, serializeComposite, parseSkillState } from "../src/learning/skill-store";
@@ -15,12 +16,14 @@ import { createNoLlmConfigPath } from "./helpers/no-llm-config";
 describe("M14 skill flywheel", () => {
   it("extracts reusable skill atoms from task text with symbol evidence", () => {
     const skills = extractSkillAtoms("update readme and add tests and refactor goal-anchor.ts");
-    expect(skills.length).toBeGreaterThan(1);
+    // Qualified multi-word phrases still extract…
+    expect(skills).toContain("add tests");
+    // …but bare generic single tokens ("tests", "refactor") no longer ride
+    // along on the corpus-level symbol evidence.
+    expect(skills).not.toContain("tests");
+    expect(skills).not.toContain("refactor");
     // Stopword-only phrases like "update readme" must not become skill atoms.
     expect(skills.some((skill) => skill.includes("update readme"))).toBe(false);
-    expect(skills.some((skill) => skill.includes("add tests") || skill.includes("refactor"))).toBe(
-      true
-    );
   });
 
   it("rejects generic corpora without project-symbol evidence at extraction", () => {
@@ -29,8 +32,11 @@ describe("M14 skill flywheel", () => {
     expect(extractSkillAtoms("update readme and add tests")).toEqual([]);
     expect(extractSkillAtoms("create fix")).toEqual([]);
     expect(extractSkillAtoms("update readme")).toEqual([]);
-    // A single project-symbol reference unlocks extraction for the corpus.
-    expect(extractSkillAtoms("fix build for cache-layer.ts").length).toBeGreaterThan(0);
+    // Per-atom evidence gate: a single project-symbol reference no longer
+    // "unlocks" generic tokens for the whole corpus — only atoms with their own
+    // symbol evidence (or qualified phrases) extract.
+    expect(extractSkillAtoms("fix build for cache-layer.ts")).toEqual([]);
+    expect(extractSkillAtoms("fix flaky_cache in cache-layer.ts")).toContain("flaky_cache");
   });
 
   it("filters standalone stopword tokens while keeping meaningful phrases", () => {
@@ -48,7 +54,7 @@ describe("M14 skill flywheel", () => {
 
   it("learns skill nodes and co-occurrence edges from task outcomes", async () => {
     const client = new GraphifyClient();
-    await applySkillLearning(client, "refactor planner.ts and add tests", {
+    await applySkillLearning(client, "refactor planner module in planner.ts and add tests", {
       status: "COMPLETED",
       attempts: 1,
       feedback: "done",
@@ -301,7 +307,7 @@ describe("M14 skill flywheel", () => {
 
   it("does not fuse composite skills unless both parents are symbolic", async () => {
     const client = new GraphifyClient();
-    await applySkillLearning(client, "refactor planner.ts and add tests", {
+    await applySkillLearning(client, "refactor planner module in planner.ts and add tests", {
       status: "COMPLETED",
       attempts: 1,
       feedback: "done",
@@ -314,8 +320,58 @@ describe("M14 skill flywheel", () => {
     for (const node of snapshot.nodes.filter((n) => n.type === "Skill")) {
       const state = parseSkillState(node.content);
       if (!state) continue;
-      expect(state.hasSymbolEvidence === true).toBe(false);
+      // The corpus legitimately yields the filename-referencing phrase
+      // ("refactor planner module in planner.ts"). What must never appear
+      // is a BARE symbolic-token skill — those are the fusion parents the
+      // composite gate above guards against.
+      if (state.hasSymbolEvidence === true) {
+        expect(state.name.includes(" ")).toBe(true);
+      }
     }
+  });
+
+  it("prunes legacy task-clause / bare-symbol / composite junk but keeps knowledge phrases", async () => {
+    // Shapes taken from the 2026-09-20 live inventory: task-clause skills
+    // quoting a file, a bare-symbol skill injected into every plan, composites
+    // fused from one episode — all score 0, uses ≤ 2. The two multi-word
+    // lesson phrases must survive.
+    const client = new GraphifyClient();
+    const now = Date.now();
+    const legacy = [
+      { id: "skill:列出-src-graph-token-savings-ts-的全部导出符号", name: "列出 src/graph/token-savings.ts 的全部导出符号", kind: "atomic" },
+      { id: "skill:savings-not-fidelity-note", name: "savings-not-fidelity-note", kind: "atomic" },
+      { id: "skill:composite:savings-not-fidelity-note__列出-src-graph-token-savings-ts-的全部导出符号", name: "savings-not-fidelity-note + 列出 src/graph/token-savings.ts 的全部导出符号", kind: "composite" },
+      // Hint injection inflates uses on legacy junk — the NAME still convicts.
+      { id: "skill:并确认-savings-not-fidelity-note-常量的语义", name: "并确认 savings-not-fidelity-note 常量的语义", kind: "atomic", uses: 9 },
+    ] as const;
+    for (const item of legacy) {
+      await client.upsertNodes([
+        {
+          id: item.id,
+          type: "Skill",
+          content:
+            item.kind === "atomic"
+              ? JSON.stringify({ kind: "atomic", id: item.id, name: item.name, score: 0, uses: "uses" in item ? item.uses : 2, lastOutcome: "pass", updatedAt: now })
+              : JSON.stringify({ kind: "composite", id: item.id, name: item.name, score: 0, uses: 1, lastOutcome: "fail", updatedAt: now, parents: ["a", "b"] }),
+        },
+      ]);
+    }
+    await applySkillLearning(client, "wire inline sources for bridge workers in provider-executor.ts", {
+      status: "COMPLETED",
+      attempts: 1,
+      feedback: "done",
+    }, ["worker 收到内联源码正文后一次通过"]);
+
+    const before = client.snapshot().nodes.filter((n) => n.type === "Skill");
+    const result = await pruneLegacyNoiseSkills(client);
+    expect(result.ids).toContain("skill:savings-not-fidelity-note");
+    expect(result.ids).toContain("skill:列出-src-graph-token-savings-ts-的全部导出符号");
+    expect(result.ids).toContain("skill:composite:savings-not-fidelity-note__列出-src-graph-token-savings-ts-的全部导出符号");
+    expect(result.ids).toContain("skill:并确认-savings-not-fidelity-note-常量的语义");
+    const after = client.snapshot().nodes.filter((n) => n.type === "Skill");
+    expect(after.length).toBe(before.length - 4);
+    // The multi-word knowledge phrase survives.
+    expect(after.some((n) => (parseSkillState(n.content)?.name ?? "").includes("内联源码"))).toBe(true);
   });
 
   it("injects learned skill hints into orchestrator feedback and planning", async () => {
