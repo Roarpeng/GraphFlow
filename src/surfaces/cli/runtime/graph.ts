@@ -133,8 +133,8 @@ function graphStoreNeedsIndexing(config: GraphFlowConfig): boolean {
     const fallbackPath = storePath.replace(/\.sqlite$/i, ".json");
     if (existsSync(fallbackPath)) {
       try {
-        const parsed = JSON.parse(readFileSync(fallbackPath, "utf8")) as { nodes?: unknown[] };
-        return !Array.isArray(parsed.nodes) || parsed.nodes.length === 0;
+        const parsed = JSON.parse(readFileSync(fallbackPath, "utf8")) as { nodes?: Array<{ type?: string }> };
+        return !Array.isArray(parsed.nodes) || !storeHasCodeNodes(parsed.nodes);
       } catch {
         return true;
       }
@@ -150,11 +150,22 @@ function graphStoreNeedsIndexing(config: GraphFlowConfig): boolean {
     return false;
   }
   try {
-    const parsed = JSON.parse(readFileSync(storePath, "utf8")) as { nodes?: unknown[] };
-    return !Array.isArray(parsed.nodes) || parsed.nodes.length === 0;
+    const parsed = JSON.parse(readFileSync(storePath, "utf8")) as { nodes?: Array<{ type?: string }> };
+    return !Array.isArray(parsed.nodes) || !storeHasCodeNodes(parsed.nodes);
   } catch {
     return true;
   }
+}
+
+/**
+ * A store whose only nodes are dialogue turns / episodes / skills is NOT an
+ * indexed workspace: auto-index previously saw a non-empty node list and
+ * skipped indexing forever, so code anchors never appeared while conversation
+ * nodes kept the store alive (live finding: preview returned dialogue-only
+ * anchors because the file store had one recorded turn).
+ */
+function storeHasCodeNodes(nodes: Array<{ type?: string }>): boolean {
+  return nodes.some((node) => node?.type === "File" || node?.type === "Symbol" || node?.type === "Module");
 }
 
 /**

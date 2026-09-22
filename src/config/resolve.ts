@@ -74,8 +74,19 @@ export function resolveConfig(
 ): GraphFlowConfig {
   if (!isDefaultProjectConfigPath(path)) {
     const result = loadConfigSafe(path);
-    if (result.usedFallback && result.error) {
-      logger.warn({ path: result.configPath, error: result.error }, "Using default config for explicit path");
+    if (result.usedFallback && result.error && !result.notFound) {
+      // The caller EXPLICITLY named an existing-but-broken config. Silently
+      // proceeding on defaults would run the wrong transport/store/budget
+      // against their intent (live finding: a Windows backslash path in JSON
+      // produced an invalid file, and commands happily wrote to the default
+      // sqlite store instead of the configured one). A merely-missing path
+      // stays permissive — creation flows (settings save) legitimately pass
+      // a path that does not exist yet.
+      throw new Error(
+        `Failed to load config at ${result.configPath}: ${result.error}. ` +
+          `Fix the file (a common Windows mistake is unescaped backslashes in paths — use forward slashes) ` +
+          `or drop --config to use the discovered project/global layers.`
+      );
     }
     const projectRoot = result.config.graphPolicy.workspaceRoot;
     return finalizeConfig(
@@ -96,13 +107,13 @@ export function resolveConfig(
   let projectWorkspaceRoot: string | undefined;
 
   if (existsSync(projectRoot) && existsSync(overlayPath)) {
-    const projectLayer = loadLayer(projectRoot);
+    const projectLayer = loadLayer(projectRoot, { projectLayer: true });
     const overlayLayer = loadLayer(overlayPath);
     merged = mergeGraphFlowConfig(mergeGraphFlowConfig(base, projectLayer), overlayLayer);
     projectWorkspaceRoot =
       overlayLayer.graphPolicy.workspaceRoot ?? projectLayer.graphPolicy.workspaceRoot;
   } else if (existsSync(projectRoot)) {
-    const projectLayer = loadLayer(projectRoot);
+    const projectLayer = loadLayer(projectRoot, { projectLayer: true });
     merged = mergeGraphFlowConfig(base, projectLayer);
     projectWorkspaceRoot = projectLayer.graphPolicy.workspaceRoot;
   } else if (existsSync(overlayPath)) {
@@ -141,9 +152,25 @@ function mergeRuntimeWorkspaceBind(
     : undefined;
 }
 
-function loadLayer(path: string): GraphFlowConfig {
+/**
+ * Load one discovered config layer. Global and overlay layers stay forgiving
+ * (a bad global must not brick every project); the PROJECT-root layer is the
+ * one the user hand-writes for this checkout, so by default a load failure
+ * throws instead of silently merging defaults over it.
+ */
+function loadLayer(
+  path: string,
+  options?: { projectLayer?: boolean }
+): GraphFlowConfig {
   const result = loadConfigSafe(path);
   if (result.usedFallback && result.error) {
+    if (options?.projectLayer) {
+      throw new Error(
+        `Failed to load project config at ${result.configPath}: ${result.error}. ` +
+          `Fix the file (a common Windows mistake is unescaped backslashes in paths — use forward slashes) ` +
+          `or remove it to fall back to the global config.`
+      );
+    }
     logger.warn({ path: result.configPath, error: result.error }, "Config layer ignored due to load failure");
     return getDefaultConfig();
   }
