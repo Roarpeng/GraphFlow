@@ -6,9 +6,11 @@ export type EvidenceSource = "manual" | "ci" | "agent" | "hook";
 
 export interface OutcomeEvidence {
   repository?: string;
-  commit: string;
+  /** Absent when the caller could not pin the outcome to a commit. */
+  commit?: string;
   diff: string;
-  testCommand: string;
+  /** Absent when no test command was supplied (verification grades it). */
+  testCommand?: string;
   testResult: "pass" | "fail" | "unknown";
   artifacts: string[];
   userConfirmed: boolean;
@@ -58,13 +60,27 @@ export function normalizeOutcomeEvidence(
   const commit = input.commit?.trim();
   const diff = input.diff ?? "";
   const testCommand = input.testCommand?.trim();
-  if (!commit || !testCommand) return undefined;
+  // Any substantive evidence field constructs the package; verification
+  // LEVELS (verified / partial / unverified with reasons) are decided by
+  // verifyOutcomeEvidence. The old gate (commit AND testCommand, else drop
+  // the whole package) silently discarded e.g. a passing test command with
+  // no commit and answered "no evidence package" — the user's submitted
+  // evidence vanished instead of being graded honestly.
+  const hasAnyEvidence = Boolean(
+    commit ||
+      diff.trim() ||
+      testCommand ||
+      (input.testResult && input.testResult !== "unknown") ||
+      (input.artifacts ?? []).length > 0 ||
+      input.userConfirmed === true
+  );
+  if (!hasAnyEvidence) return undefined;
 
   const evidence: OutcomeEvidence = {
     ...(input.repository?.trim() ? { repository: input.repository.trim() } : {}),
-    commit,
+    ...(commit ? { commit } : {}),
     diff,
-    testCommand,
+    ...(testCommand ? { testCommand } : {}),
     testResult: input.testResult === "pass" || input.testResult === "fail"
       ? input.testResult
       : "unknown",

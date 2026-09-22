@@ -4,6 +4,32 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — 第二轮深挖：配置链诚实性 + 证据分级（live 驱动）
+
+- **显式坏配置 fail-fast（v1.25.1 已知遗留 sqlite 泄漏的根因）**：`--config` 指向存在但损坏的文件（如 Windows 反斜杠路径造成的非法 JSON）此前只 WARN 一句就**静默用默认配置继续跑**——预算/传输/存储全按默认执行，`transport:"file"` 工作区因此冒出默认路径的 `graphflow-out/graphflow-graph.sqlite`（即 1.25.1 登记的句柄泄漏遗留）。现在显式路径损坏直接抛错并给出修复指引（含"用正斜杠"提示）；**路径尚不存在保持宽容**（settings-save 等创建型流程依赖此语义，`LoadConfigResult.notFound` 区分两种情况）。项目根 `graphflow.config.json` 损坏同样 fail-fast；global/overlay 层保持宽容 WARN。
+- **两处过度严格校验让最小配置非法**：`learningPolicy is required` 与 `graphPolicy.graphStorePath is required for file transport`——两者都有完整默认值兜底，却要求显式存在；按文档/示例写精简配置必然校验失败，再叠加上一条静默 fallback 就是"配置永远不生效"的组合拳。两者均改为可选补默认。
+- **auto-index 被 dialogue 节点骗过（代码锚点永不出现）**：`graphStoreNeedsIndexing` 只看"节点列表非空"，store 里只要有一条对话轮/episode 就判定"无需索引"——live 复现：全新 file 工作区 preview 永远只返回 dialogue 锚点。新增 `storeHasCodeNodes`（File/Symbol/Module 存在才算已索引）；修复后 live 验证新增 `b.ts` 即在下次 preview 自动增量索引并精确命中 symbol 锚点。
+- **outcome 证据包被静默丢弃**：`normalizeOutcomeEvidence` 要求 commit AND testCommand 双全，否则整个证据包丢弃——agent 传了 `testCommand+testResult:pass` 却收到 "no evidence package"，partial/unverified 分级形同虚设。改为"任何实质证据字段即构造包"，分级交给 `verifyOutcomeEvidence`（live：`unverified + ["diff is empty","missing commit or test command"]`，提交的证据可见、可审计）；`OutcomeEvidence.commit/testCommand` 类型随之放宽为可选。
+
+### 验证（第二轮深挖新增 live 证据）
+
+- MCP 桥接闭环：plan（probe-failed-bridge）→ insight submit×2 → merge → run（诚实 HUMAN_REVIEW + episode 落库）→ report_outcome（证据分级）。
+- R8：working-set 预取真实调用图（8 个可避免读）、challenge 20 条真实外部调用者质询、quote 诚实 insufficient-samples、facts ask 诚实 UNRESOLVED。
+- workbench：plan 播种 4 主题容器、topicId 续接注入 promptLines。
+- skill markdown：垃圾技能 export/import 双向均标 invalid（诚实拒绝）。
+- MCP Streamable HTTP：initialize 1.25.1、tools/list 10 工具（双 Accept 协商）、恶意 Origin 拒绝。
+
+### Tests
+
+- 新增 `tests/m-config-evidence-honesty.test.ts`（6 用例）：坏配置 fail-fast、missing 路径宽容、最小配置合法、证据三级分级。
+
+### 已知遗留（登记不修）
+
+- 失败 run（HUMAN_REVIEW_REQUIRED）仍会产出以任务文本命名的垃圾技能（`create-a-tiny-file-...`）——v1.25.0 的逐 atom 质量门未拦住任务名直录；建议在 applySkillLearning 前按 outcome 过滤或收紧名字门。
+- `graphflow team serve` / RBAC 未在本轮 live 验证范围。
+
+## [Unreleased - honesty round 1]
+
 ### Fixed — 诚实性收口（live 验收发现的问题批次）
 
 - **plan 来源一等字段（planSource）**：`graphflow_plan` 结果新增 `planSource`（`llm` | `probe-failed-bridge` | `llm-failed-bridge` | `no-llm-bridge`）+ `probe`（探测结果）+ `degradeReason`（降级原因）；CLI 文本输出同步打印 `source=...; reason=...`——桥接计划从此不可能读起来像真模型产出。前置问候探测（v1.25.0 已有）live 验证确实在用：坏 key 下 `source=probe-failed-bridge`，LLM 计划从未被尝试。

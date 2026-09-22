@@ -12,6 +12,9 @@ export interface LoadConfigResult {
   usedFallback: boolean;
   configPath: string;
   error?: string;
+  /** True when the fallback reason is simply that the file does not exist yet
+   *  (creation flows like settings-save legitimately pass such a path). */
+  notFound?: boolean;
 }
 
 export interface ValidationIssue {
@@ -93,9 +96,8 @@ export function validateConfigDetailed(path = "graphflow.config.json"): ConfigVa
     }
   }
 
-  if (!parsed.learningPolicy) {
-    issues.push({ severity: "error", field: "learningPolicy", message: "learningPolicy is required" });
-  }
+  // learningPolicy is optional at the input boundary (defaults are applied in
+  // validateConfig); no validation issue when absent.
 
   if (parsed.routingPolicy?.providerPriority) {
     const allowed = new Set(["openai", "anthropic", "bailian", "doubao", "deepseek"]);
@@ -160,6 +162,7 @@ export function loadConfigSafe(path = "graphflow.config.json"): LoadConfigResult
       usedFallback: true,
       configPath: resolvedPath,
       error: "Config file not found",
+      notFound: true,
     };
   }
 
@@ -282,9 +285,10 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     }
   }
 
-  if (input.graphPolicy.transport === "file" && !input.graphPolicy.graphStorePath) {
-    throw new Error("Invalid config: graphPolicy.graphStorePath is required for file transport.");
-  }
+  // No explicit graphStorePath requirement for file transport: the default
+  // resolution (`graphflow-out/graphflow-graph.json`, see resolveGraphStorePath)
+  // is valid — requiring it made minimal configs fail validation and fall into
+  // the silent-defaults trap.
 
   const allowedTransports = new Set(["memory", "mcp-http", "file", "sqlite", "auto"]);
   if (!allowedTransports.has(input.graphPolicy.transport)) {
@@ -305,9 +309,11 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     }
   }
 
-  if (!input.learningPolicy) {
-    throw new Error("Invalid config: learningPolicy is required.");
-  }
+  // learningPolicy is optional at the input boundary: every sub-field has a
+  // default, so a minimal config (providers + tiers + graphPolicy) must be
+  // valid. Requiring the bare object made minimal configs fail validation and
+  // — combined with the silent-defaults fallback — run the wrong transport
+  // and store against the user's intent.
 
   if (input.routingPolicy?.providerPriority) {
     const allowed = new Set(["openai", "anthropic", "bailian", "doubao", "deepseek"]);
@@ -340,9 +346,9 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     },
     learningPolicy: {
       ...input.learningPolicy,
-      trainingCadence: input.learningPolicy.trainingCadence ?? "nightly",
-      eventsPath: input.learningPolicy.eventsPath ?? `${DEFAULT_OUTPUT_DIR}/learning-events.jsonl`,
-      summaryPath: input.learningPolicy.summaryPath ?? `${DEFAULT_OUTPUT_DIR}/learning-summary.json`,
+      trainingCadence: (input.learningPolicy ?? {}).trainingCadence ?? "nightly",
+      eventsPath: (input.learningPolicy ?? {}).eventsPath ?? `${DEFAULT_OUTPUT_DIR}/learning-events.jsonl`,
+      summaryPath: (input.learningPolicy ?? {}).summaryPath ?? `${DEFAULT_OUTPUT_DIR}/learning-summary.json`,
     },
     routingPolicy: {
       enableDynamicRouting: input.routingPolicy?.enableDynamicRouting ?? true,
