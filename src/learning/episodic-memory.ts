@@ -19,6 +19,18 @@ import {
   type OutcomeEvidence,
   type OutcomeEvidenceInput,
 } from "./evidence";
+import {
+  buildProvenance,
+  evaluateWriteSalienceSafe,
+  resolveWriteGateMode,
+  type ExistingMemory,
+  type GateDecision,
+  type MemoryProvenance,
+  type WriteCandidate,
+  type WriteGateMode,
+  type WriteGateOptions,
+  type WriteSource,
+} from "./memory-gate";
 
 export { quarantineSkillsFromEpisode };
 
@@ -72,10 +84,33 @@ export function extractTaskTokens(task: string): string[] {
   return Array.from(out);
 }
 
+/**
+ * M2 write-gate knobs for recordEpisode. Every field is optional and purely
+ * additive: omitting the whole options object keeps the previous call shape.
+ */
+export interface EpisodeWriteGateOptions {
+  /** Force a gate mode, overriding GRAPHFLOW_WRITE_GATE (used by tests/embedders). */
+  mode?: WriteGateMode;
+  /** Threshold overrides forwarded to evaluateWriteSalience. */
+  thresholds?: WriteGateOptions;
+  /**
+   * Caller-declared provenance for this episode. Defaults to agent-reported:
+   * growth-plan §1.5 — a self-reported boolean outcome is weak evidence, so the
+   * gate must not pretend it was verified.
+   */
+  source?: WriteSource;
+  /**
+   * Extra memories to weigh against (skills/dialogue/lessons). Episode history is
+   * read from the graph automatically; this only adds to it.
+   */
+  existing?: ExistingMemory[];
+}
+
 export async function recordEpisode(
   client: GraphClient,
   episode: Omit<EpisodeRecord, "id" | "createdAt" | "updatedAt">,
-  embeddingProvider?: EmbeddingProvider
+  embeddingProvider?: EmbeddingProvider,
+  gateOptions?: EpisodeWriteGateOptions
 ): Promise<EpisodeRecord> {
   const now = Date.now();
   idCounter += 1;
@@ -96,11 +131,64 @@ export async function recordEpisode(
       ...(episode.evidence !== undefined ? { evidence: episode.evidence } : {}),
   };
 
+  // M2 写入门控：episode 写入在落库前过一遍复合显著性判定（来源 / 新颖度 /
+  // 冲突 / 持久性 / 噪声），裁决与来源链写入节点 metadata。
+  // 门控自身永不抛异常、永不阻断既有调用方；默认 advisory 模式只判定与标注，
+  // 不丢弃证据（原始 episode 是一等证据，见 growth-plan §M7）。
+  const gateMode = gateOptions?.mode ?? resolveWriteGateMode();
+  let gateDecision: GateDecision | undefined;
+  let provenance: MemoryProvenance | undefined;
+  if (gateMode !== "off") {
+    const candidate: WriteCandidate = {
+      id,
+      kind: "episode",
+      content: episodeGateContent(record),
+      task: record.task,
+      // 原始 episode 是持久证据，不是临时决策：durable 恒为 true。
+      durable: true,
+      source: gateOptions?.source ?? { kind: "agent-reported", ref: id },
+      createdAt: now,
+    };
+    const existing = [
+      ...(gateOptions?.existing ?? []),
+      ...(await loadExistingEpisodeMemories(client)),
+    ];
+    gateDecision = evaluateWriteSalienceSafe(
+      candidate,
+      { existing, now },
+      gateOptions?.thresholds
+    );
+    provenance = buildProvenance(candidate, gateDecision, now).provenance;
+    // enforce 是显式开启的严格模式：reject 的写入不落库，但仍返回 record，
+    // 以保持 recordEpisode 的返回契约不变。
+    if (gateMode === "enforce" && gateDecision.decision === "reject") {
+      return record;
+    }
+  }
+
   const node: GraphNode = {
     id,
     type: "Decision",
     content: `${EPISODE_SENTINEL} ${truncate(episode.task, 160)}`,
-    metadata: { record: serialize(record), kind: EPISODE_SENTINEL },
+    metadata: {
+      record: serialize(record),
+      kind: EPISODE_SENTINEL,
+      ...(gateDecision !== undefined
+        ? {
+            writeGate: {
+              decision: gateDecision.decision,
+              score: gateDecision.score,
+              reasons: gateDecision.reasons,
+              mode: gateMode,
+              evaluatedAt: now,
+              ...(gateDecision.conflictWith
+                ? { conflictWith: gateDecision.conflictWith }
+                : {}),
+            },
+          }
+        : {}),
+      ...(provenance !== undefined ? { provenance } : {}),
+    },
   };
 
   // 若 embedding provider 可用，计算任务描述的 embedding 并附加到节点 metadata，
@@ -489,6 +577,50 @@ function deserialize(node: GraphNode): EpisodeRecord | undefined {
     };
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * 门控判定用的 episode 文本视图：task + outcome + decisions + lessons + plan 描述。
+ * outcome 计入文本，使「同一 task 的 pass 与 fail」能被门控识别为互斥结论。
+ */
+function episodeGateContent(record: EpisodeRecord): string {
+  return [
+    record.task,
+    `outcome=${record.outcome}`,
+    ...record.keyDecisions,
+    ...record.lessons,
+    ...record.plan.map((step) => step.description),
+  ].join(" ");
+}
+
+/**
+ * 读取既有 episode 作为门控的对照集（best-effort）：
+ * 只读叶子字段，跳过软删除节点，读取失败时返回空数组 —— 门控必须容忍读路径失败，
+ * 绝不因为读不到既有记忆就阻断写入。
+ */
+async function loadExistingEpisodeMemories(client: GraphClient): Promise<ExistingMemory[]> {
+  try {
+    const nodes = await client.queryByKeyword(EPISODE_SENTINEL);
+    const out: ExistingMemory[] = [];
+    const seen = new Set<string>();
+    for (const node of nodes) {
+      if (!isEpisodeNode(node) || seen.has(node.id)) continue;
+      if (node.metadata?.pruned === true) continue;
+      const rec = deserialize(node);
+      if (!rec) continue;
+      seen.add(node.id);
+      out.push({
+        id: rec.id,
+        kind: "episode",
+        content: episodeGateContent(rec),
+        task: rec.task,
+        createdAt: rec.createdAt,
+      });
+    }
+    return out;
+  } catch {
+    return [];
   }
 }
 

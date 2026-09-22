@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.18.0] - 2026-09-10
+
+### Added
+
+- **能力指标（growth-plan M1 / M5 / M11）**：`graphflow_diagnose` 新增 `capability`、`competence`、`metricDefinitions`。维度照抄 SWE-Bench-CL 的持续学习套件（`src/learning/capability-metrics.ts`，arXiv:2507.00014），token 节省率刻意不进入复合分。任务域由 `deriveTaskDomain` 确定性推导（有序规则表、首命中优先），不交给模型判断；样本口径排除已撤回 / 软隐藏的 episode。样本不足时返回 `insufficientData` 并把能力比率归零，不填演示数据。
+- **技能选择精度（M3）**：新增 `skillUse`（有效使用精度 / shadowing 率 / `shadowingBySkill` 代理归因）。仓库尚无召回遥测，故恒为 `insufficientData` —— 这是诚实状态，不把「未测量」写成 0%。
+- **写入门控与撤回链（M2）**：新增 `src/learning/memory-gate.ts`：显著性评分（来源可信度 / 新颖度 / 冲突 / 持久性 / 噪声）、provenance、软撤回（复用 `quarantineSkillsFromEpisode` 级联与 `pruned` 语义，绝不物理删除）。`recordEpisode` 只做纯新增的可选参数与门控块。默认 `advisory`（判定并记录、保留证据），`GRAPHFLOW_WRITE_GATE=0` 完全关闭，`=enforce` 才真正不落库。diagnose 报出 `memoryGate`（裁决分布 + 被撤回数）。
+- **确定性技能失效（M4）**：新增 `src/learning/skill-staleness.ts`：索引重建后校验技能引用的符号是否仍能解析（`Symbol.metadata.name` + File/Module 路径 + 节点 id 组成的宽松全集），解析不到即软退役并**不可召回**。无符号可校验的技能单列为 `noSymbolsSkillIds`，不误判为失效；lookup 抛错按基础设施故障处理，不退役。幂等（第二遍 `retired=0`）。
+- **`docs/growth-plan.md`**：调研驱动的成长计划（10 路主题调研 + 4 路对抗验证），含 7 条核心结论、12 个里程碑各自的验收与失败判据、明确不做清单、实验与度量纪律。
+
+### Changed
+
+- **对外主指标换轨**：token 节省率从「核心指标」降为「成本约束项」。依据：削减 38.4% 工具输出 token 反而使计费成本 +6.8%（每任务相关 r=0.15），激进压缩把 SWE-bench Go 子集 patch 成功率从 27/40 打到 15/40（arXiv:2607.12161）。
+- **陈旧度机制主次调整**：确定性符号失效（M4）为主，时间衰减降为辅助——确定性 max(serial/timestamp) 优于 LLM 时效判断（arXiv:2606.01435）。
+- 技能召回候选收集在 `collectTaskSkillCandidates` 显式排除 `metadata.unrecallable` 的节点（原子技能的 `hidden` 过滤原本已生效，composite 此前没有对应过滤）。
+
+### Tests
+
+- 新增 `tests/m-capability-metrics.test.ts`、`tests/m-memory-gate.test.ts`、`tests/m-skill-staleness.test.ts`。
+
 ## [1.17.1] - 2026-09-10
 
 ### Fixed

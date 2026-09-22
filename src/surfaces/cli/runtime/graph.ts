@@ -36,6 +36,24 @@ import {
   type ConsolidateSkillInput,
 } from "../../../learning/skill-consolidate.js";
 import { parseSkillState } from "../../../learning/skill-store.js";
+import {
+  buildCompetenceMap,
+  computeCapabilityMetrics,
+  computeSkillUseStats,
+  deriveTaskDomain,
+  describeCapabilityMetrics,
+  type CapabilityEpisode,
+  type CapabilityMetricDescriptor,
+  type CapabilityMetrics,
+  type DomainCompetence,
+  type SkillUseStats,
+} from "../../../learning/capability-metrics.js";
+import { isRetracted, readWriteGate, summarizeGateStats } from "../../../learning/memory-gate.js";
+import {
+  isSkillRecallable,
+  revalidateSkills,
+  symbolLookupFromSet,
+} from "../../../learning/skill-staleness.js";
 import { logger } from "../../../utils/logger.js";
 import {
   formatDialogueThreadLines,
@@ -643,6 +661,36 @@ export async function indexGraph(
     ...(options?.onProgress ? { onProgress: options.onProgress } : {}),
   });
 
+  // M4（growth-plan §2.1）：索引重建后做一次确定性的技能失效校验。技能引用的符号
+  // 若已无法解析，立即软退役（不可召回），而不是等时间衰减把分数慢慢降下来——
+  // 确定性版本/时间戳判定优于时间衰减与 LLM 时效判断（arXiv:2606.01435）。
+  //
+  // 两点刻意的设计：
+  // 1. 符号全集取宽松（Symbol 的 metadata.name + File/Module 路径 + 全部节点 id）。
+  //    宽松方向是安全方向：多算符号只会让退役更少，绝不会误退役。
+  // 2. 治理失败绝不影响索引结果——索引是主路径，退役是附加动作。
+  try {
+    const snapshot =
+      typeof graphClient.readSnapshot === "function" ? graphClient.readSnapshot() : undefined;
+    const universe = new Set<string>();
+    for (const node of snapshot?.nodes ?? []) {
+      const name = typeof node.metadata?.name === "string" ? node.metadata.name.trim() : "";
+      if (node.type === "Symbol" && name) universe.add(name);
+      if (node.type === "Symbol" || node.type === "File" || node.type === "Module") {
+        const content = typeof node.content === "string" ? node.content.trim() : "";
+        if (content && content.length <= 200) {
+          universe.add(content);
+          const base = content.split("/").pop();
+          if (base) universe.add(base);
+        }
+      }
+      if (node.id) universe.add(node.id);
+    }
+    await revalidateSkills(graphClient, { lookup: symbolLookupFromSet(universe) });
+  } catch (error) {
+    logger.warn({ error }, "Skill staleness revalidation failed");
+  }
+
   return indexed;
 }
 
@@ -1009,6 +1057,54 @@ export interface FlywheelReport {
     };
   };
   /**
+   * growth-plan M1 — 能力指标取代 token 节省率成为对外主指标。
+   *
+   * 口径来自 SWE-Bench-CL（arXiv:2507.00014）的持续学习维度套件，不自创。token 节省率
+   * 被刻意排除在 compositeScore 之外：削减 38.4% 工具输出 token 反而使计费成本 +6.8%，
+   * 且激进压缩把 SWE-bench Go 子集 patch 成功率从 27/40 打到 15/40（arXiv:2607.12161）。
+   * 节省率降为成本约束项，仍在 `fidelity` 里报告，但不参与能力分。
+   *
+   * 注意：这里的样本口径**排除已被撤回（retracted）或软隐藏（pruned）的 episode**——
+   * 一条被撤回的记忆不构成能力证据。因此 `capability.sampleCount` 可能小于
+   * `episodes.total`，这不是 bug，是两个口径回答不同问题。
+   */
+  capability: CapabilityMetrics;
+  /**
+   * growth-plan M5 — 按任务域的能力地图，阈值由 harness 外部强制计算，
+   * 不采用模型自报置信度（growth-plan §1.5：校准不等于行动，须外部强制阈值）。
+   * domain 由 deriveTaskDomain 从 task 文本确定性推导。
+   */
+  competence: DomainCompetence[];
+  /**
+   * growth-plan M3 — 技能选择精度（有效使用精度 / shadowing 率）。
+   *
+   * 这是本领域最缺的指标：技能池 5→100 时有效使用精度从 29.6% 掉到 3.3%，202 技能库
+   * 使 pass rate 掉 21% 且最多 68% 由"选错技能"解释（arXiv:2605.24050、arXiv:2608.14036）。
+   * 仓库当前没有召回的 per-run 遥测，所以此项在接线前恒为 insufficientData —
+   * 这是诚实状态，不是 0 分（绝不把"未测量"写成 0%）。
+   */
+  skillUse: SkillUseStats;
+  /**
+   * growth-plan M11 — 每个能力指标的定义、文献依据与局限固化在代码里，
+   * 使对外数字可解释、可复现，而不是无法追溯的营销数字。
+   */
+  metricDefinitions: CapabilityMetricDescriptor[];
+  /**
+   * growth-plan M2/M4 — 记忆写入治理的可观测面：
+   * 写入门控裁决分布 + 被撤回的记忆数 + 因符号消失而被确定性退役的技能数。
+   * 社区最痛的实际事故是记忆污染（临时决策被固化并跨会话传染），这三项是它的入口指标。
+   */
+  memoryGate: {
+    admitted: number;
+    reviewed: number;
+    rejected: number;
+    rejectReasons: Record<string, number>;
+    /** 被 memory-gate 软撤回的记忆数（节点仍在，仅从召回路径隐藏）。 */
+    retracted: number;
+    /** M4：引用符号已无法解析、被确定性退役（不可召回）的技能数。 */
+    symbolRetiredSkills: number;
+  };
+  /**
    * Split metrics: `estimatedSavingsPercent` is packaging ROI, not body
    * fidelity. Pending/unknown outcomes are ratios, not Hit@k.
    */
@@ -1086,6 +1182,12 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
     updatedAt: number;
     stale: boolean;
     deviation?: string;
+    /** M1 能力指标用：返工率与工具使用效率的分母。 */
+    attempts: number;
+    /** M1 能力指标用：时间序与域内遗忘判定的排序键。 */
+    createdAt: number;
+    /** M2 记忆治理用：被撤回或软隐藏的 episode 不构成能力证据。 */
+    retracted: boolean;
   }> = [];
   for (const node of store.nodes) {
     if (node.type !== "Decision") continue;
@@ -1109,6 +1211,8 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
         deviation?: string;
         task?: string;
         updatedAt?: number;
+        createdAt?: number;
+        attempts?: number;
         id?: string;
       };
       if (record.outcome === "pass") pass += 1;
@@ -1129,6 +1233,11 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
         updatedAt: typeof record.updatedAt === "number" ? record.updatedAt : 0,
         stale: node.metadata?.staleGoal !== undefined,
         ...(typeof record.deviation === "string" ? { deviation: record.deviation } : {}),
+        attempts: typeof record.attempts === "number" ? record.attempts : 0,
+        createdAt: typeof record.createdAt === "number" ? record.createdAt : 0,
+        // 软撤回（memory-gate）与软隐藏（forgetEpisode 的 pruned）都使该 episode
+        // 不再构成能力证据；节点本身仍留在图里（证据永不物理删除）。
+        retracted: isRetracted(node) || node.metadata?.pruned === true,
       });
     } catch {
       pending += 1;
@@ -1172,6 +1281,40 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
     consolidationHint = `Consolidation suggested (${consolidationSummary.updates} UPDATE / ${consolidationSummary.deletes} DELETE / ${consolidationSummary.adds} ADD) — dry-run: graphflow skill consolidate; apply: --apply.`;
   }
   const contextFidelityStats = getContextFidelityStats(config);
+
+  // ── growth-plan M1 / M2 / M3 / M4 / M5 / M11 ───────────────────────────────
+  // 能力指标取代 token 节省率成为对外主指标。样本口径排除已撤回/软隐藏的 episode：
+  // 被撤回的记忆不构成能力证据（节点仍在图里，只是不再计数）。
+  const capabilityEpisodes: CapabilityEpisode[] = episodes
+    .filter((episode) => !episode.retracted)
+    .map((episode) => ({
+      id: episode.id,
+      // 断言仅为满足类型：normalizeOutcome 会对未知取值做保守兜底（归入未定论）。
+      outcome: episode.outcome as CapabilityEpisode["outcome"],
+      attempts: episode.attempts,
+      createdAt: episode.createdAt,
+      updatedAt: episode.updatedAt,
+      // 领域切分是确定性的（deriveTaskDomain），不交给模型判断。
+      domain: deriveTaskDomain(episode.task),
+    }));
+  const capability = computeCapabilityMetrics(capabilityEpisodes);
+  const competence = buildCompetenceMap(capabilityEpisodes);
+  // M3：仓库尚无「召回了哪些 / 实际用了哪个 / 是否有帮助」的 per-run 遥测，
+  // 因此显式传入 undefined，让指标诚实报告 insufficientData，而不是填 0。
+  const skillUse = computeSkillUseStats(undefined);
+  const metricDefinitions = describeCapabilityMetrics();
+  const gateStats = summarizeGateStats(
+    store.nodes
+      .map((node) => readWriteGate(node))
+      .filter((gate): gate is NonNullable<ReturnType<typeof readWriteGate>> => gate !== undefined)
+  );
+  const retractedMemories = store.nodes.filter((node) => isRetracted(node)).length;
+  // M4：只统计「带确定性退役标记且召回层确实会排除」的技能，避免把 quarantine 的
+  // 软隐藏误算成符号失效。
+  const symbolRetiredSkills = store.nodes.filter(
+    (node) =>
+      node.type === "Skill" && node.metadata?.unrecallable === true && !isSkillRecallable(node)
+  ).length;
 
   return {
     transport: config.graphPolicy.transport,
@@ -1231,6 +1374,18 @@ export function getFlywheelReport(configPath?: string, rootDir?: string): Flywhe
         adds: consolidationSummary.adds,
         actionable: consolidationActionable,
       },
+    },
+    capability,
+    competence,
+    skillUse,
+    metricDefinitions,
+    memoryGate: {
+      admitted: gateStats.admitted,
+      reviewed: gateStats.reviewed,
+      rejected: gateStats.rejected,
+      rejectReasons: gateStats.rejectReasons,
+      retracted: retractedMemories,
+      symbolRetiredSkills,
     },
     fidelity: {
       estimatedSavingsPercent: getSavingsStats(config).averageSavingsPercent,

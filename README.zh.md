@@ -2,13 +2,13 @@
 
 [English](README.md) | 中文
 
-[![npm version](https://img.shields.io/badge/npm-1.17.1-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.18.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（对现实 top-K 文件读取口径 **95.6%**，见[双基线](benchmarks/RESULTS.md)） · 跨会话学习飞轮。
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
-**v1.17.1** 已发：团队共享记忆 MVP（`graphflow team serve` + RBAC）、**全部 19 个宿主的 install / uninstall / doctor 统一走 HostAdapter**（4 个手写切片 + 通用 profile 切片）、飞轮公开复现（`npm run proof:flywheel`）、Serena 双 MCP 指南，以及 R4 `context-package-core` 与 `runOrchestration` 拆分。v1.14 把对话图做成一等资产（时间边、召回、fork/回放）。v1.12–v1.13 的 fidelity / 治理平面仍在。
+**v1.18.0** 已发：**能力指标取代 token 节省率成为主指标**——`graphflow_diagnose` 新增 `capability`（照抄 SWE-Bench-CL 的持续学习维度：平均准确率 / 遗忘 / 前向迁移 / 工具使用效率 / 复合分）、`competence`（按任务域的能力地图，阈值由 harness 外部强制计算，不用模型自报置信度）、`skillUse`（技能有效使用精度与 shadowing 率）、`memoryGate`（写入显著性门控 + provenance + 软撤回）与 `symbolRetiredSkills`（确定性符号失效取代时间衰减）。token 节省率降为**成本约束项**，不再参与能力分。理由与依据见 [growth-plan](docs/growth-plan.md)。v1.17 的证据诚实性口径、v1.16 的 HostAdapter 全宿主、v1.14 的对话图仍在。
 
 ## 快速开始
 
@@ -34,10 +34,12 @@ MCP 入口：
 
 Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `graphflow_plan`。没有 LLM API Key 时会桥接到宿主 Agent（agent-delegated）。需要符号级精确编辑时，把 Serena 作为第二个 MCP server 并列挂载——见 [GraphFlow + Serena 联合方案](docs/graphflow-serena.zh.md)（配置示例：[`examples/graphflow-serena.mcp.json`](examples/graphflow-serena.mcp.json)）。
 
-## 本版要点（v1.17）
+## 本版要点（v1.18）
 
 | 能力 | 说明 |
 | --- | --- |
+| **能力指标（主指标换轨）** | `graphflow_diagnose.capability`：平均准确率 / 遗忘 / 前向迁移 / 工具使用效率 / 复合分，口径来自 SWE-Bench-CL，不自创。依据表明节省率作为核心指标是错的——削减 38.4% 工具输出 token 反而使计费成本 +6.8%，激进压缩把 SWE-bench Go 子集 patch 成功率从 27/40 打到 15/40（arXiv:2607.12161）。节省率降为成本约束项，**刻意不进入复合分** |
+| **能力地图与记忆治理** | `competence`：按任务域聚合 (n, 成功率, 最近验证时间)，verdict 由 **harness 外部计算**（verified / provisional / unknown），不采用模型自报置信度（校准不等于行动，arXiv:2601.07767）。`memoryGate`：写入显著性门控 + 来源链 + 软撤回，默认 `advisory`（判定并记录但保留证据），`GRAPHFLOW_WRITE_GATE=enforce` 才真正不落库。`symbolRetiredSkills`：确定性符号失效取代时间衰减，无符号可校验的技能不误判为失效 |
 | **Harness** | 记忆动态、按任务召回（图锚点 + 压缩摘要 + 历史 episode + skill），有明确 L0–L3 token 预算；**打包后追加的载荷也计入预算**（`dialogueHits` 单独报为 `unbudgetedTokens`） |
 | **Token 节省（双口径）** | 对现实 top-K 文件读取 **95.6%**；对朴素 grep 基线 98.5%。两者回答不同问题，**不可互换**；现实口径无法自我膨胀。见 [benchmarks/RESULTS.md](benchmarks/RESULTS.md) |
 | **对话图** | 对话在所有代码锚点阶段**之后**注入，纯增量、可证明不挤掉 Symbol/File 锚点；落盘前做**密钥脱敏**（API Key / Bearer / JWT / 连接串 / PEM），`GRAPHFLOW_DIALOGUE_REDACT=0` 可关 |

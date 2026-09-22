@@ -1,6 +1,6 @@
 # GraphFlow 路线图（ROADMAP）
 
-> 最后更新：2026-09-09（v1.17.0：证据诚实性冲刺——L3 对话死代码修复、token 记账与双口径节省、CI 证据去同义反复、对话密钥脱敏）
+> 最后更新：2026-09-10（v1.18.0：能力指标换轨——新增 R6「学习驱动力与证据诚实性」，调研证据见 [docs/growth-plan.md](docs/growth-plan.md)）
 >
 > GraphFlow 是**单人维护**项目（bus factor = 1）。本路线图既是对外承诺，也是社区贡献的入口——欢迎按 [CONTRIBUTING.md](CONTRIBUTING.md) 认领任意 ⬜ / 🟡 事项，直接降低单点风险。
 
@@ -71,7 +71,7 @@
 
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
-| **P0** | **飞轮自动闭环**：hook 式 outcome 自动捕获 + 历史 backfill | ✅ | auto-capture；Claude Code hooks API + **install/doctor 接线**；`npm run backfill:episodes`；v1.9.8 diagnose 暴露 flywheel 健康。Dogfood 非零 skill 靠真实使用积累 |
+| **P0** | **飞轮自动闭环**：hook 式 outcome 自动捕获 + 历史 backfill | ✅ | auto-capture；Claude Code hooks API + **install/doctor 接线**；`npm run backfill:episodes`；v1.9.8 diagnose 暴露 flywheel 健康。Dogfood 非零 skill 靠真实使用积累。**v1.18.0 补注**：捕获已闭环，但**巩固不应无条件闭环**——无门控的持续巩固会让记忆效用先升后降到无记忆基线以下（arXiv:2605.12978），见 R6/M12 |
 | **P1** | **独立 benchmark 公开复现** | ✅ | [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md) + `npm run proof:flywheel`（检索 / 飞轮 A/B / 记忆 A/B）；方法学见 [benchmarks/README.md](benchmarks/README.md) |
 | **P1** | **图噪声治理**：Trie 引用预过滤、子图 PageRank 缓存 | ✅ | v1.9.8 落地；Bloom 非必要（Trie 已覆盖预过滤） |
 | **P1** | **团队共享记忆安全门控**：provenance + canary + anti-pattern 隔离 | ✅ | `canary-gate.ts`；见 [docs/team-memory-security.md](docs/team-memory-security.md) |
@@ -97,6 +97,25 @@
 | **P0** | **W3 多 Agent 轨迹 + fork/回放** | ✅ | dsh glue 监听 `subagent/start|end` 写 `agent-trace` Decision 节点（`GRAPHFLOW_CAPTURE_TRACE` 开关、身份去重、绝不抛入 harness 循环）；`forkDialogueSession` 显式分叉（跨 session next_section 主干 + same_topic 溯源边）；`walkDialoguePath` 回放路径（fork 边界标注）；CLI `dialogue fork --from` / `list --path` / `traces` |
 | **P1** | **W4 面板与导出** | ✅ | `/gf` RPC 数据通道扩展返回 traces；web 面板对话轮显示「修正过结论/fork/跳转」徽章 + Agent 轨迹区块；`artifact export-memory` 新增 `dialogues.md`（会话分组、修正链标注、轨迹列表，含 superseded 历史标记） |
 
+### R6 · 学习驱动力与证据诚实性（v1.18.0 落地，2026-09-10）
+
+> 来源：[docs/growth-plan.md](docs/growth-plan.md)（10 路主题调研 + 4 路对抗验证，约百条来源）。核心判断：**瓶颈不是「记得住」，而是「选得准 + 写得严 + 失效得快」**；四条承重论点经独立红队证伪后**全部降为有条件采纳**（推送式召回、技能库收益、衰减+巩固必要性、token 节省作为北极星）。对外主指标由 token 节省率换成能力指标。
+
+| 优先级 | 事项 | 状态 | 说明与依据 |
+| --- | --- | --- | --- |
+| **P0** | **M1 指标换轨** | ✅ | `capability` 照抄 SWE-Bench-CL 持续学习套件（arXiv:2507.00014）；节省率降为成本约束项且**不进入复合分**（arXiv:2607.12161：削 38.4% token 反而 +6.8% 计费成本） |
+| **P0** | **M2 写入门控 + 撤回链** | 🟡 | `memory-gate.ts` 落地，`memoryGate` 可观测。**默认 `advisory`**（判定并记录但保留证据），`=enforce` 才丢弃。8:1 干扰比的对照实验（arXiv:2603.15994 的 100% vs 13%）尚未在本仓复现 |
+| **P0** | **M3 技能选择精度** | 🟡 | `skillUse` 指标已落地，但仓库无召回遥测 → 恒为 `insufficientData`。下一步：补「召回了哪些 / 实际用了哪个 / 是否有帮助」的 per-run 遥测（shadowing 最多解释 68% 退化，arXiv:2605.24050） |
+| **P0** | **M4 确定性失效替代时间衰减** | ✅ | `skill-staleness.ts` + `indexGraph` 接线；引用符号不可解析即不可召回。无符号技能单列不误判（arXiv:2606.01435） |
+| **P0** | **M5 能力地图（元认知）** | ✅ | `competence` 按域聚合，阈值由 harness 外部强制计算，不用模型自报置信度（校准不等于行动，arXiv:2601.07767） |
+| **P1** | **M6 失败轨迹入库** | ⬜ | ExpeL / SWE-Exp 表明只沉淀成功会丢掉信息量最大的对比信号（arXiv:2507.23361） |
+| **P1** | **M7 禁止有损重写式巩固** | ⬜ | ACE：迭代重写压缩触发 brevity bias 与 context collapse（arXiv:2510.04618）；巩固必须可回溯到原始 episode |
+| **P1** | **M8 可执行验证器替代自报结局** | ⬜ | 自批评缺外部验证器会崩塌（ICLR 2025）；编码域 68–80% 失败是「自信且一致」的语义错误（arXiv:2603.25764） |
+| **P1** | **M9 推送的窄形态** | ⬜ | 只推索引与行为状态、选择性、可沉默；先做真实 A/B（arXiv:2607.27250 注入策略无可测差异；arXiv:2607.08716 选择性推送 +8.3pp） |
+| **P2** | **M10 跨项目抽象** | ⬜ | 证据混杂，**明确允许砍掉**；先做「可迁移 vs 项目约定」判别实验 |
+| **P2** | **M11 反基准** | 🟡 | `metricDefinitions` 已把定义/依据/局限固化进代码；仍需公开 harness、划分、检索种子与 per-case 工件 |
+| **P2** | **M12 巩固自动节律** | ⬜ | **按设计阻塞**：准入条件是 M2/M4/M6/M7 产出正向证据；无证据则保持手动 CLI（arXiv:2605.12978） |
+
 ### R0 · 让飞轮真的转起来（P0，决定项目本质）
 
 | 优先级 | 事项 | 状态 | 说明与依据 |
@@ -120,7 +139,7 @@
 | --- | --- | --- | --- |
 | **P1** | MCP 2.0 无状态规范迁移 | ✅ | SDK 已升 1.30；`server/discover`、JSON Schema 2020-12、全量 `structuredContent`、stdio 握手兼容、Streamable HTTP stateless/stateful 均已落地并有端到端矩阵 |
 | **P1** | Skill 节点对齐 SKILL.md 事实标准 | ✅ | `skill markdown export|import` 双向互操作；导入保守标记 import/correctable，不继承本地成功或 canary 证据 |
-| **P2** | 自适应遗忘机制 | ✅ | 陈旧度 × 失败压力 × 成功保持 × proven 保护的有界衰减曲线；只软衰减，不删除证据节点 |
+| **P2** | 自适应遗忘机制 | 🟡 | 陈旧度 × 失败压力 × 成功保持 × proven 保护的有界衰减曲线；只软衰减，不删除证据节点。**v1.18.0 降为辅助机制**：主机制改为 R6/M4 的确定性符号失效——时间衰减与巩固的净收益**未检索到独立对照实验支撑**，而确定性版本/时间戳判定优于 LLM 时效判断（arXiv:2606.01435） |
 
 ### R3 · 从"记录"到"知识"（P1，产品差异化）
 

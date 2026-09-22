@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-[![npm version](https://img.shields.io/badge/npm-1.17.1-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![npm version](https://img.shields.io/badge/npm-1.18.0-blue)](https://www.npmjs.com/package/@roarpeng/graphflow)
 
 > **The memory & context harness for coding agents.** Local-first code knowledge graph · bounded context compression (95.6% vs a realistic top-K-files read; see [both baseline arms](benchmarks/RESULTS.md)) · cross-session learning flywheel.
 
@@ -86,7 +86,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 
 > The differentiator is the **learning flywheel**: graph indexing and token compression are replicable; project-private experience (skills, lessons, decisions) accumulated across sessions is not — it compounds with use. Serena is a complement, not a competitor — see [GraphFlow + Serena: better together](docs/graphflow-serena.md) ([中文](docs/graphflow-serena.zh.md); [comparison](docs/comparison.md)).
 
-## Core capabilities (v1.17+)
+## Core capabilities (v1.18+)
 
 | Module | Capability |
 | --- | --- |
@@ -99,10 +99,12 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | **Storage backends** | `file` / `memory` / `sqlite` (FTS5, tokenizer-enhanced `searchtext`, camelCase searchable) / **`auto` (sqlite-first with fallback)** / `mcp-http` |
 | **Learning flywheel** | Episodic memory, reflection, skill nodes (score ±1, bounded [-20,20]), nightly training, adaptive evidence-aware forgetting, **auto-capture + Claude Code hooks (on by default)**, **SkillOpt-lite** bounded guidance edits, four-class lifecycle + **canary gate for synced skills**, portable SKILL.md import/export, `npm run backfill:episodes`, contribution reports (`skill report` / `graphflow_diagnose` / `route diagnose`) |
 | **Team sharing** | `graphflow team serve` (tenant + RBAC) + `skill sync export/import/push/pull`; imports/pulls are a **bidirectional MERGE**; golden queries via `.graphflow/team-golden.json`; [security model + ops runbook](docs/team-memory-security.md) |
+| **Capability metrics** | `graphflow_diagnose.capability` — the SWE-Bench-CL continual-learning suite (average accuracy, forgetting, forward transfer, tool-use efficiency, composite; memory-on/off pairing) plus **effective skill-use precision**. Token savings is demoted to a cost constraint and is deliberately **excluded** from the composite. Sample basis excludes retracted / soft-hidden episodes. Rationale and citations: [docs/growth-plan.md](docs/growth-plan.md) |
+| **Competence map & memory governance** | `competence` (per-domain n / pass-rate / last-verified with **harness-computed** thresholds — never model self-reported confidence) · `memoryGate` (write-time salience gate + provenance + soft retraction; `GRAPHFLOW_WRITE_GATE=enforce` to drop rejects) · `symbolRetiredSkills` (**deterministic symbol revalidation** replaces time decay as the staleness mechanism) |
 | **Benchmarks** | [Comprehensive 92.9%](benchmarks/COMPREHENSIVE-RESULTS.md) · [Independent-style 96.2%](benchmarks/INDEPENDENT-RESULTS.md) · [context-readiness eval](benchmarks/SWE-BENCH-RESULTS.md) · token savings with **two baseline arms** — [95.6% realistic / 98.5% naive grep](benchmarks/RESULTS.md) |
 | **Model routing** | Smart / Economy tiers; multi-provider health probes and fallback (DeepSeek, OpenAI, Anthropic, Bailian, Doubao) |
 | **Workbench** | Plan DAG seeds function-topic containers; collapsed outline; click `topicId` to resume; drift forks a side branch; original Q/A stored via `assistantReply` |
-| **Observability** | `graphflow_diagnose` / `route diagnose`: provider health + graph stats + token savings + **flywheel health** (auto-capture, episodes, skills by class, session journal) + workbench outline |
+| **Observability** | `graphflow_diagnose` / `route diagnose`: provider health + graph stats + **capability metrics** (pass rate, forgetting, forward transfer, skill-use precision) + **flywheel health** (auto-capture, episodes, skills by class, session journal) + **memory governance** (write-gate decisions, retractions, symbol-retired skills) + competence map + workbench outline. Token savings is reported as a cost constraint, not as the headline |
 | **Agent surfaces** | CLI `--json`; MCP stdio and Streamable HTTP (stateless JSON or stateful SSE, 10 tools); auto-install into 15+ agents (incl. **Codex Windows NODE/NPX_CLI short-path MCP**). **HostAdapter** registry owns install · uninstall · doctor for **every** registered host: 4 hand-written slices (Cursor / Claude Code / DeepSeek Harness / Kimi Code) + a generic profile-backed slice for the rest |
 | **Evidence & governance** | Outcome evidence packages (commit/diff/tests), evidence backfill, tamper-evident audit chains, ADR/Invariant/APIContract/Test review states, artifact three-way merge/signing/encryption, retention/quarantine, release gates |
 | **Engineering quality** | TypeScript strict; vitest suite; `npm run ci` includes extension packaging and smoke tests |

@@ -6,13 +6,21 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 
 ## 当前版本
 
-- Extension / runtime：**1.17.1**
+- Extension / runtime：**1.18.0**
 - 市场身份：`roarpeng.graphflow`（displayName **GraphFlow Context & Memory**）
-- 对应 VSIX：`../artifacts/graphflow-1.17.1.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
+- 对应 VSIX：`../artifacts/graphflow-1.18.0.vsix`（本地打包）或 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases)
 
 ## Office/PDF 文档转换（anydoc）
 
 在 **GraphFlow: Settings** 的「图谱」区块勾选 **Office / PDF**，需要时点 **安装解析器**。扩展会把 `@firecrawl/anydoc` 下到 `~/.graphflow/optional-deps`。关掉该项会跳过 Office/PDF，源码建图不受影响。
+
+## v1.18.x 要点
+
+- **能力指标取代 token 节省率成为主指标（v1.18.0）**：依据表明节省率作为核心指标是错的——削减 38.4% 工具输出 token 反而使计费成本 +6.8%，且激进压缩会把 SWE-bench Go 子集的 patch 成功率从 27/40 打到 15/40（arXiv:2607.12161）。`graphflow_diagnose` 新增 `capability`，维度照抄 SWE-Bench-CL 的持续学习套件（平均准确率 / 遗忘 / 前向迁移 / 工具使用效率 / 复合分，arXiv:2507.00014）。**token 节省率降为成本约束项，刻意不进入能力复合分**；样本口径排除已撤回 / 软隐藏的 episode
+- **能力地图（v1.18.0）**：新增 `competence`，按任务域聚合 (n, 成功率, 最近验证时间)，verdict（verified / provisional / unknown）由 **harness 外部计算**，不采用模型自报置信度——校准不等于行动（arXiv:2601.07767）。目的是让 Agent 知道「这类工作我从未验证过」，而不是猜自己有多大把握
+- **技能选择精度（v1.18.0）**：新增 `skillUse`，报告技能有效使用精度与 shadowing 率。技能池 5→100 时有效使用精度从 29.6% 掉到 3.3%，退化最多 68% 由「选错技能」解释（arXiv:2605.24050）。仓库当前没有召回遥测，故该指标**诚实返回 `insufficientData`**，不填 0
+- **写入门控与撤回链（v1.18.0）**：新增 `memoryGate`。episode 写入路由过显著性门控（来源可信度 / 新颖度 / 冲突 / 持久性），带 provenance 与**软撤回**（节点不删除，仅从召回路径隐藏，与既有遗忘/隔离语义一致）。社区最痛的事故是记忆污染：临时决策被固化并跨会话传染。默认 `advisory`（判定并记录，但**保留下证据**），`GRAPHFLOW_WRITE_GATE=enforce` 才真正不落库
+- **确定性技能失效（v1.18.0）**：新增 `symbolRetiredSkills`。索引重建时校验技能引用的符号是否仍能解析，解析不到即软退役、**不可召回**——确定性判定优于时间衰减（arXiv:2606.01435）。刻意不用时间衰减作主判据；技能若本来没绑符号则单列为「无法校验」，不误判为失效
 
 ## v1.17.x 要点
 
@@ -58,9 +66,9 @@ GraphFlow 编辑器扩展：在 VS Code / Cursor 内建图、压缩上下文、�
 ### 方式 B：命令行
 
 ```bash
-code --install-extension graphflow-1.17.1.vsix
+code --install-extension graphflow-1.18.0.vsix
 # Cursor CLI（若已安装）：
-cursor --install-extension graphflow-1.17.1.vsix
+cursor --install-extension graphflow-1.18.0.vsix
 ```
 
 ### 安装后推荐流程
@@ -124,7 +132,7 @@ graphflow memory forget <episodeId>           # 删除单条记忆
 
 直接发送 VSIX 文件即可，同事**无需** clone GraphFlow 仓库：
 
-1. 从 Releases 或本地 `artifacts/` 取得 `graphflow-1.17.1.vsix`
+1. 从 Releases 或本地 `artifacts/` 取得 `graphflow-1.18.0.vsix`
 2. 按上文「安装 VSIX」步骤安装
 3. 打开项目 → Settings → 建立图谱
 
@@ -175,7 +183,7 @@ npm run package:extension
 **MCP 未自动安装**
 
 - 命令面板 → **GraphFlow: Install MCP to Agents**
-- 或终端：`npx @roarpeng/graphflow@1.17.1 install`
+- 或终端：`npx @roarpeng/graphflow@1.18.0 install`
 
 **图谱为空 / Preview 0 anchors**
 
@@ -184,7 +192,7 @@ npm run package:extension
 
 **MCP 报错 `unsafe workspace root from discovery: /home/...`**
 
-- 升级到 **1.17.1+**，然后 Settings → **安装 / 更新 MCP**，Reload Window
+- 升级到 **1.18.0+**，然后 Settings → **安装 / 更新 MCP**，Reload Window
 - 工具调用务必传 `rootDir`（项目绝对路径）
 - CLI：`graphflow doctor --json` 查看 MCP/Skill 注册状态
 
