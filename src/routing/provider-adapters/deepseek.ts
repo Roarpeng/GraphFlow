@@ -1,5 +1,6 @@
 import { createTimeoutSignal, isAbortError } from "../../core/cancellation";
 import { logger } from "../../utils/logger";
+import { recordProviderError } from "../provider-errors";
 import {
   asRecord,
   pickChatContent,
@@ -110,6 +111,7 @@ export async function deepseekGenerateTextDetailed(
     }
     const message = error instanceof Error ? error.message : String(error);
     logger.error({ error: message }, "DeepSeek provider adapter caught error");
+    recordProviderError("deepseek", message);
     if (strict) {
       throw error;
     }

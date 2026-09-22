@@ -206,10 +206,15 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     } catch {
       // Mechanism status is advisory; diagnose must stay best-effort.
     }
+    // Ground truth over config-presence health: real bounded round-trips for
+    // the active planner/worker selections (config can say "healthy" while
+    // every actual call fails on a revoked key).
+    const { probeRoutingConnectivity } = await import("./runtime/routing.js");
+    data.connectivityProbes = await probeRoutingConnectivity(configPath);
     return {
       command: "diagnose",
       data,
-      legacyText: diagnoseRouting(configPath, data),
+      legacyText: diagnoseRouting(configPath, data, data.connectivityProbes),
     };
   }
 
@@ -1411,10 +1416,12 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     const data = diagnoseRoutingResult(configPath);
     const { probeTeamDiagnosis } = await import("../team/diagnose.js");
     data.team = await probeTeamDiagnosis(configPath);
+    const { probeRoutingConnectivity } = await import("./runtime/routing.js");
+    data.connectivityProbes = await probeRoutingConnectivity(configPath);
     return {
       command: "route-diagnose",
       data,
-      legacyText: diagnoseRouting(configPath, data),
+      legacyText: diagnoseRouting(configPath, data, data.connectivityProbes),
     };
   }
 
@@ -1820,7 +1827,13 @@ function formatValidationResult(data: ConfigValidationResult): string {
  */
 async function runFirstUseBootstrap(command: string): Promise<void> {
   if (process.env.GRAPHFLOW_SKIP_POSTINSTALL === "1" || process.env.CI === "true") return;
-  if (command === "help" || command === "--help" || command === "-h" || command === "version" || command === "--version" || command === "-v") return;
+  // Read-only diagnostics must never mutate the machine: doctor/diagnose on a
+  // fresh box stay pure observations instead of triggering the installer.
+  const readOnlyCommands = new Set([
+    "help", "--help", "-h", "version", "--version", "-v",
+    "doctor", "diagnose", "audit",
+  ]);
+  if (readOnlyCommands.has(command)) return;
   const markerPath = join(homedir(), ".graphflow-install-version");
   try {
     if (existsSync(markerPath)) return;

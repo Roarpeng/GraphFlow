@@ -308,6 +308,13 @@ export interface RunTaskSummary {
 export interface RoutingDiagnosisResult {
   dynamicRouting: boolean;
   health: Record<"openai" | "anthropic" | "bailian" | "doubao" | "deepseek", boolean>;
+  /**
+   * Real apikey+baseUrl+model round-trips for the active planner/worker
+   * selections. `health` above is CONFIG-PRESENCE derived and can be true
+   * while every actual call fails (e.g. revoked key); these probes are the
+   * ground truth. Attached by the diagnose CLI surface only (bounded).
+   */
+  connectivityProbes?: RoutingConnectivityProbe[];
   priority: string[];
   planner: {
     provider: string;
@@ -484,6 +491,22 @@ export interface PlanPreviewResult {
     avoidPatterns?: string[];
   }>;
   nodesStatus?: "suggested" | "final";
+  /**
+   * Where this plan actually came from (first-class, machine-readable — the
+   * same story agentInstructions tells in prose):
+   * - `llm`: pre-flight probe passed AND both brainstorm + decomposition
+   *   returned real model output (nodesStatus=final).
+   * - `probe-failed-bridge`: pre-flight connectivity probe failed → template
+   *   suggestion + agent bridge, LLM plan never attempted.
+   * - `llm-failed-bridge`: probe passed but brainstorm/decomposition failed
+   *   or timed out → template suggestion + agent bridge.
+   * - `no-llm-bridge`: no usable provider credentials at all.
+   */
+  planSource?: "llm" | "probe-failed-bridge" | "llm-failed-bridge" | "no-llm-bridge";
+  /** Pre-flight planner round-trip performed for this plan (when one ran). */
+  probe?: RoutingConnectivityProbe;
+  /** Why a bridge/degrade happened; absent when planSource is `llm`. */
+  degradeReason?: string;
   agentWorkItems?: AgentWorkItem[];
   agentInstructions?: string;
   status?: "awaiting-agent" | "complete";

@@ -43,6 +43,7 @@ import {
   type ProviderName,
 } from "../../../routing/model-router";
 import { buildFallbackChain, buildProviderHealthMap } from "../../../routing/provider-health";
+import { getLastProviderError } from "../../../routing/provider-errors";
 import { executeRolePrompt } from "../../../routing/provider-executor";
 import {
   mergeAgentInsightsFromGraph,
@@ -308,11 +309,26 @@ function computeModelCacheDiagnosis() {
   return { exists, path: cacheDir, resolution };
 }
 
-export function diagnoseRouting(configPath?: string, result = diagnoseRoutingResult(configPath)): string {
+export function diagnoseRouting(
+  configPath?: string,
+  result = diagnoseRoutingResult(configPath),
+  probes?: RoutingConnectivityProbe[]
+): string {
   const experience = result.flywheel?.experience;
+  const probeSegment =
+    probes && probes.length > 0
+      ? `probe=` +
+        probes
+          .map(
+            (p) =>
+              `${p.role}:${p.ok ? `ok(${p.latencyMs ?? "?"}ms)` : `FAIL(${p.error ?? "no reply"})`}`
+          )
+          .join("|")
+      : "";
   return [
     `dynamicRouting=${result.dynamicRouting ? "on" : "off"}`,
-    `health=openai:${result.health.openai},anthropic:${result.health.anthropic},bailian:${result.health.bailian},doubao:${result.health.doubao},deepseek:${result.health.deepseek}`,
+    `health(configured)=openai:${result.health.openai},anthropic:${result.health.anthropic},bailian:${result.health.bailian},doubao:${result.health.doubao},deepseek:${result.health.deepseek}`,
+    ...(probeSegment ? [probeSegment] : []),
     `priority=${result.priority.join(",")}`,
     `planner=${result.planner.provider}/${result.planner.model}${result.planner.fallbackApplied ? ":fallback" : ""}`,
     `worker=${result.worker.provider}/${result.worker.model}${result.worker.fallbackApplied ? ":fallback" : ""}`,
@@ -370,6 +386,10 @@ async function probeRoleConnectivity(
       /^\[(openai|anthropic|bailian|doubao|deepseek):/i.test(cleaned) ||
       cleaned.includes("Reply with exactly");
     const ok = cleaned.length > 0 && cleaned.length <= 200 && !masked;
+    // Read AFTER the call: a masked echo means the adapter swallowed the real
+    // error into the side channel during this very probe (or a prior call in
+    // the same process).
+    const lastAdapterError = ok ? undefined : getLastProviderError(selection.provider);
     return {
       role,
       provider: selection.provider,
@@ -392,7 +412,10 @@ async function probeRoleConnectivity(
                       : "OPENAI_API_KEY"
             ]?.trim()
               ? "Missing provider credentials (config not applied or apiKey empty)"
-              : "Provider returned placeholder/echo fallback output (masked failure), not a real completion",
+              : `Provider returned placeholder/echo fallback output (masked failure), not a real completion` +
+                (lastAdapterError
+                  ? `; last adapter error: ${lastAdapterError.message}`
+                  : "; no adapter error recorded"),
           }),
     };
   } catch (error) {
@@ -408,12 +431,20 @@ async function probeRoleConnectivity(
 }
 
 export async function probeRoutingConnectivity(
-  configPath?: string
+  configPath?: string,
+  timeoutMs = 5_000
 ): Promise<RoutingConnectivityProbe[]> {
   const diagnosis = diagnoseRoutingResult(configPath);
+  const withTimeout = (role: "planner" | "worker", selection: ModelSelection) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    return probeRoleConnectivity(role, selection, controller.signal).finally(() =>
+      clearTimeout(timer)
+    );
+  };
   return Promise.all([
-    probeRoleConnectivity("planner", diagnosisRoleToSelection("planner", diagnosis)),
-    probeRoleConnectivity("worker", diagnosisRoleToSelection("worker", diagnosis)),
+    withTimeout("planner", diagnosisRoleToSelection("planner", diagnosis)),
+    withTimeout("worker", diagnosisRoleToSelection("worker", diagnosis)),
   ]);
 }
 
@@ -446,7 +477,12 @@ export async function planAndBrainstormResult(
     const delegated = buildAgentDelegatedSimplePlan(task, skillCondition);
     const steps = delegated.suggestedNodes ?? delegated.nodes;
     const workbench = await maybeSeedWorkbench(task, steps, configPath);
-    return workbench ? { ...delegated, workbench } : delegated;
+    const withSource = {
+      ...delegated,
+      planSource: "no-llm-bridge" as const,
+      degradeReason: "No usable GraphFlow LLM provider is configured (missing api key); the connected agent must decompose this task.",
+    };
+    return workbench ? { ...withSource, workbench } : withSource;
   }
 
   // LLM credentials exist → prefer real model-driven decomposition over the
@@ -484,15 +520,19 @@ export async function planAndBrainstormResult(
     clearTimeout(probeTimer);
   }
   if (!probe.ok) {
-    const bridged = buildLlmDegradedSimplePlan(
-      task,
-      skillCondition,
+    const probeFailedReason =
       `planner connectivity probe failed: ${probe.error ?? "no usable reply"} ` +
-        `(latency ${probe.latencyMs}ms); bridging to the connected agent ` +
-        `without attempting the LLM plan (provider ${selection.provider}/${selection.model})`
-    );
+      `(latency ${probe.latencyMs}ms); bridging to the connected agent ` +
+      `without attempting the LLM plan (provider ${selection.provider}/${selection.model})`;
+    const bridged = buildLlmDegradedSimplePlan(task, skillCondition, probeFailedReason);
     const workbench = await maybeSeedWorkbench(task, bridged.nodes, configPath);
-    return workbench ? { ...bridged, workbench } : bridged;
+    const withSource = {
+      ...bridged,
+      planSource: "probe-failed-bridge" as const,
+      probe,
+      degradeReason: probeFailedReason,
+    };
+    return workbench ? { ...withSource, workbench } : withSource;
   }
 
   const [llmIdeas, llmNodes] = await Promise.all([
@@ -525,6 +565,8 @@ export async function planAndBrainstormResult(
       nodesStatus: "final" as const,
       complete: true,
       requiresAgentBridge: false,
+      planSource: "llm" as const,
+      probe,
     };
     const workbench = await maybeSeedWorkbench(task, nodes, configPath);
     return workbench ? { ...result, workbench } : result;
@@ -536,14 +578,18 @@ export async function planAndBrainstormResult(
     llmIdeas === null ? "brainstorm" : null,
     llmNodes === null ? "plan decomposition" : null,
   ].filter((stage): stage is string => stage !== null);
-  const degraded = buildLlmDegradedSimplePlan(
-    task,
-    skillCondition,
+  const degradedReason =
     `LLM ${failedStages.join(" + ")} failed or timed out after ${planLlmTimeoutMs}ms ` +
-      `(provider ${selection.provider}/${selection.model})`
-  );
+    `(provider ${selection.provider}/${selection.model})`;
+  const degraded = buildLlmDegradedSimplePlan(task, skillCondition, degradedReason);
   const workbench = await maybeSeedWorkbench(task, degraded.nodes, configPath);
-  return workbench ? { ...degraded, workbench } : degraded;
+  const withSource = {
+    ...degraded,
+    planSource: "llm-failed-bridge" as const,
+    probe,
+    degradeReason: degradedReason,
+  };
+  return workbench ? { ...withSource, workbench } : withSource;
 }
 
 export async function planAndBrainstorm(task: string, configPath?: string): Promise<string> {
@@ -555,10 +601,17 @@ export async function planAndBrainstorm(task: string, configPath?: string): Prom
     result.requiresAgentBridge === true
       ? `; bridge=awaiting-agent; workItems=${result.agentWorkItems?.length ?? 0}`
       : "";
+  // Plan provenance is part of the answer, not a footnote: a bridged plan
+  // must never read the same as a model-produced final DAG.
+  const source =
+    result.planSource !== undefined
+      ? `; source=${result.planSource}` +
+        (result.degradeReason ? `; reason=${result.degradeReason}` : "")
+      : "";
   return [
     `mode=${result.mode}`,
     `ideas=${result.ideas.join(" | ")}`,
-    `plan=${planPart}${bridge}`,
+    `plan=${planPart}${bridge}${source}`,
   ].join("; ");
 }
 
