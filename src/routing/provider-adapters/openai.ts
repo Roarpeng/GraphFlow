@@ -1,5 +1,6 @@
 import { createTimeoutSignal, isAbortError } from "../../core/cancellation";
 import { logger } from "../../utils/logger";
+import { recordProviderError } from "../provider-errors";
 import {
   asRecord,
   pickChatContent,
@@ -70,6 +71,7 @@ export async function openaiGenerateText(request: ProviderTextRequest): Promise<
     }
     const message = error instanceof Error ? error.message : String(error);
     logger.error({ error: message }, "Provider adapter caught error");
+    recordProviderError("openai", message);
     if (strict) {
       throw error;
     }

@@ -1,5 +1,6 @@
 import { createTimeoutSignal, isAbortError } from "../../core/cancellation";
 import { logger } from "../../utils/logger";
+import { recordProviderError } from "../provider-errors";
 import type { ProviderTextRequest } from "./openai";
 
 export async function bailianGenerateText(request: ProviderTextRequest): Promise<string> {
@@ -57,6 +58,7 @@ export async function bailianGenerateText(request: ProviderTextRequest): Promise
       { error: error instanceof Error ? error.message : String(error) },
       "Provider adapter caught error"
     );
+    recordProviderError("bailian", error instanceof Error ? error.message : String(error));
     if (strict) {
       throw error;
     }

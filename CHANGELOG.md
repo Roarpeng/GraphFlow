@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed — 诚实性收口（live 验收发现的问题批次）
+
+- **plan 来源一等字段（planSource）**：`graphflow_plan` 结果新增 `planSource`（`llm` | `probe-failed-bridge` | `llm-failed-bridge` | `no-llm-bridge`）+ `probe`（探测结果）+ `degradeReason`（降级原因）；CLI 文本输出同步打印 `source=...; reason=...`——桥接计划从此不可能读起来像真模型产出。前置问候探测（v1.25.0 已有）live 验证确实在用：坏 key 下 `source=probe-failed-bridge`，LLM 计划从未被尝试。
+- **provider 适配器真实错误旁路透出**：非严格模式适配器故意把失败回显成 `[provider:model] <prompt>`（弹性设计，保留），但底层原因（401/配额/网络）此前完全不可见。新增 `src/routing/provider-errors.ts` 旁路记录（无依赖、防循环导入），五个适配器 catch 路径写入；连通性探针的 masked-failure 错误现在附带 `last adapter error: openai http 401: ...`（live 与 curl 地面真值一致）。
+- **diagnose 区分 configured 与 reachable**：`health=` 更名 `health(configured)=`（配置存在性派生），CLI `diagnose` / `route diagnose` 叠加真实 planner/worker 问候探测（5s 有界，`probe=planner:FAIL(原因)|worker:FAIL(原因)`）——撤销的 key 不再显示为健康（live：configured 全 true 而 probe 全 FAIL，原因 401 透出）。
+- **memory search 零证据命中过滤**：`memory search` 此前把 Jaccard=0 的 episode 打成 `score=0.000` 的"命中"（候选扫描拉全量、两路排名均无信号）。现无条件过滤零词面重叠命中（"evidence, not judge"——在能透出 cosine 证据之前，0 分命中就是噪声）；live：无重叠查询诚实返回 `hits=0`，有重叠返回 1.000。
+- **doctor 只读**：首用自举安装器（`runFirstUseBootstrap`）豁免 `doctor` / `diagnose` / `audit`——只读诊断命令不再有安装副作用（live：删除 marker 后运行 doctor，纯诊断输出、marker 未写入）。
+- **AGENTS.md npx 版本漂移警告**：`npx -y --package=@roarpeng/graphflow` 的缓存键不含版本，装过旧版的机器会静默继续服务旧 server（live 实测握手 1.3.3 + 21 个旧命名工具）。推荐配置改为全局安装 + 直接 `graphflow-mcp` 入口，npx 形式附带验证/清缓存指引。
+
+### Tests
+
+- 新增 `tests/m-plan-provenance.test.ts`（5 用例）：masked 回显→probe-failed-bridge（带真实适配器错误）、探测抛错→原因透出、探测过/分解失败→llm-failed-bridge、全通→llm+final、memory 零证据过滤。
+
 ## [1.25.1] - 2026-09-20
 
 ### Fixed — Windows CI 平台适配（v1.24.0 起的 validate-platforms 红灯）

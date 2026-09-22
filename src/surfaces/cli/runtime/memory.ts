@@ -122,12 +122,19 @@ export async function searchEpisodes(
   const episodes = await findSimilarEpisodes(graphClient, query, limit, embeddingProvider);
 
   const queryTokens = new Set(extractTaskTokens(query));
-  return episodes.map((rec) => ({
+  const hits = episodes.map((rec) => ({
     id: rec.id,
     task: truncate(rec.task, 80),
     score: jaccardScore(rec.task, queryTokens),
     outcome: normalizeOutcome(rec.outcome),
   }));
+  // Zero-overlap hits have NO auditable evidence behind them: this CLI only
+  // shows the Jaccard score, and semantic candidates from the embedding arm
+  // would surface as "hits" with score 0.000 — ranking noise printed as
+  // results. Memory search is "evidence, not judge": until cosine evidence
+  // is surfaced per hit, zero-Jaccard episodes are filtered outright.
+  const lexical = hits.filter((hit) => hit.score > 0);
+  return lexical;
 }
 
 /**
