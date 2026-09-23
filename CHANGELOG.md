@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [1.26.0] - 2026-09-23
 
 ### Added — 桥接优先与可信度收口（round 4）
 
@@ -24,7 +24,7 @@ All notable changes to this project are documented in this file.
 - **mock-vs-real 桥接差异根因关闭**：此前 vi.mock 下桥接测试只能得到 `HUMAN_REVIEW_REQUIRED`（无 descriptor/episode）——根因是 mock 工厂只提供 `executeRolePrompt`，而 orchestrator-phases / state-machine 还从该模块**值导入** `formatPromptContextEntries`，undefined 调用抛错后被 orchestrator 顶层 catch 伪装成 HUMAN_REVIEW。工厂改为 `importOriginal` 保真其余导出后，mock 下同样得到完整 `DELEGATED + attempts=0 + descriptor + episode`，断言已恢复为完整形状。（产品代码无缺陷；该模式风险已在测试内注释警示。）
 - README / README.zh：补 `graphflow selfcheck` 与「LLM 不可用时 plan/run 桥接优先」的用户文档（中英）。
 
-## [Unreleased - round 3]
+## [1.26.0 内轮次 3]
 
 ### Fixed — 第三轮深挖：任务回显技能门 + delta 合并 394 倍性能修复（虚假问题清零批次）
 
@@ -42,7 +42,7 @@ All notable changes to this project are documented in this file.
 
 - 新增 `tests/m-task-echo-skill.test.ts`（2 用例）：任务回显原子丢弃 + 任意扩展名垃圾清理。
 
-## [Unreleased - deep-dive round 2]
+## [1.26.0 内轮次 2]
 
 ### Fixed — 第二轮深挖：配置链诚实性 + 证据分级（live 驱动）
 
@@ -68,7 +68,7 @@ All notable changes to this project are documented in this file.
 - 失败 run（HUMAN_REVIEW_REQUIRED）仍会产出以任务文本命名的垃圾技能（`create-a-tiny-file-...`）——v1.25.0 的逐 atom 质量门未拦住任务名直录；建议在 applySkillLearning 前按 outcome 过滤或收紧名字门。
 - `graphflow team serve` / RBAC 未在本轮 live 验证范围。
 
-## [Unreleased - honesty round 1]
+## [1.26.0 内轮次 1]
 
 ### Fixed — 诚实性收口（live 验收发现的问题批次）
 
