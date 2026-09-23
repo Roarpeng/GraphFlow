@@ -141,10 +141,12 @@ describe("M17 release readiness", () => {
         "utf8"
       );
 
-      // orchestrator 顶层错误边界现在将未捕获异常收敛为 HUMAN_REVIEW_REQUIRED 状态，
-      // 不再裸抛给调用方（见 CHANGELOG v1.0.0）
+      // Round 4: a dead/mis-credentialed provider is pre-flight probed and
+      // treated as "no LLM" — the run DELEGATES to the bridge (attempts=0)
+      // instead of burning worker retries on adapter echoes. The learning
+      // event must still record a non-passed outcome either way.
       const output = await runTask("force a failure", configPath);
-      expect(output).toContain("HUMAN_REVIEW_REQUIRED");
+      expect(output).toMatch(/status=(DELEGATED|HUMAN_REVIEW_REQUIRED)/);
 
       const lines = readFileSync(eventsPath, "utf8")
         .split(/\r?\n/)

@@ -294,6 +294,12 @@ export interface RunTaskSummary {
   status: TaskStatus;
   attempts: number;
   feedback: string;
+  /**
+   * Present when the LLM was configured but the pre-flight round-trip
+   * failed, so execution fell back to bridge mode exactly as if no LLM
+   * existed — the reason must stay visible (never a silent mode switch).
+   */
+  bridgeReason?: string;
   /** Worker's final textual answer (present on llm-mode completions). */
   result?: string;
   episodeId?: string;

@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added — 桥接优先与可信度收口（round 4）
+
+- **run 把不可用的 LLM 当作没有 LLM**：`runTaskResult` 前置 worker 问候往返（默认 5s 有界，`GRAPHFLOW_RUN_PROBE_TIMEOUT_MS` 可调）——探测失败即切 bridge 模式，与未配置 LLM 的行为**完全一致**：返回 `DELEGATED + executionDescriptor + episode`，`RunTaskSummary.bridgeReason` 携带真实原因（含适配器旁路的 401 详情）。此前坏 key 会烧满 3 次 worker 重试全部拿到占位符（live：现在 attempts=0、零 LLM 执行调用）。plan 侧同语义（`planSource: probe-failed-bridge`）在上一轮已落地——至此 plan/run 对"探针失败=未配置"完全对齐。
+- **`graphflow selfcheck`**：一条只读命令的红绿健康清单（8 项）：配置加载 / 图存储（含代码节点存在性）/ delta 日志规模 / 索引新鲜度 / **LLM 真实连通探测**（区分 configured 与 reachable）/ 飞轮脉冲（pending 比例）/ 对话脱敏函数级抽查 / 会话日志。每一项都源自某轮 live 验收发现过的静默故障模式。`--json` 支持；有 FAIL 时退出码非零。
+- **LLM_SMOKE 可选 CI 门**：`scripts/llm-smoke.ts` + CI job——配置了 `GRAPHFLOW_LLM_SMOKE_KEY` secret 时跑一次**真** plan 往返并断言 `planSource=llm`；无 secret 静默跳过。填补"离线测试全绿、真 provider 已坏"的盲区（本机 401 失效 key 正是这类）。
+
+### Changed
+
+- **delta 折叠阈值 8MB → 2MB**：真实世界 delta 常年挂 1-5MB，每次读取都多付一次 apply；2MB 仍能摊销批量写，同时把读侧开销封顶（重写后最坏 ~80ms）。
+
+### Confirmed（非缺陷登记）
+
+- team serve 的 `tools/list` 返回空是**设计**：团队服务器是自定义 `graph.*` / `team.*` JSON-RPC 协议面（GraphifyMcpClient 的对端），不是 MCP tools 面。
+
+### Tests
+
+- 新增 `tests/m-run-bridge-selfcheck.test.ts`（4 用例）：占位符回显→桥接且零 LLM 执行调用、健康探测→仍走 llm、selfcheck 无 LLM 配置全绿、坏配置红。真实不可达端点的完整 `DELEGATED` 形状经 live 双重验证（CLI + 独立脚本）。
+
+## [Unreleased - round 3]
+
 ### Fixed — 第三轮深挖：任务回显技能门 + delta 合并 394 倍性能修复（虚假问题清零批次）
 
 - **任务回显永不成为技能**：`applySkillLearning` 现在丢弃与任务文本互含且长度 ≥80% 的"原子"——抽取器对单句任务无法切分时会原样复读任务全文（live：`create a tiny file test-tmp.txt with content hi` 成了技能名，且来自一次 HUMAN_REVIEW_REQUIRED 的失败 run）。提炼型子短语与 lessons 种子不受影响。

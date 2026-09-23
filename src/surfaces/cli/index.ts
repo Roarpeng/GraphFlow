@@ -150,6 +150,19 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
+  if (command === "selfcheck") {
+    const { runSelfcheck, formatSelfcheckText } = await import("./runtime/selfcheck.js");
+    const data = await runSelfcheck(configPath);
+    if (!data.ok) {
+      process.exitCode = 1;
+    }
+    return {
+      command: "selfcheck",
+      data,
+      legacyText: formatSelfcheckText(data),
+    };
+  }
+
   if (command === "doctor") {
     const { buildDoctorReport, formatDoctorLegacyText } = require("./init") as typeof import("./init");
     const data = buildDoctorReport(process.cwd());

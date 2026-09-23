@@ -33,7 +33,13 @@ interface GraphStore {
  */
 export const GRAPH_STORE_DELTA_SUFFIX = ".delta.jsonl";
 /** Compact the delta into the base store once it exceeds this size. */
-export const GRAPH_STORE_DELTA_COMPACT_BYTES = 8 * 1024 * 1024;
+/**
+ * Delta logs fold back into the base store above this size. Historically 8MB,
+ * which let real-world logs sit at 1-5MB for weeks — every read then paid a
+ * delta apply on top of the base parse. 2MB still amortizes batched writes
+ * while keeping the read-side overhead bounded (~80ms at worst post-rewrite).
+ */
+export const GRAPH_STORE_DELTA_COMPACT_BYTES = 2 * 1024 * 1024;
 /**
  * Only large base stores use a delta log. Below this size a full rewrite is
  * cheap, so small/medium projects keep the historical layout: exactly one

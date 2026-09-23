@@ -99,14 +99,40 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       (config.graphPolicy.compression?.enableAdaptiveBudget === true ||
         taskComplexity === "complex");
     const hasExternalLlm = hasUsableLlmProvider(config);
+    // Pre-flight worker round-trip: an unreachable/mis-credentialed provider
+    // must behave EXACTLY like no provider at all. Without this, a revoked
+    // key burned the full retry budget on adapter echo placeholders (3 ×
+    // HUMAN_REVIEW_REQUIRED) instead of handing the task to the connected
+    // agent via bridge mode (live finding on a 401'd key).
+    let executionMode: "llm" | "bridge" = hasExternalLlm ? "llm" : "bridge";
+    let bridgeReason: string | undefined;
+    if (hasExternalLlm) {
+      const rawProbeMs = Number.parseInt(process.env.GRAPHFLOW_RUN_PROBE_TIMEOUT_MS ?? "", 10);
+      const probeMs = Number.isFinite(rawProbeMs) && rawProbeMs > 0 ? rawProbeMs : 5_000;
+      const selection = resolveModelForRole("worker", configPath);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), probeMs);
+      try {
+        const probe = await probeRoleConnectivity("worker", selection, controller.signal);
+        if (!probe.ok) {
+          executionMode = "bridge";
+          bridgeReason =
+            `worker connectivity probe failed: ${probe.error ?? "no usable reply"} ` +
+            `(latency ${probe.latencyMs}ms, provider ${selection.provider}/${selection.model}) — ` +
+            `treating the LLM as unavailable and bridging to the connected agent`;
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    }
     const orchestrateOptions: OrchestrateOptions = {
       graphClient,
       enableAutoGraphSync: config.graphPolicy.enableAutoBuild,
       maxContextTokens: config.graphPolicy.maxContextTokens,
       enableEpisodicMemory: config.learningPolicy.enableFlywheel,
-      enableLlmAgents: hasExternalLlm,
+      enableLlmAgents: executionMode === "llm",
       enableLlmTriage: false,
-      executionMode: hasExternalLlm ? "llm" : "bridge",
+      executionMode,
       ...(configPath ? { configPath } : {}),
       ...embeddingOptions,
       ...(config.skillPolicy?.enableSkillFlywheel
@@ -148,6 +174,7 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       status: result.status,
       attempts: result.attempts,
       feedback: result.feedback,
+      ...(bridgeReason ? { bridgeReason } : {}),
       ...(result.result ? { result: result.result } : {}),
       ...(result.episodeId ? { episodeId: result.episodeId } : {}),
       ...(result.executionDescriptor ? { executionDescriptor: result.executionDescriptor } : {}),
