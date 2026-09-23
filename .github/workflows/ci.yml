@@ -10,6 +10,49 @@ jobs:
   validate:
     uses: ./.github/workflows/validate.yml
 
+  # Opt-in live LLM gate: with GRAPHFLOW_LLM_SMOKE_KEY configured as a repo
+  # secret, one REAL plan round-trip must report planSource=llm. Catches the
+  # "offline tests green, real provider broken" class of regression (revoked
+  # key, changed API shape, routing drift). Without the secret the job is a
+  # silent no-op.
+  llm-smoke:
+    runs-on: ubuntu-latest
+    env:
+      HAS_SMOKE_KEY: ${{ secrets.GRAPHFLOW_LLM_SMOKE_KEY != '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Enable package manager
+        run: corepack enable
+
+      - name: Install root dependencies
+        run: npm ci --no-audit
+        env:
+          GRAPHFLOW_SKIP_POSTINSTALL: "1"
+          HUSKY: "0"
+
+      - name: Live LLM plan round-trip
+        if: env.HAS_SMOKE_KEY == 'true'
+        run: npx tsx scripts/llm-smoke.ts
+        env:
+          GRAPHFLOW_LLM_SMOKE_KEY: ${{ secrets.GRAPHFLOW_LLM_SMOKE_KEY }}
+          GRAPHFLOW_LLM_SMOKE_PROVIDER: ${{ vars.LLM_SMOKE_PROVIDER || 'deepseek' }}
+          GRAPHFLOW_LLM_SMOKE_BASE_URL: ${{ vars.LLM_SMOKE_BASE_URL || 'https://api.deepseek.com' }}
+          GRAPHFLOW_LLM_SMOKE_MODEL: ${{ vars.LLM_SMOKE_MODEL || 'deepseek-v4-flash' }}
+
+      - name: Report skip
+        if: env.HAS_SMOKE_KEY != 'true'
+        run: echo "[llm-smoke] GRAPHFLOW_LLM_SMOKE_KEY secret not configured — live LLM gate skipped (opt-in)."
+
   skill-ab-benchmark:
     runs-on: ubuntu-latest
 
