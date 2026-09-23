@@ -21,6 +21,8 @@ All notable changes to this project are documented in this file.
 ### Tests
 
 - 新增 `tests/m-run-bridge-selfcheck.test.ts`（4 用例）：占位符回显→桥接且零 LLM 执行调用、健康探测→仍走 llm、selfcheck 无 LLM 配置全绿、坏配置红。真实不可达端点的完整 `DELEGATED` 形状经 live 双重验证（CLI + 独立脚本）。
+- **mock-vs-real 桥接差异根因关闭**：此前 vi.mock 下桥接测试只能得到 `HUMAN_REVIEW_REQUIRED`（无 descriptor/episode）——根因是 mock 工厂只提供 `executeRolePrompt`，而 orchestrator-phases / state-machine 还从该模块**值导入** `formatPromptContextEntries`，undefined 调用抛错后被 orchestrator 顶层 catch 伪装成 HUMAN_REVIEW。工厂改为 `importOriginal` 保真其余导出后，mock 下同样得到完整 `DELEGATED + attempts=0 + descriptor + episode`，断言已恢复为完整形状。（产品代码无缺陷；该模式风险已在测试内注释警示。）
+- README / README.zh：补 `graphflow selfcheck` 与「LLM 不可用时 plan/run 桥接优先」的用户文档（中英）。
 
 ## [Unreleased - round 3]
 

@@ -61,7 +61,9 @@ npx @roarpeng/graphflow@latest uninstall  # 一键移除所有 Agent 上的注�
 - 经常使用建议全局安装省去每次 npx 解析：`npm install -g @roarpeng/graphflow`，之后直接 `graphflow install` / `graphflow doctor`。
 - DSH（DeepSeek Harness）走插件路径 `dsh plugin --profile web add @roarpeng/graphflow`，与 `install` **二选一**，叠加会重复加载（见下文 DSH 章节）。
 
-Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `graphflow_plan`。没有 LLM API Key 时会桥接到宿主 Agent（agent-delegated）。需要符号级精确编辑时，把 Serena 作为第二个 MCP server 并列挂载——见 [GraphFlow + Serena 联合方案](docs/graphflow-serena.zh.md)（配置示例：[`examples/graphflow-serena.mcp.json`](examples/graphflow-serena.mcp.json)）。
+Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `graphflow_plan`。没有 LLM API Key（或 Key 已失效——plan/run 都会做真实问候探测）时会桥接到宿主 Agent（agent-delegated）：`graphflow_plan` 返回 `planSource: "probe-failed-bridge"` + 降级原因，`graphflow_run` 直接 `DELEGATED`（attempts=0 + executionDescriptor + bridgeReason）——坏 Key 与没配 Key 行为完全一致，不会把重试预算烧在占位符上。需要符号级精确编辑时，把 Serena 作为第二个 MCP server 并列挂载——见 [GraphFlow + Serena 联合方案](docs/graphflow-serena.zh.md)（配置示例：[`examples/graphflow-serena.mcp.json`](examples/graphflow-serena.mcp.json)）。
+
+健康自检一条命令：`graphflow selfcheck`（配置加载 / 图存储代码节点 / delta 日志 / 索引新鲜度 / **LLM 真实连通** / 飞轮脉冲 / 对话脱敏 / 会话日志，红绿清单，`--json` 可编程消费）。
 
 ## 核心能力
 

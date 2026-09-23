@@ -4,9 +4,14 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getDefaultConfig } from "../src/config/defaults";
 
-vi.mock("../src/routing/provider-executor", () => ({
-  executeRolePrompt: vi.fn(),
-}));
+// Keep every other export real: orchestrator-phases / state-machine import
+// formatPromptContextEntries as a VALUE from this module — a factory that
+// only stubs executeRolePrompt leaves it undefined, the bridge phase throws,
+// and the top-level catch disguises it as HUMAN_REVIEW_REQUIRED.
+vi.mock("../src/routing/provider-executor", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/routing/provider-executor")>();
+  return { ...actual, executeRolePrompt: vi.fn() };
+});
 
 import { executeRolePrompt } from "../src/routing/provider-executor";
 import { runTaskResult } from "../src/surfaces/cli/runtime/routing";
@@ -52,20 +57,18 @@ describe("run treats an unusable LLM exactly like no LLM (auto-bridge)", () => {
     try {
       mockedExec.mockResolvedValue("[openai:test-model] Reply with exactly: ok");
       const summary = await runTaskResult("do something small", configPath);
-      // The essential contract: an unusable LLM is treated exactly like no
-      // LLM — bridged with a visible reason, never a faked COMPLETED, and
-      // the worker is never asked to execute (only the probe round-tripped).
-      expect(summary.status).not.toBe("COMPLETED");
+      // The full contract, now asserted under mock too (the earlier
+      // mock-only HUMAN_REVIEW was the factory missing exports, not product
+      // behavior): unusable LLM == no LLM — DELEGATED, zero worker calls,
+      // visible reason, descriptor + episode for the bridge loop.
+      expect(summary.status).toBe("DELEGATED");
+      expect(summary.attempts).toBe(0);
       expect(summary.bridgeReason).toContain("worker connectivity probe failed");
+      expect(summary.executionDescriptor?.action).toBe("execute");
+      expect(summary.episodeId).toBeTruthy();
       const calls = mockedExec.mock.calls.map((c) => String(c[1]));
       expect(calls.length).toBeGreaterThan(0);
       expect(calls.every((prompt) => prompt.includes("Reply with exactly"))).toBe(true);
-      // Attempts reflect LLM worker rounds, not the probe. (The full DELEGATED
-      // + descriptor + episode shape is verified against a REAL unreachable
-      // endpoint in the live acceptance log; under the vi.mock the
-      // orchestrator's episode finalize differs, so this test pins the core
-      // contract: no LLM execution, honest reason, never COMPLETED.)
-      expect(summary.status).not.toBe("COMPLETED");
     } finally {
       rmSync(join(configPath, ".."), { recursive: true, force: true });
     }
