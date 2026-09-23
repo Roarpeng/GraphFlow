@@ -67,8 +67,32 @@ export function applyGraphStoreDelta(
   deltaContents: string
 ): GraphStore {
   const nodeMap = new Map(base.nodes.map((node) => [node.id, node]));
-  let edges = [...base.edges];
-  let edgeKeys = new Set(edges.map((edge) => `${edge.from}::${edge.relation}::${edge.to}`));
+  const edges = [...base.edges];
+  const edgeKey = (edge: GraphEdge) => `${edge.from}::${edge.relation}::${edge.to}`;
+  const edgeKeys = new Set(edges.map(edgeKey));
+  // Endpoint index for O(degree) deletes. The previous implementation ran a
+  // full edges.filter + edgeKeys rebuild per delete op — with a real-world
+  // 1k-op delta log over a 35k-edge store that was ~77M string ops (~31s on
+  // this machine), enough to blow the 60s MCP resources timeout on every
+  // diagnose/stats read.
+  const edgeIdxByEndpoint = new Map<string, number[]>();
+  edges.forEach((edge, index) => {
+    for (const endpoint of [edge.from, edge.to]) {
+      const list = edgeIdxByEndpoint.get(endpoint);
+      if (list) list.push(index);
+      else edgeIdxByEndpoint.set(endpoint, [index]);
+    }
+  });
+  const keyToIdx = new Map(edges.map((edge, index) => [edgeKey(edge), index]));
+  /** Lazily-marked removed edge indices; compacted once at the end. */
+  const removedEdgeIdx = new Set<number>();
+
+  const markEdgeRemoved = (index: number): void => {
+    if (index < 0 || index >= edges.length) return;
+    if (removedEdgeIdx.has(index)) return;
+    removedEdgeIdx.add(index);
+    edgeKeys.delete(edgeKey(edges[index]!));
+  };
 
   for (const line of deltaContents.split("\n")) {
     if (!line.trim()) continue;
@@ -83,29 +107,45 @@ export function applyGraphStoreDelta(
     if (op.op === "upsert") {
       for (const node of op.nodes ?? []) nodeMap.set(node.id, node);
       for (const edge of op.edges ?? []) {
-        const key = `${edge.from}::${edge.relation}::${edge.to}`;
-        if (edgeKeys.has(key)) continue;
+        const key = edgeKey(edge);
+        const existingIdx = keyToIdx.get(key);
+        if (existingIdx !== undefined) {
+          if (!removedEdgeIdx.has(existingIdx)) continue; // already present
+          markEdgeRemoved(existingIdx); // re-add below
+        }
         edgeKeys.add(key);
+        keyToIdx.set(key, edges.length);
+        for (const endpoint of [edge.from, edge.to]) {
+          const list = edgeIdxByEndpoint.get(endpoint);
+          if (list) list.push(edges.length);
+          else edgeIdxByEndpoint.set(endpoint, [edges.length]);
+        }
         edges.push(edge);
       }
     } else if (op.op === "delete") {
       const ids = new Set(op.nodeIds ?? []);
-      const removedEdges = new Set(
-        (op.edges ?? []).map((edge) => `${edge.from}::${edge.relation}::${edge.to}`)
-      );
-      if (ids.size === 0 && removedEdges.size === 0) continue;
+      const removedEdges = (op.edges ?? []).map(edgeKey);
+      if (ids.size === 0 && removedEdges.length === 0) continue;
       for (const id of ids) nodeMap.delete(id);
-      edges = edges.filter(
-        (edge) =>
-          !ids.has(edge.from) &&
-          !ids.has(edge.to) &&
-          !removedEdges.has(`${edge.from}::${edge.relation}::${edge.to}`)
-      );
-      edgeKeys = new Set(edges.map((edge) => `${edge.from}::${edge.relation}::${edge.to}`));
+      for (const id of ids) {
+        for (const index of edgeIdxByEndpoint.get(id) ?? []) {
+          markEdgeRemoved(index);
+        }
+      }
+      for (const key of removedEdges) {
+        const index = keyToIdx.get(key);
+        if (index !== undefined) markEdgeRemoved(index);
+      }
     }
   }
 
-  return { nodes: Array.from(nodeMap.values()), edges };
+  if (removedEdgeIdx.size === 0) {
+    return { nodes: Array.from(nodeMap.values()), edges };
+  }
+  return {
+    nodes: Array.from(nodeMap.values()),
+    edges: edges.filter((_, index) => !removedEdgeIdx.has(index)),
+  };
 }
 
 /** Recorded file identity used to validate a cache entry (mtime + size). */

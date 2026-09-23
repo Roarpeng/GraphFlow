@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — 第三轮深挖：任务回显技能门 + delta 合并 394 倍性能修复（虚假问题清零批次）
+
+- **任务回显永不成为技能**：`applySkillLearning` 现在丢弃与任务文本互含且长度 ≥80% 的"原子"——抽取器对单句任务无法切分时会原样复读任务全文（live：`create a tiny file test-tmp.txt with content hi` 成了技能名，且来自一次 HUMAN_REVIEW_REQUIRED 的失败 run）。提炼型子短语与 lessons 种子不受影响。
+- **`pruneLegacyNoiseSkills` 扩展名白名单一般化**：路径片段正则从固定枚举（ts/js/…）放宽为任意 1-8 字符扩展——`.txt` 等常见扩展名的垃圾技能此前漏清（live：存量 2 条已清零）。
+- **`applyGraphStoreDelta` 394 倍提速（31.5s → 80ms）**：delete 分支此前每个 op 都做全量 `edges.filter` + 重建整个 edgeKeys Set——真实世界的 1,102 条 delete / 35k 边 delta 日志 = 约 7,700 万次字符串操作，令 file 后端**每次图读取**卡半分钟，直接击穿 MCP `graphflow://diagnose` / `stats` 资源的 60s 超时（live：本机全量测试 4 文件 6 用例超时根因）。改为端点邻接索引 + 惰性标记删除 + 末尾一次性压缩；upsert 去重语义保持（删除后再 upsert 同 key 正确重新入列）。
+
+### 验证（第三轮能力清点，全部 live）
+
+- team serve：启动 + health（tenant/role/rbac 元数据）+ JSON-RPC-only 面；`skill sync export` 真实落盘。**注**：无认证 loopback 下 `tools/list` 返回 0 工具（团队服务器工具面的暴露策略待确认）；Windows 保留端口范围会令某些端口 EACCES（环境限制，非产品缺陷）。
+- 对话脱敏完整复验：真实形状的 JWT Bearer / postgres 连接串 / ghp_ key 全部 `[REDACTED:*]`（此前的"Bearer 未脱敏"疑点撤回——长度门是防误伤设计，短测试 token 不是真实形状）。
+- knowledge extract（4 requirements + 4 provenance 边）、audit --privacy（如实报 0666 与 6 端点）、spawn-receipt / evidence backfill usage 正确、artifact export 8171 节点 / 35266 边（gzip，SHA-256）。
+
+### Tests
+
+- 新增 `tests/m-task-echo-skill.test.ts`（2 用例）：任务回显原子丢弃 + 任意扩展名垃圾清理。
+
+## [Unreleased - deep-dive round 2]
+
 ### Fixed — 第二轮深挖：配置链诚实性 + 证据分级（live 驱动）
 
 - **显式坏配置 fail-fast（v1.25.1 已知遗留 sqlite 泄漏的根因）**：`--config` 指向存在但损坏的文件（如 Windows 反斜杠路径造成的非法 JSON）此前只 WARN 一句就**静默用默认配置继续跑**——预算/传输/存储全按默认执行，`transport:"file"` 工作区因此冒出默认路径的 `graphflow-out/graphflow-graph.sqlite`（即 1.25.1 登记的句柄泄漏遗留）。现在显式路径损坏直接抛错并给出修复指引（含"用正斜杠"提示）；**路径尚不存在保持宽容**（settings-save 等创建型流程依赖此语义，`LoadConfigResult.notFound` 区分两种情况）。项目根 `graphflow.config.json` 损坏同样 fail-fast；global/overlay 层保持宽容 WARN。
