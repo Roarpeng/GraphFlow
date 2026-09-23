@@ -722,7 +722,7 @@ export async function cleanupNoiseSkills(
 }
 
 /** Path-like fragment inside a skill name (task-clause skills quote files). */
-const SKILL_NAME_PATH_FRAGMENT_RE = /[a-z0-9_-]+\.(ts|js|mjs|cjs|json|md|py|go|rs)\b|\//i;
+const SKILL_NAME_PATH_FRAGMENT_RE = /[a-z0-9_-]+\.[a-z0-9]{1,8}\b|\//i;
 
 /**
  * Prune LEGACY skill nodes that predate the per-atom quality gates and would
@@ -827,7 +827,21 @@ export async function applySkillLearning(
   // P0-2: evidence (plan descriptions / key decisions from the episode record)
   // provides project-symbol references for the extraction quality gate.
   const learningCorpus = [task, ...lessonText].filter(Boolean).join(" and ");
-  const skills = extractSkillAtoms(learningCorpus, options?.evidence);
+  const extracted = extractSkillAtoms(learningCorpus, options?.evidence);
+  // A task ECHO is not knowledge: when the extractor fails to split a
+  // one-sentence task, the "atom" is the task text verbatim (live finding:
+  // "create a tiny file test-tmp.txt with content hi" became a Skill node
+  // named exactly that, from a run that ended HUMAN_REVIEW_REQUIRED).
+  // Drop atoms that merely re-voice the task; real knowledge must be a
+  // distilled sub-phrase or come from the reported lessons.
+  const taskEcho = (skill: string): boolean => {
+    const t = task.trim().toLowerCase();
+    const s = skill.trim().toLowerCase();
+    if (!t || !s) return false;
+    if (s === t) return true;
+    return (t.includes(s) || s.includes(t)) && Math.min(s.length, t.length) >= 0.8 * Math.max(s.length, t.length);
+  };
+  const skills = extracted.filter((skill) => !taskEcho(skill));
   const passed = run.status === "COMPLETED";
   const linked = options?.linked === true;
 

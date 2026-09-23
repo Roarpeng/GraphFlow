@@ -50,26 +50,28 @@ describe("flywheel contribution report", () => {
     // positive score) and one failing task (twice → anti-pattern, negative
     // score). P0-2 taxonomy: single observations stay neutral (correctable).
     // 真实成功证据链按 episodeId 绑定：2 个 pass episode → proven。
+    // Task-echo atoms are no longer admitted as skills (honesty gate): the
+    // distilled lesson text is what seeds the atoms below.
     await applySkillLearning(client, "refactor planner module in planner.ts and add tests", {
       status: "COMPLETED",
       attempts: 1,
       feedback: "done",
-    }, undefined, { episodeId: "ep-report-pass-a" });
+    }, ["guard planner refactors behind the planner-module test suite"], { episodeId: "ep-report-pass-a" });
     await applySkillLearning(client, "refactor planner module in planner.ts and add tests", {
       status: "COMPLETED",
       attempts: 1,
       feedback: "done",
-    }, undefined, { episodeId: "ep-report-pass-b" });
+    }, ["guard planner refactors behind the planner-module test suite"], { episodeId: "ep-report-pass-b" });
     await applySkillLearning(client, "fix broken cache layer in cache-layer.ts", {
       status: "FAILED",
       attempts: 1,
       feedback: "failed",
-    });
+    }, ["cache-layer fixes need the invalidation sweep before landing"]);
     await applySkillLearning(client, "fix broken cache layer in cache-layer.ts", {
       status: "FAILED",
       attempts: 1,
       feedback: "failed",
-    });
+    }, ["cache-layer fixes need the invalidation sweep before landing"]);
 
     // Seed episodes with distinct outcomes.
     await recordEpisode(client, {
@@ -423,22 +425,22 @@ describe("flywheel contribution report", () => {
       status: "COMPLETED",
       attempts: 1,
       feedback: "done",
-    }, undefined, { episodeId: "ep-health-pass-a" });
+    }, ["guard health planner refactors behind the planner-module suite"], { episodeId: "ep-health-pass-a" });
     await applySkillLearning(client, "refactor health planner in planner.ts", {
       status: "COMPLETED",
       attempts: 1,
       feedback: "done",
-    }, undefined, { episodeId: "ep-health-pass-b" });
+    }, ["guard health planner refactors behind the planner-module suite"], { episodeId: "ep-health-pass-b" });
     await applySkillLearning(client, "fix health cache in cache-layer.ts", {
       status: "FAILED",
       attempts: 1,
       feedback: "failed",
-    });
+    }, ["health-cache fixes need the invalidation sweep before landing"]);
     await applySkillLearning(client, "fix health cache in cache-layer.ts", {
       status: "FAILED",
       attempts: 1,
       feedback: "failed",
-    });
+    }, ["health-cache fixes need the invalidation sweep before landing"]);
 
     await recordEpisode(client, {
       task: "health pending episode",
