@@ -166,10 +166,15 @@ graphflow skill sync export                # export team skill pack + golden que
 graphflow skill sync import                # import team skill pack (MERGE; --force to overwrite) + golden merge into .graphflow/team-golden.json
 graphflow challenge --files a.ts,b.ts      # R8-2: graph-diff challenge list after edits (callers / requirements / deleted symbols)
 graphflow audit                            # R9: closing audit — dangling deps / unwired files / unreferenced configs / doc drift
-graphflow route diagnose                   # routing diagnostics
+graphflow route diagnose                   # routing diagnostics (real planner/worker round-trip probes, not config presence)
 graphflow learn nightly                    # nightly learning
 graphflow doctor                           # install self-check
+graphflow selfcheck                        # health red/green list: config / graph store / delta log / LLM reachability / flywheel / redaction
 ```
+
+### When the LLM is unavailable, plan and run bridge to the agent
+
+Both entry points pre-flight a real apikey+baseUrl+model greeting round-trip. A dead or mis-credentialed provider is treated **exactly like no provider**: `graphflow_plan` returns `planSource: "probe-failed-bridge"` (+ `degradeReason`), `graphflow_run` switches to bridge mode (`DELEGATED`, `attempts: 0`, `executionDescriptor` + `bridgeReason` with the underlying error). No retry budget is burned on echo placeholders, and no bridged plan ever reads like a model-produced final DAG.
 
 ## Configuration
 
