@@ -157,7 +157,7 @@
     "vitest": "^3.2.6"
   },
   "dependencies": {
-    "@huggingface/transformers": "^3.8.1",
+    "@huggingface/transformers": "^4.3.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
@@ -169,6 +169,15 @@
     "@firecrawl/anydoc": "^0.1.7",
     "better-sqlite3": "^12.10.0"
   },
+  "overrides": {
+    "hono": "^4.13.10",
+    "@hono/node-server": "^1.19.15",
+    "body-parser": "^2.3.0",
+    "fast-uri": "^3.1.7",
+    "ip-address": "^10.7.2",
+    "qs": "^6.16.0"
+  },
+  "overridesComment": "Pinned past advisories in transitive deps. Six were non-breaking and lifted npm audit to zero: hono (cross-request data disclosure / ReDoS / SSRF-adjacent parser issues), @hono/node-server (Windows path traversal via encoded backslash), body-parser (DoS when an invalid limit silently disables size enforcement), fast-uri (host confusion and SSRF), ip-address (SSRF via octet and IPv6 misclassification), qs (array-limit bypass, DoS). The only remaining route was @huggingface/transformers 3.x -> 4.3.0, which pulls sharp 0.35.5 and clears the libvips/libheif CVEs; verified against the exact API surface used in src/learning/embeddings.ts (pipeline, env.cacheDir, env.remoteHost).",
   "disclosure": {
     "cloud": true,
     "network": [

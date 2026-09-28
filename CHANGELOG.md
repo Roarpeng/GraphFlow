@@ -336,6 +336,18 @@ cursor: status=created exists=true mentionsDist=yes
 
 **方法论**：这个 bug 本机不可复现（Linux 无反斜杠转义），全绿 1716 个用例。**它是被"让 CI 跑"逼出来的，不是被测试逼出来的。**
 
+### Fixed — 依赖漏洞清零（8 → 0），其中 6 项不需要破坏性升级
+
+`npm audit` 此前有 **8 项（4 high / 3 moderate / 1 low）**，Security Audit workflow **已连续失败至少三周**（9/14、9/21、9/28，仅在 schedule 上跑）。现全部清零，`security:audit` 退出 0。
+
+- **6 项非破坏性**：全部是传递依赖的**补丁版本**，`overrides` 即可。`hono`（跨请求数据泄露 / ReDoS / `toSSG()` 写出输出目录之外）、`@hono/node-server`（Windows 经 `%5C` 的路径穿越）、`body-parser`（非法 limit 静默关闭体积限制 → DoS）、`fast-uri`（host confusion / SSRF）、`ip-address`（前导零八进制与 NAT64 分类绕过 → SSRF）、`qs`（array-limit 绕过 / DoS）。
+- **1 项需要主版本升级**：`@huggingface/transformers` 3.x → **4.3.0**，它是唯一的直接依赖漏洞来源（`sharp` / `libvips` / `libheif` 的 CVE-2026-33327/33328/35590/35591、GHSA-g89c-p67h-r497、GHSA-2jg2-4ch7-h545）。npm 标注 `isSemVerMajor: true`，**我仍然做了**——理由是 `src/learning/embeddings.ts` 实际用到的 API 面极窄（`pipeline`、`env.cacheDir`、`env.remoteHost`），逐个实测存在且可写，且 4.3.0 把 `sharp` 提到 0.35.5 正是修掉这些 CVE 的版本。**"breaking" 标签说的是依赖树，不等于这个调用面会破。**
+- **未能端到端验证的部分**：本机 `huggingface.co` 不可达（registry 通、HF 不通），**真实模型下载与推理跑不了**。已验证的是 API 契约（三个成员逐一实测）与全量 1716 用例。**embedding 的真实数值行为只有你在有网环境才能确认。**
+
+- **`security-audit.cjs` 现在会说人话**。此前它在 `--json` 下把 npm 输出写进文件、**stdout 什么都不打印**，CI 日志只有一行 "Process completed with exit code 1"，必须翻 artifact 才知道原因。现在非零退出时把三件事分开讲：**有哪些漏洞**（名称 + 严重度 + 计数）、**审计没跑成**（镜像不支持 audit 端点等，`npmmirror` 就会这样）、**无输出失败**。三种情形都实测过。**一个只有退出码的 CI 日志不是信息。**
+
+- 顺带清掉 `PearAI/User/mcp.json` 与 `Cursor/User/mcp.json` 两个测试产物：它们出现在仓库根是因为**测试的 CWD 恰好等于该宿主的 `homeMarker`**，内容指向 `/tmp/gf-wb-ws-*` 已删除目录。均在 `.gitignore` 内、从未提交过。
+
 ### Tests
 
 - `tests/workspace-build.test.ts`（13 用例，由 `opencode-mcp-plugin-registration.test.ts` 重命名并扩写）：偏好本体（记录工作区而非假定 cwd / 后续 install 不重指向 / marker 不在任何宿主目录内 / 损坏视为未开启 / 未构建与未启用分开报告）+ 跨宿主注入（**每个 profile 的条目都指向该构建** / 缺构建报可操作 error / 关闭时保留 npx / 撤销后恢复 / 开关进入 `environment` / 不动其他条目 / 注入 home 与读 marker 的 home 一致）+ dsh patch 两个方向。
