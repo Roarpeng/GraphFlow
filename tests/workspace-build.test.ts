@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -43,8 +51,52 @@ function createWorkspaceBuild(workspaceRoot: string): string {
   return serverPath;
 }
 
+/**
+ * Does a host's config name this build?
+ *
+ * Compares path *segments*, not raw strings. On Windows `tmpdir()` hands back the
+ * short 8.3 form (`C:\Users\RUNNER~1\...`) while the written entry carries the
+ * resolved long form (`C:\Users\runneradmin\...`), so a literal comparison fails
+ * on a path that is demonstrably correct. That is what made CI report all 18
+ * hosts as not pointing at the build when every one of them had
+ * `status=created` and `mentionsDist=yes` — the guard was working the whole time.
+ *
+ * Both slash styles are accepted, since a config may be JSON or TOML and either
+ * can carry native or forward slashes.
+ */
+function mentionsServerPath(configText: string, serverPath: string): boolean {
+  const segments = (value: string): string[] =>
+    value
+      .replace(/[\\/]+/g, "/")
+      .replace(/^([A-Za-z]):/, "$1")
+      .split("/")
+      .filter((segment) => segment && segment !== ".");
+  const wanted = segments(serverPath).map((segment) => segment.toLowerCase());
+  // Pull the path-shaped tokens out of the file rather than splitting the whole
+  // text: a JSON config stores the path escaped (`C:\\Users\\...`), so the
+  // separators inside it are doubled and segmenting the file text yields one
+  // giant token. Matching anything that ends in the server's filename covers
+  // JSON, TOML, and either slash style.
+  const candidates = configText.match(/[^\s"'[\]{},]*server\.js/gi) ?? [];
+  return candidates.some((candidate) => {
+    // Collapse each run of backslashes to one. A JSON-written path stores them
+    // doubled (`C:\\Users\\...`); removing them outright would glue the segments
+    // together and lose the very separators being compared.
+    const actual = segments(candidate.replace(/\\+/g, (run) => run[0] ?? "\\"));
+    return (
+      actual.length === wanted.length &&
+      actual.every((segment, offset) => segment.toLowerCase() === wanted[offset])
+    );
+  });
+}
+
 function newWorkspace(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
+  // realpath so the path matches what the installer writes. tmpdir() returns the
+  // short 8.3 form on Windows (RUNNER~1) while os.homedir() and the written
+  // entry carry the long form (runneradmin); comparing the two forms is a
+  // difference in spelling, not in location.
+  return realpathSync(dir);
   tempRoots.push(dir);
   return dir;
 }
@@ -243,7 +295,7 @@ describe("hosts launch the workspace build when opted in", () => {
       // would silently skip the one host whose format differs. Asserting on the
       // file's contents covers JSON and TOML alike.
       const raw = existsSync(result.configPath) ? readFileSync(result.configPath, "utf8") : "";
-      if (!raw.includes(serverPath)) {
+      if (!mentionsServerPath(raw, serverPath)) {
         notPointing.push(profile.id);
         // Carry the evidence, not just the name. A bare list of 18 hosts says
         // nothing about the cause, and guessing at it twice was already wrong.

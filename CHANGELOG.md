@@ -315,21 +315,33 @@ npx 启动器 = 宿主每次从 npm 拉已发布包，**在这些宿主里改 Gr
 
 **这条只有 CI 能抓到**：本机 `homedir()` 就是 `HOME`，同样的代码 19/19 通过。**平台差异让"测试通过"不再等于"行为正确"，这正是这次必须推 action 的理由。**
 
-### Fixed（第二轮 CI）— Windows 上仍有 18 个宿主"未指向"，以及一处我自己写的危险清理
+### Fixed（第三轮 CI）— 守卫在 Windows 上一直是好的，坏的是我的断言
 
-第二次推送后 Windows 上 4 个失败降到 **1 个**：every-profile 那条仍报 18 个宿主未指向。但 12 个都过了，说明 marker 泄漏已修好，剩下的是另一回事。
+第三轮 CI 只剩 1 个失败，而它的诊断信息**推翻了前两轮的每一个假设**：
 
-- 症状是"文件存在但不含 dist 路径"——说明**守卫根本没触发**，注入走的是普通 npx 路径。原因是 Windows 下 `resolveHomePaths()` 直接读 **`APPDATA` / `LOCALAPPDATA`**，测试没重定向这两个，于是 vscode / trae / cline / roo-code / kilocode 的目标路径解析到**真实用户目录**。补上重定向后一致。
-- **让该用例自我防御**：它遍历全部 profile，**一个陈旧 marker 就会让 18 个宿主一起报错，而这个报错完全不反映守卫行为**。开头先断言 `resolveWorkspaceBuildServerPath().path` 等于预期路径——**守卫没生效就立刻失败，而不是量完 18 个宿主再报一个与根因无关的名字列表**。本机用"预置指向已删 workspace 的 marker"复现验证：13 个用例仍全过。
+```
+cursor: status=created exists=true mentionsDist=yes
+        configPath=C:\Users\RUNNER~1\...\gf-wb-home-wD2cks\.cursor\mcp.json
+        message=launches the workspace build at C:\Users\RUNNER~1\...\gf-wb-ws-PZ...
+```
 
-- **一处我差点造成破坏的代码**：清理时写成 `rmSync(join(homedir(), ".graphflow"), { recursive: true })`。这会删掉用户真实的 `~/.graphflow/runtime` 和 `optional-deps`。本机恰好是 no-op（`homedir()` 在测试内已指向 sandbox），**但在任何解析到真实 home 的机器上就是删数据**。改为只删那一个 marker 文件。已验证 `runtime/`、`optional-deps/` 在多轮测试后完好。
+`status=created`、`mentionsDist=yes`、路径全在 sandbox 内——**18 个宿主全部正确写入了工作区构建，守卫从头到尾都在工作**。而我前两轮分别归因于"marker 泄漏"和"`APPDATA` 未重定向"，两次都错。（那两轮的修复本身是必要的：marker 确实曾泄漏、4 个用例确实因此失败；只是它们都不是这个用例失败的原因。）
+
+**真正的失败是断言本身**：文件是 JSON，写入时反斜杠被转义成 `C:\\Users\\...`，而我拿 `raw.includes(serverPath)` 去做**字面子串比较**——在 Windows 上这**永远不可能匹配**。18 个宿主"失败"纯属尺子坏了。
+
+- 比较改为**抽取路径形态的候选再逐段比较**（`mentionsServerPath`），对 `\\` 与 `/` 都接受。
+- 顺带消掉 8.3 短路径：测试目录建好后取 `realpathSync`，使期望路径与写入路径在拼写上一致。短路径 `RUNNER~1` 与长路径 `runneradmin` 是同一目录的两种拼法，**不是两个地方**。
+- 过程中我自己又错了两次才做对：先写成"把反斜杠全删掉"（会把段粘连，正是要比较的分隔符），后靠逐例打印才发现。**这类尺子必须用已知输入验证**——现在有 5 个用例直接喂真实形态：JSON 转义 / TOML 正斜杠 / 长路径一致 / 短长不同判 false / 无关 npx 条目判 false。
+- 保留 detail 输出（status / exists / configPath / mentionsDist / message）。**没有它，这个用例会再骗我两轮**——只列 18 个宿主名，不足以区分"写到别处"、"没写"、"写错内容"。
+
+**方法论**：这个 bug 本机不可复现（Linux 无反斜杠转义），全绿 1716 个用例。**它是被"让 CI 跑"逼出来的，不是被测试逼出来的。**
 
 ### Tests
 
 - `tests/workspace-build.test.ts`（13 用例，由 `opencode-mcp-plugin-registration.test.ts` 重命名并扩写）：偏好本体（记录工作区而非假定 cwd / 后续 install 不重指向 / marker 不在任何宿主目录内 / 损坏视为未开启 / 未构建与未启用分开报告）+ 跨宿主注入（**每个 profile 的条目都指向该构建** / 缺构建报可操作 error / 关闭时保留 npx / 撤销后恢复 / 开关进入 `environment` / 不动其他条目 / 注入 home 与读 marker 的 home 一致）+ dsh patch 两个方向。
   - **"每个 profile"这条是本轮核心回归**：守卫原本只对 opencode 生效，逐宿主实测才暴露。
   - 断言用**文件原文包含路径**而非解析 JSON——codex 用 TOML，JSON 形状的读取器会静默跳过唯一格式不同的宿主。
-  - **平台相关的两处**（`USERPROFILE`、`APPDATA`/`LOCALAPPDATA`）都只有 Windows 暴露；本机 `homedir()` 就是 `HOME`。**同一份代码在这里 19/19、在 CI 全军覆没——这是必须让 action 跑的理由。**
+  - **平台相关的三处**（`USERPROFILE`、`APPDATA`/`LOCALAPPDATA`、JSON 里的反斜杠转义）都只有 Windows 暴露；本机 `homedir()` 就是 `HOME`，文件里也没有转义。**同一份代码在这里 19/19 全绿、在 CI 连续三轮失败——这是必须让 action 跑、且必须让断言自证的理由。**
   - **已验证有牙**：禁用守卫 → 3 个失败。
 - `tests/m-doctor-json-report.test.ts`："插件注册"那组用例**整体重写**为"条目指向工作区构建"——断言 user-scope 条目 `installed` 且 `summary.stale === 0`。**未**断言"恰好一条检查"：Cursor 本就产出两条（user 级 + workspace 相对级，sandbox 里后者不存在），这是既有行为，与本改动无关；最初写成 `length === 1` 时失败，说明是我的断言错了，不是代码错了。
   - 隔离靠 `vi.resetModules()` + 在设好 `HOME` **之后**动态 import——profile 在模块加载时注册，静态 import + `beforeEach` 改 `HOME` 太晚（首版正是这样假绿失败了一次）。
