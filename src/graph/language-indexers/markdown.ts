@@ -43,19 +43,21 @@ export const markdownIndexer: LanguageIndexer = {
         });
       }
 
-      let wikiMatch: RegExpExecArray | null;
-      wikiLinkRegex.lastIndex = 0;
-      while ((wikiMatch = wikiLinkRegex.exec(line)) !== null) {
-        imports.push({ module: wikiMatch[1]!.trim() });
-      }
-
-      let mdMatch: RegExpExecArray | null;
-      mdLinkRegex.lastIndex = 0;
-      while ((mdMatch = mdLinkRegex.exec(line)) !== null) {
-        const text = mdMatch[1]?.trim() ?? "";
-        const url = mdMatch[2]?.trim() ?? "";
-        imports.push({ module: url, raw: text });
-      }
+      // Markdown links and wiki links are deliberately NOT reported as imports.
+      //
+      // Every import target becomes a `Module` node with an `imports` edge, so
+      // reporting them here made one README badge into a module named
+      // `module:https://img.shields.io/badge/npm-1.0-blue`, and one relative doc
+      // link into `module:docs/guide.md` — neither of which is a place in the
+      // repository. They carried edges, so they also ranked in retrieval and
+      // occupied the module map.
+      //
+      // Nothing is lost: cross-document structure is already modelled by
+      // buildDocumentEdges, and headings are the declared symbols. The only
+      // consumer of `imports` outside this file is the PLC edge builder, which
+      // never sees a markdown file.
+      void wikiLinkRegex;
+      void mdLinkRegex;
     }
 
     for (const heading of headings) {

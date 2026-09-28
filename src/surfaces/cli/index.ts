@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { resolveConfig, resolveEfficiencyPolicy, toObservationPolicy } from "../../config/resolve";
 import { packObservation, recallObservation } from "../../observations/index";
 import { createGraphClient } from "../../graph/client-factory";
+import { pruneGraph } from "../../graph/graph-prune";
 import {
   admitMechanism,
   freezeMechanism,
@@ -1184,6 +1185,32 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       legacyText: data.skipped
         ? `path=${data.path}; skipped=${data.skipped}; reason=${data.reason ?? "unknown"}`
         : `path=${data.path}; indexedFiles=${data.indexedFiles}; indexedSymbols=${data.indexedSymbols}; indexedReferences=${data.indexedReferences}`,
+    };
+  }
+
+  if (command === "graph" && args[0] === "prune") {
+    // Dry run by default. Removing nodes is destructive and irreversible, and the
+    // whole point of the report is that the caller can see the categories before
+    // agreeing to them.
+    const apply = args.slice(1).some((arg) => arg === "--apply" || arg === "--yes");
+    const config = resolveConfig(configPath);
+    const client = createGraphClient(config);
+    const result = await pruneGraph(client, { apply });
+    return {
+      command: "graph-prune",
+      data: result,
+      legacyText: [
+        apply ? "applied" : "dry-run (pass --apply to delete)",
+        `workspace-escape=${result.byCategory["workspace-escape"]}`,
+        `link-module=${result.byCategory["link-module"]}`,
+        `foreign-artifact=${result.byCategory["foreign-artifact"]}`,
+        `deletedNodes=${result.deletedNodes}`,
+        `deletedEdges=${result.deletedEdges}`,
+        `kept=${result.kept}`,
+        result.error ? `error=${result.error}` : "",
+      ]
+        .filter(Boolean)
+        .join("; "),
     };
   }
 

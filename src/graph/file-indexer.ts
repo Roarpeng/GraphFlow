@@ -13,6 +13,7 @@ import { logger } from "../utils/logger.js";
 import type { AgentWorkItem } from "../core/agent-delegation.js";
 import type { GraphEdge, GraphNode } from "../core/types.js";
 import type { GraphClient } from "./client-factory.js";
+import { isInsideWorkspace } from "./workspace-containment.js";
 import { getIndexerForFile } from "./language-indexers/index.js";
 import { buildDocumentEdges } from "./language-indexers/markdown.js";
 import { markdownIndexer } from "./language-indexers/markdown.js";
@@ -455,6 +456,28 @@ export async function indexSingleFile(
 }> {
   const includeExtensions = options?.includeExtensions ?? DEFAULT_EXTENSIONS;
   const maxFileSizeBytes = options?.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE;
+
+  // Workspace containment, before anything else.
+  //
+  // `relative(rootDir, absPath)` happily yields `../other-project/foo.py` for a
+  // file outside the root, and the old code stored that verbatim — so a single
+  // `index-file ../../sibling/foo.py`, a watcher event from outside, or any
+  // caller that resolved a path loosely would fold a foreign project into this
+  // graph permanently. On this repo that had already happened: 33 nodes from
+  // `../LightNav-0/` were sitting in the graph as if they were ours.
+  //
+  // The check lives here rather than at the CLI so every caller is covered —
+  // CLI, file watcher, MCP tool — not just the one a user can type at.
+  if (!isInsideWorkspace(rootDir, absPath)) {
+    return {
+      indexedFiles: 0,
+      indexedSymbols: 0,
+      indexedReferences: 0,
+      skipped: true,
+      reason: `path escapes the workspace root (${absPath}); refusing to index a file that is not this project's`,
+    };
+  }
+
   const officeDoc = isOfficeDocumentPath(absPath);
   const sizeLimit = officeDoc
     ? Math.max(maxFileSizeBytes, DEFAULT_DOCUMENT_MAX_FILE_SIZE)
