@@ -241,10 +241,10 @@ module:docs/guide.md          ← 相对文档链接
 **2. `install` 把刚删掉的条目又写了回去。** 打开 marker 后跑一次 `install`，`doctor` 立刻回到 `stale`——**安装器自己重新创建了那个优先级高于插件注册的条目**。插件开着，配置条目也在，而 opencode 运行时优先配置。
 
 - 关键在于**拦在哪一层**。第一版把守卫放在 `installProfileHost` 的 opencode 切片里：切片删掉条目，**随后的全局 MCP 安装 pass 又把它写了回来**。用 `writeFileSync` 包装器抓到了真实调用栈（`injectIntoOpencodeConfig` ← `injectIntoAgentConfig` ← `installMcpToDetectedAgents`），确认存在第二条写入路径。
-- 因此守卫下沉到**唯一咽喉点** `installMcpToDetectedAgents` 的 per-target 循环：marker 开着时，opencode 这一 target 走**移除**而非注入，并如实上报 `updated` / `skipped` + 说明。`profile-host-installer.ts` 因此回到**零改动**——单一职责点比每层各守一遍更难写错。
+- 因此守卫下沉到**唯一咽喉点** `installMcpToDetectedAgents` 的 per-target 循环。~~marker 开着时该 target 走**移除**而非注入~~ —— **第四次更正**：移除是错的，正确做法是写入指向工作区构建的条目。`profile-host-installer.ts` 因此回到**零改动**——单一职责点比每层各守一遍更难写错。
 - 两个方向都实测：marker 开 + `install` → 条目消失；marker 关 + `install` → 条目恢复写入（**单向门会让关掉开关的用户彻底没有注册**）。终态 `summary {installed:61, stale:0}`、`ok: true`、`installed - Opencode (registered by plugin)`。
 
-**3. 两个 home 解析不一致，会让开关静默失效。** 测试暴露 `resolveOpenCodeHome()`（认 `GRAPHFLOW_OPENCODE_HOME`）与 agent profile 注册表（认 `homedir()`）可能指向不同 home——若不一致，守卫会读错 home 的 marker，opt-in 静默变空操作。成因：profile 在**模块加载时**就调 `resolveHomePaths()` 完成注册（`registerOpencodeProfile()` 随 import 执行）。生产默认下两者一致，但这个不一致是真实的，已加测试钉住"注入写的 home 与读 marker 的 home 必须是同一个"。
+**3. 两个 home 解析不一致，会让开关静默失效。**（此条仍然成立，见下） 测试暴露 `resolveOpenCodeHome()`（认 `GRAPHFLOW_OPENCODE_HOME`）与 agent profile 注册表（认 `homedir()`）可能指向不同 home——若不一致，守卫会读错 home 的 marker，opt-in 静默变空操作。成因：profile 在**模块加载时**就调 `resolveHomePaths()` 完成注册（`registerOpencodeProfile()` 随 import 执行）。生产默认下两者一致，但这个不一致是真实的，已加测试钉住"注入写的 home 与读 marker 的 home 必须是同一个"。
 
 ### Fixed — 全量测试会改写开发者真实的 agent 配置（"测试全绿"与"doctor ok"此前互斥）
 
@@ -255,9 +255,30 @@ module:docs/guide.md          ← 相对文档链接
 - 修法：改 HOME 之后 `vi.resetModules()` 并**动态重新 import** 被测模块。真实 `~/.config/opencode` 写入次数 **15 → 0**，全量 222 文件 / 1709 用例仍全绿，`doctor` 保持 `{installed:61, stale:0}` / `ok: true`。
 - **同一成因也是上一条 home 不一致的另一半**：profile 路径在加载期固定，marker 读取是即时的。所以隔离环境里"读 marker 的 home"和"写配置的 home"会分叉——**测试里的分叉是 bug，机器上的分叉是隐患**，两侧都已用断言钉住。
 
+### Fixed（第四次更正）— opencode 的插件根本没有 `mcp` 钩子；"opencode 会规范化掉手写条目"也是错的
+
+前三次更正都在修"怎么把本地构建喂给 opencode"，方向是**方案 B：从插件注册 MCP server**。用户重启 opencode 后仍然没有 graphflow 进程。查下来，**方案 B 在这个版本里不可能存在**，而且它建立的两条前提都是错的。
+
+**1. opencode 的插件 API 没有 `mcp` 钩子。** `~/.cache/opencode/node_modules/@opencode-ai/plugin/dist/index.d.ts` 的 `Hooks` 接口全部键是：`agent / auth / chat.headers / chat.message / chat.params / command.execute.before / config / event / experimental.chat.messages.transform / experimental.chat.system.transform / experimental.session.compacting / experimental.text.complete / permission.ask / tool / tool.execute.after / tool.execute.before`——**没有 `mcp`**。官方文档的钩子清单同样没有。返回 `mcp` 键会被**静默丢弃**。
+
+- 实测印证：13:23:34 重启后的日志里只有 `mcp connected server=pencil tools=4`，**graphflow 一条都没有**。插件文件确实被加载（本地文件目录是官方支持的加载方式），只是那个键不起作用。
+- 我此前在 `opencode/plugin.mjs` 里写的注释——"A plugin's `mcp` hook is merged by opencode itself, so it survives"——**自称"observed behaviour, not a theory"，实际从未观测过**。把没验证的推断写成既成事实，正是这轮连续三次返工的起点。该注释已删除，并写明真实的钩子集合与验证方式。
+
+**2. opencode 会保留手写条目；一直在改写它的是我们自己的安装器。** 直接把本地 `dist/` 写进 `opencode.json`，8 秒后日志出现 `mcp connected server=graphflow tools=10`，两个进程跑的是本地 dist，且**opencode 自己重新序列化配置后完整保留了这条条目**。此前"opencode 拥有该文件、会把手改条目规范化掉"的判断，是把 `graphflow install` 自己的写入误记成了宿主的规范化——而那恰恰是上一条刚修好的东西。
+
+**3. 改为：marker 的语义从"插件注册 MCP"改成"指向本工作区的构建"。**
+
+- marker 现在记录 `workspaceRoot`，条目写 `<workspaceRoot>/dist/surfaces/mcp/server.js`。**记录而非假定**：`install` 可以在任意目录执行，marker 若默默指向错误的 checkout，就会写出一条看起来合理、实则启动陈旧构建的条目——正是这个功能要防的失败。
+- 守卫（仍在 `installMcpToDetectedAgents` 这个唯一咽喉点）改为**注入指向工作区构建的条目**；构建缺失时**报 error 并给出两条出路**（`npm run build` 或 `install --no-mcp-plugin`），而不是写一条指向不存在文件的条目。
+- 顺带把 `GRAPHFLOW_*` 能力开关**写进条目的 `environment`**：opencode 自己拉起 MCP server，开发者 shell 里的变量同样到不了它——与之前那个 env 变量陷阱同型，只是下沉了一层。没有这一步，opt-in 特性只能在终端里测，无法在真实宿主上测。
+- 删除 `plugin.mjs` 中已无调用方的 `mcpServerSpec` / `shouldRegisterMcp` / marker 读取逻辑（TS 侧是唯一实现，留着会误导），以及 doctor 里 `probePluginRegisteredMcp` 与 `(registered by plugin)` 检查——**该路径已不存在，为它开特例只会让 doctor 说谎**。现在交给常规检查：条目指向本地 dist 即 `installed`，指向已发布包而本地存在更新构建即 `stale`，`probeMcpEntryPoint` 本就分得清。
+
+两个方向都实测：`--mcp-plugin` + `install` → 条目指向本地 dist；`--no-mcp-plugin` + `install` → 恢复已发布包（**单向门会让关掉开关的用户被钉在可能已删除的构建上**）。终态 `summary {installed:63, stale:0}`、`ok: true`，live 日志 `mcp connected server=graphflow tools=10`。
+
 ### Tests
 
-- `tests/opencode-mcp-plugin-registration.test.ts`（6 用例）：marker 开着 → 移除条目并上报 / marker 关掉 → 条目恢复写入（防单向门）/ 无 marker → 正常注入 / marker 损坏 → 视为未开启而不抛错 / 不动 opencode.json 里其他 agent 的条目 / **注入目标 home 与读 marker 的 home 必须一致**。
+- `tests/opencode-mcp-plugin-registration.test.ts`（9 用例）：条目指向记录的工作区构建 / **记录工作区而非假定 cwd** / 后续 install 省略 workspaceRoot 时**不重新指向 cwd** / 构建缺失时报可操作的 error（并**不覆盖**原条目）/ opt-in 撤销后恢复已发布包（防单向门）/ 无 marker 时正常注入 / marker 损坏视为未开启 / 不动其他 agent 条目 / 注入目标 home 与读 marker 的 home 一致。**已验证有牙**：禁用守卫 → 3 个失败。
+- `tests/m-doctor-json-report.test.ts`："插件注册"那组用例**整体重写**为"条目指向工作区构建"——断言 doctor 给出**恰好一条** `installed` 且 `summary.stale === 0`。旧用例断言的是一条不存在的机制。
   - 隔离靠 `vi.resetModules()` + 在设好 `HOME` **之后**动态 import——因为 profile 在模块加载时注册，静态 import + `beforeEach` 改 `HOME` 太晚（首版正是这样假绿失败了一次）。
   - **已验证它有牙**：临时把守卫改成 `if (false && ...)` → 2 个用例失败；恢复 → 6 个全过。
 

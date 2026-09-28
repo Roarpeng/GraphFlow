@@ -48,8 +48,6 @@ import { getHostAdapter } from "../../integrations/host-adapter";
 import { PROFILE_HOST_IDS, isProfileHost } from "../../integrations/profile-host-installer";
 import {
   OPENCODE_HOST_ADAPTER_ID,
-  opencodePluginPath,
-  resolveOpenCodeHome,
 } from "../../integrations/opencode-plugin";
 import { GEMINI_HOST_ADAPTER_ID } from "../../integrations/gemini-hooks";
 import { CODEX_HOST_ADAPTER_ID } from "../../integrations/codex-hooks";
@@ -676,57 +674,23 @@ function toDoctorStatus(installed: boolean, detected = true): DoctorCheckStatus 
   return detected ? "missing" : "n/a";
 }
 
-/**
- * Is opencode's GraphFlow MCP server registered by the plugin rather than by an
- * opencode.json entry?
- *
- * Returns only when the arrangement is coherent: the plugin is installed, and
- * the config genuinely has no graphflow entry. If a config entry exists the
- * config wins at runtime, so calling that "plugin-registered" would be a lie —
- * that case is the `stale` check's job.
- */
-function probePluginRegisteredMcp(): { configPath: string; entryPoint?: string } | undefined {
-  try {
-    const configPath = join(resolveOpenCodeHome(), "opencode.json");
-    if (existsSync(configPath) && probeMcpEntryPoint(configPath).entryPoint) return undefined;
-    const pluginPath = opencodePluginPath(resolveOpenCodeHome());
-    if (!existsSync(pluginPath)) return undefined;
-    const entryPoint = join(process.cwd(), "dist", "surfaces", "mcp", "server.js");
-    return { configPath, ...(existsSync(entryPoint) ? { entryPoint } : {}) };
-  } catch {
-    return undefined;
-  }
-}
-
 function pushHostAdapterDoctorChecks(checks: DoctorCheckItem[], hostId: string): void {
   const status = getHostAdapterInstallStatus(hostId);
   if (!status?.detected) return;
 
-  // opencode can register the MCP server from its own plugin instead of from
-  // opencode.json. That is a supported arrangement — and it is the arrangement
-  // you need when working on GraphFlow, because opencode normalises config
-  // entries it owns and will not keep a hand-edited one. Reporting it as missing
-  // would punish the correct setup, so doctor has to know the difference.
-  if (hostId === OPENCODE_HOST_ADAPTER_ID) {
-    const pluginRegistered = probePluginRegisteredMcp();
-    if (pluginRegistered) {
-      checks.push({
-        category: "mcp",
-        agent: `${status.agent} (registered by plugin)`,
-        path: pluginRegistered.configPath,
-        scope: "user",
-        status: "installed",
-        detected: true,
-        message:
-          `no graphflow entry in opencode.json; the opencode plugin registers the server instead. ` +
-          `Set GRAPHFLOW_OPENCODE_MCP=1 before launching opencode (entry point: ${pluginRegistered.entryPoint ?? "workspace dist, else published package"}).`,
-      });
-      // The config-based check below would now report the very entry we just
-      // confirmed is absent, producing an installed/missing pair for one server.
-      // One server, one check.
-      return;
-    }
-  }
+  // There is deliberately no "registered by plugin" special case for opencode
+  // any more. It existed because this code once claimed opencode's plugin Hooks
+  // interface had an `mcp` key, so the correct setup was "no entry in
+  // opencode.json". It does not: the hook set is agent / auth / chat.* /
+  // command.execute.before / config / event / experimental.* / permission.ask /
+  // tool / tool.execute.*. Confirmed against @opencode-ai/plugin's index.d.ts
+  // and against a live server, which logged `mcp connected server=pencil` and
+  // nothing for graphflow while the hook was present.
+  //
+  // Pointing opencode at a workspace build is now ordinary installer work: the
+  // entry lives in opencode.json like every other host's, so probeMcpEntryPoint
+  // already tells the two cases apart — a local dist entry is healthy, an entry
+  // pinned to the published package while a newer local build exists is `stale`.
 
   const mcpTargets = status.mcpTargets ?? [];
   if (mcpTargets.length > 0) {

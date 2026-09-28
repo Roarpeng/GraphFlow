@@ -39,9 +39,19 @@ export const OPENCODE_MCP_MARKER_FILE = "graphflow-mcp.json";
 
 export interface OpenCodeMcpRegistration {
   enabled: boolean;
+  /** Absolute path of the GraphFlow checkout whose build opencode should launch. */
+  workspaceRoot?: string;
   filePath?: string;
   status: "created" | "updated" | "removed" | "absent" | "unchanged" | "error";
   message?: string;
+}
+
+/**
+ * The MCP server entry opencode.json should carry when the workspace build is
+ * preferred: `<workspaceRoot>/dist/surfaces/mcp/server.js`.
+ */
+export function openCodeWorkspaceServerPath(workspaceRoot: string): string {
+  return join(workspaceRoot, "dist", "surfaces", "mcp", "server.js");
 }
 
 export function opencodeMcpMarkerPath(home: string): string {
@@ -53,9 +63,15 @@ export function getOpenCodeMcpRegistration(options: { home?: string } = {}): Ope
   const filePath = opencodeMcpMarkerPath(home);
   if (!existsSync(filePath)) return { enabled: false, status: "absent" };
   try {
-    const parsed = JSON.parse(readFileSync(filePath, "utf8")) as { enabled?: unknown };
+    const parsed = JSON.parse(readFileSync(filePath, "utf8")) as {
+      enabled?: unknown;
+      workspaceRoot?: unknown;
+    };
     return {
       enabled: parsed.enabled === true,
+      ...(typeof parsed.workspaceRoot === "string" && parsed.workspaceRoot
+        ? { workspaceRoot: parsed.workspaceRoot }
+        : {}),
       filePath,
       status: parsed.enabled === true ? "unchanged" : "absent",
     };
@@ -70,7 +86,7 @@ export function getOpenCodeMcpRegistration(options: { home?: string } = {}): Ope
 }
 
 export function setOpenCodeMcpRegistration(
-  options: { enabled: boolean; home?: string }
+  options: { enabled: boolean; home?: string; workspaceRoot?: string }
 ): OpenCodeMcpRegistration {
   const home = options.home ?? resolveOpenCodeHome();
   const filePath = opencodeMcpMarkerPath(home);
@@ -81,12 +97,21 @@ export function setOpenCodeMcpRegistration(
       return { enabled: false, filePath, status: "removed" };
     }
     const before = getOpenCodeMcpRegistration({ home });
+    // The workspace is recorded rather than assumed: `install` may be run from
+    // anywhere, and a marker that silently pointed at the wrong checkout would
+    // write a plausible-looking entry that launches a stale build.
+    const workspaceRoot = options.workspaceRoot ?? before.workspaceRoot ?? process.cwd();
     mkdirSync(opencodePluginDir(home), { recursive: true });
-    writeFileSync(filePath, `${JSON.stringify({ enabled: true }, null, 2)}\n`, "utf8");
+    writeFileSync(filePath, `${JSON.stringify({ enabled: true, workspaceRoot }, null, 2)}\n`, "utf8");
+    const unchanged =
+      before.enabled &&
+      before.status === "unchanged" &&
+      before.workspaceRoot === workspaceRoot;
     return {
       enabled: true,
+      workspaceRoot,
       filePath,
-      status: before.enabled && before.status === "unchanged" ? "unchanged" : before.status === "absent" ? "created" : "updated",
+      status: unchanged ? "unchanged" : before.status === "absent" ? "created" : "updated",
     };
   } catch (error) {
     return {

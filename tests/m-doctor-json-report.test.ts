@@ -2,7 +2,7 @@ import { probeMcpEntryPoint } from "../src/integrations/agent-mcp-installer";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildDoctorReport, formatDoctorLegacyText } from "../src/surfaces/cli/init";
 import { buildCliUsage } from "../src/surfaces/cli/output";
 
@@ -124,34 +124,48 @@ describe("doctor detects a host running the wrong build", () => {
   });
 });
 
-describe("doctor recognises a plugin-registered MCP server", () => {
-  it("is not fooled into calling the correct setup broken", () => {
-    // After removing the opencode.json entry, doctor would have reported the
-    // absent entry as `missing` — punishing the arrangement you are required to
-    // use when working on GraphFlow, because opencode normalises config entries
-    // it owns. One server must also produce exactly one check.
-    const home = mkdtempSync(join(tmpdir(), "doctor-plugin-mcp-"));
+describe("doctor reports an opencode entry that launches the workspace build", () => {
+  it("treats it as installed, not as a missing or stale server", async () => {
+    // The arrangement required for working on GraphFlow is an opencode.json entry
+    // that points at this checkout's `dist/`. It looks like any other entry, so
+    // doctor must not invent a second "the plugin registers it" check for a
+    // plugin hook that does not exist. One server, one check.
+    vi.resetModules();
+    const home = mkdtempSync(join(tmpdir(), "doctor-workspace-mcp-"));
     const prevHome = process.env.HOME;
     const prevProfile = process.env.USERPROFILE;
     try {
       const configDir = join(home, ".config", "opencode");
-      const pluginDir = join(configDir, "plugins");
-      mkdirSync(pluginDir, { recursive: true });
-      // The plugin is installed, and the config deliberately has no graphflow entry.
-      writeFileSync(join(pluginDir, "graphflow.mjs"), "export const name = 'graphflow-opencode';\n");
-      writeFileSync(join(configDir, "opencode.json"), JSON.stringify({ mcp: { pencil: { type: "local" } } }));
+      mkdirSync(join(configDir, "plugins"), { recursive: true });
+      const workspace = mkdtempSync(join(tmpdir(), "doctor-workspace-"));
+      const serverPath = join(workspace, "dist", "surfaces", "mcp", "server.js");
+      mkdirSync(join(workspace, "dist", "surfaces", "mcp"), { recursive: true });
+      writeFileSync(serverPath, "// build\n");
 
       process.env.HOME = home;
       if (process.platform === "win32") process.env.USERPROFILE = home;
-      const report = buildDoctorReport(process.cwd());
-      const opencodeMcp = report.checks.filter(
-        (c) => /opencode/i.test(c.agent) && c.category === "mcp"
-      );
-      // Exactly one, and not missing.
+      const { setOpenCodeMcpRegistration } = await import("../src/integrations/opencode-plugin");
+      setOpenCodeMcpRegistration({ enabled: true, workspaceRoot: workspace });
+      // The installer writes the entry the way `graphflow install --mcp-plugin` does.
+      const { installMcpToDetectedAgents } = await import("../src/integrations/agent-mcp-installer");
+      installMcpToDetectedAgents({
+        strategy: "npx",
+        installScope: "user",
+        agentIdsOverride: ["opencode"],
+        preferGlobalInstall: true,
+        globalInstallOverride: null,
+      });
+      const { buildDoctorReport } = (await import("../src/surfaces/cli/init")) as typeof import("../src/surfaces/cli/init");
+
+      const report = buildDoctorReport(workspace);
+      const opencodeMcp = report.checks.filter((c) => /opencode/i.test(c.agent) && c.category === "mcp");
+
       expect(opencodeMcp.length).toBe(1);
       expect(opencodeMcp[0]?.status).toBe("installed");
-      expect(opencodeMcp[0]?.message).toContain("plugin registers the server");
+      expect(report.summary.stale).toBe(0);
+      rmSync(workspace, { recursive: true, force: true });
     } finally {
+      vi.resetModules();
       if (prevHome === undefined) delete process.env.HOME;
       else process.env.HOME = prevHome;
       if (prevProfile === undefined) delete process.env.USERPROFILE;

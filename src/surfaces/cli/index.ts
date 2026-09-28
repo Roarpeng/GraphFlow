@@ -130,20 +130,27 @@ import {
 async function executeCommand(command: string, args: string[], configPath?: string): Promise<CliCommandResult | undefined> {
   if (command === "install") {
     const { buildInstallReport, formatInstallLegacyText } = require("./init") as typeof import("./init");
-    // `--mcp-plugin` persists the opencode plugin's MCP registration. The
-    // environment variable works but dies with the shell that set it, and
-    // opencode's MCP children belong to a long-lived service process that a
-    // later shell cannot reach.
+    // `--mcp-plugin` makes opencode launch *this* workspace's build instead of
+    // the published package. It is persisted in a marker rather than an env var
+    // because opencode's MCP children belong to a long-lived service process
+    // that a later shell cannot reach, and `install` would otherwise rewrite the
+    // entry on every run.
     const mcpPluginFlag = args.find((arg) => arg === "--mcp-plugin" || arg === "--no-mcp-plugin");
     if (mcpPluginFlag) {
       const { setOpenCodeMcpRegistration } = await import("../../integrations/opencode-plugin.js");
-      const registration = setOpenCodeMcpRegistration({ enabled: mcpPluginFlag === "--mcp-plugin" });
+      const registration = setOpenCodeMcpRegistration({
+        enabled: mcpPluginFlag === "--mcp-plugin",
+        workspaceRoot: process.cwd(),
+      });
       const data = buildInstallReport(process.cwd());
       if (!data.ok) process.exitCode = 1;
+      const target = registration.enabled
+        ? `opencode.json -> ${registration.workspaceRoot}/dist/surfaces/mcp/server.js`
+        : "opencode.json entry restored to the published package";
       return {
         command: "install",
         data: { ...data, opencodeMcpRegistration: registration },
-        legacyText: `mcp-plugin ${registration.enabled ? "enabled" : "disabled"} (${registration.status}) at ${registration.filePath ?? "n/a"}; ${formatInstallLegacyText(data)}`,
+        legacyText: `workspace build ${registration.enabled ? "enabled" : "disabled"} (${registration.status}): ${target}; marker at ${registration.filePath ?? "n/a"}; ${formatInstallLegacyText(data)}`,
       };
     }
     const data = buildInstallReport(process.cwd());

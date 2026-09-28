@@ -1,4 +1,4 @@
-import { getOpenCodeMcpRegistration } from "./opencode-plugin";
+import { getOpenCodeMcpRegistration, openCodeWorkspaceServerPath } from "./opencode-plugin";
 import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -2330,6 +2330,34 @@ function isOpenCodeMcpPluginRegistered(): boolean {
   return getOpenCodeMcpRegistration().enabled;
 }
 
+/**
+ * GraphFlow capability flags to copy into a host-launched server's environment.
+ *
+ * opencode starts the MCP server itself, so a flag exported in the developer's
+ * shell never reaches it — the same trap as the earlier env-var opt-in, one
+ * layer down. Copying them into the entry's `environment` is what makes the
+ * opt-in features testable on a real host rather than only from a terminal.
+ */
+const GRAPHFLOW_PASSTHROUGH_ENV = [
+  "GRAPHFLOW_PROJECT_BRIEF",
+  "GRAPHFLOW_CACHE_LAYOUT",
+  "GRAPHFLOW_CONTEXT_ECONOMICS",
+  "GRAPHFLOW_FRESHNESS",
+  "GRAPHFLOW_ABSTAIN",
+  "GRAPHFLOW_ABSTAIN_ENFORCE",
+  "GRAPHFLOW_STATIC_PREFIX_TOKENS",
+  "GRAPHFLOW_SUFFIX_TOKENS",
+] as const;
+
+function graphflowPassthroughEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const key of GRAPHFLOW_PASSTHROUGH_ENV) {
+    const value = env[key];
+    if (typeof value === "string" && value.trim()) result[key] = value.trim();
+  }
+  return result;
+}
+
 export function installMcpToDetectedAgents(options: McpInstallOptions): McpInstallResult[] {
   const agentIds = new Set(
     options.agentIdsOverride ?? detectInstalledAgents().map((agent) => agent.id)
@@ -2377,24 +2405,60 @@ export function installMcpToDetectedAgents(options: McpInstallOptions): McpInsta
       : options;
   const targets = resolveTargetsForAgents(agentIds, options.workspaceRoot, installScope);
   for (const target of targets) {
-    // opencode is the one host where a config entry and plugin registration
-    // compete, and opencode prefers the config entry — so a single injected
-    // entry silently defeats the plugin and pins the published package. This
-    // check lives here, at the single choke point every write path passes
-    // through, because enforcing it in one installer slice was not enough: the
-    // global pass re-added the entry right after the slice removed it.
+    // opencode is the one host where a stale entry is actively harmful while
+    // developing GraphFlow: it pins the published package, so edits in this
+    // checkout are never loaded even though everything looks healthy. When the
+    // workspace build is opted in, write an entry that points at it.
+    //
+    // This lives at the single choke point every write path passes through.
+    // A guard inside the opencode installer slice did not hold: the global MCP
+    // pass re-wrote the entry right after the slice changed it.
     if (target.agentId === "opencode" && isOpenCodeMcpPluginRegistered()) {
-      const removed = removeOpencodeMcpEntry(target.configPath, serverName);
-      results.push({
-        agentId: target.agentId,
-        agentName: target.agentName,
-        configPath: target.configPath,
-        scope: target.scope,
-        status: removed ? "updated" : "skipped",
-        message: removed
-          ? "removed the graphflow entry; the opencode plugin registers the server instead"
-          : "no graphflow entry in opencode.json; the opencode plugin registers the server",
-      });
+      const registration = getOpenCodeMcpRegistration();
+      const serverPath = openCodeWorkspaceServerPath(registration.workspaceRoot ?? process.cwd());
+      if (!existsSync(serverPath)) {
+        results.push({
+          agentId: target.agentId,
+          agentName: target.agentName,
+          configPath: target.configPath,
+          scope: target.scope,
+          status: "error",
+          message: `workspace build missing: ${serverPath}. Run \`npm run build\` in ${registration.workspaceRoot ?? "the GraphFlow checkout"}, or \`graphflow install --no-mcp-plugin\` to stop preferring it.`,
+        });
+        continue;
+      }
+      try {
+        const passthrough = graphflowPassthroughEnv();
+        const status = injectIntoAgentConfig(
+          target.configPath,
+          target.serversKey,
+          target.configFormat,
+          serverName,
+          buildMcpServerNode({
+            strategy: "node-bundled",
+            bundledServerPath: serverPath,
+            nodeCommand: process.execPath,
+            ...(Object.keys(passthrough).length > 0 ? { environment: passthrough } : {}),
+          })
+        );
+        results.push({
+          agentId: target.agentId,
+          agentName: target.agentName,
+          configPath: target.configPath,
+          scope: target.scope,
+          status,
+          message: `launches the workspace build at ${serverPath}`,
+        });
+      } catch (error) {
+        results.push({
+          agentId: target.agentId,
+          agentName: target.agentName,
+          configPath: target.configPath,
+          scope: target.scope,
+          status: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
       continue;
     }
     try {
