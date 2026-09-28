@@ -192,6 +192,23 @@ module:docs/guide.md          ← 相对文档链接
 2. **`pickUsage` 读不了 OpenAI / Google 的缓存字段**。原先只认 DeepSeek 的 `prompt_cache_hit_tokens`，等于"位置问题只能在一个 provider 上、用一个 provider 的数字回答"。现补 `cached_tokens` / `cache_write_tokens` / `total_cached_tokens` / `cache_read_input_tokens`，并把**写入量单列**——一个反复写入却从不被读的前缀是纯 surcharge，只有把写入和命中分开才看得见。
 3. **`cacheLayout` 的措辞按实测改写**。原来写"稳定在前、易变在后"，但宿主**完全照做也照样丢缓存**：如果两段都被拼进 system 块，易变段仍在对话之前，其后一切重新计费。措辞已改为明确指出**边界位置**（稳定段落在断点处、易变段放到对话之后），并写明"都拼进 system 块仍然丢缓存"。
 
+### Added — 处方化落位建议 + opencode 插件的 MCP 注册
+
+- **`cacheLayout.insertion`（可照抄的处方，不再只是描述）**：`stableAt: "system"` / `deltaAt: "turn-tail"` + 一句 `recipe` + `evidence`（附实测数字 95.1% / 43.1% / 94.1%）。原来的"稳定在前、易变在后"**可以被完全照做而依然丢缓存**——两段都拼进 system 块时易变段仍在对话之前。措辞改为指名**边界位置**，并明说"都拼进 system 块仍然丢缓存"。
+- **opencode 插件新增 `mcp` 注册钩子（`GRAPHFLOW_OPENCODE_MCP=1` 开启）**：**opencode 自己拥有 `opencode.json`**——手写进去的 MCP 条目会被 opencode 下次写回时规范化掉（**实测发生，不是推测**）。插件的 `mcp` 钩子由 opencode 自行合并，因而不会被覆盖。自动优先选 `<workspace>/dist/surfaces/mcp/server.js`（本地开发构建），不存在则回落到已安装包；`GRAPHFLOW_MCP_SERVER` 可显式指定。**默认关闭**，避免与已在 `opencode.json` 里配了 graphflow 的用户重复注册。
+
+### Fixed（第三轮）— 装进 opencode 的能力测试揪出来的
+
+- **provider 档位接不上，等于上一轮的修复是死的**。`buildContextEconomics` 没有任何调用方传 `provider`，所以运行时一律按 Anthropic 计价。装进 opencode 后实测：同一请求**重写税 $0.17250**（Anthropic 数字），而它实际发往 DeepSeek，正确值是 **$0.00735**——**差 23 倍**。现由 `config.tiers` 推导 provider 传入。**这正是"真装一次"才能发现的 bug**：单测全绿时它根本不显形。
+- **不可读文件在 JSON 里变成 `null`**，与"未测量"无法区分。`readFileTokens` 对读不出的文件返回 `Infinity`（诚实：委派代价无上界），但 `Infinity` 序列化后是 `null`。改为 `amplification.unreadableFiles` 计数 + 有限的 `readTokens`。
+- **顺带修掉一个我自己刚引入的严重 bug**：把 `readTokens` 钳到 0 让 JSON 好看，结果**让读不出的文件看起来免费**——恰是 `Infinity` 原本要防的失败。改为 `unreadableFiles > 0` 时**显式判失败**。新写的测试当场抓住。
+
+### 验证 — 装进 opencode 的能力测试（10/10 PASS）
+
+经**插件自身产出的 spec**（从已安装的 `~/.config/opencode/plugins/graphflow.mjs` 加载，不是仓库源文件）启动：MCP 握手 OK、10 个工具、3 轮 context 全部返回；Project Brief 2964 tok（`reused=true`）、Cache Layout 处方 `system/turn-tail`、stable 2984 / delta 679、Economics provider-aware（`cache-break`，重写税 $0.00735）、敏感性扫描 `robust=true`、新鲜度 `level=fresh`、能力地板按设计拒绝弃权（8773 节点 > 2000）。`doctor` 三个 opencode 切片（mcp / hooks / instructions）均为 installed。
+
+原 `opencode.json` 已备份为 `opencode.json.bak-graphflow-local-20260928-183059`。
+
 ### Tests
 
 ### Tests

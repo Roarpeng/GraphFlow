@@ -74,6 +74,8 @@ export interface AbstentionFloor {
   fileCount: { files: number; pass: boolean };
   amplification: {
     readTokens: number;
+    /** 0 means every pointed-to file was readable. */
+    unreadableFiles: number;
     /** handleTokens + readTokens — what the agent actually pays. */
     delegateTokens: number;
     packageTokens: number;
@@ -206,19 +208,32 @@ export function evaluateAbstentionFloor(input: {
   const fileCountPass = handles.length > 0 && handles.length <= thresholds.maxFileCount;
 
   const readTokens = handles.reduce((sum, handle) => sum + Math.max(0, input.readFileTokens(handle.file)), 0);
+  // `readFileTokens` returns Infinity for a file it cannot read, which is the
+  // honest answer (the delegation cost is unbounded) but serialises to `null` in
+  // JSON — indistinguishable from "not measured". Count them instead so a caller
+  // reading the wire can tell the two apart, and keep the ratio finite.
+  const unreadableFiles = handles.filter((handle) => !Number.isFinite(input.readFileTokens(handle.file))).length;
+  const measuredReadTokens = Number.isFinite(readTokens) ? readTokens : 0;
   const handleTokens = estimateHandleTokens(handles);
   // A handle is not free. Comparing only the reads to the package lets a
   // delegation pass the gate and then come out *more* expensive, which is the
   // one outcome this floor exists to prevent — measured: a 45 tok package
   // replaced by a 42 tok read plus a 9 tok handle is a 6 tok regression.
-  const delegateTokens = handleTokens + readTokens;
-  const amplificationRatio = packageTokens > 0 ? delegateTokens / packageTokens : Number.POSITIVE_INFINITY;
-  const amplificationPass = packageTokens > 0 && amplificationRatio <= thresholds.maxReadAmplification;
+  const delegateTokens = handleTokens + measuredReadTokens;
+  const amplificationRatio =
+    packageTokens > 0 ? delegateTokens / packageTokens : Number.POSITIVE_INFINITY;
+  // An unreadable pointer fails the gate explicitly. Clamping its cost to zero
+  // for the wire would otherwise make an unreadable file look *free* — the exact
+  // failure the unbounded value existed to prevent.
+  const amplificationPass =
+    packageTokens > 0 && unreadableFiles === 0 && amplificationRatio <= thresholds.maxReadAmplification;
 
   const reachability = { resolved: covered, total, ratio: reachabilityRatio, pass: reachabilityPass };
   const fileCount = { files: handles.length, pass: fileCountPass };
   const amplification = {
-    readTokens,
+    readTokens: measuredReadTokens,
+    /** Files whose content could not be read; the cost of those is unbounded. */
+    unreadableFiles,
     delegateTokens,
     packageTokens,
     ratio: amplificationRatio,
@@ -241,10 +256,10 @@ export function evaluateAbstentionFloor(input: {
     reason =
       packageTokens === 0
         ? "package carries 0 tokens — nothing to save by delegating the read"
-        : !Number.isFinite(readTokens)
+        : unreadableFiles > 0
           ? // An unreadable pointer is not a free read. Without this the
             // amplification gate would pass on a file that does not exist.
-            "a pointed-to file could not be read — the cost of the delegation is unbounded, so it cannot be shown to pay"
+            `${unreadableFiles} pointed-to file(s) could not be read — the cost of the delegation is unbounded, so it cannot be shown to pay`
           : `handles + reads cost ${delegateTokens} tok (${handleTokens} handle + ${readTokens} read) vs a ${packageTokens} tok package (${amplificationRatio.toFixed(2)}x > ${thresholds.maxReadAmplification}x): the agent pays more than it saves`;
   } else {
     reason = `floor holds: ${covered}/${total} anchors reachable in ${handles.length} file(s), delegation costs ${delegateTokens} tok vs package ${packageTokens} tok (${amplificationRatio.toFixed(2)}x) — cheaper and loses no evidence`;

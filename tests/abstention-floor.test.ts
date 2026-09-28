@@ -211,6 +211,24 @@ describe("abstention floor", () => {
     expect(tokens).toBeLessThan(20);
   });
 
+  it("reports unreadable pointers instead of serialising them as null", () => {
+    // An unreadable file means the delegation cost is unbounded, which is the
+    // honest answer — but Infinity becomes `null` on the wire, indistinguishable
+    // from "not measured". The count keeps the two apart for a JSON consumer.
+    const nodes = indexOf([symbol("a", "src/real.ts", 1)]);
+    const floor = evaluateAbstentionFloor({
+      anchors: [anchor("a")],
+      nodesById: nodes,
+      packageTokens: 300,
+      readFileTokens: () => Number.POSITIVE_INFINITY,
+    });
+    expect(floor.amplification.unreadableFiles).toBe(1);
+    expect(Number.isFinite(floor.amplification.readTokens)).toBe(true);
+    expect(floor.amplification.pass).toBe(false);
+    expect(floor.reason).toContain("could not be read");
+    expect(JSON.parse(JSON.stringify(floor)).amplification.unreadableFiles).toBe(1);
+  });
+
   it("reads the enforcement switch", () => {
     expect(isAbstentionEnforced({})).toBe(false);
     expect(isAbstentionEnforced({ GRAPHFLOW_ABSTAIN_ENFORCE: "0" })).toBe(false);

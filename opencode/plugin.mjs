@@ -17,9 +17,20 @@
  * - The exported factory is injectable (`spawn`/`env`) so tests stay offline.
  */
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join as joinPath } from "node:path";
 
 export const name = "graphflow-opencode";
 export const ENABLED_ENV = "GRAPHFLOW_OPENCODE_PLUGIN";
+
+/** @param {string} p */
+const fileExists = (p) => {
+  try {
+    return Boolean(p) && existsSync(p);
+  } catch {
+    return false;
+  }
+};
 
 /** Reply text is clipped before it crosses a process boundary. */
 const REPLY_CLIP_MAX = 4000;
@@ -35,6 +46,69 @@ const FILL_TIMEOUT_MS = 20_000;
 export function isEnabled(env = process.env) {
   const raw = env[ENABLED_ENV]?.trim().toLowerCase();
   return !(raw === "0" || raw === "false" || raw === "off" || raw === "no" || raw === "disabled");
+}
+
+/** Separate switch: the plugin's session hooks and its MCP registration are
+ *  independently useful, and registering a second server is not something to
+ *  turn on for someone who already has one in opencode.json. */
+export const MCP_ENV = "GRAPHFLOW_OPENCODE_MCP";
+
+export function shouldRegisterMcp(env = process.env) {
+  const raw = env[MCP_ENV]?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
+/**
+ * Opt-in capability switches to pass through to the MCP server.
+ *
+ * Every GraphFlow economy feature is default-off because it either costs tokens
+ * on every response or changes what the caller receives. A host that registers
+ * the server from this plugin therefore gets the plain server unless it asks for
+ * more — the switch is listed rather than assumed, so what is active is visible
+ * in one place instead of being spread across config files.
+ */
+export const PASSTHROUGH_ENV = [
+  "GRAPHFLOW_PROJECT_BRIEF",
+  "GRAPHFLOW_CACHE_LAYOUT",
+  "GRAPHFLOW_CONTEXT_ECONOMICS",
+  "GRAPHFLOW_FRESHNESS",
+  "GRAPHFLOW_ABSTAIN",
+  "GRAPHFLOW_ABSTAIN_ENFORCE",
+  "GRAPHFLOW_STATIC_PREFIX_TOKENS",
+  "GRAPHFLOW_SUFFIX_TOKENS",
+];
+
+/**
+ * Build the MCP server spec, preferring a local build over the published one.
+ *
+ * A developer working on GraphFlow needs opencode to exercise the working tree,
+ * not whatever npm has. GRAPHFLOW_MCP_SERVER points at an entry point when even
+ * that guess is wrong. Without it we prefer `<repo>/dist/surfaces/mcp/server.js`
+ * when that file exists and fall back to the installed package, so a user who
+ * installed the plugin without building gets the shipped server and nobody
+ * silently loses their tools.
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ * @param {any} [input] opencode plugin context (supplies the workspace)
+ * @param {{cwd?:string}} [config]
+ */
+export function mcpServerSpec(env = process.env, input, config) {
+  const explicit = env.GRAPHFLOW_MCP_SERVER?.trim();
+  const workspace = resolveWorkspaceDirectory(input, config?.cwd);
+  const localEntry = workspace ? joinPath(workspace, "dist", "surfaces", "mcp", "server.js") : "";
+  const entry = explicit || (localEntry && fileExists(localEntry) ? localEntry : "");
+  const environment = {};
+  for (const key of PASSTHROUGH_ENV) {
+    const value = env[key];
+    if (typeof value === "string" && value.trim()) environment[key] = value.trim();
+  }
+  if (env.GRAPHFLOW_LOG_JSON) environment.GRAPHFLOW_LOG_JSON = env.GRAPHFLOW_LOG_JSON;
+  if (workspace) environment.GRAPHFLOW_WORKSPACE_ROOT = workspace;
+  const spec = { type: "local", command: [process.execPath] };
+  spec.command.push(entry);
+  spec.enabled = true;
+  if (Object.keys(environment).length > 0) spec.environment = environment;
+  return spec;
 }
 
 /**
@@ -154,6 +228,16 @@ export function createGraphFlowPlugin(config = {}) {
   return async (input = {}) => {
     const workspace = resolveWorkspaceDirectory(input, config.cwd);
     return {
+      // Registering the MCP server from the plugin rather than from
+      // opencode.json is deliberate. opencode owns that file: an entry written
+      // into it by hand was normalised away on the next opencode write, which is
+      // observed behaviour, not a theory. A plugin's `mcp` hook is merged by
+      // opencode itself, so it survives.
+      //
+      // Off unless GRAPHFLOW_OPENCODE_MCP is set, so an existing install that
+      // already lists graphflow in opencode.json does not end up with two.
+      mcp: shouldRegisterMcp(env) ? { graphflow: mcpServerSpec(env, input, config) } : {},
+
       event: async ({ event }) => {
         try {
           if (!isEnabled(env)) return;

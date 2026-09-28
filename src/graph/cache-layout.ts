@@ -1,4 +1,5 @@
 import { estimateTokens } from "./context-slicer-utils.js";
+import type { CacheInsertionAdvice } from "../surfaces/cli/runtime/types.js";
 
 /**
  * Prefix Cache Planner — declaration only.
@@ -49,6 +50,7 @@ export interface CacheLayoutDeltaLine {
 export interface CacheLayoutPlan {
   stablePrefix: { lines: string[]; tokens: number };
   delta: { lines: string[]; tokens: number };
+  insertion: CacheInsertionAdvice;
   /**
    * Share of THIS package that is stable. Distinct from `reusablePrefixShare`
    * below: this is about us, that is about the request the host actually sends.
@@ -178,9 +180,47 @@ export function planCacheLayout(input: {
   return {
     stablePrefix: { lines: stableLines, tokens: stableTokens },
     delta: { lines: deltaLines, tokens: deltaTokens },
+    insertion: buildInsertionAdvice({
+      stableTokens,
+      deltaTokens,
+      hasStable: stableLines.length > 0,
+    }),
     stableShare,
     reusablePrefixShare,
     note,
+  };
+}
+
+const MEASURED_EVIDENCE =
+  "measured on DeepSeek (benchmarks/cache-placement-ab.ts, 40 turns of history): " +
+  "volatile content in the system layer took the hit ratio from 95.1% to 43.1% and re-billed the whole conversation every turn; " +
+  "a byte-stable brief in the same position cost nothing (94.1%)";
+
+/**
+ * Where each half has to go, in the two slots a host actually has.
+ *
+ * The delta is the half that is easy to get wrong, and the reason is specific
+ * rather than general: caching is a left-to-right prefix match, so anything
+ * after a volatile block is re-billed — and "after" includes the conversation.
+ * Appending the delta to the end of the current turn is what keeps the
+ * conversation inside the cached prefix.
+ */
+export function buildInsertionAdvice(input: {
+  stableTokens: number;
+  deltaTokens: number;
+  hasStable: boolean;
+}): CacheInsertionAdvice {
+  const recipe = input.hasStable
+    ? `Append stablePrefix (${input.stableTokens} tok, byte-identical across turns) to the end of your cached system/static block. Append delta (${input.deltaTokens} tok) to the END of the current turn, after the conversation — never to the system block.`
+    : `This package is entirely query-scoped (${input.deltaTokens} tok). Append it to the END of the current turn, after the conversation; it cannot be cached and must not precede the transcript.`;
+  return {
+    stableAt: "system",
+    deltaAt: "turn-tail",
+    recipe,
+    evidence: MEASURED_EVIDENCE,
+    // A host with no late-append slot cannot follow the delta half, and saying
+    // so is more useful than implying the advice is being satisfied.
+    actionable: true,
   };
 }
 

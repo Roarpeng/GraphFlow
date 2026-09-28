@@ -105,6 +105,28 @@ describe("cache layout planner", () => {
     expect(planCacheLayout({ lines })).toEqual(planCacheLayout({ lines }));
   });
 
+  it("names the two slots a host can actually use, not just the order", () => {
+    // The failure this prevents is a host that obeys "stable first, delta
+    // second" by concatenating both into the system block and losing the
+    // conversation out of the cache anyway. Advice has to be concrete or it
+    // gets implemented the wrong way.
+    const plan = planCacheLayout({ lines: ["repo-map: 3 modules", "file:src/a.ts"] });
+    expect(plan.insertion.stableAt).toBe("system");
+    expect(plan.insertion.deltaAt).toBe("turn-tail");
+    expect(plan.insertion.recipe).toContain("END of the current turn");
+    expect(plan.insertion.recipe).toContain("never to the system block");
+    expect(plan.insertion.evidence).toContain("95.1%");
+    expect(plan.insertion.evidence).toContain("43.1%");
+    expect(plan.insertion.actionable).toBe(true);
+  });
+
+  it("says something different when there is no stable half to place", () => {
+    const plan = planCacheLayout({ lines: ["file:src/a.ts", "symbol:src/b.ts:11"] });
+    expect(plan.insertion.recipe).toContain("entirely query-scoped");
+    expect(plan.insertion.recipe).toContain("cannot be cached");
+    expect(plan.insertion.stableAt).toBe("system");
+  });
+
   it("reads the switch", () => {
     expect(isCacheLayoutEnabled({})).toBe(false);
     expect(isCacheLayoutEnabled({ GRAPHFLOW_CACHE_LAYOUT: "0" })).toBe(false);

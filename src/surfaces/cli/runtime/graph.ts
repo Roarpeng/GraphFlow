@@ -651,6 +651,12 @@ async function attachContextEconomics(
         packageTokens: next.tokenBudget.compressedTokens,
         staticPrefixTokens: resolveStaticPrefixTokens(),
         suffixTokens: resolveSuffixTokens(),
+        // The cache ratios and input price are properties of the provider being
+        // billed. Without this the engine priced every host at Anthropic's rates,
+        // which an install test against DeepSeek showed was wrong by 23x on the
+        // rewrite surcharge. Cheap tier is used when the config has no smart tier
+        // because it is the one a context request is most likely billed against.
+        provider: config.tiers?.economy?.provider ?? config.tiers?.smart?.provider,
       }),
     };
   }
@@ -700,6 +706,7 @@ async function attachContextEconomics(
       cacheLayout: {
         stablePrefix: plan.stablePrefix,
         delta: plan.delta,
+        insertion: plan.insertion,
         reusablePrefixShare: plan.reusablePrefixShare,
         note: plan.note,
       },

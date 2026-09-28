@@ -53,6 +53,19 @@ export interface CacheLayout {
     tokens: number;
   };
   /**
+   * Where to put each half, named the way a host can act on it.
+   *
+   * Measured on DeepSeek (benchmarks/cache-placement-ab.ts, 40 turns of
+   * history): putting the volatile half in the system layer drops the hit ratio
+   * from 95.1% to 43.1% and re-bills the whole conversation every turn, because
+   * the surviving cache is exactly the stable prefix. Putting a byte-stable
+   * brief in the same position costs nothing (94.1%). So the position is the
+   * whole game, and "stable first, delta second" is not enough on its own — a
+   * host that concatenates both into the system block follows the order and
+   * still loses the cache.
+   */
+  insertion: CacheInsertionAdvice;
+  /**
    * Estimated share of the host's request prefix that would survive if the host
    * ordered by this declaration. Null when the host's own prefix is unknown
    * (GraphFlow is not the harness and cannot see it).
@@ -63,6 +76,34 @@ export interface CacheLayout {
    * the agent if useful. Never empty.
    */
   note: string;
+}
+
+/**
+ * Copy-pasteable placement advice.
+ *
+ * `system` and `turn-tail` are the two slots a host actually has. The advice is
+ * deliberately concrete rather than advisory: a host that is told "put the
+ * volatile part somewhere stable-ish" will put it in the system block, and that
+ * is the exact arrangement the measurement rules out.
+ */
+export interface CacheInsertionAdvice {
+  /** Put the stable segment in the host's cached system/static region. */
+  stableAt: "system";
+  /**
+   * Put the delta at the end of the current turn — after the conversation, not
+   * in the system block. This is the half that is easy to get wrong.
+   */
+  deltaAt: "turn-tail";
+  /** A single instruction a host can implement without interpreting anything. */
+  recipe: string;
+  /** The measured basis, so a host can verify instead of trusting us. */
+  evidence: string;
+  /**
+   * True when following this advice is even possible for the payload: a delta
+   * that the host has no way to append late is worth flagging rather than
+   * silently assuming.
+   */
+  actionable: boolean;
 }
 import type { GraphFlowConfig } from "../../../config/schema";
 import type { DialogueThreadEchoView } from "../../../learning/dialogue-thread";
