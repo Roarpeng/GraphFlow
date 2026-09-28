@@ -14,7 +14,7 @@
  * the bundled plugin uses only `node:child_process`, so no package.json is
  * required in the plugin directory.
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -23,6 +23,80 @@ export const OPENCODE_HOST_ADAPTER_ID = "opencode";
 export const OPENCODE_HOME_ENV = "GRAPHFLOW_OPENCODE_HOME";
 export const OPENCODE_PLUGIN_FILE = "graphflow.mjs";
 export const OPENCODE_PLUGIN_SUBDIR = "plugins";
+/**
+ * Persistent opt-in for the plugin's MCP registration, written beside the
+ * installed plugin.
+ *
+ * The environment variable works but is a trap. opencode keeps a long-lived
+ * service process that owns and re-spawns the MCP children, so a variable
+ * exported in a later shell never reaches it — and unless it is in an rc file it
+ * is gone on the next launch, including a GUI launch. That was observed
+ * directly: the variable was set, the user restarted, and nothing changed
+ * because the service had been up for three hours. The marker travels with the
+ * install instead, so the setting survives restarts and new machines.
+ */
+export const OPENCODE_MCP_MARKER_FILE = "graphflow-mcp.json";
+
+export interface OpenCodeMcpRegistration {
+  enabled: boolean;
+  filePath?: string;
+  status: "created" | "updated" | "removed" | "absent" | "unchanged" | "error";
+  message?: string;
+}
+
+export function opencodeMcpMarkerPath(home: string): string {
+  return join(opencodePluginDir(home), OPENCODE_MCP_MARKER_FILE);
+}
+
+export function getOpenCodeMcpRegistration(options: { home?: string } = {}): OpenCodeMcpRegistration {
+  const home = options.home ?? resolveOpenCodeHome();
+  const filePath = opencodeMcpMarkerPath(home);
+  if (!existsSync(filePath)) return { enabled: false, status: "absent" };
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, "utf8")) as { enabled?: unknown };
+    return {
+      enabled: parsed.enabled === true,
+      filePath,
+      status: parsed.enabled === true ? "unchanged" : "absent",
+    };
+  } catch (error) {
+    return {
+      enabled: false,
+      filePath,
+      status: "error",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export function setOpenCodeMcpRegistration(
+  options: { enabled: boolean; home?: string }
+): OpenCodeMcpRegistration {
+  const home = options.home ?? resolveOpenCodeHome();
+  const filePath = opencodeMcpMarkerPath(home);
+  try {
+    if (!options.enabled) {
+      if (!existsSync(filePath)) return { enabled: false, filePath, status: "unchanged" };
+      rmSync(filePath);
+      return { enabled: false, filePath, status: "removed" };
+    }
+    const before = getOpenCodeMcpRegistration({ home });
+    mkdirSync(opencodePluginDir(home), { recursive: true });
+    writeFileSync(filePath, `${JSON.stringify({ enabled: true }, null, 2)}\n`, "utf8");
+    return {
+      enabled: true,
+      filePath,
+      status: before.enabled && before.status === "unchanged" ? "unchanged" : before.status === "absent" ? "created" : "updated",
+    };
+  } catch (error) {
+    return {
+      enabled: false,
+      filePath,
+      status: "error",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
 
 export interface OpenCodePluginResult {
   status: "created" | "updated" | "skipped" | "error";

@@ -1,3 +1,4 @@
+import { getOpenCodeMcpRegistration } from "./opencode-plugin";
 import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -2324,6 +2325,11 @@ export function removeCodexMcpEntry(
   return true;
 }
 
+/** Is opencode's MCP server registered by its plugin instead of by opencode.json? */
+function isOpenCodeMcpPluginRegistered(): boolean {
+  return getOpenCodeMcpRegistration().enabled;
+}
+
 export function installMcpToDetectedAgents(options: McpInstallOptions): McpInstallResult[] {
   const agentIds = new Set(
     options.agentIdsOverride ?? detectInstalledAgents().map((agent) => agent.id)
@@ -2371,6 +2377,26 @@ export function installMcpToDetectedAgents(options: McpInstallOptions): McpInsta
       : options;
   const targets = resolveTargetsForAgents(agentIds, options.workspaceRoot, installScope);
   for (const target of targets) {
+    // opencode is the one host where a config entry and plugin registration
+    // compete, and opencode prefers the config entry — so a single injected
+    // entry silently defeats the plugin and pins the published package. This
+    // check lives here, at the single choke point every write path passes
+    // through, because enforcing it in one installer slice was not enough: the
+    // global pass re-added the entry right after the slice removed it.
+    if (target.agentId === "opencode" && isOpenCodeMcpPluginRegistered()) {
+      const removed = removeOpencodeMcpEntry(target.configPath, serverName);
+      results.push({
+        agentId: target.agentId,
+        agentName: target.agentName,
+        configPath: target.configPath,
+        scope: target.scope,
+        status: removed ? "updated" : "skipped",
+        message: removed
+          ? "removed the graphflow entry; the opencode plugin registers the server instead"
+          : "no graphflow entry in opencode.json; the opencode plugin registers the server",
+      });
+      continue;
+    }
     try {
       const { workspaceRoot, ...restOptions } = effectiveOptions;
       const windowsHost =

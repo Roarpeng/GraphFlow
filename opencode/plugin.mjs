@@ -17,7 +17,7 @@
  * - The exported factory is injectable (`spawn`/`env`) so tests stay offline.
  */
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
 
 export const name = "graphflow-opencode";
@@ -50,12 +50,52 @@ export function isEnabled(env = process.env) {
 
 /** Separate switch: the plugin's session hooks and its MCP registration are
  *  independently useful, and registering a second server is not something to
- *  turn on for someone who already has one in opencode.json. */
+ *  turn on for someone who already has one in opencode.json.
+ *
+ *  Read from a marker file next to the installed plugin rather than only from the
+ *  environment. Observed failure: opencode owns and re-spawns its MCP children
+ *  from a long-lived service process, so an env var exported in a later shell
+ *  never reaches it — and it was in no rc file, so it was lost on the next
+ *  launch. The marker is written by `graphflow install --mcp-plugin` and travels
+ *  with the install, so the setting survives restarts, GUI launches and machines
+ *  where nobody remembers the export. The env var still wins when set. */
 export const MCP_ENV = "GRAPHFLOW_OPENCODE_MCP";
+export const MCP_MARKER_FILE = "graphflow-mcp.json";
 
+/** Where the installed plugin lives, so the marker sits beside it.
+ *  Mirrors resolveOpenCodeHome: GRAPHFLOW_OPENCODE_HOME is already the config
+ *  home (~/.config/opencode), not the user home. */
+function pluginDirFromEnv(env) {
+  const explicit = env.GRAPHFLOW_OPENCODE_HOME?.trim();
+  const home = explicit || (env.HOME || env.USERPROFILE ? joinPath(env.HOME || env.USERPROFILE, ".config", "opencode") : "");
+  if (!home) return "";
+  return joinPath(home, "plugins");
+}
+
+function readMcpMarker(env) {
+  const dir = pluginDirFromEnv(env);
+  if (!dir) return undefined;
+  try {
+    const raw = readFileSync(joinPath(dir, MCP_MARKER_FILE), "utf8");
+    const parsed = JSON.parse(raw);
+    return typeof parsed?.enabled === "boolean" ? parsed.enabled : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Should the plugin register the MCP server?
+ *
+ * Explicit off (env or marker) always wins, so a user can always stop it. Then
+ * the env var, for one-off runs. Then the marker, which is the durable path.
+ * @param {NodeJS.ProcessEnv} [env]
+ */
 export function shouldRegisterMcp(env = process.env) {
   const raw = env[MCP_ENV]?.trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+  if (raw === "0" || raw === "false" || raw === "off" || raw === "no" || raw === "disabled") return false;
+  if (raw === "1" || raw === "true" || raw === "yes" || raw === "on") return true;
+  return readMcpMarker(env) === true;
 }
 
 /**

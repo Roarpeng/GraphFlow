@@ -19,6 +19,7 @@ export function buildCliUsage(): string {
     "Usage: graphflow <command> [options]",
     "Commands:",
     "  install [--json]            Install MCP + Skill to all detected agents",
+  "  install --mcp-plugin        Also register opencode's MCP server from its plugin",
     "  doctor [--json]             自检：列出各 agent 的 MCP 与指令文件注册状态，并报告 team/mcp-http 配置",
     "  selfcheck [--json]          健康红绿清单：配置加载 / 图存储代码节点 / delta 日志 / 索引新鲜度 / LLM 真实连通探测 / 飞轮脉冲 / 对话脱敏 / 会话日志",
     "  uninstall                   移除 MCP + Skill + Rules + hooks（插件卸后请再跑此命令）",

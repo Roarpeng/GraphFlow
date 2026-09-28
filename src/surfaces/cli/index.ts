@@ -130,6 +130,22 @@ import {
 async function executeCommand(command: string, args: string[], configPath?: string): Promise<CliCommandResult | undefined> {
   if (command === "install") {
     const { buildInstallReport, formatInstallLegacyText } = require("./init") as typeof import("./init");
+    // `--mcp-plugin` persists the opencode plugin's MCP registration. The
+    // environment variable works but dies with the shell that set it, and
+    // opencode's MCP children belong to a long-lived service process that a
+    // later shell cannot reach.
+    const mcpPluginFlag = args.find((arg) => arg === "--mcp-plugin" || arg === "--no-mcp-plugin");
+    if (mcpPluginFlag) {
+      const { setOpenCodeMcpRegistration } = await import("../../integrations/opencode-plugin.js");
+      const registration = setOpenCodeMcpRegistration({ enabled: mcpPluginFlag === "--mcp-plugin" });
+      const data = buildInstallReport(process.cwd());
+      if (!data.ok) process.exitCode = 1;
+      return {
+        command: "install",
+        data: { ...data, opencodeMcpRegistration: registration },
+        legacyText: `mcp-plugin ${registration.enabled ? "enabled" : "disabled"} (${registration.status}) at ${registration.filePath ?? "n/a"}; ${formatInstallLegacyText(data)}`,
+      };
+    }
     const data = buildInstallReport(process.cwd());
     if (!data.ok) {
       process.exitCode = 1;
