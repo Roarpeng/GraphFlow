@@ -209,6 +209,15 @@ module:docs/guide.md          ← 相对文档链接
 
 原 `opencode.json` 已备份为 `opencode.json.bak-graphflow-local-20260928-183059`。
 
+### Fixed — doctor 曾在"跑错构建"时报告健康
+
+安装后的人工排查发现：doctor 对三个 opencode 切片全部报 `installed`，但 MCP 实际启动的是 **npm 全局包**，比本地 `dist/` 早编译 10 小时。原因是 `probeDanglingGraphflowEntry` 只回答"**它启动的那个文件存在吗**"——存在，所以健康。**对一个正在改 GraphFlow 的人来说，这是最该被报出来的情况，却恰恰被漏掉。**
+
+- 新增 `probeMcpEntryPoint`：报告宿主**实际启动的入口**，并区分 `fromPublishedPackage`；当宿主指向已发布包而工作区存在更新的本地构建时，标记 `staleLocalBuild`。
+- `DoctorCheckStatus` 新增 **`stale`** 状态（既非 installed 也非 missing：文件在，只是构建错了），`summary.stale` 单独计数，**`ok` 现在要求 `missing === 0 && stale === 0`**。一个跑着旧构建的宿主**不算健康**——这比报 missing 更糟，因为它看起来是成功的。
+- 消息里给出两条路径并给出可执行的修法（设 `GRAPHFLOW_OPENCODE_MCP=1` 并从配置文件删掉 graphflow 条目，交由插件注册本地构建）。
+- 修好后本机实测：`summary {installed:62, missing:0, stale:1}`，`ok:false`，stale 项准确指向 `~/.npm-global/.../server.js` 与本地 `dist/.../server.js` 两条路径。
+
 ### Tests
 
 ### Tests

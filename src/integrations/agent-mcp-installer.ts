@@ -945,6 +945,78 @@ export function probeDanglingGraphflowEntry(configPath: string, serverName = "gr
   return findExactDanglingInfo(configPath, serverName);
 }
 
+export interface McpEntryPointInfo {
+  /** The script the host actually launches, i.e. the second argv element. */
+  entryPoint?: string;
+  /** True when that script lives inside a node_modules install. */
+  fromPublishedPackage: boolean;
+  /**
+   * Set when the host launches a published package while a newer local build
+   * exists in the workspace. This is the failure that a plain existence check
+   * reports as healthy: both files exist, the host is simply running the wrong
+   * one, and a developer debugging their own changes sees nothing wrong.
+   */
+  staleLocalBuild?: string;
+}
+
+/**
+ * Which GraphFlow build is this host actually going to run?
+ *
+ * `probeDanglingGraphflowEntry` answers "does the thing it launches exist", and
+ * that is the wrong question for a developer working on GraphFlow: a host
+ * pointed at a published npm copy reports healthy while ignoring the working
+ * tree entirely. Observed directly — doctor said `installed` for an entry whose
+ * script was ten hours older than the local `dist/`.
+ *
+ * So this reports the launch target and flags the mismatch. It never changes
+ * anything; the point is that `doctor` stops being able to say "fine" when it
+ * has not actually checked the thing that matters.
+ */
+export function probeMcpEntryPoint(
+  configPath: string,
+  options: { serverName?: string; workspaceRoot?: string; localBuildPath?: string } = {}
+): McpEntryPointInfo {
+  const serverName = options.serverName ?? "graphflow";
+  const empty: McpEntryPointInfo = { fromPublishedPackage: false };
+  try {
+    if (!existsSync(configPath)) return empty;
+    const json = readJsonConfig(configPath);
+    const entry =
+      (json.mcp as Record<string, unknown> | undefined)?.[serverName] ??
+      ((json.mcp as Record<string, unknown> | undefined)?.servers as
+        | Record<string, unknown>
+        | undefined)?.[serverName];
+    if (entry === undefined || typeof entry !== "object" || entry === null) return empty;
+
+    const argv = (entry as { command?: unknown }).command;
+    let entryPoint: string | undefined;
+    if (Array.isArray(argv)) {
+      // node <script> — the script is the first element that looks like a path.
+      entryPoint = argv.find(
+        (part): part is string =>
+          typeof part === "string" && /(\.[cm]?js|\.mjs|\.ts)$/.test(part) && !part.startsWith("-")
+      );
+    } else if (typeof argv === "string" && /(\.[cm]?js|\.mjs)$/.test(argv)) {
+      entryPoint = argv;
+    }
+    if (!entryPoint) return empty;
+
+    const fromPublishedPackage = /[\\/]node_modules[\\/]/.test(entryPoint);
+    let staleLocalBuild: string | undefined;
+    const localBuild =
+      options.localBuildPath ??
+      (options.workspaceRoot
+        ? join(options.workspaceRoot, "dist", "surfaces", "mcp", "server.js")
+        : undefined);
+    if (fromPublishedPackage && localBuild && existsSync(localBuild) && localBuild !== entryPoint) {
+      staleLocalBuild = localBuild;
+    }
+    return { entryPoint, fromPublishedPackage, ...(staleLocalBuild ? { staleLocalBuild } : {}) };
+  } catch {
+    return empty;
+  }
+}
+
 function findExactDanglingInfo(configPath: string, serverName: string): DanglingEntryInfo | undefined {
   for (const profile of buildAgentProfiles()) {
     for (const target of profile.userTargets) {

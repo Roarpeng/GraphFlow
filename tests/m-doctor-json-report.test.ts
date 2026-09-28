@@ -1,3 +1,7 @@
+import { probeMcpEntryPoint } from "../src/integrations/agent-mcp-installer";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { buildDoctorReport, formatDoctorLegacyText } from "../src/surfaces/cli/init";
 import { buildCliUsage } from "../src/surfaces/cli/output";
@@ -18,6 +22,7 @@ describe("doctor JSON install self-check report", () => {
         total: expect.any(Number),
         installed: expect.any(Number),
         missing: expect.any(Number),
+        stale: expect.any(Number),
         na: expect.any(Number),
       },
       ok: expect.any(Boolean),
@@ -26,16 +31,19 @@ describe("doctor JSON install self-check report", () => {
 
     expect(report.summary.total).toBe(report.checks.length);
     expect(
-      report.summary.installed + report.summary.missing + report.summary.na
+      report.summary.installed + report.summary.missing + report.summary.stale + report.summary.na
     ).toBe(report.summary.total);
-    expect(report.ok).toBe(report.summary.missing === 0);
+    // Stale is not "installed". A host launching a published copy while the
+    // workspace has a local build is broken, and it reports healthy on an
+    // existence check — so `ok` has to account for it or the check is theatre.
+    expect(report.ok).toBe(report.summary.missing === 0 && report.summary.stale === 0);
 
     for (const check of report.checks) {
       expect(check).toMatchObject({
         category: expect.stringMatching(/^(mcp|config|skill|instruction|project|hooks)$/),
         agent: expect.any(String),
         path: expect.any(String),
-        status: expect.stringMatching(/^(installed|missing|n\/a)$/),
+        status: expect.stringMatching(/^(installed|missing|stale|n\/a)$/),
       });
     }
 
@@ -51,5 +59,67 @@ describe("doctor JSON install self-check report", () => {
     expect(text).toContain("[DOCTOR] GraphFlow self-diagnosis...");
     expect(text).toContain("Detected agents:");
     expect(text).toMatch(/summary: installed=\d+ missing=\d+/);
+  });
+});
+
+describe("doctor detects a host running the wrong build", () => {
+  it("flags a published MCP entry while a local build exists", () => {
+    // Observed in the wild during an install: doctor reported `installed` for
+    // an entry whose script was a published npm copy ten hours older than the
+    // local dist, because the only question asked was "does the file exist".
+    const dir = mkdtempSync(join(tmpdir(), "doctor-stale-"));
+    try {
+      const localBuild = join(dir, "dist", "surfaces", "mcp", "server.js");
+      mkdirSync(dirname(localBuild), { recursive: true });
+      writeFileSync(localBuild, "// local build");
+      const configPath = join(dir, "opencode.json");
+      writeFileSync(
+        configPath,
+        JSON.stringify({
+          mcp: {
+            graphflow: {
+              type: "local",
+              command: ["/usr/bin/node", "/somewhere/node_modules/@roarpeng/graphflow/dist/surfaces/mcp/server.js"],
+              enabled: true,
+            },
+          },
+        })
+      );
+      const info = probeMcpEntryPoint(configPath, { workspaceRoot: dir });
+      expect(info.fromPublishedPackage).toBe(true);
+      expect(info.staleLocalBuild).toBe(localBuild);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not flag a host that already launches the local build", () => {
+    const dir = mkdtempSync(join(tmpdir(), "doctor-fresh-"));
+    try {
+      const localBuild = join(dir, "dist", "surfaces", "mcp", "server.js");
+      mkdirSync(dirname(localBuild), { recursive: true });
+      writeFileSync(localBuild, "// local build");
+      const configPath = join(dir, "opencode.json");
+      writeFileSync(
+        configPath,
+        JSON.stringify({ mcp: { graphflow: { type: "local", command: ["/usr/bin/node", localBuild] } } })
+      );
+      const info = probeMcpEntryPoint(configPath, { workspaceRoot: dir });
+      expect(info.staleLocalBuild).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("never throws on a missing or malformed config", () => {
+    expect(probeMcpEntryPoint("/definitely/not/here.json")).toMatchObject({ fromPublishedPackage: false });
+    const dir = mkdtempSync(join(tmpdir(), "doctor-bad-"));
+    try {
+      const bad = join(dir, "opencode.json");
+      writeFileSync(bad, "{ not json");
+      expect(() => probeMcpEntryPoint(bad)).not.toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

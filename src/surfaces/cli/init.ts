@@ -21,6 +21,7 @@ import {
   getMcpInstallStatus,
   installMcpToDetectedAgents,
   probeDanglingGraphflowEntry,
+  probeMcpEntryPoint,
   repairDanglingGraphflowMcpEntries,
   uninstallMcpFromDetectedAgents,
   type DanglingRepairResult,
@@ -525,7 +526,7 @@ export function formatInstallLegacyText(report: InstallReport): string {
     `[FINISH] Installation complete! Global config: ${report.globalConfig.path}`
   );
   lines.push(
-    `doctor ok=${report.doctor.ok} installed=${report.doctor.summary.installed} missing=${report.doctor.summary.missing} install ok=${report.ok}`
+    `doctor ok=${report.doctor.ok} installed=${report.doctor.summary.installed} missing=${report.doctor.summary.missing} stale=${report.doctor.summary.stale} install ok=${report.ok}`
   );
 
   if (report.remediation.length > 0) {
@@ -626,7 +627,7 @@ export interface UninstallReport {
   ok: boolean;
 }
 
-export type DoctorCheckStatus = "installed" | "missing" | "n/a";
+export type DoctorCheckStatus = "installed" | "missing" | "n/a" | "stale";
 export type DoctorCheckCategory = "mcp" | "config" | "skill" | "instruction" | "project" | "hooks";
 
 export interface DoctorCheckItem {
@@ -646,6 +647,8 @@ export interface DoctorReport {
     total: number;
     installed: number;
     missing: number;
+    /** Installed, but running a different build than the workspace has. */
+    stale: number;
     na: number;
   };
   /** True when no check is missing (n/a allowed). */
@@ -669,16 +672,31 @@ function pushHostAdapterDoctorChecks(checks: DoctorCheckItem[], hostId: string):
   if (mcpTargets.length > 0) {
     for (const target of mcpTargets) {
       const dangling = probeDanglingGraphflowEntry(target.path);
+      // Which build is wired, not just whether the file exists. A host pointed
+      // at a published copy reports healthy while ignoring the working tree, so
+      // "installed" on its own is a claim this has to earn.
+      const entry = probeMcpEntryPoint(target.path, { workspaceRoot: process.cwd() });
+      const stale = entry.staleLocalBuild;
       checks.push({
         category: "mcp",
-        agent: dangling ? `${target.agentName ?? status.agent} (dangling entry)` : target.agentName ?? status.agent,
+        agent: dangling
+          ? `${target.agentName ?? status.agent} (dangling entry)`
+          : stale
+            ? `${target.agentName ?? status.agent} (running published build)`
+            : target.agentName ?? status.agent,
         path: target.path,
         scope: target.scope ?? "user",
-        status: dangling ? "missing" : toDoctorStatus(target.installed, true),
+        status: dangling ? "missing" : stale ? "stale" : toDoctorStatus(target.installed, true),
         detected: true,
         ...(dangling
           ? { message: `launches missing file(s): ${dangling.danglingTargets.join(", ")} — run \`graphflow install\` to rewrite` }
-          : {}),
+          : stale
+            ? {
+                message:
+                  `launches the published package (${entry.entryPoint}) while a local build exists at ${stale} — ` +
+                  `edits in this checkout are not being used. Set GRAPHFLOW_OPENCODE_MCP=1 and remove the graphflow entry from this file to have the opencode plugin register the local build instead.`,
+              }
+            : {}),
       });
     }
   } else if (status.mcpPath) {
@@ -845,7 +863,12 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
   const installed = checks.filter((c) => c.status === "installed").length;
   const missing = checks.filter((c) => c.status === "missing").length;
   const na = checks.filter((c) => c.status === "n/a").length;
-  const ok = missing === 0;
+  // Stale counts as NOT ok. The file exists, so an existence check calls this
+  // healthy — but a host running a published copy while a local build sits in
+  // the workspace is a broken setup that reports success, which is worse than
+  // reporting a missing file.
+  const stale = checks.filter((c) => c.status === "stale").length;
+  const ok = missing === 0 && stale === 0;
   const remediation = ok
     ? []
     : [
@@ -869,6 +892,7 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
       total: checks.length,
       installed,
       missing,
+      stale,
       na,
     },
     ok,
@@ -906,7 +930,7 @@ export function formatDoctorLegacyText(report: DoctorReport): string {
   }
 
   lines.push(
-    `summary: installed=${report.summary.installed} missing=${report.summary.missing} n/a=${report.summary.na} ok=${report.ok}`
+    `summary: installed=${report.summary.installed} missing=${report.summary.missing} stale=${report.summary.stale} n/a=${report.summary.na} ok=${report.ok}`
   );
 
   if (report.remediation.length > 0) {
