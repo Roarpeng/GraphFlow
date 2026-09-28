@@ -315,11 +315,21 @@ npx 启动器 = 宿主每次从 npm 拉已发布包，**在这些宿主里改 Gr
 
 **这条只有 CI 能抓到**：本机 `homedir()` 就是 `HOME`，同样的代码 19/19 通过。**平台差异让"测试通过"不再等于"行为正确"，这正是这次必须推 action 的理由。**
 
+### Fixed（第二轮 CI）— Windows 上仍有 18 个宿主"未指向"，以及一处我自己写的危险清理
+
+第二次推送后 Windows 上 4 个失败降到 **1 个**：every-profile 那条仍报 18 个宿主未指向。但 12 个都过了，说明 marker 泄漏已修好，剩下的是另一回事。
+
+- 症状是"文件存在但不含 dist 路径"——说明**守卫根本没触发**，注入走的是普通 npx 路径。原因是 Windows 下 `resolveHomePaths()` 直接读 **`APPDATA` / `LOCALAPPDATA`**，测试没重定向这两个，于是 vscode / trae / cline / roo-code / kilocode 的目标路径解析到**真实用户目录**。补上重定向后一致。
+- **让该用例自我防御**：它遍历全部 profile，**一个陈旧 marker 就会让 18 个宿主一起报错，而这个报错完全不反映守卫行为**。开头先断言 `resolveWorkspaceBuildServerPath().path` 等于预期路径——**守卫没生效就立刻失败，而不是量完 18 个宿主再报一个与根因无关的名字列表**。本机用"预置指向已删 workspace 的 marker"复现验证：13 个用例仍全过。
+
+- **一处我差点造成破坏的代码**：清理时写成 `rmSync(join(homedir(), ".graphflow"), { recursive: true })`。这会删掉用户真实的 `~/.graphflow/runtime` 和 `optional-deps`。本机恰好是 no-op（`homedir()` 在测试内已指向 sandbox），**但在任何解析到真实 home 的机器上就是删数据**。改为只删那一个 marker 文件。已验证 `runtime/`、`optional-deps/` 在多轮测试后完好。
+
 ### Tests
 
 - `tests/workspace-build.test.ts`（13 用例，由 `opencode-mcp-plugin-registration.test.ts` 重命名并扩写）：偏好本体（记录工作区而非假定 cwd / 后续 install 不重指向 / marker 不在任何宿主目录内 / 损坏视为未开启 / 未构建与未启用分开报告）+ 跨宿主注入（**每个 profile 的条目都指向该构建** / 缺构建报可操作 error / 关闭时保留 npx / 撤销后恢复 / 开关进入 `environment` / 不动其他条目 / 注入 home 与读 marker 的 home 一致）+ dsh patch 两个方向。
   - **"每个 profile"这条是本轮核心回归**：守卫原本只对 opencode 生效，逐宿主实测才暴露。
   - 断言用**文件原文包含路径**而非解析 JSON——codex 用 TOML，JSON 形状的读取器会静默跳过唯一格式不同的宿主。
+  - **平台相关的两处**（`USERPROFILE`、`APPDATA`/`LOCALAPPDATA`）都只有 Windows 暴露；本机 `homedir()` 就是 `HOME`。**同一份代码在这里 19/19、在 CI 全军覆没——这是必须让 action 跑的理由。**
   - **已验证有牙**：禁用守卫 → 3 个失败。
 - `tests/m-doctor-json-report.test.ts`："插件注册"那组用例**整体重写**为"条目指向工作区构建"——断言 user-scope 条目 `installed` 且 `summary.stale === 0`。**未**断言"恰好一条检查"：Cursor 本就产出两条（user 级 + workspace 相对级，sandbox 里后者不存在），这是既有行为，与本改动无关；最初写成 `length === 1` 时失败，说明是我的断言错了，不是代码错了。
   - 隔离靠 `vi.resetModules()` + 在设好 `HOME` **之后**动态 import——profile 在模块加载时注册，静态 import + `beforeEach` 改 `HOME` 太晚（首版正是这样假绿失败了一次）。

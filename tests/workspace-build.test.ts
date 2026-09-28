@@ -22,6 +22,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const tempRoots: string[] = [];
 let previousHome: string | undefined;
 let previousUserProfile: string | undefined;
+let previousAppData: string | undefined;
+let previousLocalAppData: string | undefined;
 let sandboxHome: string;
 
 type Installer = typeof import("../src/integrations/agent-mcp-installer");
@@ -96,6 +98,8 @@ function entryArgv(entry: HostEntry | undefined): string {
 beforeEach(() => {
   previousHome = process.env.HOME;
   previousUserProfile = process.env.USERPROFILE;
+  previousAppData = process.env.APPDATA;
+  previousLocalAppData = process.env.LOCALAPPDATA;
   sandboxHome = newWorkspace("gf-wb-home-");
   // Both variables, not just HOME. os.homedir() reads USERPROFILE on Windows
   // while tmpdir() returns the short 8.3 form (RUNNER~1), so setting only HOME
@@ -108,17 +112,33 @@ beforeEach(() => {
   // same pair the rest of the suite redirects.
   process.env.HOME = sandboxHome;
   process.env.USERPROFILE = sandboxHome;
+  // APPDATA and LOCALAPPDATA too: resolveHomePaths() reads them directly on
+  // Windows, so every profile whose target lives under AppData (vscode, trae,
+  // cline, roo-code, kilocode) would otherwise resolve into the real profile and
+  // the test would assert against files it did not write.
+  process.env.APPDATA = join(sandboxHome, "AppData", "Roaming");
+  process.env.LOCALAPPDATA = join(sandboxHome, "AppData", "Local");
 });
 
 afterEach(() => {
   // Remove the marker before restoring the environment. Restoring first would
   // leave it in the real ~/.graphflow, and a later run would read a preference
   // from a previous run pointing at a deleted workspace.
-  rmSync(join(sandboxHome, ".graphflow"), { recursive: true, force: true });
+  // Remove the single marker file, not its directory. homedir() resolves to the
+  // sandbox here (HOME and USERPROFILE are both redirected), so a recursive
+  // delete of the real ~/.graphflow would be a no-op today and destroy a real
+  // user's runtime/ and optional-deps/ on any machine where it did resolve —
+  // and the directory holding a stale marker is exactly the one thing this test
+  // must not have to reason about.
+  rmSync(join(sandboxHome, ".graphflow", "workspace-build.json"), { force: true });
   if (previousHome === undefined) delete process.env.HOME;
   else process.env.HOME = previousHome;
   if (previousUserProfile === undefined) delete process.env.USERPROFILE;
   else process.env.USERPROFILE = previousUserProfile;
+  if (previousAppData === undefined) delete process.env.APPDATA;
+  else process.env.APPDATA = previousAppData;
+  if (previousLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+  else process.env.LOCALAPPDATA = previousLocalAppData;
   vi.resetModules();
   for (const dir of tempRoots.splice(0)) {
     try {
@@ -190,10 +210,17 @@ describe("workspace build preference", () => {
 
 describe("hosts launch the workspace build when opted in", () => {
   it("points every host's entry at the recorded build, in whatever format it uses", async () => {
+    // Clear a marker a previous case may have left behind. This test iterates
+    // every profile, so one stale marker pointing at a workspace afterEach
+    // already deleted makes it report every host as failing — a failure that
+    // says nothing about the guard. File only; see afterEach.
+    rmSync(join(sandboxHome, ".graphflow", "workspace-build.json"), { force: true });
     const { installer, wb } = await loadWithSandboxHome();
     const workspace = newWorkspace("gf-wb-ws-");
     const serverPath = createWorkspaceBuild(workspace);
     wb.setWorkspaceBuildPreference({ enabled: true, workspaceRoot: workspace });
+    // Confirm the guard will actually fire before measuring 18 hosts.
+    expect(wb.resolveWorkspaceBuildServerPath().path).toBe(serverPath);
 
     const profiles = installer.buildAgentProfiles();
     expect(profiles.length).toBeGreaterThan(1);
