@@ -123,3 +123,40 @@ describe("doctor detects a host running the wrong build", () => {
     }
   });
 });
+
+describe("doctor recognises a plugin-registered MCP server", () => {
+  it("is not fooled into calling the correct setup broken", () => {
+    // After removing the opencode.json entry, doctor would have reported the
+    // absent entry as `missing` — punishing the arrangement you are required to
+    // use when working on GraphFlow, because opencode normalises config entries
+    // it owns. One server must also produce exactly one check.
+    const home = mkdtempSync(join(tmpdir(), "doctor-plugin-mcp-"));
+    const prevHome = process.env.HOME;
+    const prevProfile = process.env.USERPROFILE;
+    try {
+      const configDir = join(home, ".config", "opencode");
+      const pluginDir = join(configDir, "plugins");
+      mkdirSync(pluginDir, { recursive: true });
+      // The plugin is installed, and the config deliberately has no graphflow entry.
+      writeFileSync(join(pluginDir, "graphflow.mjs"), "export const name = 'graphflow-opencode';\n");
+      writeFileSync(join(configDir, "opencode.json"), JSON.stringify({ mcp: { pencil: { type: "local" } } }));
+
+      process.env.HOME = home;
+      if (process.platform === "win32") process.env.USERPROFILE = home;
+      const report = buildDoctorReport(process.cwd());
+      const opencodeMcp = report.checks.filter(
+        (c) => /opencode/i.test(c.agent) && c.category === "mcp"
+      );
+      // Exactly one, and not missing.
+      expect(opencodeMcp.length).toBe(1);
+      expect(opencodeMcp[0]?.status).toBe("installed");
+      expect(opencodeMcp[0]?.message).toContain("plugin registers the server");
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      if (prevProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = prevProfile;
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});

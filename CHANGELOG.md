@@ -218,6 +218,16 @@ module:docs/guide.md          ← 相对文档链接
 - 消息里给出两条路径并给出可执行的修法（设 `GRAPHFLOW_OPENCODE_MCP=1` 并从配置文件删掉 graphflow 条目，交由插件注册本地构建）。
 - 修好后本机实测：`summary {installed:62, missing:0, stale:1}`，`ok:false`，stale 项准确指向 `~/.npm-global/.../server.js` 与本地 `dist/.../server.js` 两条路径。
 
+### Fixed — doctor 曾对"正确配置"报警（修 stale 时引入的方向性错误）
+
+把 `opencode.json` 里的 graphflow 条目删掉、改由插件注册之后，doctor 反而报 `missing`——**惩罚了唯一正确的那个配置**。原因：doctor 只认配置文件里的条目，不认插件注册这条路；而这条路恰恰是**在本地改 GraphFlow 时唯一可行的**（opencode 会规范化自己拥有的配置，手改条目留不住）。
+
+- 新增 `probePluginRegisteredMcp()`：**仅当**（插件已安装）**且**（配置里确实没有 graphflow 条目）时成立。配置里有条目时不认——那时配置在运行时优先，说成"插件注册"就是撒谎，那种情况归 `stale` 管。
+- 成立时输出**单条** `installed` 检查（`Opencode (registered by plugin)`）并说明入口；**同时跳过**配置那条检查，否则同一个 server 会同时出现 `installed` 和 `missing`。**一个 server 一条检查。**
+- `DoctorCheckItem.message` 补上正式声明（此前各处靠展开绕过类型检查，字段其实一直没被类型承认）。理由：文件存在与否不足以定论时，必须把话说明白，否则一个光秃秃的状态位会诱导出相反的结论。
+
+修好后本机实测：`summary {total:61, installed:61, missing:0, stale:0}`，`ok: true`——**正确配置现在读起来就是正确的**。新增测试锁住"插件已装 + 配置无条目 → 恰好一条 installed 检查"这一组合。
+
 ### Tests
 
 ### Tests
