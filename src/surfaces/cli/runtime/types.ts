@@ -4,6 +4,47 @@ import type { RuntimeTimelineSummary } from "../../../core/cancellation";
 import type { AgentWorkItem } from "../../../core/agent-delegation";
 
 export type { GraphSnapshotSampleEdge, GraphSnapshotSampleNode };
+
+/**
+ * What is stable across turns, declared so the host can cache it.
+ *
+ * The split is not a guess about the host's prompt: it is a statement about
+ * *this package's own content*. A repo map, module inventory and project
+ * conventions change when the code changes, not when the agent asks something
+ * new. The query-scoped anchors and the dialogue recall change on every single
+ * call. Telling the host which is which is the whole value — it is what lets the
+ * host put a cache breakpoint between them instead of after them.
+ */
+export interface CacheLayout {
+  /**
+   * Cross-turn stable content: repo/module map, project conventions, the
+   * long-lived working set. Cached content — place before the breakpoint.
+   */
+  stablePrefix: {
+    lines: string[];
+    tokens: number;
+  };
+  /**
+   * Per-turn varying content: query-scoped anchors, dialogue recall, and
+   * anything else derived from this specific request. Place after the
+   * breakpoint; injecting it earlier invalidates everything downstream.
+   */
+  delta: {
+    lines: string[];
+    tokens: number;
+  };
+  /**
+   * Estimated share of the host's request prefix that would survive if the host
+   * ordered by this declaration. Null when the host's own prefix is unknown
+   * (GraphFlow is not the harness and cannot see it).
+   */
+  reusablePrefixShare: number | null;
+  /**
+   * Why the split looks like this, in one sentence, for the host to surface to
+   * the agent if useful. Never empty.
+   */
+  note: string;
+}
 import type { GraphFlowConfig } from "../../../config/schema";
 import type { DialogueThreadEchoView } from "../../../learning/dialogue-thread";
 import type { ContextEconomics } from "../../../graph/context-economics";
@@ -119,6 +160,19 @@ export interface ContextPreviewResult {
    * anchor occupied in it.
    */
   handles?: AbstainHandle[];
+  /**
+   * Declares which parts of this package are cache-stable and which change every
+   * turn, so the host can place them correctly in its own prompt. Advisory only:
+   * GraphFlow is a plugin and does not decide breakpoints or ordering.
+   *
+   * 发布顺序规则是"前稳后动"——把每轮变化的内容放在稳定内容之前，会连带作废其
+   * 后所有 token 的缓存（provider 的缓存是自左向右的前缀匹配，一个字节不同，
+   * 其后每 token 都要按写入价重付）。实测见 `economics.invalidation`：
+   * 50k tok 宿主历史下，一轮 churn 的重写税可达压缩收益的 10 倍。
+   *
+   * Declaration, not a decision. 本字段只做声明，不代宿主摆放。
+   */
+  cacheLayout?: CacheLayout;
   /** Agent-translated English query used for symbol search (if provided). */
   englishQuery?: string;
   /** When CJK query yields few anchors, prompts the connected agent to translate to English. */

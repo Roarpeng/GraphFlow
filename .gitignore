@@ -37,3 +37,8 @@ Cursor/
 .mcp.json
 benchmarks/.cache/
 graphify-out/
+# Generated HTML reports/visualisations (design docs live as .md in docs/;
+# these are local renderings, not source). Untracked html is not project
+# content, so keep it out of the index without ignoring docs/ itself.
+docs/*.html
+*.html

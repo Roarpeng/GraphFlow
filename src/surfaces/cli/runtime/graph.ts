@@ -30,6 +30,7 @@ import {
   isAbstentionEnforced,
   type AbstainHandle,
 } from "../../../graph/abstention-floor";
+import { isCacheLayoutEnabled, planCacheLayout } from "../../../graph/cache-layout";
 import { extractSymbolCandidates } from "../../../graph/symbol-extract";
 import {
   assessSkillFreshness,
@@ -615,7 +616,8 @@ async function attachContextEconomics(
   const economicsOn = isContextEconomicsEnabled();
   const abstainOn = isAbstentionEnabled();
   const enforceOn = isAbstentionEnforced();
-  if (!economicsOn && !abstainOn && !enforceOn) return result;
+  const layoutOn = isCacheLayoutEnabled();
+  if (!economicsOn && !abstainOn && !enforceOn && !layoutOn) return result;
 
   const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
   let next = result;
@@ -641,6 +643,24 @@ async function attachContextEconomics(
         staticPrefixTokens: resolveStaticPrefixTokens(),
         suffixTokens: resolveSuffixTokens(),
       }),
+    };
+  }
+
+  if (layoutOn) {
+    // Runs after economics so it can reuse the resolved host-prefix estimate,
+    // and after abstention so the handles it emits are laid out, not orphaned.
+    const plan = planCacheLayout({
+      lines: packageLinesOf(next),
+      staticPrefixTokens: resolveStaticPrefixTokens(),
+    });
+    next = {
+      ...next,
+      cacheLayout: {
+        stablePrefix: plan.stablePrefix,
+        delta: plan.delta,
+        reusablePrefixShare: plan.reusablePrefixShare,
+        note: plan.note,
+      },
     };
   }
 
