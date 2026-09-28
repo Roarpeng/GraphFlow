@@ -305,6 +305,16 @@ npx 启动器 = 宿主每次从 npm 拉已发布包，**在这些宿主里改 Gr
 
 **一处我自己的测量错误**：验证脚本按单一路径读条目，把 `mcpServers`（kimi-code / qoder）、`mcp.servers`（zcode）判成"未指向"，而原始文件里三个都在。**数字与假设矛盾时先怀疑尺子**——已改为在文件原文里匹配路径，JSON 与 TOML 一视同仁。
 
+### Fixed（CI 抓到）— Windows 上测试只重定向 `HOME`，把 marker 写进了真实用户目录
+
+首次推送后 Windows job 挂掉 4 个用例，其中"每个 profile"那条报 **18 个宿主全部未指向**——与本机 19/19 完全相反。根因不是守卫不通用，而是测试自己的隔离有洞：
+
+- `os.homedir()` 在 Windows 上读 **`USERPROFILE`**，而 `os.tmpdir()` 返回 **8.3 短路径**（`RUNNER~1`）。测试只设了 `HOME`，于是 `homedir()` 仍指向真实用户目录，marker 被写进**真实的 `~/.graphflow`**。
+- 更糟的是它**跨用例存活**：第一个用例写的 marker 指向一个已被 `afterEach` 删掉的 workspace，于是后续每个用例都读到"已启用但未构建"——守卫按设计报 error，一个宿主都没注入。**本机复现了这个状态机**（写 marker → 删 workspace → 注入）：`missingBuild: true`、状态 `error`。
+- 修法：同时设 `HOME` 与 `USERPROFILE`（与仓库既有做法一致），并在 `afterEach` 里**先删 marker 再恢复环境变量**——反过来的话 marker 会留在真实目录，下次运行读到一个指向已删除 workspace 的偏好。连续跑两轮确认无残留，全量跑完真实 home 干净。
+
+**这条只有 CI 能抓到**：本机 `homedir()` 就是 `HOME`，同样的代码 19/19 通过。**平台差异让"测试通过"不再等于"行为正确"，这正是这次必须推 action 的理由。**
+
 ### Tests
 
 - `tests/workspace-build.test.ts`（13 用例，由 `opencode-mcp-plugin-registration.test.ts` 重命名并扩写）：偏好本体（记录工作区而非假定 cwd / 后续 install 不重指向 / marker 不在任何宿主目录内 / 损坏视为未开启 / 未构建与未启用分开报告）+ 跨宿主注入（**每个 profile 的条目都指向该构建** / 缺构建报可操作 error / 关闭时保留 npx / 撤销后恢复 / 开关进入 `environment` / 不动其他条目 / 注入 home 与读 marker 的 home 一致）+ dsh patch 两个方向。

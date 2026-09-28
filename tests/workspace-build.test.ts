@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const tempRoots: string[] = [];
 let previousHome: string | undefined;
+let previousUserProfile: string | undefined;
 let sandboxHome: string;
 
 type Installer = typeof import("../src/integrations/agent-mcp-installer");
@@ -94,13 +95,30 @@ function entryArgv(entry: HostEntry | undefined): string {
 
 beforeEach(() => {
   previousHome = process.env.HOME;
+  previousUserProfile = process.env.USERPROFILE;
   sandboxHome = newWorkspace("gf-wb-home-");
+  // Both variables, not just HOME. os.homedir() reads USERPROFILE on Windows
+  // while tmpdir() returns the short 8.3 form (RUNNER~1), so setting only HOME
+  // leaves homedir() pointing at the real user profile.
+  //
+  // That was not cosmetic — it leaked a marker into the real ~/.graphflow, where
+  // it outlived the test that wrote it and pointed at a workspace already removed
+  // by afterEach. Every later test then saw "enabled but unbuilt" and the
+  // every-profile case failed with all 18 hosts missing, on Windows only. The
+  // same pair the rest of the suite redirects.
   process.env.HOME = sandboxHome;
+  process.env.USERPROFILE = sandboxHome;
 });
 
 afterEach(() => {
+  // Remove the marker before restoring the environment. Restoring first would
+  // leave it in the real ~/.graphflow, and a later run would read a preference
+  // from a previous run pointing at a deleted workspace.
+  rmSync(join(sandboxHome, ".graphflow"), { recursive: true, force: true });
   if (previousHome === undefined) delete process.env.HOME;
   else process.env.HOME = previousHome;
+  if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = previousUserProfile;
   vi.resetModules();
   for (const dir of tempRoots.splice(0)) {
     try {
