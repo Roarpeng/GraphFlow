@@ -67,7 +67,7 @@ describe("project brief", () => {
     // 30 distinct directories, so the per-directory cap never bites and only the
     // global one does.
     const many = Array.from({ length: 30 }, (_, i) => module_(`module:pkg${i}/mod`));
-    const brief = buildProjectBrief(many, { maxModules: 5 });
+    const brief = buildProjectBrief(many, [], { maxModules: 5 });
     expect(brief.lines.filter((l) => l.startsWith("module: ")).length).toBe(5);
     expect(brief.lines.some((l) => l.includes("+25 more modules"))).toBe(true);
   });
@@ -87,7 +87,7 @@ describe("project brief", () => {
       ...files("src/graph", 50),
       ...files("src/core", 19),
     ];
-    const brief = buildProjectBrief(lopsided, { maxModules: 6, maxPerDirectory: 3 });
+    const brief = buildProjectBrief(lopsided, [], { maxModules: 6, maxPerDirectory: 3 });
     const listed = brief.lines.filter((l) => l.startsWith("module: "));
     // The two heaviest directories lead, three entries each.
     expect(listed).toHaveLength(6);
@@ -253,7 +253,7 @@ describe("project brief", () => {
       ...Array.from({ length: 30 }, (_, i) => module_(`module:@scope/pkg-${i}/dist/index`)),
       ...Array.from({ length: 20 }, (_, i) => module_(`module:pkg${i}/mod`)),
     ];
-    const brief = buildProjectBrief(noisy, { maxModules: 8, maxPerDirectory: 8 });
+    const brief = buildProjectBrief(noisy, [], { maxModules: 8, maxPerDirectory: 8 });
     const listed = brief.lines.filter((l) => l.startsWith("module: "));
     expect(listed.length).toBe(8);
     expect(listed.every((l) => !l.includes(".agents") && !l.includes("@scope"))).toBe(true);
@@ -261,6 +261,77 @@ describe("project brief", () => {
     // rather than silently curated.
     expect(brief.lines.some((l) => /^brief: modules=\d+$/.test(l))).toBe(true);
     expect(brief.lines.some((l) => l.includes("not project paths, omitted"))).toBe(true);
+  });
+
+  it("carries exports and hotspots, which is what makes it worth caching", () => {
+    const nodes: GraphNode[] = [
+      ...REPO,
+      {
+        id: "symbol:src/core/a.ts:aa11",
+        type: "Symbol",
+        content: "export const alpha = 1;",
+        metadata: { name: "alpha", exported: true, file: "src/core/a.ts" },
+      },
+      {
+        id: "symbol:src/core/a.ts:bb22",
+        type: "Symbol",
+        content: "export const beta = 2;",
+        metadata: { name: "beta", exported: true, file: "src/core/a.ts" },
+      },
+      {
+        id: "symbol:src/core/a.ts:cc33",
+        type: "Symbol",
+        content: "const internal = 3;",
+        metadata: { name: "internal", exported: false, file: "src/core/a.ts" },
+      },
+    ];
+    const edges: Array<{ from: string; to: string; relation: "references" }> = [
+      { from: "symbol:src/graph/c.ts:dd44", to: "symbol:src/core/a.ts:aa11", relation: "references" },
+      { from: "symbol:src/graph/c.ts:ee55", to: "symbol:src/core/a.ts:bb22", relation: "references" },
+    ];
+    const brief = buildProjectBrief(nodes, edges, { maxHotspots: 5 });
+    const exportsLine = brief.lines.find((l) => l.startsWith("exports: src/core/a.ts"));
+    expect(exportsLine).toContain("alpha");
+    expect(exportsLine).toContain("beta");
+    // A non-exported symbol is not part of a module's surface.
+    expect(exportsLine).not.toContain("internal");
+    expect(brief.lines.some((l) => l.startsWith("brief: hotspots="))).toBe(true);
+    expect(brief.lines.find((l) => l.startsWith("brief: hotspots="))).toContain("src/core/a(2)");
+  });
+
+  it("does NOT churn when a session records decisions", () => {
+    // The trap this segment exists to avoid. Decision and dialogue nodes are the
+    // most useful things in the graph and the most volatile: they accumulate as
+    // a session runs. A brief built from them would change every turn and
+    // reproduce exactly the churn the stable prefix is meant to eliminate.
+    const before = buildProjectBrief(REPO);
+    const after = buildProjectBrief([
+      ...REPO,
+      { id: "dialogue:ab:0001", type: "Decision", content: "we chose to do X" },
+      { id: "dialogue:ab:0002", type: "Decision", content: "we chose to do Y" },
+      { id: "dialogue-session:ab", type: "Decision", content: "session summary" },
+    ]);
+    expect(after.fingerprint).toBe(before.fingerprint);
+    expect(after.lines).toEqual(before.lines);
+    expect(after.tokens).toBe(before.tokens);
+  });
+
+  it("stays byte-identical across a full conversation's worth of churn", () => {
+    // The real test of "stable": a session records decisions, workbench topics
+    // and dialogue turns. If any of those leak into the brief, every turn
+    // re-writes the segment the host was supposed to be caching.
+    const base = buildProjectBrief(REPO, []);
+    let nodes: GraphNode[] = [...REPO];
+    for (let turn = 1; turn <= 6; turn += 1) {
+      nodes = [
+        ...nodes,
+        { id: `dialogue:s${turn}:0001`, type: "Decision", content: `turn ${turn} decision` },
+        { id: `topic:s${turn}:t1`, type: "Concept", content: `turn ${turn} topic` },
+        { id: `symbol:src/core/a.ts:${turn}0000`, type: "Symbol", content: "x", metadata: { name: `t${turn}`, file: "src/core/a.ts" } },
+      ];
+      const later = buildProjectBrief(nodes, []);
+      expect(later.fingerprint, `turn ${turn} must not change the brief`).toBe(base.fingerprint);
+    }
   });
 
   it("reads the switch", () => {

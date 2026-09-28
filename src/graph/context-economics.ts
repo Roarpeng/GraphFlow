@@ -246,6 +246,89 @@ export function shouldAbstain(input: AbstainInput): AbstainDecision {
   };
 }
 
+export interface SensitivityPoint {
+  suffixTokens: number;
+  /** What this turn costs at that tail size. */
+  costUsd: number;
+  /** Positive means the turn pays for itself after the churn surcharge. */
+  netUsd: number;
+}
+
+export interface CostSensitivity {
+  /**
+   * Why this exists: the host's own prefix and tail are not observable from here
+   * (we are not the harness), so both come from operator-supplied numbers. A
+   * conclusion that rests on one hand-filled value is not a measurement, so this
+   * sweeps the plausible range and reports the break-even point instead. If the
+   * sign of `netUsd` is the same across the whole sweep, the conclusion does not
+   * depend on the guess.
+   */
+  points: SensitivityPoint[];
+  /** Tail size at which churn stops paying for itself, or null if it always does. */
+  breakEvenSuffixTokens: number | null;
+  /** True when `netUsd` keeps the same sign across every swept point. */
+  conclusionIsRobust: boolean;
+  note: string;
+}
+
+export function computeCostSensitivity(input: {
+  staticPrefixTokens: number;
+  packageTokens: number;
+  churnRatio: number;
+  firstObservation: boolean;
+  pricePerMTokIn: number;
+  suffixCandidates?: readonly number[];
+}): CostSensitivity {
+  const candidates = input.suffixCandidates ?? [0, 2_000, 8_000, 20_000, 50_000, 120_000, 250_000];
+  const points: SensitivityPoint[] = candidates.map((suffixTokens) => {
+    // Built from the leaf functions, not from buildContextEconomics: this is
+    // called *by* buildContextEconomics, and going through the full builder here
+    // recurses (each build would sweep again, forever).
+    const packageTokens = Math.max(0, input.packageTokens);
+    const staticPrefixTokens = Math.max(0, input.staticPrefixTokens);
+    const churned = input.firstObservation ? 0 : Math.round(packageTokens * input.churnRatio);
+    const cache = estimateCacheModel({
+      prefixTokens: staticPrefixTokens + packageTokens,
+      churnTokens: churned,
+    });
+    const cost = estimateInputCost({
+      freshTokens: cache.freshTokens,
+      cachedTokens: cache.cachedTokens,
+      pricePerMTokIn: input.pricePerMTokIn,
+    });
+    const invalidation = estimateSuffixInvalidation({
+      suffixTokens,
+      churnRatio: input.churnRatio,
+      firstObservation: input.firstObservation,
+      savedUsd: cost.savedUsd,
+      pricePerMTokIn: input.pricePerMTokIn,
+    });
+    return {
+      suffixTokens,
+      costUsd: cost.actualUsd,
+      // Net of the churn surcharge: positive means the turn is worth its churn.
+      netUsd: -invalidation.overspendUsd,
+    };
+  });
+  const negative = points.find((point) => point.netUsd < 0);
+  const positive = points.find((point) => point.netUsd > 0);
+  return {
+    points,
+    breakEvenSuffixTokens: negative?.suffixTokens ?? null,
+    conclusionIsRobust: negative === undefined || positive === undefined,
+    note:
+      input.firstObservation
+        ? "first observation in this process — churn is not measurable yet, so every point reflects the same zero-churn turn"
+        : `swept tail sizes ${candidates[0]}..${candidates[candidates.length - 1]}; ${
+            negative === undefined
+              ? "churn pays for itself at every size, so the verdict does not depend on the host's real tail"
+              : positive === undefined
+                ? "churn is a net loss at every size, so the verdict does not depend on the host's real tail"
+                : `the answer flips at ${negative.suffixTokens} — the verdict depends on the host's real tail size, not on the estimate supplied`
+          }`,
+  };
+}
+
 export interface SuffixInvalidation {
   /**
    * Host tokens rendered AFTER our injection point — the conversation history,
@@ -330,6 +413,11 @@ export interface ContextEconomics {
    * because our own cost is the small half of the bill.
    */
   invalidation: SuffixInvalidation;
+  /**
+   * What the verdict looks like across a range of host tail sizes, so it does
+   * not rest on one operator-supplied number we cannot verify.
+   */
+  sensitivity: CostSensitivity;
   /** The honest headline: prefill shrank, but did the prefix survive? */
   stablePrefixTokens: number;
   /**
@@ -402,5 +490,22 @@ export function buildContextEconomics(input: {
         : churn.churnRatio === 0
           ? "cache-safe"
           : "prefix-churn";
-  return { churn, cache, cost, attention, invalidation, stablePrefixTokens: cache.cachedTokens, verdict };
+  const sensitivity = computeCostSensitivity({
+    staticPrefixTokens,
+    packageTokens,
+    churnRatio: churn.churnRatio,
+    firstObservation: churn.firstObservation,
+    pricePerMTokIn: input.pricePerMTokIn ?? DEFAULT_INPUT_PRICE_PER_MTOK,
+  });
+
+  return {
+    churn,
+    cache,
+    cost,
+    attention,
+    invalidation,
+    sensitivity,
+    stablePrefixTokens: cache.cachedTokens,
+    verdict,
+  };
 }

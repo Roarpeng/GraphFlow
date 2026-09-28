@@ -82,6 +82,14 @@ const STABLE_PATTERNS: readonly RegExp[] = [
   /^convention\b/i,
   /^project[- ]?rule/i,
   /^module map\b/i,
+  // The project brief's own line kinds. These are stable by construction — the
+  // brief is rebuilt only when its refs stop resolving — so classifying them as
+  // volatile put the whole brief in the delta bucket. That is not a cosmetic
+  // error: it is the difference between the host caching 3k tokens per turn and
+  // caching none of them.
+  /^brief:/i,
+  /^exports:/i,
+  /^files:/i,
 ];
 
 /**

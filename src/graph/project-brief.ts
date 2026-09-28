@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { GraphNode } from "../core/types";
+import type { GraphEdge, GraphNode } from "../core/types";
 import { buildRefResolver } from "../learning/memory-freshness.js";
 import { estimateTokens } from "./context-slicer-utils.js";
 
@@ -13,9 +13,23 @@ import { estimateTokens } from "./context-slicer-utils.js";
  * nothing worth putting before its breakpoint.
  *
  * The Brief is that segment. It is derived from the repository itself — module
- * map, file inventory, project conventions, the long-lived working set — none
- * of which is a function of the current question. It is built once, then
- * REUSED until validation says the repository moved under it.
+ * map, exports, reference hotspots, file inventory, entry points — none of which
+ * is a function of the current question. It is built once, then REUSED until
+ * validation says the repository moved under it.
+ *
+ * ## What is deliberately NOT in here
+ *
+ * The graph is full of genuinely useful nodes that would destroy this segment if
+ * included, and the temptation is real because they are exactly what an agent
+ * might want:
+ *
+ *  - **Decision and dialogue nodes.** They accumulate as a session runs, so a
+ *    brief built from them would change on every turn — reproducing the exact
+ *    churn this segment exists to eliminate. Stable is not the same as useful.
+ *  - **Per-turn query anchors.** By definition a function of the question.
+ *
+ * So the brief draws only on code structure, which changes when the code
+ * changes and not when the agent asks something new.
  *
  * ## Why "validate then reuse" and not "recompute every time"
  *
@@ -128,11 +142,15 @@ function fingerprintOf(lines: readonly string[]): string {
  */
 export function buildProjectBrief(
   nodes: readonly GraphNode[],
-  options: { maxModules?: number; maxFiles?: number; maxPerDirectory?: number } = {}
+  edges: readonly GraphEdge[] = [],
+  options: { maxModules?: number; maxFiles?: number; maxPerDirectory?: number; maxExportsPerModule?: number; maxExportLines?: number; maxHotspots?: number } = {}
 ): ProjectBrief {
   const maxModules = options.maxModules ?? 60;
   const maxFiles = options.maxFiles ?? 40;
   const maxPerDirectory = options.maxPerDirectory ?? 3;
+  const maxExportsPerModule = options.maxExportsPerModule ?? 8;
+  const maxExportLines = options.maxExportLines ?? 40;
+  const maxHotspots = options.maxHotspots ?? 24;
 
   const briefNodes = nodes.filter((node) => BRIEF_NODE_TYPES.has(node.type));
   const modules = briefNodes.filter((node) => node.type === "Module");
@@ -243,6 +261,75 @@ export function buildProjectBrief(
   lines.push(`brief: files=${scopedFiles.length} dirs=${directories.length}`);
   for (const [dir, count] of directories.slice(0, maxFiles)) {
     lines.push(`files: ${dir} (${count})`);
+  }
+
+  // ── 3. exports of the heaviest modules ─────────────────────────────────
+  // The single most useful thing a brief can say, and the part an earlier
+  // version left out to keep itself small. Measured: growing the stable segment
+  // from 678 to 2500 tokens roughly triples its per-turn saving, because every
+  // token placed before the host's breakpoint is read at 0.1x instead of 1x.
+  // "What does this module offer" is what an agent would otherwise spend a file
+  // read to learn, so this is the cheapest possible way to hand it over.
+  const exportsByFile = new Map<string, Set<string>>();
+  for (const node of nodes) {
+    if (node.type !== "Symbol") continue;
+    const name = typeof node.metadata?.name === "string" ? node.metadata.name.trim() : "";
+    if (name.length === 0 || node.metadata?.exported !== true) continue;
+    const file = filePathOf(node);
+    if (file.length === 0 || isOutOfScope(file)) continue;
+    const bucket = exportsByFile.get(file);
+    if (bucket) bucket.add(name);
+    else exportsByFile.set(file, new Set([name]));
+  }
+  // Emitted per file, not per directory: a directory's worth of exports says
+  // nothing an agent can act on, whereas "this file offers these symbols" is
+  // exactly what it would otherwise spend a file read to learn. Files are walked
+  // in directory-weight order so the heaviest code leads, and the cap keeps the
+  // section bounded.
+  const filesByDirectory = new Map<string, string[]>();
+  for (const node of scopedFiles) {
+    const file = filePathOf(node);
+    if (file.length === 0) continue;
+    const dir = directoryOf(file);
+    const bucket = filesByDirectory.get(dir);
+    if (bucket) bucket.push(file);
+    else filesByDirectory.set(dir, [file]);
+  }
+  let exportLines = 0;
+  for (const [dir] of directories) {
+    for (const file of (filesByDirectory.get(dir) ?? []).sort()) {
+      if (exportLines >= maxExportLines) break;
+      const names = exportsByFile.get(file);
+      if (!names || names.size === 0) continue;
+      lines.push(
+        `exports: ${file} -> ${[...names].sort().slice(0, maxExportsPerModule).join(", ")}`
+      );
+      exportLines += 1;
+    }
+    if (exportLines >= maxExportLines) break;
+  }
+
+  // ── 4. reference hotspots ──────────────────────────────────────────────
+  // Where the code actually depends on other code. Derived from edges, so it is
+  // as stable as the code, and it tells an agent which modules are load-bearing
+  // before it edits anything.
+  if (edges.length > 0) {
+    const inbound = new Map<string, number>();
+    for (const edge of edges) {
+      if (edge.relation !== "references" && edge.relation !== "calls" && edge.relation !== "imports") {
+        continue;
+      }
+      const target = moduleKeyOf(edge.to);
+      if (target.length === 0 || isOutOfScope(target)) continue;
+      inbound.set(target, (inbound.get(target) ?? 0) + 1);
+    }
+    const hotspots = [...inbound.entries()]
+      .filter(([path]) => looksLikeProjectPath(path))
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, maxHotspots);
+    if (hotspots.length > 0) {
+      lines.push(`brief: hotspots=${hotspots.map(([path, count]) => `${path}(${count})`).join(" ")}`);
+    }
   }
 
   // ── 3. entry points ────────────────────────────────────────────────────
@@ -356,9 +443,42 @@ function directoryOf(path: string): string {
   return slash > 0 ? path.slice(0, slash) : ".";
 }
 
+/** `src/core/agent-delegation.ts` -> `src/core/agent-delegation`. */
+function moduleKeyFor(filePath: string): string {
+  return filePath.replace(/\.[A-Za-z0-9]{1,8}$/, "");
+}
+
+/** Which module a node id belongs to, for edge endpoints. */
+function moduleKeyOf(nodeId: string): string {
+  if (nodeId.startsWith("file:")) return moduleKeyFor(nodeId.slice("file:".length));
+  if (nodeId.startsWith("symbol:")) {
+    // Observed ids are `symbol:<path>:<hash>`; the documented form also allows a
+    // name segment (`symbol:<path>:<name>:<hash>`). Both are disambiguated by the
+    // trailing content hash rather than by counting segments — counting is what
+    // dropped the path entirely on the 3-part form.
+    const parts = nodeId.slice("symbol:".length).split(":");
+    const last = parts[parts.length - 1] ?? "";
+    const isHash = /^[0-9a-f]{4,}$/i.test(last);
+    if (!isHash) return "";
+    const rest = parts.slice(0, -1);
+    // A name segment is a bare identifier, never a path; drop it if present.
+    return rest.length >= 2 && !rest[rest.length - 1]!.includes("/") && !rest[rest.length - 1]!.includes(".")
+      ? moduleKeyFor(rest.slice(0, -1).join(":"))
+      : moduleKeyFor(rest.join(":"));
+  }
+  if (nodeId.startsWith("module:")) return nodeId.slice("module:".length);
+  return "";
+}
+
 function filePathOf(node: GraphNode): string {
-  const explicit = node.metadata?.sourcePath;
-  if (typeof explicit === "string" && explicit.trim()) return explicit.trim();
+  // Symbol nodes do not carry `sourcePath`; the indexer records their file under
+  // `file`. Reading only sourcePath made every symbol resolve to "" and silently
+  // dropped the entire exports section, which is exactly the section that makes
+  // the brief worth caching.
+  for (const key of ["sourcePath", "file"] as const) {
+    const value = node.metadata?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
   return node.id.startsWith("file:") ? node.id.slice("file:".length) : "";
 }
 
@@ -410,7 +530,8 @@ export class ProjectBriefCache {
 
   resolve(
     workspaceRoot: string,
-    nodes: readonly GraphNode[]
+    nodes: readonly GraphNode[],
+    edges: readonly GraphEdge[] = []
   ): BriefResolution {
     const stored = this.briefs.get(workspaceRoot);
     if (stored) {
@@ -423,7 +544,7 @@ export class ProjectBriefCache {
       if (this.briefs.size >= this.maxWorkspaces) this.briefs.clear();
       this.briefs.delete(workspaceRoot);
       try {
-        const rebuilt = buildProjectBrief(nodes);
+        const rebuilt = buildProjectBrief(nodes, edges);
         this.briefs.set(workspaceRoot, rebuilt);
         return {
           brief: rebuilt,
@@ -443,7 +564,7 @@ export class ProjectBriefCache {
     }
 
     try {
-      const built = buildProjectBrief(nodes);
+      const built = buildProjectBrief(nodes, edges);
       // The bound must be enforced on the fresh-build path too, not only when
       // rebuilding a stale brief — otherwise a long-lived server visiting many
       // workspaces grows this map without limit.

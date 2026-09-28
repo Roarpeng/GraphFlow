@@ -20,6 +20,18 @@ describe("cache layout planner", () => {
     expect(classifyCacheLine("Module: src/core/orchestrator-phases")).toBe("stable");
   });
 
+  it("classes the project brief's own line kinds as stable", () => {
+    // The brief is stable by construction — it is rebuilt only when its refs stop
+    // resolving. Classing its lines as volatile put all ~3k tokens in the delta
+    // bucket, which is the difference between the host caching them every turn
+    // and caching none of them.
+    expect(classifyCacheLine("brief: project map (stable across turns)")).toBe("stable");
+    expect(classifyCacheLine("brief: modules=888")).toBe("stable");
+    expect(classifyCacheLine("exports: src/graph/cache-layout.ts -> planCacheLayout")).toBe("stable");
+    expect(classifyCacheLine("files: src/graph (50)")).toBe("stable");
+    expect(classifyCacheLine("brief: entry points=package.json,README.md")).toBe("stable");
+  });
+
   it("classes query-scoped lines as per-turn delta", () => {
     expect(classifyCacheLine("file:graph/cache-layout.ts")).toBe("delta");
     expect(classifyCacheLine("symbol:graph/cache-layout.ts:ab12cd")).toBe("delta");

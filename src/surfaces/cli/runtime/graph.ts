@@ -673,7 +673,7 @@ async function attachContextEconomics(
         },
       };
     } else {
-      const resolution = projectBriefCache.resolve(workspaceRoot, nodes);
+      const resolution = projectBriefCache.resolve(workspaceRoot, nodes, snapshot?.edges ?? []);
       next = {
         ...next,
         projectBrief: {

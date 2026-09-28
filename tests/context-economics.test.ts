@@ -188,6 +188,36 @@ describe("buildContextEconomics", () => {
     expect(tinyTail.verdict).toBe("prefix-churn");
   });
 
+  it("sweeps the unknown host size so the verdict is not one hand-filled number", () => {
+    // The host's tail is not observable from here. Reporting a verdict derived
+    // from one operator-supplied value is a claim, not a measurement — so the
+    // economics sweep the plausible range and say whether the answer holds.
+    const stable = buildContextEconomics({
+      previousLines: ["a"],
+      currentLines: ["a"],
+      packageTokens: 500,
+      staticPrefixTokens: 8_000,
+      suffixTokens: 50_000,
+    });
+    expect(stable.sensitivity.points.length).toBeGreaterThanOrEqual(5);
+    // No churn: net is positive (or zero) at every size, so the answer holds.
+    expect(stable.sensitivity.breakEvenSuffixTokens).toBeNull();
+    expect(stable.sensitivity.conclusionIsRobust).toBe(true);
+
+    const churning = buildContextEconomics({
+      previousLines: Array.from({ length: 36 }, (_, i) => `a${i}`),
+      currentLines: Array.from({ length: 36 }, (_, i) => (i === 0 ? "a0" : `b${i}`)),
+      packageTokens: 500,
+      staticPrefixTokens: 8_000,
+      suffixTokens: 50_000,
+    });
+    // With churn the small tails are fine and the large ones are not: that is a
+    // genuine flip, and the report has to say so rather than pick a side.
+    expect(churning.sensitivity.breakEvenSuffixTokens).not.toBeNull();
+    expect(churning.sensitivity.conclusionIsRobust).toBe(false);
+    expect(churning.sensitivity.note).toContain("flips");
+  });
+
   it("reads the suffix estimate and ignores invalid values", () => {
     expect(resolveSuffixTokens({})).toBe(0);
     expect(resolveSuffixTokens({ GRAPHFLOW_SUFFIX_TOKENS: "50000" })).toBe(50_000);
