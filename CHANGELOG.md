@@ -10,6 +10,20 @@ All notable changes to this project are documented in this file.
 - **上下文经济引擎（`GRAPHFLOW_CONTEXT_ECONOMICS=1`）**：把"省了多少 token"之外的那根轴补齐——**前缀 churn 与缓存局部性**。GraphFlow 每轮注入不同上下文包，这在结构上必然改写 provider 的 prompt 缓存前缀；此前 95.6% 的 prefill 节省从未与缓存命中率放进同一张表算过。新增 `economics` 字段：与上一轮包的前缀 churn（sharedPrefix / churnRatio）、可缓存 token 与 hitRate（尊重 provider 最小可缓存长度）、按 0.1x 读 / 1.25x 写定价的**真实输入成本**（显式计入 cache write 税）、以及**注意力预算**（context rot 阈值 ~70%，而非窗口占用率）。`verdict` 三态：`cache-safe` / `prefix-churn` / `cache-cold`——**高节省率配 `prefix-churn` 是一条警告：便宜的 token 是用冷缓存换来的**。
 - **弃权（`GRAPHFLOW_ABSTAIN=1`）**：渐进式披露买的是 context 不是智能——小语料且查询命中具体符号时，agent 自己读那一段比下发一个包更便宜，且不打碎前缀。`abstention: { abstained, reason }` **显式**下发并附理由（静默弃权与"工具坏了"不可区分）。强制执行（真丢锚点）**暂不开启**：需先过能力地板 A/B 证明净收益。
 
+### Fixed
+
+- **前缀模型此前把宿主静态前缀当成 churn 部分**（live 验证发现）：`buildContextEconomics` 一度只把 GraphFlow 注入的包当作"整个前缀"，于是 540 tok 的包被判 `cache-cold`（低于 provider 最小可缓存长度）——**用一个切片的尺度否定整个请求的缓存能力**。现按 `prefix = staticPrefixTokens + package` 建模，且**只有我们的切片参与 churn**（宿主静态前缀按定义稳定）。宿主前缀 GraphFlow 看不见（它不是 harness），由 `GRAPHFLOW_STATIC_PREFIX_TOKENS` 提供；缺省 0 = 纯切片模型，非法值安全回退 0。
+- **首次观测不再谎报 100% churn**：`PrefixChurn.firstObservation` 标记"本进程尚未注入过包"，此时 churn 不可测。
+- **技能引用也来自 name**：task-echo 类技能把主体写在 name（如 `src/graph/context-pressure.ts`），此前只扫 guidance/description/playbook，导致这类技能恒为 `unknown`。现纳入 name，live 复验从 `unknown` 变为 `fresh`（ref 解析成功）。
+
+### 验证（live，MCP stdio 两轮真实 tools/call）
+
+- **前缀 churn 是真的**：连续两个普通查询（"orchestrator phases" → "skill flywheel admission"）之间，注入包 36 行里只有 1 行保持不变，**churnRatio 0.972**，`verdict: prefix-churn`——GraphFlow 每轮注入的包基本不可跨轮复用。
+- **但绝对影响受宿主前缀主导**：`GRAPHFLOW_STATIC_PREFIX_TOKENS=8000` 时 hitRate 93.7%/94.7%，输入成本相对无缓存基线省 60.9%/61.6%。默认预算（1500）下包很小，风险被静态前缀吸收；**当预算放大或检索更密时才会成为主导成本**。
+- **弃权按设计不误伤大仓**：本仓 8684 节点 → `abstained: false`，理由明写 "corpus too large to navigate by reading (8684 nodes > 2000)"。
+- **新鲜度在本仓可判定**：唯一技能（`列出 src/graph/context-pressure.ts 的导出符号`）判为 `fresh`（1 ref，解析成功）。
+- CLI 一次性进程**测不出 churn**（`previousLines=0`）：churn 状态在进程内存里，只有长驻 MCP server 跨轮可比——已用真实 stdio 两轮验证。
+
 ### Tests
 
 - `tests/memory-freshness.test.ts`（9 用例）：引用抽取、无引用判 `unknown`、fresh/watch/stale 分级（含边界值）、自定义阈值、降级策略（stale+proven 降级 / watch 不降 / canary 豁免 / anti-pattern 不降）、开关读取、`buildRefResolver`（符号名 + 仓库相对路径可解析；内容哈希漂移后不可解析）。

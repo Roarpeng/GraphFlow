@@ -8,17 +8,20 @@ import {
   estimateInputCost,
   isAbstentionEnabled,
   isContextEconomicsEnabled,
+  resolveStaticPrefixTokens,
   shouldAbstain,
 } from "../src/graph/context-economics";
 
 describe("context economics", () => {
-  it("measures prefix churn", () => {
+  it("measures prefix churn and labels the first observation", () => {
     expect(computePrefixChurn(["a", "b"], ["a", "b"]).churnRatio).toBe(0);
-    expect(computePrefixChurn(["a", "b", "c"], ["a", "b", "c", "d"]).churnRatio).toBe(0);
+    expect(computePrefixChurn(["a", "b"], ["a", "b"]).firstObservation).toBe(false);
     const diverged = computePrefixChurn(["a", "b", "c"], ["a", "x", "c"]);
     expect(diverged.sharedPrefix).toBe(1);
     expect(diverged.churnRatio).toBeCloseTo(2 / 3);
-    expect(computePrefixChurn([], ["a"]).churnRatio).toBe(1);
+    const first = computePrefixChurn([], ["a"]);
+    expect(first.churnRatio).toBe(1);
+    expect(first.firstObservation).toBe(true);
   });
 
   it("refuses to model a cache below the provider minimum", () => {
@@ -94,10 +97,31 @@ describe("buildContextEconomics", () => {
     expect(churned.stablePrefixTokens).toBeLessThan(8_000);
   });
 
-  it("marks a sub-minimum package cache-cold", () => {
+  it("marks a sub-minimum package cache-cold only when it IS the whole prefix", () => {
     const cold = buildContextEconomics({ previousLines: ["a"], currentLines: ["a"], packageTokens: 200 });
     expect(cold.verdict).toBe("cache-cold");
     expect(cold.cache.cacheUsable).toBe(false);
     expect(cold.attention.level).toBe("ok");
+
+    // A real harness prefix (system + tools) puts us above the provider minimum,
+    // so the cache IS usable even though our slice alone is tiny.
+    const hosted = buildContextEconomics({
+      previousLines: ["a"],
+      currentLines: ["a"],
+      packageTokens: 529,
+      staticPrefixTokens: 8_000,
+    });
+    expect(hosted.cache.cacheUsable).toBe(true);
+    expect(hosted.verdict).toBe("cache-safe");
+    // The whole prefix survives: 8000 static + 529 unchurned package.
+    expect(hosted.stablePrefixTokens).toBe(8_529);
+    expect(hosted.cache.hitRate).toBe(1);
+  });
+
+  it("reads the static-prefix estimate and ignores invalid values", () => {
+    expect(resolveStaticPrefixTokens({})).toBe(0);
+    expect(resolveStaticPrefixTokens({ GRAPHFLOW_STATIC_PREFIX_TOKENS: "8000" })).toBe(8_000);
+    expect(resolveStaticPrefixTokens({ GRAPHFLOW_STATIC_PREFIX_TOKENS: "abc" })).toBe(0);
+    expect(resolveStaticPrefixTokens({ GRAPHFLOW_STATIC_PREFIX_TOKENS: "-5" })).toBe(0);
   });
 });

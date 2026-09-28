@@ -11,6 +11,8 @@
 
 export const CONTEXT_ECONOMICS_ENV = "GRAPHFLOW_CONTEXT_ECONOMICS";
 export const CONTEXT_ABSTAIN_ENV = "GRAPHFLOW_ABSTAIN";
+/** Host-contributed prefix tokens (system + tool schemas + history) we cannot see. */
+export const STATIC_PREFIX_TOKENS_ENV = "GRAPHFLOW_STATIC_PREFIX_TOKENS";
 
 /** Provider cache-read price as a fraction of input price (Anthropic: 0.1x). */
 export const DEFAULT_CACHE_READ_RATIO = 0.1;
@@ -39,20 +41,44 @@ export function isAbstentionEnabled(env: NodeJS.ProcessEnv = process.env): boole
   return isTruthyFlag(env[CONTEXT_ABSTAIN_ENV]);
 }
 
+/**
+ * GraphFlow is not the harness, so it cannot observe the system prompt, tool
+ * schemas or history that precede its injection. Those tokens decide whether a
+ * provider will cache anything at all, so the caller supplies them. Invalid or
+ * missing values degrade to 0 (pure-slice model) rather than guessing.
+ */
+export function resolveStaticPrefixTokens(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env[STATIC_PREFIX_TOKENS_ENV]?.trim();
+  if (!raw) return 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
+}
+
 export interface PrefixChurn {
   sharedPrefix: number;
   previousLines: number;
   currentLines: number;
   /** 0..1 — share of the previous package that does NOT survive into this one. */
   churnRatio: number;
+  /**
+   * True when this process has not injected a package for the workspace yet.
+   * Churn is not measurable then; reporting it as 100% would be a lie.
+   */
+  firstObservation: boolean;
 }
 
 export function computePrefixChurn(previous: readonly string[], current: readonly string[]): PrefixChurn {
   const max = Math.min(previous.length, current.length);
   let shared = 0;
   while (shared < max && previous[shared] === current[shared]) shared += 1;
-  const churnRatio = previous.length === 0 ? 1 : (previous.length - shared) / previous.length;
-  return { sharedPrefix: shared, previousLines: previous.length, currentLines: current.length, churnRatio };
+  const firstObservation = previous.length === 0;
+  return {
+    sharedPrefix: shared,
+    previousLines: previous.length,
+    currentLines: current.length,
+    churnRatio: firstObservation ? 1 : (previous.length - shared) / previous.length,
+    firstObservation,
+  };
 }
 
 export interface CacheModelInput {
@@ -229,27 +255,40 @@ export function buildContextEconomics(input: {
   previousLines: readonly string[];
   currentLines: readonly string[];
   packageTokens: number;
+  /**
+   * Tokens the host contributes before our injection (system prompt + tool
+   * schemas + history). GraphFlow cannot observe these — it is not the harness —
+   * so the caller supplies them. Default 0 keeps the pure-slice model, but a
+   * realistic cost needs a real number: providers gate caching on the WHOLE
+   * request prefix, not on our slice.
+   */
+  staticPrefixTokens?: number;
   windowTokens?: number;
   pricePerMTokIn?: number;
 }): ContextEconomics {
   const churn = computePrefixChurn(input.previousLines, input.currentLines);
   const packageTokens = Math.max(0, input.packageTokens);
-  // Tokens at/after the first divergence scale with the churned share.
-  const churnTokens = Math.round(packageTokens * churn.churnRatio);
-  const cache = estimateCacheModel({ prefixTokens: packageTokens, churnTokens });
+  const staticPrefixTokens = Math.max(0, input.staticPrefixTokens ?? 0);
+  const prefixTokens = staticPrefixTokens + packageTokens;
+  // Only OUR slice can churn. The host's static prefix (system + tool schemas +
+  // history) precedes the insertion point and is cacheable by construction.
+  const churnTokens = Math.min(prefixTokens, Math.round(packageTokens * churn.churnRatio));
+  const cache = estimateCacheModel({ prefixTokens, churnTokens });
   const cost = estimateInputCost({
     freshTokens: cache.freshTokens,
     cachedTokens: cache.cachedTokens,
     pricePerMTokIn: input.pricePerMTokIn ?? DEFAULT_INPUT_PRICE_PER_MTOK,
   });
   const attention = assessAttentionBudget({
-    usedTokens: packageTokens,
+    usedTokens: prefixTokens,
     windowTokens: input.windowTokens ?? DEFAULT_WINDOW_TOKENS,
   });
   const verdict: ContextEconomics["verdict"] = !cache.cacheUsable
     ? "cache-cold"
-    : churn.churnRatio === 0
+    : churn.firstObservation
       ? "cache-safe"
-      : "prefix-churn";
+      : churn.churnRatio === 0
+        ? "cache-safe"
+        : "prefix-churn";
   return { churn, cache, cost, attention, stablePrefixTokens: cache.cachedTokens, verdict };
 }

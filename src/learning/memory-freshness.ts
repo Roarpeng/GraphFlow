@@ -42,7 +42,9 @@ export function isFreshnessDowngradeEnabled(env: NodeJS.ProcessEnv = process.env
 
 export function skillTextCorpus(skill: SkillState): string {
   const playbook = (skill.playbook ?? []).map((bullet) => bullet.text).join("\n");
-  return [skill.guidance ?? "", skill.description ?? "", playbook].filter((part) => part.length > 0).join("\n");
+  return [skill.name, skill.guidance ?? "", skill.description ?? "", playbook]
+    .filter((part) => part.length > 0)
+    .join("\n");
 }
 
 export function extractFreshnessRefs(skill: SkillState): string[] {

@@ -13,7 +13,8 @@ import type { SkillState } from "../src/learning/skill-types";
 function skill(overrides: Partial<SkillState> = {}): SkillState {
   return {
     id: "skill:test",
-    name: "bridgeDagExecution",
+    // Deliberately ref-free: individual cases supply the refs they are asserting on.
+    name: "release notes tidy",
     score: 3,
     uses: 4,
     lastOutcome: "pass",
@@ -23,8 +24,9 @@ function skill(overrides: Partial<SkillState> = {}): SkillState {
 }
 
 describe("memory freshness oracle", () => {
-  it("collects code refs from guidance, description and playbook", () => {
+  it("collects code refs from name, guidance, description and playbook", () => {
     const state = skill({
+      name: "refresh src/graph/context-pressure.ts",
       guidance: "edit bridgeDagExecution before touching orchestrator",
       description: "keeps indexWorkspaceFiles honest",
       playbook: [{ id: "b1", text: "call createGraphClient once", helpful: 1, harmful: 0 }],
@@ -35,6 +37,8 @@ describe("memory freshness oracle", () => {
     expect(refs).toContain("bridgeDagExecution");
     expect(refs).toContain("indexWorkspaceFiles");
     expect(refs).toContain("createGraphClient");
+    // A task-echo skill records its subject in the name; refs must come from there too.
+    expect(refs).toContain("src/graph/context-pressure.ts");
     expect(new Set(refs).size).toBe(refs.length);
   });
 

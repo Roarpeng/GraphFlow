@@ -21,6 +21,7 @@ import {
   buildContextEconomics,
   isAbstentionEnabled,
   isContextEconomicsEnabled,
+  resolveStaticPrefixTokens,
   shouldAbstain,
 } from "../../../graph/context-economics";
 import { extractSymbolCandidates } from "../../../graph/symbol-extract";
@@ -615,6 +616,7 @@ async function attachContextEconomics(
         previousLines,
         currentLines,
         packageTokens: result.tokenBudget.compressedTokens,
+        staticPrefixTokens: resolveStaticPrefixTokens(),
       }),
     };
   }
