@@ -25,6 +25,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { getHostAdapter } from "./host-adapter";
+import { resolveWorkspaceBuildServerPath } from "./workspace-build";
 
 /** HostAdapter registry id for this installer slice. */
 export const DSH_HOST_ADAPTER_ID = "deepseek-harness";
@@ -138,6 +139,30 @@ export interface BuildDshInsertPatchOptions {
  */
 export function buildGraphFlowDshInsertPatch(options: BuildDshInsertPatchOptions = {}): string {
   const includeGlue = options.includeGlue !== false;
+  // dsh declares its MCP server in a YAML patch rather than a host config file,
+  // so it never appears in the agent profile registry and the generic installer
+  // cannot reach it. Honour the workspace-build preference here too, otherwise
+  // dsh is the one host that keeps launching the published package while you edit
+  // this checkout. Falls back to the npx launcher exactly like every other host
+  // when the preference is off or the build is missing.
+  const workspaceBuild = resolveWorkspaceBuildServerPath();
+  // `command` and `args` are keys of `config:`, so they sit at eight spaces, level
+  // with `serverName`/`transport` — not the ten a plain list item would take.
+  // Getting this wrong yields a patch that still parses but puts the launcher at
+  // the wrong depth, which dsh surfaces as a boot failure much later.
+  const launcher = workspaceBuild.path
+    ? [
+        `        command: ${process.execPath}`,
+        "        args:",
+        `          - ${workspaceBuild.path}`,
+      ]
+    : [
+        "        command: npx",
+        "        args:",
+        "          - '-y'",
+        `          - '--package=${DSH_PACKAGE_NAME}'`,
+        "          - graphflow-mcp",
+      ];
   const lines = [
     "- insert:",
     `    - id: ${DSH_MCP_ROW_ID}`,
@@ -145,11 +170,7 @@ export function buildGraphFlowDshInsertPatch(options: BuildDshInsertPatchOptions
     "      config:",
     "        serverName: graphflow",
     "        transport: stdio",
-    "        command: npx",
-    "        args:",
-    "          - '-y'",
-    `          - '--package=${DSH_PACKAGE_NAME}'`,
-    "          - graphflow-mcp",
+    ...launcher,
     "        env:",
     "          GRAPHFLOW_MCP_STDIO: '1'",
     "          GRAPHFLOW_LOG_JSON: '1'",

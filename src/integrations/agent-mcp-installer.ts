@@ -1,4 +1,7 @@
-import { getOpenCodeMcpRegistration, openCodeWorkspaceServerPath } from "./opencode-plugin";
+import {
+  resolveWorkspaceBuildServerPath,
+  workspaceBuildServerPath,
+} from "./workspace-build";
 import { execFileSync, execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -2325,11 +2328,6 @@ export function removeCodexMcpEntry(
   return true;
 }
 
-/** Is opencode's MCP server registered by its plugin instead of by opencode.json? */
-function isOpenCodeMcpPluginRegistered(): boolean {
-  return getOpenCodeMcpRegistration().enabled;
-}
-
 /**
  * GraphFlow capability flags to copy into a host-launched server's environment.
  *
@@ -2356,6 +2354,43 @@ function graphflowPassthroughEnv(env: NodeJS.ProcessEnv = process.env): Record<s
     if (typeof value === "string" && value.trim()) result[key] = value.trim();
   }
   return result;
+}
+
+/**
+ * Add capability flags to a host entry that has already been written.
+ *
+ * Done as a second pass because `buildMcpServerNode` owns the base env and
+ * exposes no merge option — passing an `environment` field to it is accepted by
+ * the type and ignored at runtime, which is worse than not offering it.
+ *
+ * Returns false when the host's config format cannot carry extra env. That is
+ * reported rather than thrown: the entry point is the load-bearing part, and a
+ * host that runs the right build with default flags is still correct.
+ */
+function mergeHostEnv(
+  configPath: string,
+  target: { serversKey: McpServersKey; configFormat: McpConfigFormat },
+  serverName: string,
+  extra: Record<string, string>
+): boolean {
+  if (Object.keys(extra).length === 0) return true;
+  // Codex stores MCP in TOML; rewriting it here would need a TOML editor, and the
+  // stdio env it needs is already set by the node itself.
+  if (target.configFormat === "codex-toml") return false;
+  try {
+    const json = readJsonConfig(configPath);
+    const servers = (json[target.serversKey] as Record<string, Record<string, unknown>> | undefined) ?? {};
+    const entry = servers[serverName];
+    if (!entry || typeof entry !== "object") return false;
+    // Hosts disagree on the key: opencode uses `environment`, most use `env`.
+    const key = entry.environment !== undefined ? "environment" : "env";
+    entry[key] = { ...((entry[key] as Record<string, string>) ?? {}), ...extra };
+    json[target.serversKey] = servers;
+    writeJsonConfig(configPath, json);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function installMcpToDetectedAgents(options: McpInstallOptions): McpInstallResult[] {
@@ -2405,28 +2440,19 @@ export function installMcpToDetectedAgents(options: McpInstallOptions): McpInsta
       : options;
   const targets = resolveTargetsForAgents(agentIds, options.workspaceRoot, installScope);
   for (const target of targets) {
-    // opencode is the one host where a stale entry is actively harmful while
-    // developing GraphFlow: it pins the published package, so edits in this
-    // checkout are never loaded even though everything looks healthy. When the
-    // workspace build is opted in, write an entry that points at it.
+    // When the workspace build is preferred, every host launches this checkout's
+    // `dist/` instead of the published package. Without this, an npx launcher
+    // fetches npm on every launch, so editing GraphFlow changes nothing the host
+    // runs — and the setup looks healthy while doing it.
     //
-    // This lives at the single choke point every write path passes through.
-    // A guard inside the opencode installer slice did not hold: the global MCP
-    // pass re-wrote the entry right after the slice changed it.
-    if (target.agentId === "opencode" && isOpenCodeMcpPluginRegistered()) {
-      const registration = getOpenCodeMcpRegistration();
-      const serverPath = openCodeWorkspaceServerPath(registration.workspaceRoot ?? process.cwd());
-      if (!existsSync(serverPath)) {
-        results.push({
-          agentId: target.agentId,
-          agentName: target.agentName,
-          configPath: target.configPath,
-          scope: target.scope,
-          status: "error",
-          message: `workspace build missing: ${serverPath}. Run \`npm run build\` in ${registration.workspaceRoot ?? "the GraphFlow checkout"}, or \`graphflow install --no-mcp-plugin\` to stop preferring it.`,
-        });
-        continue;
-      }
+    // This is the single choke point every write path passes through. A guard
+    // inside one host's installer slice did not hold: the global MCP pass
+    // rewrote the entry right after the slice changed it. It was also originally
+    // written for opencode alone; measured across every profile, the other 18
+    // hosts all kept the npx launcher, so the condition is host-agnostic now.
+    const workspaceBuild = resolveWorkspaceBuildServerPath();
+    if (workspaceBuild.path) {
+      const serverPath = workspaceBuild.path;
       try {
         const passthrough = graphflowPassthroughEnv();
         const status = injectIntoAgentConfig(
@@ -2438,16 +2464,29 @@ export function installMcpToDetectedAgents(options: McpInstallOptions): McpInsta
             strategy: "node-bundled",
             bundledServerPath: serverPath,
             nodeCommand: process.execPath,
-            ...(Object.keys(passthrough).length > 0 ? { environment: passthrough } : {}),
           })
         );
+        // Merge after the node is built, not via a build option: the node carries
+        // its env under `env` (McpServerNode), and passing an `environment` field
+        // to buildMcpServerNode is silently ignored — an option that looks right
+        // and does nothing. Hosts launch the server themselves, so a flag
+        // exported in the developer's shell never reaches it; this is what makes
+        // the opt-in features reachable on a real host.
+        const envMerge = mergeHostEnv(target.configPath, target, serverName, passthrough);
         results.push({
           agentId: target.agentId,
           agentName: target.agentName,
           configPath: target.configPath,
           scope: target.scope,
           status,
-          message: `launches the workspace build at ${serverPath}`,
+          // A host that rejects the env merge still launches the right build, so
+          // this is reported rather than thrown: the entry point is the thing
+          // that has to be right.
+          message:
+            `launches the workspace build at ${serverPath}` +
+            (Object.keys(passthrough).length > 0 && envMerge === false
+              ? " (could not add capability flags: unsupported config format)"
+              : ""),
         });
       } catch (error) {
         results.push({
@@ -2459,6 +2498,21 @@ export function installMcpToDetectedAgents(options: McpInstallOptions): McpInsta
           message: error instanceof Error ? error.message : String(error),
         });
       }
+      continue;
+    }
+    // Enabled but unbuilt. Failing loudly beats falling back to the published
+    // package, which is the exact invisible failure this preference exists to
+    // prevent — so the message names both ways out.
+    if (workspaceBuild.missingBuild) {
+      const root = workspaceBuild.preference.workspaceRoot ?? "the GraphFlow checkout";
+      results.push({
+        agentId: target.agentId,
+        agentName: target.agentName,
+        configPath: target.configPath,
+        scope: target.scope,
+        status: "error",
+        message: `workspace build missing: ${workspaceBuildServerPath(root)}. Run \`npm run build\` in ${root}, or \`graphflow install --no-workspace-build\` to stop preferring it.`,
+      });
       continue;
     }
     try {

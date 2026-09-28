@@ -687,10 +687,12 @@ function pushHostAdapterDoctorChecks(checks: DoctorCheckItem[], hostId: string):
   // and against a live server, which logged `mcp connected server=pencil` and
   // nothing for graphflow while the hook was present.
   //
-  // Pointing opencode at a workspace build is now ordinary installer work: the
-  // entry lives in opencode.json like every other host's, so probeMcpEntryPoint
-  // already tells the two cases apart — a local dist entry is healthy, an entry
-  // pinned to the published package while a newer local build exists is `stale`.
+  // A host entry that points at this checkout's dist is healthy; one pinned to
+  // the published package while a local build exists is `stale`. No host-specific
+  // special case is needed — and none is correct: an earlier version had one for
+  // opencode, asserting that its plugin registered the server. opencode's plugin
+  // Hooks interface has no `mcp` key at all, so that check described a mechanism
+  // that could never run and made doctor report the one correct setup as broken.
 
   const mcpTargets = status.mcpTargets ?? [];
   if (mcpTargets.length > 0) {
@@ -718,7 +720,7 @@ function pushHostAdapterDoctorChecks(checks: DoctorCheckItem[], hostId: string):
             ? {
                 message:
                   `launches the published package (${entry.entryPoint}) while a local build exists at ${stale} — ` +
-                  `edits in this checkout are not being used. Set GRAPHFLOW_OPENCODE_MCP=1 and remove the graphflow entry from this file to have the opencode plugin register the local build instead.`,
+                  `edits in this checkout are not being used. Run \`graphflow install --workspace-build\` to point every host at the local build.`,
               }
             : {}),
       });

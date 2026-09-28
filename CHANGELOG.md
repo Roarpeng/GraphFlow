@@ -273,14 +273,46 @@ module:docs/guide.md          ← 相对文档链接
 - 顺带把 `GRAPHFLOW_*` 能力开关**写进条目的 `environment`**：opencode 自己拉起 MCP server，开发者 shell 里的变量同样到不了它——与之前那个 env 变量陷阱同型，只是下沉了一层。没有这一步，opt-in 特性只能在终端里测，无法在真实宿主上测。
 - 删除 `plugin.mjs` 中已无调用方的 `mcpServerSpec` / `shouldRegisterMcp` / marker 读取逻辑（TS 侧是唯一实现，留着会误导），以及 doctor 里 `probePluginRegisteredMcp` 与 `(registered by plugin)` 检查——**该路径已不存在，为它开特例只会让 doctor 说谎**。现在交给常规检查：条目指向本地 dist 即 `installed`，指向已发布包而本地存在更新构建即 `stale`，`probeMcpEntryPoint` 本就分得清。
 
-两个方向都实测：`--mcp-plugin` + `install` → 条目指向本地 dist；`--no-mcp-plugin` + `install` → 恢复已发布包（**单向门会让关掉开关的用户被钉在可能已删除的构建上**）。终态 `summary {installed:63, stale:0}`、`ok: true`，live 日志 `mcp connected server=graphflow tools=10`。
+两个方向都实测：`--mcp-plugin` + `install` → 条目指向本地 dist；`--no-mcp-plugin` + `install` → 恢复已发布包（**命令已在下方第五条更正更名为 `--workspace-build`；此时范围仍仅 opencode**）（**单向门会让关掉开关的用户被钉在可能已删除的构建上**）。终态 `summary {installed:63, stale:0}`、`ok: true`，live 日志 `mcp connected server=graphflow tools=10`。
+
+### Fixed — 工作区构建偏好此前只对 opencode 生效（实测其余 18 个宿主仍是 npx 启动器）
+
+第四次更正把**机制**做对了，但**范围**只覆盖 opencode：守卫是 `target.agentId === "opencode"` 的专属分支。逐个宿主实测（全部 profile，不是推断）：
+
+| 状态 | 宿主 |
+| --- | --- |
+| 指向工作区 dist | 仅 opencode |
+| 仍是 npx 启动器 | cursor / claude-code / codex / gemini / vscode / zed / windsurf / cline / roo-code / kilocode / trae / pearai / antigravity / amazon-q / continue / qoder / kimi-code / zcode |
+| 无 MCP target | deepseek-harness（在 YAML patch 里，不在 profile registry） |
+
+npx 启动器 = 宿主每次从 npm 拉已发布包，**在这些宿主里改 GraphFlow 代码完全不生效**，而配置看起来完全健康。现改为宿主无关。
+
+**1. 守卫去专属化。** `installMcpToDetectedAgents` 的 per-target 循环里，条件从 `agentId === "opencode"` 变为"工作区构建已启用"。仍在唯一咽喉点——切片级守卫已被全局 pass 覆盖过一次。
+
+**2. marker 移出宿主目录。** 从 `~/.config/opencode/plugins/graphflow-mcp.json` 移到 **`~/.graphflow/workspace-build.json`**（`src/integrations/workspace-build.ts`）。原位置把一个适用于所有宿主的决策写成 opencode 专属，也让开关读起来像 opencode 专用。opencode 侧那份 marker API 随之删除，只留 TS 实现。
+
+**3. dsh 单独适配。** 它在 YAML patch 里声明 MCP，**不出现在 profile registry**，通用安装器够不到——否则它会是唯一仍跑 npm 副本的宿主。`buildGraphFlowDshInsertPatch` 现在同样遵循偏好。
+
+- 一处实测抓到的缩进错误：`command`/`args` 是 `config:` 的键，应为**八空格**（与 `transport` 同级），我先写成六。YAML 仍能解析，但启动器落在错误层级，dsh 只会在很晚的启动失败里报出来。由既有断言"安装器输出必须逐行等于仓库内 `cordis.patch.yml`"抓到。
+
+**4. `GRAPHFLOW_*` 开关写进条目 `environment`（跨宿主）。** 宿主自己拉起 server，shell 里的变量到不了它——与那个 env 变量陷阱同型，只是下沉一层。
+
+- 陷阱：给 `buildMcpServerNode` 传 `environment` **类型接受、运行时被忽略**（选项看起来对、实际什么都不做）。改为写盘后二次合并（`mergeHostEnv`），`environment` / `env` 两种键名都试。codex 是 TOML，无法安全二次合并，**如实上报而非假装成功**：条目仍指向正确构建，开关缺失写进 message。**入口正确是硬要求，开关到达是尽力而为。**
+
+**5. CLI 更名 `--workspace-build` / `--no-workspace-build`**（`--mcp-plugin` 名不副实）。doctor 的 `stale` 文案指向新命令，并删除已失效的 opencode 特例注释。
+
+实测（真实 home，逐宿主读配置文件）：开启 **19/19** 指向 `<workspaceRoot>/dist/surfaces/mcp/server.js`；`--no-workspace-build` 后 **0/19**；再开启恢复 19/19。`doctor` 保持 `{installed:63, stale:0}` / `ok: true`。
+
+**一处我自己的测量错误**：验证脚本按单一路径读条目，把 `mcpServers`（kimi-code / qoder）、`mcp.servers`（zcode）判成"未指向"，而原始文件里三个都在。**数字与假设矛盾时先怀疑尺子**——已改为在文件原文里匹配路径，JSON 与 TOML 一视同仁。
 
 ### Tests
 
-- `tests/opencode-mcp-plugin-registration.test.ts`（9 用例）：条目指向记录的工作区构建 / **记录工作区而非假定 cwd** / 后续 install 省略 workspaceRoot 时**不重新指向 cwd** / 构建缺失时报可操作的 error（并**不覆盖**原条目）/ opt-in 撤销后恢复已发布包（防单向门）/ 无 marker 时正常注入 / marker 损坏视为未开启 / 不动其他 agent 条目 / 注入目标 home 与读 marker 的 home 一致。**已验证有牙**：禁用守卫 → 3 个失败。
-- `tests/m-doctor-json-report.test.ts`："插件注册"那组用例**整体重写**为"条目指向工作区构建"——断言 doctor 给出**恰好一条** `installed` 且 `summary.stale === 0`。旧用例断言的是一条不存在的机制。
-  - 隔离靠 `vi.resetModules()` + 在设好 `HOME` **之后**动态 import——因为 profile 在模块加载时注册，静态 import + `beforeEach` 改 `HOME` 太晚（首版正是这样假绿失败了一次）。
-  - **已验证它有牙**：临时把守卫改成 `if (false && ...)` → 2 个用例失败；恢复 → 6 个全过。
+- `tests/workspace-build.test.ts`（13 用例，由 `opencode-mcp-plugin-registration.test.ts` 重命名并扩写）：偏好本体（记录工作区而非假定 cwd / 后续 install 不重指向 / marker 不在任何宿主目录内 / 损坏视为未开启 / 未构建与未启用分开报告）+ 跨宿主注入（**每个 profile 的条目都指向该构建** / 缺构建报可操作 error / 关闭时保留 npx / 撤销后恢复 / 开关进入 `environment` / 不动其他条目 / 注入 home 与读 marker 的 home 一致）+ dsh patch 两个方向。
+  - **"每个 profile"这条是本轮核心回归**：守卫原本只对 opencode 生效，逐宿主实测才暴露。
+  - 断言用**文件原文包含路径**而非解析 JSON——codex 用 TOML，JSON 形状的读取器会静默跳过唯一格式不同的宿主。
+  - **已验证有牙**：禁用守卫 → 3 个失败。
+- `tests/m-doctor-json-report.test.ts`："插件注册"那组用例**整体重写**为"条目指向工作区构建"——断言 user-scope 条目 `installed` 且 `summary.stale === 0`。**未**断言"恰好一条检查"：Cursor 本就产出两条（user 级 + workspace 相对级，sandbox 里后者不存在），这是既有行为，与本改动无关；最初写成 `length === 1` 时失败，说明是我的断言错了，不是代码错了。
+  - 隔离靠 `vi.resetModules()` + 在设好 `HOME` **之后**动态 import——profile 在模块加载时注册，静态 import + `beforeEach` 改 `HOME` 太晚（首版正是这样假绿失败了一次）。
 
 ### Tests
 

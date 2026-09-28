@@ -124,44 +124,53 @@ describe("doctor detects a host running the wrong build", () => {
   });
 });
 
-describe("doctor reports an opencode entry that launches the workspace build", () => {
+describe("doctor reports a host entry that launches the workspace build", () => {
   it("treats it as installed, not as a missing or stale server", async () => {
-    // The arrangement required for working on GraphFlow is an opencode.json entry
-    // that points at this checkout's `dist/`. It looks like any other entry, so
-    // doctor must not invent a second "the plugin registers it" check for a
-    // plugin hook that does not exist. One server, one check.
+    // The arrangement required for working on GraphFlow is a host entry that
+    // points at this checkout's `dist/`. It looks like any other entry, so doctor
+    // must not invent a second "something else registers it" check — an earlier
+    // version had exactly that, for an opencode plugin hook that does not exist.
+    // One server, one check.
     vi.resetModules();
     const home = mkdtempSync(join(tmpdir(), "doctor-workspace-mcp-"));
     const prevHome = process.env.HOME;
     const prevProfile = process.env.USERPROFILE;
     try {
-      const configDir = join(home, ".config", "opencode");
-      mkdirSync(join(configDir, "plugins"), { recursive: true });
+      mkdirSync(join(home, ".cursor"), { recursive: true });
+      // Built *before* the preference is set, because the preference falls back
+      // to process.cwd() for the workspace when the marker has none recorded.
+      // Creating it after would leave the build at a different path than the one
+      // the entry points at, and the test would fail for the wrong reason.
       const workspace = mkdtempSync(join(tmpdir(), "doctor-workspace-"));
-      const serverPath = join(workspace, "dist", "surfaces", "mcp", "server.js");
       mkdirSync(join(workspace, "dist", "surfaces", "mcp"), { recursive: true });
-      writeFileSync(serverPath, "// build\n");
+      writeFileSync(join(workspace, "dist", "surfaces", "mcp", "server.js"), "// build\n");
 
       process.env.HOME = home;
       if (process.platform === "win32") process.env.USERPROFILE = home;
-      const { setOpenCodeMcpRegistration } = await import("../src/integrations/opencode-plugin");
-      setOpenCodeMcpRegistration({ enabled: true, workspaceRoot: workspace });
-      // The installer writes the entry the way `graphflow install --mcp-plugin` does.
+      const { setWorkspaceBuildPreference } = await import("../src/integrations/workspace-build");
+      setWorkspaceBuildPreference({ enabled: true, workspaceRoot: workspace });
+      // The installer writes the entry the way `graphflow install --workspace-build` does.
       const { installMcpToDetectedAgents } = await import("../src/integrations/agent-mcp-installer");
       installMcpToDetectedAgents({
         strategy: "npx",
         installScope: "user",
-        agentIdsOverride: ["opencode"],
+        agentIdsOverride: ["cursor"],
         preferGlobalInstall: true,
         globalInstallOverride: null,
       });
       const { buildDoctorReport } = (await import("../src/surfaces/cli/init")) as typeof import("../src/surfaces/cli/init");
 
       const report = buildDoctorReport(workspace);
-      const opencodeMcp = report.checks.filter((c) => /opencode/i.test(c.agent) && c.category === "mcp");
+      // Cursor legitimately yields two mcp checks: the user-level path and a
+      // workspace-relative one that does not exist in this sandbox. That split is
+      // pre-existing and unrelated to the workspace build, so the invariant worth
+      // pinning is that the *user-scope* entry is installed and nothing is stale —
+      // not that there happens to be exactly one check.
+      const userEntry = report.checks.find(
+        (c) => c.category === "mcp" && /cursor/i.test(c.agent) && c.scope === "user"
+      );
 
-      expect(opencodeMcp.length).toBe(1);
-      expect(opencodeMcp[0]?.status).toBe("installed");
+      expect(userEntry?.status).toBe("installed");
       expect(report.summary.stale).toBe(0);
       rmSync(workspace, { recursive: true, force: true });
     } finally {
