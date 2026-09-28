@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getHostAdapter, HOST_ADAPTERS, hostsWithCapability } from "../src/integrations/host-adapter";
 import {
   CLAUDE_CODE_HOST_ADAPTER_ID,
@@ -17,7 +17,7 @@ import {
 import { PROFILE_HOST_IDS, getProfileHostStatus, isProfileHost } from "../src/integrations/profile-host-installer";
 import { DSH_MCP_ROW_ID, DSH_PATCH_BEGIN } from "../src/integrations/dsh-harness-installer";
 import { SESSION_HOOK_SCRIPT } from "../src/integrations/claude-code-hooks";
-import { buildDoctorReport, buildInstallReport } from "../src/surfaces/cli/init";
+import { buildDoctorReport } from "../src/surfaces/cli/init";
 
 const tempRoots: string[] = [];
 
@@ -420,9 +420,15 @@ describe("M16 HostAdapter CLI wiring", () => {
     }
   });
 
-  it("install report still exposes claudeCodeHooks after HostAdapter routing", () => {
+  it("install report still exposes claudeCodeHooks after HostAdapter routing", async () => {
     // buildInstallReport rewrites every detected agent home; isolate HOME so
     // the real agent configs on this machine stay untouched.
+    //
+    // `vi.resetModules()` is load-bearing, not hygiene: agent profiles register
+    // themselves on first import, so the statically imported buildInstallReport
+    // has already captured the real home. Redirecting HOME alone still wrote to
+    // the developer's real ~/.config/opencode — found with a writeFileSync
+    // tracer, because this assertion passes either way.
     const home = makeTempRoot("gf-report-shape-");
     const prevProfile = process.env.USERPROFILE;
     const prevHome = process.env.HOME;
@@ -430,12 +436,15 @@ describe("M16 HostAdapter CLI wiring", () => {
     if (process.platform === "win32") process.env.USERPROFILE = home;
     else process.env.HOME = home;
     process.env.APPDATA = join(home, "AppData", "Roaming");
+    vi.resetModules();
     try {
-      const report = buildInstallReport(process.cwd(), { bootstrapGraph: false });
+      const init = (await import("../src/surfaces/cli/init")) as typeof import("../src/surfaces/cli/init");
+      const report = init.buildInstallReport(process.cwd(), { bootstrapGraph: false });
       expect(report.claudeCodeHooks).toMatchObject({
         status: expect.stringMatching(/^(created|updated|skipped|error)$/),
       });
     } finally {
+      vi.resetModules();
       if (prevProfile === undefined) delete process.env.USERPROFILE;
       else process.env.USERPROFILE = prevProfile;
       if (prevHome === undefined) delete process.env.HOME;

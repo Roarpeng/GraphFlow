@@ -1,13 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import {
-  buildInstallReport,
-  formatInstallLegacyText,
-  type InstallReport,
-} from "../src/surfaces/cli/init";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildCliUsage } from "../src/surfaces/cli/output";
+import type { InstallReport } from "../src/surfaces/cli/init";
+
+type InitModule = typeof import("../src/surfaces/cli/init");
 
 const tempRoots: string[] = [];
 
@@ -27,9 +25,21 @@ afterEach(() => {
   }
 });
 
-// buildInstallReport rewrites configs for every detected agent home; isolate
-// HOME so the machine running the suite keeps its real agent configs intact.
-function withIsolatedHome<T>(run: () => T): T {
+/**
+ * buildInstallReport rewrites configs for every detected agent home; isolate
+ * HOME so the machine running the suite keeps its real agent configs intact.
+ *
+ * Resetting the module registry is the load-bearing part, not an optimisation.
+ * Agent profiles call `resolveHomePaths()` and register themselves when their
+ * module is first imported, so a statically imported installer has already
+ * captured the real home by the time this runs. Pointing HOME at a temp dir
+ * alone left the suite writing to the developer's real `~/.config/opencode` —
+ * verified with a writeFileSync tracer, which caught
+ * injectIntoOpencodeConfig <- installMcpToDetectedAgents landing on the real
+ * path. Re-importing after the env is redirected is the only way the
+ * isolation actually holds.
+ */
+async function withIsolatedHome<T>(run: (init: InitModule) => T): Promise<T> {
   const home = makeTempRoot("gf-isolated-home-");
   const prevProfile = process.env.USERPROFILE;
   const prevHome = process.env.HOME;
@@ -37,9 +47,11 @@ function withIsolatedHome<T>(run: () => T): T {
   if (process.platform === "win32") process.env.USERPROFILE = home;
   else process.env.HOME = home;
   process.env.APPDATA = join(home, "AppData", "Roaming");
+  vi.resetModules();
   try {
-    return run();
+    return run((await import("../src/surfaces/cli/init")) as InitModule);
   } finally {
+    vi.resetModules();
     if (prevProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = prevProfile;
     if (prevHome === undefined) delete process.env.HOME;
@@ -54,9 +66,9 @@ describe("install JSON report for agent self-check", () => {
     expect(buildCliUsage()).toContain("install [--json]");
   });
 
-  it("returns structured install actions plus post-install doctor checks", () => {
-    const report = withIsolatedHome(() =>
-      buildInstallReport(process.cwd(), { bootstrapGraph: false })
+  it("returns structured install actions plus post-install doctor checks", async () => {
+    const report = await withIsolatedHome((init) =>
+      init.buildInstallReport(process.cwd(), { bootstrapGraph: false })
     );
 
     expect(report).toMatchObject({
@@ -121,11 +133,10 @@ describe("install JSON report for agent self-check", () => {
     }
   });
 
-  it("formats human-readable install text from the same report", () => {
-    const report = withIsolatedHome(() =>
-      buildInstallReport(process.cwd(), { bootstrapGraph: false })
+  it("formats human-readable install text from the same report", async () => {
+    const text = await withIsolatedHome((init) =>
+      init.formatInstallLegacyText(init.buildInstallReport(process.cwd(), { bootstrapGraph: false }))
     );
-    const text = formatInstallLegacyText(report);
     expect(text).toContain("[START] Installing GraphFlow");
     expect(text).toContain("[FINISH] Installation complete");
     expect(text).toMatch(/doctor ok=/);

@@ -1,18 +1,14 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getClaudeCodeHooksStatus,
   installClaudeCodeHooks,
   SESSION_HOOK_SCRIPT,
   settingsReferenceHookScript,
 } from "../src/integrations/claude-code-hooks";
-import {
-  buildDoctorReport,
-  buildInstallReport,
-  formatInstallLegacyText,
-} from "../src/surfaces/cli/init";
+import { buildDoctorReport } from "../src/surfaces/cli/init";
 
 const tempRoots: string[] = [];
 
@@ -88,9 +84,16 @@ describe("Claude Code hooks status helper", () => {
 });
 
 describe("install/doctor wire Claude Code hooks", () => {
-  it("includes claudeCodeHooks in InstallReport and formats it in legacy text", () => {
+  it("includes claudeCodeHooks in InstallReport and formats it in legacy text", async () => {
     // buildInstallReport rewrites every detected agent home; isolate HOME so
     // the real agent configs on this machine stay untouched.
+    //
+    // `vi.resetModules()` is load-bearing: agent profiles register themselves
+    // when their module is first imported, so the statically imported
+    // `buildInstallReport` has already captured the real home here. Redirecting
+    // HOME alone left the suite writing to the real ~/.config/opencode — caught
+    // with a writeFileSync tracer, not by a failing assertion, because the
+    // assertions here pass either way.
     const home = makeTempRoot("gf-hooks-install-");
     const prevProfile = process.env.USERPROFILE;
     const prevHome = process.env.HOME;
@@ -98,15 +101,18 @@ describe("install/doctor wire Claude Code hooks", () => {
     if (process.platform === "win32") process.env.USERPROFILE = home;
     else process.env.HOME = home;
     process.env.APPDATA = join(home, "AppData", "Roaming");
+    vi.resetModules();
     try {
-      const report = buildInstallReport(process.cwd(), { bootstrapGraph: false });
+      const init = (await import("../src/surfaces/cli/init")) as typeof import("../src/surfaces/cli/init");
+      const report = init.buildInstallReport(process.cwd(), { bootstrapGraph: false });
       expect(report.claudeCodeHooks).toMatchObject({
         status: expect.stringMatching(/^(created|updated|skipped|error)$/),
       });
-      const text = formatInstallLegacyText(report);
+      const text = init.formatInstallLegacyText(report);
       expect(text).toMatch(/Claude Code hooks/i);
       expect(text).toMatch(/DeepSeek Harness/i);
     } finally {
+      vi.resetModules();
       if (prevProfile === undefined) delete process.env.USERPROFILE;
       else process.env.USERPROFILE = prevProfile;
       if (prevHome === undefined) delete process.env.HOME;

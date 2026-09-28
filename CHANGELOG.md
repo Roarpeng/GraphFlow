@@ -246,6 +246,15 @@ module:docs/guide.md          ← 相对文档链接
 
 **3. 两个 home 解析不一致，会让开关静默失效。** 测试暴露 `resolveOpenCodeHome()`（认 `GRAPHFLOW_OPENCODE_HOME`）与 agent profile 注册表（认 `homedir()`）可能指向不同 home——若不一致，守卫会读错 home 的 marker，opt-in 静默变空操作。成因：profile 在**模块加载时**就调 `resolveHomePaths()` 完成注册（`registerOpencodeProfile()` 随 import 执行）。生产默认下两者一致，但这个不一致是真实的，已加测试钉住"注入写的 home 与读 marker 的 home 必须是同一个"。
 
+### Fixed — 全量测试会改写开发者真实的 agent 配置（"测试全绿"与"doctor ok"此前互斥）
+
+提交后复核终态时，`doctor` 又回到 `stale`——**而测试是全绿的**。查配置 mtime：写入时间 21:04:13，正落在全量测试运行区间内。
+
+- 三个测试文件（`m-install-json-report` / `m-install-hooks-wiring` / `host-adapter-install`）都调用 `buildInstallReport`，也都**自称**隔离了 HOME（注释原文："isolate HOME so the machine running the suite keeps its real agent configs intact"）。**但隔离是假的**：agent profile 在**模块首次 import 时**就调 `resolveHomePaths()` 完成注册（`registerOpencodeProfile()` 随 import 执行），静态 import 的 `buildInstallReport` 早已把**真实 home** 捕获在手里。此后改 `process.env.HOME` 对它毫无影响——安装照旧写进真实的 `~/.config/opencode`。
+- 这类泄漏**不会让任何断言失败**：断言检查的是 report 结构，而 report 对"写到了真实 home"和"写到了临时 home"一视同仁。**它只在真实机器上表现为 doctor 变脏。** 用 `writeFileSync` 预加载追踪器抓到完整调用栈（`injectIntoOpencodeConfig` ← `injectIntoAgentConfig` ← `installMcpToDetectedAgents` ← `installProfileHost` ← `installViaHostAdapter` ← `buildInstallReport`）才定位到。
+- 修法：改 HOME 之后 `vi.resetModules()` 并**动态重新 import** 被测模块。真实 `~/.config/opencode` 写入次数 **15 → 0**，全量 222 文件 / 1709 用例仍全绿，`doctor` 保持 `{installed:61, stale:0}` / `ok: true`。
+- **同一成因也是上一条 home 不一致的另一半**：profile 路径在加载期固定，marker 读取是即时的。所以隔离环境里"读 marker 的 home"和"写配置的 home"会分叉——**测试里的分叉是 bug，机器上的分叉是隐患**，两侧都已用断言钉住。
+
 ### Tests
 
 - `tests/opencode-mcp-plugin-registration.test.ts`（6 用例）：marker 开着 → 移除条目并上报 / marker 关掉 → 条目恢复写入（防单向门）/ 无 marker → 正常注入 / marker 损坏 → 视为未开启而不抛错 / 不动 opencode.json 里其他 agent 的条目 / **注入目标 home 与读 marker 的 home 必须一致**。
