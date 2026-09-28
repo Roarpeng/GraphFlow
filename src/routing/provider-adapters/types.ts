@@ -44,6 +44,13 @@ export interface ProviderUsageStats {
   completionTokens?: number;
   promptCacheHitTokens?: number;
   promptCacheMissTokens?: number;
+  /**
+   * Tokens written to the cache this request, where the vendor reports it
+   * separately (OpenAI from GPT-5.6). Kept distinct from the hit count because
+   * a prefix that is written repeatedly and never read is a pure surcharge, and
+   * that is only visible if the write is counted on its own.
+   */
+  promptCacheWriteTokens?: number;
 }
 
 export interface ProviderTextResult {
@@ -109,6 +116,25 @@ export function pickUsage(payload: Record<string, unknown>): ProviderUsageStats 
   }
   if (typeof usage.prompt_cache_miss_tokens === "number") {
     stats.promptCacheMissTokens = usage.prompt_cache_miss_tokens;
+  }
+  // OpenAI and Azure report the cached span as `cached_tokens` (plus
+  // `cache_write_tokens` from GPT-5.6). Without these the cache hit ratio is
+  // unmeasurable on exactly the hosts where prompt caching is automatic and
+  // free to write — so the placement question could only ever be answered on
+  // one provider, from one provider's numbers.
+  if (typeof usage.cached_tokens === "number") {
+    stats.promptCacheHitTokens = usage.cached_tokens;
+  }
+  if (typeof usage.cache_write_tokens === "number") {
+    stats.promptCacheWriteTokens = usage.cache_write_tokens;
+  }
+  // Google reports the same thing as `total_cached_tokens`.
+  if (typeof usage.total_cached_tokens === "number") {
+    stats.promptCacheHitTokens = usage.total_cached_tokens;
+  }
+  // Cache reads are not always free: several vendors meter them separately.
+  if (typeof usage.cache_read_input_tokens === "number") {
+    stats.promptCacheHitTokens = usage.cache_read_input_tokens;
   }
   return Object.keys(stats).length > 0 ? stats : undefined;
 }

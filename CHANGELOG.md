@@ -172,6 +172,26 @@ module:docs/guide.md          ← 相对文档链接
 - 改为 `economics.sensitivity`：**扫描一整段合理的宿主尾部尺寸**（0 / 2k / 8k / 20k / 50k / 120k / 250k），给出每档成本与净值、**翻转点**与**结论是否稳健**。
 - 结论不再压在一个人工填的数上：live 显示 churn 97.4% 时 `breakEvenSuffixTokens=8000`、`conclusionIsRobust=false`——**明说"这个判断取决于宿主的真实规模，而不是你填的估计值"**；无 churn 时 `robust=true`，**明说"不依赖宿主规模"**。
 
+### Verified — 真实 provider 端到端 A/B（`benchmarks/cache-placement-ab.ts`）
+
+之前所有缓存结论都来自**公开的缓存乘数 + 我自己的前缀匹配模型**，从没被任何 provider 的真实缓存验证过。现在用 `DEEPSEEK_API_KEY` 打了真实请求，读回 provider 自己的 `prompt_cache_hit_tokens`。
+
+**实验**（3 臂 × 3 轮，40 轮历史，`max_tokens:16`）：C 宿主单独跑 / A 把每轮变化的注入放进 system 层 / B 把**逐字节不变**的 brief 放进同一位置。每臂独立 system 块（首轮全部 hit=0），避免跨臂缓存串味。
+
+| 臂 | 末轮 hitRatio | 全价计费 token |
+| --- | --- | --- |
+| C 基线（无注入） | **95.1%** | 3790 |
+| A 每轮变化注入 | **43.1%** | **9459** |
+| B 稳定 brief | **94.1%** | 4515 |
+
+**结论：52.0 个百分点的落差，每轮多付 1890 个全价 token。** 更要命的是 A 臂幸存的缓存**恰好只有 system 里的稳定段（1920 tok）**——**整段对话每轮被重新计费**。会话越长越糟（3 轮历史时是 28.6 个点，40 轮是 52 个点）。而 B 臂与基线基本无差：**逐字节稳定的 brief 放在断点前不花宿主一分钱**。
+
+**由此改了三处（都是被测试逼出来的，不是想出来的）**：
+
+1. **缓存定价原本是把一家厂商的数字套给所有人**。实测 DeepSeek **完全没有缓存写入溢价**（`cacheWrite=0`），缓存读约为未命中价的 **2%** 而非 10%。旧默认（1.25 / 0.1）在 DeepSeek 上把 churn 税**高估了 2247%**。现按 provider 取档位（`CACHE_PROFILES`），只收录**已对厂商页面或真实 usage payload 核实过**的值；未匹配时回退到一个**明写"保守兜底"**的档位，而不是假装知道。`buildContextEconomics` 新增 `provider` 参数。
+2. **`pickUsage` 读不了 OpenAI / Google 的缓存字段**。原先只认 DeepSeek 的 `prompt_cache_hit_tokens`，等于"位置问题只能在一个 provider 上、用一个 provider 的数字回答"。现补 `cached_tokens` / `cache_write_tokens` / `total_cached_tokens` / `cache_read_input_tokens`，并把**写入量单列**——一个反复写入却从不被读的前缀是纯 surcharge，只有把写入和命中分开才看得见。
+3. **`cacheLayout` 的措辞按实测改写**。原来写"稳定在前、易变在后"，但宿主**完全照做也照样丢缓存**：如果两段都被拼进 system 块，易变段仍在对话之前，其后一切重新计费。措辞已改为明确指出**边界位置**（稳定段落在断点处、易变段放到对话之后），并写明"都拼进 system 块仍然丢缓存"。
+
 ### Tests
 
 ### Tests

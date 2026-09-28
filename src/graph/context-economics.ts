@@ -10,6 +10,94 @@
  */
 
 export const CONTEXT_ECONOMICS_ENV = "GRAPHFLOW_CONTEXT_ECONOMICS";
+/**
+ * Cache economics are provider-specific, and the defaults used to be one
+ * provider's numbers applied to everyone.
+ *
+ * That was measured, not assumed. A real-provider A/B
+ * (benchmarks/cache-placement-ab.ts, DeepSeek) showed:
+ *
+ *  - DeepSeek charges **no cache-write premium** at all, and its cache read is
+ *    ~2% of the miss price — not 10%. Charging Anthropic's 1.25x write and 0.1x
+ *    read overstates the churn penalty by ~17% and understates what a cache hit
+ *    is worth by 5x on that provider.
+ *  - OpenAI caches automatically and, before GPT-5.6, wrote for free.
+ *  - The write premium is a *choice of TTL* at Anthropic (1.25x for 5 minutes,
+ *    2x for 1 hour), not a constant of nature.
+ *
+ * So the ratios are a property of (provider, model), not of caching. Only the
+ * values verified against a vendor page or a live usage payload are listed;
+ * anything else falls back to a labelled conservative default rather than an
+ * invented number.
+ */
+export interface ProviderCacheProfile {
+  id: string;
+  /** Cost of reading a cached token, as a fraction of the miss price. */
+  cacheReadRatio: number;
+  /**
+   * Effective cost of a token that must be (re)written, premium included.
+   * 1.0 means "full input price, no premium" — which is most providers, and not
+   * what the old default of 1.25 assumed.
+   */
+  cacheWriteRatio: number;
+  pricePerMTokIn: number;
+  /** Where the numbers came from. Surfaced so a stale table is auditable. */
+  source: string;
+  /** False when these are a conservative stand-in rather than a quoted rate. */
+  verified: boolean;
+}
+
+export const CACHE_PROFILES: readonly ProviderCacheProfile[] = [
+  {
+    id: "deepseek",
+    cacheReadRatio: 0.02,
+    // Verified via the provider usage payload and the vendor pricing page: the
+    // `cache_write` multiplier is 0, so a rewritten token costs plain input.
+    cacheWriteRatio: 1.0,
+    pricePerMTokIn: 0.15,
+    source: "api-docs.deepseek.com pricing; model registry cacheWrite=0",
+    verified: true,
+  },
+  {
+    id: "openai",
+    cacheReadRatio: 0.1,
+    // GPT-5.6+ bills cache writes at 1.25x; earlier families wrote for free.
+    cacheWriteRatio: 1.25,
+    pricePerMTokIn: 5,
+    source: "platform.openai.com prompt caching; GPT-5.6 write premium",
+    verified: true,
+  },
+  {
+    id: "anthropic",
+    cacheReadRatio: 0.1,
+    // 1.25x is the 5-minute TTL, which is the API default. The 1-hour TTL that
+    // Claude Code itself selects costs 2x and would double the churn penalty.
+    cacheWriteRatio: 1.25,
+    pricePerMTokIn: 3,
+    source: "platform.claude.com prompt caching multipliers",
+    verified: true,
+  },
+];
+
+/** Used when the provider is unknown. Labelled, not silently presented as fact. */
+export const UNKNOWN_CACHE_PROFILE: ProviderCacheProfile = {
+  id: "unknown",
+  cacheReadRatio: 0.1,
+  // Assume a write premium, because assuming its absence would understate the
+  // cost of the churn this engine exists to detect.
+  cacheWriteRatio: 1.25,
+  pricePerMTokIn: 3,
+  source: "conservative fallback — no provider profile matched; set one explicitly for real numbers",
+  verified: false,
+};
+
+export function resolveCacheProfile(provider?: string): ProviderCacheProfile {
+  if (!provider) return UNKNOWN_CACHE_PROFILE;
+  const needle = provider.trim().toLowerCase();
+  const hit = CACHE_PROFILES.find((profile) => needle.includes(profile.id));
+  return hit ?? UNKNOWN_CACHE_PROFILE;
+}
+
 export const CONTEXT_ABSTAIN_ENV = "GRAPHFLOW_ABSTAIN";
 /** Host-contributed prefix tokens (system + tool schemas + history) we cannot see. */
 export const STATIC_PREFIX_TOKENS_ENV = "GRAPHFLOW_STATIC_PREFIX_TOKENS";
@@ -96,9 +184,9 @@ export interface CacheModelInput {
   prefixTokens: number;
   /** Tokens at/after the first divergence — these cannot be served from cache. */
   churnTokens: number;
-  cacheReadRatio?: number;
-  cacheWriteRatio?: number;
-  minCacheableTokens?: number;
+  cacheReadRatio?: number | undefined;
+  cacheWriteRatio?: number | undefined;
+  minCacheableTokens?: number | undefined;
 }
 
 export interface CacheModel {
@@ -140,8 +228,8 @@ export interface CostInput {
   freshTokens: number;
   cachedTokens: number;
   pricePerMTokIn: number;
-  cacheReadRatio?: number;
-  cacheWriteRatio?: number;
+  cacheReadRatio?: number | undefined;
+  cacheWriteRatio?: number | undefined;
 }
 
 export interface CostEstimate {
@@ -277,6 +365,8 @@ export function computeCostSensitivity(input: {
   churnRatio: number;
   firstObservation: boolean;
   pricePerMTokIn: number;
+  cacheReadRatio?: number;
+  cacheWriteRatio?: number;
   suffixCandidates?: readonly number[];
 }): CostSensitivity {
   const candidates = input.suffixCandidates ?? [0, 2_000, 8_000, 20_000, 50_000, 120_000, 250_000];
@@ -290,11 +380,15 @@ export function computeCostSensitivity(input: {
     const cache = estimateCacheModel({
       prefixTokens: staticPrefixTokens + packageTokens,
       churnTokens: churned,
+      cacheReadRatio: input.cacheReadRatio,
+      cacheWriteRatio: input.cacheWriteRatio,
     });
     const cost = estimateInputCost({
       freshTokens: cache.freshTokens,
       cachedTokens: cache.cachedTokens,
       pricePerMTokIn: input.pricePerMTokIn,
+      cacheReadRatio: input.cacheReadRatio,
+      cacheWriteRatio: input.cacheWriteRatio,
     });
     const invalidation = estimateSuffixInvalidation({
       suffixTokens,
@@ -302,6 +396,8 @@ export function computeCostSensitivity(input: {
       firstObservation: input.firstObservation,
       savedUsd: cost.savedUsd,
       pricePerMTokIn: input.pricePerMTokIn,
+      cacheReadRatio: input.cacheReadRatio,
+      cacheWriteRatio: input.cacheWriteRatio,
     });
     return {
       suffixTokens,
@@ -375,8 +471,8 @@ export function estimateSuffixInvalidation(input: {
   firstObservation: boolean;
   savedUsd: number;
   pricePerMTokIn: number;
-  cacheReadRatio?: number;
-  cacheWriteRatio?: number;
+  cacheReadRatio?: number | undefined;
+  cacheWriteRatio?: number | undefined;
 }): SuffixInvalidation {
   const cacheReadRatio = input.cacheReadRatio ?? DEFAULT_CACHE_READ_RATIO;
   const cacheWriteRatio = input.cacheWriteRatio ?? DEFAULT_CACHE_WRITE_RATIO;
@@ -454,7 +550,17 @@ export function buildContextEconomics(input: {
   suffixTokens?: number;
   windowTokens?: number;
   pricePerMTokIn?: number;
+  /**
+   * Provider whose cache pricing applies. Overrides the ratio defaults, which
+   * are one provider's numbers and were measurably wrong on at least two others.
+   */
+  provider?: string;
+  cacheReadRatio?: number | undefined;
+  cacheWriteRatio?: number | undefined;
 }): ContextEconomics {
+  const profile = resolveCacheProfile(input.provider);
+  const cacheReadRatio = input.cacheReadRatio ?? profile.cacheReadRatio;
+  const cacheWriteRatio = input.cacheWriteRatio ?? profile.cacheWriteRatio;
   const churn = computePrefixChurn(input.previousLines, input.currentLines);
   const packageTokens = Math.max(0, input.packageTokens);
   const staticPrefixTokens = Math.max(0, input.staticPrefixTokens ?? 0);
@@ -462,11 +568,19 @@ export function buildContextEconomics(input: {
   // Only OUR slice can churn. The host's static prefix (system + tool schemas +
   // history) precedes the insertion point and is cacheable by construction.
   const churnTokens = Math.min(prefixTokens, Math.round(packageTokens * churn.churnRatio));
-  const cache = estimateCacheModel({ prefixTokens, churnTokens });
+  const cache = estimateCacheModel({
+    prefixTokens,
+    churnTokens,
+    cacheReadRatio,
+    cacheWriteRatio,
+  });
+  const pricePerMTokIn = input.pricePerMTokIn ?? profile.pricePerMTokIn;
   const cost = estimateInputCost({
     freshTokens: cache.freshTokens,
     cachedTokens: cache.cachedTokens,
-    pricePerMTokIn: input.pricePerMTokIn ?? DEFAULT_INPUT_PRICE_PER_MTOK,
+    pricePerMTokIn,
+    cacheReadRatio,
+    cacheWriteRatio,
   });
   const attention = assessAttentionBudget({
     usedTokens: prefixTokens,
@@ -477,7 +591,9 @@ export function buildContextEconomics(input: {
     churnRatio: churn.churnRatio,
     firstObservation: churn.firstObservation,
     savedUsd: cost.savedUsd,
-    pricePerMTokIn: input.pricePerMTokIn ?? DEFAULT_INPUT_PRICE_PER_MTOK,
+    pricePerMTokIn,
+    cacheReadRatio,
+    cacheWriteRatio,
   });
   // Net economics first: a package that saves less than its churn costs is a
   // loss no matter how good the hit rate looks.
@@ -495,7 +611,9 @@ export function buildContextEconomics(input: {
     packageTokens,
     churnRatio: churn.churnRatio,
     firstObservation: churn.firstObservation,
-    pricePerMTokIn: input.pricePerMTokIn ?? DEFAULT_INPUT_PRICE_PER_MTOK,
+    pricePerMTokIn,
+    cacheReadRatio,
+    cacheWriteRatio,
   });
 
   return {

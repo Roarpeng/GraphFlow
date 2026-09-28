@@ -158,12 +158,22 @@ export function planCacheLayout(input: {
     staticPrefix > 0 ? (staticPrefix + stableTokens) / (staticPrefix + totalTokens) : null;
 
   const stableShare = totalTokens > 0 ? stableTokens / totalTokens : 0;
+  // Wording sharpened by a real-provider measurement rather than by reasoning.
+  // The naive instruction is "put stable first, then the delta", and a host can
+  // follow it exactly and still lose the cache: if BOTH halves are concatenated
+  // into the system block, the delta still sits before the conversation, and
+  // everything after it is re-billed. Measured on DeepSeek with a 40-turn
+  // history: hit ratio 95.1% with no injection, 43.1% with a volatile injection
+  // in the system layer, 94.1% with a byte-stable brief in the same position.
+  // The volatile arm's surviving cache was *exactly* the stable prefix — the
+  // whole conversation was re-charged every turn. So the instruction has to say
+  // where the boundary is, not just that stable comes first.
   const note =
     totalTokens === 0
       ? "empty package — nothing to lay out"
       : stableLines.length === 0
         ? "no stable lines in this package: it is entirely query-scoped, so it belongs after the host's cache breakpoint and cannot itself be cached"
-        : `${stableLines.length}/${input.lines.length} lines (${(stableShare * 100).toFixed(0)}% of ${totalTokens} tok) are cross-turn stable and belong before the host's cache breakpoint; the remaining ${deltaLines.length} vary every turn and belong after it`;
+        : `${stableLines.length}/${input.lines.length} lines (${(stableShare * 100).toFixed(0)}% of ${totalTokens} tok) are cross-turn stable. Place the stable segment where the host's cache breakpoint falls, and the ${deltaLines.length} query-scoped lines after the conversation — appending both to the system block still loses the cache, because everything after a volatile block is re-billed.`;
 
   return {
     stablePrefix: { lines: stableLines, tokens: stableTokens },

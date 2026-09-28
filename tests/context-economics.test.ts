@@ -1,3 +1,4 @@
+import { pickUsage } from "../src/routing/provider-adapters/types";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MIN_CACHEABLE_TOKENS,
@@ -8,6 +9,7 @@ import {
   estimateInputCost,
   isAbstentionEnabled,
   isContextEconomicsEnabled,
+  resolveCacheProfile,
   resolveStaticPrefixTokens,
   resolveSuffixTokens,
   shouldAbstain,
@@ -218,10 +220,71 @@ describe("buildContextEconomics", () => {
     expect(churning.sensitivity.note).toContain("flips");
   });
 
+  it("does not apply one provider's cache pricing to everyone", () => {
+    // Measured, not assumed: DeepSeek's usage payload reports cacheWrite=0 and a
+    // cache read at ~2% of the miss price. Charging Anthropic's 1.25x/0.1x
+    // overstates the churn penalty there and understates what a hit is worth 5x.
+    const deepseek = resolveCacheProfile("deepseek");
+    expect(deepseek.verified).toBe(true);
+    expect(deepseek.cacheWriteRatio).toBe(1.0);
+    expect(deepseek.cacheReadRatio).toBeLessThan(0.05);
+
+    const churned = (provider: string) =>
+      buildContextEconomics({
+        previousLines: Array.from({ length: 36 }, (_, i) => `a${i}`),
+        currentLines: Array.from({ length: 36 }, (_, i) => (i === 0 ? "a0" : `b${i}`)),
+        packageTokens: 500,
+        staticPrefixTokens: 8_000,
+        suffixTokens: 50_000,
+        provider,
+      });
+    // DeepSeek prices rewritten tokens at plain input (1.0) against a 0.02 read,
+    // so the penalty per rewritten token is 0.98 — not the 1.15 the old
+    // Anthropic-flavoured default implied.
+    const ds = churned("deepseek");
+    const an = churned("anthropic");
+    expect(ds.invalidation.surchargeUsd).toBeLessThan(an.invalidation.surchargeUsd);
+    expect(ds.invalidation.surchargeUsd).toBeGreaterThan(0);
+  });
+
+  it("labels the fallback rather than presenting a guess as fact", () => {
+    // An unknown provider must not silently inherit one provider's numbers, and
+    // must not understate churn either — so the fallback assumes a write premium
+    // and says it is a stand-in.
+    const unknown = resolveCacheProfile("some-new-vendor");
+    expect(unknown.verified).toBe(false);
+    expect(unknown.id).toBe("unknown");
+    expect(unknown.source).toContain("conservative fallback");
+    expect(resolveCacheProfile(undefined).verified).toBe(false);
+  });
+
   it("reads the suffix estimate and ignores invalid values", () => {
     expect(resolveSuffixTokens({})).toBe(0);
     expect(resolveSuffixTokens({ GRAPHFLOW_SUFFIX_TOKENS: "50000" })).toBe(50_000);
     expect(resolveSuffixTokens({ GRAPHFLOW_SUFFIX_TOKENS: "abc" })).toBe(0);
     expect(resolveSuffixTokens({ GRAPHFLOW_SUFFIX_TOKENS: "-1" })).toBe(0);
+  });
+});
+
+describe("provider usage parsing", () => {
+  it("reads cache counters from every vendor shape we support", () => {
+    // Without these, the placement question can only be answered on one
+    // provider — from one provider's numbers. The A/B that settled it used
+    // DeepSeek's field names; OpenAI and Google report the same span under
+    // different keys.
+    expect(pickUsage({ usage: { prompt_tokens: 100, prompt_cache_hit_tokens: 80, prompt_cache_miss_tokens: 20 } })).toMatchObject({
+      promptCacheHitTokens: 80,
+      promptCacheMissTokens: 20,
+    });
+    expect(pickUsage({ usage: { prompt_tokens: 100, cached_tokens: 90 } })).toMatchObject({ promptCacheHitTokens: 90 });
+    expect(pickUsage({ usage: { total_cached_tokens: 70 } })).toMatchObject({ promptCacheHitTokens: 70 });
+    expect(pickUsage({ usage: { cache_read_input_tokens: 60 } })).toMatchObject({ promptCacheHitTokens: 60 });
+    // A prefix written repeatedly and never read is a pure surcharge, and that
+    // is only visible if the write is counted separately from the hit.
+    expect(pickUsage({ usage: { cached_tokens: 10, cache_write_tokens: 500 } })).toMatchObject({
+      promptCacheHitTokens: 10,
+      promptCacheWriteTokens: 500,
+    });
+    expect(pickUsage({})).toBeUndefined();
   });
 });
