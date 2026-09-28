@@ -228,6 +228,7 @@ describe("hosts launch the workspace build when opted in", () => {
     // The regression this pins: the guard used to be `agentId === "opencode"`,
     // and measuring all profiles showed 19 of 20 hosts still on the npx launcher.
     const notPointing: string[] = [];
+    const detail: string[] = [];
     for (const profile of profiles) {
       const results = installer.installMcpToDetectedAgents({
         strategy: "npx",
@@ -241,12 +242,20 @@ describe("hosts launch the workspace build when opted in", () => {
       // Raw text, not parsed: codex declares MCP in TOML, so a JSON-shaped reader
       // would silently skip the one host whose format differs. Asserting on the
       // file's contents covers JSON and TOML alike.
-      if (!readFileSync(result.configPath, "utf8").includes(serverPath)) {
+      const raw = existsSync(result.configPath) ? readFileSync(result.configPath, "utf8") : "";
+      if (!raw.includes(serverPath)) {
         notPointing.push(profile.id);
+        // Carry the evidence, not just the name. A bare list of 18 hosts says
+        // nothing about the cause, and guessing at it twice was already wrong.
+        detail.push(
+          `${profile.id}: status=${result.status} exists=${existsSync(result.configPath)} ` +
+            `configPath=${result.configPath} sandbox=${sandboxHome} ` +
+            `mentionsDist=${raw.includes("dist") ? "yes" : "no"} message=${String(result.message).slice(0, 80)}`
+        );
       }
     }
 
-    expect(notPointing).toEqual([]);
+    expect({ notPointing, detail }).toEqual({ notPointing: [], detail: [] });
   });
 
   it("reports an actionable error when the workspace has no build", async () => {
