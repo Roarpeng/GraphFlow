@@ -7,6 +7,7 @@ export type { GraphSnapshotSampleEdge, GraphSnapshotSampleNode };
 import type { GraphFlowConfig } from "../../../config/schema";
 import type { DialogueThreadEchoView } from "../../../learning/dialogue-thread";
 import type { ContextEconomics } from "../../../graph/context-economics";
+import type { AbstainHandle, AbstentionFloor } from "../../../graph/abstention-floor";
 import type { SkillFreshness } from "../../../learning/memory-freshness";
 import type { TeamDiagnosis } from "../../team/diagnose.js";
 
@@ -97,13 +98,27 @@ export interface ContextPreviewResult {
    */
   economics?: ContextEconomics;
   /**
-   * Present only when GRAPHFLOW_ABSTAIN=1. Progressive disclosure buys context,
-   * not intelligence: on a small corpus with a concrete ref the agent can read
-   * the passage itself, so the package is redundant cost. Surfaced explicitly
-   * (never silently) so the host can skip the read; enforcement stays opt-in
-   * until the capability-floor A/B proves the net win.
+   * Present only when GRAPHFLOW_ABSTAIN=1 or GRAPHFLOW_ABSTAIN_ENFORCE=1.
+   * Progressive disclosure buys context, not intelligence: on a small corpus with
+   * a concrete ref the agent can read the passage itself, so the package can be
+   * redundant cost. Surfaced explicitly (never silently) so the host can skip
+   * the read. `enforced` separates "we recommended it" from "we did it" — only
+   * GRAPHFLOW_ABSTAIN_ENFORCE=1 ever drops anchors, and only when the capability
+   * floor holds. `floor` carries the full A/B measurement (evidence recall, file
+   * count, read amplification) so the default can be decided on numbers.
    */
-  abstention?: { abstained: boolean; reason: string };
+  abstention?: {
+    abstained: boolean;
+    reason: string;
+    enforced?: boolean;
+    floor?: AbstentionFloor;
+  };
+  /**
+   * Present only when abstention was enforced. The "go read this" pointers that
+   * replaced the dropped anchors. Each is one file plus the earliest line an
+   * anchor occupied in it.
+   */
+  handles?: AbstainHandle[];
   /** Agent-translated English query used for symbol search (if provided). */
   englishQuery?: string;
   /** When CJK query yields few anchors, prompts the connected agent to translate to English. */

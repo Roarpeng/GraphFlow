@@ -24,6 +24,11 @@ import {
   resolveStaticPrefixTokens,
   shouldAbstain,
 } from "../../../graph/context-economics";
+import {
+  evaluateAbstentionFloor,
+  isAbstentionEnforced,
+  type AbstainHandle,
+} from "../../../graph/abstention-floor";
 import { extractSymbolCandidates } from "../../../graph/symbol-extract";
 import {
   assessSkillFreshness,
@@ -33,7 +38,8 @@ import {
 import type { SkillState } from "../../../learning/skill-types";
 import { indexWorkspaceFiles, clearGraphIndexArtifacts, hasPendingGraphIndexWork, indexSingleFile } from "../../../graph/file-indexer";
 import { GraphFileWatcher } from "../../../graph/file-watcher.js";
-import { extractNodeSourcePath } from "../../../graph/graph-utils";
+import { extractNodeSourcePath, queryNamesGraphNode } from "../../../graph/graph-utils";
+import { estimateTokens } from "../../../graph/context-slicer-utils";
 import { searchDialogueTurns, type DialogueHitPreview, type DialogueSearchHit } from "../../../graph/graph-search";
 import { sampleGraphForSnapshot } from "../../../graph/snapshot-view.js";
 import {
@@ -582,7 +588,14 @@ const lastPackageLines = new Map<string, string[]>();
 const MAX_ECONOMICS_WORKSPACES = 32;
 
 function packageLinesOf(result: ContextPreviewResult): string[] {
-  return [...result.summary, ...result.anchors.map((anchor) => anchor.id)];
+  // Under enforced abstention the anchors are gone and the handles are the
+  // payload, so churn has to price the lines the caller actually receives.
+  const handles: AbstainHandle[] = result.handles ?? [];
+  return [
+    ...result.summary,
+    ...result.anchors.map((anchor) => anchor.id),
+    ...handles.map((handle) => `handle:${handle.file}:${handle.line}`),
+  ];
 }
 
 /**
@@ -600,13 +613,21 @@ async function attachContextEconomics(
 ): Promise<ContextPreviewResult> {
   const economicsOn = isContextEconomicsEnabled();
   const abstainOn = isAbstentionEnabled();
-  if (!economicsOn && !abstainOn) return result;
+  const enforceOn = isAbstentionEnforced();
+  if (!economicsOn && !abstainOn && !enforceOn) return result;
 
   const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
   let next = result;
 
+  // Abstention runs FIRST so the economics report prices whatever the caller
+  // actually receives. Measuring the package we are about to throw away would
+  // make the A/B meaningless.
+  if (abstainOn || enforceOn) {
+    next = await applyAbstention(next, client, query, workspaceRoot);
+  }
+
   if (economicsOn) {
-    const currentLines = packageLinesOf(result);
+    const currentLines = packageLinesOf(next);
     const previousLines = lastPackageLines.get(workspaceRoot) ?? [];
     if (lastPackageLines.size >= MAX_ECONOMICS_WORKSPACES) lastPackageLines.clear();
     lastPackageLines.set(workspaceRoot, currentLines);
@@ -615,40 +636,93 @@ async function attachContextEconomics(
       economics: buildContextEconomics({
         previousLines,
         currentLines,
-        packageTokens: result.tokenBudget.compressedTokens,
+        packageTokens: next.tokenBudget.compressedTokens,
         staticPrefixTokens: resolveStaticPrefixTokens(),
       }),
     };
   }
 
-  if (abstainOn) {
-    next = { ...next, abstention: await decideAbstention(client, query, result) };
-  }
-
   return next;
 }
 
-async function decideAbstention(
+/**
+ * Apply the abstention call, and — only under GRAPHFLOW_ABSTAIN_ENFORCE=1 —
+ * actually drop the package.
+ *
+ * Enforcement is gated on the capability floor (abstention-floor.ts) rather than
+ * on the corpus-size heuristic alone, because the heuristic prices only
+ * GraphFlow's side of the trade. The floor is also a veto over the heuristic:
+ * a repo small enough to satisfy `shouldAbstain` still gets its package back
+ * when the pointed-to files cost more to read than the package was worth.
+ *
+ * Both switches report the same fields so a paired A/B reads symmetrically;
+ * `enforced` is what separates "we said yes" from "we actually did it".
+ */
+async function applyAbstention(
+  result: ContextPreviewResult,
   client: GraphClient,
   query: string,
-  result: ContextPreviewResult
-): Promise<{ abstained: boolean; reason: string }> {
+  workspaceRoot: string
+): Promise<ContextPreviewResult> {
   try {
     const snapshot = client.readSnapshot?.();
-    const repoNodeCount = snapshot?.nodes.length ?? 0;
-    if (repoNodeCount === 0) {
-      return { abstained: false, reason: "graph size unknown — abstention needs a snapshot" };
+    const nodes = snapshot?.nodes ?? [];
+    if (nodes.length === 0) {
+      return { ...result, abstention: { abstained: false, reason: "graph size unknown — abstention needs a snapshot" } };
     }
     const decision = shouldAbstain({
-      repoNodeCount,
-      queryHasConcreteRef: extractSymbolCandidates(query).length > 0,
+      repoNodeCount: nodes.length,
+      queryHasConcreteRef:
+        extractSymbolCandidates(query).length > 0 || queryNamesGraphNode(query, nodes),
       estimatedPackageTokens: result.tokenBudget.compressedTokens,
     });
-    return { abstained: decision.abstain, reason: decision.reason };
+    if (!isAbstentionEnforced()) {
+      return { ...result, abstention: { abstained: decision.abstain, reason: decision.reason } };
+    }
+
+    const floor = evaluateAbstentionFloor({
+      anchors: result.anchors,
+      nodesById: new Map(nodes.map((node) => [node.id, node])),
+      packageTokens: result.tokenBudget.compressedTokens,
+      // An unreadable pointer is an unbounded delegation cost, never a free one.
+      readFileTokens: (file) => {
+        try {
+          return estimateTokens(readFileSync(join(workspaceRoot, file), "utf8"));
+        } catch {
+          return Number.POSITIVE_INFINITY;
+        }
+      },
+    });
+
+    if (!decision.abstain || !floor.pass) {
+      return {
+        ...result,
+        abstention: {
+          abstained: false,
+          reason: decision.abstain ? floor.reason : decision.reason,
+          enforced: false,
+          floor,
+        },
+      };
+    }
+
+    return {
+      ...result,
+      anchors: [],
+      anchorCount: 0,
+      handles: floor.handles,
+      tokenEstimate: floor.delegateCostTokens,
+      tokenBudget: { ...result.tokenBudget, compressedTokens: floor.delegateCostTokens },
+      abstention: { abstained: true, reason: decision.reason, enforced: true, floor },
+    };
   } catch (error) {
     return {
-      abstained: false,
-      reason: `abstention check failed: ${error instanceof Error ? error.message : String(error)}`,
+      ...result,
+      abstention: {
+        abstained: false,
+        reason: `abstention check failed: ${error instanceof Error ? error.message : String(error)}`,
+        enforced: false,
+      },
     };
   }
 }

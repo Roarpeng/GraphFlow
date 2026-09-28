@@ -294,6 +294,33 @@ export function dedupEdgesByKey(edges: GraphEdge[]): GraphEdge[] {
   return result;
 }
 
+/**
+ * Does the query name something that actually exists in the graph?
+ *
+ * `extractSymbolCandidates` is a text heuristic: it only recognises camelCase
+ * identifiers, file paths and call syntax, so a query naming a plain lowercase
+ * symbol (`tokenize`, `parse_frontmatter`) reads as having no concrete ref at
+ * all — the exact opposite of the truth, and it silently blocks the case where
+ * delegation is most obviously right. Matching against the graph is evidence
+ * rather than a pattern, and it cannot invent a ref that is not there.
+ */
+export function queryNamesGraphNode(
+  query: string,
+  nodes: readonly GraphNode[]
+): boolean {
+  const haystack = query.trim();
+  if (haystack.length === 0) return false;
+  for (const node of nodes) {
+    const name = typeof node.metadata?.name === "string" ? node.metadata.name.trim() : "";
+    if (name.length >= 3 && haystack.includes(name)) return true;
+    const path = extractNodeSourcePath(node);
+    // Only trust a path that is really a path (see abstention-floor.ts: the
+    // extractor degrades to the node's first word when metadata is absent).
+    if (path.length >= 4 && !/\s/.test(path) && haystack.includes(path)) return true;
+  }
+  return false;
+}
+
 export function extractNodeSourcePath(node: GraphNode): string {
   const fromMeta = node.metadata?.sourcePath;
   if (typeof fromMeta === "string" && fromMeta.trim()) {
