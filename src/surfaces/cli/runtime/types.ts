@@ -15,6 +15,25 @@ export type { GraphSnapshotSampleEdge, GraphSnapshotSampleNode };
  * call. Telling the host which is which is the whole value — it is what lets the
  * host put a cache breakpoint between them instead of after them.
  */
+/**
+ * The project brief: the cross-turn stable segment GraphFlow owns.
+ *
+ * Without it, `cacheLayout.stablePrefix` is 19 tokens of module label and the
+ * host has nothing worth placing before its breakpoint. The brief is derived
+ * from the repository rather than the question, and is reused until validation
+ * says the code moved under it.
+ */
+export interface ProjectBriefView {
+  lines: string[];
+  tokens: number;
+  /** True when a stored brief was reused instead of rebuilt. */
+  reused: boolean;
+  /** Why it was reused or rebuilt. Never empty — a silent rebuild is untrustworthy. */
+  reason: string;
+  /** Refs from the stored brief that no longer resolved, when it was checked. */
+  deadRefs: string[];
+}
+
 export interface CacheLayout {
   /**
    * Cross-turn stable content: repo/module map, project conventions, the
@@ -173,6 +192,15 @@ export interface ContextPreviewResult {
    * Declaration, not a decision. 本字段只做声明，不代宿主摆放。
    */
   cacheLayout?: CacheLayout;
+  /**
+   * Present only when GRAPHFLOW_PROJECT_BRIEF=1. The stable, reusable segment
+   * of the package, plus whether it was reused or rebuilt and why. Report-only
+   * until a host demonstrably consumes it.
+   *
+   * Present only when GRAPHFLOW_PROJECT_BRIEF=1。跨轮稳定的项目级摘要，
+   * 附复用/重建状态与理由；宿主消费前只上报，不进入注入路径。
+   */
+  projectBrief?: ProjectBriefView;
   /** Agent-translated English query used for symbol search (if provided). */
   englishQuery?: string;
   /** When CJK query yields few anchors, prompts the connected agent to translate to English. */

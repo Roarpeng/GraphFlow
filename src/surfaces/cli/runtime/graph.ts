@@ -31,6 +31,7 @@ import {
   type AbstainHandle,
 } from "../../../graph/abstention-floor";
 import { isCacheLayoutEnabled, planCacheLayout } from "../../../graph/cache-layout";
+import { isProjectBriefEnabled, ProjectBriefCache } from "../../../graph/project-brief";
 import { extractSymbolCandidates } from "../../../graph/symbol-extract";
 import {
   assessSkillFreshness,
@@ -589,6 +590,13 @@ export async function previewContext(
 const lastPackageLines = new Map<string, string[]>();
 const MAX_ECONOMICS_WORKSPACES = 32;
 
+/**
+ * One brief per workspace, rebuilt only when its refs stop resolving. The
+ * reuse is the whole point: rebuilding per call would churn the prefix we are
+ * trying to stabilise, and pay a module walk to do it.
+ */
+const projectBriefCache = new ProjectBriefCache(MAX_ECONOMICS_WORKSPACES);
+
 function packageLinesOf(result: ContextPreviewResult): string[] {
   // Under enforced abstention the anchors are gone and the handles are the
   // payload, so churn has to price the lines the caller actually receives.
@@ -617,7 +625,8 @@ async function attachContextEconomics(
   const abstainOn = isAbstentionEnabled();
   const enforceOn = isAbstentionEnforced();
   const layoutOn = isCacheLayoutEnabled();
-  if (!economicsOn && !abstainOn && !enforceOn && !layoutOn) return result;
+  const briefOn = isProjectBriefEnabled();
+  if (!economicsOn && !abstainOn && !enforceOn && !layoutOn && !briefOn) return result;
 
   const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
   let next = result;
@@ -646,11 +655,44 @@ async function attachContextEconomics(
     };
   }
 
+  // The brief is resolved BEFORE the layout so the layout can classify the
+  // brief's own lines. Building it after would mean declaring "almost nothing
+  // here is stable" and then attaching the stable part anyway.
+  if (briefOn) {
+    const snapshot = client.readSnapshot?.();
+    const nodes = snapshot?.nodes ?? [];
+    if (nodes.length === 0) {
+      next = {
+        ...next,
+        projectBrief: {
+          lines: [],
+          tokens: 0,
+          reused: false,
+          reason: "graph size unknown — the brief is derived from the repository, so an empty graph yields no brief",
+          deadRefs: [],
+        },
+      };
+    } else {
+      const resolution = projectBriefCache.resolve(workspaceRoot, nodes);
+      next = {
+        ...next,
+        projectBrief: {
+          lines: resolution.brief?.lines ?? [],
+          tokens: resolution.brief?.tokens ?? 0,
+          reused: resolution.reused,
+          reason: resolution.error ? `${resolution.reason}: ${resolution.error}` : resolution.reason,
+          deadRefs: resolution.validity?.deadRefs ?? [],
+        },
+      };
+    }
+  }
+
   if (layoutOn) {
     // Runs after economics so it can reuse the resolved host-prefix estimate,
     // and after abstention so the handles it emits are laid out, not orphaned.
+    const briefLines = next.projectBrief?.lines ?? [];
     const plan = planCacheLayout({
-      lines: packageLinesOf(next),
+      lines: [...briefLines, ...packageLinesOf(next)],
       staticPrefixTokens: resolveStaticPrefixTokens(),
     });
     next = {
