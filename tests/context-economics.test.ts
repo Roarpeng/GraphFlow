@@ -9,6 +9,7 @@ import {
   isAbstentionEnabled,
   isContextEconomicsEnabled,
   resolveStaticPrefixTokens,
+  resolveSuffixTokens,
   shouldAbstain,
 } from "../src/graph/context-economics";
 
@@ -123,5 +124,74 @@ describe("buildContextEconomics", () => {
     expect(resolveStaticPrefixTokens({ GRAPHFLOW_STATIC_PREFIX_TOKENS: "8000" })).toBe(8_000);
     expect(resolveStaticPrefixTokens({ GRAPHFLOW_STATIC_PREFIX_TOKENS: "abc" })).toBe(0);
     expect(resolveStaticPrefixTokens({ GRAPHFLOW_STATIC_PREFIX_TOKENS: "-5" })).toBe(0);
+  });
+
+  it("prices the host's tail, not just our own slice, when we churn it", () => {
+    // Our slice is 500 tok churning 97%; the host sends 50k tok of history
+    // after us. The premium is 1.25x - 0.1x = 1.15x on the rewritten tail.
+    const econ = buildContextEconomics({
+      previousLines: Array.from({ length: 36 }, (_, i) => `a${i}`),
+      currentLines: Array.from({ length: 36 }, (_, i) => (i === 0 ? "a0" : `b${i}`)),
+      packageTokens: 500,
+      staticPrefixTokens: 8_000,
+      suffixTokens: 50_000,
+      pricePerMTokIn: 2,
+    });
+    const expectedRewritten = econ.invalidation.rewrittenTokens;
+    expect(expectedRewritten).toBeGreaterThan(48_000);
+    expect(econ.churn.churnRatio).toBeCloseTo(35 / 36, 5);
+    expect(econ.invalidation.surchargeUsd).toBeCloseTo((expectedRewritten * 1.15 * 2) / 1_000_000, 8);
+    expect(econ.invalidation.surchargeUsd).toBeGreaterThan(econ.invalidation.savedUsd);
+    expect(econ.invalidation.overspendUsd).toBeGreaterThan(0);
+    expect(econ.verdict).toBe("cache-break");
+  });
+
+  it("does not invent a churn surcharge on the first observation", () => {
+    const econ = buildContextEconomics({
+      previousLines: [],
+      currentLines: ["a", "b"],
+      packageTokens: 500,
+      suffixTokens: 50_000,
+    });
+    expect(econ.invalidation.rewrittenTokens).toBe(0);
+    expect(econ.invalidation.surchargeUsd).toBe(0);
+    expect(econ.invalidation.note).toContain("first observation");
+    expect(econ.verdict).not.toBe("cache-break");
+  });
+
+  it("stays net-positive when the tail is small or the slice is stable", () => {
+    const stable = buildContextEconomics({
+      previousLines: ["a"],
+      currentLines: ["a"],
+      packageTokens: 500,
+      staticPrefixTokens: 8_000,
+      suffixTokens: 50_000,
+    });
+    expect(stable.invalidation.rewrittenTokens).toBe(0);
+    // Static prefix clears the provider minimum, so the stable case is a real
+    // hit, not the cache-cold no-op the 500 tok slice alone would report.
+    expect(stable.cache.cacheUsable).toBe(true);
+    expect(stable.verdict).toBe("cache-safe");
+
+    // A tail too small to notice, but compression still has to pay for itself:
+    // with no static prefix the package saves nothing, so any surcharge is a
+    // loss. Churn only stays `prefix-churn` when compression actually won.
+    const tinyTail = buildContextEconomics({
+      previousLines: ["a", "b"],
+      currentLines: ["a", "z"],
+      packageTokens: 500,
+      staticPrefixTokens: 8_000,
+      suffixTokens: 200,
+    });
+    expect(tinyTail.invalidation.rewrittenTokens).toBe(100);
+    expect(tinyTail.invalidation.overspendUsd).toBeLessThan(0);
+    expect(tinyTail.verdict).toBe("prefix-churn");
+  });
+
+  it("reads the suffix estimate and ignores invalid values", () => {
+    expect(resolveSuffixTokens({})).toBe(0);
+    expect(resolveSuffixTokens({ GRAPHFLOW_SUFFIX_TOKENS: "50000" })).toBe(50_000);
+    expect(resolveSuffixTokens({ GRAPHFLOW_SUFFIX_TOKENS: "abc" })).toBe(0);
+    expect(resolveSuffixTokens({ GRAPHFLOW_SUFFIX_TOKENS: "-1" })).toBe(0);
   });
 });

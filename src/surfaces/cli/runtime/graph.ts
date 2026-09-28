@@ -22,6 +22,7 @@ import {
   isAbstentionEnabled,
   isContextEconomicsEnabled,
   resolveStaticPrefixTokens,
+  resolveSuffixTokens,
   shouldAbstain,
 } from "../../../graph/context-economics";
 import {
@@ -638,6 +639,7 @@ async function attachContextEconomics(
         currentLines,
         packageTokens: next.tokenBudget.compressedTokens,
         staticPrefixTokens: resolveStaticPrefixTokens(),
+        suffixTokens: resolveSuffixTokens(),
       }),
     };
   }

@@ -13,6 +13,8 @@ export const CONTEXT_ECONOMICS_ENV = "GRAPHFLOW_CONTEXT_ECONOMICS";
 export const CONTEXT_ABSTAIN_ENV = "GRAPHFLOW_ABSTAIN";
 /** Host-contributed prefix tokens (system + tool schemas + history) we cannot see. */
 export const STATIC_PREFIX_TOKENS_ENV = "GRAPHFLOW_STATIC_PREFIX_TOKENS";
+/** Host tokens rendered after our injection point — the tail our churn re-prices. */
+export const SUFFIX_TOKENS_ENV = "GRAPHFLOW_SUFFIX_TOKENS";
 
 /** Provider cache-read price as a fraction of input price (Anthropic: 0.1x). */
 export const DEFAULT_CACHE_READ_RATIO = 0.1;
@@ -49,6 +51,14 @@ export function isAbstentionEnabled(env: NodeJS.ProcessEnv = process.env): boole
  */
 export function resolveStaticPrefixTokens(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env[STATIC_PREFIX_TOKENS_ENV]?.trim();
+  if (!raw) return 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
+}
+
+/** Sibling of {@link resolveStaticPrefixTokens} for the tail we invalidate. */
+export function resolveSuffixTokens(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env[SUFFIX_TOKENS_ENV]?.trim();
   if (!raw) return 0;
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
@@ -236,14 +246,97 @@ export function shouldAbstain(input: AbstainInput): AbstainDecision {
   };
 }
 
+export interface SuffixInvalidation {
+  /**
+   * Host tokens rendered AFTER our injection point — the conversation history,
+   * prior tool results, everything the host will send this turn.
+   */
+  suffixTokens: number;
+  /** Suffix tokens our churn pushed from a 0.1x cache read to a 1.25x write. */
+  rewrittenTokens: number;
+  /**
+   * Dollars added per turn purely by our churn. This is the number that
+   * matters, and it is not the package's own cost: a provider invalidates
+   * everything after the first differing byte, so our churn re-prices the host's
+   * whole tail, not our slice.
+   */
+  surchargeUsd: number;
+  /**
+   * What the compression actually saved this turn (uncached baseline minus
+   * actual). Compared against `surchargeUsd` to decide whether net economics
+   * are positive at all.
+   */
+  savedUsd: number;
+  /** surchargeUsd - savedUsd. Positive means the turn is a net loss. */
+  overspendUsd: number;
+  note: string;
+}
+
+/**
+ * The cost our churn imposes on the host, which is the cost everybody forgets.
+ *
+ * Caching is a left-to-right prefix match: a single differing byte invalidates
+ * every token after it, and those tokens must then be re-written at the write
+ * premium instead of read at the discount. We inject volatile content, so what
+ * our churn actually costs is the re-write of everything downstream of us — the
+ * conversation history — not the few hundred tokens of our own package.
+ *
+ * Measured on this project: a 500 tok package churning 97% per turn against a
+ * 50k tok history surcharges ~$0.115/turn at Sonnet 5 pricing while saving
+ * ~$0.025. Churn is not merely a lost discount; at a realistic history size it
+ * is a net loss, and pricing only our own slice is what made it look harmless.
+ */
+export function estimateSuffixInvalidation(input: {
+  suffixTokens: number;
+  churnRatio: number;
+  firstObservation: boolean;
+  savedUsd: number;
+  pricePerMTokIn: number;
+  cacheReadRatio?: number;
+  cacheWriteRatio?: number;
+}): SuffixInvalidation {
+  const cacheReadRatio = input.cacheReadRatio ?? DEFAULT_CACHE_READ_RATIO;
+  const cacheWriteRatio = input.cacheWriteRatio ?? DEFAULT_CACHE_WRITE_RATIO;
+  const suffixTokens = Math.max(0, Math.round(input.suffixTokens));
+  // On the first observation there is nothing to invalidate: no prior prefix
+  // existed to break. Reporting a surcharge there would invent a cost.
+  const rewrittenTokens = input.firstObservation ? 0 : Math.round(suffixTokens * input.churnRatio);
+  const premium = Math.max(0, cacheWriteRatio - cacheReadRatio);
+  const surchargeUsd = (rewrittenTokens * premium * input.pricePerMTokIn) / 1_000_000;
+  const savedUsd = input.savedUsd;
+  const overspendUsd = surchargeUsd - savedUsd;
+  return {
+    suffixTokens,
+    rewrittenTokens,
+    surchargeUsd,
+    savedUsd,
+    overspendUsd,
+    note:
+      rewrittenTokens === 0
+        ? input.firstObservation
+          ? "first observation in this process — no prior prefix to invalidate, churn cost not yet measurable"
+          : "no churn: the host's tail keeps its cache-read rate"
+        : `our churn re-writes ${rewrittenTokens} tok of the host's tail at ${cacheWriteRatio}x instead of ${cacheReadRatio}x, costing $${surchargeUsd.toFixed(6)}/turn against $${savedUsd.toFixed(6)} saved by compressing`,
+  };
+}
+
 export interface ContextEconomics {
   churn: PrefixChurn;
   cache: CacheModel;
   cost: CostEstimate;
   attention: AttentionBudget;
+  /**
+   * What our churn costs the HOST. Reported separately from our own cost
+   * because our own cost is the small half of the bill.
+   */
+  invalidation: SuffixInvalidation;
   /** The honest headline: prefill shrank, but did the prefix survive? */
   stablePrefixTokens: number;
-  verdict: "cache-safe" | "prefix-churn" | "cache-cold";
+  /**
+   * `cache-break` is the verdict that matters: compression saved less than our
+   * own churn cost, so the turn is a net loss and only a stable prefix fixes it.
+   */
+  verdict: "cache-safe" | "prefix-churn" | "cache-break" | "cache-cold";
 }
 
 /**
@@ -263,6 +356,14 @@ export function buildContextEconomics(input: {
    * request prefix, not on our slice.
    */
   staticPrefixTokens?: number;
+  /**
+   * Host tokens rendered after our injection point (conversation history, prior
+   * tool results). We cannot observe them — we are not the harness — but our
+   * churn re-prices every one of them, so the caller supplies the size. Absent
+   * or 0 reports only our own slice's cost, which understates the bill by the
+   * size of the history.
+   */
+  suffixTokens?: number;
   windowTokens?: number;
   pricePerMTokIn?: number;
 }): ContextEconomics {
@@ -283,12 +384,23 @@ export function buildContextEconomics(input: {
     usedTokens: prefixTokens,
     windowTokens: input.windowTokens ?? DEFAULT_WINDOW_TOKENS,
   });
-  const verdict: ContextEconomics["verdict"] = !cache.cacheUsable
-    ? "cache-cold"
-    : churn.firstObservation
-      ? "cache-safe"
-      : churn.churnRatio === 0
+  const invalidation = estimateSuffixInvalidation({
+    suffixTokens: input.suffixTokens ?? 0,
+    churnRatio: churn.churnRatio,
+    firstObservation: churn.firstObservation,
+    savedUsd: cost.savedUsd,
+    pricePerMTokIn: input.pricePerMTokIn ?? DEFAULT_INPUT_PRICE_PER_MTOK,
+  });
+  // Net economics first: a package that saves less than its churn costs is a
+  // loss no matter how good the hit rate looks.
+  const verdict: ContextEconomics["verdict"] = invalidation.overspendUsd > 0
+    ? "cache-break"
+    : !cache.cacheUsable
+      ? "cache-cold"
+      : churn.firstObservation
         ? "cache-safe"
-        : "prefix-churn";
-  return { churn, cache, cost, attention, stablePrefixTokens: cache.cachedTokens, verdict };
+        : churn.churnRatio === 0
+          ? "cache-safe"
+          : "prefix-churn";
+  return { churn, cache, cost, attention, invalidation, stablePrefixTokens: cache.cachedTokens, verdict };
 }
