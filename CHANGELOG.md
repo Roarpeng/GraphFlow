@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added — 记忆新鲜度预言机 + 上下文经济引擎（均默认关，显式 opt-in）
+
+- **记忆新鲜度预言机（`GRAPHFLOW_FRESHNESS=1`）**：技能新鲜度由**代码图谱**裁定——从 guidance/playbook 抽出的符号引用若在图里不再解析，说明代码在这个技能脚下动过。符号节点 id 内嵌内容哈希，代码一改 id 即退役、引用即失配；这是没有代码图的记忆层（Mem0 / Zep·Graphiti / Letta / Cognee）结构上给不出的信号。分级 `fresh` / `watch` / `stale` / `unknown`——判不了就明说 `unknown`，不假装 `fresh`。`graphflow_skill_insights` 与 CLI `skill insights` 每条技能附带 `freshness`（level / driftScore / staleRefs / reason）。`stale` 的 proven 技能是**比缺失更坏**的失效模式：它带着过去证据的自信继续错。降级策略 `evaluateFreshnessPolicy` 已实现（stale+proven → correctable；watch 不降级；canary 已验证者豁免），但**自动降级刻意未接线**——`GRAPHFLOW_FRESHNESS_DOWNGRADE` 仅预留开关，先观测再强制。
+- **上下文经济引擎（`GRAPHFLOW_CONTEXT_ECONOMICS=1`）**：把"省了多少 token"之外的那根轴补齐——**前缀 churn 与缓存局部性**。GraphFlow 每轮注入不同上下文包，这在结构上必然改写 provider 的 prompt 缓存前缀；此前 95.6% 的 prefill 节省从未与缓存命中率放进同一张表算过。新增 `economics` 字段：与上一轮包的前缀 churn（sharedPrefix / churnRatio）、可缓存 token 与 hitRate（尊重 provider 最小可缓存长度）、按 0.1x 读 / 1.25x 写定价的**真实输入成本**（显式计入 cache write 税）、以及**注意力预算**（context rot 阈值 ~70%，而非窗口占用率）。`verdict` 三态：`cache-safe` / `prefix-churn` / `cache-cold`——**高节省率配 `prefix-churn` 是一条警告：便宜的 token 是用冷缓存换来的**。
+- **弃权（`GRAPHFLOW_ABSTAIN=1`）**：渐进式披露买的是 context 不是智能——小语料且查询命中具体符号时，agent 自己读那一段比下发一个包更便宜，且不打碎前缀。`abstention: { abstained, reason }` **显式**下发并附理由（静默弃权与"工具坏了"不可区分）。强制执行（真丢锚点）**暂不开启**：需先过能力地板 A/B 证明净收益。
+
+### Tests
+
+- `tests/memory-freshness.test.ts`（9 用例）：引用抽取、无引用判 `unknown`、fresh/watch/stale 分级（含边界值）、自定义阈值、降级策略（stale+proven 降级 / watch 不降 / canary 豁免 / anti-pattern 不降）、开关读取、`buildRefResolver`（符号名 + 仓库相对路径可解析；内容哈希漂移后不可解析）。
+- `tests/context-economics.test.ts`（9 用例）：前缀 churn、低于 provider 最小可缓存长度时拒绝建模、cache/fresh 切分与 hitRate、含 cache write 税的成本账、注意力预算四级、弃权四象限（含"reason 必须说明前缀稳定性"）、开关读取、`buildContextEconomics` 的 `cache-safe` / `prefix-churn` / `cache-cold` 三态。
+
 ## [1.26.0] - 2026-09-23
 
 ### Added — 桥接优先与可信度收口（round 4）

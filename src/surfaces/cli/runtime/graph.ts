@@ -17,6 +17,19 @@ import {
   type ContextPressure,
   type ObservedContextUsage,
 } from "../../../graph/context-pressure";
+import {
+  buildContextEconomics,
+  isAbstentionEnabled,
+  isContextEconomicsEnabled,
+  shouldAbstain,
+} from "../../../graph/context-economics";
+import { extractSymbolCandidates } from "../../../graph/symbol-extract";
+import {
+  assessSkillFreshness,
+  buildRefResolver,
+  isFreshnessEnabled,
+} from "../../../learning/memory-freshness";
+import type { SkillState } from "../../../learning/skill-types";
 import { indexWorkspaceFiles, clearGraphIndexArtifacts, hasPendingGraphIndexWork, indexSingleFile } from "../../../graph/file-indexer";
 import { GraphFileWatcher } from "../../../graph/file-watcher.js";
 import { extractNodeSourcePath } from "../../../graph/graph-utils";
@@ -559,7 +572,83 @@ export async function previewContext(
     // Savings tracking is best-effort; don't fail the preview if it errors
   }
 
-  return pressureBlock ? { ...budgeted, contextPressure: pressureBlock } : budgeted;
+  return pressureBlock
+    ? await attachContextEconomics({ ...budgeted, contextPressure: pressureBlock }, graphClient, query, config)
+    : await attachContextEconomics(budgeted, graphClient, query, config);
+}
+
+const lastPackageLines = new Map<string, string[]>();
+const MAX_ECONOMICS_WORKSPACES = 32;
+
+function packageLinesOf(result: ContextPreviewResult): string[] {
+  return [...result.summary, ...result.anchors.map((anchor) => anchor.id)];
+}
+
+/**
+ * Attach the context-economics report and (opt-in) the abstention call.
+ *
+ * Both are off unless their switch is set: the economics block is extra tokens
+ * on every response, which is exactly what this project spends its budget
+ * avoiding, and abstention changes what the caller receives.
+ */
+async function attachContextEconomics(
+  result: ContextPreviewResult,
+  client: GraphClient,
+  query: string,
+  config: GraphFlowConfig
+): Promise<ContextPreviewResult> {
+  const economicsOn = isContextEconomicsEnabled();
+  const abstainOn = isAbstentionEnabled();
+  if (!economicsOn && !abstainOn) return result;
+
+  const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
+  let next = result;
+
+  if (economicsOn) {
+    const currentLines = packageLinesOf(result);
+    const previousLines = lastPackageLines.get(workspaceRoot) ?? [];
+    if (lastPackageLines.size >= MAX_ECONOMICS_WORKSPACES) lastPackageLines.clear();
+    lastPackageLines.set(workspaceRoot, currentLines);
+    next = {
+      ...next,
+      economics: buildContextEconomics({
+        previousLines,
+        currentLines,
+        packageTokens: result.tokenBudget.compressedTokens,
+      }),
+    };
+  }
+
+  if (abstainOn) {
+    next = { ...next, abstention: await decideAbstention(client, query, result) };
+  }
+
+  return next;
+}
+
+async function decideAbstention(
+  client: GraphClient,
+  query: string,
+  result: ContextPreviewResult
+): Promise<{ abstained: boolean; reason: string }> {
+  try {
+    const snapshot = client.readSnapshot?.();
+    const repoNodeCount = snapshot?.nodes.length ?? 0;
+    if (repoNodeCount === 0) {
+      return { abstained: false, reason: "graph size unknown — abstention needs a snapshot" };
+    }
+    const decision = shouldAbstain({
+      repoNodeCount,
+      queryHasConcreteRef: extractSymbolCandidates(query).length > 0,
+      estimatedPackageTokens: result.tokenBudget.compressedTokens,
+    });
+    return { abstained: decision.abstain, reason: decision.reason };
+  } catch (error) {
+    return {
+      abstained: false,
+      reason: `abstention check failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 async function attachWorkbenchThenDialogue(
@@ -1211,6 +1300,41 @@ export async function listWorkbenchOutline(
   return { outlines, lines: formatWorkbenchOutlineLines(outlines) };
 }
 
+/**
+ * Attach freshness to surfaced skills. A skill whose learned refs no longer
+ * resolve is a `stale` proven skill: the failure mode memory stores without a
+ * code graph cannot even detect.
+ */
+function withSkillFreshness(
+  skills: SkillInsightItem[],
+  nodes: GraphNode[]
+): SkillInsightItem[] {
+  if (!isFreshnessEnabled()) return skills;
+  const resolves = buildRefResolver(
+    nodes.map((node) => ({ id: node.id, type: node.type }))
+  );
+  const nodeBySkillId = new Map<string, GraphNode>();
+  for (const node of nodes) {
+    if (node.type !== "Skill") continue;
+    try {
+      const parsed = JSON.parse(node.content) as { id?: string };
+      if (parsed.id) nodeBySkillId.set(parsed.id, node);
+    } catch {
+      // A malformed skill node simply has no freshness verdict.
+    }
+  }
+  return skills.map((item) => {
+    const node = nodeBySkillId.get(item.id);
+    if (!node) return item;
+    try {
+      const state = JSON.parse(node.content) as SkillState;
+      return { ...item, freshness: assessSkillFreshness(state, resolves) };
+    } catch {
+      return item;
+    }
+  });
+}
+
 export async function getSkillInsights(
   configPath?: string,
   limit = 12,
@@ -1233,7 +1357,7 @@ export async function getSkillInsights(
       source: skills.length > 0 ? "graph-store" : "unavailable",
       transport: config.graphPolicy.transport,
       storePath: resolveGraphStorePath(config),
-      skills,
+      skills: withSkillFreshness(skills, remote.nodes),
     };
   }
 
@@ -1258,7 +1382,7 @@ export async function getSkillInsights(
     source: "graph-store",
     transport: config.graphPolicy.transport,
     storePath: resolveGraphStorePath(config),
-    skills,
+    skills: withSkillFreshness(skills, store.nodes),
   };
 }
 

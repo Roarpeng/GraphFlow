@@ -6,6 +6,8 @@ import type { AgentWorkItem } from "../../../core/agent-delegation";
 export type { GraphSnapshotSampleEdge, GraphSnapshotSampleNode };
 import type { GraphFlowConfig } from "../../../config/schema";
 import type { DialogueThreadEchoView } from "../../../learning/dialogue-thread";
+import type { ContextEconomics } from "../../../graph/context-economics";
+import type { SkillFreshness } from "../../../learning/memory-freshness";
 import type { TeamDiagnosis } from "../../team/diagnose.js";
 
 export interface ContextPreviewResult {
@@ -85,6 +87,23 @@ export interface ContextPreviewResult {
    * 真实下发总量 = 预算内 + 预算外；仅发生打包后追加记账时出现。
    */
   accountedTokens?: number;
+  /**
+   * Present only when GRAPHFLOW_CONTEXT_ECONOMICS=1. Reports the axis the
+   * token-savings percent does not: how much of the injected prefix survived
+   * from the previous turn, what that does to provider prompt-cache reuse, the
+   * resulting input cost, and the attention budget against the context-rot
+   * threshold. A large savings percent with verdict 'prefix-churn' is a warning
+   * that the cheap tokens were paid for with a cold cache.
+   */
+  economics?: ContextEconomics;
+  /**
+   * Present only when GRAPHFLOW_ABSTAIN=1. Progressive disclosure buys context,
+   * not intelligence: on a small corpus with a concrete ref the agent can read
+   * the passage itself, so the package is redundant cost. Surfaced explicitly
+   * (never silently) so the host can skip the read; enforcement stays opt-in
+   * until the capability-floor A/B proves the net win.
+   */
+  abstention?: { abstained: boolean; reason: string };
   /** Agent-translated English query used for symbol search (if provided). */
   englishQuery?: string;
   /** When CJK query yields few anchors, prompts the connected agent to translate to English. */
@@ -281,6 +300,13 @@ export interface SkillInsightItem {
   uses: number;
   lastOutcome: "pass" | "fail";
   updatedAt: number;
+  /**
+   * Present only when GRAPHFLOW_FRESHNESS=1. The freshness oracle: whether the
+   * symbols this skill was learned from still resolve in the code graph. A
+   * `stale` proven skill is doing more harm than a missing one — it is wrong
+   * with the confidence of past evidence.
+   */
+  freshness?: SkillFreshness;
 }
 
 export interface SkillInsightsResult {
