@@ -456,12 +456,12 @@ AND 要求**单个节点同时包含全部查询词**，于是召回随查询变
 
 ### Fixed — 自检脚本在 Windows 上静默跳过了 MCP 检查
 
-用户在 Windows 上跑 1.27.6 的自检，MCP 那项显示 ——**而实际上包就在那里**。脚本只找 （Linux 布局）和 ，Windows 的  两条都不匹配。
+用户在 Windows 上跑 1.27.6 的自检，MCP 那项显示 `skipped: package not found at a known location`——**而实际上包就在那里**。脚本只找 `~/.npm-global/lib/node_modules`（Linux 布局）和 `./node_modules`，Windows 的 `%APPDATA%\npm\node_modules` 两条都不匹配。
 
-- 改用 /home/bosch/.npm-global/lib/node_modules 解析，不猜布局。这同时覆盖了  自定义前缀的情况（已实测： 能正确解析）。
-- **skip 改为 FAIL**。一个显示跳过的检查读起来和通过一样，这是最坏的失败形态。现在找不到包会报 FAIL，并打印它找过哪些路径。
+- 改用 `npm root -g` 解析，不猜布局。这同时覆盖了 `--prefix` 自定义前缀的情况（已实测：`npm root -g --prefix <dir>` 能正确解析）。
+- **skip 改为 FAIL**。一个显示"跳过"的检查读起来和通过一样，这是最坏的失败形态。现在找不到包会报 FAIL，并打印它找过哪些路径。
 
-用户在 Windows 上还给出了 1.27.6 的完整安装日志：19 个宿主的条目全部写入且路径正确（含 AppData 路径），，。文档已补 Windows 的 （被自己开着的 agent 占用）与镜像  两类处理。
+用户在 Windows 上还给出了 1.27.6 的完整安装日志：19 个宿主的条目全部写入且路径正确（含 AppData 路径），`stale=0`，`missing=4`。文档已补 Windows 的 `EBUSY`（被自己开着的 agent 占用）与镜像 `ETARGET` 两类处理。
 
 ## [1.26.0] - 2026-09-23
 
