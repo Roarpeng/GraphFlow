@@ -203,8 +203,21 @@ function getWindowsHomeFromWsl(): string | undefined {
 
 function resolveHomePaths(): { home: string; appData: string; localAppData: string; wslWindowsHome?: string } {
   const home = homedir();
-  const appData = process.env.APPDATA ?? (isWindows() ? join(home, "AppData", "Roaming") : "");
-  const localAppData = process.env.LOCALAPPDATA ?? (isWindows() ? join(home, "AppData", "Local") : "");
+  // This used to return "" for appData/localAppData on non-Windows, on the
+  // assumption that every appData path only ever mattered on Windows. It does
+  // not: cursor, cline, roo-code, kilocode, trae and pearai all declare a second
+  // user target under appData, so `join("", "Cursor", "User", ...)` produced a
+  // RELATIVE path and the installer wrote host configs into whatever directory
+  // it happened to run from — the user's repo, in practice. Observed on this
+  // machine: `Cursor/User/globalStorage/roval.cursor/mcp.json` and
+  // `PearAI/User/mcp.json` inside the checkout, pointing at a deleted
+  // /tmp workspace, which doctor then reported as a dangling entry and a missing
+  // server. It also broke test isolation for the same reason.
+  //
+  // Keep this in step with agent-profiles/utils.ts, which already resolves the
+  // POSIX case to ~/.config and ~/.local/share.
+  const appData = process.env.APPDATA ?? (isWindows() ? join(home, "AppData", "Roaming") : join(home, ".config"));
+  const localAppData = process.env.LOCALAPPDATA ?? (isWindows() ? join(home, "AppData", "Local") : join(home, ".local", "share"));
   const result: { home: string; appData: string; localAppData: string; wslWindowsHome?: string } = { home, appData, localAppData };
   if (isWsl()) {
     const winHome = getWindowsHomeFromWsl();

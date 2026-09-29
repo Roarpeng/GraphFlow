@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { isAbsolute } from "node:path";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -451,3 +452,42 @@ describe("dsh glue patch honours the preference", () => {
     expect(after).not.toContain("command: npx");
   });
 });
+
+describe("agent profile paths", () => {
+  it("resolves every host target to an absolute path with no APPDATA set", async () => {
+    // Regression: resolveHomePaths() returned appData="" on non-Windows, so
+    // `join("", "Cursor", "User", ...)` produced a RELATIVE path and the
+    // installer wrote host configs into whatever directory it ran from — the
+    // user's repo. Observed as Cursor/User/... and PearAI/User/... inside this
+    // checkout, pointing at a deleted /tmp workspace, which doctor then reported
+    // as a dangling entry plus a missing server.
+    //
+    // APPDATA and LOCALAPPDATA are cleared on purpose. Every other test in this
+    // file sets them, which takes the `??` branch and masks the fallback
+    // entirely — the first version of this test passed with the bug deliberately
+    // reintroduced, which is the whole reason this note exists.
+    const prevAppData = process.env.APPDATA;
+    const prevLocalAppData = process.env.LOCALAPPDATA;
+    delete process.env.APPDATA;
+    delete process.env.LOCALAPPDATA;
+    try {
+      const { installer } = await loadWithSandboxHome();
+      const relative: string[] = [];
+      for (const profile of installer.buildAgentProfiles()) {
+        for (const target of profile.userTargets ?? []) {
+          if (!isAbsolute(target.configPath)) relative.push(`${profile.id}: ${target.configPath}`);
+        }
+      }
+
+      // A relative target here is not cosmetic: it means "write into the current
+      // working directory".
+      expect(relative).toEqual([]);
+    } finally {
+      if (prevAppData === undefined) delete process.env.APPDATA;
+      else process.env.APPDATA = prevAppData;
+      if (prevLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+      else process.env.LOCALAPPDATA = prevLocalAppData;
+    }
+  });
+});
+

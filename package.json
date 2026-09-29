@@ -158,7 +158,6 @@
     "vitest": "^3.2.6"
   },
   "dependencies": {
-    "@huggingface/transformers": "^4.3.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
@@ -168,6 +167,7 @@
   },
   "optionalDependencies": {
     "@firecrawl/anydoc": "^0.1.7",
+    "@huggingface/transformers": "^4.3.0",
     "better-sqlite3": "^12.10.0"
   },
   "overrides": {

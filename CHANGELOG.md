@@ -368,6 +368,29 @@ cursor: status=created exists=true mentionsDist=yes
 - `tests/memory-freshness.test.ts`（9 用例）：引用抽取、无引用判 `unknown`、fresh/watch/stale 分级（含边界值）、自定义阈值、降级策略（stale+proven 降级 / watch 不降 / canary 豁免 / anti-pattern 不降）、开关读取、`buildRefResolver`（符号名 + 仓库相对路径可解析；内容哈希漂移后不可解析）。
 - `tests/context-economics.test.ts`（9 用例）：前缀 churn、低于 provider 最小可缓存长度时拒绝建模、cache/fresh 切分与 hitRate、含 cache write 税的成本账、注意力预算四级、弃权四象限（含"reason 必须说明前缀稳定性"）、开关读取、`buildContextEconomics` 的 `cache-safe` / `prefix-churn` / `cache-cold` 三态。
 
+### Fixed — 用户实测报出的两个安装级缺陷
+
+用户在 Linux 上 `npm install -g @roarpeng/graphflow@1.27.0` 后报 `onnxruntime-node` 302 失败、`graphflow doctor` 报 `missing=3`。两处都复现并修好。
+
+**1. `onnxruntime-node` 安装失败会中断整个安装**
+
+`@huggingface/transformers` 原本在 `dependencies`，其 `onnxruntime-node` 的 postinstall 要从**独立 CDN** 拉二进制。该 CDN 在部分网络下不可达 / 返回 302，npm 直接判定安装失败，**整个包装不上**——用户必须知道 `--ignore-scripts` 才能继续，这是把可选能力变成了安装门槛。
+
+改为 `optionalDependencies`：拉取失败时 npm 容错跳过，CLI / MCP / 上下文压缩 / 记忆全部正常，**只有语义检索降级为哈希**（代码里本就有 `createResilientLocalEmbeddingProvider` 这条降级路径）。实测：不带 `--ignore-scripts` 安装 tarball，153 个包装完，`graphflow --version` 正常。
+
+**2. 非 Windows 上 appData 解析为空字符串，把宿主配置写进了用户的仓库**
+
+`agent-mcp-installer.ts` 里有一份**自己的** `resolveHomePaths()`，非 Windows 时返回 `appData: ""`、`localAppData: ""`（当时假定 appData 路径只在 Windows 有意义）。但 cursor / cline / roo-code / kilocode / trae / pearai **都声明了第二个位于 appData 的 user target**，于是 `join("", "Cursor", "User", ...)` 产出**相对路径**，安装器把它写进**当前工作目录**——也就是用户的仓库。
+
+用户实测留下的痕迹（本机可查）：仓库内出现 `Cursor/User/globalStorage/roval.cursor/mcp.json` 与 `PearAI/User/mcp.json`，内容指向一个已被删除的 `/tmp/doctor-workspace-*`；doctor 因此报 `Cursor (dangling entry)` 与 `PearAI missing`，`ok=false`。同一原因也让测试隔离失效。
+
+与 `agent-profiles/utils.ts` 里已有的同名函数对齐（POSIX 下 `~/.config` 与 `~/.local/share`）。修复后全部 user target 均为绝对路径。
+
+> **仓库里还有两份 `mcp.json` 不是泄漏**：`./mcp.json` 是本包要发布的 MCP 规格（已在 `files` 中、已被 git 跟踪），`./.cursor/mcp.json`、`.vscode/mcp.json` 指向扩展安装目录。它们与本次问题无关。
+>
+> **方法论**：这次的用户实测抓到了一个**我自己测不出来的 bug**——我此前 20 余次跑 `install` / `doctor` 全程 `ok=true`，因为我的 CWD 恰好让相对路径落在无害位置，而 3 个 `missing` 我读成了"未检测到的 agent 不参与判定"的既有语义。**同一个数字，换一台机器就变成数据损坏。**
+
+
 ## [1.26.0] - 2026-09-23
 
 ### Added — 桥接优先与可信度收口（round 4）
