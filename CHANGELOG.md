@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — DSH 每轮报 `Cannot read properties of undefined (reading 'kind')`
+
+真机（DSH 0.1.7-rc.2，`dsh web`）复测时，首轮报 #55 的 `format v4 message requires a producer-owned source kind`（profile 里仍锁着 1.18.5），随后每一轮都报 `Cannot read properties of undefined (reading 'kind')`。
+
+根因在 glue 的 `agent/pre-step` 监听器：`await next()` 被 `try { … } catch { return undefined; }` 包住。`dsh-agent-loop` 的 `preStep()` 在 waterfall 之后立刻读 `decision.kind`，于是上游任何失败（中止信号、其他插件抛错、上一轮遗留的准入失败）都被改写成 `undefined` 决策，报一个与真实原因无关的 TypeError。DSH 自带监听器（`dsh-time-context`、`dsh-plan-mode` 等）都是直接 `await next()`、让错误原样上抛。
+
+- 监听器改为 `const decision = await next()`，不再吞掉上游错误；只有 GraphFlow 自己追加 hint 的那一步仍然容错（失败时原样返回上游决策）。
+- 新增用例：上游 `next()` 抛出的错误原样传播，而不是返回 `undefined`。
+
 ### Fixed — DSH 会话格式 v4：首轮 hint 用了已退役的 `kind: "plugin"`，整轮失败（#55）
 
 `dsh/plugin.mjs` 的 `buildHintMessage()` 给注入的首轮 hint 打的是 v3 的 `source.kind: "plugin"`。DSH 会话格式 v4 的原生准入（`dsh-session-format-v3-to-v4` 的 `source(message)`）对 `"plugin"` **硬拒绝**：`format v4 message requires a producer-owned source kind`，报在落盘阶段，所以是整轮失败而不是丢一条消息。
@@ -52,6 +61,10 @@ All notable changes to this project are documented in this file.
 - 7 个用例（+1 前提用例），两个守卫仍**分别验证有牙**。
 
 **这一版的教训**：跨平台测试里，"构造前置条件"本身就是要测的东西。凡是用环境变量伪造平台行为的测试，先断言伪造生效，再断言行为。
+
+## [1.27.12] - 2026-09-29
+
+修复 DSH 中每轮报 `Cannot read properties of undefined (reading 'kind')`：glue 的 `agent/pre-step` 监听器不再吞掉上游错误并返回 `undefined` 决策。
 
 ## [1.27.11] - 2026-09-29
 

@@ -1661,13 +1661,13 @@ export function apply(ctx, config = {}) {
     // inbox (and can spawn a trailing step the model refuses). Extend the
     // enter decision's `messages` after `next()` instead — same WeakSet
     // gating and source tagging, no driver wake.
+    // A waterfall listener must hand back the downstream decision or let its
+    // error propagate: dsh-agent-loop reads `decision.kind` right after the
+    // waterfall, so returning undefined turns any upstream failure (abort,
+    // another plugin's throw) into "Cannot read properties of undefined
+    // (reading 'kind')" and hides the real cause.
     listen(ctx, "agent/pre-step", async (payload, next) => {
-      let decision;
-      try {
-        decision = typeof next === "function" ? await next() : undefined;
-      } catch {
-        return undefined;
-      }
+      const decision = await next();
       try {
         if (!decision || decision.kind !== "enter") return decision;
         const agent = payloadAgent(payload);

@@ -292,6 +292,15 @@ describe("dsh ESM glue plugin", () => {
     )) as { messages: unknown[] };
     expect(again.messages).toHaveLength(1);
     expect(injected).toHaveLength(0);
+
+    // dsh-agent-loop reads `decision.kind` after the waterfall: an upstream
+    // failure must surface as itself, never as an undefined decision.
+    const upstream = new Error("upstream pre-step failed");
+    await expect(
+      handlers["agent/pre-step"]?.({ agent: {}, cwd: "/tmp/ws" }, async () => {
+        throw upstream;
+      })
+    ).rejects.toBe(upstream);
   });
 
   it("reports outcome on agent/disposed only when GRAPHFLOW_HOOK_SUCCESS is explicit", () => {
