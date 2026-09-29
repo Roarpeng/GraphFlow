@@ -35,16 +35,24 @@ npm install -g --ignore-scripts @roarpeng/graphflow@1.27.3
 ```bash
 graphflow --version          # 应输出 1.27.3
 graphflow install            # 注册 MCP + Skill 到本机检测到的 agent
-graphflow doctor             # 直接读最后一行 summary
+graphflow doctor             # 输出里找 summary: 那一行
 ```
 
 **不需要 `--json`，也不需要 `grep`。** 早期版本文档里写的 `doctor --json | grep -o ...` 在 Windows 上跑不了（`grep` 不是系统命令），而且 `doctor` 本身就打印了同样的信息。`doctor --json` 只在你写脚本时才需要。
 
-**期望**：最后一行形如
+**期望**：输出里有一行（实测在第 67 行附近，**不是最后一行**——后面还有补救建议和排查章节）形如
+
 ```
-summary: installed=62 missing=0 stale=0 n/a=0 ok=true
+summary: installed=57 missing=0 stale=0 n/a=4 ok=true
 ```
-关键是 `missing=0` 和 `stale=0`。
+
+关键是 `missing=0` 和 `stale=0`。`n/a` 只是没装对应宿主，不影响。
+
+想只取这一行又不依赖 `grep`，用 Node。**注意必须用 `spawnSync` 而不是 `execSync`**：doctor 在 `ok=false` 时退出码非零，`execSync` 会直接抛错，把要读的那行输出一起丢掉。
+
+```bash
+node -e "const{spawnSync}=require('child_process');const r=spawnSync('graphflow',['doctor'],{encoding:'utf8'});console.log((r.stdout||'').split('\n').find(l=>l.startsWith('summary:'))||'未找到 summary 行')"
+```
 
 > **Windows 特有**：`graphflow` 报"不是内部或外部命令"时，npm 全局 bin 目录没进 PATH。用 `npm prefix -g` 找到目录（通常是 `%AppData%\npm`），把它加进系统 PATH，或直接用 `npx graphflow ...` 代替。
 >

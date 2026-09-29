@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.27.5] - 2026-09-29
+
+测试文档再修：summary 不在最后一行；取该行必须用 spawnSync 而非 execSync（doctor 在 ok=false 时非零退出）。
+
 ## [1.27.4] - 2026-09-29
 
 修正测试文档的 Windows 不可用命令（`grep` 等），改用跨平台的 Node 单行脚本。
