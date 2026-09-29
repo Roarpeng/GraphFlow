@@ -395,6 +395,27 @@ cursor: status=created exists=true mentionsDist=yes
 > **方法论**：这次的用户实测抓到了一个**我自己测不出来的 bug**——我此前 20 余次跑 `install` / `doctor` 全程 `ok=true`，因为我的 CWD 恰好让相对路径落在无害位置，而 3 个 `missing` 我读成了"未检测到的 agent 不参与判定"的既有语义。**同一个数字，换一台机器就变成数据损坏。**
 
 
+### Fixed — 多词查询召回归零：FTS 把英文 token 用 AND 串起来
+
+用户的 Zcode 实测报告"中文召回差"，追下去发现**真正的问题不是中文，是多词查询本身**：在真实 home 上量到 `buildFtsMatch` 用 `" AND "` 拼接英文 token，而中文分支用 `" OR "`。
+
+AND 要求**单个节点同时包含全部查询词**，于是召回随查询变长而**单调收缩**。本仓实测：
+
+| 查询 | 修复前 | 修复后 |
+| --- | --- | --- |
+| `installer` | 200 节点 | 200 |
+| `preference` | 7 节点 | 7 |
+| `installer preference` | **0** | 200 |
+| `workspace build preference installer` | **0** | 200 |
+| 端到端 `installer preference` | **0 锚点** | 15 |
+
+**加一个词只会让结果变少，永远不会变多**——这与检索的基本预期相反。`"X preference"` 恒为 0 与 X 无关，`foo bar baz qux` 也为 0，正是这个原因，不是"查询无意义"。端到端排序也正确：`workspace build preference installer` 的首位是 `file:src/integrations/workspace-build.ts`。
+
+改用 `OR`。FTS5 的 bm25 本来就把"命中多个词"的节点排在"只命中一个"之前（实测首位即全命中节点），所以原先 AND 换来的精度由**排序**保证，而非靠丢弃候选集。中文分支本来就是 OR，现在两侧一致。
+
+`tests/m24-sqlite-backend.test.ts` 里那条用例原本叫"returns nodes containing all tokens"，**它把缺陷当成规格钉住了**。已改写为断言新的真实契约：全命中节点排第一、部分命中不被丢弃、无关节点仍不出现；并补一条单 token 行为不变的守卫。golden 排名门 149 条全过，中文查询无回归。
+
+
 ## [1.26.0] - 2026-09-23
 
 ### Added — 桥接优先与可信度收口（round 4）

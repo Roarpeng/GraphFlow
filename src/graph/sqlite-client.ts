@@ -108,7 +108,16 @@ function buildFtsMatch(tokens: string[], query: string): string {
     const escaped = escapeFtsToken(token);
     return token.length >= 3 ? `${escaped}*` : escaped;
   });
-  return parts.join(tokens.length === 1 ? "" : " AND ");
+  // OR, not AND. AND required a single node to contain every query token, which
+  // made results monotonically shrink as a query grew: measured on this repo,
+  // "installer" alone matched 200 nodes and "installer preference" matched 0,
+  // because nothing in the graph contained both words. Any real multi-word
+  // query — a file name plus a concept, a symbol plus an action — collapsed the
+  // same way, and the user saw an empty context package rather than a ranked
+  // one. FTS5's bm25 already orders multi-term matches above incidental
+  // single-term ones, so OR broadens the candidate set without flattening the
+  // ranking, and it matches what the CJK branch above has always done.
+  return parts.join(" OR ");
 }
 
 export class GraphifySqliteClient implements GraphClient {

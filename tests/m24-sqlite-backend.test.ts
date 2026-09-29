@@ -42,7 +42,15 @@ afterAll(() => {
 });
 
 describe.skipIf(!hasBetterSqlite3())("M24 SQLite + FTS5 backend", () => {
-  it("A: FTS5 multi-token query returns nodes containing all tokens", async () => {
+  it("A: FTS5 multi-token query ranks the all-token node first, without dropping partial matches", async () => {
+    // Multi-token queries join with OR, not AND. AND required one node to contain
+    // every term, which made recall shrink monotonically as a query grew:
+    // measured on this repository, "installer" matched 200 nodes and
+    // "installer preference" matched 0, so an ordinary two-concept query
+    // returned an empty context package. bm25 already orders a node matching
+    // both terms above one matching a single term, so the precision this test
+    // originally protected is preserved by the ranking rather than by
+    // discarding candidates.
     const client = freshClient("a");
     const nodes: GraphNode[] = [
       { id: "n1", type: "File", content: "orchestrate task pipeline alpha" },
@@ -53,8 +61,26 @@ describe.skipIf(!hasBetterSqlite3())("M24 SQLite + FTS5 backend", () => {
     await client.upsertNodes(nodes);
 
     const hits = await client.queryByKeyword("orchestrate task");
-    const ids = hits.map((n) => n.id).sort();
-    expect(ids).toEqual(["n1"]);
+    const ids = hits.map((n) => n.id);
+
+    // The node containing both terms leads.
+    expect(ids[0]).toBe("n1");
+    // Partial matches are no longer discarded, and the unrelated node still is.
+    expect(ids).toEqual(expect.arrayContaining(["n1", "n2", "n3"]));
+    expect(ids).not.toContain("n4");
+  });
+
+  it("A2: a single-token query is unchanged", async () => {
+    // Guards the OR change against regressing the common case: one token must
+    // still behave exactly as before.
+    const client = freshClient("a2");
+    await client.upsertNodes([
+      { id: "n1", type: "File", content: "orchestrate task pipeline alpha" },
+      { id: "n2", type: "File", content: "orchestrate routing decision" },
+    ]);
+
+    const ids = (await client.queryByKeyword("orchestrate")).map((n) => n.id).sort();
+    expect(ids).toEqual(["n1", "n2"]);
   });
 
   it("B: upsert is idempotent and updates content", async () => {
