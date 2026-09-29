@@ -20,6 +20,24 @@ All notable changes to this project are documented in this file.
 
 `tests/vendored-source-resolution.test.ts`（4 用例）：把 CWD 切到临时空目录再解析——**不靠 CWD 运气**。已验证有牙：改回一处旧路径 → 1 个失败。
 
+### Fixed — home 目录守卫的测试只在 Linux 上成立，Windows 上 3 个用例失败
+
+1.27.9 的 CI 在 `windows-latest` 上红了，3 个用例失败。**生产代码是对的，错的是我的测试。**
+
+`os.homedir()` 在 Linux 上读 `HOME`、在 Windows 上读 `USERPROFILE`。我用 `process.env.HOME = <临时目录>` 来假扮 home——这在 Linux 上成立，在 Windows 上**完全无效**，于是沙箱从来不是 home，守卫正确地没有触发，测试却断言它应该触发。
+
+这类错误值得单列，因为它和「平台差异让测试全绿不等于行为正确」是同一个坑，只是方向相反：上一版是**代码有 bug 而 Linux 测不出来**，这一版是**测试的前提不成立而 Linux 测不出来**。两次都是"本地量的是错的东西"。
+
+- 沙箱现在同时设置 `HOME` 与 `USERPROFILE`，并逐个平台断言前提成立（`homedir() === sandbox` 且 `isUnsafeWorkspaceFallback(sandbox) === true`）——前提不成立时会**直接说前提没成立**，而不是让三个下游断言带着误导性的信息失败。
+- 两个"真实项目目录照常写入"的用例补上 `isUnsafeWorkspaceFallback(project) === false`，坐实守卫看的是 root 本身，不是"某个 home 存在"。
+- 7 个用例（+1 前提用例），两个守卫仍**分别验证有牙**。
+
+**这一版的教训**：跨平台测试里，"构造前置条件"本身就是要测的东西。凡是用环境变量伪造平台行为的测试，先断言伪造生效，再断言行为。
+
+## [1.27.10] - 2026-09-29
+
+修复 home 目录守卫测试只在 Linux 成立的问题（Windows CI 3 个用例失败），并为跨平台前提增加显式断言。
+
 ## [1.27.9] - 2026-09-29
 
 修复项目规则源文件解析差一级目录：Trae / Cursor / Antigravity / Copilot 的项目规则与 Skill 在发布包里永远报 Source file not found（Ubuntu / Windows 日志均有）。

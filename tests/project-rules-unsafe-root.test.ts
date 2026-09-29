@@ -18,7 +18,27 @@ import { installProjectGeminiInstructions, installProjectLevelRules } from "../s
  * workspace root"). Project files have to refuse it too.
  */
 const tempRoots: string[] = [];
-let previousHome: string | undefined;
+const previousEnv = new Map<string, string | undefined>();
+
+/**
+ * Point `os.homedir()` at a sandbox directory.
+ *
+ * `os.homedir()` reads `HOME` on POSIX but `USERPROFILE` on Windows, so setting
+ * only `HOME` fakes home on Linux and does nothing on Windows. The first version
+ * of this file did exactly that: 4/6 passed locally and 3/6 failed on
+ * windows-latest, not because the guard was wrong but because the sandbox was
+ * never home there -- the guard correctly declined to fire. Both variables are
+ * set so the premise holds on every platform.
+ */
+function sandboxHome(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempRoots.push(dir);
+  for (const key of ["HOME", "USERPROFILE"]) {
+    if (!previousEnv.has(key)) previousEnv.set(key, process.env[key]);
+    process.env[key] = dir;
+  }
+  return dir;
+}
 
 function sandbox(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -27,12 +47,17 @@ function sandbox(prefix: string): string {
 }
 
 beforeEach(() => {
-  previousHome = process.env.HOME;
+  for (const key of ["HOME", "USERPROFILE"]) {
+    if (!previousEnv.has(key)) previousEnv.set(key, process.env[key]);
+  }
 });
 
 afterEach(() => {
-  if (previousHome === undefined) delete process.env.HOME;
-  else process.env.HOME = previousHome;
+  for (const [key, value] of previousEnv) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  previousEnv.clear();
   for (const dir of tempRoots.splice(0)) {
     try {
       rmSync(dir, { recursive: true, force: true });
@@ -43,9 +68,18 @@ afterEach(() => {
 });
 
 describe("project-level rules refuse a home-directory root", () => {
+  it("treats the sandbox as the home directory on this platform", () => {
+    // States the premise before relying on it. Without this, a platform where
+    // the sandbox is not home fails three downstream assertions with messages
+    // that blame the guard instead of reporting "the premise did not hold".
+    const home = sandboxHome("gf-premise-");
+    expect(homedir()).toBe(home);
+    expect(isUnsafeWorkspaceFallback(home)).toBe(true);
+  });
+
   it("writes nothing when the workspace root is the home directory", () => {
-    const home = sandbox("gf-home-root-");
-    process.env.HOME = home;
+    const home = sandboxHome("gf-home-root-");
+    expect(homedir()).toBe(home);
 
     const results = installProjectLevelRules(home, undefined, () => {});
 
@@ -61,9 +95,11 @@ describe("project-level rules refuse a home-directory root", () => {
   });
 
   it("still writes into a real project directory", () => {
-    const home = sandbox("gf-home-ok-");
+    // A home sandbox that is NOT the project root: proves the guard keys off
+    // the root, not merely off "a home directory existing somewhere".
+    sandboxHome("gf-home-ok-");
     const project = sandbox("gf-project-");
-    process.env.HOME = home;
+    expect(isUnsafeWorkspaceFallback(project)).toBe(false);
 
     const results = installProjectLevelRules(project, undefined, () => {});
     const wrote = results.filter((r) => r.status === "created" || r.status === "updated");
@@ -76,8 +112,7 @@ describe("project-level rules refuse a home-directory root", () => {
   });
 
   it("leaves an existing marker-ful instruction file intact when run from home", () => {
-    const home = sandbox("gf-home-intact-");
-    process.env.HOME = home;
+    const home = sandboxHome("gf-home-intact-");
     const rulesDir = join(home, ".claude", "rules");
     mkdirSync(rulesDir, { recursive: true });
     const instruction = join(rulesDir, "graphflow.md");
@@ -104,8 +139,7 @@ describe("project GEMINI.md refuses a home-directory root", () => {
   // rule-file writer would have left this one scattering files, which is the
   // shape of fix that looks complete and is not.
   it("does not write ~/GEMINI.md", () => {
-    const home = sandbox("gf-gemini-home-");
-    process.env.HOME = home;
+    const home = sandboxHome("gf-gemini-home-");
 
     const results = installProjectGeminiInstructions(home);
 
@@ -115,9 +149,9 @@ describe("project GEMINI.md refuses a home-directory root", () => {
   });
 
   it("still writes GEMINI.md into a real project", () => {
-    const home = sandbox("gf-gemini-ok-");
+    sandboxHome("gf-gemini-ok-");
     const project = sandbox("gf-gemini-project-");
-    process.env.HOME = home;
+    expect(isUnsafeWorkspaceFallback(project)).toBe(false);
 
     const results = installProjectGeminiInstructions(project);
 
