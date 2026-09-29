@@ -9,15 +9,23 @@
 ## 0. 一次性准备
 
 ```bash
+# macOS / Linux
 mkdir -p ~/gf-test && cd ~/gf-test
 npm init -y
-npm install -g @roarpeng/graphflow@1.27.0
+npm install -g @roarpeng/graphflow@1.27.3
 ```
 
-如果安装报 `onnxruntime-node` 下载失败，加 `--ignore-scripts` 重装：
+```powershell
+# Windows PowerShell
+mkdir $env:USERPROFILE\gf-test -Force; cd $env:USERPROFILE\gf-test
+npm init -y
+npm install -g @roarpeng/graphflow@1.27.3
+```
+
+如果安装报 `onnxruntime-node` 下载失败，加 `--ignore-scripts` 重装（两个平台命令相同）：
 
 ```bash
-npm install -g --ignore-scripts @roarpeng/graphflow@1.27.0
+npm install -g --ignore-scripts @roarpeng/graphflow@1.27.3
 ```
 
 这只影响本地 embedding（语义检索）功能，MCP、上下文压缩、记忆全部正常。`onnxruntime` 的二进制走独立 CDN，部分网络环境访问不到。
@@ -25,13 +33,21 @@ npm install -g --ignore-scripts @roarpeng/graphflow@1.27.0
 确认装好：
 
 ```bash
-graphflow --version          # 应输出 1.27.0
+graphflow --version          # 应输出 1.27.3
 graphflow install            # 注册 MCP + Skill 到本机检测到的 agent
-graphflow doctor --json | grep -o '"summary":{[^}]*}'
+graphflow doctor             # 直接读最后一行 summary
 ```
 
-**期望**：`{"total":63,"installed":63,"missing":0,"stale":0}`（数字随你装了几个 agent 变化，关键是 `missing:0` 和 `stale:0`）。
+**不需要 `--json`，也不需要 `grep`。** 早期版本文档里写的 `doctor --json | grep -o ...` 在 Windows 上跑不了（`grep` 不是系统命令），而且 `doctor` 本身就打印了同样的信息。`doctor --json` 只在你写脚本时才需要。
 
+**期望**：最后一行形如
+```
+summary: installed=62 missing=0 stale=0 n/a=0 ok=true
+```
+关键是 `missing=0` 和 `stale=0`。
+
+> **Windows 特有**：`graphflow` 报"不是内部或外部命令"时，npm 全局 bin 目录没进 PATH。用 `npm prefix -g` 找到目录（通常是 `%AppData%\npm`），把它加进系统 PATH，或直接用 `npx graphflow ...` 代替。
+>
 > `stale` 的含义要留意：宿主指向**已发布包**、而本机存在更新的本地构建时，doctor 报 stale。对**普通用户**这是正常状态；对**开发者**才是问题。`missing` 指的是 skill / hooks 未装齐，按提示补即可。
 
 ---
@@ -56,14 +72,13 @@ graphflow doctor --json | grep -o '"summary":{[^}]*}'
 
 ## 2. 确认条目指向正确（可选，命令行核查）
 
-想知道某个宿主的 MCP 条目到底指向哪里：
+想知道某个宿主的 MCP 条目到底指向哪里。**用 Node 读文件，两个平台命令完全相同**，不依赖 `grep` / `jq`：
 
 ```bash
-# Linux / macOS
-for f in ~/.cursor/mcp.json ~/.claude.json ~/.qoder/mcp.json ~/.config/opencode/opencode.json ~/.codex/config.toml; do
-  [ -f "$f" ] && echo "== $f" && grep -o '"command":[^,]*\|command = "[^"]*"\|graphflow-mcp' "$f" | head -2
-done
+node -e "const f=require('os').homedir()+'/.cursor/mcp.json';const j=require('fs').readFileSync(f,'utf8');const m=j.match(/graphflow[\s\S]{0,200}/);console.log(m?m[0].slice(0,160):'(未找到 graphflow 条目)')"
 ```
+
+把路径换成你关心的宿主（`~/.cursor/mcp.json`、`~/.claude.json`、`~/.qoder/mcp.json`、`~/.config/opencode/opencode.json`、`~/.codex/config.toml`）。
 
 **普通用户**应看到 `npx -y --package=@roarpeng/graphflow graphflow-mcp`（走发布包，正确）。
 **GraphFlow 开发者**会看到指向本地 `dist/surfaces/mcp/server.js` 的绝对路径。
@@ -72,16 +87,16 @@ done
 
 ## 3. 验证 opencode 运行时真的加载了（仅 opencode 可做）
 
-opencode 会把 MCP server 拉成独立进程，所以只有它能做运行时确认：
+opencode 会把 MCP server 拉成独立进程，所以只有它能做运行时确认。**日志那条跨平台**：
 
 ```bash
-# 有输出 = 加载成功
-ps -eo args | grep "graphflow/dist/surfaces/mcp/server.js" | grep -v grep
-
-# 或看日志
-grep "mcp connected" ~/.local/share/opencode/log/opencode.log | tail -3
+node -e "const f=require('os').homedir()+'/.local/share/opencode/log/opencode.log';const t=require('fs').readFileSync(f,'utf8').split('\n').filter(l=>l.includes('mcp connected')&&l.includes('graphflow')).slice(-3);console.log(t.join('\n')||'(无记录)')"
 # 期望形如： mcp connected server=graphflow tools=10
 ```
+
+**Windows** 的日志路径不同：`%USERPROFILE%\.local\share\opencode\log\opencode.log`（同一条路径，Node 的 `os.homedir()` 会自动处理）。
+
+Linux / macOS 还可用 `ps -eo args | grep "surfaces/mcp/server.js" | grep -v grep` 看进程，Windows 用 `Get-Process node | Where-Object { $_.Path -like "*node*" }`，但日志更省事。
 
 其余 18 个宿主不一定起独立进程，也不会在 opencode 日志里留痕——**它们只能用第 1 步验证**。
 
@@ -112,7 +127,7 @@ graphflow skill insights      # 应能看到技能 + 新鲜度
 cd <GraphFlow 仓库路径>
 npm run build
 graphflow install --workspace-build
-graphflow doctor --json | grep -o '"summary":{[^}]*}'
+graphflow doctor          # 同样读最后一行 summary,不要 grep
 ```
 
 验证全部宿主都指向本地构建：

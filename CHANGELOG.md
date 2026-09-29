@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.27.4] - 2026-09-29
+
+修正测试文档的 Windows 不可用命令（`grep` 等），改用跨平台的 Node 单行脚本。
+
 ## [1.27.3] - 2026-09-29
 
 修复 CLI 帮助文本混入 stdout 破坏脚本消费；清理仓库内测试产物。
