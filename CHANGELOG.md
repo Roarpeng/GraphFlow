@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — DSH 会话格式 v4：首轮 hint 用了已退役的 `kind: "plugin"`，整轮失败（#55）
+
+`dsh/plugin.mjs` 的 `buildHintMessage()` 给注入的首轮 hint 打的是 v3 的 `source.kind: "plugin"`。DSH 会话格式 v4 的原生准入（`dsh-session-format-v3-to-v4` 的 `source(message)`）对 `"plugin"` **硬拒绝**：`format v4 message requires a producer-owned source kind`，报在落盘阶段，所以是整轮失败而不是丢一条消息。
+
+- hint 改用 v4 第三方生产者形式 `plugin:graphflow-dsh`（与官方迁移模块 `producerKind()` 对第三方插件的映射一致）。
+- `isUserOriginatedMessage()` 同步识别 `plugin:*` 前缀，以及 v4 的一方生产者 kind（`runtime-context` / `system-prompt` / `compact-checkpoint` / `time-context` / `plan-mode` / `tool-jobs` / `user-approval` / `cordis-host-runner` 等，取自官方 `RENAMED_PRODUCERS` 与 `RELEASED_SAME_NAME_PRODUCERS`）。否则这些 `role: "user"` 的宿主注入会走兜底分支、被当成真人提问记进对话图。`webhook` 有意不列入：它可能转发外部渠道的真人消息。
+- 新增用例：hint 通过 v4 准入规则；v4 生产者 kind 与 `plugin:*` 均不被记录为用户消息。
+
+### Fixed — dsh web 半边注入了已被取代的 `@deepseek-ai/dsh-client-runtime`（#54）
+
+`package.json` 的 `dsh.client.inject` 仍列着 2026-08 起不再发布的 `dsh-client-runtime`。当前 harness 的 client-modules 用 `inject` 决定 web 半边的加载顺序（找不到的包直接跳过），所以我们声明的服务依赖根本没有被排序保证。
+
+- `inject` 改为 `dsh/client.js` 实际使用的三个服务的提供者（逐包核对 0.2.0-rc.2 源码）：`sessions` ← `@deepseek-ai/dsh-api-session-controller`，`connection` ← `@deepseek-ai/dsh-client-connection`，`slots` ← `@deepseek-ai/dsh-client-ui-renderer`。
+- 新增用例：`inject` 不含 `dsh-client-runtime`，且包含上述三个提供者。
+
+### Verified — 「知识节点」面板 `POST /gf/nodes` 405（#26）
+
+服务端部分已在 1.14.1（PR #34）修复：`/gf` 通道在 `connection` 未就绪时经 `ctx.inject(["connection"])` 等待注册，失败写日志不再静默。本次对照 `dsh-client-connection` 0.2.0-rc.2 复核：`rpc.handle(channel, handler)` 仍以 prefix 路由挂到 `webServer`，handler 签名 `(endpoint, payload, signal)`、前端 `rpc.call(channel, endpoint, payload)` 均兼容。web 半边的注入目标问题由 #54 一并修复。
+
 ### Fixed — 项目规则的源文件解析差了一级 `..`，发布包里永远"找不到源文件"
 
 用户 Ubuntu / Windows 的安装日志里有一整片"静默失败"：
@@ -33,6 +52,10 @@ All notable changes to this project are documented in this file.
 - 7 个用例（+1 前提用例），两个守卫仍**分别验证有牙**。
 
 **这一版的教训**：跨平台测试里，"构造前置条件"本身就是要测的东西。凡是用环境变量伪造平台行为的测试，先断言伪造生效，再断言行为。
+
+## [1.27.11] - 2026-09-29
+
+修复 DeepSeek Harness 插件三处问题：会话格式 v4 下首轮 hint 使整轮失败（#55）、web 半边注入已被取代的 `dsh-client-runtime`（#54），并复核「知识节点」面板 `/gf` 通道（#26）。
 
 ## [1.27.10] - 2026-09-29
 

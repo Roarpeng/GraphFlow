@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "1.27.10",
+  "version": "1.27.11",
   "publishConfig": {
     "access": "public"
   },
@@ -129,8 +129,9 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-connection"
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-renderer"
       ]
     }
   },

@@ -245,7 +245,7 @@ describe("dsh ESM glue plugin", () => {
     expect(messages[1]?.content?.[0]?.text).toContain("mcp__graphflow__graphflow_context");
     expect(messages[1]?.content?.[0]?.text).toContain(`rootDir=${workspace}`);
     expect(messages[1]?.content?.[0]?.text?.length).toBeLessThan(240);
-    expect(messages[1]?.source).toEqual({ kind: "plugin", plugin: "graphflow-dsh", form: "instructions" });
+    expect(messages[1]?.source).toEqual({ kind: "plugin:graphflow-dsh", plugin: "graphflow-dsh", form: "instructions" });
 
     handlers["agent/disposed"]?.({ agent, cwd: workspace });
     expect(spawned).toHaveLength(0);
@@ -283,7 +283,7 @@ describe("dsh ESM glue plugin", () => {
     )) as { kind: string; messages: Array<{ source?: unknown }> };
     expect(enter.kind).toBe("enter");
     expect(enter.messages).toHaveLength(2);
-    expect(enter.messages[1]?.source).toEqual({ kind: "plugin", plugin: "graphflow-dsh", form: "instructions" });
+    expect(enter.messages[1]?.source).toEqual({ kind: "plugin:graphflow-dsh", plugin: "graphflow-dsh", form: "instructions" });
     expect(injected).toHaveLength(0);
 
     const again = (await handlers["agent/pre-step"]?.(
@@ -407,12 +407,39 @@ describe("dsh ESM glue plugin", () => {
     expect(isAutoCaptureEnabled({ GRAPHFLOW_AUTO_CAPTURE: "false" })).toBe(false);
     expect(buildContextHint("/tmp/proj")).toContain("rootDir=/tmp/proj");
     const hint = buildHintMessage("/tmp/proj");
-    expect(hint.source).toEqual({ kind: "plugin", plugin: "graphflow-dsh", form: "instructions" });
+    expect(hint.source).toEqual({ kind: "plugin:graphflow-dsh", plugin: "graphflow-dsh", form: "instructions" });
     expect(hint.content[0]?.text).toContain("rootDir=/tmp/proj");
     expect(resolveConnectionService({ get: () => undefined, connection: { rpc: {} } })).toEqual({ rpc: {} });
     expect(resolveConnectionService({ get: () => ({ rpc: { handle() {} } }) })?.rpc).toBeDefined();
     const journal = join(makeTempRoot("gf-dsh-journal-"), "empty.jsonl");
     expect(latestPendingEpisodeId(journal)).toBeUndefined();
+  });
+
+  it("first-turn hint passes DSH session format v4 source admission (#55)", () => {
+    // Mirrors dsh-session-format-v3-to-v4 `source(message)`: retired "plugin" is a hard reject.
+    const admitV4 = (message: { source?: { kind?: unknown } }) => {
+      const kind = message.source?.kind;
+      if (typeof kind !== "string" || kind.length === 0 || kind === "plugin") {
+        throw new Error("format v4 message requires a producer-owned source kind");
+      }
+    };
+    const hint = buildHintMessage("/tmp/proj");
+    expect(() => admitV4(hint)).not.toThrow();
+    expect(hint.source.kind.startsWith("plugin:")).toBe(true);
+  });
+
+  it("web client injects the live DSH service providers, not the retired dsh-client-runtime (#54)", () => {
+    const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf8"));
+    const inject: string[] = pkg.dsh.client.inject;
+    expect(inject).not.toContain("@deepseek-ai/dsh-client-runtime");
+    // sessions / connection / slots — the services dsh/client.js declares in `inject`.
+    expect(inject).toEqual(
+      expect.arrayContaining([
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-renderer",
+      ])
+    );
   });
 });
 
@@ -469,7 +496,7 @@ describe("workspace cwd resolution (unsafe rootDir guard)", () => {
 
     const unsafeMessage = buildHintMessage(home);
     expect(unsafeMessage.content[0]?.text).not.toContain("rootDir=");
-    expect(unsafeMessage.source).toEqual({ kind: "plugin", plugin: "graphflow-dsh", form: "instructions" });
+    expect(unsafeMessage.source).toEqual({ kind: "plugin:graphflow-dsh", plugin: "graphflow-dsh", form: "instructions" });
 
     // Placeholders would create a literal "${workspaceFolder}" directory.
     expect(buildContextHint("${workspaceFolder}")).not.toContain("rootDir=");
@@ -550,13 +577,28 @@ describe("inbox auto-record (dialogue turn capture)", () => {
         content: [{ type: "text", text: "<system-reminder> available skills" }],
       })
     ).toBe(false);
-    // The glue's own hint carries source.kind "plugin" (form: instructions).
+    // The glue's own hint carries the v4 producer-owned kind "plugin:graphflow-dsh".
     expect(
       isUserOriginatedMessage({
-        source: { kind: "plugin", plugin: "graphflow-dsh", form: "instructions" },
+        role: "user",
+        source: { kind: "plugin:graphflow-dsh", plugin: "graphflow-dsh", form: "instructions" },
         content: [{ type: "text", text: "GraphFlow: before large code reads, call mcp__graphflow__graphflow_context" }],
       })
     ).toBe(false);
+    // Session format v4 producer kinds (renamed / same-name / third-party plugin:*).
+    for (const kind of [
+      "runtime-context",
+      "system-prompt",
+      "compact-checkpoint",
+      "time-context",
+      "plan-mode",
+      "tool-jobs",
+      "user-approval",
+      "cordis-host-runner",
+      "plugin:some-other-plugin",
+    ]) {
+      expect(isUserOriginatedMessage({ role: "user", source: { kind }, content: [] })).toBe(false);
+    }
     // unknown/missing source falls back to role
     expect(isUserOriginatedMessage({ role: "user", content: [] })).toBe(true);
     expect(isUserOriginatedMessage({ role: "system", content: [] })).toBe(false);

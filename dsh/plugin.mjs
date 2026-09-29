@@ -226,6 +226,14 @@ export function buildContextHint(cwd = process.cwd()) {
 }
 
 /**
+ * DSH session format v4 rejects the retired V3 wrapper `kind: "plugin"`
+ * outright (the whole turn fails at adoption). Third-party producers own
+ * `plugin:<id>` — the same shape dsh-session-format-v3-to-v4 lifts V3
+ * plugin sources into.
+ */
+const HINT_SOURCE_KIND = `plugin:${PLUGIN_ID}`;
+
+/**
  * Same-step first-turn hint message. Tagged as plugin instructions so
  * `isUserOriginatedMessage` does not treat it as a user question.
  * `inject()` is the wrong primitive here — it lands in the *next* step inbox.
@@ -236,7 +244,7 @@ export function buildHintMessage(cwd = process.cwd()) {
     id: crypto.randomUUID(),
     role: "user",
     content: [{ type: "text", text: buildContextHint(cwd) }],
-    source: { kind: "plugin", plugin: PLUGIN_ID, form: "instructions" },
+    source: { kind: HINT_SOURCE_KIND, plugin: PLUGIN_ID, form: "instructions" },
   };
 }
 
@@ -285,10 +293,16 @@ export function resolveCliCommand(packageRoot = PACKAGE_ROOT) {
  * - `goal`: goal-round driver context prompts (dsh-goal-round-driver);
  * - `skill-catalog`: the `<system-reminder><available_skills>` catalog
  *   (dsh-tool-skill, form: catalog).
- * `plugin` also covers runtime-context snapshots (`@deepseek-ai/dsh-system-prompt`,
- * form: snapshot), approval-policy changes (`user-approval`),
- * Cordis run failures (`cordis-host-runner`), and this glue's own hint
- * (`graphflow-dsh`, form: instructions).
+ * `plugin` (session format v3) also covers runtime-context snapshots
+ * (`@deepseek-ai/dsh-system-prompt`, form: snapshot), approval-policy changes
+ * (`user-approval`), Cordis run failures (`cordis-host-runner`), and this
+ * glue's own hint (`graphflow-dsh`, form: instructions).
+ *
+ * Session format v4 retires `plugin`: first-party producers own their kind
+ * (renamed or same-name, per dsh-session-format-v3-to-v4 RENAMED_PRODUCERS /
+ * RELEASED_SAME_NAME_PRODUCERS) and third-party producers use `plugin:<id>`
+ * (matched by prefix in `isUserOriginatedMessage`). `webhook` is left out on
+ * purpose: it can relay a human message from an external channel.
  */
 const SYSTEM_MESSAGE_SOURCE_KINDS = new Set([
   "plugin",
@@ -300,7 +314,32 @@ const SYSTEM_MESSAGE_SOURCE_KINDS = new Set([
   "session-reference",
   "goal",
   "skill-catalog",
+  "system-prompt",
+  "runtime-context",
+  "compact-checkpoint",
+  "compact-basic",
+  "ptc-mode",
+  "team-message",
+  "agent-message",
+  "coordinator",
+  "skill-invocation",
+  "model-selection",
+  "plan-mode",
+  "time-context",
+  "tmux-context",
+  "user-approval",
+  "repeat-tool-reminder",
+  "tool-cordis",
+  "cordis-host-runner",
+  "tool-goal",
+  "tool-jobs",
+  "hooks-codex",
+  "hooks-claude-code",
+  "schedule",
+  "dsh-session-title-llm",
 ]);
+
+const PRODUCER_OWNED_PLUGIN_KIND_PREFIX = "plugin:";
 
 /**
  * Whether a message originates from the human user rather than the harness.
@@ -319,7 +358,12 @@ export function isUserOriginatedMessage(message) {
   const kind =
     message.source && typeof message.source === "object" ? message.source.kind : undefined;
   if (kind === "user") return true;
-  if (typeof kind === "string" && SYSTEM_MESSAGE_SOURCE_KINDS.has(kind)) return false;
+  if (
+    typeof kind === "string" &&
+    (SYSTEM_MESSAGE_SOURCE_KINDS.has(kind) || kind.startsWith(PRODUCER_OWNED_PLUGIN_KIND_PREFIX))
+  ) {
+    return false;
+  }
   return message.role !== "system";
 }
 
