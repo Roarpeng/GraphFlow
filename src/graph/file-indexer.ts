@@ -19,6 +19,7 @@ import { buildDocumentEdges } from "./language-indexers/markdown.js";
 import { markdownIndexer } from "./language-indexers/markdown.js";
 import type { CallRelation, InheritRelation } from "./language-indexers/index.js";
 import { embedAndAttachNodes } from "../learning/embeddings.js";
+import { refreshStaleEmbeddings } from "../learning/embedding-refresh.js";
 import {
   convertDocumentToMarkdown,
   DEFAULT_DOCUMENT_MAX_FILE_SIZE,
@@ -407,6 +408,14 @@ export async function indexWorkspaceFiles(
   }
 
   saveCacheState(cachePath, cacheState);
+
+  if (options?.embeddingProvider && !signal?.aborted) {
+    try {
+      await refreshStaleEmbeddings(client, options.embeddingProvider, signal ? { signal } : undefined);
+    } catch (error) {
+      logger.warn({ error }, "Stale embedding refresh failed; vectors stay on their previous model");
+    }
+  }
 
   const agentWorkItems = buildDocumentSemanticWorkItems(documentTargets);
   const result: {

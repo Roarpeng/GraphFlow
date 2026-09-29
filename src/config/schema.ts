@@ -1,3 +1,5 @@
+export type EmbeddingDtype = "fp32" | "fp16" | "q8" | "q4";
+
 export interface ProviderConfig {
   apiKey?: string;
   baseUrl?: string;
@@ -240,6 +242,8 @@ export interface GraphFlowConfig {
     modelCacheDir?: string;
     /** Backward-compatible alias for modelCacheDir. */
     transformersCachePath?: string;
+    /** ONNX weight precision for the local model. Default "q8" (~100MB vs ~400MB fp32). */
+    dtype?: EmbeddingDtype;
     vectorStorePath?: string;
     topK?: number;
     minSimilarity?: number;

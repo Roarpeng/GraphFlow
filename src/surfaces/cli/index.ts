@@ -127,6 +127,41 @@ import {
   type CliCommandResult,
 } from "./output";
 
+async function executeDepsCommand(args: string[]): Promise<CliCommandResult> {
+  const { ensureRuntimeDepsInstalled, inspectRuntimeDeps } = await import("../../integrations/ensure-runtime-deps.js");
+  const sub = args[0] ?? "status";
+  if (sub === "status") {
+    const deps = inspectRuntimeDeps();
+    const lines = deps.map(
+      (d) => `${d.name}: ${d.source}${d.version ? ` ${d.version}` : ""}${d.loadError ? ` (load error: ${d.loadError})` : ""}`
+    );
+    return { command: "deps-status", data: { deps }, legacyText: lines.join("\n") };
+  }
+  if (sub !== "install") {
+    process.exitCode = 1;
+    return { command: "deps", data: { error: `unknown deps subcommand: ${sub}` }, legacyText: "usage: graphflow deps <status|install> [--force] [--with-model]" };
+  }
+  const result = await ensureRuntimeDepsInstalled({
+    force: args.includes("--force"),
+    logger: (m) => console.error(m),
+  });
+  if (result.status === "failed") process.exitCode = 1;
+  let model: unknown;
+  let modelText = "";
+  if (args.includes("--with-model") && result.status !== "failed") {
+    const { prefetchEmbeddingModel } = await import("../../learning/embeddings.js");
+    const prefetch = await prefetchEmbeddingModel({ logger: (m) => console.error(m) });
+    model = prefetch;
+    modelText = `\nmodel ${prefetch.model}: ${prefetch.ok ? `ready (dim ${prefetch.dimensions}, ${prefetch.elapsedMs}ms)` : `failed — ${prefetch.error}`}`;
+    if (!prefetch.ok) process.exitCode = 1;
+  }
+  return {
+    command: "deps-install",
+    data: { ...result, ...(model ? { model } : {}) },
+    legacyText: `runtime deps ${result.status}: ${result.message}${modelText}`,
+  };
+}
+
 async function executeCommand(command: string, args: string[], configPath?: string): Promise<CliCommandResult | undefined> {
   if (command === "install") {
     const { buildInstallReport, formatInstallLegacyText } = require("./init") as typeof import("./init");
@@ -159,11 +194,27 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     if (!data.ok) {
       process.exitCode = 1;
     }
+    let runtimeDepsText = "";
+    let runtimeDeps: unknown;
+    if (!args.includes("--skip-deps")) {
+      const { ensureRuntimeDepsInstalled, isRuntimeDepsAutoInstallDisabled } = await import(
+        "../../integrations/ensure-runtime-deps.js"
+      );
+      if (!isRuntimeDepsAutoInstallDisabled()) {
+        const result = await ensureRuntimeDepsInstalled({ logger: (m) => console.error(m) });
+        runtimeDeps = result;
+        runtimeDepsText = `; runtime deps ${result.status}: ${result.message}`;
+      }
+    }
     return {
       command: "install",
-      data,
-      legacyText: formatInstallLegacyText(data),
+      data: runtimeDeps ? { ...data, runtimeDeps } : data,
+      legacyText: `${formatInstallLegacyText(data)}${runtimeDepsText}`,
     };
+  }
+
+  if (command === "deps") {
+    return executeDepsCommand(args);
   }
 
   if (command === "init" || (command === "config" && args[0] === "init")) {

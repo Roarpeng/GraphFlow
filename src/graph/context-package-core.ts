@@ -12,8 +12,10 @@ import type { GraphNode } from "../core/types.js";
 import {
   cosineSimilarity,
   extractEmbedding,
+  filterCompatibleEmbeddingNodes,
   reciprocalRankFusion,
 } from "../learning/embeddings.js";
+import { recordIncompatibleVectorsSkipped } from "../learning/embedding-quality.js";
 import type { GraphClient } from "./client-factory.js";
 import { rankNodesForContextQuery, composeContextQuery, buildSearchScoreTokens } from "./graph-utils.js";
 import { collectExpandedKeywordHits } from "./query-expand.js";
@@ -157,7 +159,7 @@ export function vectorRecall(
   const scored: { node: GraphNode; sim: number }[] = [];
   for (const node of nodes) {
     const emb = extractEmbedding(node);
-    if (!emb) continue;
+    if (!emb || emb.length !== queryEmbedding.length) continue;
     const sim = cosineSimilarity(queryEmbedding, emb);
     if (sim >= minSimilarity) scored.push({ node, sim });
   }
@@ -236,11 +238,12 @@ export async function fuseVectorRecallIfEnabled(
     const queryEmbedding = await options.embeddingProvider.embed(query);
     const topK = options.vectorTopK ?? 8;
     const minSim = options.vectorMinSimilarity ?? 0.05;
-    const vectorCandidates = collectVectorRecallCandidates(
-      client,
-      keywordHits,
-      options.enableFullGraphVectorRecall === true
+    const { nodes: vectorCandidates, skipped } = filterCompatibleEmbeddingNodes(
+      collectVectorRecallCandidates(client, keywordHits, options.enableFullGraphVectorRecall === true),
+      queryEmbedding.length,
+      options.embeddingProvider.fingerprint?.()
     );
+    recordIncompatibleVectorsSkipped(skipped);
     const vectorHits = await hnswVectorRecall(
       vectorCandidates,
       queryEmbedding,

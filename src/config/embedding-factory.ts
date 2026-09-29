@@ -15,7 +15,11 @@ import {
   getEmbeddingQualitySummary,
   wrapEmbeddingProviderWithQualityMonitor,
 } from "../learning/embedding-quality";
-import { CANONICAL_EMBEDDING_MODEL } from "./embedding-model";
+import {
+  CANONICAL_EMBEDDING_DIM,
+  CANONICAL_EMBEDDING_MODEL,
+  resolveEmbeddingDtype,
+} from "./embedding-model";
 
 function collectResolveRoots(config: GraphFlowConfig): string[] {
   const roots: string[] = [];
@@ -104,10 +108,11 @@ export function createEmbeddingProviderFromConfig(
 
   const backend = resolveEffectiveEmbeddingBackend(config);
   const modelCacheDir = resolveConfiguredModelCacheDir(config);
+  const dtype = resolveEmbeddingDtype(policy?.dtype);
 
   let embeddingProvider: EmbeddingProvider | undefined;
   let model = CANONICAL_EMBEDDING_MODEL;
-  let dimensions = EMBEDDING_DIM;
+  let dimensions = CANONICAL_EMBEDDING_DIM;
   let resolvedProviderName = "transformers";
 
   const createResilientLocal = (): EmbeddingProvider => {
@@ -115,6 +120,7 @@ export function createEmbeddingProviderFromConfig(
     configureEmbeddingQualityBackend("pending");
     return createResilientLocalEmbeddingProvider({
       resolveRoots: collectResolveRoots(config),
+      dtype,
       ...(modelCacheDir ? { modelCacheDir } : {}),
       onFallback: () => {
         configureEmbeddingQualityMeta({
@@ -129,6 +135,7 @@ export function createEmbeddingProviderFromConfig(
 
   if (backend === "fnv") {
     model = HASH_EMBEDDING_MODEL;
+    dimensions = EMBEDDING_DIM;
     resolvedProviderName = "hash";
     embeddingProvider = createHashEmbeddingProvider();
     configureEmbeddingQualityBackend("hash");

@@ -21,6 +21,10 @@ export interface EmbeddingQualitySummary {
   lastSample?: EmbeddingQualitySample;
   backend?: string;
   fallbackReason?: string;
+  /** Stored vectors skipped by the last vector recall (wrong dimension / model). */
+  incompatibleVectorsSkipped?: number;
+  /** Last refresh pass: vectors from an older model, and how many were re-embedded. */
+  staleVectors?: { stale: number; refreshed: number; fingerprint?: string; at: number };
 }
 
 interface EmbeddingQualityState {
@@ -34,6 +38,8 @@ interface EmbeddingQualityState {
   lastSample?: EmbeddingQualitySample;
   backend?: string;
   fallbackReason?: string;
+  incompatibleVectorsSkipped?: number;
+  staleVectors?: { stale: number; refreshed: number; fingerprint?: string; at: number };
 }
 
 const state: EmbeddingQualityState = {
@@ -56,6 +62,16 @@ export function resetEmbeddingQualityStats(): void {
   delete state.lastSample;
   delete state.backend;
   delete state.fallbackReason;
+  delete state.incompatibleVectorsSkipped;
+  delete state.staleVectors;
+}
+
+export function recordIncompatibleVectorsSkipped(count: number): void {
+  state.incompatibleVectorsSkipped = count;
+}
+
+export function recordStaleVectorRefresh(result: { stale: number; refreshed: number; fingerprint?: string }): void {
+  state.staleVectors = { ...result, at: Date.now() };
 }
 
 export function configureEmbeddingQualityMeta(meta: {
@@ -157,6 +173,10 @@ export function getEmbeddingQualitySummary(): EmbeddingQualitySummary {
     ...(state.lastSample ? { lastSample: state.lastSample } : {}),
     ...(state.backend ? { backend: state.backend } : {}),
     ...(state.fallbackReason ? { fallbackReason: state.fallbackReason } : {}),
+    ...(typeof state.incompatibleVectorsSkipped === "number"
+      ? { incompatibleVectorsSkipped: state.incompatibleVectorsSkipped }
+      : {}),
+    ...(state.staleVectors ? { staleVectors: state.staleVectors } : {}),
   };
 }
 
@@ -185,6 +205,9 @@ export function wrapEmbeddingProviderWithQualityMonitor(
     wrapped.warmup = async () => {
       await provider.warmup!();
     };
+  }
+  if (provider.fingerprint) {
+    wrapped.fingerprint = () => provider.fingerprint!();
   }
   return wrapped;
 }

@@ -64,12 +64,19 @@ export function saveCacheState(cachePath: string, cacheState: CacheState): void 
   }
 }
 
-/** Remove graph store, index cache, and vector DB for a full rebuild. */
+/**
+ * Remove graph store, index cache, and vector DB for a full rebuild.
+ * Close any client on `graphStorePath` first: on POSIX an open SQLite handle
+ * keeps writing into the unlinked inode, and a leftover -wal would be replayed
+ * into the fresh database.
+ */
 export function clearGraphIndexArtifacts(rootDir: string, graphStorePath: string): void {
   const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
   const vectorsPath = join(rootDir, CACHE_DIR, "vectors.db");
   rmSync(graphStorePath, { force: true });
   rmSync(`${graphStorePath}${GRAPH_STORE_DELTA_SUFFIX}`, { force: true });
+  rmSync(`${graphStorePath}-wal`, { force: true });
+  rmSync(`${graphStorePath}-shm`, { force: true });
   rmSync(cachePath, { force: true });
   rmSync(vectorsPath, { force: true });
 }

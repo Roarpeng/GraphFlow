@@ -899,6 +899,34 @@ function installMcpProcessGuards(server: McpServer): void {
   process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
+/**
+ * Shared-runtime hosts (Cursor, Cline, ZCode) lack better-sqlite3 and
+ * transformers; install them in the background so the next start uses the same
+ * SQLite store and semantic embeddings as the npm package.
+ */
+function scheduleRuntimeDepsInstall(server: McpServer): void {
+  const timer = setTimeout(() => {
+    void (async () => {
+      try {
+        const { ensureRuntimeDepsInstalled, isRuntimeDepsAutoInstallDisabled } = await import(
+          "../../integrations/ensure-runtime-deps.js"
+        );
+        if (isRuntimeDepsAutoInstallDisabled()) return;
+        const result = await ensureRuntimeDepsInstalled({ respectBackoff: true });
+        if (result.status === "installed" || result.status === "failed") {
+          const message = `[GraphFlow MCP] runtime deps ${result.status}: ${result.message}` +
+            (result.status === "installed" ? " (takes full effect on next MCP start)" : "");
+          console.error(message);
+          server.sendLogNotification(result.status === "installed" ? "info" : "warning", message);
+        }
+      } catch (error) {
+        console.error("[GraphFlow MCP] runtime deps check failed:", error instanceof Error ? error.message : error);
+      }
+    })();
+  }, 15_000);
+  timer.unref();
+}
+
 function runMcpServerCli(): void {
   const argv = process.argv.slice(2);
   const httpOptions = readMcpHttpOptionsFromArgv(argv);
@@ -942,6 +970,8 @@ function runMcpServerCli(): void {
       server.sendLogNotification("error", message);
     }
   })();
+
+  scheduleRuntimeDepsInstall(server);
 
   if (httpOptions) {
     void startStreamableHttpServer(() => server, httpOptions)

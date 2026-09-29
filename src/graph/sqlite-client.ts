@@ -4,17 +4,36 @@ import { createRequire } from "node:module";
 import type { GraphEdge, GraphNode } from "../core/types";
 import type { GraphClient } from "./client-factory";
 import { tokenizeForIndex, containsCJK } from "./graph-utils";
+import { requireFromOptionalDeps, resolveSqliteDepsRoot } from "../utils/optional-deps";
 
 const requireFn = createRequire(__filename);
 
+export type SqliteModuleSource = "bundled" | "optional-deps";
+
+let loadedSqliteSource: SqliteModuleSource | undefined;
+
+/** Where better-sqlite3 was last loaded from; undefined until a sqlite client opened. */
+export function getSqliteModuleSource(): SqliteModuleSource | undefined {
+  return loadedSqliteSource;
+}
+
 function loadBetterSqlite3(): typeof import("better-sqlite3") {
   try {
-    return requireFn("better-sqlite3") as typeof import("better-sqlite3");
+    const mod = requireFn("better-sqlite3") as typeof import("better-sqlite3");
+    loadedSqliteSource = "bundled";
+    return mod;
   } catch (err) {
+    try {
+      const mod = requireFromOptionalDeps<typeof import("better-sqlite3")>("better-sqlite3", resolveSqliteDepsRoot());
+      loadedSqliteSource = "optional-deps";
+      return mod;
+    } catch {
+      // report the primary resolution error below
+    }
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(
       `[graphflow] sqlite transport requires the optional 'better-sqlite3' package. ` +
-        `Install it (npm i better-sqlite3) or switch graphPolicy.transport to 'file' / 'memory'. ` +
+        `Run 'graphflow deps install' (installs into ~/.graphflow/optional-deps) or switch graphPolicy.transport to 'file' / 'memory'. ` +
         `Underlying error: ${msg}`
     );
   }
@@ -218,6 +237,24 @@ export class GraphifySqliteClient implements GraphClient {
       }
     });
     tx(edges);
+  }
+
+  /** Nodes and edges in ONE transaction: either the whole batch lands or none of it. */
+  upsertGraphSync(batch: { nodes: GraphNode[]; edges: GraphEdge[] }): void {
+    const nodeStmt = this.db.prepare(
+      `INSERT INTO nodes(id, type, content, metadata, searchtext) VALUES(?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET type=excluded.type, content=excluded.content, metadata=excluded.metadata, searchtext=excluded.searchtext`
+    );
+    const edgeStmt = this.db.prepare(`INSERT OR IGNORE INTO edges(from_id, to_id, relation) VALUES(?, ?, ?)`);
+    this.db.transaction(() => {
+      for (const n of batch.nodes) {
+        const metaJson = n.metadata !== undefined ? JSON.stringify(n.metadata) : null;
+        nodeStmt.run(n.id, n.type, n.content, metaJson, buildSearchText(n.content));
+      }
+      for (const e of batch.edges) {
+        edgeStmt.run(e.from, e.to, e.relation);
+      }
+    })();
   }
 
   readSnapshot(): { nodes: GraphNode[]; edges: GraphEdge[] } {

@@ -4,7 +4,7 @@
   "displayName": "GraphFlow Context & Memory",
   "description": "Token-first code context, knowledge graph, MCP, planning and cross-session memory for VS Code/Cursor: memory audit CLI, flywheel attribution panel, semantic embeddings, skill sync.",
   "icon": "media/graphflow.png",
-  "version": "1.27.13",
+  "version": "1.28.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/Roarpeng/GraphFlow.git"
@@ -43,6 +43,11 @@
           "type": "boolean",
           "default": true,
           "description": "Download @firecrawl/anydoc so Office/PDF can be indexed. Prefer GraphFlow: Settings (Office / PDF). This key is the backing store."
+        },
+        "graphflow.downloadRuntimeDeps": {
+          "type": "boolean",
+          "default": true,
+          "description": "Download better-sqlite3 and @huggingface/transformers into ~/.graphflow/optional-deps so every agent host shares one SQLite graph and semantic embeddings."
         }
       }
     },

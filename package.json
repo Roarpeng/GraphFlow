@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "1.27.13",
+  "version": "1.28.0",
   "publishConfig": {
     "access": "public"
   },

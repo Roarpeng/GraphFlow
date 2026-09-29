@@ -404,6 +404,8 @@ export interface GraphIndexResult {
 export interface GraphRebuildResult extends GraphIndexResult {
   cleared: boolean;
   storePath: string;
+  /** Memory nodes (dialogue, workbench, skills, episodes, insights) carried across the rebuild. */
+  preservedMemory?: { nodes: number; edges: number; droppedEdges: number };
 }
 
 export interface GraphSnapshotResult {
@@ -528,6 +530,22 @@ export interface RoutingDiagnosisResult {
     };
     backend?: string;
     fallbackReason?: string;
+    /** Configured ONNX precision for the local model (q8 by default). */
+    dtype?: string;
+    incompatibleVectorsSkipped?: number;
+    staleVectors?: { stale: number; refreshed: number; fingerprint?: string; at: number };
+  };
+  /** Which store this process uses and whether all hosts can share it. */
+  graphStore?: {
+    transport: string;
+    backend?: "sqlite" | "file" | "memory" | "mcp-http";
+    path?: string;
+    fallbackReason?: string;
+    sqliteModuleSource?: "bundled" | "optional-deps";
+    /** A JSON store sits next to the SQLite store and has not been merged yet. */
+    unmergedJsonStore: boolean;
+    lastMerge?: { mergedAt: string; stats: Record<string, number> };
+    runtimeDeps: Array<{ name: string; source: string; version?: string; loadError?: string }>;
   };
   runtimeTimeline: RuntimeTimelineSummary;
   workspaceRoot: {

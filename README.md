@@ -188,8 +188,18 @@ Key options:
 | `graphPolicy.maxContextTokens` | Context budget (default 1500) |
 | `graphPolicy.autoIndexOnSave` | Auto incremental index on save (default true) |
 | `embeddingPolicy.provider` | `transformers` (local default) / `openai` / `hash` |
+| `embeddingPolicy.dtype` | Local model precision: `q8` (default, ~98MB) / `fp16` / `q4` / `fp32` (~400MB); env `GRAPHFLOW_EMBEDDING_DTYPE` wins |
 | `embeddingPolicy.vectorStorePath` | Vector index persistence path (`.hnsw` derived automatically) |
 | `skillPolicy.enableSkillFlywheel` | Learning flywheel switch |
+
+### Switching agents on one project
+
+Cursor, ZCode, Cline, Claude Code and DSH working on the same project share **one** graph and memory: every host reads and writes `graphflow-out/graphflow-graph.sqlite` and the same incremental index manifest, so switching tools never rebuilds the graph and dialogue turns, workbench topics, episodes and skills carry over.
+
+- **Runtime deps on demand.** The VSIX / shared MCP runtime does not bundle `better-sqlite3` or `@huggingface/transformers`; they are installed in the background into `~/.graphflow/optional-deps` on first start (better-sqlite3 per node / Electron ABI). Manual: `graphflow deps status`, `graphflow deps install [--with-model]`. Opt out: `GRAPHFLOW_OPTIONAL_DEPS_AUTO=0` or the extension setting `graphflow.downloadRuntimeDeps`.
+- **Legacy JSON stores are merged.** Older hosts without better-sqlite3 fell back to `graphflow-graph.json`, splitting memory across two stores. When the SQLite store opens next to a JSON store, its memory is merged in (newer `updatedAt` wins; colliding dialogue turn ids are renumbered), the JSON is renamed to `*.merged-bak`, and stats land in `*.merge-log.json` and in `graphflow diagnose` → `graphStore`.
+- **Embedding fingerprints.** Each vector records its model (`Xenova/bge-base-zh-v1.5@q8`, `fnv1a-384`, …). Recall only compares vectors from the active model; index runs re-embed stale vectors in batches, and a transient fallback to hash never overwrites semantic vectors. The model is cached once in `~/.graphflow/models` for all hosts.
+- **`graph index --full` keeps memory.** The memory subgraph is captured before the store is cleared and restored after re-indexing.
 
 ## Team backend pilot
 

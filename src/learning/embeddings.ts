@@ -3,8 +3,14 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { GraphNode } from "../core/types";
-import { CANONICAL_EMBEDDING_MODEL } from "../config/embedding-model";
+import {
+  CANONICAL_EMBEDDING_MODEL,
+  embeddingFingerprint,
+  resolveEmbeddingDtype,
+} from "../config/embedding-model";
+import type { EmbeddingDtype } from "../config/schema";
 import { logger } from "../utils/logger";
+import { resolveOptionalDepsRoot, resolveSharedModelCacheDir } from "../utils/optional-deps";
 
 export const EMBEDDING_DIM = 384;
 export const HASH_EMBEDDING_MODEL = "fnv1a-384";
@@ -17,6 +23,11 @@ export type LocalEmbeddingBackend = "transformers" | "hash";
 
 export interface EmbeddingProvider {
   embed(text: string): Promise<number[]>;
+  /**
+   * Model identity stored next to each vector (e.g. `Xenova/bge-base-zh-v1.5@q8`,
+   * `fnv1a-384`). Undefined while a resilient provider has not settled yet.
+   */
+  fingerprint?(): string | undefined;
   /**
    * 预热：用一段简短的 dummy 文本（如 "warmup"）做一次推理，
    * 避免首个真实请求的冷启动延迟（尤其是本地模型懒加载场景）。
@@ -88,7 +99,7 @@ function l2Normalize(vec: number[]): number[] {
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Timeout after ${ms}ms: ${label}`)), ms);
+    const timer = setTimeout(() => reject(new Error(`Timeout after ${ms}ms: ${label}`)), Math.min(ms, 2 ** 31 - 1));
     promise.then(
       (v) => { clearTimeout(timer); resolve(v); },
       (e) => { clearTimeout(timer); reject(e); }
@@ -103,6 +114,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 export function createHashEmbeddingProvider(dimensions: number = EMBEDDING_DIM): EmbeddingProvider {
   const dim = dimensions > 0 ? dimensions : EMBEDDING_DIM;
   return {
+    fingerprint: () => `fnv1a-${dim}`,
     async embed(text: string): Promise<number[]> {
       const vec = new Array<number>(dim).fill(0);
       const normalized = text.toLowerCase();
@@ -146,8 +158,23 @@ type TransformersModule = {
   };
   pipeline: (
     task: "feature-extraction",
-    model: string
+    model: string,
+    options?: {
+      /** @huggingface/transformers v3+: selects onnx/model{_quantized,_fp16,_q4}.onnx. */
+      dtype?: EmbeddingDtype;
+      /** Legacy @xenova/transformers equivalent of dtype q8. */
+      quantized?: boolean;
+      progress_callback?: (event: TransformersProgressEvent) => void;
+    }
   ) => Promise<(texts: string | string[], options: { pooling: "mean"; normalize: boolean }) => Promise<unknown>>;
+};
+
+export type TransformersProgressEvent = {
+  status?: string;
+  file?: string;
+  progress?: number;
+  loaded?: number;
+  total?: number;
 };
 
 function normalizeOptionalPath(value: string | undefined): string | undefined {
@@ -155,15 +182,16 @@ function normalizeOptionalPath(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-export function resolveTransformersCacheDir(modelCacheDir?: string): string | undefined {
-  return normalizeOptionalPath(modelCacheDir) ?? normalizeOptionalPath(process.env[GRAPHFLOW_EMBEDDING_CACHE_DIR_ENV]);
+export function resolveTransformersCacheDir(modelCacheDir?: string): string {
+  return (
+    normalizeOptionalPath(modelCacheDir) ??
+    normalizeOptionalPath(process.env[GRAPHFLOW_EMBEDDING_CACHE_DIR_ENV]) ??
+    resolveSharedModelCacheDir()
+  );
 }
 
-export function applyTransformersCacheDir(transformers: TransformersModule, modelCacheDir?: string): string | undefined {
+export function applyTransformersCacheDir(transformers: TransformersModule, modelCacheDir?: string): string {
   const cacheDir = resolveTransformersCacheDir(modelCacheDir);
-  if (!cacheDir) {
-    return undefined;
-  }
   transformers.env ??= {};
   transformers.env.cacheDir = cacheDir;
   return cacheDir;
@@ -207,11 +235,13 @@ export async function loadTransformersModule(resolveRoots: string[] = []): Promi
       lastError = error;
     }
   }
-  const roots = [...new Set(resolveRoots.filter((r) => typeof r === "string" && r.length > 0))];
+  const roots = [
+    ...new Set([...resolveRoots, resolveOptionalDepsRoot()].filter((r) => typeof r === "string" && r.length > 0)),
+  ];
   for (const root of roots) {
     const loaded = await importTransformersFromRoot(root);
     if (loaded) {
-      logger.info({ root }, "Loaded transformers from workspace resolve root");
+      logger.info({ root }, "Loaded transformers from resolve root");
       return loaded;
     }
   }
@@ -221,6 +251,11 @@ export async function loadTransformersModule(resolveRoots: string[] = []): Promi
 export function createTransformersEmbeddingProvider(options?: {
   resolveRoots?: string[];
   modelCacheDir?: string;
+  /** ONNX precision; defaults to resolveEmbeddingDtype() (q8 unless overridden). */
+  dtype?: EmbeddingDtype;
+  /** Load timeout override (ms); defaults to GRAPHFLOW_EMBEDDING_TIMEOUT_MS or 60s. */
+  timeoutMs?: number;
+  onProgress?: (event: TransformersProgressEvent) => void;
   /** Test/injection hook — defaults to loadTransformersModule. */
   loadModule?: (resolveRoots: string[]) => Promise<TransformersModule>;
 }): EmbeddingProvider {
@@ -229,6 +264,7 @@ export function createTransformersEmbeddingProvider(options?: {
   let loadError: unknown = null;
   const resolveRoots = options?.resolveRoots ?? [];
   const loadModule = options?.loadModule ?? loadTransformersModule;
+  const dtype = options?.dtype ?? resolveEmbeddingDtype();
 
   async function getExtractor() {
     if (extractor) return extractor;
@@ -241,11 +277,16 @@ export function createTransformersEmbeddingProvider(options?: {
         transformers.env.remoteHost = mirror;
       }
       const { pipeline } = transformers;
-      const timeoutMs = parseInt(process.env[GRAPHFLOW_EMBEDDING_TIMEOUT_MS_ENV] ?? "", 10) || 60000;
+      const timeoutMs =
+        options?.timeoutMs ?? (parseInt(process.env[GRAPHFLOW_EMBEDDING_TIMEOUT_MS_ENV] ?? "", 10) || 60000);
       extractor = await withTimeout(
-        pipeline("feature-extraction", CANONICAL_EMBEDDING_MODEL),
+        pipeline("feature-extraction", CANONICAL_EMBEDDING_MODEL, {
+          dtype,
+          quantized: dtype === "q8",
+          ...(options?.onProgress ? { progress_callback: options.onProgress } : {}),
+        }),
         timeoutMs,
-        `pipeline('feature-extraction', '${CANONICAL_EMBEDDING_MODEL}')`
+        `pipeline('feature-extraction', '${CANONICAL_EMBEDDING_MODEL}', { dtype: '${dtype}' })`
       );
       return extractor;
     } catch (error) {
@@ -255,6 +296,7 @@ export function createTransformersEmbeddingProvider(options?: {
   }
 
   return {
+    fingerprint: () => embeddingFingerprint(CANONICAL_EMBEDDING_MODEL, dtype),
     async embed(text: string): Promise<number[]> {
       const ext = await getExtractor();
       const output = await ext!(text, { pooling: "mean", normalize: true });
@@ -277,12 +319,14 @@ export function createTransformersEmbeddingProvider(options?: {
 export function createResilientLocalEmbeddingProvider(options?: {
   resolveRoots?: string[];
   modelCacheDir?: string;
+  dtype?: EmbeddingDtype;
   onFallback?: (error: unknown) => void;
   loadModule?: (resolveRoots: string[]) => Promise<TransformersModule>;
 }): ResilientLocalEmbeddingProvider {
   const primary = createTransformersEmbeddingProvider({
     resolveRoots: options?.resolveRoots ?? [],
     ...(options?.modelCacheDir ? { modelCacheDir: options.modelCacheDir } : {}),
+    ...(options?.dtype ? { dtype: options.dtype } : {}),
     ...(options?.loadModule ? { loadModule: options.loadModule } : {}),
   });
   const fallback = createHashEmbeddingProvider();
@@ -290,6 +334,11 @@ export function createResilientLocalEmbeddingProvider(options?: {
   let fallbackReason: string | null = null;
 
   return {
+    fingerprint() {
+      if (backend === "transformers") return primary.fingerprint?.();
+      if (backend === "hash") return fallback.fingerprint?.();
+      return undefined;
+    },
     getBackend() {
       return backend;
     },
@@ -336,6 +385,7 @@ export function createOpenAiEmbeddingProvider(options: {
   const base = options.baseUrl ?? "https://api.openai.com/v1";
   const model = options.model ?? "text-embedding-3-small";
   return {
+    fingerprint: () => `openai:${model}`,
     async embed(text: string): Promise<number[]> {
       const res = await fetch(`${base}/embeddings`, {
         method: "POST",
@@ -360,6 +410,60 @@ export function createOpenAiEmbeddingProvider(options: {
       /* no-op: 远程 provider 无需本地预热 */
     },
   };
+}
+
+export interface PrefetchEmbeddingModelResult {
+  ok: boolean;
+  model: string;
+  dtype: EmbeddingDtype;
+  dimensions?: number;
+  elapsedMs: number;
+  error?: string;
+}
+
+/**
+ * Download (or verify the cache of) the local model and run one inference.
+ * No load timeout by default: this is the explicit, user-initiated download path.
+ */
+export async function prefetchEmbeddingModel(options?: {
+  dtype?: EmbeddingDtype;
+  modelCacheDir?: string;
+  timeoutMs?: number;
+  logger?: (message: string) => void;
+  loadModule?: (resolveRoots: string[]) => Promise<TransformersModule>;
+}): Promise<PrefetchEmbeddingModelResult> {
+  const dtype = options?.dtype ?? resolveEmbeddingDtype();
+  const log = options?.logger ?? (() => undefined);
+  const lastBucket = new Map<string, number>();
+  const started = Date.now();
+  const provider = createTransformersEmbeddingProvider({
+    resolveRoots: [process.cwd()],
+    dtype,
+    timeoutMs: options?.timeoutMs ?? 2 ** 31 - 1,
+    ...(options?.modelCacheDir ? { modelCacheDir: options.modelCacheDir } : {}),
+    ...(options?.loadModule ? { loadModule: options.loadModule } : {}),
+    onProgress: (event) => {
+      if (event.status !== "progress" || !event.file || typeof event.progress !== "number") return;
+      const bucket = Math.floor(event.progress / 10);
+      if ((lastBucket.get(event.file) ?? -1) >= bucket) return;
+      lastBucket.set(event.file, bucket);
+      const mb = typeof event.total === "number" ? ` of ${(event.total / 1048576).toFixed(1)}MB` : "";
+      log(`[GraphFlow] ${CANONICAL_EMBEDDING_MODEL} ${event.file}: ${Math.round(event.progress)}%${mb}`);
+    },
+  });
+  log(`[GraphFlow] Loading ${CANONICAL_EMBEDDING_MODEL} (dtype ${dtype})…`);
+  try {
+    const vector = await provider.embed("warmup");
+    return { ok: true, model: CANONICAL_EMBEDDING_MODEL, dtype, dimensions: vector.length, elapsedMs: Date.now() - started };
+  } catch (error) {
+    return {
+      ok: false,
+      model: CANONICAL_EMBEDDING_MODEL,
+      dtype,
+      elapsedMs: Date.now() - started,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 /**
@@ -428,12 +532,51 @@ export function extractEmbedding(node: GraphNode): number[] | null {
   return raw as number[];
 }
 
-export function attachEmbedding(node: GraphNode, embedding: number[]): GraphNode {
+/** Model fingerprint recorded with the node's vector; undefined for legacy vectors. */
+export function extractEmbeddingModel(node: GraphNode): string | undefined {
+  const quantized = node.metadata?.[QUANTIZED_EMBEDDING_METADATA_KEY] as { model?: unknown } | undefined;
+  return quantized && typeof quantized.model === "string" ? quantized.model : undefined;
+}
+
+export function attachEmbedding(node: GraphNode, embedding: number[], model?: string): GraphNode {
   const metadata = { ...(node.metadata ?? {}) };
   // 新写入统一使用量化键，并移除遗留 float32 键以避免双份存储
   delete metadata.embedding;
-  metadata[QUANTIZED_EMBEDDING_METADATA_KEY] = quantizeEmbedding(embedding);
+  metadata[QUANTIZED_EMBEDDING_METADATA_KEY] = model
+    ? { ...quantizeEmbedding(embedding), model }
+    : quantizeEmbedding(embedding);
   return { ...node, metadata };
+}
+
+/**
+ * A stored vector is comparable to a query vector only when it has the same
+ * dimension and, when both sides are known, the same model fingerprint.
+ * cosineSimilarity returns 0 for mismatched lengths, which used to hide a
+ * store half-filled with 384-dim hash vectors behind "no results".
+ */
+export function isEmbeddingCompatible(node: GraphNode, dim: number, fingerprint?: string): boolean {
+  const emb = extractEmbedding(node);
+  if (!emb || emb.length !== dim) return false;
+  if (!fingerprint) return true;
+  const model = extractEmbeddingModel(node);
+  return model === undefined || model === fingerprint;
+}
+
+export function filterCompatibleEmbeddingNodes(
+  nodes: GraphNode[],
+  dim: number,
+  fingerprint?: string
+): { nodes: GraphNode[]; skipped: number } {
+  const kept: GraphNode[] = [];
+  let skipped = 0;
+  for (const node of nodes) {
+    if (isEmbeddingCompatible(node, dim, fingerprint)) {
+      kept.push(node);
+    } else if (extractEmbedding(node)) {
+      skipped += 1;
+    }
+  }
+  return { nodes: kept, skipped };
 }
 
 export async function embedAndAttachNodes(
@@ -447,7 +590,8 @@ export async function embedAndAttachNodes(
       continue;
     }
     const emb = await provider.embed(node.content);
-    out.push(attachEmbedding(node, emb));
+    // Read after embed: a resilient provider only settles its backend on first use.
+    out.push(attachEmbedding(node, emb, provider.fingerprint?.()));
   }
   return out;
 }

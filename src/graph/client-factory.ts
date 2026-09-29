@@ -7,6 +7,8 @@ import { GraphifyClient } from "./graphify-client";
 import { GraphifyFileClient } from "./graphify-file-client";
 import { GraphifyMcpClient } from "./graphify-mcp-client";
 import { GraphifySqliteClient } from "./sqlite-client";
+import { mergeSiblingJsonStoreIntoSqlite } from "./store-migration";
+import { existsSync } from "node:fs";
 
 export interface GraphStoreSnapshot {
   nodes: GraphNode[];
@@ -195,6 +197,44 @@ class MutationAwareGraphClient implements GraphClient {
   }
 }
 
+export type GraphStoreBackend = "sqlite" | "file" | "memory" | "mcp-http";
+
+let lastStoreBackend: { backend: GraphStoreBackend; path?: string; fallbackReason?: string } | undefined;
+
+/** Backend chosen by the most recent createGraphClient call (for diagnose). */
+export function getLastGraphStoreBackend(): typeof lastStoreBackend {
+  return lastStoreBackend;
+}
+
+function openSqliteStore(sqlitePath: string, config: GraphFlowConfig): GraphifySqliteClient {
+  const client = new GraphifySqliteClient(sqlitePath);
+  const workspaceRoot = config.graphPolicy.workspaceRoot;
+  mergeSiblingJsonStoreIntoSqlite(client, sqlitePath, workspaceRoot ? { workspaceRoot } : undefined);
+  lastStoreBackend = { backend: "sqlite", path: sqlitePath };
+  return client;
+}
+
+const warnedSplitStores = new Set<string>();
+
+/**
+ * A SQLite store written by another host exists but this runtime cannot load
+ * better-sqlite3: writes go to a JSON store the other hosts do not read.
+ */
+function warnIfSqliteStoreExists(sqlitePath: string, fallbackPath: string): void {
+  lastStoreBackend = {
+    backend: "file",
+    path: fallbackPath,
+    fallbackReason: "better-sqlite3 unavailable — run 'graphflow deps install'",
+  };
+  if (!existsSync(sqlitePath) || warnedSplitStores.has(sqlitePath)) return;
+  warnedSplitStores.add(sqlitePath);
+  logger.warn(
+    { sqlitePath, fallbackPath },
+    "[graphflow] another host keeps this project's graph in SQLite, but better-sqlite3 is unavailable here; " +
+      "writes go to the JSON store until 'graphflow deps install' succeeds (the JSON store is merged back on the next SQLite open)"
+  );
+}
+
 export function createGraphClient(config: GraphFlowConfig): GraphClient {
   if (config.graphPolicy.transport === "mcp-http") {
     // Team backend pilot: remote Graphify server, transparently falling back
@@ -215,6 +255,7 @@ export function createGraphClient(config: GraphFlowConfig): GraphClient {
     const envTimeout = Number.parseInt(process.env.GRAPHFLOW_MCP_TIMEOUT_MS ?? "", 10);
     const timeoutOptions =
       Number.isFinite(envTimeout) && envTimeout > 0 ? { timeoutMs: envTimeout } : {};
+    lastStoreBackend = { backend: "mcp-http", path: endpoint };
     try {
       // mcp-http 是远程试点后端：PageRank 影响面标记只作用于本地图，
       // 且远程 client 有 isDegraded 等特有契约，这里不做装饰器包装。
@@ -234,15 +275,18 @@ export function createGraphClient(config: GraphFlowConfig): GraphClient {
   }
 
   if (config.graphPolicy.transport === "file") {
+    lastStoreBackend = { backend: "file", path: resolveGraphStorePath(config) };
     return new MutationAwareGraphClient(new GraphifyFileClient(resolveGraphStorePath(config)));
   }
 
   if (config.graphPolicy.transport === "sqlite") {
+    const sqlitePath = resolveGraphStorePath(config);
     try {
-      return new MutationAwareGraphClient(new GraphifySqliteClient(resolveGraphStorePath(config)));
+      return new MutationAwareGraphClient(openSqliteStore(sqlitePath, config));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      const fallbackPath = resolveGraphStorePath(config).replace(/\.sqlite$/i, ".json");
+      const fallbackPath = sqlitePath.replace(/\.sqlite$/i, ".json");
+      warnIfSqliteStoreExists(sqlitePath, fallbackPath);
       logger.warn(
         { err, fallbackPath },
         `[graphflow] sqlite transport unavailable, falling back to file. Reason: ${msg}`
@@ -257,9 +301,10 @@ export function createGraphClient(config: GraphFlowConfig): GraphClient {
     // better-sqlite3 is unavailable (e.g. missing optional dependency).
     const sqlitePath = resolveGraphStorePath(config).replace(/\.json$/i, ".sqlite");
     try {
-      return new MutationAwareGraphClient(new GraphifySqliteClient(sqlitePath));
+      return new MutationAwareGraphClient(openSqliteStore(sqlitePath, config));
     } catch {
       const fallbackPath = sqlitePath.replace(/\.sqlite$/i, ".json");
+      warnIfSqliteStoreExists(sqlitePath, fallbackPath);
       logger.info(
         { fallbackPath },
         "[graphflow] auto transport: sqlite unavailable, using file store"
@@ -268,5 +313,6 @@ export function createGraphClient(config: GraphFlowConfig): GraphClient {
     }
   }
 
+  lastStoreBackend = { backend: "memory" };
   return new MutationAwareGraphClient(new InMemoryGraphClientAdapter(new GraphifyClient()));
 }

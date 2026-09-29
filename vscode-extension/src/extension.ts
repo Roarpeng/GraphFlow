@@ -55,6 +55,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // Ensure anydoc (if enabled) before MCP bootstrap / auto-index so Office/PDF indexing works.
   void (async () => {
     await ensureAnydocForExtension(context, output);
+    void ensureRuntimeDepsForExtension(context, output);
     await bootstrapExtension(context, workspaceRoot, output);
     if (workspaceRoot) {
       try {
@@ -487,6 +488,35 @@ async function loadEnsureAnydocModule(context: vscode.ExtensionContext): Promise
     "ensure-anydoc.js"
   );
   return (await import(pathToFileURL(ensurePath).href)) as Awaited<ReturnType<typeof loadEnsureAnydocModule>>;
+}
+
+/**
+ * The extension host runs on Electron, so better-sqlite3 needs an Electron-ABI
+ * build separate from the node build the MCP server installs for itself.
+ */
+async function ensureRuntimeDepsForExtension(
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel
+): Promise<void> {
+  if (!vscode.workspace.getConfiguration("graphflow").get<boolean>("downloadRuntimeDeps", true)) {
+    return;
+  }
+  try {
+    const modulePath = join(context.extensionPath, "vendor", "graphflow", "dist", "integrations", "ensure-runtime-deps.js");
+    const mod = (await import(pathToFileURL(modulePath).href)) as {
+      ensureRuntimeDepsInstalled: (options?: {
+        respectBackoff?: boolean;
+        logger?: (message: string) => void;
+      }) => Promise<{ status: string; message: string }>;
+    };
+    const result = await mod.ensureRuntimeDepsInstalled({
+      respectBackoff: true,
+      logger: (message) => output.appendLine(message),
+    });
+    output.appendLine(`[GraphFlow] runtime deps: ${result.status} — ${result.message}`);
+  } catch (err) {
+    output.appendLine(`[GraphFlow] runtime deps check failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 async function inspectAnydocForExtension(

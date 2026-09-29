@@ -12,11 +12,15 @@ import {
   type SkillConditionOptions,
 } from "../../../core/agent-delegation";
 import { resolveConfig, resolveEfficiencyPolicy } from "../../../config/resolve";
-import { resolveLearningPath } from "../../../config/paths";
+import { resolveGraphStorePath, resolveLearningPath } from "../../../config/paths";
+import { resolveEmbeddingDtype } from "../../../config/embedding-model";
+import { getSqliteModuleSource } from "../../../graph/sqlite-client";
+import { MERGE_MARKER_SUFFIX } from "../../../graph/store-migration";
+import { inspectRuntimeDeps } from "../../../integrations/ensure-runtime-deps";
 import { orchestrate, type OrchestrateOptions } from "../../../core/orchestrator";
 import type { TaskRunResult } from "../../../core/types";
 import { triageTask } from "../../../core/triage";
-import { createGraphClient } from "../../../graph/client-factory";
+import { createGraphClient, getLastGraphStoreBackend } from "../../../graph/client-factory";
 import { indexWorkspaceFiles, hasPendingGraphIndexWork } from "../../../graph/file-indexer";
 import { appendFeedbackEvent } from "../../../learning/learning-events";
 import { updateEpisodeOutcome, type DeviationKind } from "../../../learning/episodic-memory";
@@ -278,7 +282,8 @@ export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResu
     },
     compression,
     embeddingBackend,
-    embeddingQuality: getEmbeddingQualitySummary(),
+    embeddingQuality: { ...getEmbeddingQualitySummary(), dtype: resolveEmbeddingDtype(config.embeddingPolicy?.dtype) },
+    graphStore: computeGraphStoreDiagnosis(config),
     runtimeTimeline: getRuntimeTimelineSummary(),
     workspaceRoot,
     graphFreshness,
@@ -286,6 +291,41 @@ export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResu
     connectivitySummary,
     flywheel,
     team: diagnoseTeamConfig(config),
+  };
+}
+
+function computeGraphStoreDiagnosis(config: ReturnType<typeof resolveConfig>) {
+  const transport = config.graphPolicy.transport;
+  const last = getLastGraphStoreBackend();
+  const configuredPath = resolveGraphStorePath(config);
+  const sqlitePath =
+    last?.backend === "sqlite" && last.path ? last.path : configuredPath.replace(/\.json$/i, ".sqlite");
+  const jsonPath = sqlitePath.replace(/\.sqlite$/i, ".json");
+  let lastMerge: { mergedAt: string; stats: Record<string, number> } | undefined;
+  try {
+    const log = JSON.parse(readFileSync(`${sqlitePath}${MERGE_MARKER_SUFFIX}`, "utf8")) as {
+      mergedAt?: string;
+      stats?: Record<string, number>;
+    };
+    if (log.mergedAt && log.stats) lastMerge = { mergedAt: log.mergedAt, stats: log.stats };
+  } catch {
+    // no merge happened for this store
+  }
+  const sqliteModuleSource = getSqliteModuleSource();
+  return {
+    transport,
+    ...(last?.backend ? { backend: last.backend } : {}),
+    ...(last?.path ?? configuredPath ? { path: last?.path ?? configuredPath } : {}),
+    ...(last?.fallbackReason ? { fallbackReason: last.fallbackReason } : {}),
+    ...(sqliteModuleSource ? { sqliteModuleSource } : {}),
+    unmergedJsonStore: (transport === "sqlite" || transport === "auto") && existsSync(sqlitePath) && existsSync(jsonPath),
+    ...(lastMerge ? { lastMerge } : {}),
+    runtimeDeps: inspectRuntimeDeps().map((dep) => ({
+      name: dep.name,
+      source: dep.source,
+      ...(dep.version ? { version: dep.version } : {}),
+      ...(dep.loadError ? { loadError: dep.loadError } : {}),
+    })),
   };
 }
 
@@ -361,7 +401,14 @@ export function diagnoseRouting(
     `worker=${result.worker.provider}/${result.worker.model}${result.worker.fallbackApplied ? ":fallback" : ""}`,
     `validator=${result.validator.provider}/${result.validator.model}${result.validator.fallbackApplied ? ":fallback" : ""}`,
     `compression=${result.compression.backend}:${result.compression.provider}/${result.compression.model}${result.compression.embedded ? ":embedded" : ""}`,
-    `embeddings=${result.embeddingBackend}`,
+    `embeddings=${result.embeddingBackend}${result.embeddingQuality?.dtype ? `:${result.embeddingQuality.dtype}` : ""}`,
+    ...(result.graphStore
+      ? [
+          `store=${result.graphStore.backend ?? result.graphStore.transport}` +
+            `${result.graphStore.unmergedJsonStore ? ":unmerged-json" : ""}` +
+            `;deps=${result.graphStore.runtimeDeps.map((d) => `${d.name}:${d.loadError ? "broken" : d.source}`).join(",")}`,
+        ]
+      : []),
     ...(experience
       ? [
           `experience=conv:${experience.episodeToSkillConversionRate.toFixed(2)},lessons:${experience.lessonsCoverageRate.toFixed(2)},consol:${experience.consolidation?.actionable ?? 0}`,

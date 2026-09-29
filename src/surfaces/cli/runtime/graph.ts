@@ -5,7 +5,8 @@ import { resolveConfig, resolveEfficiencyPolicy, type ResolvedContextPressurePol
 import { resolveGraphStorePath } from "../../../config/paths";
 import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
 import type { GraphEdge, GraphNode } from "../../../core/types";
-import { createGraphClient, type GraphClient } from "../../../graph/client-factory";
+import { createGraphClient, getLastGraphStoreBackend, type GraphClient } from "../../../graph/client-factory";
+import { captureMemorySubgraph, restoreMemorySubgraph } from "../../../graph/memory-subgraph";
 import { GraphifyMcpClient } from "../../../graph/graphify-mcp-client";
 import {
   createContextRefillManager,
@@ -1191,12 +1192,17 @@ export async function rebuildGraph(
   options?: { onProgress?: (processed: number, total: number) => void }
 ): Promise<GraphRebuildResult> {
   const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath, rootDir ? { rootDir } : undefined), rootDir ? { rootDir } : undefined);
-  const graphClient = createGraphClient(config);
   const targetDir = config.graphPolicy.workspaceRoot ?? process.cwd();
-  const storePath = resolveGraphStorePath(config);
+
+  const previousClient = createGraphClient(config);
+  // The "auto" transport opens <store>.sqlite even when the configured path is .json.
+  const storePath = getLastGraphStoreBackend()?.path ?? resolveGraphStorePath(config);
+  const memory = captureMemorySubgraph(previousClient.readSnapshot?.());
+  await previousClient.close?.();
 
   clearGraphIndexArtifacts(targetDir, storePath);
 
+  const graphClient = createGraphClient(config);
   const indexOptions = buildIndexOptions(config);
 
   const indexed = await indexWorkspaceFiles(graphClient, targetDir, {
@@ -1204,11 +1210,13 @@ export async function rebuildGraph(
     forceReindex: true,
     ...(options?.onProgress ? { onProgress: options.onProgress } : {}),
   });
+  const preservedMemory = await restoreMemorySubgraph(graphClient, memory);
 
   return {
     ...indexed,
     cleared: true,
     storePath,
+    preservedMemory,
   };
 }
 

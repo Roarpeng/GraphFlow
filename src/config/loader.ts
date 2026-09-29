@@ -373,6 +373,7 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       ...(input.embeddingPolicy?.baseUrl ? { baseUrl: input.embeddingPolicy.baseUrl } : {}),
       ...(input.embeddingPolicy?.apiKey ? { apiKey: input.embeddingPolicy.apiKey } : {}),
       ...(input.embeddingPolicy?.modelCacheDir ? { modelCacheDir: input.embeddingPolicy.modelCacheDir } : {}),
+      ...(input.embeddingPolicy?.dtype ? { dtype: input.embeddingPolicy.dtype } : {}),
       ...(input.embeddingPolicy?.transformersCachePath
         ? { transformersCachePath: input.embeddingPolicy.transformersCachePath }
         : {}),
