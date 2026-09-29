@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "1.26.0",
+  "version": "1.27.0",
   "publishConfig": {
     "access": "public"
   },
@@ -24,6 +24,7 @@
     "README.zh.md",
     "LICENSE",
     "CHANGELOG.md",
+    "docs/TESTING-1.27.0.md",
     "AGENTS.md",
     "CLAUDE.md"
   ],

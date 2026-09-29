@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.27.0] - 2026-09-29
+
+上下文经济引擎（新鲜度预言机 / 前缀 churn 计价 / 能力地板 / Prefix Cache Planner / Project Brief）全量落地，`npm audit` 清零，工作区构建偏好覆盖全部 19 个宿主 + dsh。本段汇总，其后各条目为该版本的详细记录。
+
+
 ### Added — 记忆新鲜度预言机 + 上下文经济引擎（均默认关，显式 opt-in）
 
 - **记忆新鲜度预言机（`GRAPHFLOW_FRESHNESS=1`）**：技能新鲜度由**代码图谱**裁定——从 guidance/playbook 抽出的符号引用若在图里不再解析，说明代码在这个技能脚下动过。符号节点 id 内嵌内容哈希，代码一改 id 即退役、引用即失配；这是没有代码图的记忆层（Mem0 / Zep·Graphiti / Letta / Cognee）结构上给不出的信号。分级 `fresh` / `watch` / `stale` / `unknown`——判不了就明说 `unknown`，不假装 `fresh`。`graphflow_skill_insights` 与 CLI `skill insights` 每条技能附带 `freshness`（level / driftScore / staleRefs / reason）。`stale` 的 proven 技能是**比缺失更坏**的失效模式：它带着过去证据的自信继续错。降级策略 `evaluateFreshnessPolicy` 已实现（stale+proven → correctable；watch 不降级；canary 已验证者豁免），但**自动降级刻意未接线**——`GRAPHFLOW_FRESHNESS_DOWNGRADE` 仅预留开关，先观测再强制。
