@@ -193,7 +193,7 @@ dsh plugin --profile web remove @roarpeng/graphflow
 
 ## 换 Agent 工具：一个项目一份图谱与记忆
 
-同一个项目轮流用 Cursor / ZCode / Cline / Claude Code / DSH，**不会重复建图**，记忆（对话、workbench 主题、episode、skill）也会延续：所有宿主按项目目录读写同一个 `graphflow-out/graphflow-graph.sqlite`，增量索引清单共享，只重新解析改动过的文件。
+同一个项目轮流用 Cursor / ZCode / Cline / Claude Code / DSH，**不会重复建图**，记忆（对话、workbench 主题、episode、skill）也会延续：所有宿主按项目目录读写同一个 `graphflow-out/graphflow-graph.sqlite` 及其增量索引清单（`.graphflow-cache/index-state.sqlite.json`），只重新解析改动过的文件。
 
 - **运行时依赖按需下载**：VS Code/Cursor 扩展与 MCP 共享运行时不打包 `better-sqlite3` 和 `@huggingface/transformers`，首次启动时后台装进 `~/.graphflow/optional-deps`（better-sqlite3 按 node / Electron ABI 分目录）。手动：`graphflow deps status`、`graphflow deps install [--with-model]`；关闭：`GRAPHFLOW_OPTIONAL_DEPS_AUTO=0` 或扩展设置 `graphflow.downloadRuntimeDeps`。
 - **旧 JSON 存储自动合并**：老版本在缺依赖时会退回 `graphflow-graph.json`，与 SQLite 分叉。现在 SQLite 打开时发现同名 JSON 会把记忆并入（同 id 取较新；对话轮 id 冲突则顺延编号），原文件改名为 `*.merged-bak`，结果写入 `*.merge-log.json`，`graphflow diagnose` 的 `graphStore` 段可见。

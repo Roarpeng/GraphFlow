@@ -14,6 +14,8 @@ import { join, resolve } from "node:path";
 import type { GraphEdge, GraphNode } from "../src/core/types";
 import { GRAPHFLOW_EMBEDDING_DTYPE_ENV, embeddingFingerprint, resolveEmbeddingDtype } from "../src/config/embedding-model";
 import { GraphifyFileClient } from "../src/graph/graphify-file-client";
+import { hasPendingGraphIndexWork, SQLITE_INDEX_MANIFEST } from "../src/graph/file-indexer-cache";
+import { indexWorkspaceFiles } from "../src/graph/file-indexer";
 import { captureMemorySubgraph, restoreMemorySubgraph } from "../src/graph/memory-subgraph";
 import { GraphifySqliteClient } from "../src/graph/sqlite-client";
 import {
@@ -310,13 +312,11 @@ describe("M128 JSON → SQLite store merge", () => {
     expect(plan.stats.droppedEdges).toBe(1);
   });
 
-  it("merges a sibling JSON store once, backs it up, and clears the index manifest only the first time", async () => {
+  it("merges a sibling JSON store, backs it up, and rotates later backups", async () => {
     const root = tmp("gf-merge-");
     const out = join(root, "graphflow-out");
     const sqlitePath = join(out, "graphflow-graph.sqlite");
     const jsonPath = join(out, "graphflow-graph.json");
-    const manifest = join(root, ".graphflow-cache", "index-state.json");
-    mkdirSync(join(root, ".graphflow-cache"), { recursive: true });
 
     const writeJson = async (nodes: GraphNode[]) => {
       const file = new GraphifyFileClient(jsonPath);
@@ -324,36 +324,62 @@ describe("M128 JSON → SQLite store merge", () => {
       await file.close?.();
     };
     await writeJson([record({ id: "episode:a", type: "Decision", content: "a" }, { createdAt: "2026-09-01T00:00:00Z" }), code]);
-    writeFileSync(manifest, "{}");
 
     const sqlite = new GraphifySqliteClient(sqlitePath);
-    const stats = mergeSiblingJsonStoreIntoSqlite(sqlite, sqlitePath, { workspaceRoot: root });
+    const stats = mergeSiblingJsonStoreIntoSqlite(sqlite, sqlitePath);
     expect(stats).toMatchObject({ addedNodes: 1, skippedCodeNodes: 1 });
     expect(existsSync(jsonPath)).toBe(false);
     expect(existsSync(`${jsonPath}${MERGED_BACKUP_SUFFIX}`)).toBe(true);
     expect(existsSync(`${sqlitePath}${MERGE_MARKER_SUFFIX}`)).toBe(true);
-    expect(existsSync(manifest)).toBe(false);
     expect(sqlite.readSnapshot().nodes.map((n) => n.id)).toEqual(["episode:a"]);
 
     // No JSON sibling → no-op.
-    expect(mergeSiblingJsonStoreIntoSqlite(sqlite, sqlitePath, { workspaceRoot: root })).toBeUndefined();
+    expect(mergeSiblingJsonStoreIntoSqlite(sqlite, sqlitePath)).toBeUndefined();
 
-    // A not-yet-upgraded host writes JSON again: merged, but the manifest survives.
-    writeFileSync(manifest, "{}");
+    // A not-yet-upgraded host writes JSON again.
     await writeJson([record({ id: "episode:b", type: "Decision", content: "b" }, { createdAt: "2026-09-02T00:00:00Z" })]);
-    const second = mergeSiblingJsonStoreIntoSqlite(sqlite, sqlitePath, { workspaceRoot: root });
-    expect(second?.addedNodes).toBe(1);
-    expect(existsSync(manifest)).toBe(true);
+    expect(mergeSiblingJsonStoreIntoSqlite(sqlite, sqlitePath)?.addedNodes).toBe(1);
     expect(sqlite.readSnapshot().nodes.map((n) => n.id).sort()).toEqual(["episode:a", "episode:b"]);
 
     // Backups: the first one is kept, later merges rotate one `.latest` copy.
     await writeJson([record({ id: "episode:c", type: "Decision", content: "c" }, { createdAt: "2026-09-03T00:00:00Z" })]);
-    mergeSiblingJsonStoreIntoSqlite(sqlite, sqlitePath, { workspaceRoot: root });
+    mergeSiblingJsonStoreIntoSqlite(sqlite, sqlitePath);
     const backups = readdirSync(out).filter((f) => f.startsWith("graphflow-graph.json") && f.includes(MERGED_BACKUP_SUFFIX));
     expect(backups.filter((f) => !f.includes(".delta")).sort()).toEqual([
       `graphflow-graph.json${MERGED_BACKUP_SUFFIX}`,
       `graphflow-graph.json${MERGED_BACKUP_SUFFIX}.latest`,
     ]);
+    sqlite.close?.();
+  });
+});
+
+describe("M128 per-store index manifest", () => {
+  it("indexes files a JSON-store host already recorded, and prunes files deleted meanwhile", async () => {
+    const root = tmp("gf-manifest-");
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "src", "a.ts"), "export function a() { return 1; }\n", "utf8");
+
+    // A host still on the JSON store indexes a.ts and writes the shared manifest.
+    const json = new GraphifyFileClient(join(root, "graphflow-out", "graphflow-graph.json"));
+    await indexWorkspaceFiles(json, root, { includeExtensions: [".ts"] });
+    expect(existsSync(join(root, ".graphflow-cache", "index-state.json"))).toBe(true);
+
+    // The SQLite store predates a.ts and still holds a file deleted while the
+    // two stores shared one manifest.
+    const sqlite = new GraphifySqliteClient(join(root, "graphflow-out", "graphflow-graph.sqlite"));
+    await sqlite.upsertNodes([{ id: "file:src/gone.ts", type: "File", content: "gone" }]);
+    expect(sqlite.indexManifestName).toBe(SQLITE_INDEX_MANIFEST);
+    expect(hasPendingGraphIndexWork(root, { includeExtensions: [".ts"] })).toBe(false);
+    expect(
+      hasPendingGraphIndexWork(root, { includeExtensions: [".ts"], manifestName: sqlite.indexManifestName })
+    ).toBe(true);
+
+    const result = await indexWorkspaceFiles(sqlite, root, { includeExtensions: [".ts"] });
+    expect(result.indexedFiles).toBe(1);
+    const ids = sqlite.readSnapshot().nodes.map((n) => n.id);
+    expect(ids).toContain("file:src/a.ts");
+    expect(ids).not.toContain("file:src/gone.ts");
+    expect(existsSync(join(root, ".graphflow-cache", SQLITE_INDEX_MANIFEST))).toBe(true);
     sqlite.close?.();
   });
 });

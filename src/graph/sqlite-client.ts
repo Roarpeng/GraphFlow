@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { createRequire } from "node:module";
 import type { GraphEdge, GraphNode } from "../core/types";
 import type { GraphClient } from "./client-factory";
+import { SQLITE_INDEX_MANIFEST } from "./file-indexer-cache";
 import { tokenizeForIndex, containsCJK } from "./graph-utils";
 import { requireFromOptionalDeps, resolveSqliteDepsRoot } from "../utils/optional-deps";
 
@@ -140,6 +141,7 @@ function buildFtsMatch(tokens: string[], query: string): string {
 }
 
 export class GraphifySqliteClient implements GraphClient {
+  readonly indexManifestName = SQLITE_INDEX_MANIFEST;
   private readonly db: import("better-sqlite3").Database;
 
   constructor(dbPath: string) {

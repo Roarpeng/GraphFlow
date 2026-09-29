@@ -6,7 +6,7 @@
  * - indexSingleFile: incremental single-file indexing
  */
 
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { createHash } from "node:crypto";
 import { logger } from "../utils/logger.js";
@@ -40,7 +40,7 @@ export { resolveCallerAtLine } from "./file-indexer-nodes.js";
 // ── Internal imports ─────────────────────────────────────────────────
 import { DEFAULT_EXTENSIONS, DEFAULT_MAX_FILE_SIZE, normalizePath, extOf, walkScannableFiles } from "./file-indexer-walker.js";
 import type { FileIndexerOptions } from "./file-indexer-walker.js";
-import { CACHE_DIR, CACHE_FILE, loadCacheState, saveCacheState } from "./file-indexer-cache.js";
+import { indexManifestPath, loadCacheState, saveCacheState } from "./file-indexer-cache.js";
 import type {
   IndexedSymbol,
   ParsedFile,
@@ -247,7 +247,7 @@ export async function indexWorkspaceFiles(
   const concurrency = Math.max(1, options?.concurrency ?? 10);
   const signal = options?.signal;
 
-  const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
+  const cachePath = indexManifestPath(rootDir, client.indexManifestName);
   let cacheState = loadCacheState(cachePath, forceReindex);
 
   const snapshot = client.readSnapshot?.();
@@ -262,6 +262,15 @@ export async function indexWorkspaceFiles(
 
   if (client.deleteNode ?? client.deleteNodes) {
     const stale = Object.keys(cacheState).filter((relPath) => !currentRelPaths.has(relPath));
+    if (Object.keys(cacheState).length === 0 && snapshot) {
+      // No manifest for this store (first run, or it used to share one with a
+      // JSON-store host): files deleted meanwhile are only visible in the store.
+      for (const node of snapshot.nodes) {
+        if (node.type !== "File" || !node.id.startsWith("file:")) continue;
+        const relPath = node.id.slice("file:".length);
+        if (!currentRelPaths.has(relPath) && !existsSync(join(rootDir, relPath))) stale.push(relPath);
+      }
+    }
     if (stale.length > 0) {
       // 批量清理：单次快照读取 + 单次批量删除，避免逐文件全量读写图文件
       await pruneFileFromGraph(client, stale);
@@ -538,7 +547,7 @@ export async function indexSingleFile(
     currentHash = createHash("md5").update(content).digest("hex");
   }
 
-  const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
+  const cachePath = indexManifestPath(rootDir, client.indexManifestName);
   const cacheState = loadCacheState(cachePath, false);
   const prev = cacheState[relPath];
 

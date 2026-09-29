@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { GraphFlowConfig } from "../config/schema";
 import { resolveGraphStorePath } from "../config/paths";
+import { resolveIndexManifestName } from "./client-factory";
 import { getSavingsStats } from "./token-savings";
 import { loadGraphStore } from "../surfaces/cli/runtime/helpers";
 
@@ -84,7 +85,7 @@ export function collectMetrics(config: GraphFlowConfig): MetricsSnapshot {
   // Index cache entries
   let cacheEntries = 0;
   try {
-    const cachePath = join(root, ".graphflow-cache", "index-state.json");
+    const cachePath = join(root, ".graphflow-cache", resolveIndexManifestName(config));
     if (existsSync(cachePath)) {
       const raw = readFileSync(cachePath, "utf8");
       const parsed = JSON.parse(raw);

@@ -402,7 +402,10 @@ export async function previewContext(
   if (config.graphPolicy.autoIndexOnPreview) {
     const root = config.graphPolicy.workspaceRoot ?? process.cwd();
     const indexOptions = buildIndexOptions(config);
-    if (hasPendingGraphIndexWork(root, indexOptions) || graphStoreNeedsIndexing(config)) {
+    if (
+      hasPendingGraphIndexWork(root, { ...indexOptions, manifestName: graphClient.indexManifestName }) ||
+      graphStoreNeedsIndexing(config)
+    ) {
       await indexWorkspaceFiles(graphClient, root, {
         ...indexOptions,
       });

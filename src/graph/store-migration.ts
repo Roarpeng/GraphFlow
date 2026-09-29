@@ -10,10 +10,8 @@
  */
 
 import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import type { GraphEdge, GraphNode } from "../core/types";
 import { logger } from "../utils/logger";
-import { CACHE_DIR, CACHE_FILE } from "./file-indexer-cache";
 import { GRAPH_STORE_DELTA_SUFFIX, GraphifyFileClient } from "./graphify-file-client";
 
 export const MERGED_BACKUP_SUFFIX = ".merged-bak";
@@ -21,8 +19,8 @@ export const MERGE_MARKER_SUFFIX = ".merge-log.json";
 
 const DIALOGUE_TURN_ID = /^dialogue:([^:]+):(\d+)$/;
 /**
- * Code nodes are re-derived from disk after the merge (the index manifest is
- * cleared); copying JSON-only ones would resurrect symbols of deleted files
+ * Code nodes are re-derived from disk by the SQLite store's own index
+ * manifest; copying JSON-only ones would resurrect symbols of deleted files
  * that no later index run knows to prune.
  */
 const CODE_NODE_TYPES = new Set<GraphNode["type"]>(["File", "Symbol", "Module"]);
@@ -273,8 +271,7 @@ export interface SqliteMergeTarget {
  */
 export function mergeSiblingJsonStoreIntoSqlite(
   target: SqliteMergeTarget,
-  sqlitePath: string,
-  options?: { workspaceRoot?: string }
+  sqlitePath: string
 ): StoreMergeStats | undefined {
   const jsonPath = sqlitePath.replace(/\.sqlite$/i, ".json");
   if (jsonPath === sqlitePath || !existsSync(jsonPath)) {
@@ -290,16 +287,8 @@ export function mergeSiblingJsonStoreIntoSqlite(
     if (existsSync(deltaPath)) {
       moveToBackup(deltaPath);
     }
-    const markerPath = `${sqlitePath}${MERGE_MARKER_SUFFIX}`;
-    if (options?.workspaceRoot && !existsSync(markerPath)) {
-      // The two stores shared one index manifest, so files indexed into the JSON
-      // side look "unchanged" to SQLite. Re-hash everything once — not on every
-      // later merge from a not-yet-upgraded host, which would re-parse the
-      // workspace each time.
-      rmSync(join(options.workspaceRoot, CACHE_DIR, CACHE_FILE), { force: true });
-    }
     writeFileSync(
-      markerPath,
+      `${sqlitePath}${MERGE_MARKER_SUFFIX}`,
       `${JSON.stringify({ mergedAt: new Date().toISOString(), from: jsonPath, stats: plan.stats }, null, 2)}\n`,
       "utf8"
     );

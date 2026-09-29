@@ -8,6 +8,7 @@ import { GraphifyFileClient } from "./graphify-file-client";
 import { GraphifyMcpClient } from "./graphify-mcp-client";
 import { GraphifySqliteClient } from "./sqlite-client";
 import { mergeSiblingJsonStoreIntoSqlite } from "./store-migration";
+import { CACHE_FILE, SQLITE_INDEX_MANIFEST } from "./file-indexer-cache";
 import { existsSync } from "node:fs";
 
 export interface GraphStoreSnapshot {
@@ -16,6 +17,8 @@ export interface GraphStoreSnapshot {
 }
 
 export interface GraphClient {
+  /** Incremental-index manifest under `.graphflow-cache/` for this store; default `index-state.json`. */
+  readonly indexManifestName?: string | undefined;
   upsertNodes(nodes: GraphNode[]): Promise<void>;
   upsertEdges(edges: GraphEdge[]): Promise<void>;
   /**
@@ -105,6 +108,10 @@ class InMemoryGraphClientAdapter implements GraphClient {
  */
 class MutationAwareGraphClient implements GraphClient {
   constructor(private readonly inner: GraphClient) {}
+
+  get indexManifestName(): string | undefined {
+    return this.inner.indexManifestName;
+  }
 
   async upsertNodes(nodes: GraphNode[]): Promise<void> {
     await this.inner.upsertNodes(nodes);
@@ -206,10 +213,22 @@ export function getLastGraphStoreBackend(): typeof lastStoreBackend {
   return lastStoreBackend;
 }
 
-function openSqliteStore(sqlitePath: string, config: GraphFlowConfig): GraphifySqliteClient {
+/**
+ * Manifest name for callers that only hold a config (freshness checks): the
+ * backend this process opened, else what the transport would open.
+ */
+export function resolveIndexManifestName(config: GraphFlowConfig): string {
+  const last = lastStoreBackend;
+  if (last) return last.backend === "sqlite" ? SQLITE_INDEX_MANIFEST : CACHE_FILE;
+  const transport = config.graphPolicy.transport;
+  if (transport !== "sqlite" && transport !== "auto") return CACHE_FILE;
+  const sqlitePath = resolveGraphStorePath(config).replace(/\.json$/i, ".sqlite");
+  return existsSync(sqlitePath) ? SQLITE_INDEX_MANIFEST : CACHE_FILE;
+}
+
+function openSqliteStore(sqlitePath: string): GraphifySqliteClient {
   const client = new GraphifySqliteClient(sqlitePath);
-  const workspaceRoot = config.graphPolicy.workspaceRoot;
-  mergeSiblingJsonStoreIntoSqlite(client, sqlitePath, workspaceRoot ? { workspaceRoot } : undefined);
+  mergeSiblingJsonStoreIntoSqlite(client, sqlitePath);
   lastStoreBackend = { backend: "sqlite", path: sqlitePath };
   return client;
 }
@@ -282,7 +301,7 @@ export function createGraphClient(config: GraphFlowConfig): GraphClient {
   if (config.graphPolicy.transport === "sqlite") {
     const sqlitePath = resolveGraphStorePath(config);
     try {
-      return new MutationAwareGraphClient(openSqliteStore(sqlitePath, config));
+      return new MutationAwareGraphClient(openSqliteStore(sqlitePath));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       const fallbackPath = sqlitePath.replace(/\.sqlite$/i, ".json");
@@ -301,7 +320,7 @@ export function createGraphClient(config: GraphFlowConfig): GraphClient {
     // better-sqlite3 is unavailable (e.g. missing optional dependency).
     const sqlitePath = resolveGraphStorePath(config).replace(/\.json$/i, ".sqlite");
     try {
-      return new MutationAwareGraphClient(openSqliteStore(sqlitePath, config));
+      return new MutationAwareGraphClient(openSqliteStore(sqlitePath));
     } catch {
       const fallbackPath = sqlitePath.replace(/\.sqlite$/i, ".json");
       warnIfSqliteStoreExists(sqlitePath, fallbackPath);

@@ -20,7 +20,7 @@ import { inspectRuntimeDeps } from "../../../integrations/ensure-runtime-deps";
 import { orchestrate, type OrchestrateOptions } from "../../../core/orchestrator";
 import type { TaskRunResult } from "../../../core/types";
 import { triageTask } from "../../../core/triage";
-import { createGraphClient, getLastGraphStoreBackend } from "../../../graph/client-factory";
+import { createGraphClient, getLastGraphStoreBackend, resolveIndexManifestName } from "../../../graph/client-factory";
 import { indexWorkspaceFiles, hasPendingGraphIndexWork } from "../../../graph/file-indexer";
 import { appendFeedbackEvent } from "../../../learning/learning-events";
 import { updateEpisodeOutcome, type DeviationKind } from "../../../learning/episodic-memory";
@@ -89,7 +89,7 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       const indexOptions = config.graphPolicy.includeExtensions
         ? { includeExtensions: config.graphPolicy.includeExtensions }
         : undefined;
-      if (hasPendingGraphIndexWork(root, indexOptions)) {
+      if (hasPendingGraphIndexWork(root, { ...indexOptions, manifestName: graphClient.indexManifestName })) {
         await indexWorkspaceFiles(graphClient, root, {
           ...indexOptions,
         });
@@ -350,13 +350,14 @@ function computeWorkspaceRootDiagnosis(config: ReturnType<typeof resolveConfig>)
 
 function computeGraphFreshnessDiagnosis(config: ReturnType<typeof resolveConfig>) {
   const root = config.graphPolicy.workspaceRoot ?? process.cwd();
-  const cached = hasIndexCache(root);
+  const manifestName = resolveIndexManifestName(config);
+  const cached = hasIndexCache(root, manifestName);
   let stale = false;
   let cacheFileCount = 0;
   if (cached) {
-    stale = hasPendingGraphIndexWork(root);
+    stale = hasPendingGraphIndexWork(root, { manifestName });
     try {
-      const cachePath = join(root, ".graphflow-cache", "index-state.json");
+      const cachePath = join(root, ".graphflow-cache", manifestName);
       const raw = readFileSync(cachePath, "utf8");
       const parsed = JSON.parse(raw);
       cacheFileCount = parsed?.state ? Object.keys(parsed.state).length : 0;

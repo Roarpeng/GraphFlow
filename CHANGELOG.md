@@ -4,12 +4,21 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — 过渡期 SQLite 漏掉旧宿主索引过的文件（1.28.1）
+
+1.28.0 发布后本机实测：Cursor 里仍在跑的 1.27 运行时（JSON 存储）把新文件索引进 JSON，并写入**共用的** `.graphflow-cache/index-state.json`；合并又跳过代码节点，于是 SQLite 把这些文件当成"未改动"，永远不会索引（本仓库新增的 `store-migration.ts` 等在 SQLite 里查不到）。
+
+- 每个存储用自己的索引清单：SQLite 用 `index-state.sqlite.json`（`GraphClient.indexManifestName`，经包装层透传），JSON / 内存存储仍用 `index-state.json`。`hasPendingGraphIndexWork` / `hasIndexCache` / diagnose / selfcheck / metrics 按当前存储选清单（`resolveIndexManifestName`）。
+- 合并不再清空索引清单（1.28.0 会清掉旧宿主的清单，逼它全量重解析）。
+- 清单为空时（首次或刚从共用清单切过来），顺带删除磁盘上已不存在的文件节点，清理分叉期间漏删的残留。
+- 升级后 SQLite 首次索引会全量解析一次（本仓库 623 个文件约 3 秒），之后恢复增量。
+
 ### Fixed — 同一项目换 Agent 工具后图谱与记忆分叉成两份
 
 设计上所有宿主按项目共享一份图谱，但实测分成了两份：VS Code/Cursor 扩展与共享 MCP 运行时（`~/.graphflow/runtime`，Cursor / Cline / ZCode 都连它）**没有打包 `better-sqlite3` 和 `@huggingface/transformers`**，于是悄悄退回 JSON 存储 + 哈希向量；npm 包（DSH、CLI）用的是 SQLite + bge。本仓库实测：JSON 里有 167 个 episode，SQLite 里只有 12 个；两边还共用同一份增量索引清单，一边索引过的文件在另一边被当成"未改动"。
 
 - **运行时依赖按需安装**（新增 `src/integrations/ensure-runtime-deps.ts`、`src/utils/optional-deps.ts`）：装到 `~/.graphflow/optional-deps`；`better-sqlite3` 按运行时分目录（`sqlite-node-abi127` / `sqlite-electron-abi…`，扩展宿主是 Electron、MCP 是 node），transformers 是 N-API 共用。触发点：MCP 启动 15 秒后后台检查、扩展激活、`graphflow install`；手动 `graphflow deps status` / `graphflow deps install [--force] [--with-model]`。文件锁防并发，失败 24 小时内后台不重试；`GRAPHFLOW_OPTIONAL_DEPS_AUTO=0`、CI、vitest 下不自动装；扩展设置 `graphflow.downloadRuntimeDeps`。安装 transformers 时设 `ONNXRUNTIME_NODE_INSTALL=skip`（否则 linux-x64 上 onnxruntime-node 的 postinstall 去 NuGet 下 CUDA 库，网络不通就整个安装失败；推理用包内自带的 CPU 版）；安装前把以 `--no-save` 装的 anydoc 登记进 `package.json`，否则 npm 会把它当多余包删掉。
-- **JSON 存储自动并入 SQLite**（新增 `src/graph/store-migration.ts`）：SQLite 打开时若旁边有同名 `.json`，把记忆节点并入——代码节点（File / Symbol / Module）跳过，由磁盘重新索引，避免复活已删文件的符号；同 id 取 `updatedAt` 较新者；对话轮 id `dialogue:<session>:<seq>` 冲突（两个宿主在同一 session 里各自往下记）时顺延编号、改写 `parentTurnId` 并修正 session 的 `turnCount` / `tipTurnId`；两端缺失的边丢弃。JSON 与 delta 改名为 `*.merged-bak`（首份永久保留，之后只轮换一份 `.merged-bak.latest`），统计写入 `*.sqlite.merge-log.json`；只在首次合并时清空索引清单触发一次全量重新哈希。单事务写入（`GraphifySqliteClient.upsertGraphSync`）；失败则保留 JSON，下次打开重试。本仓库实测：并入 244 个记忆节点、797 条边，SQLite 里 episode 从 12 个变为 180 个。
+- **JSON 存储自动并入 SQLite**（新增 `src/graph/store-migration.ts`）：SQLite 打开时若旁边有同名 `.json`，把记忆节点并入——代码节点（File / Symbol / Module）跳过，由磁盘重新索引，避免复活已删文件的符号；同 id 取 `updatedAt` 较新者；对话轮 id `dialogue:<session>:<seq>` 冲突（两个宿主在同一 session 里各自往下记）时顺延编号、改写 `parentTurnId` 并修正 session 的 `turnCount` / `tipTurnId`；两端缺失的边丢弃。JSON 与 delta 改名为 `*.merged-bak`（首份永久保留，之后只轮换一份 `.merged-bak.latest`），统计写入 `*.sqlite.merge-log.json`。单事务写入（`GraphifySqliteClient.upsertGraphSync`）；失败则保留 JSON，下次打开重试。本仓库实测：并入 244 个记忆节点、797 条边，SQLite 里 episode 从 12 个变为 180 个。
 - **`graph index --full` 不再清掉记忆**（新增 `src/graph/memory-subgraph.ts`）：重建前取出所有非代码节点及相连的边，关闭旧客户端（连同删除 `-wal` / `-shm`）后清库重建，再写回；指向已删代码节点的边丢弃。结果带 `preservedMemory`。
 - **`diagnose` 新增 `graphStore` 段**：`transport`、实际后端、`sqliteModuleSource`（bundled / optional-deps）、退回 JSON 的原因、是否存在未合并的 JSON、上次合并统计、各运行时依赖的来源与加载错误。
 
@@ -88,6 +97,10 @@ All notable changes to this project are documented in this file.
 - 7 个用例（+1 前提用例），两个守卫仍**分别验证有牙**。
 
 **这一版的教训**：跨平台测试里，"构造前置条件"本身就是要测的东西。凡是用环境变量伪造平台行为的测试，先断言伪造生效，再断言行为。
+
+## [1.28.1] - 2026-09-29
+
+每个存储改用自己的增量索引清单（SQLite 用 `index-state.sqlite.json`）：过渡期里仍在 JSON 存储上的旧宿主索引过的文件，不再被 SQLite 当成"未改动"而漏掉；合并也不再清空旧宿主的清单。
 
 ## [1.28.0] - 2026-09-29
 

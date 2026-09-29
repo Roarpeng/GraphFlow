@@ -4,6 +4,7 @@ import { resolveConfig } from "../../../config/resolve";
 import { resolveGraphStorePath } from "../../../config/paths";
 import { graphStoreDeltaPath } from "../../../graph/graphify-file-client";
 import { hasPendingGraphIndexWork } from "../../../graph/file-indexer-cache";
+import { resolveIndexManifestName } from "../../../graph/client-factory";
 import { loadGraphStore } from "./helpers";
 import { redactSecrets } from "../../../learning/dialogue-thread";
 import { hasUsableLlmProvider } from "../../../config/llm-availability";
@@ -103,9 +104,10 @@ export async function runSelfcheck(
 
   // 4. Index freshness.
   try {
-    const pending = hasPendingGraphIndexWork(root, config.graphPolicy.includeExtensions
-      ? { includeExtensions: config.graphPolicy.includeExtensions }
-      : undefined);
+    const pending = hasPendingGraphIndexWork(root, {
+      ...(config.graphPolicy.includeExtensions ? { includeExtensions: config.graphPolicy.includeExtensions } : {}),
+      manifestName: resolveIndexManifestName(config),
+    });
     items.push({
       name: "index-freshness",
       status: pending ? "warn" : "ok",

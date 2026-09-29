@@ -26,6 +26,15 @@ export interface CacheState {
 
 export const CACHE_DIR = ".graphflow-cache";
 export const CACHE_FILE = "index-state.json";
+/**
+ * The manifest must describe what is in *its* store: a host still on the JSON
+ * store indexing a file must not make that file look "unchanged" to SQLite.
+ */
+export const SQLITE_INDEX_MANIFEST = "index-state.sqlite.json";
+
+export function indexManifestPath(rootDir: string, manifestName: string = CACHE_FILE): string {
+  return join(rootDir, CACHE_DIR, manifestName);
+}
 
 /**
  * Load cache state from disk. Returns empty object on missing or invalid cache.
@@ -71,13 +80,14 @@ export function saveCacheState(cachePath: string, cacheState: CacheState): void 
  * into the fresh database.
  */
 export function clearGraphIndexArtifacts(rootDir: string, graphStorePath: string): void {
-  const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
   const vectorsPath = join(rootDir, CACHE_DIR, "vectors.db");
   rmSync(graphStorePath, { force: true });
   rmSync(`${graphStorePath}${GRAPH_STORE_DELTA_SUFFIX}`, { force: true });
   rmSync(`${graphStorePath}-wal`, { force: true });
   rmSync(`${graphStorePath}-shm`, { force: true });
-  rmSync(cachePath, { force: true });
+  rmSync(indexManifestPath(rootDir, /\.sqlite$/i.test(graphStorePath) ? SQLITE_INDEX_MANIFEST : CACHE_FILE), {
+    force: true,
+  });
   rmSync(vectorsPath, { force: true });
 }
 
@@ -87,7 +97,7 @@ export function hasPendingGraphIndexWork(
   options?: Pick<
     FileIndexerOptions,
     "includeExtensions" | "maxFileSizeBytes" | "forceReindex" | "respectGitIgnore"
-  >
+  > & { manifestName?: string | undefined }
 ): boolean {
   const includeExtensions = options?.includeExtensions ?? DEFAULT_EXTENSIONS;
   const maxFileSizeBytes = options?.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE;
@@ -96,8 +106,7 @@ export function hasPendingGraphIndexWork(
     return true;
   }
 
-  const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
-  const cacheState = loadCacheState(cachePath, false);
+  const cacheState = loadCacheState(indexManifestPath(rootDir, options?.manifestName), false);
   const scanned = walkScannableFiles(rootDir, includeExtensions, maxFileSizeBytes, {
     ...(options?.respectGitIgnore === false ? { respectGitIgnore: false } : {}),
   });
@@ -123,8 +132,8 @@ export function hasPendingGraphIndexWork(
  * Quick check whether the index cache exists and is non-empty.
  * Cheaper than hasPendingGraphIndexWork (no full workspace walk).
  */
-export function hasIndexCache(rootDir: string): boolean {
-  const cachePath = join(rootDir, CACHE_DIR, CACHE_FILE);
+export function hasIndexCache(rootDir: string, manifestName?: string): boolean {
+  const cachePath = indexManifestPath(rootDir, manifestName);
   if (!existsSync(cachePath)) return false;
   try {
     const cacheState = loadCacheState(cachePath, false);
