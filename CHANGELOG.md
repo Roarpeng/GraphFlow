@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.27.3] - 2026-09-29
+
+修复 CLI 帮助文本混入 stdout 破坏脚本消费；清理仓库内测试产物。
+
 ## [1.27.2] - 2026-09-29
 
 修复多词查询召回归零：FTS 把英文 token 用 AND 串联，任何两词以上查询都要求单节点全命中。
@@ -418,6 +422,20 @@ AND 要求**单个节点同时包含全部查询词**，于是召回随查询变
 改用 `OR`。FTS5 的 bm25 本来就把"命中多个词"的节点排在"只命中一个"之前（实测首位即全命中节点），所以原先 AND 换来的精度由**排序**保证，而非靠丢弃候选集。中文分支本来就是 OR，现在两侧一致。
 
 `tests/m24-sqlite-backend.test.ts` 里那条用例原本叫"returns nodes containing all tokens"，**它把缺陷当成规格钉住了**。已改写为断言新的真实契约：全命中节点排第一、部分命中不被丢弃、无关节点仍不出现；并补一条单 token 行为不变的守卫。golden 排名门 149 条全过，中文查询无回归。
+
+
+### Fixed — CLI 的 stdout 混入帮助文本，破坏脚本消费
+
+用户实测反馈"`--json` 输出里混着日志行"。核实后：日志**没有**混进 stdout（`doctor --json` 的 stdout 是单个可 `JSON.parse` 通过的对象），`run --json` 也**确实**打印 `executionDescriptor` / `episodeId`。真正的问题是另一处，也是唯一会让脚本报错的地方：
+
+- **未知命令 / `--help` 把 usage 横幅打到 stdout**。`graphflow 不存在的命令` 退出码是 1，但 stdout 里有 6700 多字节的帮助文本——脚本把这段散文喂给 JSON 解析器必然失败，**而且它无法区分"工具在解释自己"和"工具产出了结果"**。
+- 现改为：帮助与诊断一律走 **stderr**，stdout 只保留机器可读输出；未知命令额外在 stderr 报 `graphflow: unknown command "<name>"`。`doctor --json` 仍正常输出可解析 JSON。
+- 新增 `tests/cli-stdout-hygiene.test.ts`（3 用例）钉住这条契约：未知命令 stdout 为空且退出码非 0、`--help` stdout 为空、真实 `--json` 仍可解析。**已验证有牙**：把 usage 改回 stdout → 1 个用例失败。
+
+### 清理 — 仓库里的测试产物
+
+- 删除 `tmp/`（25M）、`benchmarks/.cache/`（47M）、`Cursor/`、`PearAI/`、`.codex/`。后三者是被测宿主配置，出现在仓库根是因为**测试的 CWD 恰好是 checkout**；`.codex/config.toml` 里还钉着 `roarpeng.graphflow-1.9.6` 的旧扩展路径（用户反馈的"版本残留"，我找到的是 1.9.6 而非 1.7.6），一并清除。
+- `.gitignore` 增加 `.codex/`，并写明原因——`Cursor/`、`PearAI/`、`benchmarks/.cache/` 此前已在忽略列表里。
 
 
 ## [1.26.0] - 2026-09-23

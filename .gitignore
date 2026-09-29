@@ -42,3 +42,7 @@ graphify-out/
 # content, so keep it out of the index without ignoring docs/ itself.
 docs/*.html
 *.html
+# Machine-local agent configs. Tests whose CWD is the checkout write host
+# configs relative to it (see the appData resolution fix), so these can appear
+# at the repo root. Install artifacts, not project files.
+.codex/

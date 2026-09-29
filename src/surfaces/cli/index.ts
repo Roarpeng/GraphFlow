@@ -1791,7 +1791,11 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
-  console.log(buildCliUsage());
+  // Fallback for an unrecognised subcommand inside a known command (and the
+  // only place the usage banner was still going to stdout, so an unknown
+  // command printed help text into a script's stdout pipe). stderr keeps the
+  // machine-readable channel clean.
+  console.error(buildCliUsage());
   process.exitCode = 1;
   return undefined;
 }
@@ -1925,8 +1929,14 @@ async function main(): Promise<void> {
   const options = parseCliOptions(process.argv.slice(2));
   const command = options.command;
 
+  // Help text is a diagnostic, not a result. Printing it to stdout means
+  // `graphflow --json` piped into a JSON parser receives prose, and an unknown
+  // command does the same while exiting non-zero — a script cannot tell "the
+  // tool explained itself" from "the tool produced a result", because both look
+  // like a stdout payload. stderr keeps stdout reserved for machine-readable
+  // output.
   if (!command) {
-    console.log(buildCliUsage());
+    console.error(buildCliUsage());
     process.exitCode = 1;
     return;
   }
@@ -1939,7 +1949,7 @@ async function main(): Promise<void> {
   await runFirstUseBootstrap(command);
 
   if (command === "help" || command === "--help" || command === "-h") {
-    console.log(buildCliUsage());
+    console.error(buildCliUsage());
     return;
   }
 
@@ -1950,6 +1960,12 @@ async function main(): Promise<void> {
 
   const result = await executeCommand(command, options.args, options.configPath);
   if (!result) {
+    // An unrecognised command lands here. Say so on stderr and keep stdout
+    // empty, so a script reading stdout gets nothing rather than help text it
+    // will try to parse.
+    console.error(`graphflow: unknown command "${command}"`);
+    console.error(buildCliUsage());
+    process.exitCode = 1;
     return;
   }
 
