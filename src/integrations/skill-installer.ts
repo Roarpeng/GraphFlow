@@ -168,7 +168,7 @@ export function resolveSkillSourcePath(vendorRuntimeRoot?: string): string | und
   const candidates: string[] = [
     // Agent Plugins 1.0 fixed discovery path (canonical source)
     join(process.cwd(), "skills", "graphflow"),
-    join(__dirname, "..", "..", "..", "skills", "graphflow"),
+    join(__dirname, "..", "..", "skills", "graphflow"),
     // VS Code 扩展 vendor 路径（打包后）
     ...(vendorRuntimeRoot
       ? [
@@ -178,7 +178,7 @@ export function resolveSkillSourcePath(vendorRuntimeRoot?: string): string | und
         ]
       : []),
     // 兼容副本 / 标准构建产物路径
-    join(__dirname, "..", "..", "surfaces", "trae-skill", "graphflow"),
+    join(__dirname, "..", "surfaces", "trae-skill", "graphflow"),
     join(__dirname, "..", "..", "..", "src", "surfaces", "trae-skill", "graphflow"),
     join(process.cwd(), "src", "surfaces", "trae-skill", "graphflow"),
     join(process.cwd(), "dist", "surfaces", "trae-skill", "graphflow"),
@@ -202,7 +202,7 @@ export function resolveTraeRulesSourcePath(vendorRuntimeRoot?: string): string |
           join(vendorRuntimeRoot, "dist", "surfaces", "trae-rules"),
         ]
       : []),
-    join(__dirname, "..", "..", "surfaces", "trae-rules"),
+    join(__dirname, "..", "surfaces", "trae-rules"),
     join(__dirname, "..", "..", "..", "src", "surfaces", "trae-rules"),
     join(process.cwd(), "src", "surfaces", "trae-rules"),
     join(process.cwd(), "dist", "surfaces", "trae-rules"),
@@ -227,7 +227,7 @@ function surfaceDirCandidates(
           join(vendorRuntimeRoot, "dist", "surfaces", surfaceName),
         ]
       : []),
-    join(__dirname, "..", "..", "surfaces", surfaceName),
+    join(__dirname, "..", "surfaces", surfaceName),
     join(__dirname, "..", "..", "..", "src", "surfaces", surfaceName),
     join(process.cwd(), "src", "surfaces", surfaceName),
     join(process.cwd(), "dist", "surfaces", surfaceName),
@@ -267,7 +267,7 @@ export function resolveCursorRulesSourcePath(vendorRuntimeRoot?: string): string
         ]
       : []),
     // 标准构建产物路径
-    join(__dirname, "..", "..", "surfaces", "cursor-rules"),
+    join(__dirname, "..", "surfaces", "cursor-rules"),
     join(__dirname, "..", "..", "..", "src", "surfaces", "cursor-rules"),
     join(process.cwd(), "src", "surfaces", "cursor-rules"),
     join(process.cwd(), "dist", "surfaces", "cursor-rules"),

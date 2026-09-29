@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — 项目规则的源文件解析差了一级 `..`，发布包里永远"找不到源文件"
+
+用户 Ubuntu / Windows 的安装日志里有一整片"静默失败"：
+
+- `[SKIP] Trae Skill Trae: Skill source (SKILL.md) not found`
+- `[SKIP] Cursor Rules Cursor: Cursor rules source (graphflow.mdc) not found`
+- `[SKIP] Project rules Trae CN / Cursor / Antigravity / Copilot: Source file not found`
+
+**源文件明明在发布包里**（`dist/surfaces/...`、`skills/graphflow` 一项不少）。问题在 5 个解析函数：从 `dist/integrations/` 出发，它们用 `join(__dirname, "..", "..", "surfaces", ...)` 去找源文件——两级 `..` 落到的是**不存在的 `<pkg>/surfaces/`**，正确位置是上一级的 `dist/surfaces/`。唯一能命中的候选是 `process.cwd()` 那几条，也就是说：**只有 CWD 恰好是仓库检出目录时才找得到**。用户在自己项目里跑，永远 not found；我之前在仓库里测，永远成功——**尺子一直量的是错误的东西**。
+
+修法：5 处各减一级 `..`（`surfaces` 用 `join(__dirname, "..", ...)`，`skills` 用两级到包根）。同一表达式同时覆盖构建布局（`dist/integrations`→`dist/surfaces`）与源码布局（`src/integrations`→`src/surfaces`）。`CLAUDE.md` 那处本来就是对的（包根真有 `CLAUDE.md`），没动。
+
+本机实测（普通项目目录，非仓库）：copilot / cursor / trae / skill 四个解析器全部命中包内路径；`install` 一次写出 10 个项目文件（`.trae/rules`、`.trae/skills`、`.cursor/rules`、`.agent/rules+skills`、`.github/copilot-instructions.md`、`.claude/rules`、`.windsurfrules`、`AGENTS.md`），此前这些全是 SKIP。
+
+`tests/vendored-source-resolution.test.ts`（4 用例）：把 CWD 切到临时空目录再解析——**不靠 CWD 运气**。已验证有牙：改回一处旧路径 → 1 个失败。
+
+## [1.27.9] - 2026-09-29
+
+修复项目规则源文件解析差一级目录：Trae / Cursor / Antigravity / Copilot 的项目规则与 Skill 在发布包里永远报 Source file not found（Ubuntu / Windows 日志均有）。
+
 ## [1.27.8] - 2026-09-29
 
 修复从 home 目录运行 install 会把项目文件写进 home 并覆盖带标记的指令文件（Ubuntu / Windows 均复现）。
