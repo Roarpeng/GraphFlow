@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.27.6] - 2026-09-29
+
+新增 `scripts/cross-platform-check.mjs`：Ubuntu / Windows 同一套命令的自检脚本，含中文编码往返检测。
+
 ## [1.27.5] - 2026-09-29
 
 测试文档再修：summary 不在最后一行；取该行必须用 spawnSync 而非 execSync（doctor 在 ok=false 时非零退出）。

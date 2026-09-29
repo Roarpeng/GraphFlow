@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "1.27.5",
+  "version": "1.27.6",
   "publishConfig": {
     "access": "public"
   },
@@ -26,7 +26,8 @@
     "CHANGELOG.md",
     "docs/TESTING-1.27.0.md",
     "AGENTS.md",
-    "CLAUDE.md"
+    "CLAUDE.md",
+    "scripts/cross-platform-check.mjs"
   ],
   "packageManager": "npm@10.9.2",
   "engines": {
