@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.27.2] - 2026-09-29
+
+修复多词查询召回归零：FTS 把英文 token 用 AND 串联，任何两词以上查询都要求单节点全命中。
+
 ## [1.27.1] - 2026-09-29
 
 修复用户实测报出的两个安装级缺陷：`onnxruntime-node` 安装失败中断整包安装（非 Windows 上 appData 解析为空字符串，宿主配置被写进用户仓库）。详见下方条目。
