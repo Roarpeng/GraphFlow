@@ -194,18 +194,28 @@ const factory = (require) => {
     );
   }
 
-  // ── 取数：Connection 通用 RPC 通道（规格书 §3.2 路 A） ──
-  // 宿主端点: ctx.connection.rpc.handle("/gf", handler, { authority: "trusted-host" })
+  // ── 取数：Connection 通用 RPC 信封（规格书 §3.2 路 A） ──
+  // 宿主端点: connection.fetch.register({ path: "/api/gf/nodes" })；
+  // 旧宿主无 Fetch 注册表时为 rpc.handle("/gf")，这里 404 时回退。
   // 返回信封: { ok: true, value: { workbench, dialogues } } | { ok: false, error: { code, message, details } }
   function fetchNodes(ctx, cwd) {
     const connection = ctx && typeof ctx.get === "function" ? ctx.get("connection") : undefined;
     if (!connection || !connection.rpc || typeof connection.rpc.call !== "function") {
       return Promise.resolve({ ok: false, error: "no-connection" });
     }
-    return connection.rpc.call("/gf", "nodes", { workspaceRoot: cwd }).catch((err) => ({
-      ok: false,
-      error: String(err && err.message ? err.message : err),
-    }));
+    const payload = { workspaceRoot: cwd };
+    return connection.rpc
+      .call("/api", "gf/nodes", payload)
+      .catch((err) => {
+        if (/HTTP 404\b/.test(String(err && err.message ? err.message : err))) {
+          return connection.rpc.call("/gf", "nodes", payload);
+        }
+        throw err;
+      })
+      .catch((err) => ({
+        ok: false,
+        error: String(err && err.message ? err.message : err),
+      }));
   }
 
   // ── 共享 helpers ──

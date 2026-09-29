@@ -51,6 +51,9 @@ const DEFAULT_SKILL_DESCRIPTION =
 
 /** Static-panel data channel: Connection generic RPC channel for the panel. */
 const NODES_CHANNEL = "/gf";
+const NODES_FETCH_PATH = "/api/gf/nodes";
+/** Cordis 4 fibers only see services they inject; the plugin fiber injects none. */
+const NODES_RPC_SERVICES = ["connection"];
 /** Panel-data CLI children are killed after this long (timeout guard). */
 const CAPTURE_TIMEOUT_MS = 20_000;
 /** Captured stdout/stderr per command are capped at ~4MB (runaway guard). */
@@ -977,7 +980,11 @@ function logGlue(config, level, message) {
  */
 export function resolveConnectionService(source) {
   if (!source || typeof source !== "object") return undefined;
-  if (typeof source.get === "function") {
+  // Property access first: Cordis binds the service to the reading ctx, so
+  // registrations belong to (and are disposed with) the inject fork.
+  const connection = readProperty(source, "connection");
+  if (connection && typeof connection === "object") return connection;
+  if (typeof readProperty(source, "get") === "function") {
     try {
       const viaGet = source.get("connection");
       if (viaGet && typeof viaGet === "object") return viaGet;
@@ -985,13 +992,26 @@ export function resolveConnectionService(source) {
       // service not ready / get threw
     }
   }
-  if (source.connection && typeof source.connection === "object") return source.connection;
-  if (source.rpc && typeof source.rpc.handle === "function") return source;
+  const rpc = readProperty(source, "rpc");
+  if (rpc && typeof rpc.handle === "function") return source;
   return undefined;
 }
 
+/**
+ * Cordis 4 context proxies throw `cannot get property "<name>" without
+ * inject` for any service the fiber did not declare, so every duck-typed
+ * read on a ctx goes through here.
+ */
+function readProperty(source, key) {
+  try {
+    return source[key];
+  } catch {
+    return undefined;
+  }
+}
+
 function attachRpcEffect(targetCtx, dispose) {
-  if (!targetCtx || typeof targetCtx.effect !== "function") return;
+  if (!targetCtx || typeof readProperty(targetCtx, "effect") !== "function") return;
   try {
     targetCtx.effect(() => dispose, "graphflow-dsh: /gf nodes rpc channel");
   } catch {
@@ -999,8 +1019,48 @@ function attachRpcEffect(targetCtx, dispose) {
   }
 }
 
+function nodesServerResponse(rpcId, result) {
+  return Response.json({ type: "server-response", rpcId, result });
+}
+
 /**
- * Wire `/gf` on one connection instance. Idempotent per connection.
+ * Exact Fetch route serving the panel's `rpc.call("/api", "gf/nodes")`: the
+ * same client-request / server-response envelope Connection's unary RPC
+ * channels speak, answered by `rpcNodesHandler`.
+ * @param {GraphFlowDshPluginConfig} [config]
+ */
+export function buildNodesFetchRoute(config = {}) {
+  return {
+    path: NODES_FETCH_PATH,
+    methods: ["POST"],
+    requestBody: "buffered",
+    fetch: async (request) => {
+      let message;
+      try {
+        message = await request.json();
+      } catch {
+        return new Response("body is not JSON", { status: 400 });
+      }
+      const rpcId = message && typeof message.rpcId === "string" ? message.rpcId : "";
+      if (!message || message.type !== "client-request" || !rpcId) {
+        return nodesServerResponse(rpcId, {
+          ok: false,
+          error: { code: "bad-request", message: "invalid client-request message", details: { issues: [] } },
+        });
+      }
+      const result = await rpcNodesHandler("nodes", message.payload, request.signal, config);
+      return nodesServerResponse(rpcId, result);
+    },
+  };
+}
+
+/**
+ * Wire the panel data channel on one connection instance. Idempotent per
+ * connection. Prefers `connection.fetch.register` (`POST /api/gf/nodes`):
+ * `connection.rpc.handle` registers through `owner.webServer`, which Cordis 4
+ * resolves on the Connection plugin's own fiber — DSH mounts that row without
+ * `webServer`, so every third-party `rpc.handle` fails there. Hosts without
+ * the Fetch registry fall back to the `/gf` RPC channel.
  * Failures are logged (not swallowed). Never throws.
  * @returns {(() => void)|undefined}
  */
@@ -1009,8 +1069,10 @@ function registerNodesRpcOnConnection(connection, ctx, config) {
     logGlue(config, "warn", "/gf RPC: connection service unavailable");
     return undefined;
   }
-  const rpc = connection.rpc;
-  if (!rpc || typeof rpc.handle !== "function") {
+  const fetchRegistry = readProperty(connection, "fetch");
+  const useFetchRoute = Boolean(fetchRegistry) && typeof fetchRegistry.register === "function";
+  const rpc = useFetchRoute ? undefined : readProperty(connection, "rpc");
+  if (!useFetchRoute && (!rpc || typeof rpc.handle !== "function")) {
     logGlue(config, "warn", "/gf RPC: connection.rpc.handle is missing");
     return undefined;
   }
@@ -1018,16 +1080,15 @@ function registerNodesRpcOnConnection(connection, ctx, config) {
   wiredRpcConnections.add(connection);
   let disposer;
   try {
-    disposer = rpc.handle(NODES_CHANNEL, (endpoint, payload, signal) => rpcNodesHandler(endpoint, payload, signal, config), {
-      authority: "trusted-host",
-    });
+    disposer = useFetchRoute
+      ? fetchRegistry.register(buildNodesFetchRoute(config))
+      : rpc.handle(NODES_CHANNEL, (endpoint, payload, signal) => rpcNodesHandler(endpoint, payload, signal, config), {
+          authority: "trusted-host",
+        });
   } catch (error) {
     wiredRpcConnections.delete(connection);
-    logGlue(
-      config,
-      "error",
-      `/gf RPC: rpc.handle("${NODES_CHANNEL}") failed: ${error && error.message ? error.message : error}`
-    );
+    const target = useFetchRoute ? `fetch.register("${NODES_FETCH_PATH}")` : `rpc.handle("${NODES_CHANNEL}")`;
+    logGlue(config, "error", `/gf RPC: ${target} failed: ${error && error.message ? error.message : error}`);
     return undefined;
   }
   const dispose = () => {
@@ -1046,15 +1107,15 @@ function registerNodesRpcOnConnection(connection, ctx, config) {
 }
 
 /**
- * Best-effort registration of the /gf Connection RPC channel
- * (`ctx.connection.rpc.handle("/gf", handler, { authority: "trusted-host" })`
- * — see dsh-client-connection lib/index.js:219-258: the handler is
- * `(endpoint, payload, signal)` and `handle` returns a disposer).
+ * Best-effort registration of the knowledge-panel data channel
+ * (`POST /api/gf/nodes` Fetch route, or the `/gf` RPC channel on hosts
+ * without `connection.fetch` — see `registerNodesRpcOnConnection`).
  *
- * The host `connection` service is often not ready at apply() time
- * (`ctx.get("connection")` is undefined because it injects `webRuntime`).
- * Mirror DSH api-gateway: wait with `ctx.inject(["connection"], cb)` and
- * register when the service appears. Duck-typed, idempotent (one channel
+ * On a Cordis host (`ctx.inject` present) it is only ever registered from a
+ * `ctx.inject(["connection"], cb)` fork, mirroring DSH api-gateway: the plugin
+ * fiber declares no services, so reading `connection` on `ctx` throws, and it
+ * may not be ready at apply() time.
+ * Hosts without `ctx.inject` register synchronously. Duck-typed, idempotent (one channel
  * per connection), and the returned disposer both unregisters via the
  * handle disposer and is attached to `ctx.effect` when available.
  * Registration failures are logged. Never throws.
@@ -1078,12 +1139,11 @@ function registerNodesRpcChannel(ctx, config) {
     return dispose;
   };
 
-  tryRegister(ctx);
-
-  if (!disposeHolder.current && ctx && typeof ctx.inject === "function") {
-    logGlue(config, "warn", '/gf RPC: connection not ready; waiting via ctx.inject(["connection"])');
+  if (!ctx || typeof ctx.inject !== "function") {
+    tryRegister(ctx);
+  } else {
     try {
-      ctx.inject(["connection"], (injected) => {
+      ctx.inject(NODES_RPC_SERVICES, (injected) => {
         try {
           if (disposed) return;
           const dispose = tryRegister(injected ?? ctx);
@@ -1102,7 +1162,7 @@ function registerNodesRpcChannel(ctx, config) {
       logGlue(
         config,
         "error",
-        `/gf RPC: ctx.inject(["connection"]) failed: ${error && error.message ? error.message : error}`
+        `/gf RPC: ctx.inject(${JSON.stringify(NODES_RPC_SERVICES)}) failed: ${error && error.message ? error.message : error}`
       );
     }
   }
@@ -1484,9 +1544,9 @@ export function apply(ctx, config = {}) {
     // missing or duplicate skill registry — ignore
   }
 
-  // Static-panel data channel: /gf Connection RPC (registerNodesRpcChannel).
-  // Registers immediately when connection is already on ctx; otherwise waits
-  // via ctx.inject(["connection"]) so apply() racing webRuntime still works.
+  // Static-panel data channel (registerNodesRpcChannel): /api/gf/nodes Fetch
+  // route, /gf RPC fallback. On Cordis hosts it waits via
+  // ctx.inject(["connection"]); hosts without ctx.inject register immediately.
   // Failures are logged. Never throw into the harness.
   let disposeNodesRpc;
   try {

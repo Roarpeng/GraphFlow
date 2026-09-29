@@ -123,7 +123,7 @@ GraphFlow 本身就是一个 **dsh 插件包**（topic：`dsh-plugin`）。`pack
 | 会话结束飞轮（仅 `agent/disposed` → `outcome report`；不是 live `session/flush`） | 支持 |
 | 首轮短 hint（先调 `graphflow_context`）；兼容会话格式 v4（`source.kind = plugin:graphflow-dsh`） | 支持 |
 | 对话自动入图（只记真人提问；v3 `plugin` / v4 宿主生产者 kind / `plugin:*` 注入一律排除） | 支持 |
-| dsh web「知识节点」面板（`/gf` Connection RPC；web 半边依赖 `dsh-api-session-controller` / `dsh-client-connection` / `dsh-client-ui-renderer`） | 支持 |
+| dsh web「知识节点」面板（`POST /api/gf/nodes`，经 `connection.fetch.register`；旧宿主回退 `/gf` RPC；web 半边依赖 `dsh-api-session-controller` / `dsh-client-connection` / `dsh-client-ui-renderer`） | 支持 |
 | VS Code/Cursor 图谱面板、Settings、Workbench Tree、`@graphflow` chat | **不移植** |
 | Cursor Agent Plugins 发现 / Claude Code Session* **文件** hooks | **不移植**（dsh 用 bundle + glue） |
 

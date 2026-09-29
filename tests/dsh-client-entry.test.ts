@@ -10,7 +10,7 @@
  *   2. factory 导出 named `apply` 与 `inject` 服务声明数组；
  *   3. apply 注册两个 slot 贡献（gf-knowledge-toggle / gf-knowledge），
  *      ToggleButton 渲染调用 React.createElement（stubRequire("react") 返回的 React）；
- *   4. 面板取数走 `connection.rpc.call("/gf", "nodes", { workspaceRoot })`
+ *   4. 面板取数走 `connection.rpc.call("/api", "gf/nodes", { workspaceRoot })`（404 时回退 `/gf`）
  *      （RpcResult 信封解包 data.value），点击主题续聊走
  *      `sessions.binding(currentId).session.prompt(..., "queue")`。
  */
@@ -224,7 +224,7 @@ describe("dsh 静态客户端 bundle 入口（dsh/client.js）", () => {
     expect(h.createElementCalls.some((c) => c.type === "button" && c.props["aria-label"] === "知识节点")).toBe(true);
   });
 
-  it("面板经 connection.rpc.call('/gf','nodes',…) 取数，续聊走 sessions.binding().prompt('queue')", async () => {
+  it("面板经 connection.rpc.call('/api','gf/nodes',…) 取数，续聊走 sessions.binding().prompt('queue')", async () => {
     const h = createRenderHarness();
     const mod = runFactory(h);
     const apply = mod.apply as (ctx: { get: (name: string) => unknown }) => void;
@@ -273,7 +273,7 @@ describe("dsh 静态客户端 bundle 入口（dsh/client.js）", () => {
     expect(panelEl.type).toBe("div");
     expect(panelEl.props.className).toBe("gf-panel");
     expect(rpcCalls).toHaveLength(1);
-    expect(rpcCalls[0]).toEqual({ channel: "/gf", endpoint: "nodes", payload: { workspaceRoot: "/tmp/gf-ws" } });
+    expect(rpcCalls[0]).toEqual({ channel: "/api", endpoint: "gf/nodes", payload: { workspaceRoot: "/tmp/gf-ws" } });
 
     // 宿主返回 RpcResult 信封 → 重渲染出 workbench 主题与对话记录
     resolveNodes({
@@ -307,5 +307,38 @@ describe("dsh 静态客户端 bundle 入口（dsh/client.js）", () => {
     expect(text).toContain('rootDir: "/tmp/gf-ws"');
     expect(text).toContain('topicId: "n1"');
     expect(text).toContain("Static bundle");
+  });
+
+  it("面板取数在 /api/gf/nodes 返回 404 时回退到旧宿主的 /gf 通道", async () => {
+    const h = createRenderHarness();
+    const mod = runFactory(h);
+    const apply = mod.apply as (ctx: { get: (name: string) => unknown }) => void;
+
+    const rpcCalls: Array<{ channel: string; endpoint: string }> = [];
+    const connection = {
+      rpc: {
+        call: (channel: string, endpoint: string) => {
+          rpcCalls.push({ channel, endpoint });
+          if (channel === "/api") return Promise.reject(new Error("transport failure for /api/gf/nodes: HTTP 404"));
+          return Promise.resolve({ ok: true, value: { workbench: [], dialogues: [] } });
+        },
+      },
+    };
+    const slotStub = createSlotStub();
+    apply(createCtxStub({ slots: slotStub.slots, sessions: { binding: () => undefined }, connection }));
+    slotStub.injectCbs.get("conversation.session.header.utilities")!();
+    slotStub.injectCbs.get("shell.overlay")!();
+    const toggleReg = slotStub.registerCalls.find((r) => r.spec.id === "gf-knowledge-toggle")!;
+    const panelReg = slotStub.registerCalls.find((r) => r.spec.id === "gf-knowledge")!;
+    (h.renderTree(toggleReg.component({ sessionId: "s1" })).props.onClick as () => void)();
+    const useSessions = (selector: (state: Record<string, unknown>) => unknown) =>
+      selector({ current: "s1", byId: { s1: { cwd: "/tmp/gf-ws" } } });
+    h.renderTree(panelReg.component({ useSessions }), { fresh: true });
+    await flushMicrotasks();
+
+    expect(rpcCalls).toEqual([
+      { channel: "/api", endpoint: "gf/nodes" },
+      { channel: "/gf", endpoint: "nodes" },
+    ]);
   });
 });

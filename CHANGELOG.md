@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — 「知识节点」面板在 Cordis 4 宿主上从未注册成功（`cannot get property "connection" without inject`）
+
+1.27.12 真机启动日志：`[graphflow-dsh] /gf RPC: registerNodesRpcChannel threw: cannot get property "connection" without inject`。#26 在 1.14.1 的"修复"与 1.27.11 的复核都只对照了源码、用宽松的假 ctx 测试，**从未在真实 Cordis 下跑过**——这次用 DSH 自带的 `@deepseek-ai/cordis` 4.0.4 与真实 `HostConnectionService` 复现后，发现两层问题：
+
+1. **读未声明的服务直接抛错。** Cordis 4 的 ctx 代理对 fiber 未 inject 的任何属性（`ctx.connection`、`ctx.rpc`、`ctx.effect`）都抛 `cannot get property … without inject`。glue 在走到 `ctx.inject` 之前先同步读了 `ctx.connection`，整个注册中断。修法：Cordis 宿主上只在 `ctx.inject(["connection"])` 的 fork 里注册；所有鸭子类型读取都经 `readProperty` 保护；优先用属性访问取服务（Cordis 会把服务绑定到读取它的 fork）。
+2. **`connection.rpc.handle` 对第三方插件在 DSH 上不可用。** 它经 `owner.webServer.register` 挂路由，而 service 内部的 `this.ctx` 带 shadow，服务解析走的是 **Connection 插件自己的 fiber**；DSH 挂载该行时只注入 `credentials` + `webRuntime`，于是无论调用方怎么声明 inject（静态 / `ctx.inject` / 对象形式，四种写法实测全部失败）都报 `cannot get property "webServer" without inject`。DSH 自身也没有任何代码调用 `rpc.handle`。修法：改用 `connection.fetch.register` 注册精确 Fetch 路由 `POST /api/gf/nodes`（只用 `owner.effect`，挂在 Connection 自己的 `/api` 路由下，鉴权/Origin 围栏与 `/api` 相同），应答与 unary RPC 相同的 `server-response` 信封；宿主没有 Fetch 注册表时回退 `rpc.handle("/gf")`。前端改为 `rpc.call("/api", "gf/nodes")`，404 时回退 `/gf`。
+
+**验证**：真实 Cordis 4.0.4 + 真实 `HostConnectionService` + connection 自己的 `/api` 共享 Fetch 处理器，请求 `POST /api/gf/nodes` → HTTP 200、`server-response`、返回本仓库 24 个 workbench 主题与 50 条对话；同一脚本对 1.27.12 精确复现线上报错并得到 404。新增用例：严格 Cordis 代理（读未声明属性即抛错）下不读未声明服务、从 inject fork 注册；Fetch 路由的信封（非 JSON → 400、坏信封 → bad-request、缺 workspace → no-workspace）；前端 404 回退。
+
 ### Fixed — DSH 每轮报 `Cannot read properties of undefined (reading 'kind')`
 
 真机（DSH 0.1.7-rc.2，`dsh web`）复测时，首轮报 #55 的 `format v4 message requires a producer-owned source kind`（profile 里仍锁着 1.18.5），随后每一轮都报 `Cannot read properties of undefined (reading 'kind')`。
@@ -61,6 +70,10 @@ All notable changes to this project are documented in this file.
 - 7 个用例（+1 前提用例），两个守卫仍**分别验证有牙**。
 
 **这一版的教训**：跨平台测试里，"构造前置条件"本身就是要测的东西。凡是用环境变量伪造平台行为的测试，先断言伪造生效，再断言行为。
+
+## [1.27.13] - 2026-09-29
+
+修复 DSH「知识节点」面板在 Cordis 4 宿主上从未注册成功：改用 `connection.fetch.register`（`POST /api/gf/nodes`），并且只在 `ctx.inject(["connection"])` 的 fork 里读取服务。已在真实 Cordis 4.0.4 + 真实 `HostConnectionService` 下端到端验证。
 
 ## [1.27.12] - 2026-09-29
 

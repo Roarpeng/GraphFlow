@@ -1207,7 +1207,6 @@ describe("static panel data channel (/gf nodes)", () => {
 
     expect(registrations).toHaveLength(0);
     expect(typeof injectCallback).toBe("function");
-    expect(logs.some((line) => line.includes("waiting via ctx.inject"))).toBe(true);
 
     injectCallback?.({ connection });
     expect(registrations).toHaveLength(1);
@@ -1221,6 +1220,106 @@ describe("static panel data channel (/gf nodes)", () => {
     apply(ctx, cfg);
     injectCallback?.({ connection });
     expect(registrations).toHaveLength(2);
+  });
+
+  it("on a strict Cordis 4 ctx, never reads undeclared services and registers /gf from the inject fork", () => {
+    // Cordis 4 proxies throw on any property the fiber did not inject.
+    const strict = <T extends object>(target: T): T =>
+      new Proxy(target, {
+        get(obj, prop, receiver) {
+          if (typeof prop === "symbol" || Reflect.has(obj, prop)) return Reflect.get(obj, prop, receiver);
+          throw new Error(`cannot get property "${String(prop)}" without inject`);
+        },
+      });
+    const logs: string[] = [];
+    const registrations: string[] = [];
+    let injectCallback: ((injected: unknown) => void) | undefined;
+    const ctx = strict({
+      skills: { register() {} },
+      on() {},
+      get() {
+        return undefined;
+      },
+      inject(deps: unknown, callback: (injected: unknown) => void) {
+        expect(deps).toEqual(["connection"]);
+        injectCallback = callback;
+      },
+    });
+    const cfg = {
+      env: {},
+      log: {
+        warn(message: string) {
+          logs.push(message);
+        },
+        error(message: string) {
+          logs.push(message);
+        },
+      },
+    };
+    expect(() => apply(ctx, cfg)).not.toThrow();
+    expect(logs.filter((line) => line.includes("/gf RPC"))).toEqual([]);
+
+    const fork = strict({
+      get() {
+        return undefined;
+      },
+      connection: {
+        rpc: {
+          handle(channel: string) {
+            registrations.push(channel);
+            return () => {};
+          },
+        },
+      },
+    });
+    injectCallback?.(fork);
+    expect(registrations).toEqual(["/gf"]);
+    expect(logs.filter((line) => line.includes("/gf RPC"))).toEqual([]);
+  });
+
+  it("prefers connection.fetch.register: POST /api/gf/nodes speaks the server-response envelope", async () => {
+    const routes: Array<{ path: string; methods: string[]; fetch: (request: Request) => Promise<Response> }> = [];
+    let rpcHandleCalls = 0;
+    const connection = {
+      fetch: {
+        register(route: { path: string; methods: string[]; fetch: (request: Request) => Promise<Response> }) {
+          routes.push(route);
+          return () => {};
+        },
+      },
+      rpc: {
+        handle() {
+          rpcHandleCalls += 1;
+          return () => {};
+        },
+      },
+    };
+    apply({ skills: { register() {} }, on() {}, connection }, { env: {} });
+    expect(rpcHandleCalls).toBe(0);
+    expect(routes).toHaveLength(1);
+    expect(routes[0]?.path).toBe("/api/gf/nodes");
+    expect(routes[0]?.methods).toEqual(["POST"]);
+
+    const post = (body: string) =>
+      routes[0]!.fetch(
+        new Request("http://127.0.0.1:3080/api/gf/nodes", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+        })
+      );
+    expect((await post("{not json")).status).toBe(400);
+    await expect((await post(JSON.stringify({ type: "nope" }))).json()).resolves.toMatchObject({
+      type: "server-response",
+      result: { ok: false, error: { code: "bad-request" } },
+    });
+    await expect(
+      (await post(JSON.stringify({ type: "client-request", rpcId: "r-1", method: "gf/nodes", payload: {} }))).json()
+    ).resolves.toEqual({
+      type: "server-response",
+      rpcId: "r-1",
+      result: { ok: false, error: { code: "bad-request", message: "no-workspace", details: { issues: [] } } },
+    });
   });
 
   it("logs when rpc.handle throws and does not stay wired", () => {

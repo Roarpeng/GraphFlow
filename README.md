@@ -260,7 +260,7 @@ GraphFlow 是 [DeepSeek Harness](https://www.deepseek.com/harness/en/) 的 [`dsh
 | 首轮短 hint：先调 `graphflow_context`（`rootDir` = cwd）；兼容会话格式 v4（`source.kind = plugin:graphflow-dsh`） | 是 |
 | 对话自动入图：只记录真人提问（`source.kind = user`），v3 `plugin` / v4 宿主生产者 kind / `plugin:*` 注入一律排除 | 是 |
 | Workbench 数据（`topicId` / outline）经 MCP `graphflow_context` / `graphflow_diagnose` | 是 |
-| dsh web「知识节点」面板（`/gf` Connection RPC；web 半边依赖 `dsh-api-session-controller` / `dsh-client-connection` / `dsh-client-ui-renderer`） | 是 |
+| dsh web「知识节点」面板（`POST /api/gf/nodes`，经 `connection.fetch.register`；旧宿主回退 `/gf` RPC；web 半边依赖 `dsh-api-session-controller` / `dsh-client-connection` / `dsh-client-ui-renderer`） | 是 |
 | VS Code/Cursor 图谱面板、Settings webview、Workbench Tree、`@graphflow` chat | **否**（宿主 UI，不移植） |
 | Cursor Agent Plugins 1.0 发现 | **否**（dsh 用 `dsh.bundle`） |
 | Claude Code `SessionStart/End/Stop` **文件** hooks | **否**（dsh analog 是上面的 glue） |
