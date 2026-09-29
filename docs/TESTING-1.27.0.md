@@ -48,6 +48,13 @@ summary: installed=57 missing=0 stale=0 n/a=4 ok=true
 
 关键是 `missing=0` 和 `stale=0`。`n/a` 只是没装对应宿主，不影响。
 
+**`missing` 不是一类东西，要分开看**（自检脚本会把具体项列出来）：
+
+- `project:*` / `instruction:*GitHub Copilot*` / `project:Antigravity*` —— **项目作用域**，写在 CWD。在 `C:\Users\xxx` 或 `~` 这类非项目目录里跑，**必然报 missing**，与安装质量无关。换个真实项目目录即可。
+- `hooks:DeepSeek Harness glue` —— **按设计如此**。dsh 的 glue 层要等 `@roarpeng/graphflow` 装进 profile 才写入，命令是 `dsh plugin --profile web add @roarpeng/graphflow`。
+
+Windows 上实测（1.27.6）的 `missing=4` 就是这四类，没有真问题。
+
 想只取这一行又不依赖 `grep`，用 Node。**注意必须用 `spawnSync` 而不是 `execSync`**：doctor 在 `ok=false` 时退出码非零，`execSync` 会直接抛错，把要读的那行输出一起丢掉。
 
 ```bash
@@ -169,6 +176,8 @@ console.log(`指向工作区 dist: ${ok}/${total}`);'
 
 | 症状 | 排查 |
 | --- | --- |
+| `npm install -g` 报 `ETARGET: No matching version found` | 镜像未同步。`npm config get registry` 若指向 npmmirror，改用 `npm install -g --registry=https://registry.npmjs.org @roarpeng/graphflow@1.27.6` |
+| **Windows** `npm install -g` 报 `EBUSY: resource busy or locked` | 有进程占着旧目录——最常见是**你自己开着的 agent**（它们拉起的 MCP server 正跑在那个目录里）。关掉所有 agent → `Stop-Process -Name node -Force -ErrorAction SilentlyContinue` → 重试。仍失败就 `Remove-Item -Recurse -Force "$env:APPDATA\npm\node_modules\@roarpeng\graphflow" -ErrorAction SilentlyContinue` 后重装（残留半装状态）。最后才是杀毒软件扫描 |
 | `graphflow: command not found` | 全局 npm bin 不在 PATH。`npm bin -g`（或 `npm prefix -g`）确认目录已加进 PATH |
 | 某 agent 里没有 graphflow 工具 | 跑 `graphflow doctor`，看该 agent 的 `mcp` 项状态；`missing` 时先确认该 agent 的配置目录存在（如 `~/.cursor`） |
 | 工具存在但一直 pending | MCP 进程启动失败。看 `graphflow doctor` 的 `stale` / `missing`；必要时手动启动看报错 |

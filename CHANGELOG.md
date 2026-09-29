@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.27.7] - 2026-09-29
+
+自检脚本修 Windows 上「MCP 检查被静默跳过」；文档补 Windows EBUSY 与镜像延迟的处理。
+
 ## [1.27.6] - 2026-09-29
 
 新增 `scripts/cross-platform-check.mjs`：Ubuntu / Windows 同一套命令的自检脚本，含中文编码往返检测。
@@ -449,6 +453,15 @@ AND 要求**单个节点同时包含全部查询词**，于是召回随查询变
 - 删除 `tmp/`（25M）、`benchmarks/.cache/`（47M）、`Cursor/`、`PearAI/`、`.codex/`。后三者是被测宿主配置，出现在仓库根是因为**测试的 CWD 恰好是 checkout**；`.codex/config.toml` 里还钉着 `roarpeng.graphflow-1.9.6` 的旧扩展路径（用户反馈的"版本残留"，我找到的是 1.9.6 而非 1.7.6），一并清除。
 - `.gitignore` 增加 `.codex/`，并写明原因——`Cursor/`、`PearAI/`、`benchmarks/.cache/` 此前已在忽略列表里。
 
+
+### Fixed — 自检脚本在 Windows 上静默跳过了 MCP 检查
+
+用户在 Windows 上跑 1.27.6 的自检，MCP 那项显示 ——**而实际上包就在那里**。脚本只找 （Linux 布局）和 ，Windows 的  两条都不匹配。
+
+- 改用 /home/bosch/.npm-global/lib/node_modules 解析，不猜布局。这同时覆盖了  自定义前缀的情况（已实测： 能正确解析）。
+- **skip 改为 FAIL**。一个显示跳过的检查读起来和通过一样，这是最坏的失败形态。现在找不到包会报 FAIL，并打印它找过哪些路径。
+
+用户在 Windows 上还给出了 1.27.6 的完整安装日志：19 个宿主的条目全部写入且路径正确（含 AppData 路径），，。文档已补 Windows 的 （被自己开着的 agent 占用）与镜像  两类处理。
 
 ## [1.26.0] - 2026-09-23
 

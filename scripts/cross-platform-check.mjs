@@ -241,18 +241,33 @@ record(
 );
 
 // ── 8. MCP server starts and lists tools ─────────────────────────────────────
-const serverPath = join(home, ".npm-global", "lib", "node_modules", "@roarpeng", "graphflow", "dist", "surfaces", "mcp", "server.js");
-const altServer = join(process.cwd(), "node_modules", "@roarpeng", "graphflow", "dist", "surfaces", "mcp", "server.js");
-const resolved = existsSync(serverPath) ? serverPath : existsSync(altServer) ? altServer : undefined;
+// Locate the package through `npm root -g` rather than guessing the layout.
+// Guessing worked on Linux (~/.npm-global/lib/node_modules) and silently
+// skipped on Windows (%APPDATA%\npm\node_modules), where it reported "skipped"
+// instead of running the check — the worst kind of failure, because a skipped
+// check reads like a pass.
+const npmRoot = spawnSync("npm", ["root", "-g"], { encoding: "utf8", shell: process.platform === "win32" });
+const globalRoot = (npmRoot.stdout ?? "").trim();
+const localRoot = join(process.cwd(), "node_modules");
+const candidates = [
+  globalRoot ? join(globalRoot, "@roarpeng", "graphflow", "dist", "surfaces", "mcp", "server.js") : "",
+  join(localRoot, "@roarpeng", "graphflow", "dist", "surfaces", "mcp", "server.js"),
+].filter(Boolean);
+const resolved = candidates.find((p) => existsSync(p));
 if (resolved) {
   const probe = spawnSync(process.execPath, ["-e", MCP_PROBE_SOURCE, resolved], {
     encoding: "utf8",
     timeout: 60_000,
   });
   const count = Number((probe.stdout ?? "").trim() || "0");
-  record(count >= 10, "MCP server starts and lists tools", `${count} tools (${probe.stderr?.slice(0, 80) ?? ""})`);
+  record(count >= 10, "MCP server starts and lists tools", `${count} tools from ${resolved}`);
 } else {
-  record(true, "MCP server starts and lists tools", "skipped: package not found at a known location");
+  // A skip that looks like a pass is worse than a failure, so this fails.
+  record(
+    false,
+    "MCP server starts and lists tools",
+    `package not found. npm root -g = ${globalRoot || "(unavailable)"}; looked in: ${candidates.join(", ")}`
+  );
 }
 
 // ── report ───────────────────────────────────────────────────────────────────
