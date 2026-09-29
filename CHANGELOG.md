@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.27.1] - 2026-09-29
+
+修复用户实测报出的两个安装级缺陷：`onnxruntime-node` 安装失败中断整包安装（非 Windows 上 appData 解析为空字符串，宿主配置被写进用户仓库）。详见下方条目。
+
 ## [1.27.0] - 2026-09-29
 
 上下文经济引擎（新鲜度预言机 / 前缀 churn 计价 / 能力地板 / Prefix Cache Planner / Project Brief）全量落地，`npm audit` 清零，工作区构建偏好覆盖全部 19 个宿主 + dsh。本段汇总，其后各条目为该版本的详细记录。
