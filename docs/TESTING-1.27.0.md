@@ -1,8 +1,14 @@
-# GraphFlow 1.27.0 — 多宿主验收测试步骤
+# GraphFlow 1.27.8 — 多宿主验收测试步骤
 
 本版把「工作区构建偏好」从只支持 opencode 扩到**全部 19 个宿主 + dsh**，并把 `npm audit` 从 8 项清到 0。下面的步骤用于在**你自己的 agent 工具里**逐个验收。
 
-本文档只讲**从 npm 安装的包**（`@roarpeng/graphflow@1.27.0`）怎么测。**不需要克隆仓库、不需要编译。**
+本文档只讲**从 npm 安装的包**（`@roarpeng/graphflow@1.27.8`）怎么测。**不需要克隆仓库、不需要编译。**
+
+> ⚠️ **不要在 home 目录里跑 `graphflow install`。**
+> `~` / `C:\Users\xxx` 不是项目目录：1.27.8 会拒绝在那里写入项目规则文件（`.windsurfrules`、`AGENTS.md`、`GEMINI.md`、`.claude/rules/graphflow.md` 等），
+> 每项都会明确报 `home directory is not a project root`。Ubuntu 和 Windows 上都已实测：旧版本会把这些文件散落进 home，
+> 还会把带标记的指令文件覆盖成无标记副本，导致 install 说「已是最新」而 doctor 说 missing——**同一个文件，两个相反结论**。
+> 请始终 `cd` 进一个真实项目目录（比如下面第 0 步的 `~/gf-test` 子目录）再跑。
 
 ---
 
@@ -12,20 +18,20 @@
 # macOS / Linux
 mkdir -p ~/gf-test && cd ~/gf-test
 npm init -y
-npm install -g @roarpeng/graphflow@1.27.3
+npm install -g @roarpeng/graphflow@1.27.8
 ```
 
 ```powershell
 # Windows PowerShell
 mkdir $env:USERPROFILE\gf-test -Force; cd $env:USERPROFILE\gf-test
 npm init -y
-npm install -g @roarpeng/graphflow@1.27.3
+npm install -g @roarpeng/graphflow@1.27.8
 ```
 
 如果安装报 `onnxruntime-node` 下载失败，加 `--ignore-scripts` 重装（两个平台命令相同）：
 
 ```bash
-npm install -g --ignore-scripts @roarpeng/graphflow@1.27.3
+npm install -g --ignore-scripts @roarpeng/graphflow@1.27.8
 ```
 
 这只影响本地 embedding（语义检索）功能，MCP、上下文压缩、记忆全部正常。`onnxruntime` 的二进制走独立 CDN，部分网络环境访问不到。
@@ -33,7 +39,7 @@ npm install -g --ignore-scripts @roarpeng/graphflow@1.27.3
 确认装好：
 
 ```bash
-graphflow --version          # 应输出 1.27.3
+graphflow --version          # 应输出 1.27.8
 graphflow install            # 注册 MCP + Skill 到本机检测到的 agent
 graphflow doctor             # 输出里找 summary: 那一行
 ```
@@ -50,7 +56,8 @@ summary: installed=57 missing=0 stale=0 n/a=4 ok=true
 
 **`missing` 不是一类东西，要分开看**（自检脚本会把具体项列出来）：
 
-- `project:*` / `instruction:*GitHub Copilot*` / `project:Antigravity*` —— **项目作用域**，写在 CWD。在 `C:\Users\xxx` 或 `~` 这类非项目目录里跑，**必然报 missing**，与安装质量无关。换个真实项目目录即可。
+- `project:*` / `instruction:*GitHub Copilot*` / `project:Antigravity*` —— **项目作用域**，写在 CWD。在 `C:\Users\xxx` 或 `~` 这类非项目目录里跑，1.27.8 会明确拒绝（`home directory is not a project root`），旧版本则报 missing 或静默污染。这与安装质量无关：换个真实项目目录即可。
+- `instruction:Claude Code rules` 报 missing 但 `~/.claude/rules/graphflow.md` 明明存在 —— **这是个真 bug（1.27.8 已修）**：旧版本从 home 跑 install 时，用无标记的纯复制覆盖了带标记的指令文件，install 说「已是最新」而 doctor 说 missing。升级到 1.27.8 后再跑一次 install 即可自愈，之后不再复发。
 - `hooks:DeepSeek Harness glue` —— **按设计如此**。dsh 的 glue 层要等 `@roarpeng/graphflow` 装进 profile 才写入，命令是 `dsh plugin --profile web add @roarpeng/graphflow`。
 
 Windows 上实测（1.27.6）的 `missing=4` 就是这四类，没有真问题。
@@ -176,7 +183,7 @@ console.log(`指向工作区 dist: ${ok}/${total}`);'
 
 | 症状 | 排查 |
 | --- | --- |
-| `npm install -g` 报 `ETARGET: No matching version found` | 镜像未同步。`npm config get registry` 若指向 npmmirror，改用 `npm install -g --registry=https://registry.npmjs.org @roarpeng/graphflow@1.27.6` |
+| `npm install -g` 报 `ETARGET: No matching version found` | 镜像未同步。`npm config get registry` 若指向 npmmirror，改用 `npm install -g --registry=https://registry.npmjs.org @roarpeng/graphflow@1.27.8` |
 | **Windows** `npm install -g` 报 `EBUSY: resource busy or locked` | 有进程占着旧目录——最常见是**你自己开着的 agent**（它们拉起的 MCP server 正跑在那个目录里）。关掉所有 agent → `Stop-Process -Name node -Force -ErrorAction SilentlyContinue` → 重试。仍失败就 `Remove-Item -Recurse -Force "$env:APPDATA\npm\node_modules\@roarpeng\graphflow" -ErrorAction SilentlyContinue` 后重装（残留半装状态）。最后才是杀毒软件扫描 |
 | `graphflow: command not found` | 全局 npm bin 不在 PATH。`npm bin -g`（或 `npm prefix -g`）确认目录已加进 PATH |
 | 某 agent 里没有 graphflow 工具 | 跑 `graphflow doctor`，看该 agent 的 `mcp` 项状态；`missing` 时先确认该 agent 的配置目录存在（如 `~/.cursor`） |

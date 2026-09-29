@@ -6,7 +6,8 @@
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { isUnsafeWorkspaceFallback } from "../config/discover-workspace.js";
 import { resolveDshHome } from "./dsh-harness-installer";
 import { resolveKimiCodeHome } from "./kimi-code-paths";
 
@@ -1189,6 +1190,26 @@ export function installProjectLevelRules(
   if (!workspaceRoot) return results;
 
   const logFn = log ?? ((msg: string) => console.log(msg));
+
+  // Refuse to scatter project files into the user's home directory. Observed on
+  // both Ubuntu and Windows: running `graphflow install` from `~` /
+  // `C:\Users\x` makes every "project" target resolve to the home directory, and
+  // one of these writers is a plain copy without managed-block markers, so it
+  // overwrote a marker-ful instruction file with a bare AGENTS.md copy. doctor
+  // then reported the file as `missing` (it checks for the markers) while install
+  // reported "already up to date" — the same file, two opposite verdicts.
+  // Graph index already refuses an unsafe root; project files must too.
+  if (isUnsafeWorkspaceFallback(resolve(workspaceRoot))) {
+    const message =
+      `Refusing to write project rule files into the home directory (${workspaceRoot}). ` +
+      `Run \`graphflow install\` from a project directory.`;
+    logFn(`[SKIP] ${message}`);
+    for (const target of getProjectLevelRuleTargets(workspaceRoot)) {
+      results.push({ target: target.agent, status: "skipped", message: "home directory is not a project root" });
+    }
+    return results;
+  }
+
   const targets = getProjectLevelRuleTargets(workspaceRoot);
 
   for (const target of targets) {
@@ -1268,6 +1289,17 @@ export function installProjectLevelRules(
  */
 export function installProjectGeminiInstructions(workspaceRoot: string): SkillInstallResult[] {
   if (!workspaceRoot) return [];
+  // Same home-root guard as installProjectLevelRules. Verified residue on a
+  // machine where install was run from `~`: a 1.6 KB `~/GEMINI.md`.
+  if (isUnsafeWorkspaceFallback(resolve(workspaceRoot))) {
+    return [
+      {
+        target: "Antigravity/Gemini project GEMINI.md",
+        status: "skipped",
+        message: "home directory is not a project root",
+      },
+    ];
+  }
   const filePath = join(workspaceRoot, "GEMINI.md");
   const result = upsertManagedBlock(filePath, workspaceRoot);
   return [{ target: "Antigravity/Gemini project GEMINI.md", status: result.status, message: result.message }];

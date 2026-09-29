@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.27.8] - 2026-09-29
+
+修复从 home 目录运行 install 会把项目文件写进 home 并覆盖带标记的指令文件（Ubuntu / Windows 均复现）。
+
 ## [1.27.7] - 2026-09-29
 
 自检脚本修 Windows 上「MCP 检查被静默跳过」；文档补 Windows EBUSY 与镜像延迟的处理。
@@ -462,6 +466,31 @@ AND 要求**单个节点同时包含全部查询词**，于是召回随查询变
 - **skip 改为 FAIL**。一个显示"跳过"的检查读起来和通过一样，这是最坏的失败形态。现在找不到包会报 FAIL，并打印它找过哪些路径。
 
 用户在 Windows 上还给出了 1.27.6 的完整安装日志：19 个宿主的条目全部写入且路径正确（含 AppData 路径），`stale=0`，`missing=4`。文档已补 Windows 的 `EBUSY`（被自己开着的 agent 占用）与镜像 `ETARGET` 两类处理。
+
+### Fixed — 从 home 目录跑 install 会把项目文件写进 home，并覆盖带标记的指令文件
+
+用户在 Ubuntu 与 Windows 上**都**从 home 目录（`~` / `C:\Users\xxx`）跑了 `graphflow install`，两边都留下同一个矛盾结果：
+
+- `~/.claude/rules/graphflow.md` **确实存在**（1.6 KB），install 报 `already up to date`，doctor 却报 `missing`。**同一个文件，两个相反结论。**
+- 原因：该文件被写成 `AGENTS.md` 的**逐字副本，且没有 managed block 标记**。doctor 的判定是"文件里有没有 `GRAPHFLOW:BEGIN/END` 标记"，自然判 missing。而项目规则写入器里那条 `claude-rules` 路径是**纯复制**（不带标记），从 home 跑时它把带标记的版本覆盖成了裸副本。
+
+机制：项目作用域的目标是相对 `workspaceRoot` 解析的。`workspaceRoot` = home，于是 `.claude/rules/`、`.windsurfrules`、`.agent/rules/`、`AGENTS.md`、`GEMINI.md` 全部落进 home。**Windows 同理**（`C:\Users\vboxuser`）。
+
+审计本机 home 实际被写进去的文件时，发现**不止一个写入点**：
+
+| 文件 | 大小 | 写入者 | 已守卫 |
+|---|---|---|---|
+| `~/.claude/rules/graphflow.md` | 1.6 KB | `installProjectLevelRules` | ✅ |
+| `~/.windsurfrules` | 1.6 KB | `installProjectLevelRules` | ✅ |
+| `~/.cursor/rules/graphflow.mdc` | 7.6 KB | `installProjectLevelRules` | ✅ |
+| `~/AGENTS.md` | 1.6 KB | `installProjectLevelRules` | ✅ |
+| `~/GEMINI.md` | 1.7 KB | `installProjectGeminiInstructions` | ✅ |
+
+只修前一个就是**看起来修完了其实没修完**——`~/GEMINI.md` 照样每天被生成。两个写入点现在都复用图谱索引已有的 `isUnsafeWorkspaceFallback` 判定，home / AppData 作为 root 时**拒绝写入并逐项说明原因**。图索引早就拒绝不安全 root，项目文件此前没有——这个不对称就是漏洞本身。
+
+`tests/project-rules-unsafe-root.test.ts`（6 用例）：home 为 root 时一项都不写、每项都说明原因、**带标记的既有指令文件保持逐字不变**、两个写入点各自的守卫、真实项目目录照常写入，以及"真实 home 确实被判定为 unsafe"这个前提本身。**两个守卫都单独验证过有牙**：分别移除 → 各有测试失败。
+
+本机实测（本地构建，从 home 跑 `install`）：**10 个项目作用域目标被拒绝，home 下 9 个文件的大小与 mtime 零变化**。同一构建在真实项目目录跑，`AGENTS.md` / `GEMINI.md` / `.windsurfrules` / `.claude/rules/graphflow.md` 四个文件照常写入。
 
 ## [1.26.0] - 2026-09-23
 
