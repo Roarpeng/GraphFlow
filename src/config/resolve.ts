@@ -7,8 +7,17 @@ import { mergeGraphFlowConfig } from "./merge";
 import { getDefaultConfig } from "./defaults";
 import { resolveGlobalConfigPath } from "./scaffold";
 import { bindRuntimeWorkspaceRoot } from "./workspace-root";
-import { applyProviderEnvFromConfig } from "./provider-env";
+import { applyProviderEnvFromConfig, isConfigExportedEnvKey } from "./provider-env";
 import { logger } from "../utils/logger";
+
+/** True when `key` holds a genuine shell-provided value (not config-exported). */
+function genuineEnvPresent(key: string): boolean {
+  if (isConfigExportedEnvKey(key)) {
+    return false;
+  }
+  const value = process.env[key]?.trim();
+  return Boolean(value && value.length > 0 && !value.startsWith("${"));
+}
 
 function isDefaultProjectConfigPath(path: string): boolean {
   const projectRootConfig = resolve("graphflow.config.json");
@@ -53,8 +62,88 @@ export function resolveWritableConfigPath(path = "graphflow.config.json"): strin
   return resolveGlobalConfigPath();
 }
 
-function finalizeConfig(config: GraphFlowConfig): GraphFlowConfig {
+function sniffAndApplyProviderEnv(config: GraphFlowConfig, isZeroConfig = false): void {
+  // 1. Config values win: apply configured credentials from config into process.env if not already set
   applyProviderEnvFromConfig(config);
+
+  // 2. Alias mapping: if DEEPSEEK_API_KEY is not set, but TYPESAFE_API_KEY is, map it.
+  // A TYPESAFE_* value that was itself exported from another config is that
+  // config's credential — aliasing it would leak it across configs.
+  const typesafeGenuine = !isConfigExportedEnvKey("TYPESAFE_API_KEY");
+  const typesafeKey = typesafeGenuine ? process.env.TYPESAFE_API_KEY?.trim() : undefined;
+  if (typesafeKey && !process.env.DEEPSEEK_API_KEY?.trim()) {
+    process.env.DEEPSEEK_API_KEY = typesafeKey;
+  }
+  const typesafeBaseUrl = !isConfigExportedEnvKey("TYPESAFE_BASE_URL")
+    ? process.env.TYPESAFE_BASE_URL?.trim()
+    : undefined;
+  if (typesafeBaseUrl && !process.env.DEEPSEEK_BASE_URL?.trim()) {
+    process.env.DEEPSEEK_BASE_URL = typesafeBaseUrl;
+  }
+
+  const envMap: Record<string, string> = {
+    deepseek: "DEEPSEEK_API_KEY",
+    openai: "OPENAI_API_KEY",
+    anthropic: "ANTHROPIC_API_KEY",
+    bailian: "BAILIAN_API_KEY",
+    doubao: "DOUBAO_API_KEY",
+  };
+
+  // 3. For any provider explicitly mentioned in config.providers, if apiKey is missing,
+  // sniff from process.env so config accurately reflects credentials unless explicitly closed
+  for (const [provider, details] of Object.entries(config.providers)) {
+    const raw = details?.apiKey?.trim();
+    if (raw === "" || raw?.toLowerCase() === "disabled" || raw?.toLowerCase() === "none") {
+      continue;
+    }
+    const envVar = envMap[provider];
+    if (envVar && genuineEnvPresent(envVar)) {
+      if (!details.apiKey || details.apiKey.trim().length === 0) {
+        details.apiKey = `\${${envVar}}`;
+      }
+    }
+  }
+
+  // 4. For providers configured in tiers: if config.providers[tierProvider] doesn't have apiKey
+  const tierProviders = [config.tiers.smart.provider, config.tiers.economy.provider];
+  for (const provider of tierProviders) {
+    if (provider === "openai" && !config.providers.openai && !isZeroConfig) {
+      continue;
+    }
+    const envVar = envMap[provider];
+    if (envVar && genuineEnvPresent(envVar)) {
+      const existing = config.providers[provider];
+      if (existing) {
+        const raw = existing.apiKey?.trim();
+        if (raw === "" || raw?.toLowerCase() === "disabled" || raw?.toLowerCase() === "none") {
+          continue;
+        }
+        if (!existing.apiKey || existing.apiKey.trim().length === 0) {
+          existing.apiKey = `\${${envVar}}`;
+        }
+      } else {
+        config.providers[provider] = { apiKey: `\${${envVar}}` };
+      }
+    }
+  }
+
+  // 5. Zero-config fallback: when no config layers exist on disk, if DEEPSEEK_API_KEY is present
+  // and OPENAI_API_KEY is not, align tiers to deepseek so zero-config out of the box works
+  if (isZeroConfig) {
+    const openAiKey = genuineEnvPresent("OPENAI_API_KEY");
+    const deepseekKey = genuineEnvPresent("DEEPSEEK_API_KEY");
+    if (!openAiKey && deepseekKey) {
+      config.providers.deepseek = { apiKey: "${DEEPSEEK_API_KEY}" };
+      config.tiers.smart.provider = "deepseek";
+      config.tiers.smart.model = "deepseek-v4-pro";
+      config.tiers.economy.provider = "deepseek";
+      config.tiers.economy.model = "deepseek-v4-flash";
+    }
+  }
+}
+
+function finalizeConfig(config: GraphFlowConfig, isZeroConfig = false): GraphFlowConfig {
+  sniffAndApplyProviderEnv(config, isZeroConfig);
   return config;
 }
 
@@ -98,7 +187,8 @@ export function resolveConfig(
   }
 
   const globalPath = resolveGlobalConfigPath();
-  const base = existsSync(globalPath) ? loadLayer(globalPath) : getDefaultConfig();
+  const globalExists = existsSync(globalPath);
+  const base = globalExists ? loadLayer(globalPath) : getDefaultConfig();
 
   const projectRoot = resolve("graphflow.config.json");
   const overlayPath = resolve(".graphflow/config.json");
@@ -106,17 +196,20 @@ export function resolveConfig(
   let merged: GraphFlowConfig;
   let projectWorkspaceRoot: string | undefined;
 
-  if (existsSync(projectRoot) && existsSync(overlayPath)) {
+  const projectExists = existsSync(projectRoot);
+  const overlayExists = existsSync(overlayPath);
+
+  if (projectExists && overlayExists) {
     const projectLayer = loadLayer(projectRoot, { projectLayer: true });
     const overlayLayer = loadLayer(overlayPath);
     merged = mergeGraphFlowConfig(mergeGraphFlowConfig(base, projectLayer), overlayLayer);
     projectWorkspaceRoot =
       overlayLayer.graphPolicy.workspaceRoot ?? projectLayer.graphPolicy.workspaceRoot;
-  } else if (existsSync(projectRoot)) {
+  } else if (projectExists) {
     const projectLayer = loadLayer(projectRoot, { projectLayer: true });
     merged = mergeGraphFlowConfig(base, projectLayer);
     projectWorkspaceRoot = projectLayer.graphPolicy.workspaceRoot;
-  } else if (existsSync(overlayPath)) {
+  } else if (overlayExists) {
     const overlayLayer = loadLayer(overlayPath);
     merged = mergeGraphFlowConfig(base, overlayLayer);
     projectWorkspaceRoot = overlayLayer.graphPolicy.workspaceRoot;
@@ -124,11 +217,14 @@ export function resolveConfig(
     merged = base;
   }
 
+  const isZeroConfig = !projectExists && !overlayExists && !globalExists;
+
   return finalizeConfig(
     bindRuntimeWorkspaceRoot(
       merged,
       mergeRuntimeWorkspaceBind(bind, projectWorkspaceRoot)
-    )
+    ),
+    isZeroConfig
   );
 }
 
