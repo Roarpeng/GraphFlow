@@ -23,8 +23,15 @@ export interface EmbeddingQualitySummary {
   fallbackReason?: string;
   /** Stored vectors skipped by the last vector recall (wrong dimension / model). */
   incompatibleVectorsSkipped?: number;
-  /** Last refresh pass: vectors from an older model, and how many were re-embedded. */
-  staleVectors?: { stale: number; refreshed: number; fingerprint?: string; at: number };
+  /** Last backfill pass: vectors missing or from an older model, and how many were re-embedded. */
+  vectorBackfill?: {
+    missing: number;
+    stale: number;
+    refreshed: number;
+    fingerprint?: string;
+    budget?: { limit: number; deadlineMs: number };
+    at: number;
+  };
 }
 
 interface EmbeddingQualityState {
@@ -39,7 +46,14 @@ interface EmbeddingQualityState {
   backend?: string;
   fallbackReason?: string;
   incompatibleVectorsSkipped?: number;
-  staleVectors?: { stale: number; refreshed: number; fingerprint?: string; at: number };
+  vectorBackfill?: {
+    missing: number;
+    stale: number;
+    refreshed: number;
+    fingerprint?: string;
+    budget?: { limit: number; deadlineMs: number };
+    at: number;
+  };
 }
 
 const state: EmbeddingQualityState = {
@@ -63,15 +77,21 @@ export function resetEmbeddingQualityStats(): void {
   delete state.backend;
   delete state.fallbackReason;
   delete state.incompatibleVectorsSkipped;
-  delete state.staleVectors;
+  delete state.vectorBackfill;
 }
 
 export function recordIncompatibleVectorsSkipped(count: number): void {
   state.incompatibleVectorsSkipped = count;
 }
 
-export function recordStaleVectorRefresh(result: { stale: number; refreshed: number; fingerprint?: string }): void {
-  state.staleVectors = { ...result, at: Date.now() };
+export function recordVectorBackfill(result: {
+  missing: number;
+  stale: number;
+  refreshed: number;
+  fingerprint?: string;
+  budget?: { limit: number; deadlineMs: number };
+}): void {
+  state.vectorBackfill = { ...result, at: Date.now() };
 }
 
 export function configureEmbeddingQualityMeta(meta: {
@@ -176,7 +196,7 @@ export function getEmbeddingQualitySummary(): EmbeddingQualitySummary {
     ...(typeof state.incompatibleVectorsSkipped === "number"
       ? { incompatibleVectorsSkipped: state.incompatibleVectorsSkipped }
       : {}),
-    ...(state.staleVectors ? { staleVectors: state.staleVectors } : {}),
+    ...(state.vectorBackfill ? { vectorBackfill: state.vectorBackfill } : {}),
   };
 }
 

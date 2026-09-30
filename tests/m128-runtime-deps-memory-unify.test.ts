@@ -29,7 +29,7 @@ import {
   ensureRuntimeDepsInstalled,
   inspectRuntimeDeps,
 } from "../src/integrations/ensure-runtime-deps";
-import { refreshStaleEmbeddings } from "../src/learning/embedding-refresh";
+import { ensureEmbeddings } from "../src/learning/embedding-refresh";
 import {
   attachEmbedding,
   createHashEmbeddingProvider,
@@ -238,20 +238,36 @@ describe("M128 embedding fingerprints", () => {
       fingerprint: () => bge,
       embed: async () => [0, 1, 0, 0],
     };
-    const result = await refreshStaleEmbeddings(client as never, semantic);
-    expect(result).toMatchObject({ stale: 1, refreshed: 1, fingerprint: bge });
+    const result = await ensureEmbeddings(client as never, semantic);
+    expect(result).toMatchObject({ missing: 0, stale: 1, refreshed: 1, fingerprint: bge });
     const after = client.readSnapshot().nodes.find((n) => n.id === "s1")!;
     expect(extractEmbeddingModel(after)).toBe(bge);
     client.close?.();
   });
 
-  it("never downgrades vectors when the provider fell back to hash", async () => {
+  it("backfills nodes that never had a vector", async () => {
+    const client = seededClient();
+    await client.upsertNodes([
+      { id: "s1", type: "Symbol", content: "alpha beta" },
+      { id: "s2", type: "Symbol", content: "gamma" },
+    ]);
+
+    const semantic: EmbeddingProvider = {
+      fingerprint: () => bge,
+      embed: async () => [0, 1, 0, 0],
+    };
+    const result = await ensureEmbeddings(client as never, semantic);
+    expect(result).toMatchObject({ missing: 2, stale: 0, refreshed: 2, fingerprint: bge });
+    expect(client.readSnapshot().nodes.every((n) => extractEmbeddingModel(n) === bge)).toBe(true);
+    client.close?.();
+  });
+
+  it("never downgrades semantic vectors when the provider fell back to hash", async () => {
     const client = seededClient();
     const good = attachEmbedding({ id: "s1", type: "Symbol", content: "alpha" }, [1, 0, 0, 0], bge);
     await client.upsertNodes([good]);
-    const result = await refreshStaleEmbeddings(client as never, createHashEmbeddingProvider(8));
-    expect(result.skippedReason).toBe("hash-backend");
-    expect(result.refreshed).toBe(0);
+    const result = await ensureEmbeddings(client as never, createHashEmbeddingProvider(8));
+    expect(result).toMatchObject({ stale: 1, refreshed: 0 });
     expect(extractEmbeddingModel(client.readSnapshot().nodes[0]!)).toBe(bge);
     client.close?.();
   });

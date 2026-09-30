@@ -19,7 +19,7 @@ import { buildDocumentEdges } from "./language-indexers/markdown.js";
 import { markdownIndexer } from "./language-indexers/markdown.js";
 import type { CallRelation, InheritRelation } from "./language-indexers/index.js";
 import { embedAndAttachNodes } from "../learning/embeddings.js";
-import { refreshStaleEmbeddings } from "../learning/embedding-refresh.js";
+import { ensureEmbeddings, type VectorBackfillResult } from "../learning/embedding-refresh.js";
 import {
   convertDocumentToMarkdown,
   DEFAULT_DOCUMENT_MAX_FILE_SIZE,
@@ -418,11 +418,12 @@ export async function indexWorkspaceFiles(
 
   saveCacheState(cachePath, cacheState);
 
+  let vectorBackfill: VectorBackfillResult | undefined;
   if (options?.embeddingProvider && !signal?.aborted) {
     try {
-      await refreshStaleEmbeddings(client, options.embeddingProvider, signal ? { signal } : undefined);
+      vectorBackfill = await ensureEmbeddings(client, options.embeddingProvider, signal ? { signal } : undefined);
     } catch (error) {
-      logger.warn({ error }, "Stale embedding refresh failed; vectors stay on their previous model");
+      logger.warn({ error }, "Embedding backfill failed; vectors stay on their previous model");
     }
   }
 
@@ -433,11 +434,16 @@ export async function indexWorkspaceFiles(
     indexedReferences: number;
     agentWorkItems?: AgentWorkItem[];
     agentInstructions?: string;
+    vectorBackfill?: Omit<VectorBackfillResult, "skippedReason">;
   } = {
     indexedFiles: nodes.filter((node) => node.type === "File").length,
     indexedSymbols: nodes.filter((node) => node.type === "Symbol").length,
     indexedReferences: referenceCount + callEdgeCount + inheritEdgeCount,
   };
+  if (vectorBackfill && (vectorBackfill.refreshed > 0 || vectorBackfill.missing > 0 || vectorBackfill.stale > 0)) {
+    const { skippedReason: _skipped, ...backfill } = vectorBackfill;
+    result.vectorBackfill = backfill;
+  }
   if (agentWorkItems.length > 0) {
     result.agentWorkItems = agentWorkItems;
     result.agentInstructions = [

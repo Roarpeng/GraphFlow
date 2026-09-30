@@ -2,6 +2,7 @@ import type { GraphNode } from "../core/types";
 import type { GraphClient } from "../graph/client-factory";
 import { hashText } from "../utils/hash";
 import {
+  attachEmbedding,
   cosineSimilarity,
   extractEmbedding,
   type EmbeddingProvider,
@@ -108,18 +109,22 @@ export async function recordEpisode(
 
   // 若 embedding provider 可用，计算任务描述的 embedding 并附加到节点 metadata，
   // 供后续 findSimilarEpisodes 做语义余弦检索；计算失败则优雅降级为无语义向量。
+  let episodeNode = node;
   if (embeddingProvider) {
     try {
       const emb = await embeddingProvider.embed(episode.task);
       if (Array.isArray(emb) && emb.length > 0) {
-        node.metadata = { ...node.metadata, embedding: emb };
+        // Same writer as code nodes: int8 storage plus the model stamp. A raw
+        // float32 `metadata.embedding` carries no model, so it reads as
+        // compatible forever and never migrates when the model changes.
+        episodeNode = attachEmbedding(node, emb, embeddingProvider.fingerprint?.());
       }
     } catch {
       // embedding 计算失败不应阻断 episode 记录，降级为无语义向量
     }
   }
 
-  await client.upsertNodes([node]);
+  await client.upsertNodes([episodeNode]);
   return record;
 }
 

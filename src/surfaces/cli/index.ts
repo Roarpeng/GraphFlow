@@ -1243,7 +1243,11 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     return {
       command: "graph-index",
       data,
-      legacyText: `indexedFiles=${data.indexedFiles}; indexedSymbols=${data.indexedSymbols}; indexedReferences=${data.indexedReferences}`,
+      legacyText: `indexedFiles=${data.indexedFiles}; indexedSymbols=${data.indexedSymbols}; indexedReferences=${data.indexedReferences}${
+        data.vectorBackfill
+          ? `; vectors=${data.vectorBackfill.refreshed} written, ${Math.max(0, data.vectorBackfill.missing + data.vectorBackfill.stale - data.vectorBackfill.refreshed)} still pending`
+          : ""
+      }`,
     };
   }
 

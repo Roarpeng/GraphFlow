@@ -17,6 +17,9 @@ import {
 } from "../../../learning/skill-consolidate";
 import { parseSkillState } from "../../../learning/skill-store";
 import { forgetEpisodes } from "../../../learning/episodic-memory";
+import { createEmbeddingProviderFromConfig } from "../../../config/embedding-factory";
+import { ensureEmbeddings } from "../../../learning/embedding-refresh";
+import { logger } from "../../../utils/logger";
 
 export interface LearningNightlyResult extends NightlyLearningSummary {}
 export type { SkillDecayResult };
@@ -62,6 +65,16 @@ export async function runLearningNightlyResult(configPath?: string): Promise<Lea
   const config = resolveConfig(configPath);
   const graphClient = createGraphClient(config);
   const summary = await runNightlyLearning(config, graphClient);
+  // Index runs only spend ~2s on vectors (they sit on the agent's hot path);
+  // this is the maintenance loop, so it can pay for real convergence.
+  const embeddingProvider = createEmbeddingProviderFromConfig(config);
+  if (embeddingProvider) {
+    try {
+      await ensureEmbeddings(graphClient, embeddingProvider, { limit: 1024, deadlineMs: 30_000 });
+    } catch (error) {
+      logger.warn({ error }, "Embedding backfill failed during nightly learning");
+    }
+  }
   return summary;
 }
 

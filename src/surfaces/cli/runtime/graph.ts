@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isUnsafeWorkspaceFallback } from "../../../config/discover-workspace.js";
+import { createEmbeddingProviderFromConfig } from "../../../config/embedding-factory";
 import { resolveConfig, resolveEfficiencyPolicy, type ResolvedContextPressurePolicy } from "../../../config/resolve";
 import { resolveGraphStorePath } from "../../../config/paths";
 import { bindRuntimeWorkspaceRoot } from "../../../config/workspace-root";
@@ -334,8 +335,10 @@ function buildIndexOptions(config: GraphFlowConfig): {
   referenceEdgeMaxDefinitionFiles?: number;
   referenceEdgeMaxPerFile?: number;
   indexWorkers?: number;
+  embeddingProvider?: import("../../../learning/embeddings").EmbeddingProvider;
 } {
   const graphPolicy = config.graphPolicy;
+  const embeddingProvider = createEmbeddingProviderFromConfig(config);
   return {
     ...(graphPolicy.includeExtensions ? { includeExtensions: graphPolicy.includeExtensions } : {}),
     ...(graphPolicy.respectGitIgnore === false ? { respectGitIgnore: false } : {}),
@@ -348,6 +351,9 @@ function buildIndexOptions(config: GraphFlowConfig): {
     ...(typeof graphPolicy.indexWorkers === "number"
       ? { indexWorkers: graphPolicy.indexWorkers }
       : {}),
+    // Without this the indexer never sees a provider: no node gets a vector and
+    // the semantic recall arm silently stays empty.
+    ...(embeddingProvider ? { embeddingProvider } : {}),
   };
 }
 
@@ -417,10 +423,6 @@ export async function previewContext(
     ...buildEmbeddingOptions(config),
     workspaceRoot: config.graphPolicy.workspaceRoot ?? process.cwd(),
     ...(englishQuery?.trim() ? { englishQuery: englishQuery.trim() } : {}),
-    // Persist HNSW index to disk for faster startup on large repos.
-    ...(config.embeddingPolicy?.vectorStorePath
-      ? { hnswIndexPath: config.embeddingPolicy.vectorStorePath.replace(/\.\w+$/, ".hnsw") }
-      : {}),
   };
 
   const compressionPolicy = config.graphPolicy.compression;

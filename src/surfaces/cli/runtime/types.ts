@@ -399,6 +399,14 @@ export interface GraphIndexResult {
   cancelled?: boolean;
   agentWorkItems?: AgentWorkItem[];
   agentInstructions?: string;
+  /** Semantic vectors this run wrote, and how far the store still is from covered. */
+  vectorBackfill?: {
+    missing: number;
+    stale: number;
+    refreshed: number;
+    fingerprint?: string;
+    budget?: { limit: number; deadlineMs: number };
+  };
 }
 
 export interface GraphRebuildResult extends GraphIndexResult {
@@ -533,7 +541,14 @@ export interface RoutingDiagnosisResult {
     /** Configured ONNX precision for the local model (q8 by default). */
     dtype?: string;
     incompatibleVectorsSkipped?: number;
-    staleVectors?: { stale: number; refreshed: number; fingerprint?: string; at: number };
+    vectorBackfill?: {
+      missing: number;
+      stale: number;
+      refreshed: number;
+      fingerprint?: string;
+      budget?: { limit: number; deadlineMs: number };
+      at: number;
+    };
   };
   /** Which store this process uses and whether all hosts can share it. */
   graphStore?: {

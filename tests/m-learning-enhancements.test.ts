@@ -3,7 +3,10 @@ import { GraphifyClient } from "../src/graph/graphify-client";
 import {
   warmupEmbeddingProvider,
   cosineSimilarity,
+  extractEmbedding,
+  QUANTIZED_EMBEDDING_FORMAT,
   type EmbeddingProvider,
+  type QuantizedEmbedding,
 } from "../src/learning/embeddings";
 import {
   recordEpisode,
@@ -61,7 +64,7 @@ describe("学习层增强：Embedding 预热", () => {
 });
 
 describe("学习层增强：Episode 语义检索", () => {
-  it("recordEpisode 携带 provider 时将 embedding 附加到节点 metadata", async () => {
+  it("recordEpisode 携带 provider 时把量化向量写进节点 metadata（不再是裸 float32）", async () => {
     const client = new GraphifyClient();
     const provider = createMockEmbeddingProvider();
     const ep = await recordEpisode(
@@ -76,10 +79,13 @@ describe("学习层增强：Episode 语义检索", () => {
       },
       provider
     );
-    const nodes = await client.getNodesByIds([ep.id]);
-    const emb = nodes[0]?.metadata?.embedding;
-    expect(Array.isArray(emb)).toBe(true);
-    expect((emb as number[]).length).toBeGreaterThan(0);
+    const node = (await client.getNodesByIds([ep.id]))[0];
+    const quantized = node?.metadata?.embeddingQ as QuantizedEmbedding | undefined;
+    expect(quantized?.format).toBe(QUANTIZED_EMBEDDING_FORMAT);
+    expect((quantized?.data ?? []).length).toBeGreaterThan(0);
+    // 遗留裸 float32 键会把 episode 变成没有模型指纹的向量，换模型后永远不被迁移
+    expect(node?.metadata?.embedding).toBeUndefined();
+    expect(extractEmbedding(node!)?.length).toBe(quantized?.data.length);
   });
 
   it("findSimilarEpisodes 携带 provider 时按语义检索命中同任务 episode", async () => {

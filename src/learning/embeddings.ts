@@ -14,6 +14,11 @@ import { resolveOptionalDepsRoot, resolveSharedModelCacheDir } from "../utils/op
 
 export const EMBEDDING_DIM = 384;
 export const HASH_EMBEDDING_MODEL = "fnv1a-384";
+
+/** True for FNV-1a hash fingerprints (`fnv1a-<dim>`) — no semantic model behind them. */
+export function isHashFingerprint(fingerprint: string): boolean {
+  return fingerprint.startsWith("fnv1a-");
+}
 export const GRAPHFLOW_EMBEDDING_CACHE_DIR_ENV = "GRAPHFLOW_EMBEDDING_CACHE_DIR";
 export const GRAPHFLOW_EMBEDDING_TIMEOUT_MS_ENV = "GRAPHFLOW_EMBEDDING_TIMEOUT_MS";
 export const HF_ENDPOINT_ENV = "HF_ENDPOINT";
@@ -579,19 +584,36 @@ export function filterCompatibleEmbeddingNodes(
   return { nodes: kept, skipped };
 }
 
+/**
+ * Per-run ceiling on re-embedding. A local ONNX model costs milliseconds per
+ * node, so an index run must never embed the whole store: it embeds this many
+ * (or for this long) and the next run converges further.
+ */
+export const DEFAULT_EMBEDDING_RUN_LIMIT = 256;
+
+/** Default wall-clock ceiling for one embedding pass, in milliseconds. */
+export const DEFAULT_EMBEDDING_RUN_DEADLINE_MS = 2000;
+
 export async function embedAndAttachNodes(
   nodes: GraphNode[],
-  provider: EmbeddingProvider
+  provider: EmbeddingProvider,
+  options?: { limit?: number; deadlineMs?: number }
 ): Promise<GraphNode[]> {
   const out: GraphNode[] = [];
+  const limit = options?.limit ?? DEFAULT_EMBEDDING_RUN_LIMIT;
+  const deadline = Date.now() + (options?.deadlineMs ?? DEFAULT_EMBEDDING_RUN_DEADLINE_MS);
+  let attached = 0;
   for (const node of nodes) {
-    if (!node.content) {
+    if (!node.content || extractEmbedding(node) || attached >= limit || Date.now() >= deadline) {
+      // Nodes that miss this run's budget stay unscored; the store-wide pass
+      // picks them up on a later run instead of blocking this one.
       out.push(node);
       continue;
     }
     const emb = await provider.embed(node.content);
     // Read after embed: a resilient provider only settles its backend on first use.
     out.push(attachEmbedding(node, emb, provider.fingerprint?.()));
+    attached += 1;
   }
   return out;
 }
