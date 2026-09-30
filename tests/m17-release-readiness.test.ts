@@ -46,6 +46,11 @@ describe("M17 release readiness", () => {
             budgetPolicy: { runTokenCap: 2000 },
             graphPolicy: {
               enableAutoBuild: true,
+              // Pinned to the temp dir: a dead mcpEndpoint makes the client
+              // factory fall back to the default store, and an unpinned
+              // workspaceRoot landed that fallback in THIS repo's
+              // graphflow-out SQLite.
+              workspaceRoot: root,
               transport: "mcp-http",
               mcpEndpoint: "http://127.0.0.1:9999",
               mcpApiKey: "${GRAPHIFY_API_KEY}",
@@ -123,6 +128,9 @@ describe("M17 release readiness", () => {
               enableAutoBuild: true,
               enableNearLosslessMode: false,
               autoIndexOnRun: true,
+              // Same pin as above: the dead endpoint falls back to the default
+              // store, which must not be this repo's graphflow-out SQLite.
+              workspaceRoot: root,
               transport: "mcp-http",
               mcpEndpoint: "http://127.0.0.1:9",
               maxContextTokens: 200,
