@@ -116,7 +116,9 @@ export function createAnchorBodyReader(options: {
     while (keep > 1 && estimateTokens(slice.slice(0, keep).join("\n")) > perBodyTokens) keep -= 1;
     const body = slice.slice(0, keep).join("\n").trimEnd();
     const tokens = estimateTokens(body);
-    if (!body || tokens > remainingTokens) {
+    if (!body || tokens > remainingTokens || stats.tokens + tokens > bodyTokenCap) {
+      // The cap is checked with this body's cost included: testing only the
+      // running total let the last body overshoot by a whole unit.
       stats.noBudget += 1;
       return undefined;
     }

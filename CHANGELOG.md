@@ -39,7 +39,7 @@ All notable changes to this project are documented in this file.
 
 - 符号节点记录声明范围：`DeclaredSymbol.endLine`（TS 走编译器 API 的 `sourceNode.getEnd()`），`file-indexer-nodes.ts` 写进 `metadata.endLine`。**需要重索引**才拿得到；没有 endLine 的旧节点一律不附正文（计入 `noExtent`），不会拿旧行号猜一个窗口。
 - `metadata.signature` 现在只在解析器真给出签名时写。原先它存的是 `kind name @file:line` 这种显示串，任何"拿磁盘文本对一对"的核验都会把它当签名，从而误判。
-- 打包新增正文阶段（`src/graph/anchor-bodies.ts`）：前 3 个 L1 符号锚点各附 ≤120 token 的声明正文，整包正文 ≤20% 预算，并且**只花锚点阶段剩下的预算**——锚点永不被正文挤掉，对话仍保持它原有的"所有代码锚点之后"的纯增量位。`enableSymbolBodies: false` 可关。
+- 打包新增正文阶段（`src/graph/anchor-bodies.ts`）：前 3 个 L1 符号锚点各附 ≤120 token 的声明正文，整包正文 ≤20% 预算（上限按"含正在附加的这条"判定，否则最后一条会超额一档：实测曾出现 300 上限装到 344），并且**只花锚点阶段剩下的预算**——锚点永不被正文挤掉，对话仍保持它原有的"所有代码锚点之后"的纯增量位。`enableSymbolBodies: false` 可关。
 - 不可信就不给：磁盘上的声明头与存储签名不符 → 不附（`unverified`）；预算不足 → `noBudget`。`graphflow_context` / `context preview` 的返回新增 `anchorBodies: { attached, tokens, noExtent, unverified, noBudget }`，成本与缺口都可见。
 - `expandAnchor` 现在返回 `verified: "exact" | "relocated" | "drifted"`：符号在上次索引后被人插了行，就按磁盘实际位置给窗口并报 `relocated`；签名已不在文件里则报 `drifted` 且不假装是正确代码。`endLine` 只细化默认窗口，`GRAPHFLOW_EXPAND_SYMBOL_AFTER` 仍是硬上限（`tests/m50-expand-anchor.test.ts` 的既有契约不变）。
 - 代价如实记：正文是真源码，每包最多约 360 token，节省率会按已记账口径下移；`m109` 的 raw 基线门改为把正文档位计入，而不是假装它免费。检索侧无回退：`bench:retrieval` Hit@5 99.2% / MRR 0.748 / NDCG@5 0.619，与不附正文时一致。

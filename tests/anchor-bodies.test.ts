@@ -105,6 +105,8 @@ describe("declaration bodies inside the pack", () => {
     const { client } = await indexedClient();
     const pkg = await buildLayeredContextPackage(client, "computeHash padEnd", 1500, packageOptions(root));
     expect(pkg.bodies?.attached ?? 0).toBeGreaterThanOrEqual(1);
+    // Bodies never claim more than their share of the pack, overshoot included.
+    expect(pkg.bodies!.tokens).toBeLessThanOrEqual(Math.floor(1500 * 0.2));
     const bodyLine = pkg.summaryChannel.find((line) => line.startsWith("body symbol:"));
     expect(bodyLine, "the pack should carry a body line for the anchor it names").toBeDefined();
     expect(bodyLine).toContain("padEnd");
