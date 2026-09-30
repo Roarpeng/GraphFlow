@@ -2,8 +2,6 @@
 
 All notable changes to this project are documented in this file.
 
-## [2.0.1] — 2026-09-30
-
 ## [2.0.2] — 2026-09-30
 
 ### Fixed — 只读诊断命令从 home 目录运行不再拒绝（Ubuntu 实测）
@@ -22,6 +20,9 @@ root: /home/\<user\>"——**诊断命令犯了 2.0.1 刚修过的同类错**（
   帮助含新条目）。
 - 另：Windows 报 "unknown command config" 的机器装的是 2.0.0 之前的版本
   （usage 无 settings 命令可证），升级到本版即可。
+
+
+## [2.0.1] — 2026-09-30
 
 ### Fixed — Jev 接入真实 API 契约 + `graphflow llm-check` 自诊断
 
@@ -49,7 +50,6 @@ from projectWorkspaceRoot: C:\Users\roarp"。根因：从 home 目录启动时�
   scoped 配置（旧版本钉进去的坏值会在下次加载时复发成同样的抛错）。
 - 回归测试 `tests/settings-unsafe-root-save.test.ts`：home 下保存/读取
   全局设置成功且永不持久化 workspaceRoot；预置的坏根在保存时被清除。
-
 ## [2.0.0] — 2026-09-30
 
 ### 升级须知（2.0.0 迁移说明）
