@@ -97,7 +97,7 @@
     "gate:release": "node scripts/release-gates.cjs",
     "security:audit": "node scripts/security-audit.cjs",
     "test:coverage": "vitest run --coverage",
-    "prepare": "husky || true",
+    "prepare": "node scripts/prepare-hook.cjs",
     "benchmark:eff": "tsx benchmarks/run-eff-bench.ts",
     "benchmark:real": "tsx benchmarks/run-real-ab.ts"
   },

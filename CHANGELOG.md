@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — `npm pack` 在 Windows 上失败（prepare 钩子的 POSIX 写法）
+
+Windows 实测：`npm pack` 报 "'husky' 不是内部或外部命令…'true' 不是内部或
+外部命令"——`prepare: "husky || true"` 里 `true` 是 POSIX 命令，Windows cmd
+没有；husky 缺失时（未装 devDependencies 的检出）回退链整体失败 → pack
+中断、tarball 不生成。改为 `node scripts/prepare-hook.cjs`：best-effort 跑
+husky（shell:true 解析 Windows 的 husky.cmd），**任何情况退出 0**——git 钩子
+接线是开发便利，永远不该连累 install/pack。
+
 ### Fixed — 只读诊断命令从 home 目录运行不再拒绝（Ubuntu 实测）
 
 用户实测：`graphflow llm-check` 从 `~` 抛 "Refusing to index unsafe workspace
