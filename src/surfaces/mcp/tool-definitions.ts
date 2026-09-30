@@ -14,7 +14,7 @@ export function getToolDefinitions(): ToolDefinition[] {
   const tools: Array<Omit<ToolDefinition, "$schema">> = [
     {
       name: "graphflow_run",
-      description: "[Core] Plan and package a task with compressed context, returning a structured execution descriptor for external coding agents (Cursor, Claude Code) to execute. Bridge mode by default. CALL graphflow_report_outcome AFTER executing the plan to close the learning loop.",
+      description: "[Core] Plan and package a task with compressed context, returning a structured execution descriptor for external coding agents (Cursor, Claude Code) to execute. Bridge mode by default. The response carries an `advisory` block (Shadow mode, deterministic, zero LLM cost): a reuse verdict (REUSE/ADAPT/FRESH), suggested model tier, execution mode and validation gates — advisory only, never binding. CALL graphflow_report_outcome AFTER executing the plan to close the learning loop.",
       inputSchema: {
         type: "object",
         properties: {

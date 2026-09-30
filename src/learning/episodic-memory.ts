@@ -75,6 +75,24 @@ export function extractTaskTokens(task: string): string[] {
   return Array.from(out);
 }
 
+/**
+ * Pure Jaccard similarity between two task texts over extractTaskTokens —
+ * the same baseline the episode ranking uses. Exported so consumers of
+ * `similarEpisodes` (the efficiency advisory) can gate on SIMILARITY rather
+ * than the outcome-derived `score` (pass=1/pending=0/fail=-1); conflating
+ * the two made ADAPT fire whenever any pass episode ranked top-3.
+ */
+export function taskSimilarity(a: string, b: string): number {
+  const aTokens = new Set(extractTaskTokens(a));
+  const bTokens = new Set(extractTaskTokens(b));
+  let inter = 0;
+  for (const t of bTokens) {
+    if (aTokens.has(t)) inter += 1;
+  }
+  const union = new Set([...aTokens, ...bTokens]).size;
+  return union === 0 ? 0 : inter / union;
+}
+
 export async function recordEpisode(
   client: GraphClient,
   episode: Omit<EpisodeRecord, "id" | "createdAt" | "updatedAt">,

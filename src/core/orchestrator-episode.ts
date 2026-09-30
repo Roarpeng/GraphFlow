@@ -3,6 +3,7 @@ import { syncGraphAfterRun } from "../hooks/post-run-sync.js";
 import {
   findSimilarEpisodes,
   recordEpisode,
+  taskSimilarity,
   type EpisodeRecord,
 } from "../learning/episodic-memory.js";
 import { applySkillLearning, cleanupNoiseSkills } from "../learning/skill-flywheel.js";
@@ -189,10 +190,14 @@ export async function finalizeEpisode(
   const episode = await recordEpisode(options.graphClient, recordInput, options.embeddingProvider);
   await autoCapture(episode.id);
 
+  // `score` stays OUTCOME-derived (proven-classification signal); `similarity`
+  // is the text-overlap signal. Consumers must gate reuse on similarity —
+  // outcome 1 on a rank-3 barely-related episode is not reuse evidence.
   const similarSummaries = similar.map((ep) => ({
     id: ep.id,
     task: ep.task,
     score: ep.outcome === "pass" ? 1 : ep.outcome === "fail" ? -1 : 0,
+    similarity: Number(taskSimilarity(task, ep.task).toFixed(4)),
   }));
 
   return {

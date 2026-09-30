@@ -485,6 +485,12 @@ export interface RunTaskSummary {
     context: string;
     retryHints: string[];
   };
+  /**
+   * 2.x groundwork: deterministic Shadow advisory (Execution Contract embryo).
+   * Pure Layer A output — zero LLM calls, workers may ignore it. Its own cost
+   * is recorded in the decision ledger (graphflow-out/decision-ledger.jsonl).
+   */
+  advisory?: import("../../../core/efficiency-advisory").EfficiencyAdvisory;
 }
 
 export interface RoutingDiagnosisResult {

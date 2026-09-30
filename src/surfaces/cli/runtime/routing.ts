@@ -13,6 +13,8 @@ import {
 } from "../../../core/agent-delegation";
 import { resolveConfig, resolveEfficiencyPolicy } from "../../../config/resolve";
 import { resolveGraphStorePath, resolveLearningPath } from "../../../config/paths";
+import { buildEfficiencyAdvisory } from "../../../core/efficiency-advisory";
+import { appendDecisionLedgerRecord } from "../../../learning/decision-ledger";
 import { resolveEmbeddingDtype } from "../../../config/embedding-model";
 import { getSqliteModuleSource } from "../../../graph/sqlite-client";
 import { MERGE_MARKER_SUFFIX } from "../../../graph/store-migration";
@@ -174,6 +176,42 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       retries: Math.max(0, result.attempts - 1),
     });
 
+    // 2.x groundwork: deterministic (Layer A) Shadow advisory — the Execution
+    // Contract embryo riding on the run summary — plus its own cost record in
+    // the decision ledger. Failure-isolated: advising must never break a run.
+    let advisory: RunTaskSummary["advisory"];
+    try {
+      const advisoryStart = Date.now();
+      const built = buildEfficiencyAdvisory({
+        task,
+        taskComplexity,
+        executionMode,
+        fusedSteps: result.executionDescriptor?.steps ?? [],
+        ...(result.similarEpisodes ? { similarEpisodes: result.similarEpisodes } : {}),
+        maxContextTokens: config.graphPolicy.maxContextTokens,
+        durationMs: 0,
+      });
+      advisory = {
+        ...built,
+        decision: { ...built.decision, durationMs: Math.max(0, Date.now() - advisoryStart) },
+      };
+      appendDecisionLedgerRecord(config, {
+        kind: "decision",
+        at: new Date().toISOString(),
+        taskId: advisory.taskId,
+        tool: "graphflow_run",
+        mode: "shadow",
+        reuseMode: advisory.reuseMode,
+        modelTier: advisory.worker.modelTier,
+        durationMs: advisory.decision.durationMs,
+        llmCalls: advisory.decision.llmCalls,
+        tokenCost: 0,
+        provenance: advisory.decision.provenance,
+      });
+    } catch {
+      advisory = undefined;
+    }
+
     return {
       status: result.status,
       attempts: result.attempts,
@@ -182,6 +220,7 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       ...(result.result ? { result: result.result } : {}),
       ...(result.episodeId ? { episodeId: result.episodeId } : {}),
       ...(result.executionDescriptor ? { executionDescriptor: result.executionDescriptor } : {}),
+      ...(advisory ? { advisory } : {}),
     };
   } catch (error) {
     appendFeedbackEvent(eventsPath, {

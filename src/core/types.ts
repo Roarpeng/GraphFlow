@@ -58,7 +58,14 @@ export interface TaskRunResult {
   brainstormIdeas?: string[];
   promptContextLines?: number;
   episodeId?: string;
-  similarEpisodes?: Array<{ id: string; task: string; score: number }>;
+  similarEpisodes?: Array<{
+    id: string;
+    task: string;
+    /** Outcome-derived: pass=1 / pending=0 / fail=-1. NOT a similarity signal. */
+    score: number;
+    /** Text-overlap similarity (Jaccard) to the current task. Gate reuse on THIS. */
+    similarity?: number;
+  }>;
   executionDescriptor?: {
     action: "execute";
     task: string;
