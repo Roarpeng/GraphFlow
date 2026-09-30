@@ -1,5 +1,5 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { getGraphFlowSettings, saveGraphFlowSettings } from "../src/surfaces/cli/runtime/settings";
@@ -75,7 +75,9 @@ describe("settings save from an unsafe (home) working directory", () => {
   });
 
   it("never persists an unsafe workspaceRoot into a PROJECT config either", () => {
-    process.env.HOME = fakeHome; // make the project dir's "unsafe" detection see home as home
+    // Pin the REAL home as the bad root — os.homedir() is what the unsafe
+    // matcher consults on every platform (a Temp dir is not "home" on Windows).
+    const badRoot = homedir();
     const projectConfig = join(projectDir, "graphflow.config.json");
     writeFileSync(
       projectConfig,
@@ -90,7 +92,7 @@ describe("settings save from an unsafe (home) working directory", () => {
         graphPolicy: {
           transport: "file",
           graphStorePath: "graphflow-out/graphflow-graph.json",
-          workspaceRoot: fakeHome,
+          workspaceRoot: badRoot,
           maxContextTokens: 400,
         },
         learningPolicy: { enableFlywheel: true, trainingCadence: "nightly", exportPath: "graphflow-out/l.jsonl" },
