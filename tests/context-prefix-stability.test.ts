@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { join } from "node:path";
 import type { GraphEdge, GraphNode } from "../src/core/types";
 import { resolveConfig } from "../src/config/resolve";
-import { createGraphClient } from "../src/graph/client-factory";
+import { closeAllGraphClients, createGraphClient } from "../src/graph/client-factory";
 import { buildEnhancedContextPackage } from "../src/graph/context-slicer";
 import { previewContext } from "../src/surfaces/cli/runtime/graph";
 import type { ContextPreviewResult } from "../src/surfaces/cli/runtime/types";
@@ -124,7 +124,11 @@ describe("context preview prefix stability", () => {
     await client.upsertEdges(edges);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    // Release sqlite handles BEFORE deleting temp dirs: previewContext and
+    // this test create internal clients whose file handles Windows refuses
+    // to unlink (EBUSY) — first CI exposure of this test.
+    await closeAllGraphClients();
     rmTrackedRoots(roots);
   });
 

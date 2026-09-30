@@ -104,8 +104,12 @@ describe("reconcileEpisodes", () => {
   });
 
   it("passes only when the suite is green AND a commit touched the named file", async () => {
-    commitTouching("src/packer.ts");
     const client = await episodeClient("调整 src/packer.ts 的 layerQuota");
+    // Episode FIRST, commit DURING the task — the reconcile window is
+    // [episode.createdAt, now]; committing before the episode record exists
+    // only passed by git's second-granularity luck (CI's slower cold FS
+    // crossed the boundary).
+    commitTouching("src/packer.ts");
     const { report, written } = await run(client, { verifyCommand: PASS_COMMAND });
     expect(report.counts.pass).toBe(1);
     expect(written).toHaveLength(1);
@@ -116,8 +120,8 @@ describe("reconcileEpisodes", () => {
   });
 
   it("stamps provenance and never claims the user confirmed it", async () => {
-    commitTouching("src/packer.ts");
     const client = await episodeClient("重构 src/packer.ts 的打包顺序");
+    commitTouching("src/packer.ts");
     const { written } = await run(client, { verifyCommand: PASS_COMMAND });
     expect(written[0]?.source).toBe("reconcile");
     expect(written[0]?.userConfirmed).toBe(false);
@@ -140,8 +144,8 @@ describe("reconcileEpisodes", () => {
   });
 
   it("flags a pass that carries no lesson: closed, but nothing to learn from", async () => {
-    commitTouching("src/packer.ts");
     const client = await episodeClient("核对 src/packer.ts 的常量");
+    commitTouching("src/packer.ts");
     const { report } = await run(client, { verifyCommand: PASS_COMMAND });
     expect(report.counts.pass).toBe(1);
     expect(report.passesWithoutLessons).toBe(1);

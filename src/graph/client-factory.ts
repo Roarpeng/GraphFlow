@@ -254,7 +254,33 @@ function warnIfSqliteStoreExists(sqlitePath: string, fallbackPath: string): void
   );
 }
 
+/**
+ * Every client created this process, so test teardown can release sqlite
+ * handles before deleting temp dirs — Windows cannot unlink open files
+ * (EBUSY), and previewContext/runTaskResult create internal clients the
+ * caller never sees.
+ */
+const liveClients = new Set<GraphClient>();
+
+/** Close every live client created via createGraphClient (test teardown). */
+export async function closeAllGraphClients(): Promise<void> {
+  for (const client of liveClients) {
+    try {
+      await client.close?.();
+    } catch {
+      // already closed — teardown must be best-effort
+    }
+  }
+  liveClients.clear();
+}
+
 export function createGraphClient(config: GraphFlowConfig): GraphClient {
+  const client = buildGraphClient(config);
+  liveClients.add(client);
+  return client;
+}
+
+function buildGraphClient(config: GraphFlowConfig): GraphClient {
   if (config.graphPolicy.transport === "mcp-http") {
     // Team backend pilot: remote Graphify server, transparently falling back
     // to the local JSON file store when the endpoint is missing, malformed,
