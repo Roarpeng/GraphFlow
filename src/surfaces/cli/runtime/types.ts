@@ -573,10 +573,12 @@ export interface RoutingDiagnosisResult {
   runtimeTimeline: RuntimeTimelineSummary;
   workspaceRoot: {
     path: string;
-    discovery: "env" | "config" | "auto" | "cwd";
+    /** "refused": the resolver rejected the (unsafe) candidate — the finding IS the refusal. */
+    discovery: "env" | "config" | "auto" | "cwd" | "refused";
     exists: boolean;
     hasPackageJson: boolean;
     stale: boolean;
+    refused?: string;
   };
   graphFreshness: {
     hasIndexCache: boolean;

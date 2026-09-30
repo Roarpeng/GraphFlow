@@ -134,7 +134,8 @@ function buildCliUsageWithSettings(): string {
   return (
     usage +
     "\n  settings [--port <port>] [--host <host>] [--no-open]   Launch web settings server in browser (alias: config ui)\n" +
-    "                                                        Run 'graphflow settings' to configure in browser"
+    "                                                        Run 'graphflow settings' to configure in browser" +
+    "\n  llm-check                   Diagnose LLM credentials: winning source per provider, env vars consulted, endpoints"
   );
 }
 

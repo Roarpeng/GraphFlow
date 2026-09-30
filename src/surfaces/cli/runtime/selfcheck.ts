@@ -40,7 +40,7 @@ export async function runSelfcheck(
   // 1. Config loads (the fail-fast path throws; here we surface it red).
   let config;
   try {
-    config = resolveConfig(configPath ?? "graphflow.config.json", rootDir ? { rootDir } : undefined);
+    config = resolveConfig(configPath ?? "graphflow.config.json", rootDir ? { rootDir } : undefined, { allowUnsafeWorkspace: true });
     items.push({ name: "config", status: "ok", detail: "project/global config layers load and validate" });
   } catch (error) {
     config = undefined;

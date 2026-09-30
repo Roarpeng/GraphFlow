@@ -119,7 +119,10 @@ export interface LlmCheckReport {
  * --probe adds a real round-trip on the tier worker role.
  */
 export async function llmCheckResult(configPath?: string): Promise<LlmCheckReport> {
-  const config = resolveConfig(configPath);
+  // Read-only diagnostic: must answer from ANY working directory — a
+  // diagnostic that itself refuses to run from home helps nobody (live
+  // report from an Ubuntu user's home shell).
+  const config = resolveConfig(configPath, undefined, { allowUnsafeWorkspace: true });
   const { explainProviderCredentials } = await import("../../../config/llm-availability.js");
   const candidates = Array.from(
     new Set<string>([
@@ -431,7 +434,8 @@ export async function runTask(task: string, configPath?: string): Promise<string
 }
 
 export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResult {
-  const config = resolveConfig(configPath);
+  // Read-only diagnostic (doctor-class): tolerate any working directory.
+  const config = resolveConfig(configPath, undefined, { allowUnsafeWorkspace: true });
   const health = buildProviderHealthMap(config);
   const chain = buildFallbackChain(config);
 
@@ -555,11 +559,23 @@ function computeGraphStoreDiagnosis(config: ReturnType<typeof resolveConfig>) {
 
 function computeWorkspaceRootDiagnosis(config: ReturnType<typeof resolveConfig>) {
   const envSet = Boolean(process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim());
-  const resolved = resolveRuntimeWorkspaceRoot({
-    ...(config.graphPolicy.workspaceRoot ? { projectWorkspaceRoot: config.graphPolicy.workspaceRoot } : {}),
-  });
-  let discovery: "env" | "config" | "auto" | "cwd" = "cwd";
-  if (envSet) {
+  // A DIAGNOSIS must never be killed by the thing it diagnoses: resolving
+  // from an unsafe cwd (home) legitimately refuses — report the refusal as
+  // the finding instead of throwing out of `graphflow diagnose`.
+  let resolved: string;
+  let refused: string | undefined;
+  try {
+    resolved = resolveRuntimeWorkspaceRoot({
+      ...(config.graphPolicy.workspaceRoot ? { projectWorkspaceRoot: config.graphPolicy.workspaceRoot } : {}),
+    });
+  } catch (error) {
+    refused = error instanceof Error ? error.message.split("\n")[0] : String(error);
+    resolved = config.graphPolicy.workspaceRoot ?? process.cwd();
+  }
+  let discovery: "env" | "config" | "auto" | "cwd" | "refused" = "cwd";
+  if (refused !== undefined) {
+    discovery = "refused";
+  } else if (envSet) {
     discovery = "env";
   } else if (config.graphPolicy.workspaceRoot) {
     discovery = "config";
@@ -569,7 +585,14 @@ function computeWorkspaceRootDiagnosis(config: ReturnType<typeof resolveConfig>)
   const exists = existsSync(resolved);
   const hasPackageJson = exists && existsSync(join(resolved, "package.json"));
   const stale = envSet && (!exists || !hasPackageJson);
-  return { path: resolved, discovery, exists, hasPackageJson, stale };
+  return {
+    path: resolved,
+    discovery,
+    exists,
+    hasPackageJson,
+    stale,
+    ...(refused !== undefined ? { refused } : {}),
+  };
 }
 
 function computeGraphFreshnessDiagnosis(config: ReturnType<typeof resolveConfig>) {

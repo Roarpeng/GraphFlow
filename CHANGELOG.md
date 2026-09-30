@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 ## [2.0.1] — 2026-09-30
 
+## [2.0.2] — 2026-09-30
+
+### Fixed — 只读诊断命令从 home 目录运行不再拒绝（Ubuntu 实测）
+
+用户实测：`graphflow llm-check` 从 `~` 抛 "Refusing to index unsafe workspace
+root: /home/\<user\>"——**诊断命令犯了 2.0.1 刚修过的同类错**（llm-check 是
+新命令，写时漏了逃生口）。
+
+- `llm-check` / `diagnose`（含 `route diagnose`）/ `selfcheck` 三个只读诊断
+  全部以 `allowUnsafeWorkspace` 解析：任何工作目录都能作答。
+- `diagnose` 的 workspaceRoot 诊断块升级为**异常安全**：解析被拒时把拒绝
+  本身作为发现上报（`discovery: "refused"` + 原因），不再抛出。
+- usage 帮助补 `llm-check` 条目。
+- 回归测试 `tests/diagnostics-from-home.test.ts`：假 home 下四个命令全部
+  作答（llm-check 报告在场、diagnose 报 refused 而非抛出、selfcheck 通过、
+  帮助含新条目）。
+- 另：Windows 报 "unknown command config" 的机器装的是 2.0.0 之前的版本
+  （usage 无 settings 命令可证），升级到本版即可。
+
 ### Fixed — Jev 接入真实 API 契约 + `graphflow llm-check` 自诊断
 
 用户实测"配了 DEEPSEEK_API_KEY / TYPESAFE_API_KEY 和 settings 仍无法访问"，根因是**类别错误**：typesafe-jev worker 把 Jev 当 chat 模型，打向**编造的域名** `api.typesafe-jev.ai/v1/chat/completions`，还让它编造命令 JSON——按 docs.typesafe.ai 官方契约，Jev 是 System One 判定模型（`POST https://api.typesafe.ai/v1/systemone`，Bearer，`jev-latest`，Choice/Score/Noul 类型化问答），**不生成文本**。
