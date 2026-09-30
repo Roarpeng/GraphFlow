@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added — Step D 首份真实成本 A/B：Context ↓47%（门槛 ↓20%）
+
+`npm run benchmark:real`（`benchmarks/run-real-ab.ts`）：50 任务 × 双臂真实
+deepseek-v4-flash 调用。token 数取自 provider usage（R2 measured），100 条
+trace 全部通过 R6 provenance 门，总实验成本 ≈ $0.20。
+
+- **双臂语义（诚实反事实）**：baseline = 传统 grep 取上下文（top-3 文件 ×
+  250 行）；shadow = GraphFlow 压缩上下文包。同模型/同单轮/同 6000 字符
+  预算。首版"裸提示词基线"被否——它把效率层带上下文误读成 +2000% 输入。
+- **结果**：输入 token 均值 1578 → 835（**-47%**，§23 门槛 ↓20% 的 2.35 倍）；
+  总量 78,913 → 41,736。成功率 100/100（判据=非空回答，局限如实记录）。
+  输出 token 被 2048 生成上限支配（25-32/50 顶格），输出/费用对比本轮不作数。
+- **审计修正**：`eff-agent bench run` CLI 实为合成模拟器（fabricated 时长与
+  循环编造的 reuseMode，含真实 advisory 永不给出的 REUSE）——本轮以真跑
+  数据替代；CLI 的真实化列入待办。
+- 详细数字与局限声明：`benchmarks/REAL-AB-RESULTS.md`。
+
 ### Fixed — LLM 可用性嗅探的自反馈回路（bridge 降级保障回归）
 
 新一轮凭证嗅探引入了一个反馈回路：`applyProviderEnvFromConfig`（既有行为）把 config 凭证写进 `process.env`，新的 `providerHasCredentials` 又去嗅探 env——**前一个配置的凭证泄漏进后续所有配置的可用性判定**。实测后果：同文件早先测试导出的一次性 `sk-good` key 让后面本应无 LLM 的 selfcheck 判为"可用"（llm-probe ok 而非 na），`bridge-fallback-guarantee` 9/12 失败。

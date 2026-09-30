@@ -98,7 +98,8 @@
     "security:audit": "node scripts/security-audit.cjs",
     "test:coverage": "vitest run --coverage",
     "prepare": "husky || true",
-    "benchmark:eff": "tsx benchmarks/run-eff-bench.ts"
+    "benchmark:eff": "tsx benchmarks/run-eff-bench.ts",
+    "benchmark:real": "tsx benchmarks/run-real-ab.ts"
   },
   "lint-staged": {
     "*.ts": "eslint --fix"
