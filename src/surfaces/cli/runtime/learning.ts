@@ -16,7 +16,13 @@ import {
   type ConsolidateSkillInput,
 } from "../../../learning/skill-consolidate";
 import { parseSkillState } from "../../../learning/skill-store";
-import { forgetEpisodes } from "../../../learning/episodic-memory";
+import { forgetEpisodes, loadAllEpisodes } from "../../../learning/episodic-memory";
+import {
+  extractNamedFiles,
+  reconcileEpisodes,
+  type ReconcileReport,
+} from "../../../learning/outcome-reconciler";
+import { reportOutcome } from "./routing.js";
 import { createEmbeddingProviderFromConfig } from "../../../config/embedding-factory";
 import { ensureEmbeddings } from "../../../learning/embedding-refresh";
 import { logger } from "../../../utils/logger";
@@ -133,6 +139,55 @@ export async function runLearnForget(configPath?: string): Promise<{ removed: nu
   const config = resolveConfig(configPath);
   const graphClient = createGraphClient(config);
   return forgetEpisodes(graphClient);
+}
+
+/**
+ * Close pending episodes from git history plus one verify-command run. Without
+ * `reconcilePolicy.verifyCommand` this reports what it could not decide and
+ * writes nothing — a commit alone is delivery, not correctness.
+ */
+export async function reconcileOutcomes(
+  configPath?: string,
+  options?: { verifyCommand?: string; lookbackDays?: number; limit?: number; dryRun?: boolean }
+): Promise<ReconcileReport> {
+  const config = resolveConfig(configPath);
+  const graphClient = createGraphClient(config);
+  const verifyCommand = options?.verifyCommand ?? config.reconcilePolicy?.verifyCommand;
+  const lookbackDays = options?.lookbackDays ?? config.reconcilePolicy?.lookbackDays;
+  const limit = options?.limit ?? config.reconcilePolicy?.limit;
+  return reconcileEpisodes(
+    graphClient,
+    {
+      workspaceRoot: config.graphPolicy.workspaceRoot ?? process.cwd(),
+      ...(verifyCommand ? { verifyCommand } : {}),
+      ...(lookbackDays !== undefined ? { lookbackDays } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+      ...(options?.dryRun !== undefined ? { dryRun: options.dryRun } : {}),
+    },
+    async (episodeId, evidence) => {
+      const result = await reportOutcome(episodeId, true, [], configPath, undefined, undefined, evidence);
+      return result.ok === true;
+    }
+  );
+}
+
+/** What `reconcileOutcomes` would see, without touching git or running anything. */
+export async function reconcilePreview(
+  configPath?: string
+): Promise<{ candidates: number; withNamedFiles: number; verifyCommand?: string }> {
+  const config = resolveConfig(configPath);
+  const graphClient = createGraphClient(config);
+  const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
+  const cutoff = Date.now() - (config.reconcilePolicy?.lookbackDays ?? 30) * 86_400_000;
+  const episodes = (await loadAllEpisodes(graphClient)).filter(
+    (episode) =>
+      (episode.outcome === "pending" || episode.outcome === "human_review") && episode.updatedAt >= cutoff
+  );
+  const withNamedFiles = episodes.filter(
+    (episode) => extractNamedFiles([episode.task, ...episode.plan.map((step) => step.description ?? "")], workspaceRoot).length > 0
+  ).length;
+  const verifyCommand = config.reconcilePolicy?.verifyCommand;
+  return { candidates: episodes.length, withNamedFiles, ...(verifyCommand ? { verifyCommand } : {}) };
 }
 
 function formatNightlySummary(summary: NightlyLearningSummary): string {

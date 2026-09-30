@@ -69,6 +69,7 @@ import {
   runLearningNightly,
   runLearningNightlyResult,
   runLearnForget,
+  reconcileOutcomes,
   runSkillDecay,
   runSkillReset,
   runSkillPrune,
@@ -1613,6 +1614,42 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       command: "learn-nightly",
       data,
       legacyText: await runLearningNightly(configPath),
+    };
+  }
+
+  if (command === "reconcile" && args[0] === "outcomes") {
+    // Writing is opt-in: without --apply this only reports what it could not
+    // decide, because a commit proves delivery, not correctness.
+    const apply = args.includes("--apply");
+    const verifyCommand = readCliFlagValue(args, "--verify-command");
+    const lookbackRaw = readCliFlagValue(args, "--lookback");
+    const limitRaw = readCliFlagValue(args, "--limit");
+    const lookbackDays = lookbackRaw !== undefined ? Number(lookbackRaw) : undefined;
+    const limit = limitRaw !== undefined ? Number(limitRaw) : undefined;
+    const data = await reconcileOutcomes(configPath, {
+      dryRun: !apply,
+      ...(verifyCommand ? { verifyCommand } : {}),
+      ...(lookbackDays !== undefined && Number.isFinite(lookbackDays) ? { lookbackDays } : {}),
+      ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
+    });
+    const unresolved = Object.entries(data.counts)
+      .filter(([reason, count]) => reason !== "pass" && count > 0)
+      .map(([reason, count]) => `${reason}=${count}`)
+      .join(",");
+    return {
+      command: "reconcile-outcomes",
+      data,
+      legacyText: [
+        `candidates=${data.candidates}`,
+        `pass=${data.counts.pass}`,
+        `written=${data.written}`,
+        `dryRun=${data.dryRun}`,
+        `verifyExit=${data.verifyExitCode ?? "none"}`,
+        ...(data.passesWithoutLessons > 0
+          ? [`passesWithoutLessons=${data.passesWithoutLessons}`]
+          : []),
+        ...(unresolved ? [`unresolved(${unresolved})`] : []),
+      ].join("; "),
     };
   }
 

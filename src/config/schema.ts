@@ -249,6 +249,16 @@ export interface GraphFlowConfig {
     /** Opt in to vector recall across all graph nodes with embeddings. Default false. */
     enableFullGraphVectorRecall?: boolean;
   };
+  /**
+   * Mechanical outcome closure (`graphflow reconcile outcomes`). Without a
+   * `verifyCommand` the reconciler only reports what it could not decide — it
+   * never infers a pass from a commit alone.
+   */
+  reconcilePolicy?: {
+    verifyCommand?: string;
+    lookbackDays?: number;
+    limit?: number;
+  };
   /** MCP surface knobs (tool-result text copy policy). */
   mcp?: McpSurfaceConfig;
   /**

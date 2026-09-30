@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-export type EvidenceSource = "manual" | "ci" | "agent" | "hook";
+export type EvidenceSource = "manual" | "ci" | "agent" | "hook" | "reconcile";
 
 export interface OutcomeEvidence {
   repository?: string;
@@ -38,7 +38,7 @@ export interface EvidenceVerification {
   reasons: string[];
 }
 
-const EVIDENCE_SOURCES = new Set(["manual", "ci", "agent", "hook"]);
+const EVIDENCE_SOURCES = new Set(["manual", "ci", "agent", "hook", "reconcile"]);
 
 function stableEvidenceString(evidence: OutcomeEvidence): string {
   return JSON.stringify({

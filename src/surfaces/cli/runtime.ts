@@ -63,6 +63,8 @@ export {
   runSkillConsolidatePlan,
   runSkillConsolidate,
   runLearnForget,
+  reconcileOutcomes,
+  reconcilePreview,
 } from "./runtime/learning.js";
 export {
   listEpisodes,

@@ -69,6 +69,11 @@
     "topK": 8,
     "minSimilarity": 0.05
   },
+  "reconcilePolicy": {
+    "verifyCommand": "npm test",
+    "lookbackDays": 30,
+    "limit": 20
+  },
   "efficiencyPolicy": {
     "observations": {
       "enabled": true,

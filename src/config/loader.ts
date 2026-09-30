@@ -381,5 +381,12 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       minSimilarity: input.embeddingPolicy?.minSimilarity ?? 0.05,
       enableFullGraphVectorRecall: input.embeddingPolicy?.enableFullGraphVectorRecall ?? false,
     },
+    reconcilePolicy: {
+      lookbackDays: input.reconcilePolicy?.lookbackDays ?? 30,
+      limit: input.reconcilePolicy?.limit ?? 20,
+      ...(input.reconcilePolicy?.verifyCommand
+        ? { verifyCommand: input.reconcilePolicy.verifyCommand }
+        : {}),
+    },
   };
 }

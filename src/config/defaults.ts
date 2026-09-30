@@ -88,6 +88,10 @@ export function getDefaultConfig(): GraphFlowConfig {
       minSimilarity: 0.05,
       enableFullGraphVectorRecall: false,
     },
+    reconcilePolicy: {
+      lookbackDays: 30,
+      limit: 20,
+    },
     mcp: {
       // 大响应（紧凑 JSON > 4KB）的 text 副本默认桩化，structuredContent 保持
       // 全量；设 "full" 保留全量 text 副本（老客户端逃生门）。

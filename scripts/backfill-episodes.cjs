@@ -107,7 +107,10 @@ function episodesFromGitLog(root, limit = BACKFILL_LIMIT) {
       id: `${EPISODE_PREFIX}commit:${hash}`,
       task,
       plan: [],
-      outcome: "pass",
+      // 一条 commit 只是"交付过"，不是"改对了"。回填出的 episode 一律 pending，
+      // 由 `graphflow reconcile outcomes`（git 窗口 + verify 命令退出码）或
+      // agent 的 report_outcome 来定成败，绝不在这里凭空写 pass。
+      outcome: "pending",
       keyDecisions: [`commit ${hash.slice(0, 12)}`],
       lessons: [],
       attempts: 1,
@@ -186,7 +189,18 @@ function mergeEpisodesIntoStore(storePath, episodes, dryRun = false) {
  */
 function runBackfill(options = {}) {
   const root = options.root ?? process.cwd();
+  const sqliteStore = path.join(root, "graphflow-out", "graphflow-graph.sqlite");
   const storePath = options.storePath ?? path.join(root, "graphflow-out", "graphflow-graph.json");
+  if (!options.storePath && fs.existsSync(sqliteStore)) {
+    // Writing a JSON store next to a live SQLite store is exactly the fork 1.28.0
+    // had to merge back. This script only speaks JSON, so it declines.
+    console.error(
+      `refusing to write ${storePath}: the live store is ${sqliteStore} (SQLite).\n` +
+      'Use "graphflow reconcile outcomes --apply" to close pending episodes from git + a verify command.\n' +
+      'Only run this script with --store <path> when you deliberately target a JSON store.'
+    );
+    return { total: 0, added: 0, skipped: 0, refused: "sqlite-store-present" };
+  }
   const limit = typeof options.limit === "number" ? options.limit : BACKFILL_LIMIT;
 
   const eventsCandidates = options.eventsPath

@@ -190,6 +190,7 @@ Key options:
 | `embeddingPolicy.provider` | `transformers` (local default) / `openai` / `hash` |
 | `embeddingPolicy.dtype` | Local model precision: `q8` (default, ~98MB) / `fp16` / `q4` / `fp32` (~400MB); env `GRAPHFLOW_EMBEDDING_DTYPE` wins |
 | `skillPolicy.enableSkillFlywheel` | Learning flywheel switch |
+| `reconcilePolicy.verifyCommand` | Command whose exit code closes pending episodes (`graphflow reconcile outcomes --apply`); unset means report-only — a commit is never treated as a pass |
 
 ### Switching agents on one project
 

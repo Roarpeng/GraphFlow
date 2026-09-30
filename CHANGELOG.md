@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added — outcome 机械闭合：`graphflow reconcile outcomes`
+
+飞轮的输入缺口是结构性的：`pass` 只能来自 agent 自愿调用 `graphflow_report_outcome` 的自报布尔值。本仓库实测 191 个 episode 里 9 pass / 1 fail / 73 pending / 108 human_review，**0 个带 evidence、0 个带 deviation、187 个 `plan` 为空**。新增一条不依赖配合的闭合路径。
+
+- `src/learning/outcome-reconciler.ts`：pending / human_review 的 episode，取任务文本与计划步骤里**磁盘上真实存在**的路径 → 在该 episode 时间窗内查 `git log --name-only`（只读命令）→ 整个 reconcile 跑**一次**声明的 verify 命令，用退出码定成败。写回走现有 `reportOutcome`，因此技能学习与审计链的行为和自报完全一致。
+- **保守是有条件的**：pass 需要"verify 退出 0"**且**"窗口内有 commit 碰到 episode 点名的文件"。没配 `reconcilePolicy.verifyCommand`、或命令失败、或没有这样的 commit —— 一律不写，并把原因计入 `no-verify-command / verify-failed / no-named-files / no-commit-in-window / no-git-history`。一条 commit 只代表交付过，不代表改对，所以绝不凭它写 pass。
+- 出处如实：写入的证据带 `source: "reconcile"`（`EvidenceSource` 联合新增该值）且 `userConfirmed: false`，不会伪装成用户确认。默认 **dry-run**，要落盘必须显式 `--apply`。
+- `graphflow selfcheck` 新增 `reconcile` 行（只读，不跑 git、不跑命令）。本仓库实跑：`158 pending (0 name files), verifyCommand unset` —— 也就是说机制虽然通了，**当前仓库的 episode 任务文本里没有任何存在的文件路径**，闭合还差"捕获时记下改过哪些文件"这一步；报告里 `passesWithoutLessons` 也明说：pass 无 lesson 只关闭 episode，不产生技能学习（`shouldApplySkillLearningFromOutcome` 的既有门）。
+- 修 `scripts/backfill-episodes.cjs` 两处硬伤：回填出的 episode 原先一律 `outcome:"pass"`（每条 commit 都算成功，正是上面禁止的凭空判胜），现在改 `pending`；且当旁边存在 `graphflow-graph.sqlite` 时拒绝写 JSON 存储并给出指引（这正是 1.28.0 费力合并回来的分叉）。实测该脚本从未跑过（无 `source: backfill:*` 的 episode）。
+- 新增 `tests/outcome-reconciler.test.ts`（8 例，含真 git 仓库）：无 verify 命令不写、命令失败不写、绿+命中文件才 pass、出处与 `userConfirmed:false`、无命中的 commit 不写、dry-run 不写、无 lesson 的 pass 被标记。
+
+### Fixed — 测试把 179 条 `force a failure` episode 写进了本仓库的真实存储
+
+`tests/m17-release-readiness.test.ts` 用 `transport: "mcp-http"` + 死端点做"provider 不可用→桥接委托"的回归，但配置里没有 `workspaceRoot`：客户端工厂退回默认存储，而默认存储按当前工作目录解析到这个仓库的 `graphflow-out/graphflow-graph.sqlite`。于是每次跑测试都往里追加 episode，累积 179 条同名噪声——**selfcheck 那个"pending ratio 95%"很大程度是这个假象**。两处配置都钉到临时目录；跑完整个测试套（228 文件 / 1770 测试全绿）后 episode 数从 191 到 191，不再增长。存量脏数据需要显式清理（`graphflow learn forget` 是全清，不是筛选），所以留给作者决定。
+
 ### Added — 锚点带正文：bodyCoverage 从 1% 抬起来
 
 自家保真度实测：`averageAnchorRecallPercent 92` 而 `averageBodyCoveragePercent 1`——包能点名正确的符号，却几乎不覆盖它的正文，于是 agent 还得再发一次 expand 或整读文件，首包省下的又被后续轮次吃回去。

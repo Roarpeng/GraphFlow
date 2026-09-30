@@ -159,6 +159,29 @@ export async function runSelfcheck(
     items.push({ name: "flywheel", status: "warn", detail: error instanceof Error ? error.message : String(error) });
   }
 
+  // 6b. Mechanically closable episodes (read-only: no git, no verify run).
+  try {
+    const { reconcilePreview } = await import("./learning.js");
+    const preview = await reconcilePreview(configPath);
+    if (preview.candidates === 0) {
+      items.push({ name: "reconcile", status: "na", detail: "no pending episodes in the lookback window" });
+    } else if (!preview.verifyCommand) {
+      items.push({
+        name: "reconcile",
+        status: "warn",
+        detail: `${preview.candidates} pending (${preview.withNamedFiles} name files), but reconcilePolicy.verifyCommand is unset — a commit is delivery, not correctness, so nothing can be concluded`,
+      });
+    } else {
+      items.push({
+        name: "reconcile",
+        status: "ok",
+        detail: `${preview.candidates} pending (${preview.withNamedFiles} name files), verifyCommand: ${preview.verifyCommand}; close with 'graphflow reconcile outcomes --apply'`,
+      });
+    }
+  } catch (error) {
+    items.push({ name: "reconcile", status: "warn", detail: error instanceof Error ? error.message : String(error) });
+  }
+
   // 7. Redaction spot check (function-level, nothing persisted).
   const sample = "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig";
   const redacted = redactSecrets(sample);

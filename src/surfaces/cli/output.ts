@@ -33,6 +33,7 @@ export function buildCliUsage(): string {
     "  team example-config [--endpoint <url>] [--tenant <id>] [--json]",
     "  diagnose [--json] [--config <path>]  # alias of route diagnose; includes team/RBAC/health",
     "  learn nightly [--json]      Run nightly learning loop",
+    "  reconcile outcomes [--apply] [--verify-command <cmd>] [--lookback <days>] [--limit <n>] [--json]  # close pending episodes from git + one verify run; without --apply it only reports",
     "  config init [--global]",
     "  config validate [--json] [--config <path>]",
     '  run "<task>" [--json] [--config <path>]',
