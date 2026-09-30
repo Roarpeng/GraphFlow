@@ -35,10 +35,23 @@ GraphFlow 2.x 效率决策层的落地包（v0.1：schema + 合同 + 纯函数�
   §8 四轨指纹（semantic/project/context/environment → reuseKey）、
   版本化 Context/Plan/Result 三层缓存（TTL、状态校验、结果安全类目白名单）、
   保守复用阶梯 REUSE→ADAPT→FRESH。
-- `src/broker.ts` + `src/workers/local-command-worker.ts`（**P2**）—
+- `src/broker.ts` + `src/workers/`（**P2**）—
   标准 Worker 适配器生命周期（prepare/execute/observe/validate/stop）、
-  轮次+预算+停止条件的 Broker；第一个 worker 是本地命令 worker
-  （execFile、超时、AbortController 停止）。
+  轮次+预算+停止条件的 Broker。三大 Worker 现已就位：
+  * `local-command-worker.ts`：本地命令验证 worker（execFile、超时、AbortController 停止）；
+  * `typesafe-jev-worker.ts`：基于强类型 Schema 约束的 AI Worker，杜绝语法漂移与任意命令执行；支持云端与本地部署端点（如 `http://localhost:8000/v1`），本地部署自动免密；
+  * `external-cli-worker.ts`：外部通用 CLI Worker 适配器，包装 Claude Code、Codex CLI、Cursor 等外部通用 AI 编程代理。
+- `src/dynamic-harness.ts`（**P7**）—
+  §11 Dynamic Temporary Harness 动态任务沙盒控制面。根据任务复杂度自适应装配：
+  * trivial：零模型确定性 fast-path
+  * simple：单 Worker One-shot 模式
+  * medium：Worker + 专用工具链 + 受控退避重试
+  * complex：任务专属临时沙盒（Context 规划 + 专用工具集 + Sub-agents 调度 + 严格 Budget Cap 熔断 + 安全资源清理）。
+- `bin/eff-agent.ts` —
+  §12/§25 独立原生 CLI 命令行入口，支持直接运行任务与基准评测：
+  * `eff-agent run <task> [--mode=broker|shadow|advisory] [--worker=local|jev|external]`
+  * `eff-agent bench run <tasks.jsonl> [--worker=typesafe-jev|local] [--mode=baseline|shadow]`
+  * `eff-agent bench compare <baseline.jsonl> <shadow.jsonl>`
 - `src/learning/`（**P4**）— TrajectoryRecord 校验/汇总、带滞回的策略
   学习（成功率 <0.7 升档、≥0.9 且 2×minSamples 才降档、avgRounds>1.5 转
   loop、失败阶段 ≥30% 进 avoidPatterns）、版本化 append-only 策略存储。
@@ -56,7 +69,32 @@ GraphFlow 2.x 效率决策层的落地包（v0.1：schema + 合同 + 纯函数�
 - `schemas/trace-v1.schema.json` / `schemas/execution-contract-v1.schema.json`
   / `schemas/tool-capability-v1.schema.json` — 外部工具用的规范 JSON Schema。
 
-## 基准运行（仓库内）
+## 命令行与基准运行（CLI & Benchmark）
+
+### 1. 独立 eff-agent CLI
+```bash
+# 运行单个任务（Broker 真实调度）
+npx eff-agent run "修复某个模块的类型报错" --worker=jev --policy=conservative
+
+# 运行真实模型基准
+npx eff-agent bench run benchmarks/eff-tasks-v1.jsonl --worker=jev --mode=shadow
+
+# 严格 R1-R6 溯源门禁 A/B 比较
+npx eff-agent bench compare baseline.jsonl shadow.jsonl
+```
+
+### 2. 仓库内部基准脚本（含真实 Worker 臂）
+```bash
+# 离线模拟臂
+npm run benchmark:eff -- run --mode=baseline
+npm run benchmark:eff -- run --mode=shadow
+
+# 真实 Worker 臂（支持 TypeSafe-JEV 或 DeepSeek）
+npm run benchmark:eff -- run --mode=shadow --worker=typesafe-jev --provider=deepseek
+
+# A/B 对比输出真实 Token 节约率与 LLM 调用减少率
+npm run benchmark:eff -- compare graphflow-out/eff-bench/baseline.jsonl graphflow-out/eff-bench/shadow.jsonl
+```
 
 ```
 npm run benchmark:eff -- run --mode=baseline   # → graphflow-out/eff-bench/baseline.jsonl

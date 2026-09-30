@@ -31,7 +31,22 @@ export interface ExecutionContractV1 {
     source: "graphflow";
     requiredAnchors: string[];
     maxTokens?: number;
+    cached?: boolean;
   };
+  /** §5: project identity the fingerprint binds to (when known). */
+  project?: {
+    root: string;
+    gitHead?: string;
+  };
+  /** §5: experience pointers the decision consumed. */
+  experience?: {
+    episodes: string[];
+    topSimilarity?: number;
+  };
+  /** §5: capability-based tool needs (selected by capability, not name). */
+  tools?: Array<{ name: string; capability: string }>;
+  /** §21 closed loop: a learned policy overrode the deterministic hints. */
+  policyApplied?: { version: number };
   worker: {
     modelTier: ModelTier;
     executionMode: ExecutionMode;
@@ -88,6 +103,22 @@ export function assertAdvisoryCompatible(advisory: unknown): string[] {
     fail("worker.maxRounds: positive number required");
   }
   if (!Array.isArray(a.validation)) fail("validation: string[] required");
+  if (a.project !== undefined && (typeof a.project.root !== "string" || a.project.root.length === 0)) {
+    fail("project: non-empty root required when present");
+  }
+  if (a.experience !== undefined && !Array.isArray(a.experience.episodes)) {
+    fail("experience: episodes[] required when present");
+  }
+  if (
+    a.tools !== undefined &&
+    (!Array.isArray(a.tools) ||
+      a.tools.some((t) => typeof t?.name !== "string" || typeof t?.capability !== "string"))
+  ) {
+    fail("tools: {name, capability}[] required when present");
+  }
+  if (a.policyApplied !== undefined && typeof a.policyApplied.version !== "number") {
+    fail("policyApplied: version number required when present");
+  }
   if (!a.decision || typeof a.decision.llmCalls !== "number" || typeof a.decision.durationMs !== "number") {
     fail("decision: llmCalls and durationMs numbers required");
   }

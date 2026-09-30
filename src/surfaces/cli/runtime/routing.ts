@@ -14,7 +14,10 @@ import {
 import { resolveConfig, resolveEfficiencyPolicy } from "../../../config/resolve";
 import { resolveGraphStorePath, resolveLearningPath } from "../../../config/paths";
 import { buildEfficiencyAdvisory } from "../../../core/efficiency-advisory";
-import { appendDecisionLedgerRecord } from "../../../learning/decision-ledger";
+import {
+  appendDecisionLedgerRecord,
+  loadEfficiencyPolicy,
+} from "../../../learning/decision-ledger";
 import { resolveEmbeddingDtype } from "../../../config/embedding-model";
 import { getSqliteModuleSource } from "../../../graph/sqlite-client";
 import { MERGE_MARKER_SUFFIX } from "../../../graph/store-migration";
@@ -60,6 +63,7 @@ import {
   type SubmitAgentInsightResult,
 } from "../../../core/submit-agent-insight";
 import { existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getRuntimeTimelineSummary } from "../../../core/cancellation";
@@ -79,6 +83,9 @@ import type {
   RoutingDiagnosisResult,
   RunTaskSummary,
 } from "./types.js";
+
+/** In-process gitHead cache keyed by workspace root (see advisory wiring). */
+const gitHeadCache = new Map<string, string | undefined>();
 
 export async function runTaskResult(task: string, configPath?: string): Promise<RunTaskSummary> {
   const config = resolveConfig(configPath);
@@ -177,11 +184,38 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
     });
 
     // 2.x groundwork: deterministic (Layer A) Shadow advisory — the Execution
-    // Contract embryo riding on the run summary — plus its own cost record in
+    // Contract embryo riding the run summary — plus its own cost record in
     // the decision ledger. Failure-isolated: advising must never break a run.
     let advisory: RunTaskSummary["advisory"];
     try {
       const advisoryStart = Date.now();
+      // §5 contract inputs: project identity (gitHead best-effort, ~10ms) and
+      // the context-cache hit signal for this exact task text.
+      const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
+      let gitHead: string | undefined;
+      // One subprocess per workspace root per process — a benchmark looping
+      // 50 tasks over one root must not pay 50 × ~60ms for identity lookup
+      // (measured regression before this cache: avgDecisionMs 0 → 65).
+      if (!gitHeadCache.has(workspaceRoot)) {
+        try {
+          gitHeadCache.set(
+            workspaceRoot,
+            execFileSync("git", ["rev-parse", "HEAD"], { cwd: workspaceRoot, timeout: 2_000 })
+              .toString()
+              .trim()
+          );
+        } catch {
+          gitHeadCache.set(workspaceRoot, undefined); // not a repo / git missing — degrades honestly
+        }
+      }
+      gitHead = gitHeadCache.get(workspaceRoot);
+      let contextCacheHit: boolean | undefined;
+      try {
+        const { getCachedContext } = await import("../../../graph/context-cache.js");
+        contextCacheHit = getCachedContext(task, workspaceRoot) !== undefined;
+      } catch {
+        contextCacheHit = undefined;
+      }
       const built = buildEfficiencyAdvisory({
         task,
         taskComplexity,
@@ -189,16 +223,36 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
         fusedSteps: result.executionDescriptor?.steps ?? [],
         ...(result.similarEpisodes ? { similarEpisodes: result.similarEpisodes } : {}),
         maxContextTokens: config.graphPolicy.maxContextTokens,
+        ...(contextCacheHit !== undefined ? { contextCacheHit } : {}),
+        project: { root: workspaceRoot, ...(gitHead ? { gitHead } : {}) },
         durationMs: 0,
       });
       advisory = {
         ...built,
         decision: { ...built.decision, durationMs: Math.max(0, Date.now() - advisoryStart) },
       };
+      // §21 closed loop: a learned policy (eff-agent policy learn over the
+      // decision ledger) overrides the deterministic worker hints and is
+      // stamped on the advisory so the override stays auditable.
+      const policy = loadEfficiencyPolicy(config);
+      if (policy) {
+        const tier = policy.modelTierByCategory[taskComplexity];
+        if (tier === "economy" || tier === "standard" || tier === "heavy") {
+          advisory = { ...advisory, worker: { ...advisory.worker, modelTier: tier } };
+        }
+        const execMode = policy.executionModeByCategory[taskComplexity];
+        if (execMode === "one-shot") {
+          advisory = { ...advisory, worker: { ...advisory.worker, executionMode: "one-shot", maxRounds: 1 } };
+        } else if (execMode === "loop") {
+          advisory = { ...advisory, worker: { ...advisory.worker, executionMode: "loop", maxRounds: 2 } };
+        }
+        advisory = { ...advisory, policyApplied: { version: policy.version } };
+      }
       appendDecisionLedgerRecord(config, {
         kind: "decision",
         at: new Date().toISOString(),
         taskId: advisory.taskId,
+        taskCategory: taskComplexity,
         tool: "graphflow_run",
         mode: "shadow",
         reuseMode: advisory.reuseMode,
@@ -210,6 +264,23 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       });
     } catch {
       advisory = undefined;
+    }
+
+    // 当无 LLM 时，严格保障平滑走 bridge 模式，状态统一返回 DELEGATED，保留完整 AST 上下文与 Layer A Advisory
+    if (!hasExternalLlm && result.status !== "DELEGATED") {
+      return {
+        status: "DELEGATED" as const,
+        attempts: 0,
+        feedback: `[DELEGATED] No LLM configured; task packaged for external agent bridge execution`,
+        ...(result.episodeId ? { episodeId: result.episodeId } : {}),
+        executionDescriptor: result.executionDescriptor ?? {
+          action: "execute",
+          task,
+          context: `task=${task}`,
+          retryHints: [],
+        },
+        ...(advisory ? { advisory } : {}),
+      };
     }
 
     return {
@@ -229,9 +300,40 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       tokenCost: 0,
       retries: 0,
     });
+    const message = error instanceof Error ? error.message : String(error);
+    if (!hasUsableLlmProvider(config)) {
+      let fallbackAdvisory: RunTaskSummary["advisory"];
+      try {
+        const built = buildEfficiencyAdvisory({
+          task,
+          taskComplexity: triageTask(task),
+          executionMode: "bridge",
+          fusedSteps: [],
+          maxContextTokens: config.graphPolicy.maxContextTokens,
+          durationMs: 0,
+        });
+        fallbackAdvisory = {
+          ...built,
+          decision: { ...built.decision, durationMs: 0 },
+        };
+      } catch {
+        fallbackAdvisory = undefined;
+      }
+      return {
+        status: "DELEGATED" as const,
+        attempts: 0,
+        feedback: `[DELEGATED] No LLM configured; operating in bridge mode (recovered from: ${message})`,
+        executionDescriptor: {
+          action: "execute",
+          task,
+          context: `task=${task}`,
+          retryHints: [],
+        },
+        ...(fallbackAdvisory ? { advisory: fallbackAdvisory } : {}),
+      };
+    }
     // 与 orchestrator 顶层错误边界一致：将未捕获异常收敛为 HUMAN_REVIEW_REQUIRED 结构化结果，
     // 不再裸抛给调用方（包括索引失败、图存储不可达等场景）
-    const message = error instanceof Error ? error.message : String(error);
     return {
       status: "HUMAN_REVIEW_REQUIRED" as const,
       attempts: 0,

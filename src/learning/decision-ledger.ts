@@ -23,6 +23,8 @@ export interface DecisionLedgerRecord {
   at: string;
   /** Advisory task hash (advisoryTaskId) — joins back to the advisory. */
   taskId: string;
+  /** Triage category ("simple"|"complex") — the policy learner's group key. */
+  taskCategory?: string;
   /** Producing surface; v0 only graphflow_run emits advisories. */
   tool: "graphflow_run";
   mode: "shadow";
@@ -37,6 +39,53 @@ export interface DecisionLedgerRecord {
   provenance: "deterministic" | "llm";
   /** Free-form context: why this verdict (kept short; details live in advisory). */
   reason?: string;
+}
+
+/**
+ * §21 closed loop — the learned policy file. Written by
+ * `eff-agent policy learn <ledger.jsonl>` (package CLI: ledger →
+ * TrajectoryRecords → summarize → learnPolicy), read by graphflow_run to
+ * override the deterministic worker hints. Shape is the package's
+ * PolicyUpdate JSON; the substrate reads it structurally (no package import).
+ */
+export interface EfficiencyPolicyFile {
+  version: number;
+  minSamples: number;
+  modelTierByCategory: Record<string, string>;
+  executionModeByCategory: Record<string, string>;
+  avoidPatterns: string[];
+  rationale: string[];
+}
+
+export function resolveEfficiencyPolicyPath(config: GraphFlowConfig): string {
+  const root = config.graphPolicy.workspaceRoot ?? process.cwd();
+  return resolveWorkspacePath(root, `${DEFAULT_OUTPUT_DIR}/efficiency-policy.json`);
+}
+
+/** Best-effort load; malformed or missing files read as "no policy". */
+export function loadEfficiencyPolicy(config: GraphFlowConfig): EfficiencyPolicyFile | undefined {
+  const path = resolveEfficiencyPolicyPath(config);
+  if (!existsSync(path)) return undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<EfficiencyPolicyFile>;
+    if (
+      typeof parsed.version !== "number" ||
+      typeof parsed.modelTierByCategory !== "object" ||
+      parsed.modelTierByCategory === null
+    ) {
+      return undefined;
+    }
+    return {
+      version: parsed.version,
+      minSamples: parsed.minSamples ?? 5,
+      modelTierByCategory: parsed.modelTierByCategory,
+      executionModeByCategory: parsed.executionModeByCategory ?? {},
+      avoidPatterns: parsed.avoidPatterns ?? [],
+      rationale: parsed.rationale ?? [],
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 export function resolveDecisionLedgerPath(config: GraphFlowConfig): string {

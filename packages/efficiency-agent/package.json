@@ -6,8 +6,11 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "eff-agent": "./dist/bin/eff-agent.js"
+  },
   "scripts": {
-    "build": "tsc -p .",
+    "build": "tsc -p . && npx tsc bin/eff-agent.ts --outDir dist --rootDir . --target es2022 --module NodeNext --moduleResolution NodeNext --types node --ignoreConfig",
     "typecheck": "tsc -p . --noEmit"
   },
   "engines": {

@@ -18,12 +18,14 @@ export type { ResultCache, ResultCacheLookup } from "./caches/result-cache.js";
 // P2 execution broker.
 export * from "./broker.js";
 export * from "./workers/local-command-worker.js";
+export * from "./workers/typesafe-jev-worker.js";
 // P4 experience learning. policy-store defines its own structural KVStore —
 // identical to the cache layer's; re-export only the non-ambiguous members so
 // `KVStore` resolves to exactly one declaration at the package root.
 export * from "./learning/trajectory.js";
 export * from "./learning/policy-learner.js";
 export { createPolicyStore } from "./learning/policy-store.js";
+export * from "./learning/policy-from-ledger.js";
 export type { PolicyStore } from "./learning/policy-store.js";
 // P5 project twin + tool intelligence.
 export * from "./project-twin.js";

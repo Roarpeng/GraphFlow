@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — LLM 可用性嗅探的自反馈回路（bridge 降级保障回归）
+
+新一轮凭证嗅探引入了一个反馈回路：`applyProviderEnvFromConfig`（既有行为）把 config 凭证写进 `process.env`，新的 `providerHasCredentials` 又去嗅探 env——**前一个配置的凭证泄漏进后续所有配置的可用性判定**。实测后果：同文件早先测试导出的一次性 `sk-good` key 让后面本应无 LLM 的 selfcheck 判为"可用"（llm-probe ok 而非 na），`bridge-fallback-guarantee` 9/12 失败。
+
+- `provider-env.ts` 新增 `configExportedEnvKeys` 记录：凡由配置导出的 env 键，可用性嗅探（`genuineEnvValue`/`detectApiKeyFromEndpoint`/分支 2/4）一律视为不存在；**真实 shell 提供的环境变量不受影响**（零配置开箱即用、TYPESAFE 映射保留）。
+- `resolve.ts` 的 env→config 回写（步骤 3/4/5）与 TYPESAFE 别名同样只信 genuine env——防止跨配置凭证被写进 config 对象本身（乃至被设置页持久化）。
+- `bridge-fallback-guarantee.test.ts` 补 `GRAPHFLOW_CONFIG_HOME` 家目录隔离（m49 既有机制）：断言"彻底清空凭证"的测试不得读本机真实全局配置（本机有真实 deepseek key，不隔离必然假阴）。
+- 回归守卫：`m-run-bridge-selfcheck` 恢复绿（4/4）。
+
+### Added — §5 Contract 补全 + §21 策略闭环 + lint 清零
+
+- **advisory 补 §5 四块**：`project`（workspaceRoot + gitHead 尽力获取，**按工作区根做进程内缓存**——基准实测不缓存决策成本 0→65ms/任务，缓存后 4ms）、`experience`（相似 episode 指针 + topSimilarity）、`tools`（按能力派生，融合 edit 步的 command 即 validate 能力）、`context.cached`（context-cache 命中信号）。contract schema 与 `assertAdvisoryCompatible` 验收门同步扩展。
+- **§21 策略闭环（读侧）**：`graphflow-out/efficiency-policy.json` 存在时，`graphflow_run` 的 advisory 以其覆盖 worker 档位/执行模式并盖章 `policyApplied.version`；账本记录补 `taskCategory`（triage 类目作学习分组键）。
+- **§21 策略闭环（写侧）**：包内 `policy-from-ledger.ts`（账本→TrajectoryRecord→summarize→learnPolicy，映射的"决策形≠运行形"局限如实写入 docblock）+ `eff-agent policy learn <ledger.jsonl>` CLI 命令。闭环：生产决策入账本 → 学习出策略文件 → 下次 advisory 应用。
+- **测试**：`tests/advisory-policy-loop.test.ts`（§5 字段契约纯净、策略覆盖+盖章、账本→学习闭环）；新一轮 10 个 lint 错误清零（6 未用 import、settings-server 4 处 `any`→类型化）。
+- **终态**：253 文件 / 2069 测试全绿；lint 干净；双 tsc + 包构建通过；基准 provenance 全净、ADAPT 7/50 稳定、决策成本 4ms。
+
 ### Added — P2–P7 全量落地（5 agent 并行，独占文件域）+ similarity/outcome 拆分
 
 效率决策层的六个阶段一次到位，全部在 `packages/efficiency-agent`（138 个新测试 + 5 个集成测试），共享类型契约 `src/domain.ts`。

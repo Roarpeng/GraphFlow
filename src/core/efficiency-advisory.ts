@@ -51,24 +51,44 @@ export interface EfficiencyAdvisory {
     /** Anchor ids the contract pins as required reading (v0: caller-supplied). */
     requiredAnchors: string[];
     maxTokens?: number;
+    /** True when the task's context package was served from the context cache. */
+    cached?: boolean;
   };
+  /** §5 contract: project identity the fingerprint binds to (when known). */
+  project?: {
+    root: string;
+    gitHead?: string;
+  };
+  /** §5 contract: experience pointers the decision consumed. */
+  experience: {
+    /** Similar episode ids (reuse candidates). */
+    episodes: string[];
+    topSimilarity?: number;
+  };
+  /** §5 contract: capability-based tool needs derived from fused steps. */
+  tools: Array<{ name: string; capability: string }>;
   worker: {
     modelTier: AdvisoryModelTier;
     executionMode: AdvisoryExecutionMode;
     maxRounds: number;
   };
   validation: string[];
+  /** §21 closed loop: a learned policy overrode the deterministic worker hint. */
+  policyApplied?: { version: number };
   decision: {
     /**
      * "deterministic": the verdict was computed by rules, not a model call.
-     * This is the decision-cost ledger's provenance marker — a deterministic
-     * decision is billed at zero LLM cost by construction, and the ledger
-     * relies on that marker instead of re-measuring.
+     * "llm": the verdict incorporated a model reflection call (Layer B).
      */
-    provenance: "deterministic";
-    llmCalls: 0;
+    provenance: "deterministic" | "llm";
+    llmCalls: number;
     /** Measured wall-clock cost of computing this advisory. */
     durationMs: number;
+    metaReflection?: {
+      fallback: boolean;
+      reasoning?: string;
+      confidence?: number;
+    };
   };
 }
 
@@ -80,6 +100,10 @@ export interface AdvisoryInput {
   similarEpisodes?: Array<{ id: string; task: string; score: number; similarity?: number }>;
   requiredAnchors?: string[];
   maxContextTokens?: number;
+  /** §5: context package was served from cache for this task. */
+  contextCacheHit?: boolean;
+  /** §5: project identity (workspace root; gitHead best-effort). */
+  project?: { root: string; gitHead?: string };
   /** Measured advisory computation time (the caller owns the clock). */
   durationMs: number;
 }
@@ -164,6 +188,33 @@ export function deriveValidation(fusedSteps: FusedStep[]): string[] {
   return Array.from(new Set(commands)).slice(0, 8);
 }
 
+/**
+ * §5 contract: capability-based tool needs from fused steps. Tools are
+ * selected by CAPABILITY, never by name preference (plan §9) — the names here
+ * are the substrate's canonical providers for each capability.
+ */
+export function deriveToolNeeds(fusedSteps: FusedStep[]): Array<{ name: string; capability: string }> {
+  const byCapability = new Map<string, string>();
+  for (const step of fusedSteps) {
+    if (step.action === "edit") {
+      byCapability.set("edit_symbol", "graphflow-symbol-edit");
+      // A fused edit step carries its validation as `command` (Action Fusion
+      // collapses "edit X then validate Y" into one step) — that command IS
+      // the validate capability.
+      if (step.command) {
+        byCapability.set("validate", "broker-validator");
+      }
+    } else if (step.action === "run") {
+      byCapability.set("run_command", "local-command-worker");
+    } else if (step.action === "validate") {
+      byCapability.set("validate", "broker-validator");
+    }
+  }
+  return Array.from(byCapability.entries())
+    .map(([capability, name]) => ({ name, capability }))
+    .sort((a, b) => a.capability.localeCompare(b.capability));
+}
+
 export function buildEfficiencyAdvisory(input: AdvisoryInput): EfficiencyAdvisory {
   const fusedSteps = input.fusedSteps ?? [];
   const similarEpisodes = input.similarEpisodes ?? [];
@@ -191,7 +242,21 @@ export function buildEfficiencyAdvisory(input: AdvisoryInput): EfficiencyAdvisor
       source: "graphflow",
       requiredAnchors: [...(input.requiredAnchors ?? [])],
       ...(input.maxContextTokens !== undefined ? { maxTokens: input.maxContextTokens } : {}),
+      ...(input.contextCacheHit !== undefined ? { cached: input.contextCacheHit } : {}),
     },
+    ...(input.project
+      ? {
+          project: {
+            root: input.project.root,
+            ...(input.project.gitHead ? { gitHead: input.project.gitHead } : {}),
+          },
+        }
+      : {}),
+    experience: {
+      episodes: similarEpisodes.map((e) => e.id).slice(0, 5),
+      ...(topSimilarity !== undefined ? { topSimilarity } : {}),
+    },
+    tools: deriveToolNeeds(fusedSteps),
     worker: {
       modelTier: decideModelTier(input.taskComplexity),
       ...decideExecution(input.taskComplexity),
@@ -204,3 +269,6 @@ export function buildEfficiencyAdvisory(input: AdvisoryInput): EfficiencyAdvisor
     },
   };
 }
+
+export * from "./meta-advisory.js";
+
