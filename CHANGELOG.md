@@ -14,6 +14,25 @@ All notable changes to this project are documented in this file.
 - **新增 `graphflow llm-check`**（只读诊断）：逐 provider 报告可用性、**获胜凭证来源**（config-key / `env:变量名` / localhost / none，`${VAR}` 占位符如实标注 env 来源）、baseUrl/model、**实际查过的环境变量名清单**（拼错立即现形）、System One 端点状态。Windows"无法访问"从此可自诊。
 - 测试：`tests/typesafe-systemone.test.ts`（契约/退避/反思器/llm-check 9 例）+ worker 测试重写为真实语义（14 例）+ 真实臂记账对齐（判定调用数=typeSafeValid、token=usage）。全仓 254 文件 / 2073 测试绿。
 
+## [Unreleased]
+
+### Fixed — `graphflow config ui` 保存被 unsafe-root 断言拒绝（Windows 实测）
+
+用户报告：设置页能打开但保存失败——"Refusing to use unsafe workspace root
+from projectWorkspaceRoot: C:\Users\roarp"。根因：从 home 目录启动时，
+保存流程 resolve 一个**不存在的显式 config**，loadConfigSafe 给默认配置
+绑上 cwd(home) 作为 workspaceRoot，随后被当 `projectWorkspaceRoot` 传入
+运行时绑定断言 → 抛错。而**保存全局设置根本不需要项目工作区**。
+
+- `resolveConfig` 新增 `allowUnsafeWorkspace` 逃生口（settings 流程专用，
+  其他调用方不变——M49 的全局断言语义保持原样）。
+- `getGraphFlowSettings` / `saveGraphFlowSettings` 以该模式解析：从 home
+  读写全局设置不再抛错（已在真实环境复现验证：THREW → save ok）。
+- 保险丝：持久化前若发现不安全根（home/AppData），一律剥离——包括项目
+  scoped 配置（旧版本钉进去的坏值会在下次加载时复发成同样的抛错）。
+- 回归测试 `tests/settings-unsafe-root-save.test.ts`：home 下保存/读取
+  全局设置成功且永不持久化 workspaceRoot；预置的坏根在保存时被清除。
+
 ## [2.0.0] — 2026-09-30
 
 ### 升级须知（2.0.0 迁移说明）

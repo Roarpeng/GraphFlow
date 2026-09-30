@@ -14,6 +14,7 @@ import {
   resolveEfficiencyPolicy,
   resolveWritableConfigPath,
 } from "../../../config/resolve";
+import { isUnsafeWorkspaceFallback } from "../../../config/discover-workspace";
 import { resolveGlobalConfigPath, writeConfigSecure } from "../../../config/scaffold";
 import { stripWorkspaceRootForGlobalPersist } from "../../../config/workspace-root";
 import type { GraphFlowConfig, WorkerConfig, WorkerPolicyConfig, WorkerType } from "../../../config/schema";
@@ -151,7 +152,10 @@ function readWorkerFromConfig(
 
 export function getGraphFlowSettings(configPath = "graphflow.config.json"): GraphFlowSettings {
   const actualPath = resolveConfigPath(configPath);
-  const config = resolveConfig(actualPath);
+  // Settings are machine-wide (or single-file): resolving them must never
+  // require a safe PROJECT workspace — reading from the home directory is a
+  // normal launch point for `graphflow config ui`.
+  const config = resolveConfig(actualPath, undefined, { allowUnsafeWorkspace: true });
   const rawConfig = readRawConfig(actualPath);
   const smart = readTierFromConfig(config, rawConfig, "smart");
   const economy = readTierFromConfig(config, rawConfig, "economy");
@@ -205,7 +209,11 @@ export function saveGraphFlowSettings(
   configPath = "graphflow.config.json"
 ): GraphFlowSettings {
   const actualPath = resolveWritableConfigPath(configPath);
-  const current = resolveConfig(configPath);
+  // Saving GLOBAL settings from the home directory used to throw
+  // "Refusing to use unsafe workspace root from projectWorkspaceRoot" — a
+  // missing config file inherits cwd(home) as its workspaceRoot and the
+  // runtime bind asserted on it. Global saves need no workspace at all.
+  const current = resolveConfig(configPath, undefined, { allowUnsafeWorkspace: true });
   const smart = resolveTier(settings, "smart");
   const economy = resolveTier(settings, "economy");
 
@@ -320,8 +328,15 @@ export function saveGraphFlowSettings(
   if (dir && dir !== ".") {
     mkdirSync(dir, { recursive: true });
   }
-  const persisted =
+  let persisted =
     actualPath === resolveGlobalConfigPath() ? stripWorkspaceRootForGlobalPersist(updated) : updated;
+  if (persisted.graphPolicy.workspaceRoot && isUnsafeWorkspaceFallback(persisted.graphPolicy.workspaceRoot)) {
+    // A home/AppData root must never be pinned into any config file — even
+    // a project-scoped one (it would resurface as the unsafe-bind throw on
+    // the next load).
+    const { workspaceRoot: _dropped, ...graphPolicy } = persisted.graphPolicy;
+    persisted = { ...persisted, graphPolicy: graphPolicy as GraphFlowConfig["graphPolicy"] };
+  }
   if (actualPath === resolveGlobalConfigPath()) {
     // Provider API keys live in the global config: keep it owner-only.
     writeConfigSecure(actualPath, `${JSON.stringify(persisted, null, 2)}\n`);

@@ -159,7 +159,8 @@ function finalizeConfig(config: GraphFlowConfig, isZeroConfig = false): GraphFlo
  */
 export function resolveConfig(
   path = "graphflow.config.json",
-  bind?: { rootDir?: string }
+  bind?: { rootDir?: string },
+  options?: { allowUnsafeWorkspace?: boolean }
 ): GraphFlowConfig {
   if (!isDefaultProjectConfigPath(path)) {
     const result = loadConfigSafe(path);
@@ -178,6 +179,12 @@ export function resolveConfig(
       );
     }
     const projectRoot = result.config.graphPolicy.workspaceRoot;
+    // Settings flows save GLOBAL config (no project workspace involved):
+    // allowUnsafeWorkspace skips the runtime bind so saving from the home
+    // directory cannot trip the unsafe-root assertion.
+    if (options?.allowUnsafeWorkspace) {
+      return finalizeConfig(result.config);
+    }
     return finalizeConfig(
       bindRuntimeWorkspaceRoot(
         result.config,
@@ -219,6 +226,9 @@ export function resolveConfig(
 
   const isZeroConfig = !projectExists && !overlayExists && !globalExists;
 
+  if (options?.allowUnsafeWorkspace) {
+    return finalizeConfig(merged, isZeroConfig);
+  }
   return finalizeConfig(
     bindRuntimeWorkspaceRoot(
       merged,
