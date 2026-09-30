@@ -19,6 +19,7 @@ function fakeNode(
     type,
     text,
     startPosition: { row: 0 },
+    endPosition: { row: 0 },
     namedChildren: children,
     children,
     childForFieldName: () => null,

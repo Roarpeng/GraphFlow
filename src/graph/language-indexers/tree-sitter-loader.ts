@@ -21,6 +21,7 @@ export interface TreeSitterSyntaxNode {
   type: string;
   text: string;
   startPosition: { row: number; column?: number };
+  endPosition: { row: number; column?: number };
   parent?: TreeSitterSyntaxNode;
   namedChildren: TreeSitterSyntaxNode[];
   children?: TreeSitterSyntaxNode[];

@@ -74,6 +74,7 @@ function fakeTree(type: string) {
       type,
       text: "",
       startPosition: { row: 0 },
+      endPosition: { row: 0 },
       namedChildren: [],
       childForFieldName: () => null,
     },
