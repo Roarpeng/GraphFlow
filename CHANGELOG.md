@@ -2,7 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [2.0.0] — 2026-09-30
+
+### 升级须知（2.0.0 迁移说明）
+
+- **store 路径可能变化（重要）**：`bindRuntimeWorkspaceRoot` 修复后，项目
+  config（graphflow.config.json）里的 `workspaceRoot` 从此被正确尊重
+  （文档优先级第 3 级）。此前被 cwd 发现覆盖的部署，升级后实际生效的
+  graph store 路径会变——旧数据还在原位置，用 `graphflow artifact` 导入
+  或把 `graphStorePath` 指回旧文件即可。
+- **混合库召回隔离**：dialogue/workbench 召回现在按工作区归属过滤。
+  依赖"跨项目串台"行为的（错误）用法会看到不同的召回结果。
+- **默认配置新增 `workerPolicy`**（本地 JEV 端点占位）与凭证嗅探语义：
+  环境变量凭证只信真实 shell 来源；`localhost` 端点视为免密。
+- **graphflow_run 响应新增 `advisory` block**（Shadow、确定性、零 LLM
+  成本）——纯增量，不读取它的宿主不受影响。
+- 2.x 效率层以 monorepo workspace 包形式随仓库交付
+  （`packages/efficiency-agent`，暂不随 npm 包发布）。
 
 ### Added — Step D 首份真实成本 A/B：Context ↓47%（门槛 ↓20%）
 
