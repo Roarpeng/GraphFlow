@@ -5,6 +5,12 @@ import { tmpdir } from "node:os";
 import { GraphifyClient } from "../src/graph/graphify-client";
 import type { GraphClient } from "../src/graph/client-factory";
 import { indexWorkspaceFiles } from "../src/graph/file-indexer";
+import { pythonIndexer } from "../src/graph/language-indexers/python";
+import { goIndexer } from "../src/graph/language-indexers/go";
+import { rustIndexer } from "../src/graph/language-indexers/rust";
+import { javaIndexer } from "../src/graph/language-indexers/java";
+import { rubyIndexer } from "../src/graph/language-indexers/ruby";
+import { cppIndexer } from "../src/graph/language-indexers/c-cpp";
 
 function makeClient(): { wrapper: GraphClient; inner: GraphifyClient } {
   const inner = new GraphifyClient();
@@ -237,5 +243,139 @@ describe("M27 multi-language indexer", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  // Symbol nodes used to record only a start line, so nothing downstream could
+  // quote a symbol's real extent. These assert the end of the span instead.
+  it("G: Python reports endLine covering the body", async () => {
+    const result = await pythonIndexer.extract(
+      "mod.py",
+      [
+        "def foo():",
+        "    return 1",
+        "",
+        "",
+        "class Bar:",
+        "    def method(self):",
+        "        return 2",
+      ].join("\n")
+    );
+
+    const foo = result.symbols.find((s) => s.name === "foo");
+    expect(foo?.line).toBe(1);
+    expect(foo?.endLine).toBe(2);
+
+    const bar = result.symbols.find((s) => s.name === "Bar");
+    expect(bar?.line).toBe(5);
+    expect(bar?.endLine).toBe(7);
+  });
+
+  it("H: Rust reports endLine covering fn body and struct fields", async () => {
+    const result = await rustIndexer.extract(
+      "lib.rs",
+      ["pub fn alpha() -> u32 {", "    1", "}", "", "struct Beta {", "    x: u32,", "}"].join("\n")
+    );
+
+    const alpha = result.symbols.find((s) => s.name === "alpha");
+    expect(alpha?.line).toBe(1);
+    expect(alpha?.endLine).toBe(3);
+
+    const beta = result.symbols.find((s) => s.name === "Beta");
+    expect(beta?.line).toBe(5);
+    expect(beta?.endLine).toBe(7);
+  });
+
+  it("I: Go reports endLine covering func body and struct fields", async () => {
+    const result = await goIndexer.extract(
+      "main.go",
+      [
+        "package main",
+        "",
+        "func Long() string {",
+        '\treturn "a"',
+        "}",
+        "",
+        "type Server struct {",
+        "\tName string",
+        "}",
+      ].join("\n")
+    );
+
+    const long = result.symbols.find((s) => s.name === "Long");
+    expect(long?.line).toBe(3);
+    expect(long?.endLine).toBe(5);
+
+    const server = result.symbols.find((s) => s.name === "Server");
+    expect(server?.line).toBe(7);
+    expect(server?.endLine).toBe(9);
+  });
+
+  it("J: C/C++ reports endLine spanning class and function bodies", async () => {
+    const result = await cppIndexer.extract(
+      "a.cpp",
+      [
+        "class Foo {",
+        "public:",
+        "  int bar();",
+        "};",
+        "",
+        "int compute(int x) {",
+        "  return x + 1;",
+        "}",
+      ].join("\n")
+    );
+
+    const foo = result.symbols.find((s) => s.name === "Foo");
+    expect(foo?.line).toBe(1);
+    expect(foo?.endLine).toBe(4);
+
+    const compute = result.symbols.find((s) => s.name === "compute");
+    expect(compute?.line).toBe(6);
+    expect(compute?.endLine).toBe(8);
+  });
+
+  it("K: Java spans come from the declaration node, not the name node", async () => {
+    const result = await javaIndexer.extract(
+      "Widget.java",
+      [
+        "public class Widget {",
+        "    private int count = 0;",
+        "",
+        "    public int compute(int x) {",
+        "        return x + 1;",
+        "    }",
+        "}",
+      ].join("\n")
+    );
+
+    const widget = result.symbols.find((s) => s.name === "Widget");
+    expect(widget?.line).toBe(1);
+    expect(widget?.endLine).toBe(7);
+
+    const compute = result.symbols.find((s) => s.name === "compute");
+    expect(compute?.line).toBe(4);
+    expect(compute?.endLine).toBe(6);
+
+    // `count` is named by a variable_declarator nested inside the
+    // field_declaration; its span is the field_declaration's, not the
+    // identifier's.
+    const count = result.symbols.find((s) => s.name === "count");
+    expect(count?.line).toBe(2);
+    expect(count?.endLine).toBe(2);
+  });
+
+  it("L: Ruby reports endLine through the `end` keyword", async () => {
+    const result = await rubyIndexer.extract(
+      "widget.rb",
+      ["class Widget", "  def compute(x)", "    x + 1", "  end", "end"].join("\n")
+    );
+
+    const widget = result.symbols.find((s) => s.name === "Widget");
+    expect(widget?.line).toBe(1);
+    expect(widget?.endLine).toBe(5);
+
+    const compute = result.symbols.find((s) => s.name === "compute");
+    expect(compute?.line).toBe(2);
+    expect(compute?.endLine).toBe(4);
   });
 });

@@ -6,6 +6,8 @@ import { GraphifyClient } from "../src/graph/graphify-client";
 import type { GraphClient } from "../src/graph/client-factory";
 import { indexWorkspaceFiles } from "../src/graph/file-indexer";
 import { getIndexerForFile } from "../src/graph/language-indexers";
+import { kotlinIndexer } from "../src/graph/language-indexers/kotlin";
+import { swiftIndexer } from "../src/graph/language-indexers/swift";
 
 function makeClient(): { wrapper: GraphClient; inner: GraphifyClient } {
   const inner = new GraphifyClient();
@@ -112,5 +114,36 @@ describe("M59 Kotlin and Swift indexers", () => {
 
     expect(getIndexerForFile("App.swift")).toBeDefined();
     expect(getIndexerForFile("App.swift")?.language).toBe("swift");
+  });
+
+  // Symbol spans: the declaration node's end line, not just its start line.
+  it("reports Kotlin endLine spanning the class and function bodies", async () => {
+    const result = await kotlinIndexer.extract(
+      "App.kt",
+      ["class App {", "    fun greet() {", '        println("hi")', "    }", "}"].join("\n")
+    );
+
+    const app = result.symbols.find((s) => s.name === "App");
+    expect(app?.line).toBe(1);
+    expect(app?.endLine).toBe(5);
+
+    const greet = result.symbols.find((s) => s.name === "greet");
+    expect(greet?.line).toBe(2);
+    expect(greet?.endLine).toBe(4);
+  });
+
+  it("reports Swift endLine spanning the class and function bodies", async () => {
+    const result = await swiftIndexer.extract(
+      "App.swift",
+      ["class App {", "    func greet() {", '        print("hi")', "    }", "}"].join("\n")
+    );
+
+    const app = result.symbols.find((s) => s.name === "App");
+    expect(app?.line).toBe(1);
+    expect(app?.endLine).toBe(5);
+
+    const greet = result.symbols.find((s) => s.name === "greet");
+    expect(greet?.line).toBe(2);
+    expect(greet?.endLine).toBe(4);
   });
 });

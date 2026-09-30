@@ -28,6 +28,7 @@ export const rustIndexer: LanguageIndexer = {
 
     walkTreeSitterAst(tree.rootNode, (node) => {
       const lineNo = node.startPosition.row + 1;
+      const endLine = node.endPosition.row + 1;
       const hasPub = node.children?.some((c) => c.type === "visibility_modifier") ?? false;
 
       switch (node.type) {
@@ -47,6 +48,7 @@ export const rustIndexer: LanguageIndexer = {
               kind: "function",
               exported: hasPub,
               line: lineNo,
+              endLine,
               file: filePath,
               paramsCount,
               signature: `${isAsync ? "async " : ""}fn ${nameNode.text}(${paramsCount} params)`,
@@ -62,6 +64,7 @@ export const rustIndexer: LanguageIndexer = {
               kind: "struct",
               exported: hasPub,
               line: lineNo,
+              endLine,
               file: filePath,
             });
           }
@@ -75,6 +78,7 @@ export const rustIndexer: LanguageIndexer = {
               kind: "enum",
               exported: hasPub,
               line: lineNo,
+              endLine,
               file: filePath,
             });
           }
@@ -88,6 +92,7 @@ export const rustIndexer: LanguageIndexer = {
               kind: "trait",
               exported: hasPub,
               line: lineNo,
+              endLine,
               file: filePath,
             });
           }
@@ -103,6 +108,7 @@ export const rustIndexer: LanguageIndexer = {
               kind: "impl",
               exported: false,
               line: lineNo,
+              endLine,
               file: filePath,
             });
           }
@@ -116,6 +122,7 @@ export const rustIndexer: LanguageIndexer = {
               kind: "const",
               exported: hasPub,
               line: lineNo,
+              endLine,
               file: filePath,
             });
           }
@@ -129,6 +136,7 @@ export const rustIndexer: LanguageIndexer = {
               kind: "const",
               exported: hasPub,
               line: lineNo,
+              endLine,
               file: filePath,
             });
           }
@@ -142,6 +150,7 @@ export const rustIndexer: LanguageIndexer = {
               kind: "module",
               exported: hasPub,
               line: lineNo,
+              endLine,
               file: filePath,
             });
           }
@@ -155,6 +164,7 @@ export const rustIndexer: LanguageIndexer = {
               kind: "macro",
               exported: true,
               line: lineNo,
+              endLine,
               file: filePath,
             });
           }

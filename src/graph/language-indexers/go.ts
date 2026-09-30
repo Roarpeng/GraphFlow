@@ -18,6 +18,7 @@ export const goIndexer: LanguageIndexer = {
 
     walkTreeSitterAst(tree.rootNode, (node) => {
       const lineNo = node.startPosition.row + 1;
+      const endLine = node.endPosition.row + 1;
 
       if (node.type === "package_clause") {
         const nameNode = node.childForFieldName("package_identifier") || node.namedChildren[0];
@@ -27,6 +28,7 @@ export const goIndexer: LanguageIndexer = {
             kind: "package",
             exported: true,
             line: lineNo,
+            endLine,
             file: filePath,
           });
         }
@@ -45,6 +47,7 @@ export const goIndexer: LanguageIndexer = {
             kind: node.type === "method_declaration" ? "method" : "func",
             exported: isExported(name),
             line: lineNo,
+            endLine,
             file: filePath,
             paramsCount,
           });
@@ -61,6 +64,7 @@ export const goIndexer: LanguageIndexer = {
             kind,
             exported: isExported(name),
             line: lineNo,
+            endLine,
             file: filePath,
           });
         }
@@ -80,6 +84,7 @@ export const goIndexer: LanguageIndexer = {
             kind: node.type === "const_spec" ? "const" : "variable",
             exported: isExported(name),
             line: lineNo,
+            endLine,
             file: filePath,
           });
         }

@@ -27,6 +27,7 @@ export const javaIndexer: LanguageIndexer = {
 
     walkTreeSitterAst(tree.rootNode, (node) => {
       const lineNo = node.startPosition.row + 1;
+      const endLine = node.endPosition.row + 1;
       const modifierText = node.children
         ?.filter((c) => c.type === "modifiers")
         .map((c) => c.text)
@@ -51,6 +52,7 @@ export const javaIndexer: LanguageIndexer = {
               kind: "class",
               exported: isPublic || !isPrivate,
               line: lineNo,
+              endLine,
               file: filePath,
               visibility,
             });
@@ -65,6 +67,7 @@ export const javaIndexer: LanguageIndexer = {
               kind: "interface",
               exported: isPublic || !isPrivate,
               line: lineNo,
+              endLine,
               file: filePath,
               visibility,
             });
@@ -79,6 +82,7 @@ export const javaIndexer: LanguageIndexer = {
               kind: "enum",
               exported: isPublic || !isPrivate,
               line: lineNo,
+              endLine,
               file: filePath,
               visibility,
             });
@@ -93,6 +97,7 @@ export const javaIndexer: LanguageIndexer = {
               kind: "record",
               exported: isPublic || !isPrivate,
               line: lineNo,
+              endLine,
               file: filePath,
               visibility,
             });
@@ -107,6 +112,7 @@ export const javaIndexer: LanguageIndexer = {
               kind: "annotation",
               exported: isPublic || !isPrivate,
               line: lineNo,
+              endLine,
               file: filePath,
               visibility,
             });
@@ -133,6 +139,7 @@ export const javaIndexer: LanguageIndexer = {
               kind: "method",
               exported: isPublic || !isPrivate,
               line: lineNo,
+              endLine,
               file: filePath,
               visibility,
               paramsCount,
@@ -157,6 +164,7 @@ export const javaIndexer: LanguageIndexer = {
               kind: "constructor",
               exported: isPublic || !isPrivate,
               line: lineNo,
+              endLine,
               file: filePath,
               visibility,
               paramsCount,
@@ -178,6 +186,7 @@ export const javaIndexer: LanguageIndexer = {
                 kind: isStatic && isFinal ? "const" : "field",
                 exported: isPublic || !isPrivate,
                 line: lineNo,
+                endLine,
                 file: filePath,
                 visibility,
               });

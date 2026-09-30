@@ -14,6 +14,7 @@ export const pythonIndexer: LanguageIndexer = {
 
     walkTreeSitterAstWithState(tree.rootNode, undefined as string | undefined, (node, caller) => {
       const lineNo = node.startPosition.row + 1;
+      const endLine = node.endPosition.row + 1;
 
       if (node.type === "class_definition") {
         const nameNode = node.childForFieldName("name");
@@ -24,6 +25,7 @@ export const pythonIndexer: LanguageIndexer = {
             kind: "class",
             exported: !name.startsWith("_"),
             line: lineNo,
+            endLine,
             file: filePath,
           });
 
@@ -62,6 +64,7 @@ export const pythonIndexer: LanguageIndexer = {
             kind,
             exported: !name.startsWith("_"),
             line: lineNo,
+            endLine,
             file: filePath,
             paramsCount,
           });

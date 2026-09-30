@@ -41,6 +41,7 @@ export const cppIndexer: LanguageIndexer = {
     // ("Maximum call stack size exceeded" when indexing big projects).
     walkTreeSitterAst(tree.rootNode, (node) => {
       const lineNo = node.startPosition.row + 1;
+      const endLine = node.endPosition.row + 1;
 
       switch (node.type) {
         case "function_definition": {
@@ -53,6 +54,7 @@ export const cppIndexer: LanguageIndexer = {
                 kind: "class",
                 exported: true,
                 line: lineNo,
+                endLine,
                 file: filePath,
               });
             }
@@ -73,6 +75,7 @@ export const cppIndexer: LanguageIndexer = {
               kind: "function",
               exported: !isStatic,
               line: lineNo,
+              endLine,
               file: filePath,
               paramsCount,
             });
@@ -88,6 +91,7 @@ export const cppIndexer: LanguageIndexer = {
                 kind: "class",
                 exported: true,
                 line: lineNo,
+                endLine,
                 file: filePath,
               });
             }
@@ -107,6 +111,7 @@ export const cppIndexer: LanguageIndexer = {
                 kind: "function",
                 exported: !isStatic,
                 line: lineNo,
+                endLine,
                 file: filePath,
                 paramsCount,
               });
@@ -122,6 +127,7 @@ export const cppIndexer: LanguageIndexer = {
               kind: "class",
               exported: true,
               line: lineNo,
+              endLine,
               file: filePath,
             });
           }
@@ -135,6 +141,7 @@ export const cppIndexer: LanguageIndexer = {
               kind: "struct",
               exported: true,
               line: lineNo,
+              endLine,
               file: filePath,
             });
           }
@@ -148,6 +155,7 @@ export const cppIndexer: LanguageIndexer = {
               kind: "enum",
               exported: true,
               line: lineNo,
+              endLine,
               file: filePath,
             });
           }
@@ -161,6 +169,7 @@ export const cppIndexer: LanguageIndexer = {
               kind: "type",
               exported: true,
               line: lineNo,
+              endLine,
               file: filePath,
             });
           }
@@ -175,6 +184,7 @@ export const cppIndexer: LanguageIndexer = {
               kind: "macro",
               exported: true,
               line: lineNo,
+              endLine,
               file: filePath,
             });
           }
@@ -188,6 +198,7 @@ export const cppIndexer: LanguageIndexer = {
               kind: "namespace",
               exported: true,
               line: lineNo,
+              endLine,
               file: filePath,
             });
           }

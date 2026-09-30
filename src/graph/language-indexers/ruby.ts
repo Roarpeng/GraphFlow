@@ -31,6 +31,7 @@ export const rubyIndexer: LanguageIndexer = {
 
     walkTreeSitterAst(tree.rootNode, (node) => {
       const lineNo = node.startPosition.row + 1;
+      const endLine = node.endPosition.row + 1;
 
       switch (node.type) {
         case "class": {
@@ -41,6 +42,7 @@ export const rubyIndexer: LanguageIndexer = {
               kind: "class",
               exported: true,
               line: lineNo,
+              endLine,
               file: filePath,
               visibility: "public",
             });
@@ -55,6 +57,7 @@ export const rubyIndexer: LanguageIndexer = {
               kind: "module",
               exported: true,
               line: lineNo,
+              endLine,
               file: filePath,
               visibility: "public",
             });
@@ -84,6 +87,7 @@ export const rubyIndexer: LanguageIndexer = {
               kind: "method",
               exported: !isPrivate,
               line: lineNo,
+              endLine,
               file: filePath,
               visibility: isPrivate ? "private" : "public",
               paramsCount,
@@ -105,6 +109,7 @@ export const rubyIndexer: LanguageIndexer = {
               kind: "method",
               exported: true,
               line: lineNo,
+              endLine,
               file: filePath,
               visibility: "public",
               paramsCount,
@@ -122,6 +127,7 @@ export const rubyIndexer: LanguageIndexer = {
               kind: "const",
               exported: true,
               line: lineNo,
+              endLine,
               file: filePath,
               visibility: "public",
             });

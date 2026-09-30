@@ -68,6 +68,7 @@ function pushSymbol(
   name: string | undefined,
   kind: string,
   line: number,
+  endLine?: number,
   extras?: Partial<DeclaredSymbol>
 ): void {
   if (!name) {
@@ -81,6 +82,7 @@ function pushSymbol(
     file: filePath,
     visibility: dartVisibility(name),
     ...extras,
+    ...(typeof endLine === "number" ? { endLine } : {}),
   });
 }
 
@@ -107,26 +109,27 @@ export const dartIndexer: LanguageIndexer = {
 
     walkTreeSitterAst(tree.rootNode, (node) => {
       const lineNo = node.startPosition.row + 1;
+      const endLine = node.endPosition.row + 1;
 
       switch (node.type) {
         case "class_definition": {
-          pushSymbol(symbols, filePath, firstIdentifier(node), "class", lineNo);
+          pushSymbol(symbols, filePath, firstIdentifier(node), "class", lineNo, endLine);
           break;
         }
         case "mixin_declaration": {
-          pushSymbol(symbols, filePath, firstIdentifier(node), "mixin", lineNo);
+          pushSymbol(symbols, filePath, firstIdentifier(node), "mixin", lineNo, endLine);
           break;
         }
         case "extension_declaration": {
-          pushSymbol(symbols, filePath, firstIdentifier(node), "extension", lineNo);
+          pushSymbol(symbols, filePath, firstIdentifier(node), "extension", lineNo, endLine);
           break;
         }
         case "enum_declaration": {
-          pushSymbol(symbols, filePath, firstIdentifier(node), "enum", lineNo);
+          pushSymbol(symbols, filePath, firstIdentifier(node), "enum", lineNo, endLine);
           break;
         }
         case "type_alias": {
-          pushSymbol(symbols, filePath, firstIdentifier(node), "typedef", lineNo);
+          pushSymbol(symbols, filePath, firstIdentifier(node), "typedef", lineNo, endLine);
           break;
         }
         case "function_signature": {
@@ -144,18 +147,18 @@ export const dartIndexer: LanguageIndexer = {
                 c.type === "super_formal_parameter"
             ).length;
           }
-          pushSymbol(symbols, filePath, name, "function", lineNo, {
+          pushSymbol(symbols, filePath, name, "function", lineNo, endLine, {
             paramsCount,
             ...(name ? { signature: `${name}(${paramsCount} params)` } : {}),
           });
           break;
         }
         case "getter_signature": {
-          pushSymbol(symbols, filePath, firstIdentifier(node), "getter", lineNo);
+          pushSymbol(symbols, filePath, firstIdentifier(node), "getter", lineNo, endLine);
           break;
         }
         case "setter_signature": {
-          pushSymbol(symbols, filePath, firstIdentifier(node), "setter", lineNo);
+          pushSymbol(symbols, filePath, firstIdentifier(node), "setter", lineNo, endLine);
           break;
         }
         case "constructor_signature":
@@ -168,7 +171,7 @@ export const dartIndexer: LanguageIndexer = {
           // Symbol node ids hash by name only; disambiguate from the class symbol.
           const namedMatch = /\.(\w+)\s*\(/.exec(node.text);
           const ctorName = namedMatch ? `${name}.${namedMatch[1]}` : `${name}.new`;
-          pushSymbol(symbols, filePath, ctorName, "constructor", lineNo);
+          pushSymbol(symbols, filePath, ctorName, "constructor", lineNo, endLine);
           break;
         }
         case "library_import": {

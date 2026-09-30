@@ -31,6 +31,7 @@ export const swiftIndexer: LanguageIndexer = {
 
     walkTreeSitterAst(tree.rootNode, (node) => {
       const lineNo = node.startPosition.row + 1;
+      const endLine = node.endPosition.row + 1;
 
       switch (node.type) {
         case "class_declaration": {
@@ -41,6 +42,7 @@ export const swiftIndexer: LanguageIndexer = {
               kind: "class",
               exported: true,
               line: lineNo,
+              endLine,
               file: filePath,
               visibility: "public",
             });
@@ -62,6 +64,7 @@ export const swiftIndexer: LanguageIndexer = {
               kind: "function",
               exported: true,
               line: lineNo,
+              endLine,
               file: filePath,
               visibility: "public",
               paramsCount,
@@ -78,6 +81,7 @@ export const swiftIndexer: LanguageIndexer = {
               kind: "protocol",
               exported: true,
               line: lineNo,
+              endLine,
               file: filePath,
               visibility: "public",
             });

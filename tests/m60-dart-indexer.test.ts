@@ -77,6 +77,23 @@ describe("M60 Dart indexer", () => {
     expect(modules.some((m) => m.includes("game_models"))).toBe(true);
   });
 
+  it("reports endLine spanning the declaring node, not just its first line", async () => {
+    const result = await dartIndexer.extract("lib/pages/battle_page.dart", SAMPLE_DART);
+
+    // class_definition spans its closing brace.
+    const battle = result.symbols.find((s) => s.name === "BattlePage" && s.kind === "class");
+    expect(battle?.line).toBe(7);
+    expect(battle?.endLine).toBe(11);
+
+    // Single-line declarations report the same start and end line.
+    const main = result.symbols.find((s) => s.name === "main");
+    expect(main?.line).toBe(12);
+    expect(main?.endLine).toBe(12);
+
+    // The span is inclusive and never inverted, for every symbol in the file.
+    expect(result.symbols.every((s) => (s.endLine ?? 0) >= s.line)).toBe(true);
+  });
+
   it("indexes Dart symbols via indexWorkspaceFiles", async () => {
     const root = tmpRoot("dart");
     try {
