@@ -149,10 +149,14 @@ describe("dialogue distill backfill (end-to-end)", () => {
     seq: number,
     input: { userQuery: string; assistantReply: string }
   ): Promise<void> {
-    // The runtime dialogue surfaces re-resolve the workspace root from cwd
-    // (see listDialogueTurnsRuntime / distillDialogueTurnsRuntime), so the seed
-    // must key sessions on the same root the runtime will use.
-    const sessionId = dialogueSessionIdFor(sessionName, resolveRuntimeWorkspaceRoot());
+    // The runtime dialogue surfaces bind the workspace root from the project
+    // config first (documented priority 3), so the seed must key sessions on
+    // that same root — the sandbox config pins workspaceRoot to the sandbox
+    // dir, NOT the process cwd.
+    const sessionId = dialogueSessionIdFor(
+      sessionName,
+      resolveRuntimeWorkspaceRoot({ projectWorkspaceRoot: sandbox.dir })
+    );
     const turnId = dialogueTurnIdFor(sessionId, seq);
     const sessionNode: GraphNode = {
       id: sessionId,

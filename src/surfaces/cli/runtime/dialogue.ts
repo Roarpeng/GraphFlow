@@ -82,9 +82,19 @@ export async function listDialogueTurnsRuntime(
   configPath?: string,
   options?: { sessionId?: string; limit?: number; rootDir?: string }
 ): Promise<DialogueListItem[]> {
-  const config = bindRuntimeWorkspaceRoot(
-    resolveConfig(configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
+  const resolved = resolveConfig(
+    configPath,
     options?.rootDir ? { rootDir: options.rootDir } : undefined
+  );
+  // Project-config workspaceRoot rides the bind (documented priority 3) so
+  // every dialogue surface in this file resolves the SAME root.
+  const config = bindRuntimeWorkspaceRoot(
+    resolved,
+    options?.rootDir
+      ? { rootDir: options.rootDir }
+      : resolved.graphPolicy.workspaceRoot
+        ? { projectWorkspaceRoot: resolved.graphPolicy.workspaceRoot }
+        : undefined
   );
   const client = createGraphClient(config);
   const sessionId = resolveSessionId(options?.sessionId, config.graphPolicy.workspaceRoot);
@@ -105,9 +115,20 @@ export async function recordDialogueTurnRuntime(
     resumeFromTurnId?: string;
   }
 ): Promise<DialogueListItem | undefined> {
-  const config = bindRuntimeWorkspaceRoot(
-    resolveConfig(options?.configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
+  const resolved = resolveConfig(
+    options?.configPath,
     options?.rootDir ? { rootDir: options.rootDir } : undefined
+  );
+  // Pass the project config's workspaceRoot into the bind (documented
+  // priority 3) so workspace-scoped reads verify ownership against the
+  // project root rather than the process cwd.
+  const config = bindRuntimeWorkspaceRoot(
+    resolved,
+    options?.rootDir
+      ? { rootDir: options.rootDir }
+      : resolved.graphPolicy.workspaceRoot
+        ? { projectWorkspaceRoot: resolved.graphPolicy.workspaceRoot }
+        : undefined
   );
   const client = createGraphClient(config);
   const result = await recordDialogueTurn(client, {
@@ -134,9 +155,19 @@ export async function distillDialogueTurnsRuntime(
   configPath?: string,
   options?: { sessionId?: string; rootDir?: string; all?: boolean; useLlm?: boolean }
 ): Promise<DistillDialogueResult> {
-  const config = bindRuntimeWorkspaceRoot(
-    resolveConfig(configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
+  const resolved = resolveConfig(
+    configPath,
     options?.rootDir ? { rootDir: options.rootDir } : undefined
+  );
+  // Project-config workspaceRoot rides the bind (documented priority 3) so
+  // every dialogue surface in this file resolves the SAME root.
+  const config = bindRuntimeWorkspaceRoot(
+    resolved,
+    options?.rootDir
+      ? { rootDir: options.rootDir }
+      : resolved.graphPolicy.workspaceRoot
+        ? { projectWorkspaceRoot: resolved.graphPolicy.workspaceRoot }
+        : undefined
   );
   const client = createGraphClient(config);
   const sessionId = options?.all
@@ -208,9 +239,20 @@ export async function forkDialogueSessionRuntime(
   fromTurnId: string,
   options?: { configPath?: string; rootDir?: string; forkName?: string }
 ): Promise<ForkDialogueListItem | undefined> {
-  const config = bindRuntimeWorkspaceRoot(
-    resolveConfig(options?.configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
+  const resolved = resolveConfig(
+    options?.configPath,
     options?.rootDir ? { rootDir: options.rootDir } : undefined
+  );
+  // Pass the project config's workspaceRoot into the bind (documented
+  // priority 3) so workspace-scoped reads verify ownership against the
+  // project root rather than the process cwd.
+  const config = bindRuntimeWorkspaceRoot(
+    resolved,
+    options?.rootDir
+      ? { rootDir: options.rootDir }
+      : resolved.graphPolicy.workspaceRoot
+        ? { projectWorkspaceRoot: resolved.graphPolicy.workspaceRoot }
+        : undefined
   );
   const client = createGraphClient(config);
   const result = await forkDialogueSession(client, {
@@ -248,9 +290,20 @@ export async function dialoguePathRuntime(
   endTurnId: string,
   options?: { configPath?: string; rootDir?: string; limit?: number }
 ): Promise<DialoguePathStep[]> {
-  const config = bindRuntimeWorkspaceRoot(
-    resolveConfig(options?.configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
+  const resolved = resolveConfig(
+    options?.configPath,
     options?.rootDir ? { rootDir: options.rootDir } : undefined
+  );
+  // Pass the project config's workspaceRoot into the bind (documented
+  // priority 3) so workspace-scoped reads verify ownership against the
+  // project root rather than the process cwd.
+  const config = bindRuntimeWorkspaceRoot(
+    resolved,
+    options?.rootDir
+      ? { rootDir: options.rootDir }
+      : resolved.graphPolicy.workspaceRoot
+        ? { projectWorkspaceRoot: resolved.graphPolicy.workspaceRoot }
+        : undefined
   );
   const client = createGraphClient(config);
   const all = await listDialogueTurns(client, { limit: 500 });
@@ -263,9 +316,14 @@ export async function recordAgentTraceRuntime(
   configPath?: string,
   rootDir?: string
 ): Promise<boolean> {
+  const resolved = resolveConfig(configPath, rootDir ? { rootDir } : undefined);
   const config = bindRuntimeWorkspaceRoot(
-    resolveConfig(configPath, rootDir ? { rootDir } : undefined),
-    rootDir ? { rootDir } : undefined
+    resolved,
+    rootDir
+      ? { rootDir }
+      : resolved.graphPolicy.workspaceRoot
+        ? { projectWorkspaceRoot: resolved.graphPolicy.workspaceRoot }
+        : undefined
   );
   const client = createGraphClient(config);
   const sessionId = trace.sessionId?.trim()
@@ -287,9 +345,19 @@ export async function listDialogueTracesRuntime(
   configPath?: string,
   options?: { sessionId?: string; limit?: number; rootDir?: string }
 ): Promise<AgentTraceRecord[]> {
-  const config = bindRuntimeWorkspaceRoot(
-    resolveConfig(configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
+  const resolved = resolveConfig(
+    configPath,
     options?.rootDir ? { rootDir: options.rootDir } : undefined
+  );
+  // Project-config workspaceRoot rides the bind (documented priority 3) so
+  // every dialogue surface in this file resolves the SAME root.
+  const config = bindRuntimeWorkspaceRoot(
+    resolved,
+    options?.rootDir
+      ? { rootDir: options.rootDir }
+      : resolved.graphPolicy.workspaceRoot
+        ? { projectWorkspaceRoot: resolved.graphPolicy.workspaceRoot }
+        : undefined
   );
   const client = createGraphClient(config);
   const sessionId = options?.sessionId
@@ -320,14 +388,26 @@ export async function searchDialogueTurnsRuntime(
     includeSuperseded?: boolean;
   }
 ): Promise<DialogueSearchHit[]> {
-  const config = bindRuntimeWorkspaceRoot(
-    resolveConfig(options?.configPath, options?.rootDir ? { rootDir: options.rootDir } : undefined),
+  const resolved = resolveConfig(
+    options?.configPath,
     options?.rootDir ? { rootDir: options.rootDir } : undefined
+  );
+  // Pass the project config's workspaceRoot into the bind (documented
+  // priority 3) so workspace-scoped reads verify ownership against the
+  // project root rather than the process cwd.
+  const config = bindRuntimeWorkspaceRoot(
+    resolved,
+    options?.rootDir
+      ? { rootDir: options.rootDir }
+      : resolved.graphPolicy.workspaceRoot
+        ? { projectWorkspaceRoot: resolved.graphPolicy.workspaceRoot }
+        : undefined
   );
   const client = createGraphClient(config);
   return searchDialogueTurns(client, query, {
     ...(options?.limit !== undefined ? { limit: options.limit } : {}),
     ...(options?.includeSuperseded ? { includeSuperseded: true } : {}),
+    ...(config.graphPolicy.workspaceRoot ? { workspaceRoot: config.graphPolicy.workspaceRoot } : {}),
   });
 }
 

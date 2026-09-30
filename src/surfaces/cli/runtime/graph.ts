@@ -367,7 +367,19 @@ export async function previewContext(
   dialogue?: PreviewDialogueOptions,
   contextPressure?: ObservedContextUsage
 ): Promise<ContextPreviewResult> {
-  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath, rootDir ? { rootDir } : undefined), rootDir ? { rootDir } : undefined);
+  // Workspace binding must honor the project config's own workspaceRoot
+  // (documented priority 3): without it the bind falls back to cwd discovery
+  // and the recall/workbench isolation filters verify ownership against the
+  // WRONG root, hiding every dialogue hit in project-config deployments.
+  const resolvedPreviewConfig = resolveConfig(configPath, rootDir ? { rootDir } : undefined);
+  const config = bindRuntimeWorkspaceRoot(
+    resolvedPreviewConfig,
+    rootDir
+      ? { rootDir }
+      : resolvedPreviewConfig.graphPolicy.workspaceRoot
+        ? { projectWorkspaceRoot: resolvedPreviewConfig.graphPolicy.workspaceRoot }
+        : undefined
+  );
   const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
 
   // GF-3 / Online Context Compact: observed-pressure budget + compaction signal.
@@ -828,8 +840,10 @@ async function attachWorkbenchThenDialogue(
   dialogue?: PreviewDialogueOptions
 ): Promise<ContextPreviewResult> {
   // Historical recall (Conversation Graph W2b) is read-only, so it runs even
-  // when this preview must not record a dialogue turn.
-  const withHits = await attachDialogueHits(result, client, query);
+  // when this preview must not record a dialogue turn. Recall is scoped to
+  // this workspace's sessions (P0 isolation): a shared/legacy store must not
+  // leak another project's conversation into `dialogueHits`.
+  const withHits = await attachDialogueHits(result, client, query, config.graphPolicy.workspaceRoot);
   // R9 promise ledger: surface unresolved obligations from earlier sessions
   // on the FIRST context of a session — "干着干着就忘了" heals at open.
   const withReminders = await attachPromiseReminder(withHits, client);
@@ -893,10 +907,14 @@ function toDialogueHitPreview(hit: DialogueSearchHit): DialogueHitPreview {
 async function attachDialogueHits(
   result: ContextPreviewResult,
   client: GraphClient,
-  query: string
+  query: string,
+  workspaceRoot?: string
 ): Promise<ContextPreviewResult> {
   try {
-    const hits = await searchDialogueTurns(client, query, { limit: 3 });
+    const hits = await searchDialogueTurns(client, query, {
+      limit: 3,
+      ...(workspaceRoot ? { workspaceRoot } : {}),
+    });
     if (hits.length === 0) {
       return result;
     }

@@ -306,17 +306,33 @@ function dialogueMatchScore(turn: DialogueTurnRecord, tokens: Set<string>): numb
  * (superseded) turns so callers can separate current truth from old answers.
  * Dialogue hits are ADDITIVE: they never displace code Symbol/File results
  * and are returned in their own list.
+ *
+ * Cross-project isolation (P0 gate): when `workspaceRoot` is set, only turns
+ * from sessions that hash-verify against that root are searched. The
+ * recency window is applied AFTER the workspace filter — a chatty foreign
+ * project sharing a legacy store must not crowd this workspace's turns out
+ * of the 120-turn recall window.
  */
 export async function searchDialogueTurns(
   client: GraphClient,
   query: string,
-  options?: { limit?: number; includeSuperseded?: boolean }
+  options?: { limit?: number; includeSuperseded?: boolean; workspaceRoot?: string }
 ): Promise<DialogueSearchHit[]> {
   try {
     const { listDialogueTurns, formatSupersessionLine } = await import(
       "../learning/dialogue-thread.js"
     );
-    const turns: DialogueTurnRecord[] = await listDialogueTurns(client, { limit: 120 });
+    let turns: DialogueTurnRecord[] =
+      options?.workspaceRoot !== undefined
+        ? await listDialogueTurns(client)
+        : await listDialogueTurns(client, { limit: 120 });
+    if (options?.workspaceRoot !== undefined) {
+      const { listOwnedDialogueSessionIds } = await import("../learning/dialogue-thread.js");
+      const owned = await listOwnedDialogueSessionIds(client, options.workspaceRoot);
+      // Unattributable sessions cannot be verified, so their turns stay out:
+      // isolation wins over recall for records whose ownership is unknown.
+      turns = turns.filter((turn) => owned.has(turn.sessionId)).slice(0, 120);
+    }
     if (turns.length === 0) return [];
 
     const tokens = dialogueSearchTokens(query);

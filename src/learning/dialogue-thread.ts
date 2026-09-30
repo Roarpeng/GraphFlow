@@ -848,6 +848,34 @@ async function collectDialogueNodes(client: GraphClient): Promise<GraphNode[]> {
   return Array.from(byId.values());
 }
 
+/**
+ * Session ids in this store that verify as belonging to `workspaceRoot`.
+ * Ownership is verified, not guessed: a session node's id was produced by
+ * `dialogueSessionIdFor(name, workspaceRoot-at-write)`, so recomputing the
+ * hash from the stored name plus the CURRENT root identifies same-workspace
+ * sessions exactly — including records written before recall was scoped.
+ * Sessions whose id does not recompute (other roots, or pre-scoping writes
+ * made with no root) are foreign by construction and stay out of the set.
+ * 跨项目隔离的读侧判定：用存储的 name + 当前 workspaceRoot 重算哈希与
+ * sessionId 比对，一致 ⇒ 本工作区的会话；不一致 ⇒ 其他工作区，不参与召回。
+ */
+export async function listOwnedDialogueSessionIds(
+  client: GraphClient,
+  workspaceRoot: string
+): Promise<Set<string>> {
+  const owned = new Set<string>();
+  for (const node of await collectDialogueNodes(client)) {
+    if (!isDialogueSessionNode(node)) continue;
+    const name =
+      typeof node.metadata?.name === "string" ? node.metadata.name : parseDialogueSession(node)?.name;
+    if (!name) continue;
+    if (dialogueSessionIdFor(name, workspaceRoot) === node.id) {
+      owned.add(node.id);
+    }
+  }
+  return owned;
+}
+
 async function upsertUniqueEdges(client: GraphClient, edges: GraphEdge[]): Promise<void> {
   if (edges.length === 0) return;
   const snapshot = client.readSnapshot?.();

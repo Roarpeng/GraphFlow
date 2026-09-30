@@ -597,16 +597,22 @@ export async function loadActiveTopic(
       return loadTopic(client, root.activeTopicId);
     }
   }
-  const roots = (await collectWorkbenchNodes(client)).filter(isWorkbenchRootNode);
-  if (roots.length === 0) return undefined;
-  roots.sort((a, b) => {
-    const ar = deserializeRoot(a)?.updatedAt ?? 0;
-    const br = deserializeRoot(b)?.updatedAt ?? 0;
-    return br - ar;
-  });
-  const root = deserializeRoot(roots[0]!);
-  if (!root) return undefined;
-  return loadTopic(client, root.activeTopicId);
+  // Cross-workspace guard (P0 isolation): root ownership is hash-verified —
+  // workbenchRootIdFor(task, CURRENT root) must reproduce the stored rootId —
+  // so a store shared across projects never attaches another project's most
+  // recently updated workbench to this workspace's context echo.
+  // 跨工作区守卫：用存储 task + 当前 workspaceRoot 重算哈希验归属，
+  // 混库中其他项目最新更新的工作台不再被误认作本工作区的活跃主题。
+  const candidates = (await collectWorkbenchNodes(client))
+    .filter(isWorkbenchRootNode)
+    .map((node) => deserializeRoot(node))
+    .filter((root): root is WorkbenchRootRecord => Boolean(root))
+    .filter((root) =>
+      workspaceRoot === undefined ? true : workbenchRootIdFor(root.task, workspaceRoot) === root.id
+    );
+  if (candidates.length === 0) return undefined;
+  candidates.sort((a, b) => b.updatedAt - a.updatedAt);
+  return loadTopic(client, candidates[0]!.activeTopicId);
 }
 
 export async function loadWorkbenchContext(
