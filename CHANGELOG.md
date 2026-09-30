@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [2.0.1] — 2026-09-30
 
 ### Fixed — Jev 接入真实 API 契约 + `graphflow llm-check` 自诊断
 
@@ -13,8 +13,6 @@ All notable changes to this project are documented in this file.
 - **默认端点修正**：`workerPolicy` 默认 `https://api.typesafe.ai` + `jev-latest`（原 localhost:8000 占位也是"开箱不通"的一环）。
 - **新增 `graphflow llm-check`**（只读诊断）：逐 provider 报告可用性、**获胜凭证来源**（config-key / `env:变量名` / localhost / none，`${VAR}` 占位符如实标注 env 来源）、baseUrl/model、**实际查过的环境变量名清单**（拼错立即现形）、System One 端点状态。Windows"无法访问"从此可自诊。
 - 测试：`tests/typesafe-systemone.test.ts`（契约/退避/反思器/llm-check 9 例）+ worker 测试重写为真实语义（14 例）+ 真实臂记账对齐（判定调用数=typeSafeValid、token=usage）。全仓 254 文件 / 2073 测试绿。
-
-## [Unreleased]
 
 ### Fixed — `graphflow config ui` 保存被 unsafe-root 断言拒绝（Windows 实测）
 

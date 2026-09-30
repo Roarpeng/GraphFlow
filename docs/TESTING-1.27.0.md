@@ -1,8 +1,8 @@
-# GraphFlow 2.0.0 — 多宿主验收测试步骤
+# GraphFlow 2.0.1 — 多宿主验收测试步骤
 
 本版把「工作区构建偏好」从只支持 opencode 扩到**全部 19 个宿主 + dsh**，并把 `npm audit` 从 8 项清到 0。下面的步骤用于在**你自己的 agent 工具里**逐个验收。
 
-本文档只讲**从 npm 安装的包**（`@roarpeng/graphflow@2.0.0`）怎么测。**不需要克隆仓库、不需要编译。**
+本文档只讲**从 npm 安装的包**（`@roarpeng/graphflow@2.0.1`）怎么测。**不需要克隆仓库、不需要编译。**
 
 > ⚠️ **不要在 home 目录里跑 `graphflow install`。**
 > `~` / `C:\Users\xxx` 不是项目目录：1.27.8 会拒绝在那里写入项目规则文件（`.windsurfrules`、`AGENTS.md`、`GEMINI.md`、`.claude/rules/graphflow.md` 等），
@@ -18,20 +18,20 @@
 # macOS / Linux
 mkdir -p ~/gf-test && cd ~/gf-test
 npm init -y
-npm install -g @roarpeng/graphflow@2.0.0
+npm install -g @roarpeng/graphflow@2.0.1
 ```
 
 ```powershell
 # Windows PowerShell
 mkdir $env:USERPROFILE\gf-test -Force; cd $env:USERPROFILE\gf-test
 npm init -y
-npm install -g @roarpeng/graphflow@2.0.0
+npm install -g @roarpeng/graphflow@2.0.1
 ```
 
 如果安装报 `onnxruntime-node` 下载失败，加 `--ignore-scripts` 重装（两个平台命令相同）：
 
 ```bash
-npm install -g --ignore-scripts @roarpeng/graphflow@2.0.0
+npm install -g --ignore-scripts @roarpeng/graphflow@2.0.1
 ```
 
 这只影响本地 embedding（语义检索）功能，MCP、上下文压缩、记忆全部正常。`onnxruntime` 的二进制走独立 CDN，部分网络环境访问不到。
@@ -39,7 +39,7 @@ npm install -g --ignore-scripts @roarpeng/graphflow@2.0.0
 确认装好：
 
 ```bash
-graphflow --version          # 应输出 2.0.0
+graphflow --version          # 应输出 2.0.1
 graphflow install            # 注册 MCP + Skill 到本机检测到的 agent
 graphflow doctor             # 输出里找 summary: 那一行
 ```
@@ -184,7 +184,7 @@ console.log(`指向工作区 dist: ${ok}/${total}`);'
 
 | 症状 | 排查 |
 | --- | --- |
-| `npm install -g` 报 `ETARGET: No matching version found` | 镜像未同步。`npm config get registry` 若指向 npmmirror，改用 `npm install -g --registry=https://registry.npmjs.org @roarpeng/graphflow@2.0.0` |
+| `npm install -g` 报 `ETARGET: No matching version found` | 镜像未同步。`npm config get registry` 若指向 npmmirror，改用 `npm install -g --registry=https://registry.npmjs.org @roarpeng/graphflow@2.0.1` |
 | **Windows** `npm install -g` 报 `EBUSY: resource busy or locked` | 有进程占着旧目录——最常见是**你自己开着的 agent**（它们拉起的 MCP server 正跑在那个目录里）。关掉所有 agent → `Stop-Process -Name node -Force -ErrorAction SilentlyContinue` → 重试。仍失败就 `Remove-Item -Recurse -Force "$env:APPDATA\npm\node_modules\@roarpeng\graphflow" -ErrorAction SilentlyContinue` 后重装（残留半装状态）。最后才是杀毒软件扫描 |
 | `graphflow: command not found` | 全局 npm bin 不在 PATH。`npm bin -g`（或 `npm prefix -g`）确认目录已加进 PATH |
 | 某 agent 里没有 graphflow 工具 | 跑 `graphflow doctor`，看该 agent 的 `mcp` 项状态；`missing` 时先确认该 agent 的配置目录存在（如 `~/.cursor`） |
