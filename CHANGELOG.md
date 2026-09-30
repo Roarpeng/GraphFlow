@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed — Jev 接入真实 API 契约 + `graphflow llm-check` 自诊断
+
+用户实测"配了 DEEPSEEK_API_KEY / TYPESAFE_API_KEY 和 settings 仍无法访问"，根因是**类别错误**：typesafe-jev worker 把 Jev 当 chat 模型，打向**编造的域名** `api.typesafe-jev.ai/v1/chat/completions`，还让它编造命令 JSON——按 docs.typesafe.ai 官方契约，Jev 是 System One 判定模型（`POST https://api.typesafe.ai/v1/systemone`，Bearer，`jev-latest`，Choice/Score/Noul 类型化问答），**不生成文本**。
+
+- **substrate 新增 `src/routing/typesafe-systemone.ts`**：真实契约客户端（429/529 指数退避、401/422 硬失败、usage→measured）+ `createJevMetaReflector`——Layer B 灰区复用决策现在走真实 Jev choice(REUSE/ADAPT/FRESH)+score(置信度)，失败一律回退 Layer A。已实测联通：HTTP 200、jev-1.13.0、noul 判定。
+- **worker 重写**：`prepare` 确定性（Jev 不编命令）、`execute` 本地 execFile、`validate` 走真实 noul 判定（可否决零退码；无 key/不可达 fail-open 为退码语义）。移除 DEEPSEEK_API_KEY 跨服务回退（两套服务两套 key，回退=必 401）。
+- **默认端点修正**：`workerPolicy` 默认 `https://api.typesafe.ai` + `jev-latest`（原 localhost:8000 占位也是"开箱不通"的一环）。
+- **新增 `graphflow llm-check`**（只读诊断）：逐 provider 报告可用性、**获胜凭证来源**（config-key / `env:变量名` / localhost / none，`${VAR}` 占位符如实标注 env 来源）、baseUrl/model、**实际查过的环境变量名清单**（拼错立即现形）、System One 端点状态。Windows"无法访问"从此可自诊。
+- 测试：`tests/typesafe-systemone.test.ts`（契约/退避/反思器/llm-check 9 例）+ worker 测试重写为真实语义（14 例）+ 真实臂记账对齐（判定调用数=typeSafeValid、token=usage）。全仓 254 文件 / 2073 测试绿。
+
 ## [2.0.0] — 2026-09-30
 
 ### 升级须知（2.0.0 迁移说明）

@@ -86,33 +86,13 @@ describe("Real Worker Benchmark & Measurement Contract (R1-R6)", () => {
       const mockFetch: typeof globalThis.fetch = async () => {
         return new Response(
           JSON.stringify({
-            id: "chatcmpl-test",
-            object: "chat.completion",
-            choices: [
-              {
-                index: 0,
-                message: {
-                  role: "assistant",
-                  content: JSON.stringify({
-                    action: "command",
-                    command: "node",
-                    args: ["-e", "process.exit(0)"],
-                    explanation: "Execute harmless validation command",
-                  }),
-                },
-                finish_reason: "stop",
-              },
-            ],
-            usage: {
-              prompt_tokens: 180,
-              completion_tokens: 45,
-              total_tokens: 225,
+            model: "jev-1.13.0",
+            answers: {
+              succeeded: { type: "noul", noul: 0.93 },
             },
+            usage: { input_tokens: 100, output_tokens: 125 },
           }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }
+          { status: 200, headers: { "content-type": "application/json" } }
         );
       };
 
@@ -121,6 +101,7 @@ describe("Real Worker Benchmark & Measurement Contract (R1-R6)", () => {
         limit: 4,
         outPath: baselineOut,
         worker: "typesafe-jev",
+        apiKey: "tsk-bench",
         fetch: mockFetch,
       });
 
@@ -135,10 +116,10 @@ describe("Real Worker Benchmark & Measurement Contract (R1-R6)", () => {
       expect(baselineTraces).toHaveLength(4);
       for (const trace of baselineTraces) {
         expect(validateTraceProvenance(trace)).toEqual([]);
-        // Unlike offline bridge where totalLlmCalls was permanently 0, real worker records calls:
-        expect(trace.llm.calls.value).toBeGreaterThan(0);
+        // The jev worker's real LLM cost is the System One judgment call:
+        // one per executed task, tokens from the usage block (100+125).
+        expect(trace.llm.calls.value).toBe(1);
         expect(trace.llm.calls.provenance).toBe("measured");
-        // Real tokens recorded:
         expect(trace.llm.totalTokens?.value).toBe(225);
         expect(trace.llm.totalTokens?.provenance).toBe("measured");
         expect(trace.result.success).toBe(true);
@@ -150,6 +131,7 @@ describe("Real Worker Benchmark & Measurement Contract (R1-R6)", () => {
         limit: 4,
         outPath: shadowOut,
         worker: "typesafe-jev",
+        apiKey: "tsk-bench",
         fetch: mockFetch,
       });
 

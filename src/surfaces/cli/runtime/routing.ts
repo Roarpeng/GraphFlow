@@ -87,6 +87,79 @@ import type {
 /** In-process gitHead cache keyed by workspace root (see advisory wiring). */
 const gitHeadCache = new Map<string, string | undefined>();
 
+export interface LlmCheckProviderReport {
+  provider: string;
+  usable: boolean;
+  source: string;
+  baseUrl?: string;
+  model?: string;
+  envVarsChecked: string[];
+  detail: string;
+}
+
+export interface LlmCheckReport {
+  usable: boolean;
+  tiers: { role: string; provider: string; model: string }[];
+  providers: LlmCheckProviderReport[];
+  typesafe: {
+    configured: boolean;
+    baseUrl: string;
+    model: string;
+    envVarsChecked: string[];
+    note: string;
+  };
+  resolutionOrder: string;
+}
+
+/**
+ * `graphflow llm-check` — why is (or isn't) my LLM usable? Reports the
+ * winning credential SOURCE per provider (config key / env var NAME /
+ * localhost / none), the env var names consulted (typos become visible),
+ * and the TypeSafe System One (Jev) endpoint state. Read-only by design;
+ * --probe adds a real round-trip on the tier worker role.
+ */
+export async function llmCheckResult(configPath?: string): Promise<LlmCheckReport> {
+  const config = resolveConfig(configPath);
+  const { explainProviderCredentials } = await import("../../../config/llm-availability.js");
+  const candidates = Array.from(
+    new Set<string>([
+      config.tiers.smart.provider,
+      config.tiers.economy.provider,
+      ...Object.keys(config.providers),
+    ])
+  );
+  const providers = candidates.map((provider) => {
+    const explanation = explainProviderCredentials(provider, config);
+    const model =
+      provider === config.tiers.smart.provider
+        ? config.tiers.smart.model
+        : provider === config.tiers.economy.provider
+          ? config.tiers.economy.model
+          : undefined;
+    return { provider, ...explanation, ...(model ? { model } : {}) };
+  });
+  const { resolveTypesafeCredentials, TYPESAFE_DEFAULT_MODEL } = await import(
+    "../../../routing/typesafe-systemone.js"
+  );
+  const ts = resolveTypesafeCredentials();
+  return {
+    usable: providers.some((p) => p.usable),
+    tiers: [
+      { role: "smart", provider: String(config.tiers.smart.provider), model: String(config.tiers.smart.model) },
+      { role: "economy", provider: String(config.tiers.economy.provider), model: String(config.tiers.economy.model) },
+    ],
+    providers,
+    typesafe: {
+      configured: ts.apiKey !== undefined,
+      baseUrl: ts.baseUrl,
+      model: TYPESAFE_DEFAULT_MODEL,
+      envVarsChecked: ["TYPESAFE_API_KEY", "TYPESAFE_BASE_URL"],
+      note: "System One (Jev) answers typed judgments on POST {base}/v1/systemone; it does not author commands or text.",
+    },
+    resolutionOrder: "config apiKey > localhost endpoint > domain-sniffed env > provider env keys; config-exported env values are invisible to sniffing (no self-feedback); at the adapter layer genuine shell env wins over config exports",
+  };
+}
+
 export async function runTaskResult(task: string, configPath?: string): Promise<RunTaskSummary> {
   const config = resolveConfig(configPath);
   const eventsPath = resolveLearningPath(config, "eventsPath");
@@ -216,17 +289,27 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       } catch {
         contextCacheHit = undefined;
       }
-      const built = buildEfficiencyAdvisory({
-        task,
-        taskComplexity,
-        executionMode,
-        fusedSteps: result.executionDescriptor?.steps ?? [],
-        ...(result.similarEpisodes ? { similarEpisodes: result.similarEpisodes } : {}),
-        maxContextTokens: config.graphPolicy.maxContextTokens,
-        ...(contextCacheHit !== undefined ? { contextCacheHit } : {}),
-        project: { root: workspaceRoot, ...(gitHead ? { gitHead } : {}) },
-        durationMs: 0,
-      });
+      // Layer B: gray-zone similarity (0.3..0.7) goes to the REAL TypeSafe
+      // System One API (choice over REUSE/ADAPT/FRESH + confidence score)
+      // when TYPESAFE_API_KEY is present; every failure path falls back to
+      // deterministic Layer A. The old worker guessed a chat-completions
+      // endpoint on a fabricated domain — Jev answers typed questions.
+      const { evaluateMetaAdvisory } = await import("../../../core/meta-advisory.js");
+      const { createJevMetaReflector } = await import("../../../routing/typesafe-systemone.js");
+      const built = await evaluateMetaAdvisory(
+        {
+          task,
+          taskComplexity,
+          executionMode,
+          fusedSteps: result.executionDescriptor?.steps ?? [],
+          ...(result.similarEpisodes ? { similarEpisodes: result.similarEpisodes } : {}),
+          maxContextTokens: config.graphPolicy.maxContextTokens,
+          ...(contextCacheHit !== undefined ? { contextCacheHit } : {}),
+          project: { root: workspaceRoot, ...(gitHead ? { gitHead } : {}) },
+          durationMs: 0,
+        },
+        { metaReflector: createJevMetaReflector() }
+      );
       advisory = {
         ...built,
         decision: { ...built.decision, durationMs: Math.max(0, Date.now() - advisoryStart) },

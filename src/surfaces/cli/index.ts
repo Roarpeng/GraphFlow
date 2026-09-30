@@ -274,6 +274,33 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     };
   }
 
+  if (command === "llm-check") {
+    const { llmCheckResult } = await import("./runtime/routing.js");
+    const report = await llmCheckResult(configPath);
+    const lines: string[] = [
+      `usable=${report.usable}`,
+      `tiers: ${report.tiers.map((t) => `${t.role}=${t.provider}/${t.model}`).join(" | ")}`,
+    ];
+    for (const provider of report.providers) {
+      lines.push(
+        `${provider.provider}: usable=${provider.usable} source=${provider.source}` +
+          `${provider.baseUrl ? ` baseUrl=${provider.baseUrl}` : ""}${provider.model ? ` model=${provider.model}` : ""}`
+      );
+      lines.push(`  env checked: ${provider.envVarsChecked.join(", ")}`);
+      lines.push(`  ${provider.detail}`);
+    }
+    lines.push(
+      `typesafe(system-one): configured=${report.typesafe.configured} ${report.typesafe.baseUrl} model=${report.typesafe.model}`
+    );
+    lines.push(`  env checked: ${report.typesafe.envVarsChecked.join(", ")}`);
+    lines.push(`  ${report.typesafe.note}`);
+    lines.push(`resolution: ${report.resolutionOrder}`);
+    if (!report.usable) {
+      process.exitCode = 1;
+    }
+    return { command: "llm-check", data: report, legacyText: lines.join("\n") };
+  }
+
   if (command === "doctor") {
     const { buildDoctorReport, formatDoctorLegacyText } = require("./init") as typeof import("./init");
     const data = buildDoctorReport(process.cwd());
@@ -2025,7 +2052,7 @@ async function runFirstUseBootstrap(command: string): Promise<void> {
   // fresh box stay pure observations instead of triggering the installer.
   const readOnlyCommands = new Set([
     "help", "--help", "-h", "version", "--version", "-v",
-    "doctor", "diagnose", "audit",
+    "doctor", "diagnose", "audit", "llm-check",
   ]);
   if (readOnlyCommands.has(command)) return;
   const markerPath = join(homedir(), ".graphflow-install-version");

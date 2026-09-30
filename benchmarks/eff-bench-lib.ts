@@ -234,30 +234,19 @@ function resolveWorker(options: EffBenchRunOptions): WorkerAdapter | undefined {
     return options.worker;
   }
   if (options.worker === "typesafe-jev") {
-    let baseUrl = options.baseUrl;
-    let apiKey = options.apiKey;
-    let model = options.model;
-
-    if (options.provider === "deepseek") {
-      baseUrl = baseUrl ?? process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com/v1";
-      apiKey = apiKey ?? process.env.DEEPSEEK_API_KEY ?? "";
-      model = model ?? "deepseek-chat";
-    } else if (options.provider === "openai") {
-      baseUrl = baseUrl ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1";
-      apiKey = apiKey ?? process.env.OPENAI_API_KEY ?? "";
-      model = model ?? "gpt-4o-mini";
-    } else if (options.provider === "local") {
-      baseUrl = baseUrl ?? process.env.LOCAL_LLM_BASE_URL ?? "http://localhost:11434/v1";
-      apiKey = apiKey ?? "none";
-      model = model ?? "local-model";
-    }
-
+    // System One (Jev) only — the judgment endpoint. DEEPSEEK/OPENAI keys are
+    // deliberately NOT fallbacks: different services, different keys (the old
+    // cross-fallback produced guaranteed-401 "cannot connect" runs). A task
+    // EXECUTING model belongs to a different worker (local command /
+    // external-cli); jev judges outcomes.
     return createTypeSafeJevWorker({
       name: "typesafe-jev",
-      baseUrl,
-      apiKey,
-      model,
-      fetch: options.fetch,
+      ...(options.baseUrl !== undefined ? { baseUrl: options.baseUrl } : {}),
+      ...(options.apiKey !== undefined
+        ? { apiKey: options.apiKey }
+        : { ...(process.env.TYPESAFE_API_KEY ? { apiKey: process.env.TYPESAFE_API_KEY } : {}) }),
+      ...(options.model !== undefined ? { model: options.model } : {}),
+      ...(options.fetch ? { fetch: options.fetch } : {}),
     });
   }
   if (options.worker === "local") {
@@ -407,6 +396,12 @@ export async function runEffBench(options: EffBenchRunOptions): Promise<EffBench
                 totalTokens += jevObs.measurements.totalTokens.value;
                 hasTokenMeasurement = true;
               }
+              if (jevObs.measurements.judgmentTokens) {
+                // System One judgment usage (in+out) — the real LLM cost of
+                // the jev worker under the new contract.
+                totalTokens += jevObs.measurements.judgmentTokens.value;
+                hasTokenMeasurement = true;
+              }
               if (jevObs.measurements.promptTokens) {
                 promptTokens += jevObs.measurements.promptTokens.value;
               }
@@ -414,7 +409,9 @@ export async function runEffBench(options: EffBenchRunOptions): Promise<EffBench
                 completionTokens += jevObs.measurements.completionTokens.value;
               }
             }
-            if (worker.name.includes("jev") || jevObs.action !== undefined) {
+            // A judgment call happened exactly when validate() marked the
+            // observation typeSafeValid (fail-open runs are exit-code only).
+            if (jevObs.typeSafeValid === true) {
               totalLlmCalls += 1;
             }
           }

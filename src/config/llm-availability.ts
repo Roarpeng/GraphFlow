@@ -11,6 +11,81 @@ const PROVIDER_ENV_KEYS: Record<ProviderName, string[]> = {
   deepseek: ["DEEPSEEK_API_KEY", "TYPESAFE_API_KEY"],
 };
 
+export interface CredentialExplanation {
+  usable: boolean;
+  /** Winning source: "config-key" | "env:VAR" | "localhost" | "none" */
+  source: string;
+  /** The env var names this provider's resolution actually consulted. */
+  envVarsChecked: string[];
+  /** Resolved effective base URL (config or genuine env), when any. */
+  baseUrl?: string;
+  detail: string;
+}
+
+function providerEnvKeys(provider: string): string[] {
+  return [
+    ...(PROVIDER_ENV_KEYS[provider as ProviderName] ?? []),
+    "LLM_API_KEY",
+    "API_KEY",
+  ];
+}
+
+/**
+ * Readable per-provider credential verdict — the engine behind
+ * `graphflow llm-check`. Re-traces the same branch order as
+ * providerHasCredentials and names the winning source, so "configured a key
+ * but cannot connect" becomes self-diagnosing (typos in env var names show
+ * up as absent among envVarsChecked).
+ */
+export function explainProviderCredentials(provider: string, config: GraphFlowConfig): CredentialExplanation {
+  const envVarsChecked = providerEnvKeys(provider);
+  const baseKey = provider === "openai" ? "OPENAI_BASE_URL" : provider === "anthropic" ? "ANTHROPIC_BASE_URL" : provider === "deepseek" ? "DEEPSEEK_BASE_URL" : provider === "bailian" ? "BAILIAN_BASE_URL" : provider === "doubao" ? "DOUBAO_BASE_URL" : "LLM_BASE_URL";
+  const details = config.providers[provider];
+  const envBaseUrl = isConfigExportedEnvKey(baseKey) ? undefined : process.env[baseKey]?.trim();
+  const effectiveBaseUrl = details?.baseUrl?.trim() || envBaseUrl;
+  const detail = details
+    ? `config.providers.${provider}: ${details.apiKey ? "apiKey set" : "apiKey empty"}${details.baseUrl ? `, baseUrl=${details.baseUrl}` : ""}${envBaseUrl ? `, env ${baseKey}=${envBaseUrl}` : ""}`
+    : `no config.providers.${provider} entry${envBaseUrl ? `; env ${baseKey}=${envBaseUrl}` : ""}`;
+
+  const enabled = (details as { enabled?: boolean } | undefined)?.enabled;
+  let source = "none";
+  if (details && enabled === false) {
+    source = "disabled-by-config";
+  } else if (details?.apiKey !== undefined) {
+    const raw = details.apiKey.trim();
+    const resolved = raw && resolveConfigSecret(details.apiKey);
+    if (raw === "" || raw.toLowerCase() === "disabled" || raw.toLowerCase() === "none") {
+      source = "config-key-cleared";
+    } else if (resolved && resolved.length > 0 && !resolved.startsWith("${")) {
+      // A ${VAR} placeholder that RESOLVED means the credential actually came
+      // from that env var (resolveConfig materializes genuine env keys into
+      // tier providers this way) — report the true origin, not "config-key".
+      const placeholder = /^\$\{([A-Z0-9_]+)\}$/.exec(raw);
+      source = placeholder ? `env:${placeholder[1]}` : "config-key";
+    }
+  }
+  if (source === "none" && effectiveBaseUrl && isLocalhostEndpoint(effectiveBaseUrl)) {
+    source = "localhost-password-free";
+  }
+  if (source === "none") {
+    for (const envKey of envVarsChecked) {
+      if (isConfigExportedEnvKey(envKey)) continue;
+      const value = process.env[envKey]?.trim();
+      if (value && value.length > 0 && !value.startsWith("${")) {
+        source = `env:${envKey}`;
+        break;
+      }
+    }
+  }
+  return {
+    usable: providerHasCredentials(provider, config),
+    source,
+    envVarsChecked: envVarsChecked.concat(baseKey),
+    ...(effectiveBaseUrl ? { baseUrl: effectiveBaseUrl } : {}),
+    detail,
+  };
+}
+
 export function providerHasCredentials(provider: string, config: GraphFlowConfig): boolean {
   const details = config.providers[provider] as (ProviderConfig & { enabled?: boolean }) | undefined;
 

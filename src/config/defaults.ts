@@ -20,8 +20,14 @@ export const DEFAULT_OUTPUT_DIR = "graphflow-out";
 export const LEGACY_MAX_CONTEXT_TOKENS = 400;
 
 export const DEFAULT_WORKER_TYPE: WorkerType = "local-command";
-export const DEFAULT_WORKER_BASE_URL = "http://localhost:8000/v1";
-export const DEFAULT_WORKER_MODEL = "typesafe-jev";
+/**
+ * TypeSafe System One REAL endpoint (docs.typesafe.ai/api): POST
+ * {base}/v1/systemone, Bearer TYPESAFE_API_KEY, model "jev-latest". The old
+ * placeholder (localhost:8000) and the fabricated api.typesafe-jev.ai domain
+ * are why "configured key but cannot connect" happened out of the box.
+ */
+export const DEFAULT_WORKER_BASE_URL = "https://api.typesafe.ai";
+export const DEFAULT_WORKER_MODEL = "jev-latest";
 export const DEFAULT_WORKER_TIMEOUT_MS = 30000;
 
 export function resolveMaxContextTokens(value?: number): number {
