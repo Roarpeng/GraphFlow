@@ -129,7 +129,10 @@ describe("broker lifecycle with a scripted fake worker", () => {
     expect(result.status).toBe("budget-exhausted");
     expect(result.stopReason).toBe("budget-exhausted");
     expect(result.rounds).toBe(1);
-    expect(result.totalDurationMs).toBeGreaterThanOrEqual(50);
+    // Wall-clock bound is deliberately loose: a loaded CI runner measured
+    // 49ms against the fake's 50ms sleep (Date.now jitter). The path under
+    // test is the budget STOP, not the timer's precision.
+    expect(result.totalDurationMs).toBeGreaterThanOrEqual(40);
     expect(worker.executeCalls).toBe(1);
     expect(worker.stopCalls).toBe(1);
   });
