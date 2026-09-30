@@ -81,6 +81,12 @@ In addition to the VS Code extension settings panel, NPM CLI users can launch a 
 graphflow settings      # or: npx graphflow config ui
 ```
 
+Quick credential diagnosis from any directory:
+
+```bash
+graphflow llm-check      # winning credential source per provider, env vars consulted, endpoints
+```
+
 * **Universal Protocol Support**: Native `openai-compatible` and `anthropic-compatible` drivers. Configure only `baseUrl` and `model`.
 * **Password-Free Local Deployment**: Automatically recognizes `localhost` / `127.0.0.1` endpoints (Ollama, vLLM, local JEV) without requiring placeholder API keys.
 * **Cascade Env-Key Sniffing**: Automatically matches public domain endpoints to corresponding environment variables (`DEEPSEEK_API_KEY`, `TYPESAFE_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.). Seamlessly falls back to Bridge mode if no credentials are configured.

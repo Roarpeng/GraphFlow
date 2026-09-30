@@ -2,7 +2,9 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [2.0.3] — 2026-09-30
+
+> npm 上的 2.0.2 是一次取消竞争里意外落地的部分发布（不含下方 Windows pack 修复），由本版接管 latest。
 
 ### Fixed — `npm pack` 在 Windows 上失败（prepare 钩子的 POSIX 写法）
 

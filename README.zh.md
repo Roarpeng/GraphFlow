@@ -73,6 +73,12 @@ Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `gra
 graphflow settings      # 或 npx graphflow config ui
 ```
 
+任意目录快速诊断凭证链路：
+
+```bash
+graphflow llm-check      # 逐 provider 显示获胜凭证来源、检查过的环境变量名、端点状态
+```
+
 * **通用模型协议**：原生支持 `openai-compatible` 与 `anthropic-compatible` 协议，仅需配置 `baseUrl` 和 `model`；
 * **本地免密部署**：自动识别 `localhost` / `127.0.0.1` 等本地模型端点（如 Ollama / vLLM / JEV 本地服务），无需虚假 API Key 即可直接通信；
 * **四级级联嗅探**：公网端点自动按域名特征映射对应环境变量（`DEEPSEEK_API_KEY`、`TYPESAFE_API_KEY`、`OPENAI_API_KEY`、`ANTHROPIC_API_KEY` 等）；未配置任何 Key 时 100% 平滑进入 Bridge 桥接模式，绝不抛错阻断。
