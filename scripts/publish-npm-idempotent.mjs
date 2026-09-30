@@ -64,7 +64,20 @@ if (publish.stdout) process.stdout.write(publish.stdout);
 if (publish.stderr) process.stderr.write(publish.stderr);
 
 if (publish.status === 0) {
-  console.log(`Published ${name}@${version} successfully.`);
+  // npm publish exiting 0 is NOT proof the version landed: a dispatch-run
+  // OIDC publish once exited 0 with full notices + provenance while the
+  // registry packument was never modified (live incident, 2.0.3). The only
+  // trustworthy success signal is the version being readable from the
+  // registry afterwards.
+  const landed = npmViewVersion();
+  if (landed !== version) {
+    console.error(
+      `npm publish exited 0 but the registry still reports ${landed ?? "no version"} — ` +
+        `the publish did NOT land. Failing loudly instead of a false green.`
+    );
+    process.exit(1);
+  }
+  console.log(`Published ${name}@${version} successfully (verified on the registry).`);
   process.exit(0);
 }
 
