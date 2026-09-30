@@ -89,6 +89,7 @@ function extractFromAst(relPath: string, content: string, ts: typeof TsNs): Extr
     if (!name) return;
     const start = nameNode.getStart(sourceFile);
     const { line } = sourceFile.getLineAndCharacterOfPosition(start);
+    const { line: endLine } = sourceFile.getLineAndCharacterOfPosition(sourceNode.getEnd());
     const signature = sourceNode.getText(sourceFile).split(/\r?\n/)[0]?.slice(0, 240) ?? `${kind} ${name}`;
     const jsdoc = summarizeJsDoc(sourceNode);
     symbols.push({
@@ -96,6 +97,7 @@ function extractFromAst(relPath: string, content: string, ts: typeof TsNs): Extr
       kind,
       exported,
       line: line + 1,
+      endLine: endLine + 1,
       file: relPath,
       signature,
       ...(jsdoc ? { jsdoc } : {}),

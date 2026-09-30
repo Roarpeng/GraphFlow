@@ -16,6 +16,8 @@ export interface DeclaredSymbol {
   kind: string;
   exported: boolean;
   line: number;
+  /** Last line of the declaration, when the parser knows its extent. */
+  endLine?: number;
   file: string;
   signature?: string;
   jsdoc?: string;

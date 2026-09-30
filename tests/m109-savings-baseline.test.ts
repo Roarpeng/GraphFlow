@@ -310,8 +310,12 @@ describe("raw baseline is anchored to the delivered anchor set (low-hit CJK quer
     expect(preview.summary[0]).toContain("低相关中文命中");
 
     // Raw baseline on the order of the delivered anchor volume — the old
-    // whole-graph formula reported ~339K tokens for this shape.
-    expect(preview.tokenBudget.estimatedRawTokens).toBeLessThan((anchorBytesSum / 4) * 3);
+    // whole-graph formula reported ~339K tokens for this shape. Symbol bodies
+    // are a bounded, counted part of the delivered pack (they quote real anchor
+    // source), so the gate adds them rather than pretending they are free.
+    expect(preview.tokenBudget.estimatedRawTokens).toBeLessThan(
+      (anchorBytesSum / 4) * 3 + (preview.anchorBodies?.tokens ?? 0)
+    );
     // Floor semantics survive: never below the delivered payload.
     expect(preview.tokenBudget.estimatedRawTokens).toBeGreaterThanOrEqual(
       preview.accountedTokens ?? preview.tokenBudget.compressedTokens

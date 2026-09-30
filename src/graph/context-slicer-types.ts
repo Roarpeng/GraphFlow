@@ -30,6 +30,8 @@ export interface LayeredContextPackage {
   anchorChannel: ContextAnchorItem[];
   tokenEstimate: number;
   truncated: boolean;
+  /** Declaration bodies quoted into the pack, and why the rest were left as pointers. */
+  bodies?: import("./anchor-bodies.js").AnchorBodyStats;
 }
 
 export interface LayeredPackageOptions {
@@ -58,6 +60,8 @@ export interface LayeredPackageOptions {
   vectorMinSimilarity?: number;
   /** Workspace root for CJK query expansion (path token hints). */
   workspaceRoot?: string;
+  /** Quote declaration bodies for the first symbol anchors. Default true. */
+  enableSymbolBodies?: boolean;
   /** Agent-translated English search terms (see Skill CJK workflow). */
   englishQuery?: string;
   /** Hard cap on anchor count. Default 15. Set to Infinity to disable. */

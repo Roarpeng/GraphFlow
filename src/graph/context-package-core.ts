@@ -17,6 +17,7 @@ import {
 } from "../learning/embeddings.js";
 import { recordIncompatibleVectorsSkipped } from "../learning/embedding-quality.js";
 import { getSharedVectorIndex } from "../learning/vector-index.js";
+import { createAnchorBodyReader, type AnchorBodyReader, type AnchorBodyStats } from "./anchor-bodies.js";
 import type { GraphClient } from "./client-factory.js";
 import { rankNodesForContextQuery, composeContextQuery, buildSearchScoreTokens } from "./graph-utils.js";
 import { collectExpandedKeywordHits } from "./query-expand.js";
@@ -53,6 +54,11 @@ export interface PackState {
   used: { l1: number; l2: number; l3: number };
   maxTokens: number;
   maxAnchors?: number;
+  /** Optional declaration bodies for the top symbol anchors; absent = id-only pack. */
+  bodyReader?: AnchorBodyReader;
+  bodyStats?: AnchorBodyStats;
+  /** L1 symbol anchors worth quoting, collected during packing. */
+  bodyCandidates?: GraphNode[];
 }
 
 export interface PackBudget {
@@ -107,6 +113,17 @@ export function createPackState(
   if (maxAnchors !== undefined) {
     state.maxAnchors = maxAnchors;
   }
+  // Quote real declaration bodies into the pack for the first few L1 symbols.
+  // Off only when explicitly disabled or when we do not know the workspace.
+  if (options?.enableSymbolBodies !== false && options?.workspaceRoot) {
+    const { reader, stats } = createAnchorBodyReader({
+      workspaceRoot: options.workspaceRoot,
+      maxTokens,
+    });
+    state.bodyReader = reader;
+    state.bodyStats = stats;
+    state.bodyCandidates = [];
+  }
   return state;
 }
 
@@ -116,6 +133,7 @@ export function toLayeredPackage(state: PackState, budget: PackBudget): LayeredC
     anchorChannel: state.anchorChannel,
     tokenEstimate: budget.tokens,
     truncated: budget.truncated,
+    ...(state.bodyStats ? { bodies: state.bodyStats } : {}),
   };
 }
 
@@ -339,6 +357,32 @@ export function packPrimaryHits(hits: GraphNode[], state: PackState, budget: Pac
     state.added.add(hit.id);
     budget.tokens += estimate;
     markLayerUsed(layer, state.used);
+
+    if (state.bodyCandidates && hit.type === "Symbol" && layer === "L1" && state.bodyCandidates.length < 6) {
+      // Bodies are attached by `injectSymbolBodies`, after every anchor stage,
+      // so a body can only ever spend budget an anchor left behind.
+      state.bodyCandidates.push(hit);
+    }
+  }
+}
+
+/**
+ * Quote the declaration bodies of the leading symbol anchors into the tail of
+ * the package. Runs after every code-anchor stage and before dialogue: an
+ * anchor is never displaced by a body, and dialogue keeps the same
+ * additive-LAST invariant it already has.
+ */
+export function injectSymbolBodies(state: PackState, budget: PackBudget): void {
+  const reader = state.bodyReader;
+  const candidates = state.bodyCandidates;
+  if (!reader || !candidates || candidates.length === 0) {
+    return;
+  }
+  for (const hit of candidates) {
+    const body = reader(hit, state.maxTokens - budget.tokens);
+    if (!body) continue;
+    state.summaryChannel.push(`body ${hit.id}\n${body}`);
+    budget.tokens += estimateTokens(body);
   }
 }
 

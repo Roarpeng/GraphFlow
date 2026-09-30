@@ -126,6 +126,8 @@ export interface ContextPreviewResult {
   refillPreview: string[];
   summary: string[];
   anchors: Array<{ id: string; type: GraphNode["type"]; layer: "L1" | "L2" | "L3" }>;
+  /** Declaration bodies quoted into the pack, and why the others stayed pointers. */
+  anchorBodies?: import("../../../graph/anchor-bodies").AnchorBodyStats;
   tokenBudget: {
     maxContextTokens: number;
     /**
@@ -782,6 +784,14 @@ export interface ExpandAnchorResult {
   sourcePath?: string;
   sourceLine?: number;
   sourceSnippet?: string;
+  /**
+   * Whether the snippet really is the indexed symbol. `exact` = the stored
+   * signature sits in the window; `relocated` = the signature was found at a
+   * different line and the window follows it; `drifted` = the signature is no
+   * where in the file, so the snippet is the old position and must not be
+   * edited blind. Never reported as verified when it is not.
+   */
+  verified?: "exact" | "relocated" | "drifted";
   metadata?: Record<string, unknown>;
   /**
    * When expanding a dialogue-turn node: the session spine so the agent can

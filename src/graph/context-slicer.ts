@@ -23,6 +23,7 @@ import {
   injectL3SkillsAndPins,
   injectNeighborExpansion,
   injectSameFileAndImportExpansion,
+  injectSymbolBodies,
   isPinnedL3Node,
   packPrimaryHits,
   preparePackageHits,
@@ -141,6 +142,9 @@ export async function buildLayeredContextPackage(
   await injectL2Modules(client, hits, state, budget, "continue");
   await injectL3SkillsAndPins(client, query, options, snapshotNodes, state, budget);
   await injectNeighborExpansion(client, options, state, budget);
+  // Symbol bodies spend only what the anchor stages left behind (see the
+  // invariant on the dialogue call below).
+  injectSymbolBodies(state, budget);
   // Dialogue is additive-LAST and shares this one budget object: it may only use
   // budget left over after every code-anchor stage, so a recalled conversation
   // turn can never displace a Symbol/File anchor (the documented invariant).
@@ -300,6 +304,7 @@ export async function buildEnhancedContextPackage(
   await injectL3SkillsAndPins(client, query, options, snapshotNodes, state, budget);
   await injectSameFileAndImportExpansion(client, snapshotNodes, state, budget);
   await injectNeighborExpansion(client, options, state, budget);
+  injectSymbolBodies(state, budget);
   // Same additive-LAST rule as the layered packer (see above): dialogue turns
   // ride on leftover budget and cannot push a code anchor out of the package.
   await injectDialogueTurns(client, query, options, state, budget);

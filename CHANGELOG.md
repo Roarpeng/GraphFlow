@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added — 锚点带正文：bodyCoverage 从 1% 抬起来
+
+自家保真度实测：`averageAnchorRecallPercent 92` 而 `averageBodyCoveragePercent 1`——包能点名正确的符号，却几乎不覆盖它的正文，于是 agent 还得再发一次 expand 或整读文件，首包省下的又被后续轮次吃回去。
+
+- 符号节点记录声明范围：`DeclaredSymbol.endLine`（TS 走编译器 API 的 `sourceNode.getEnd()`），`file-indexer-nodes.ts` 写进 `metadata.endLine`。**需要重索引**才拿得到；没有 endLine 的旧节点一律不附正文（计入 `noExtent`），不会拿旧行号猜一个窗口。
+- `metadata.signature` 现在只在解析器真给出签名时写。原先它存的是 `kind name @file:line` 这种显示串，任何"拿磁盘文本对一对"的核验都会把它当签名，从而误判。
+- 打包新增正文阶段（`src/graph/anchor-bodies.ts`）：前 3 个 L1 符号锚点各附 ≤120 token 的声明正文，整包正文 ≤20% 预算，并且**只花锚点阶段剩下的预算**——锚点永不被正文挤掉，对话仍保持它原有的"所有代码锚点之后"的纯增量位。`enableSymbolBodies: false` 可关。
+- 不可信就不给：磁盘上的声明头与存储签名不符 → 不附（`unverified`）；预算不足 → `noBudget`。`graphflow_context` / `context preview` 的返回新增 `anchorBodies: { attached, tokens, noExtent, unverified, noBudget }`，成本与缺口都可见。
+- `expandAnchor` 现在返回 `verified: "exact" | "relocated" | "drifted"`：符号在上次索引后被人插了行，就按磁盘实际位置给窗口并报 `relocated`；签名已不在文件里则报 `drifted` 且不假装是正确代码。`endLine` 只细化默认窗口，`GRAPHFLOW_EXPAND_SYMBOL_AFTER` 仍是硬上限（`tests/m50-expand-anchor.test.ts` 的既有契约不变）。
+- 代价如实记：正文是真源码，每包最多约 360 token，节省率会按已记账口径下移；`m109` 的 raw 基线门改为把正文档位计入，而不是假装它免费。检索侧无回退：`bench:retrieval` Hit@5 99.2% / MRR 0.748 / NDCG@5 0.619，与不附正文时一致。
+- 新增 `tests/anchor-bodies.test.ts`（7 例：范围与签名入库、附正文、漂移时不附、正文不挤锚点 + 开关、expand 的 exact/relocated/drifted 三态）。
+- 另按 `benchmarks/flywheel-proof-claims.json` 的 disclaimer 纠正一次误操作：`52330de` 把跑过评测的 `benchmarks/RETRIEVAL-EVAL-RESULTS.md` 一起提交了，而该 catalog 把这个文件当"冻结对照目标"，导致 `flywheel-proof` 的声明门失败；已按 `cdfdb6e` 恢复。要重新基线请显式改 catalog。
+
 ### Fixed — 语义召回臂其实从未接上，`.hnsw` 派生副本零命中
 
 本机实测本仓库（1.28.1）：8811 个节点里 **0 个带向量**；`graphflow-out/vectors.hnsw` 里只有 **1 个**向量；`graphflow-out/vectors.db` 从来没有写入者，却出现在配置默认值、README、threat-model 和 `audit --privacy` 的产物清单里。

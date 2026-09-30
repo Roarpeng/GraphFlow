@@ -550,6 +550,7 @@ export async function previewContext(
     refillPreview,
     summary: deliveredSummary,
     anchors: deliveredAnchors,
+    ...(pkg.bodies ? { anchorBodies: pkg.bodies } : {}),
     tokenBudget: {
       maxContextTokens: effectiveMaxTokens,
       estimatedRawTokens: rawTokenEstimate,
@@ -2222,6 +2223,51 @@ function readWorkspaceSource(workspaceRoot: string, sourcePath: string): string 
  * @param configPath Optional config path
  * @param rootDir    Optional workspace root override
  */
+/**
+ * The indexed line is only a guess once the file changed under us: a symbol two
+ * lines below a new comment is no longer where the graph says it is, and the
+ * old code handed back a window around the stale line with no warning. Check the
+ * stored signature against the bytes on disk, relocate when it moved, and say
+ * which of the three happened.
+ */
+function normalizeSignatureLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function resolveSymbolWindow(params: {
+  lines: string[];
+  line: number;
+  endLine?: number;
+  signature?: string;
+  before: number;
+  after: number;
+}): { start: number; end: number; verified?: "exact" | "relocated" | "drifted" } {
+  // The env knobs are an explicit cap; the indexed extent only refines the
+  // default window, it never overrides what the caller asked for.
+  const span =
+    typeof params.endLine === "number" && params.endLine >= params.line
+      ? Math.min(params.endLine - params.line, params.after)
+      : params.after;
+  const windowAt = (lineNumber: number) => {
+    const start = Math.max(0, lineNumber - 1 - params.before);
+    return { start, end: Math.min(params.lines.length, start + params.before + 1 + span) };
+  };
+
+  const head = params.signature ? normalizeSignatureLine(params.signature).slice(0, 80) : "";
+  if (!head) return windowAt(params.line);
+
+  const candidate = windowAt(params.line);
+  const candidateText = normalizeSignatureLine(params.lines.slice(candidate.start, candidate.end).join("\n"));
+  if (candidateText.includes(head)) return { ...candidate, verified: "exact" as const };
+
+  for (let i = 0; i < params.lines.length; i += 1) {
+    if (normalizeSignatureLine(params.lines[i] ?? "").includes(head)) {
+      return { ...windowAt(i + 1), verified: "relocated" as const };
+    }
+  }
+  return { ...candidate, verified: "drifted" as const };
+}
+
 export async function expandAnchor(
   anchorId: string,
   configPath?: string,
@@ -2249,6 +2295,7 @@ export async function expandAnchor(
   const workspaceRoot = config.graphPolicy.workspaceRoot ?? process.cwd();
 
   let sourceSnippet: string | undefined;
+  let verified: "exact" | "relocated" | "drifted" | undefined;
   if (sourcePath) {
     const fileContent = readWorkspaceSource(workspaceRoot, sourcePath);
     if (fileContent !== undefined) {
@@ -2261,9 +2308,16 @@ export async function expandAnchor(
         const before = readExpandWindowEnv("GRAPHFLOW_EXPAND_SYMBOL_BEFORE", 3);
         const after = readExpandWindowEnv("GRAPHFLOW_EXPAND_SYMBOL_AFTER", 20);
         const lines = fileContent.split(/\r?\n/);
-        const startLine = Math.max(0, sourceLine - 1 - before);
-        const endLine = Math.min(lines.length, sourceLine + after);
-        sourceSnippet = lines.slice(startLine, endLine).join("\n");
+        const window = resolveSymbolWindow({
+          lines,
+          line: sourceLine,
+          ...(typeof node.metadata?.endLine === "number" ? { endLine: node.metadata.endLine } : {}),
+          ...(typeof node.metadata?.signature === "string" ? { signature: node.metadata.signature } : {}),
+          before,
+          after,
+        });
+        verified = window.verified;
+        sourceSnippet = lines.slice(window.start, window.end).join("\n");
       }
     }
   }
@@ -2275,6 +2329,7 @@ export async function expandAnchor(
     ...(sourcePath ? { sourcePath } : {}),
     ...(sourceLine !== undefined ? { sourceLine } : {}),
     ...(sourceSnippet ? { sourceSnippet } : {}),
+    ...(verified ? { verified } : {}),
     ...(node.metadata ? { metadata: node.metadata } : {}),
   };
 
