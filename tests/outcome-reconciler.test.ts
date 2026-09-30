@@ -87,8 +87,8 @@ describe("extractNamedFiles", () => {
 
 describe("reconcileEpisodes", () => {
   it("writes nothing when no verify command is configured", async () => {
-    commitTouching("src/packer.ts");
     const client = await episodeClient("再改一次 src/packer.ts 的配额");
+    commitTouching("src/packer.ts");
     const { report, written } = await run(client, { verifyCommand: undefined });
     expect(written).toHaveLength(0);
     expect(report.counts["no-verify-command"]).toBe(1);
@@ -135,8 +135,8 @@ describe("reconcileEpisodes", () => {
   });
 
   it("dry-run counts the pass without writing it", async () => {
-    commitTouching("src/packer.ts");
     const client = await episodeClient("确认 src/packer.ts 的预算");
+    commitTouching("src/packer.ts");
     const { report, written } = await run(client, { verifyCommand: PASS_COMMAND, dryRun: true });
     expect(report.counts.pass).toBe(1);
     expect(report.written).toBe(0);
