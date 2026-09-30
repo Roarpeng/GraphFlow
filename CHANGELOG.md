@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — 语义召回臂其实从未接上，`.hnsw` 派生副本零命中
+
+本机实测本仓库（1.28.1）：8811 个节点里 **0 个带向量**；`graphflow-out/vectors.hnsw` 里只有 **1 个**向量；`graphflow-out/vectors.db` 从来没有写入者，却出现在配置默认值、README、threat-model 和 `audit --privacy` 的产物清单里。
+
+- **索引拿不到 provider**：`buildIndexOptions` 的返回类型里就没有 `embeddingProvider`，于是索引期的 `embedAndAttachNodes` 和索引后的重算都不会跑——向量臂恒空，只有 episode 参与。已接入（`src/surfaces/cli/runtime/graph.ts`）。
+- **重算只"换模型"，从不补第一份**：旧 `refreshStaleEmbeddings` 的判定是 `if (!emb) return false`，新库因此永远停在 0 向量。改名 `ensureEmbeddings`，缺失与过期共用一份预算、过期优先。
+- **每轮有预算**：单次索引 256 个向量 / 2 秒上限（`DEFAULT_EMBEDDING_RUN_LIMIT`、`DEFAULT_EMBEDDING_RUN_DEADLINE_MS`），`graph index .` 实测 5.9 秒、无延迟回归；`learn nightly` 用 1024 / 30 秒继续收敛（大库分几轮跑完）。`graph index --json` 新增 `vectorBackfill: { missing, stale, refreshed, fingerprint, budget }`，`diagnose` 的 `embeddingQuality.vectorBackfill` 同步。后端退回哈希时只补缺、绝不覆盖语义向量。
+- **episode 绕开了量化存储**：`recordEpisode` 直接写 float32 `metadata.embedding`，既不吃 1.28.0 的 int8，也不带模型指纹——本仓库 186 个 episode 全是这种 384 维哈希向量，换成语义模型后被 `filterCompatibleEmbeddingNodes` 整批滤掉。改走 `attachEmbedding`，无指纹的旧向量按"过期"迁移。实测：int8 向量 0 → 1692，遗留 float32 186 → 0，存储 24MB → 28MB。
+- **删除零命中的 `.hnsw` 持久化**：那是节点 metadata 里同一批向量**反量化后的 float32 副本**（每维 4 字节，比源大 4 倍），而它的指纹按**当前查询的候选集**算（默认 `enableFullGraphVectorRecall: false`，候选集就是关键词命中）——换个查询就作废，等于每次召回写盘、几乎永不回读。向量的权威只留 `metadata.embeddingQ` 一份；已落盘的 `vectors.hnsw` 从此无人读写，可直接删。
+- **随之移除**：`embeddingPolicy.vectorStorePath`（存量配置里的该键被静默忽略）、`OrchestrateOptions.hnswIndexPath`、全图重建时对 `.graphflow-cache/vectors.db` 的空删；`src/learning/hnsw-index.ts` → `vector-index.ts`，`HnswVectorIndex` → `LinearVectorIndex`，删掉空壳 `save()` / `loadIndex()` / `forceLinear` / `linearThreshold`（hnswlib-node 早在 P1 就移除了，`backend` 一直如实返回 `"linear"`）。
+- **文档与审计面同步**：README 配置表去掉 `vectorStorePath`、模块树注释去掉 hnsw；`docs/threat-model.md` 落盘清单去掉 `vectors.db` / `.hnsw`；`audit --privacy` 不再列一个永不存在的产物；`docs/comparison.md` 的 "RRF / HNSW" 改为"精确余弦 + RRF"。
+- **测试**：`tests/hnsw-persistence.test.ts` → `tests/vector-index.test.ts`（memo 命中、候选集变化重建、维度不符跳过，外加"不再写盘"守卫）；`m128` 补"给从没向量的节点补第一份"用例，并把哈希后端不降级的断言改成 `stale=1 / refreshed=0`；golden 集里 `"hnsw approximate nearest neighbor index"` 改为 `"brute force cosine scan over node vectors"`（`expectAny: ["vector-index"]`），同步 `benchmarks/retrieval-golden-data.ts` 与导出数据集。
+- **指标如实记账**：语义臂刚接通（每轮只有几百个向量），检索质量暂时持平——同一提交用只读 worktree 对照跑 `bench:retrieval`：Hit@1 57.6% → 56.8%、Hit@3 92.4% → 92.4%、Hit@5 99.2% → 99.2%、MRR 0.752 → 0.748、NDCG@5 0.620 → 0.619；`retrieval-golden` 的排名漂移门（±2 位、≤12 条）在**未刷新基线**的情况下通过（132/132 命中）。索引延迟量级不变：本仓库 `graph index .`（623 文件）5.9 秒。收益要等存储收敛（`enableFullGraphVectorRecall` + 全量向量）才会显形。
+
 ### Fixed — 过渡期 SQLite 漏掉旧宿主索引过的文件（1.28.1）
 
 1.28.0 发布后本机实测：Cursor 里仍在跑的 1.27 运行时（JSON 存储）把新文件索引进 JSON，并写入**共用的** `.graphflow-cache/index-state.json`；合并又跳过代码节点，于是 SQLite 把这些文件当成"未改动"，永远不会索引（本仓库新增的 `store-migration.ts` 等在 SQLite 里查不到）。

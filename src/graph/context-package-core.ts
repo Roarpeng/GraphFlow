@@ -16,6 +16,7 @@ import {
   reciprocalRankFusion,
 } from "../learning/embeddings.js";
 import { recordIncompatibleVectorsSkipped } from "../learning/embedding-quality.js";
+import { getSharedVectorIndex } from "../learning/vector-index.js";
 import type { GraphClient } from "./client-factory.js";
 import { rankNodesForContextQuery, composeContextQuery, buildSearchScoreTokens } from "./graph-utils.js";
 import { collectExpandedKeywordHits } from "./query-expand.js";
@@ -197,17 +198,14 @@ function collectVectorRecallCandidates(
   return byId.size > 0 ? Array.from(byId.values()) : keywordHits;
 }
 
-async function hnswVectorRecall(
+function linearVectorRecall(
   nodes: GraphNode[],
   queryEmbedding: number[],
   topK: number,
-  minSimilarity: number,
-  hnswIndexPath?: string
-): Promise<GraphNode[]> {
-  const { getSharedVectorIndex } = await import("../learning/hnsw-index.js");
-  const { index } = getSharedVectorIndex(nodes, hnswIndexPath);
-  const results = await index.search(queryEmbedding, topK, minSimilarity);
-  return results.map((result) => result.node);
+  minSimilarity: number
+): GraphNode[] {
+  const { index } = getSharedVectorIndex(nodes);
+  return index.search(queryEmbedding, topK, minSimilarity).map((result) => result.node);
 }
 
 export async function collectKeywordHits(
@@ -244,13 +242,7 @@ export async function fuseVectorRecallIfEnabled(
       options.embeddingProvider.fingerprint?.()
     );
     recordIncompatibleVectorsSkipped(skipped);
-    const vectorHits = await hnswVectorRecall(
-      vectorCandidates,
-      queryEmbedding,
-      topK,
-      minSim,
-      options.hnswIndexPath
-    );
+    const vectorHits = linearVectorRecall(vectorCandidates, queryEmbedding, topK, minSim);
     return reciprocalRankFusion([keywordHits, vectorHits]);
   } catch (error) {
     logger.warn({ error }, `Vector recall failed in ${logLabel}`);

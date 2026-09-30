@@ -16,9 +16,5 @@ export function buildEmbeddingOptions(config: GraphFlowConfig) {
     ...(config.embeddingPolicy?.minSimilarity !== undefined
       ? { vectorMinSimilarity: config.embeddingPolicy.minSimilarity }
       : {}),
-    // Persist vector recall index to disk for faster startup on large repos.
-    ...(config.embeddingPolicy?.vectorStorePath
-      ? { hnswIndexPath: config.embeddingPolicy.vectorStorePath.replace(/\.\w+$/, ".hnsw") }
-      : {}),
   };
 }

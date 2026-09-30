@@ -60,7 +60,7 @@
 {"type":"query","id":"q060","query":"skill flywheel hints scoring","expectAny":["skill-flywheel","skillflywheel"],"domain":"learning","topK":3}
 {"type":"query","id":"q061","query":"episodic memory similar episodes","expectAny":["episodic-memory","episodicmemory"],"domain":"learning","topK":3}
 {"type":"query","id":"q062","query":"embedding cosine similarity vector","expectAny":["embeddings","cosine"],"domain":"learning","topK":3}
-{"type":"query","id":"q063","query":"hnsw approximate nearest neighbor index","expectAny":["hnsw"],"domain":"learning","topK":3}
+{"type":"query","id":"q063","query":"brute force cosine scan over node vectors","expectAny":["vector-index"],"domain":"learning","topK":3}
 {"type":"query","id":"q064","query":"nightly learning trainer","expectAny":["nightly-trainer","nightlytrainer"],"domain":"learning","topK":3}
 {"type":"query","id":"q065","query":"reflect episodes extract lessons","expectAny":["reflector","reflect"],"domain":"learning","topK":3}
 {"type":"query","id":"q066","query":"skill store persistence","expectAny":["skill-store"],"domain":"learning","topK":3}

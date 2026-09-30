@@ -29,7 +29,7 @@
 | 数据 | 从哪来 | 到哪去 | 出网？ |
 |---|---|---|---|
 | 工作区源码 | 本地文件扫描（尊重 `.gitignore`） | 内存图 → 本地图（sqlite/file） | 否 |
-| 符号/边/摘要 | 本地 AST/正则索引器 | 本地图 + 按需向量索引（`.hnsw`） | 否 |
+| 符号/边/摘要 | 本地 AST/正则索引器 | 本地图（语义向量以 int8 量化存进节点 metadata，无独立向量文件） | 否 |
 | 对话 turn/技能/episode | 本地会话 + outcome 上报 | 本地图 Skill/Decision 节点 | 否 |
 | 观测归档（gfo:句柄） | 超大工具输出 | `.graphflow/observations/`（脱敏后） | 否 |
 | LLM prompt/completion | 需要 LLM 的规划/压缩/ort | 你配置的 provider endpoint | **是（仅配置时）** |
@@ -64,7 +64,6 @@
 | 路径 | 内容 | 敏感度 |
 |---|---|---|
 | `<workspace>/graphflow-out/graphflow-graph.sqlite`（或 `.json`） | 代码图 + 技能 + episode + 对话 | 含源码摘要/符号，**不要提交到公开仓**（已在默认 `.gitignore` 建议中） |
-| `<workspace>/graphflow-out/vectors.db` + `.hnsw` | 向量召回索引 | 同上 |
 | `<workspace>/graphflow-out/*.jsonl`（learning-dataset/events/summary、efficiency、fidelity） | 学习事件与效率证据 | 含任务描述，注意脱敏 |
 | `<workspace>/.graphflow/observations/` | 超大输出归档（content-addressed）+ `index.jsonl` | 脱敏后存储，TTL 14 天 |
 | `<workspace>/.graphflow/session-journal.jsonl` | outcome 自动捕获 journal | 含任务文本 |

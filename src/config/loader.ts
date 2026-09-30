@@ -377,7 +377,6 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
       ...(input.embeddingPolicy?.transformersCachePath
         ? { transformersCachePath: input.embeddingPolicy.transformersCachePath }
         : {}),
-      vectorStorePath: input.embeddingPolicy?.vectorStorePath ?? `${DEFAULT_OUTPUT_DIR}/vectors.db`,
       topK: input.embeddingPolicy?.topK ?? 8,
       minSimilarity: input.embeddingPolicy?.minSimilarity ?? 0.05,
       enableFullGraphVectorRecall: input.embeddingPolicy?.enableFullGraphVectorRecall ?? false,

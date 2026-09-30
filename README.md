@@ -189,7 +189,6 @@ Key options:
 | `graphPolicy.autoIndexOnSave` | Auto incremental index on save (default true) |
 | `embeddingPolicy.provider` | `transformers` (local default) / `openai` / `hash` |
 | `embeddingPolicy.dtype` | Local model precision: `q8` (default, ~98MB) / `fp16` / `q4` / `fp32` (~400MB); env `GRAPHFLOW_EMBEDDING_DTYPE` wins |
-| `embeddingPolicy.vectorStorePath` | Vector index persistence path (`.hnsw` derived automatically) |
 | `skillPolicy.enableSkillFlywheel` | Learning flywheel switch |
 
 ### Switching agents on one project
@@ -387,7 +386,7 @@ GraphFlow/
 │   ├── core/           # orchestration core: orchestrator, triage, dag-engine, agent-delegation
 │   ├── graph/          # indexing, context slicing, graph compression, sqlite/auto storage, snapshot
 │   ├── routing/        # model routing and health probes (5 providers)
-│   ├── learning/       # embeddings, episodic, skill-flywheel, hnsw, nightly
+│   ├── learning/       # embeddings, episodic, skill-flywheel, vector-index, nightly
 │   ├── agents/         # ATP schema, planner, insight, brainstormer
 │   └── surfaces/
 │       ├── cli/        # CLI + runtime

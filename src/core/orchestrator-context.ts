@@ -29,7 +29,7 @@ export async function maybeBuildNearLosslessContext(
     ...(options.layerQuota ? { layerQuota: options.layerQuota } : {}),
     // Graph-structure compression is zero-cost; enable by default unless explicitly disabled.
     enableGraphCompression: options.enableGraphCompression !== false,
-    // Pass through embedding/vector recall options so HNSW + vector recall are activated.
+    // Pass through embedding/vector recall options so the linear vector recall arm is activated.
     ...(options.embeddingProvider
       ? {
           embeddingProvider: options.embeddingProvider,
@@ -37,7 +37,6 @@ export async function maybeBuildNearLosslessContext(
           ...(options.enableFullGraphVectorRecall === true
             ? { enableFullGraphVectorRecall: true as const }
             : {}),
-          ...(options.hnswIndexPath ? { hnswIndexPath: options.hnswIndexPath } : {}),
         }
       : {}),
   };

@@ -244,7 +244,6 @@ export interface GraphFlowConfig {
     transformersCachePath?: string;
     /** ONNX weight precision for the local model. Default "q8" (~100MB vs ~400MB fp32). */
     dtype?: EmbeddingDtype;
-    vectorStorePath?: string;
     topK?: number;
     minSimilarity?: number;
     /** Opt in to vector recall across all graph nodes with embeddings. Default false. */

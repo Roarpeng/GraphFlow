@@ -187,7 +187,7 @@ export const GOLDEN_SET: ReadonlyArray<GoldenEntry> = [
   { query: "skill flywheel hints scoring", expectAny: ["skill-flywheel", "skillflywheel"], domain: "learning", topK: 3 },
   { query: "episodic memory similar episodes", expectAny: ["episodic-memory", "episodicmemory"], domain: "learning", topK: 3 },
   { query: "embedding cosine similarity vector", expectAny: ["embeddings", "cosine"], domain: "learning", topK: 3 },
-  { query: "hnsw approximate nearest neighbor index", expectAny: ["hnsw"], domain: "learning", topK: 3 },
+  { query: "brute force cosine scan over node vectors", expectAny: ["vector-index"], domain: "learning", topK: 3 },
   { query: "nightly learning trainer", expectAny: ["nightly-trainer", "nightlytrainer"], domain: "learning", topK: 3 },
   { query: "reflect episodes extract lessons", expectAny: ["reflector", "reflect"], domain: "learning", topK: 3 },
   { query: "skill store persistence", expectAny: ["skill-store"], domain: "learning", topK: 3 },

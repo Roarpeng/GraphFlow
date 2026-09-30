@@ -7,9 +7,9 @@
   "licensePointer": "LICENSE",
   "sourceOfTruth": "benchmarks/retrieval-golden-data.ts",
   "regenerator": "npm run dataset:retrieval",
-  "graphflowVersion": "1.9.11",
-  "commit": "9186ee68f621a81b0633c39e791328f105476e99",
-  "generatedAt": "2026-08-12T14:14:31.473Z",
+  "graphflowVersion": "1.28.1",
+  "commit": "cdfdb6e5a6a3398caad044b39668dbc2fbbec199",
+  "generatedAt": "2026-09-29T23:51:34.291Z",
   "description": "Open evaluation queries for GraphFlow graph retrieval on a code knowledge graph. Each query lists alternative path/symbol substrings (expectAny); a hit is when any substring appears in ranked retrieval anchors. Use with `npm run bench:retrieval` against this repository's `src/` corpus (or an equivalent GraphFlow-indexed tree).",
   "corpus": "GraphFlow repository `src/` (in-memory index via bench:retrieval)",
   "evaluation": {
@@ -632,9 +632,9 @@
     },
     {
       "id": "q063",
-      "query": "hnsw approximate nearest neighbor index",
+      "query": "brute force cosine scan over node vectors",
       "expectAny": [
-        "hnsw"
+        "vector-index"
       ],
       "domain": "learning",
       "topK": 3

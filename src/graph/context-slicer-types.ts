@@ -60,8 +60,6 @@ export interface LayeredPackageOptions {
   workspaceRoot?: string;
   /** Agent-translated English search terms (see Skill CJK workflow). */
   englishQuery?: string;
-  /** Optional path to persist the vector index across process restarts. */
-  hnswIndexPath?: string;
   /** Hard cap on anchor count. Default 15. Set to Infinity to disable. */
   maxAnchors?: number;
   /**

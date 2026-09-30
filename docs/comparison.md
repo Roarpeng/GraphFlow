@@ -35,7 +35,7 @@ GraphFlow 不是"又一个代码图谱"，而是把 **本地知识图谱 + 三�
 ### GraphFlow vs CodeGraph（同层最强对手）
 
 - **CodeGraph 强在哪**：47.4k★ 的认知壁垒、MIT 宽松许可、"一个 SQLite 文件 + FTS5"的零配置体验、文件 watcher 实时增量索引、已有独立 benchmark（省 ~70% 工具调用）。它是 Tier1 里最成熟、最容易上手、最被信任的选择。
-- **GraphFlow 强在哪**：CodeGraph 本质是"图谱 + 检索"；GraphFlow 在图谱之上叠了**三层上下文压缩（L1/L2/L3 锚点 + 图结构压缩/PageRank + 向量召回 RRF/HNSW + 语义压缩）**、**DAG / 六顶思考帽规划**，以及 CodeGraph 没有的**跨会话学习飞轮**。GraphFlow 的目标不只是"找到代码"，而是"压缩上下文 + 规划任务 + 从历史中学习"。
+- **GraphFlow 强在哪**：CodeGraph 本质是"图谱 + 检索"；GraphFlow 在图谱之上叠了**三层上下文压缩（L1/L2/L3 锚点 + 图结构压缩/PageRank + 向量召回（精确余弦 + RRF）+ 语义压缩）**、**DAG / 六顶思考帽规划**，以及 CodeGraph 没有的**跨会话学习飞轮**。GraphFlow 的目标不只是"找到代码"，而是"压缩上下文 + 规划任务 + 从历史中学习"。
 - **怎么选**：只想要零配置、稳定、被验证的"代码图谱 + MCP 检索" → **选 CodeGraph**。需要把图谱当成更大上下文工程 / 规划 / 跨会话记忆系统的底座 → **选 GraphFlow**。
 
 ### GraphFlow vs Serena（符号编辑事实标准）
@@ -53,7 +53,7 @@ GraphFlow 不是"又一个代码图谱"，而是把 **本地知识图谱 + 三�
 ### GraphFlow vs claude-context（向量检索）
 
 - **claude-context 强在哪**：11.8k★、Zilliz 背书，BM25 + 向量混合检索成熟，语义召回质量好，生态完善。
-- **GraphFlow 强在哪**：claude-context **默认把代码块发送到向量云**（隐私 / 合规敏感者需注意）；GraphFlow 是 local-first，且向量召回（RRF / HNSW）只是其**一层**，之上还有图结构压缩、规划与学习记忆。
+- **GraphFlow 强在哪**：claude-context **默认把代码块发送到向量云**（隐私 / 合规敏感者需注意）；GraphFlow 是 local-first，且向量召回（精确余弦 / RRF）只是其**一层**，之上还有图结构压缩、规划与学习记忆。
 - **怎么选**：信任并愿意使用云端向量、只要语义检索 → **选 claude-context**。要求本地优先、且想要"图谱 + 压缩 + 规划 + 记忆"整套 → **选 GraphFlow**。
 
 ### GraphFlow vs Augment（商业闭源）

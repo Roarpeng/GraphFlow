@@ -84,7 +84,6 @@ export function getDefaultConfig(): GraphFlowConfig {
       enabled: true,
       provider: "transformers",
       model: DEFAULT_EMBEDDING_MODEL,
-      vectorStorePath: `${DEFAULT_OUTPUT_DIR}/vectors.db`,
       topK: 8,
       minSimilarity: 0.05,
       enableFullGraphVectorRecall: false,

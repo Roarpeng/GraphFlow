@@ -15,7 +15,6 @@ import type { PrivacyAuditFacts } from "../types.js";
 const WORKSPACE_ARTIFACTS = [
   "graphflow-out/graphflow-graph.sqlite",
   "graphflow-out/graphflow-graph.json",
-  "graphflow-out/vectors.db",
   "graphflow-out/learning-dataset.jsonl",
   "graphflow-out/learning-events.jsonl",
   "graphflow-out/learning-summary.json",
