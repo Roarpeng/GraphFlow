@@ -617,7 +617,6 @@ export function buildContextEconomics(input: {
   });
 
   return {
-    churn,
     cache,
     cost,
     attention,
@@ -625,5 +624,10 @@ export function buildContextEconomics(input: {
     sensitivity,
     stablePrefixTokens: cache.cachedTokens,
     verdict,
+    // `churn` is a diff against whatever THIS process sent last time, so the
+    // same query reports a different ratio on its first call than on every call
+    // after it. It rides last for that reason: a field that cannot repeat must
+    // not sit in front of the ones that can.
+    churn,
   };
 }

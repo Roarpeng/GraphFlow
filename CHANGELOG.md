@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — 同一个查询的两次调用现在字节相同
+
+`graphflow_context` 是给宿主当提示前缀用的：前导字节一旦变了，它后面所有 token 重新计价。实测此前**同样的 query + 没变的仓库，两次调用产出不同字节**，原因有三类，都已修：
+
+- **信封字段顺序**：每次调用都会重算的记账字段原先插在内容字段中间。`src/surfaces/cli/runtime/graph.ts:540` 现在按"内容由 (query, store) 决定 → 在前"排序：`query / summary / anchors / anchorBodies / tokenBudget(稳定字段) / refillPreview`，把 `anchorsByLayer`、`unbudgetedTokens`、`accountedTokens`、`degraded`、对话/workbench 回显、`economics`、`cacheLayout` 全部排到尾。**anchors 本身没有重排**（只动信封顺序，不动锚点顺序）。
+- **`degraded` 与 `churn`**：`response-budget.ts` 原先把 `degraded` 塞在对象中部（改变的是**键集合**，不只是值）；`context-economics.ts` 的 `churn` 是"和本进程上一次发的内容"的差，第一次调用和之后每次天然不同——两者现在都落在最后。
+- **对话时钟**：`dialogue-thread.ts` 在 30 分钟去重窗口内命中时原先无条件写 `updatedAt = Date.now()`，于是回显里的 `updatedAt` 每次都变。现在拆出 `lastSeenAt` 作为去重时钟，`updatedAt` 只在文本/摘要/关联节点真的变化时前进；旧记录没有 `lastSeenAt` 时回退到 `updatedAt`，升级不会把历史轮次全部重开。回显视图 `DialogueHitPreview` **不再携带 `updatedAt`**（全仓无消费者；值仍留在图和 `DialogueSearchHit` 上，走 store 读取的调用方不受影响）。
+- **平局打破**：`graph-search.ts` 对话检索、`detectSupersession`、`vectorRecall`、打包内对话行、`snapshot-view.ts` 边排序、`sqlite-client.ts` 的 FTS 查询（`ORDER BY rank, n.id`）都补了确定性的次键；V8 排序稳定，同分时以前继承 SQLite/FTS 行序。
+- **量到的效果**：本仓库同一 query 连续两次 `previewContext(recordDialogue:false)`，**整段 JSON 逐字节相同**（不只是稳定头）。
+- **被否掉的两处**（有实测支撑，不是偷懒）：给 `graph-compression.ts` 的 `ranked.sort(score)` 加 id 次键，golden 召回从 132/132 掉到 **90/132**、负样本泄漏——那里的"平局"其实是 BFS 发现序（种子与近邻优先），按 id 重排会让字母序靠前的节点顶掉真正的种子；同样理由撤掉了对 `importHits` / `expanded` / 快照扫描的 id 预排。**结论：确定性不能靠给有语义的排序强行加字母序**，这些位置要做到可重复需要有意义的质量次键，目前如实留着未解。
+- **仍未决定**：`planCacheLayout` 是否真的参与 `summary/anchors` 排序、`cache-layout` / `context-economics` 默认是否打开——本轮只做了机械的字节稳定部分，策略留给作者（宿主是否把这个块提到 system 层，决定了这笔收益有多大）。
+- 测试：新增 `tests/context-prefix-stability.test.ts`（3 例：两次调用头相同且变动字段落在尾、`economics.churn` 每轮变化时头仍相同、同分锚点按 id 确定），`tests/dialogue-thread.test.ts` 增加"纯重复提问只走去重时钟"一例，`m107` 的回显断言改为**显式要求视图里没有 `updatedAt`**（而不是放宽）。
+
 ### Added — outcome 机械闭合：`graphflow reconcile outcomes`
 
 飞轮的输入缺口是结构性的：`pass` 只能来自 agent 自愿调用 `graphflow_report_outcome` 的自报布尔值。本仓库实测 191 个 episode 里 9 pass / 1 fail / 73 pending / 108 human_review，**0 个带 evidence、0 个带 deviation、187 个 `plan` 为空**。新增一条不依赖配合的闭合路径。

@@ -66,7 +66,14 @@ function snapshotEdgeRank(relation: GraphEdge["relation"]): number {
 }
 
 function sortSnapshotEdges(edges: GraphEdge[]): GraphEdge[] {
-  return [...edges].sort((a, b) => snapshotEdgeRank(a.relation) - snapshotEdgeRank(b.relation));
+  // Relation priority, then the edge endpoints: equal-rank edges otherwise keep
+  // SQLite row order, which is not stable across runs.
+  return [...edges].sort(
+    (a, b) =>
+      snapshotEdgeRank(a.relation) - snapshotEdgeRank(b.relation) ||
+      a.from.localeCompare(b.from) ||
+      a.to.localeCompare(b.to)
+  );
 }
 
 function compactPreview(content: string, maxLength: number): string {

@@ -132,6 +132,30 @@ describe("dialogue-thread knowledge graph", () => {
     );
   });
 
+  it("moves only the dedupe clock when the same question is repeated", async () => {
+    // `updatedAt` is content-derived. A bare repeat changes no text, so it must
+    // not re-stamp the turn: echoing a moving clock made the response — and
+    // every byte after it — churn between two identical calls.
+    const client = new GraphifyClient();
+    const first = await recordDialogueTurn(client, {
+      userQuery: "重复提问会不会改动时间戳",
+      workspaceRoot: "/repo",
+      now: 1_000,
+    });
+    const repeated = await recordDialogueTurn(client, {
+      userQuery: "重复提问会不会改动时间戳",
+      workspaceRoot: "/repo",
+      now: 2_000,
+    });
+
+    expect(repeated.reused).toBe(true);
+    const stored = parseDialogueTurn(
+      client.readSnapshot().nodes.find((node) => node.id === first.turn!.id)!
+    )!;
+    expect(stored.updatedAt).toBe(1_000);
+    expect(stored.lastSeenAt).toBe(2_000);
+  });
+
   it("fills the pending tip when only assistantReply is provided", async () => {
     const client = new GraphifyClient();
     const pending = await recordDialogueTurn(client, {

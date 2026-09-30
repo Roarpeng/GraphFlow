@@ -270,11 +270,13 @@ export function withPostPackageAccounting(
       ...result.tokenBudget,
       estimatedRawTokens,
       compressedTokens,
-      estimatedSavingsPercent: calculateSavingsPercent(estimatedRawTokens, accountedTokens),
       budgetUsedPercent: calculateBudgetUsedPercent(
         compressedTokens,
         result.tokenBudget.maxContextTokens
       ),
+      // Recomputed per call, so it rides last inside the budget block rather
+      // than ahead of the fields that stay put.
+      estimatedSavingsPercent: calculateSavingsPercent(estimatedRawTokens, accountedTokens),
     },
     ...(unbudgeted > 0 ? { unbudgetedTokens: unbudgeted } : {}),
     accountedTokens,
@@ -535,19 +537,19 @@ export async function previewContext(
   // the post-packaging attach (see the end of this function) so the persisted
   // ROI covers the true accounted payload, not just the layered package.
 
+  // Byte-stable head, volatile tail / 稳定头 + 变动尾.
+  //
+  // A host that caches this block as a prompt prefix only gets a hit while the
+  // leading bytes repeat — one differing byte re-prices everything behind it. So
+  // key order is part of the contract: everything derived from (query, store)
+  // comes first — `query`, `summary`, `anchors`, `anchorBodies`, the stable
+  // `tokenBudget` fields, `refillPreview` — and fields that can move between two
+  // otherwise identical calls (per-call accounting, degradation steps, the
+  // dialogue/workbench echoes, economics, cache layout) are appended after.
+  // Anchors are NOT reordered here; only the envelope's field order changes.
   const result: ContextPreviewResult = {
     query,
     ...(englishQuery?.trim() ? { englishQuery: englishQuery.trim() } : {}),
-    summaryCount: deliveredSummary.length,
-    anchorCount: deliveredAnchors.length,
-    tokenEstimate: deliveredTokenEstimate,
-    truncated: pkg.truncated,
-    anchorsByLayer: {
-      l1: deliveredAnchors.filter((item) => item.layer === "L1").length,
-      l2: deliveredAnchors.filter((item) => item.layer === "L2").length,
-      l3: deliveredAnchors.filter((item) => item.layer === "L3").length,
-    },
-    refillPreview,
     summary: deliveredSummary,
     anchors: deliveredAnchors,
     ...(pkg.bodies ? { anchorBodies: pkg.bodies } : {}),
@@ -555,8 +557,21 @@ export async function previewContext(
       maxContextTokens: effectiveMaxTokens,
       estimatedRawTokens: rawTokenEstimate,
       compressedTokens: deliveredTokenEstimate,
-      estimatedSavingsPercent: calculateSavingsPercent(rawTokenEstimate, deliveredTokenEstimate),
       budgetUsedPercent: calculateBudgetUsedPercent(deliveredTokenEstimate, effectiveMaxTokens),
+      // Recomputed by the post-packaging accounting below, so it rides last
+      // inside the budget block rather than ahead of the fields that stay put.
+      estimatedSavingsPercent: calculateSavingsPercent(rawTokenEstimate, deliveredTokenEstimate),
+    },
+    refillPreview,
+    summaryCount: deliveredSummary.length,
+    anchorCount: deliveredAnchors.length,
+    tokenEstimate: deliveredTokenEstimate,
+    truncated: pkg.truncated,
+    // --- volatile tail: per-call accounting and additive echoes ---
+    anchorsByLayer: {
+      l1: deliveredAnchors.filter((item) => item.layer === "L1").length,
+      l2: deliveredAnchors.filter((item) => item.layer === "L2").length,
+      l3: deliveredAnchors.filter((item) => item.layer === "L3").length,
     },
     ...(queryTranslationDelegation ?? {}),
   };
@@ -863,7 +878,6 @@ function toDialogueHitPreview(hit: DialogueSearchHit): DialogueHitPreview {
     ...(hit.title ? { title: hit.title } : {}),
     ...(hit.summary ? { summary: hit.summary } : {}),
     userQuery: clip(hit.userQuery, MAX_ECHO_TURN_CHARS),
-    updatedAt: hit.updatedAt,
     ...(hit.correctionLine ? { correctionLine: hit.correctionLine } : {}),
     superseded: hit.superseded,
     ...(truncated ? { truncated: true } : {}),

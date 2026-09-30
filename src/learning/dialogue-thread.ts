@@ -73,6 +73,18 @@ export interface DialogueTurnRecord {
   relatedNodeIds: string[];
   createdAt: number;
   updatedAt: number;
+  /**
+   * Ms epoch of the last time this turn was *seen* — the same question asked
+   * again inside the dedupe window. Kept separate from `updatedAt` so the
+   * dedupe clock can move without touching `updatedAt`, which is content
+   * derived: it only advances when the turn's text actually changes. Without
+   * the split, every repeat question rewrote `updatedAt`, so a preview's
+   * dialogue payload (and every byte after it) churned on a field nothing
+   * consumes. Absent on turns recorded before the split: readers fall back to
+   * `updatedAt`, so old turns keep their existing window instead of all
+   * reopening at once.
+   */
+  lastSeenAt?: number;
   /** Distilled short title (offline heuristic, no LLM). */
   title?: string;
   /** Distilled conclusion summary (offline heuristic, no LLM). */
@@ -474,7 +486,9 @@ export async function recordDialogueTurn(
         ...tip,
         assistantReply,
         ...(summary ? { summary } : {}),
+        // Real content write: the clock and the stamp both move.
         updatedAt: now,
+        lastSeenAt: now,
       };
       await persistTurn(client, updated, session, {
         linkParent: false,
@@ -504,16 +518,26 @@ export async function recordDialogueTurn(
 
   if (!replyOnlyFill && tip && shouldReuseTurn(tip, userQuery, now)) {
     const summary = assistantReply ? deriveTurnSummary(assistantReply) : undefined;
+    const relatedNodeIds = mergeRelated(tip.relatedNodeIds, input.relatedNodeIds);
+    // `updatedAt` is content-derived: it moves only when this reuse actually
+    // rewrites the turn. The dedupe clock itself moves in `lastSeenAt`, so a
+    // repeated question inside the window no longer re-stamps the record (and
+    // with it every byte the response puts after the dialogue preview).
+    const contentChanged =
+      (assistantReply.length > 0 && assistantReply !== tip.assistantReply) ||
+      (summary !== undefined && summary !== tip.summary) ||
+      relatedNodeIds.join("\u0000") !== tip.relatedNodeIds.join("\u0000");
     const updated: DialogueTurnRecord = {
       ...tip,
       ...(assistantReply ? { assistantReply } : {}),
       ...(summary ? { summary } : {}),
-      updatedAt: now,
+      ...(contentChanged ? { updatedAt: now } : {}),
+      lastSeenAt: now,
     };
     await persistTurn(client, updated, session, {
       linkParent: false,
       jumped: tip.jumped,
-      relatedNodeIds: mergeRelated(tip.relatedNodeIds, input.relatedNodeIds),
+      relatedNodeIds,
     });
     const nextSession: DialogueSessionRecord = {
       ...session,
@@ -836,7 +860,11 @@ async function upsertUniqueEdges(client: GraphClient, edges: GraphEdge[]): Promi
 }
 
 function shouldReuseTurn(turn: DialogueTurnRecord, userQuery: string, now: number): boolean {
-  if (now - turn.updatedAt > DEDUPE_WINDOW_MS) return false;
+  // `lastSeenAt` is the dedupe clock; `updatedAt` now tracks content only.
+  // Older records have no `lastSeenAt` and keep their existing window via the
+  // fallback, so upgrading never reopens every recorded turn at once.
+  const seenAt = turn.lastSeenAt ?? turn.updatedAt;
+  if (now - seenAt > DEDUPE_WINDOW_MS) return false;
   return normalizeQuery(turn.userQuery) === normalizeQuery(userQuery);
 }
 
@@ -864,6 +892,7 @@ function deserializeTurn(node: GraphNode): DialogueTurnRecord | undefined {
         : [],
       createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : 0,
       updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
+      ...(typeof parsed.lastSeenAt === "number" ? { lastSeenAt: parsed.lastSeenAt } : {}),
       ...(typeof parsed.title === "string" ? { title: parsed.title } : {}),
       ...(typeof parsed.summary === "string" ? { summary: parsed.summary } : {}),
       ...(Array.isArray(parsed.supersedesTurnIds)
@@ -1035,7 +1064,14 @@ export function detectSupersession(
   if (candidates.length === 0) return [];
 
   // Nearest turns first (highest overlap, then latest), capped at `limit`.
-  candidates.sort((a, b) => b.overlap - a.overlap || b.turn.seq - a.turn.seq);
+  // Turn id closes the tie: `seq` collides across sessions, and a capped slice
+  // on a tied tail otherwise picks up whichever row order the store returned.
+  candidates.sort(
+    (a, b) =>
+      b.overlap - a.overlap ||
+      b.turn.seq - a.turn.seq ||
+      a.turn.id.localeCompare(b.turn.id)
+  );
   return candidates
     .slice(0, Math.max(1, limit))
     .map((c) => c.turn.id)
@@ -1077,7 +1113,12 @@ export function detectSameTopicLinks(
     if (overlap < SAME_TOPIC_MIN_OVERLAP) continue;
     scored.push({ turn, overlap });
   }
-  scored.sort((a, b) => b.overlap - a.overlap || b.turn.updatedAt - a.turn.updatedAt);
+  scored.sort(
+    (a, b) =>
+      b.overlap - a.overlap ||
+      b.turn.updatedAt - a.turn.updatedAt ||
+      a.turn.id.localeCompare(b.turn.id)
+  );
   const limit = options?.limit ?? 3;
   return scored
     .slice(0, Math.max(1, limit))

@@ -287,7 +287,7 @@ export class GraphifySqliteClient implements GraphClient {
       .prepare(
         `SELECT n.id AS id, n.type AS type, n.content AS content, n.metadata AS metadata
          FROM nodes_fts JOIN nodes n ON n.rowid = nodes_fts.rowid
-         WHERE nodes_fts MATCH ? ORDER BY rank LIMIT 200`
+         WHERE nodes_fts MATCH ? ORDER BY rank, n.id LIMIT 200`
       )
       .all(match) as NodeRow[];
     return rows.map(rowToNode);

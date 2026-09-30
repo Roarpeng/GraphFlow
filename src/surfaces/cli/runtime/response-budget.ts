@@ -161,10 +161,19 @@ function finalizeBudget(
   const accountedTokens = compressedTokens + unbudgetedTokens;
   // 真实下发量不会低于 raw 估算：沿用 estimateRawContextTokens 的下限语义。
   const estimatedRawTokens = Math.max(result.tokenBudget.estimatedRawTokens, accountedTokens);
-  const { unbudgetedTokens: _stale, ...base } = result;
+  // `degraded` and the two accounting fields are re-appended AFTER the spread
+  // rather than inline: they are per-call traces, and inserting `degraded`
+  // ahead of them used to interleave volatile fields into the middle of the
+  // envelope, so the bytes behind them moved between two otherwise identical
+  // responses. Omit first so a second pass cannot leave the key at its old
+  // position.
+  const {
+    unbudgetedTokens: _stale,
+    degraded: _previousDegraded,
+    ...base
+  } = result;
   return {
     ...base,
-    degraded: [...steps],
     tokenBudget: {
       ...result.tokenBudget,
       estimatedRawTokens,
@@ -172,5 +181,6 @@ function finalizeBudget(
     },
     ...(unbudgetedTokens > 0 ? { unbudgetedTokens } : {}),
     accountedTokens,
+    degraded: [...steps],
   };
 }

@@ -132,7 +132,11 @@ describe("previewContext dialogueHits: clipped previews, honest accounting (m107
     expect(hit.sessionId).toBe(raw.sessionId);
     expect(hit.title).toBe(raw.title);
     expect(hit.summary).toBe(raw.summary);
-    expect(hit.updatedAt).toBe(raw.updatedAt);
+    // The echo view carries no clock: `updatedAt` moves when the same question
+    // is asked again inside the dedupe window, so echoing it re-wrote every
+    // byte behind it for a field nothing reads. It stays on the store hit.
+    expect("updatedAt" in hit).toBe(false);
+    expect(raw.updatedAt).toBeGreaterThan(0);
     expect(hit.correctionLine).toBe(raw.correctionLine);
     expect(hit.superseded).toBe(raw.superseded);
     expect(hit.userQuery === raw.userQuery).toBe(false);

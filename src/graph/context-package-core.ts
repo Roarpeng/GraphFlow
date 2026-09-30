@@ -182,7 +182,7 @@ export function vectorRecall(
     const sim = cosineSimilarity(queryEmbedding, emb);
     if (sim >= minSimilarity) scored.push({ node, sim });
   }
-  scored.sort((a, b) => b.sim - a.sim);
+  scored.sort((a, b) => b.sim - a.sim || a.node.id.localeCompare(b.node.id));
   return scored.slice(0, topK).map((s) => s.node);
 }
 
@@ -329,6 +329,8 @@ function collectPinnedL3Nodes(
   };
   for (const node of ranked) consider(node);
   if (snapshotNodes) {
+    // Same reason as the other capped scans: pins are taken in encounter order
+    // until the budget stops them, so the whole-graph tail must be id-ordered.
     for (const node of snapshotNodes) consider(node);
   }
   return pins;
@@ -522,7 +524,12 @@ async function collectDialogueContextLines(
         return { turn, hits };
       })
       .filter((s) => s.hits > 0)
-      .sort((a, b) => b.hits - a.hits || b.turn.updatedAt - a.turn.updatedAt)
+      .sort(
+        (a, b) =>
+          b.hits - a.hits ||
+          b.turn.updatedAt - a.turn.updatedAt ||
+          a.turn.id.localeCompare(b.turn.id)
+      )
       .slice(0, DIALOGUE_PACK_MAX_TURNS);
     if (scored.length === 0) return [];
 

@@ -58,6 +58,11 @@ export interface DialogueSearchHit {
  * store — anchor expansion reads the stored node, never this attached view.
  * 回显瘦身视图：id/seq/sessionId 等结构字段原样，userQuery 裁成预览并标记
  * truncated；全文留在图谱，anchorId 展开走 store 直读，不经过该视图。
+ *
+ * `updatedAt` is deliberately NOT part of this view: a turn's timestamp moves
+ * whenever the same question is asked again inside the dedupe window, so
+ * echoing it made the response — and every token after it — churn on a field
+ * nothing consumes. The value stays on `DialogueSearchHit` and in the graph.
  */
 export interface DialogueHitPreview {
   id: string;
@@ -66,7 +71,6 @@ export interface DialogueHitPreview {
   title?: string;
   summary?: string;
   userQuery: string;
-  updatedAt: number;
   /** Non-empty when this turn's conclusion supersedes an earlier one: "结论 X 已被修正为 Y". */
   correctionLine?: string;
   /** True when an earlier turn superseded THIS turn (it is historical context, not current truth). */
@@ -322,7 +326,7 @@ export async function searchDialogueTurns(
     const scored = turns
       .map((turn) => ({ turn, score: dialogueMatchScore(turn, tokens) }))
       .filter((s) => s.score >= DIALOGUE_SEARCH_MIN_RATIO)
-      .sort((a, b) => b.score - a.score || b.turn.updatedAt - a.turn.updatedAt);
+      .sort((a, b) => b.score - a.score || b.turn.updatedAt - a.turn.updatedAt || a.turn.id.localeCompare(b.turn.id));
 
     const limitBounded = Math.max(1, options?.limit ?? DIALOGUE_SEARCH_MAX);
     const hits: DialogueSearchHit[] = [];
