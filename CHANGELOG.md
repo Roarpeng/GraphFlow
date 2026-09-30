@@ -13,7 +13,8 @@ All notable changes to this project are documented in this file.
 - 出处如实：写入的证据带 `source: "reconcile"`（`EvidenceSource` 联合新增该值）且 `userConfirmed: false`，不会伪装成用户确认。默认 **dry-run**，要落盘必须显式 `--apply`。
 - `graphflow selfcheck` 新增 `reconcile` 行（只读，不跑 git、不跑命令）。本仓库实跑：`158 pending (0 name files), verifyCommand unset` —— 也就是说机制虽然通了，**当前仓库的 episode 任务文本里没有任何存在的文件路径**，闭合还差"捕获时记下改过哪些文件"这一步；报告里 `passesWithoutLessons` 也明说：pass 无 lesson 只关闭 episode，不产生技能学习（`shouldApplySkillLearningFromOutcome` 的既有门）。
 - 修 `scripts/backfill-episodes.cjs` 两处硬伤：回填出的 episode 原先一律 `outcome:"pass"`（每条 commit 都算成功，正是上面禁止的凭空判胜），现在改 `pending`；且当旁边存在 `graphflow-graph.sqlite` 时拒绝写 JSON 存储并给出指引（这正是 1.28.0 费力合并回来的分叉）。实测该脚本从未跑过（无 `source: backfill:*` 的 episode）。
-- 新增 `tests/outcome-reconciler.test.ts`（8 例，含真 git 仓库）：无 verify 命令不写、命令失败不写、绿+命中文件才 pass、出处与 `userConfirmed:false`、无命中的 commit 不写、dry-run 不写、无 lesson 的 pass 被标记。
+- 新增 `tests/outcome-reconciler.test.ts`（9 例，含真 git 仓库）：无 verify 命令不写、命令失败不写、绿+命中文件才 pass、出处与 `userConfirmed:false`、无命中的 commit 不写、dry-run 不写、无 lesson 的 pass 被标记。
+- **顺带修一个真 bug**：`loadAllEpisodes` 走 `client.queryByKeyword`，而 SQLite 的关键字查询是 `LIMIT 200`（`sqlite-client.ts:280,290`）——名字叫 "All"，实际第 201 条起静默消失，影响 `memory list`、飞轮报告与 outcome 回填。现在优先读整快照，读不到快照才退回关键字查询。`tests/outcome-reconciler.test.ts` 用 201 条 episode 钉住这条。
 
 ### Fixed — 测试把 179 条 `force a failure` episode 写进了本仓库的真实存储
 

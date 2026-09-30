@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GraphifyClient } from "../src/graph/graphify-client";
+import { GraphifySqliteClient } from "../src/graph/sqlite-client";
 import { recordEpisode, loadAllEpisodes } from "../src/learning/episodic-memory";
 import {
   extractNamedFiles,
@@ -145,4 +146,30 @@ describe("reconcileEpisodes", () => {
     expect(report.counts.pass).toBe(1);
     expect(report.passesWithoutLessons).toBe(1);
   });
+});
+
+describe("episode enumeration is complete", () => {
+  it("reads past the keyword query's 200-row cap", async () => {
+    // `queryByKeyword` is LIMIT 200 in SQLite, so "loadAllEpisodes" used to
+    // stop at 200 and hide the rest from memory list, the flywheel report and
+    // reconciliation. The snapshot read is the only complete one.
+    const client = new GraphifySqliteClient(join(root, "over-cap.sqlite"));
+    for (let i = 0; i < 201; i += 1) {
+      await recordEpisode(
+        client,
+        {
+          task: `批量核对 src/packer.ts 的第 ${i} 项`,
+          plan: [],
+          outcome: "pending",
+          keyDecisions: [],
+          lessons: [],
+          attempts: 1,
+        },
+        undefined
+      );
+    }
+    const all = await loadAllEpisodes(client);
+    expect(all.length).toBe(201);
+    client.close?.();
+  }, 120_000);
 });

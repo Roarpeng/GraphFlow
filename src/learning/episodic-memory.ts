@@ -361,9 +361,19 @@ function fuseEpisodeRankings(rankings: EpisodeRecord[][], limit: number, k = 60)
   return entries.slice(0, limit).map((e) => e.rec);
 }
 
+/**
+ * Every episode in the store.
+ *
+ * This used to go through `queryByKeyword`, which is `LIMIT 200` in SQLite
+ * (`sqlite-client.ts:280,290`) — so "all" silently stopped at 200 and anything
+ * past that vanished from `memory list`, the flywheel report and outcome
+ * reconciliation. The snapshot is the only complete read; the keyword path
+ * stays as the fallback for clients that cannot take one.
+ */
 export async function loadAllEpisodes(client: GraphClient): Promise<EpisodeRecord[]> {
-  const nodes = await client.queryByKeyword(EPISODE_SENTINEL);
-  return parseEpisodes(nodes);
+  const snapshot = client.readSnapshot?.();
+  if (snapshot) return parseEpisodes(snapshot.nodes);
+  return parseEpisodes(await client.queryByKeyword(EPISODE_SENTINEL));
 }
 
 const LESSON_PREFIX = "lesson:";
