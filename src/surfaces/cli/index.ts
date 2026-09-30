@@ -128,6 +128,16 @@ import {
   type CliCommandResult,
 } from "./output";
 
+function buildCliUsageWithSettings(): string {
+  const usage = buildCliUsage();
+  if (usage.includes("settings")) return usage;
+  return (
+    usage +
+    "\n  settings [--port <port>] [--host <host>] [--no-open]   Launch web settings server in browser (alias: config ui)\n" +
+    "                                                        Run 'graphflow settings' to configure in browser"
+  );
+}
+
 async function executeDepsCommand(args: string[]): Promise<CliCommandResult> {
   const { ensureRuntimeDepsInstalled, inspectRuntimeDeps } = await import("../../integrations/ensure-runtime-deps.js");
   const sub = args[0] ?? "status";
@@ -188,7 +198,7 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       return {
         command: "install",
         data: { ...data, workspaceBuildPreference: preference },
-        legacyText: `workspace build ${preference.enabled ? "enabled" : "disabled"} (${preference.status}): ${target}; marker at ${preference.filePath}; ${formatInstallLegacyText(data)}`,
+        legacyText: `workspace build ${preference.enabled ? "enabled" : "disabled"} (${preference.status}): ${target}; marker at ${preference.filePath}; ${formatInstallLegacyText(data)}\nRun 'graphflow settings' to configure in browser`,
       };
     }
     const data = buildInstallReport(process.cwd());
@@ -210,7 +220,7 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     return {
       command: "install",
       data: runtimeDeps ? { ...data, runtimeDeps } : data,
-      legacyText: `${formatInstallLegacyText(data)}${runtimeDepsText}`,
+      legacyText: `${formatInstallLegacyText(data)}${runtimeDepsText}\nRun 'graphflow settings' to configure in browser`,
     };
   }
 
@@ -224,7 +234,30 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     return {
       command: "init",
       data: {},
-      legacyText: `Initialization complete`,
+      legacyText: `Initialization complete\nRun 'graphflow settings' to configure in browser`,
+    };
+  }
+
+  if (command === "settings" || (command === "config" && args[0] === "ui")) {
+    const { startSettingsServer } = await import("./settings-server.js");
+    const portRaw = readCliFlagValue(args, "--port");
+    const host = readCliFlagValue(args, "--host") ?? "127.0.0.1";
+    const port = portRaw ? parseInt(portRaw, 10) : undefined;
+    const noOpen = args.includes("--no-open");
+    const started = await startSettingsServer({
+      port,
+      host,
+      configPath,
+      openBrowser: !noOpen,
+    });
+    const { server: _server, stop: _stop, ...data } = started;
+    return {
+      command: "settings",
+      data,
+      legacyText:
+        `GraphFlow settings web UI listening on ${data.url}\n` +
+        `Run 'graphflow settings' to configure in browser\n` +
+        `Press Ctrl+C to stop`,
     };
   }
 
@@ -1887,7 +1920,7 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   // only place the usage banner was still going to stdout, so an unknown
   // command printed help text into a script's stdout pipe). stderr keeps the
   // machine-readable channel clean.
-  console.error(buildCliUsage());
+  console.error(buildCliUsageWithSettings());
   process.exitCode = 1;
   return undefined;
 }
@@ -2028,7 +2061,7 @@ async function main(): Promise<void> {
   // like a stdout payload. stderr keeps stdout reserved for machine-readable
   // output.
   if (!command) {
-    console.error(buildCliUsage());
+    console.error(buildCliUsageWithSettings());
     process.exitCode = 1;
     return;
   }
@@ -2041,7 +2074,7 @@ async function main(): Promise<void> {
   await runFirstUseBootstrap(command);
 
   if (command === "help" || command === "--help" || command === "-h") {
-    console.error(buildCliUsage());
+    console.error(buildCliUsageWithSettings());
     return;
   }
 
@@ -2056,7 +2089,7 @@ async function main(): Promise<void> {
     // empty, so a script reading stdout gets nothing rather than help text it
     // will try to parse.
     console.error(`graphflow: unknown command "${command}"`);
-    console.error(buildCliUsage());
+    console.error(buildCliUsageWithSettings());
     process.exitCode = 1;
     return;
   }

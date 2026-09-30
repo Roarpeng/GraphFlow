@@ -1,4 +1,4 @@
-import type { GraphFlowConfig } from "./schema";
+import type { GraphFlowConfig, WorkerType } from "./schema";
 import { validateConfig } from "./loader";
 import { DEFAULT_INCLUDE_EXTENSIONS } from "./include-extensions.js";
 import {
@@ -18,6 +18,11 @@ export const DEFAULT_MAX_CONTEXT_TOKENS = 1500;
 export const DEFAULT_OUTPUT_DIR = "graphflow-out";
 /** Pre-v0.6.9 default; upgraded automatically when still present in saved configs. */
 export const LEGACY_MAX_CONTEXT_TOKENS = 400;
+
+export const DEFAULT_WORKER_TYPE: WorkerType = "local-command";
+export const DEFAULT_WORKER_BASE_URL = "http://localhost:8000/v1";
+export const DEFAULT_WORKER_MODEL = "typesafe-jev";
+export const DEFAULT_WORKER_TIMEOUT_MS = 30000;
 
 export function resolveMaxContextTokens(value?: number): number {
   if (value === undefined || value === LEGACY_MAX_CONTEXT_TOKENS) {
@@ -100,6 +105,15 @@ export function getDefaultConfig(): GraphFlowConfig {
       // full text copy (escape hatch for legacy clients).
       textCopy: "auto",
     },
+    workerPolicy: {
+      workerType: DEFAULT_WORKER_TYPE,
+      workerConfig: {
+        provider: "openai",
+        baseUrl: DEFAULT_WORKER_BASE_URL,
+        model: DEFAULT_WORKER_MODEL,
+        timeoutMs: DEFAULT_WORKER_TIMEOUT_MS,
+      },
+    },
     // SoL-Pi-style efficiency mechanisms. Default = best config (all ON);
     // switch any mechanism off from the graphflow-settings page or here.
     efficiencyPolicy: {
@@ -120,6 +134,15 @@ export function getDefaultConfig(): GraphFlowConfig {
       },
       actionFusion: { enabled: true },
       reinvest: { enabled: true, ratio: 0.5, maxBudgetTokens: 200_000, estimatedTrialTokens: 4_000 },
+      worker: {
+        workerType: DEFAULT_WORKER_TYPE,
+        workerConfig: {
+          provider: "openai",
+          baseUrl: DEFAULT_WORKER_BASE_URL,
+          model: DEFAULT_WORKER_MODEL,
+          timeoutMs: DEFAULT_WORKER_TIMEOUT_MS,
+        },
+      },
     },
   });
 }

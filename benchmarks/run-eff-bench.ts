@@ -35,10 +35,31 @@ async function main(): Promise<void> {
   if (command === "run") {
     const mode = flag("mode", rest) === "shadow" ? "shadow" : "baseline";
     const limit = flag("limit", rest) ? Number(flag("limit", rest)) : undefined;
+    const workerFlag = flag("worker", rest);
+    const worker =
+      workerFlag === "typesafe-jev" || workerFlag === "local" || workerFlag === "baseline"
+        ? workerFlag
+        : undefined;
+    const providerFlag = flag("provider", rest);
+    const provider =
+      providerFlag === "deepseek" || providerFlag === "openai" || providerFlag === "local"
+        ? providerFlag
+        : undefined;
+    const model = flag("model", rest);
     const outPath =
-      flag("out", rest) ?? `graphflow-out/eff-bench/${mode}.jsonl`;
+      flag("out", rest) ??
+      `graphflow-out/eff-bench/${mode}${worker && worker !== "baseline" ? `-${worker}` : ""}.jsonl`;
+
     mkdirSync(dirname(outPath), { recursive: true });
-    const summary = await runEffBench({ mode, limit, outPath });
+    const summary = await runEffBench({
+      mode,
+      limit,
+      outPath,
+      worker,
+      provider,
+      model,
+    });
+
     console.log(`mode=${summary.mode} tasks=${summary.tasksRun} out=${summary.outPath}`);
     console.log(`byCohort=${JSON.stringify(summary.byCohort)}`);
     console.log(`reuseMode=${JSON.stringify(summary.reuseModeDistribution)}`);
@@ -73,10 +94,19 @@ async function main(): Promise<void> {
     console.log(`tasksCompared=${report.tasksCompared}`);
     console.log(`baseline=${JSON.stringify(report.baseline)}`);
     console.log(`shadow=${JSON.stringify(report.shadow)}`);
+    if (report.comparison) {
+      console.log(`tokenSavingsRate=${(report.comparison.tokenSavingsRate * 100).toFixed(2)}%`);
+      console.log(`llmCallReductionRate=${(report.comparison.llmCallReductionRate * 100).toFixed(2)}%`);
+      console.log(
+        `roundsComparison=baseline:${report.baseline?.avgRounds} vs shadow:${report.shadow?.avgRounds} (diff: ${report.comparison.roundsDiff})`
+      );
+    }
     return;
   }
 
-  console.error("usage: run-eff-bench.ts run [--mode=baseline|shadow] [--limit=N] [--out=PATH] | compare <a.jsonl> <b.jsonl>");
+  console.error(
+    "usage: run-eff-bench.ts run [--mode=baseline|shadow] [--limit=N] [--out=PATH] [--worker=baseline|typesafe-jev|local] [--provider=deepseek|openai|local] [--model=NAME] | compare <a.jsonl> <b.jsonl>"
+  );
   process.exitCode = 2;
 }
 

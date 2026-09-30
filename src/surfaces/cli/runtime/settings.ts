@@ -16,9 +16,26 @@ import {
 } from "../../../config/resolve";
 import { resolveGlobalConfigPath, writeConfigSecure } from "../../../config/scaffold";
 import { stripWorkspaceRootForGlobalPersist } from "../../../config/workspace-root";
-import type { GraphFlowConfig } from "../../../config/schema";
+import type { GraphFlowConfig, WorkerConfig, WorkerPolicyConfig, WorkerType } from "../../../config/schema";
+import {
+  DEFAULT_WORKER_BASE_URL,
+  DEFAULT_WORKER_MODEL,
+  DEFAULT_WORKER_TIMEOUT_MS,
+  DEFAULT_WORKER_TYPE,
+} from "../../../config/defaults";
 import { readRawConfig } from "./helpers.js";
 import type { GraphFlowSettings, GraphFlowSettingsInput, SettingsValidationIssue } from "./types.js";
+
+declare module "./types.js" {
+  interface GraphFlowSettings {
+    workerType?: WorkerType;
+    workerBaseUrl?: string;
+    workerModel?: string;
+    workerApiKey?: string;
+    workerProvider?: string;
+    workerTimeoutMs?: number;
+  }
+}
 
 type TierName = "smart" | "economy";
 
@@ -86,12 +103,59 @@ function mergeProviderConfig(
   } as GraphFlowConfig["providers"][string];
 }
 
+interface ResolvedWorker {
+  workerType: WorkerType;
+  workerBaseUrl?: string;
+  workerModel?: string;
+  workerApiKey?: string;
+  workerProvider?: string;
+  workerTimeoutMs?: number;
+}
+
+function readWorkerFromConfig(
+  config: GraphFlowConfig,
+  rawConfig: Partial<GraphFlowConfig> | undefined
+): ResolvedWorker {
+  const resolvedPolicy =
+    config.workerPolicy ??
+    config.efficiencyPolicy?.workerPolicy ??
+    config.efficiencyPolicy?.worker;
+  const rawPolicy =
+    rawConfig?.workerPolicy ??
+    rawConfig?.efficiencyPolicy?.workerPolicy ??
+    rawConfig?.efficiencyPolicy?.worker;
+
+  const rawConfigObj = rawPolicy?.workerConfig;
+  const resolvedConfigObj = resolvedPolicy?.workerConfig;
+
+  const workerType = (rawPolicy?.workerType ??
+    resolvedPolicy?.workerType ??
+    DEFAULT_WORKER_TYPE) as WorkerType;
+
+  const rawApiKey = rawConfigObj?.apiKey ?? resolvedConfigObj?.apiKey;
+  const apiKey = formatApiKeyForSettings(rawApiKey);
+  const baseUrl = rawConfigObj?.baseUrl ?? resolvedConfigObj?.baseUrl ?? DEFAULT_WORKER_BASE_URL;
+  const model = rawConfigObj?.model ?? resolvedConfigObj?.model ?? DEFAULT_WORKER_MODEL;
+  const provider = rawConfigObj?.provider ?? resolvedConfigObj?.provider ?? "openai";
+  const timeoutMs = rawConfigObj?.timeoutMs ?? resolvedConfigObj?.timeoutMs ?? DEFAULT_WORKER_TIMEOUT_MS;
+
+  return {
+    workerType,
+    ...(baseUrl ? { workerBaseUrl: baseUrl } : {}),
+    ...(model ? { workerModel: model } : {}),
+    ...(apiKey ? { workerApiKey: apiKey } : {}),
+    ...(provider ? { workerProvider: provider } : {}),
+    ...(timeoutMs !== undefined ? { workerTimeoutMs: timeoutMs } : {}),
+  };
+}
+
 export function getGraphFlowSettings(configPath = "graphflow.config.json"): GraphFlowSettings {
   const actualPath = resolveConfigPath(configPath);
   const config = resolveConfig(actualPath);
   const rawConfig = readRawConfig(actualPath);
   const smart = readTierFromConfig(config, rawConfig, "smart");
   const economy = readTierFromConfig(config, rawConfig, "economy");
+  const worker = readWorkerFromConfig(config, rawConfig);
 
   return {
     configPath: actualPath,
@@ -127,6 +191,12 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
         actionFusionEnabled: efficiency.actionFusion.enabled,
       };
     })(),
+    workerType: worker.workerType,
+    ...(worker.workerBaseUrl ? { workerBaseUrl: worker.workerBaseUrl } : {}),
+    ...(worker.workerModel ? { workerModel: worker.workerModel } : {}),
+    ...(worker.workerApiKey ? { workerApiKey: worker.workerApiKey } : {}),
+    ...(worker.workerProvider ? { workerProvider: worker.workerProvider } : {}),
+    ...(worker.workerTimeoutMs !== undefined ? { workerTimeoutMs: worker.workerTimeoutMs } : {}),
   };
 }
 
@@ -148,6 +218,29 @@ export function saveGraphFlowSettings(
     mergeProviderConfig(providers, economy.provider, economy);
   }
 
+  const currentWorker = readWorkerFromConfig(current, readRawConfig(actualPath));
+  const workerType = (settings.workerType || currentWorker.workerType || DEFAULT_WORKER_TYPE) as WorkerType;
+  const workerBaseUrl = settings.workerBaseUrl?.trim() ?? currentWorker.workerBaseUrl ?? DEFAULT_WORKER_BASE_URL;
+  const workerModel = settings.workerModel?.trim() ?? currentWorker.workerModel ?? DEFAULT_WORKER_MODEL;
+  const workerApiKey = settings.workerApiKey !== undefined
+    ? (settings.workerApiKey.trim() ? formatApiKeyForConfig(settings.workerApiKey) : undefined)
+    : (currentWorker.workerApiKey ? formatApiKeyForConfig(currentWorker.workerApiKey) : undefined);
+  const workerProvider = settings.workerProvider?.trim() || currentWorker.workerProvider || "openai";
+  const workerTimeoutMs = settings.workerTimeoutMs ?? currentWorker.workerTimeoutMs ?? DEFAULT_WORKER_TIMEOUT_MS;
+
+  const workerConfig: WorkerConfig = {
+    provider: workerProvider,
+    ...(workerBaseUrl ? { baseUrl: workerBaseUrl } : {}),
+    ...(workerModel ? { model: workerModel } : {}),
+    ...(workerApiKey ? { apiKey: workerApiKey } : {}),
+    ...(workerTimeoutMs !== undefined ? { timeoutMs: workerTimeoutMs } : {}),
+  };
+
+  const workerPolicy: WorkerPolicyConfig = {
+    workerType,
+    workerConfig,
+  };
+
   const efficiency = resolveEfficiencyPolicy(current);
   const efficiencyPolicy: NonNullable<GraphFlowConfig["efficiencyPolicy"]> = {
     ...current.efficiencyPolicy,
@@ -167,6 +260,8 @@ export function saveGraphFlowSettings(
       ...current.efficiencyPolicy?.actionFusion,
       enabled: settings.actionFusionEnabled ?? efficiency.actionFusion.enabled,
     },
+    worker: workerPolicy,
+    workerPolicy: workerPolicy,
   };
 
   const updated = validateConfig({
@@ -218,6 +313,7 @@ export function saveGraphFlowSettings(
       ...current.learningPolicy,
     },
     efficiencyPolicy,
+    workerPolicy,
   });
 
   const dir = dirname(actualPath);

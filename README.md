@@ -73,6 +73,33 @@ Connect via MCP (Cursor / Claude Code / …):
 
 The agent calls `graphflow_context` for compressed context, then `graphflow_plan` to plan; without a provider API key GraphFlow automatically bridges the ATP thinking protocol to the host agent (agent-delegated mode). For symbol-precise edits, compose Serena as a second MCP server — [GraphFlow + Serena](docs/graphflow-serena.md) (`examples/graphflow-serena.mcp.json`).
 
+### Web Settings UI (Local Lightweight Service)
+
+In addition to the VS Code extension settings panel, NPM CLI users can launch a local dark-themed configuration dashboard in their browser at any time:
+
+```bash
+graphflow settings      # or: npx graphflow config ui
+```
+
+* **Universal Protocol Support**: Native `openai-compatible` and `anthropic-compatible` drivers. Configure only `baseUrl` and `model`.
+* **Password-Free Local Deployment**: Automatically recognizes `localhost` / `127.0.0.1` endpoints (Ollama, vLLM, local JEV) without requiring placeholder API keys.
+* **Cascade Env-Key Sniffing**: Automatically matches public domain endpoints to corresponding environment variables (`DEEPSEEK_API_KEY`, `TYPESAFE_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.). Seamlessly falls back to Bridge mode if no credentials are configured.
+
+### GraphFlow 2.x: Agent Efficiency Agent (`eff-agent`)
+
+Elevates token reduction to an independent **Compute Avoidance** decision layer, available as a standalone CLI:
+
+```bash
+# Execute task with real worker dispatch
+npx eff-agent run "fix type errors in this module" --worker=jev --policy=conservative
+
+# Run real 50-task benchmark
+npx eff-agent bench run benchmarks/eff-tasks-v1.jsonl --worker=jev --mode=shadow
+
+# Strict R1-R6 provenance-gated A/B comparison
+npx eff-agent bench compare baseline.jsonl shadow.jsonl
+```
+
 ## Why GraphFlow
 
 Single-purpose tools each do one thing well; GraphFlow combines graph + compression + planning protocol + learning memory in one place:
@@ -104,6 +131,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | **Team sharing** | `graphflow team serve` (tenant + RBAC) + `skill sync export/import/push/pull`; imports/pulls are a **bidirectional MERGE**; golden queries via `.graphflow/team-golden.json`; [security model + ops runbook](docs/team-memory-security.md) |
 | **Benchmarks** | [Comprehensive 92.9%](benchmarks/COMPREHENSIVE-RESULTS.md) · [Independent-style 96.2%](benchmarks/INDEPENDENT-RESULTS.md) · [context-readiness eval](benchmarks/SWE-BENCH-RESULTS.md) · token savings with **two baseline arms** — [95.6% realistic / 98.5% naive grep](benchmarks/RESULTS.md) |
 | **Model routing** | Smart / Economy tiers; multi-provider health probes and fallback (DeepSeek, OpenAI, Anthropic, Bailian, Doubao) |
+| **2.x Efficiency Layer** | Standalone package `@roarpeng/graphflow-efficiency-agent` + `eff-agent` CLI: four-track fingerprinting, 3-tier caching, Layer B hybrid Meta-Agent decision, Dynamic Temporary Harness, TypeSafe-JEV Worker, External CLI Worker, R1-R6 provenance A/B benchmarks. See [packages/efficiency-agent/README.md](packages/efficiency-agent/README.md) |
 | **Workbench** | Plan DAG seeds function-topic containers; collapsed outline; click `topicId` to resume; drift forks a side branch; original Q/A stored via `assistantReply` |
 | **Conversation graph** | Dialogue turns are typed graph nodes with temporal validity (`supersedes` / `same_topic` edges, `validAt` / `invalidAt`) — corrected conclusions are detected offline and rendered as correction chains, and current-truth filtering hides superseded turns. Historical Q&A is searchable: `dialogue search "<query>"` (add `--include-superseded` to look back), plus additive `dialogueHits` in every `graphflow_context` preview that never displace code anchors. Explicit forks (`dialogue fork --from <turnId>`), replay paths (`dialogue list --path <turnId>`), multi-agent traces (`dialogue traces`), and a session-grouped export with correction chains + traces in the memory pack (`artifact export-memory` → `dialogues.md`) |
 | **Observability** | `graphflow_diagnose` / `route diagnose`: provider health + graph stats + token savings + **flywheel health** (auto-capture, episodes, skills by class, session journal) + workbench outline |

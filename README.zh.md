@@ -65,6 +65,33 @@ Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `gra
 
 健康自检一条命令：`graphflow selfcheck`（配置加载 / 图存储代码节点 / delta 日志 / 索引新鲜度 / **LLM 真实连通** / 飞轮脉冲 / 对话脱敏 / 会话日志，红绿清单，`--json` 可编程消费）。
 
+### Web 可视化配置后台（本地轻量服务）
+
+除 VS Code 扩展设置面板外，NPM CLI 安装用户可随时通过一行命令在浏览器中唤起本地暗色配置后台：
+
+```bash
+graphflow settings      # 或 npx graphflow config ui
+```
+
+* **通用模型协议**：原生支持 `openai-compatible` 与 `anthropic-compatible` 协议，仅需配置 `baseUrl` 和 `model`；
+* **本地免密部署**：自动识别 `localhost` / `127.0.0.1` 等本地模型端点（如 Ollama / vLLM / JEV 本地服务），无需虚假 API Key 即可直接通信；
+* **四级级联嗅探**：公网端点自动按域名特征映射对应环境变量（`DEEPSEEK_API_KEY`、`TYPESAFE_API_KEY`、`OPENAI_API_KEY`、`ANTHROPIC_API_KEY` 等）；未配置任何 Key 时 100% 平滑进入 Bridge 桥接模式，绝不抛错阻断。
+
+### GraphFlow 2.x：Agent Efficiency Agent (`eff-agent`)
+
+从“省 Token”升级为“计算规避决策层（Compute Avoidance）”，支持以独立 CLI 工具运行：
+
+```bash
+# 任务真实调度执行
+npx eff-agent run "修复这个模块的类型报错" --worker=jev --policy=conservative
+
+# 运行真实 50 任务基准评测
+npx eff-agent bench run benchmarks/eff-tasks-v1.jsonl --worker=jev --mode=shadow
+
+# 严格 R1-R6 溯源门禁 A/B 对比
+npx eff-agent bench compare baseline.jsonl shadow.jsonl
+```
+
 ## 核心能力
 
 | 能力 | 说明 |
@@ -79,6 +106,7 @@ Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `gra
 | **飞轮复现** | `npm run proof:flywheel` 离线串检索 / skill A/B / memory A/B；见 [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md) |
 | **团队记忆** | `graphflow team serve`：tenant 隔离 + viewer/contributor/admin；非 loopback 默认强制认证；`diagnose` 报告连通与 RBAC。见 [docs/team-memory-security.md](docs/team-memory-security.md) |
 | **HostAdapter** | **全部 20 个宿主**的 install / uninstall / doctor 统一走注册表：4 个手写切片（Cursor / Claude Code / DeepSeek Harness / Kimi Code）+ 通用 profile 切片（Trae、VS Code、Windsurf、Cline、Roo、Kilo、PearAI、Gemini、Codex、Antigravity、Amazon Q、Zed、Continue、Qoder、Opencode、ZCode） |
+| **2.x 效率决策层** | 独立包 `@roarpeng/graphflow-efficiency-agent` + `eff-agent` CLI；四轨指纹、三层缓存、Layer B 小模型 Meta 决策、Dynamic Temporary Harness 动态任务沙盒、TypeSafe-JEV 强类型 AI Worker、External CLI Worker、R1-R6 溯源门禁 A/B 基准。详见 [packages/efficiency-agent/README.md](packages/efficiency-agent/README.md) |
 | **Serena** | 并列第二个 MCP：context/plan → Serena 编辑 → `report_outcome` |
 
 完整英文对照与基准数字：[README.md](README.md)。

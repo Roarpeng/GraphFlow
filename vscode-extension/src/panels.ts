@@ -157,6 +157,12 @@ export interface GraphFlowSettings {
   indexOfficeDocs?: boolean;
   embeddingProvider?: "fnv" | "transformers";
   downloadAnydoc?: boolean;
+  workerType?: "local-command" | "typesafe-jev";
+  workerBaseUrl?: string;
+  workerModel?: string;
+  workerApiKey?: string;
+  workerProvider?: string;
+  workerTimeoutMs?: number;
 }
 
 export interface SettingsPanelStatus {
@@ -913,6 +919,10 @@ export function buildSettingsHtml(
   const observationReduceEnabled = settings.observationReduceEnabled !== false;
   const contextPressureEnabled = settings.contextPressureEnabled !== false;
   const actionFusionEnabled = settings.actionFusionEnabled !== false;
+  const workerType = settings.workerType === "typesafe-jev" ? "typesafe-jev" : "local-command";
+  const workerBaseUrl = settings.workerBaseUrl ?? "http://localhost:8000/v1";
+  const workerModel = settings.workerModel ?? "typesafe-jev";
+  const workerApiKey = settings.workerApiKey ?? "";
   const anydocReady = Boolean(status?.anydocReady);
   const anydocLabel = anydocReady
     ? `就绪${status?.anydocVersion ? ` ${escapeHtml(status.anydocVersion)}` : ""}`
@@ -1055,6 +1065,31 @@ export function buildSettingsHtml(
         <label><input id="settings-observation-reduce" name="observationReduceEnabled" type="checkbox" ${observationReduceEnabled ? "checked" : ""} /> 日志压缩为可核验收据（Evidence-Preserving Reducer）</label>
         <label><input id="settings-context-pressure" name="contextPressureEnabled" type="checkbox" ${contextPressureEnabled ? "checked" : ""} /> 按观测压力自适应预算 + 压缩建议（Online Context Compact）</label>
         <label><input id="settings-action-fusion" name="actionFusionEnabled" type="checkbox" ${actionFusionEnabled ? "checked" : ""} /> 融合「编辑 + 验证」为一步（Action Fusion）</label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Worker Agent 配置</h2>
+      <p class="flow-hint" style="margin-bottom: 12px;">配置任务执行 Worker Adapter（包含 TypeSafe-JEV 与本地部署配置）。</p>
+      <div class="grid-2">
+        <label>Worker 类型
+          <select id="settings-worker-type" name="workerType">
+            <option value="local-command"${workerType === "local-command" ? " selected" : ""}>本地命令（local-command）</option>
+            <option value="typesafe-jev"${workerType === "typesafe-jev" ? " selected" : ""}>TypeSafe-JEV 模型（typesafe-jev）</option>
+          </select>
+        </label>
+        <label>Model
+          <input id="settings-worker-model" name="workerModel" value="${escapeHtml(workerModel)}" placeholder="typesafe-jev" />
+          <span class="flow-hint">默认 typesafe-jev 或本地模型名称</span>
+        </label>
+        <label>Base URL
+          <input id="settings-worker-base-url" name="workerBaseUrl" value="${escapeHtml(workerBaseUrl)}" placeholder="http://localhost:8000/v1" />
+          <span class="flow-hint">支持云端或本地部署模型端点，例如 http://localhost:8000/v1</span>
+        </label>
+        <label>API Key
+          <input id="settings-worker-api-key" name="workerApiKey" value="${escapeHtml(workerApiKey)}" placeholder="TYPESAFE_API_KEY" />
+          <span class="flow-hint">支持 TYPESAFE_API_KEY，本地免密模型可留空</span>
+        </label>
       </div>
     </section>
 

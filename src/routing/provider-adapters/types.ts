@@ -138,3 +138,16 @@ export function pickUsage(payload: Record<string, unknown>): ProviderUsageStats 
   }
   return Object.keys(stats).length > 0 ? stats : undefined;
 }
+
+export type ProtocolType = "openai-compatible" | "anthropic-compatible";
+
+export interface GenericProtocolOptions {
+  baseUrl?: string;
+  apiKey?: string;
+  timeoutMs?: number;
+  headers?: Record<string, string>;
+  strict?: boolean;
+}
+
+export type GenericProtocolRequest = ProviderTextRequest;
+export type ProtocolDriverResult = ProviderTextResult;

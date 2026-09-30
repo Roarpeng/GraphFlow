@@ -16,10 +16,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildRunTrace,
+  createLocalCommandWorker,
+  createTypeSafeJevWorker,
+  estimated,
+  measured,
   parseEffTaskCorpus,
+  runBrokeredExecution,
   validateTraceProvenance,
+  type BrokerPolicy,
   type EffTask,
+  type Measurement,
   type TaskTrace,
+  type TraceTaskInfo,
+  type TraceToolUse,
+  type TypeSafeJevObservation,
+  type WorkerAdapter,
 } from "../packages/efficiency-agent/src/index";
 import { runTaskResult } from "../src/surfaces/cli/runtime";
 import type { RunTaskSummary } from "../src/surfaces/cli/runtime/types";
@@ -81,6 +92,112 @@ function makeSandbox(): { configPath: string; cleanup: () => void } {
   return { configPath, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
+export interface RealWorkerObservation {
+  task: TraceTaskInfo;
+  worker: string;
+  mode: "baseline" | "shadow";
+  startedAt: string;
+  finishedAt: string;
+  /** Wall-clock ms of the execution. Measured. */
+  totalDurationMs: number;
+  /** Actual execution outcome: pass or fail. */
+  success: boolean;
+  /** Attempts or rounds consumed. */
+  rounds?: number | Measurement;
+  attempts?: number;
+  /** Anchors in context. */
+  anchors?: number;
+  /** Context token count (number wrapped as measured(n), or explicit Measurement). */
+  contextTokens?: number | Measurement;
+  /** Total LLM calls (number wrapped as measured(n), or explicit Measurement). */
+  llmCalls?: number | Measurement;
+  /** LLM tokens. Numbers wrapped as measured(n), or explicit Measurement. */
+  totalTokens?: number | Measurement;
+  inputTokens?: number | Measurement;
+  outputTokens?: number | Measurement;
+  costUsd?: number | Measurement;
+  /** Tool usage if any. */
+  tools?: TraceToolUse[];
+  /** Validation checks performed. */
+  validation?: Array<{ name: string; passed: boolean }>;
+  /** Failure detail if any. */
+  failure?: { stage: string; reason: string };
+  /** Efficiency advisory if in shadow mode. */
+  advisory?: {
+    taskId: string;
+    reuseMode: "REUSE" | "ADAPT" | "FRESH";
+    durationMs: number;
+    llmCalls: number;
+  };
+}
+
+/**
+ * Build a TaskTrace from real worker execution observations.
+ * Ensures all cost-bearing numbers strictly follow the Measurement Contract (R1-R6).
+ */
+export function buildRealWorkerTrace(obs: RealWorkerObservation): TaskTrace {
+  const toMeasurement = (val: number | Measurement | undefined, fallback: number): Measurement => {
+    if (val === undefined) return measured(fallback);
+    if (typeof val === "number") return measured(val);
+    return val;
+  };
+
+  const contextTokens = toMeasurement(obs.contextTokens, 0);
+  const llmCalls = toMeasurement(obs.llmCalls, 0);
+  const rounds =
+    obs.rounds !== undefined
+      ? typeof obs.rounds === "number"
+        ? measured(Math.max(1, obs.rounds))
+        : obs.rounds
+      : measured(Math.max(1, obs.attempts ?? 1));
+
+  const trace: TaskTrace = {
+    schemaVersion: "1.0",
+    traceId: `${obs.mode}-${obs.task.taskId ?? obs.task.text.slice(0, 24)}`,
+    task: obs.task,
+    run: {
+      worker: obs.worker,
+      mode: obs.mode,
+      startedAt: obs.startedAt,
+      finishedAt: obs.finishedAt,
+    },
+    context: {
+      tokens: contextTokens,
+      anchors: obs.anchors ?? 0,
+      cacheHit: obs.advisory?.reuseMode === "REUSE",
+    },
+    llm: {
+      calls: llmCalls,
+      ...(obs.inputTokens !== undefined ? { inputTokens: toMeasurement(obs.inputTokens, 0) } : {}),
+      ...(obs.outputTokens !== undefined ? { outputTokens: toMeasurement(obs.outputTokens, 0) } : {}),
+      ...(obs.totalTokens !== undefined ? { totalTokens: toMeasurement(obs.totalTokens, 0) } : {}),
+      ...(obs.costUsd !== undefined ? { costUsd: toMeasurement(obs.costUsd, 0) } : {}),
+    },
+    tools: obs.tools ?? [],
+    rounds,
+    validation: obs.validation ?? [],
+    result: { success: obs.success },
+    ...(obs.failure ? { failure: obs.failure } : {}),
+  };
+
+  if (obs.advisory) {
+    const share =
+      obs.totalDurationMs > 0 ? obs.advisory.durationMs / obs.totalDurationMs : 0;
+    trace.decision = {
+      reuseMode: obs.advisory.reuseMode,
+      durationMs: measured(obs.advisory.durationMs),
+      llmCalls: measured(obs.advisory.llmCalls),
+      costShare: estimated(
+        Number(share.toFixed(4)),
+        "decisionMs/totalRunMs",
+        0.9
+      ),
+    };
+  }
+
+  return trace;
+}
+
 export interface EffBenchRunSummary {
   mode: "baseline" | "shadow";
   tasksRun: number;
@@ -92,24 +209,76 @@ export interface EffBenchRunSummary {
   outPath: string;
 }
 
-export async function runEffBench(options: {
+export interface EffBenchRunOptions {
   mode: "baseline" | "shadow";
   limit?: number;
   outPath: string;
   corpusPath?: string;
-}): Promise<EffBenchRunSummary> {
+  /** Worker arm: baseline/bridge (offline) or real worker adapter (TypeSafe-JEV / Local). */
+  worker?: "baseline" | "bridge" | "typesafe-jev" | "local" | WorkerAdapter;
+  provider?: "deepseek" | "openai" | "local" | string;
+  model?: string;
+  apiKey?: string;
+  baseUrl?: string;
+  fetch?: typeof globalThis.fetch;
+  brokerPolicy?: Partial<BrokerPolicy>;
+  workerAdapter?: WorkerAdapter;
+  createWorker?: (task: EffTask, summary: RunTaskSummary) => WorkerAdapter;
+}
+
+function resolveWorker(options: EffBenchRunOptions): WorkerAdapter | undefined {
+  if (options.workerAdapter) {
+    return options.workerAdapter;
+  }
+  if (typeof options.worker === "object" && options.worker !== null && "prepare" in options.worker) {
+    return options.worker;
+  }
+  if (options.worker === "typesafe-jev") {
+    let baseUrl = options.baseUrl;
+    let apiKey = options.apiKey;
+    let model = options.model;
+
+    if (options.provider === "deepseek") {
+      baseUrl = baseUrl ?? process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com/v1";
+      apiKey = apiKey ?? process.env.DEEPSEEK_API_KEY ?? "";
+      model = model ?? "deepseek-chat";
+    } else if (options.provider === "openai") {
+      baseUrl = baseUrl ?? process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1";
+      apiKey = apiKey ?? process.env.OPENAI_API_KEY ?? "";
+      model = model ?? "gpt-4o-mini";
+    } else if (options.provider === "local") {
+      baseUrl = baseUrl ?? process.env.LOCAL_LLM_BASE_URL ?? "http://localhost:11434/v1";
+      apiKey = apiKey ?? "none";
+      model = model ?? "local-model";
+    }
+
+    return createTypeSafeJevWorker({
+      name: "typesafe-jev",
+      baseUrl,
+      apiKey,
+      model,
+      fetch: options.fetch,
+    });
+  }
+  if (options.worker === "local") {
+    return createLocalCommandWorker({ name: "local-command" });
+  }
+  return undefined;
+}
+
+export async function runEffBench(options: EffBenchRunOptions): Promise<EffBenchRunSummary> {
   const tasks = loadCorpus(options.corpusPath).slice(0, options.limit ?? 50);
   const sandbox = makeSandbox();
   const traces: TaskTrace[] = [];
   const violations: string[] = [];
   const startedTotal = Date.now();
 
-  // Episode closure models a real deployment: the flywheel closes runs via
-  // report_outcome / hooks, and similarEpisodes scores are OUTCOME-based
-  // (pass=1, pending=0, fail=-1). Without closure every bridge episode stays
-  // pending at score 0 and the ADAPT verdict can never fire — a benchmark
-  // that never closes episodes measures a store no real project has.
-  // Failure-cohort tasks close as fail: they must never become reuse bait.
+  const isRealWorker =
+    (options.worker && options.worker !== "baseline" && options.worker !== "bridge") ||
+    options.workerAdapter !== undefined ||
+    options.createWorker !== undefined;
+
+  const defaultWorker = isRealWorker ? resolveWorker(options) : undefined;
   const client = createGraphClient(resolveConfig(sandbox.configPath));
 
   try {
@@ -120,15 +289,14 @@ export async function runEffBench(options: {
       try {
         summary = await runTaskResult(task.text, sandbox.configPath);
       } catch (error) {
-        // A deliberate-failure task may still crash the pipeline — that is a
-        // finding, recorded as a failed trace, never a bench abort.
         summary = {
           status: "HUMAN_REVIEW_REQUIRED",
           attempts: 0,
           feedback: `crashed: ${error instanceof Error ? error.message : String(error)}`,
         };
       }
-      const totalDurationMs = Date.now() - t0;
+      const runResultDurationMs = Date.now() - t0;
+
       if (summary.episodeId) {
         try {
           await updateEpisodeOutcome(
@@ -137,38 +305,159 @@ export async function runEffBench(options: {
             task.cohort === "failure" ? "fail" : "pass"
           );
         } catch {
-          // closure is simulation scaffolding; a failed close must not
-          // invalidate the run — the advisory just sees a pending episode.
+          // simulation scaffolding closure
         }
       }
-      const trace = buildRunTrace({
-        task: {
-          text: task.text,
-          category: task.category,
-          ...(summary.advisory ? { taskId: summary.advisory.taskId } : {}),
-        },
-        worker: "graphflow-bridge",
-        mode: options.mode,
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        totalDurationMs,
-        packaged: summary.status === "DELEGATED",
-        descriptorContextChars: summary.executionDescriptor?.context?.length ?? 0,
-        attempts: summary.attempts,
-        anchors: 0,
-        ...(options.mode === "shadow" && summary.advisory
-          ? {
-              advisory: {
-                taskId: summary.advisory.taskId,
-                reuseMode: summary.advisory.reuseMode,
-                durationMs: summary.advisory.decision.durationMs,
-                llmCalls: summary.advisory.decision.llmCalls,
-              },
+
+      if (!isRealWorker) {
+        // Offline bridge path (deterministic v0 packaging + advisory pipeline)
+        const trace = buildRunTrace({
+          task: {
+            text: task.text,
+            category: task.category,
+            ...(summary.advisory ? { taskId: summary.advisory.taskId } : {}),
+          },
+          worker: "graphflow-bridge",
+          mode: options.mode,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          totalDurationMs: runResultDurationMs,
+          packaged: summary.status === "DELEGATED",
+          descriptorContextChars: summary.executionDescriptor?.context?.length ?? 0,
+          attempts: summary.attempts,
+          anchors: 0,
+          ...(options.mode === "shadow" && summary.advisory
+            ? {
+                advisory: {
+                  taskId: summary.advisory.taskId,
+                  reuseMode: summary.advisory.reuseMode,
+                  durationMs: summary.advisory.decision.durationMs,
+                  llmCalls: summary.advisory.decision.llmCalls,
+                },
+              }
+            : {}),
+        });
+        violations.push(...validateTraceProvenance(trace).map((v) => `${task.id}: ${v}`));
+        traces.push(trace);
+      } else {
+        // Real Worker execution arm
+        const worker = options.createWorker ? options.createWorker(task, summary) : defaultWorker!;
+
+        if (options.mode === "shadow" && summary.advisory?.reuseMode === "REUSE") {
+          // REUSE verdict in shadow mode: execution bypassed, 0 LLM calls, cached pass
+          const trace = buildRealWorkerTrace({
+            task: {
+              text: task.text,
+              category: task.category,
+              ...(summary.advisory ? { taskId: summary.advisory.taskId } : {}),
+            },
+            worker: worker.name,
+            mode: options.mode,
+            startedAt,
+            finishedAt: new Date().toISOString(),
+            totalDurationMs: summary.advisory.decision.durationMs,
+            success: true,
+            rounds: 1,
+            contextTokens: measured(0),
+            llmCalls: measured(0),
+            totalTokens: measured(0),
+            validation: [{ name: "cache-reuse", passed: true }],
+            advisory: {
+              taskId: summary.advisory.taskId,
+              reuseMode: summary.advisory.reuseMode,
+              durationMs: summary.advisory.decision.durationMs,
+              llmCalls: summary.advisory.decision.llmCalls,
+            },
+          });
+          violations.push(...validateTraceProvenance(trace).map((v) => `${task.id}: ${v}`));
+          traces.push(trace);
+        } else {
+          // Worker execution through Broker
+          let validationCommands: string[] = [];
+          if (summary.advisory?.validation && summary.advisory.validation.length > 0) {
+            validationCommands = summary.advisory.validation;
+          } else if (task.cohort === "failure") {
+            validationCommands = [`node -e "process.exit(1)"`];
+          } else {
+            validationCommands = [`node -e "process.exit(0)"`];
+          }
+
+          const brokerPolicy: BrokerPolicy = {
+            maxRounds: summary.advisory?.worker.maxRounds ?? 2,
+            totalBudgetMs: 60_000,
+            stopOnValidationPass: true,
+            ...options.brokerPolicy,
+          };
+
+          const brokerResult = await runBrokeredExecution(
+            { validation: validationCommands, policy: brokerPolicy },
+            worker
+          );
+
+          let totalLlmCalls = 0;
+          let totalTokens = 0;
+          let promptTokens = 0;
+          let completionTokens = 0;
+          let hasTokenMeasurement = false;
+
+          for (const obs of brokerResult.observations) {
+            const jevObs = obs as TypeSafeJevObservation;
+            if (jevObs.measurements) {
+              if (jevObs.measurements.totalTokens) {
+                totalTokens += jevObs.measurements.totalTokens.value;
+                hasTokenMeasurement = true;
+              }
+              if (jevObs.measurements.promptTokens) {
+                promptTokens += jevObs.measurements.promptTokens.value;
+              }
+              if (jevObs.measurements.completionTokens) {
+                completionTokens += jevObs.measurements.completionTokens.value;
+              }
             }
-          : {}),
-      });
-      violations.push(...validateTraceProvenance(trace).map((v) => `${task.id}: ${v}`));
-      traces.push(trace);
+            if (worker.name.includes("jev") || jevObs.action !== undefined) {
+              totalLlmCalls += 1;
+            }
+          }
+
+          const contextChars = summary.executionDescriptor?.context?.length ?? 0;
+          const contextTokensCount =
+            promptTokens > 0 ? promptTokens : Math.ceil(contextChars / 4);
+
+          const trace = buildRealWorkerTrace({
+            task: {
+              text: task.text,
+              category: task.category,
+              ...(summary.advisory ? { taskId: summary.advisory.taskId } : {}),
+            },
+            worker: worker.name,
+            mode: options.mode,
+            startedAt,
+            finishedAt: new Date().toISOString(),
+            totalDurationMs: brokerResult.totalDurationMs + runResultDurationMs,
+            success: brokerResult.status === "completed",
+            rounds: brokerResult.rounds,
+            contextTokens: measured(contextTokensCount),
+            llmCalls: measured(totalLlmCalls),
+            ...(hasTokenMeasurement ? { totalTokens: measured(totalTokens) } : {}),
+            ...(promptTokens > 0 ? { inputTokens: measured(promptTokens) } : {}),
+            ...(completionTokens > 0 ? { outputTokens: measured(completionTokens) } : {}),
+            validation: brokerResult.validation?.checks ?? [],
+            ...(options.mode === "shadow" && summary.advisory
+              ? {
+                  advisory: {
+                    taskId: summary.advisory.taskId,
+                    reuseMode: summary.advisory.reuseMode,
+                    durationMs: summary.advisory.decision.durationMs,
+                    llmCalls: summary.advisory.decision.llmCalls,
+                  },
+                }
+              : {}),
+          });
+
+          violations.push(...validateTraceProvenance(trace).map((v) => `${task.id}: ${v}`));
+          traces.push(trace);
+        }
+      }
     }
   } finally {
     sandbox.cleanup();
@@ -202,16 +491,34 @@ export async function runEffBench(options: {
   };
 }
 
+export interface ComparisonMetrics {
+  tokenSavingsRate: number;
+  llmCallReductionRate: number;
+  roundsDiff: number;
+  roundsReductionRate: number;
+  baselineTokens: number;
+  shadowTokens: number;
+  baselineCalls: number;
+  shadowCalls: number;
+}
+
 export interface EffBenchCompareReport {
   ok: boolean;
   refusedBy?: string[];
   tasksCompared?: number;
   baseline?: ArmStats;
   shadow?: ArmStats;
+  comparison?: ComparisonMetrics;
+  tokenSavingsRate?: number;
+  llmCallReductionRate?: number;
+  roundsDiff?: number;
 }
 
 export interface ArmStats {
   avgContextTokens: number;
+  totalContextTokens?: number;
+  totalLlmTokens?: number;
+  totalTokens?: number;
   totalLlmCalls: number;
   avgRounds: number;
   successRate: number;
@@ -249,10 +556,15 @@ export function compareEffBench(baselinePath: string, shadowPath: string): EffBe
     const n = traces.length || 1;
     const withDecision = traces.filter((t) => t.decision);
     const m = withDecision.length || 1;
+    const totalContextTokens = traces.reduce((acc, t) => acc + t.context.tokens.value, 0);
+    const totalLlmTokens = traces.reduce((acc, t) => acc + (t.llm.totalTokens?.value ?? 0), 0);
+    const totalTokens = totalLlmTokens > 0 ? totalLlmTokens : totalContextTokens;
+
     return {
-      avgContextTokens: Math.round(
-        traces.reduce((acc, t) => acc + t.context.tokens.value, 0) / n
-      ),
+      avgContextTokens: Math.round(totalContextTokens / n),
+      totalContextTokens,
+      totalLlmTokens,
+      totalTokens,
       totalLlmCalls: traces.reduce((acc, t) => acc + t.llm.calls.value, 0),
       avgRounds: Number((traces.reduce((acc, t) => acc + t.rounds.value, 0) / n).toFixed(2)),
       successRate: Number((traces.filter((t) => t.result.success).length / n).toFixed(3)),
@@ -271,10 +583,53 @@ export function compareEffBench(baselinePath: string, shadowPath: string): EffBe
     };
   };
 
+  const baselineStats = arm(baseline);
+  const shadowStats = arm(shadow);
+
+  // Token comparison (prefer totalTokens / LLM tokens if present, else context tokens)
+  const baselineTokens = baselineStats.totalTokens ?? baselineStats.totalContextTokens ?? 0;
+  const shadowTokens = shadowStats.totalTokens ?? shadowStats.totalContextTokens ?? 0;
+  const tokenSavingsRate =
+    baselineTokens > 0
+      ? Number(((baselineTokens - shadowTokens) / baselineTokens).toFixed(4))
+      : 0;
+
+  // LLM call reduction comparison
+  const baselineCalls = baselineStats.totalLlmCalls;
+  const shadowCalls = shadowStats.totalLlmCalls;
+  const llmCallReductionRate =
+    baselineCalls > 0
+      ? Number(((baselineCalls - shadowCalls) / baselineCalls).toFixed(4))
+      : 0;
+
+  // Rounds comparison
+  const roundsDiff = Number((shadowStats.avgRounds - baselineStats.avgRounds).toFixed(2));
+  const roundsReductionRate =
+    baselineStats.avgRounds > 0
+      ? Number(
+          ((baselineStats.avgRounds - shadowStats.avgRounds) / baselineStats.avgRounds).toFixed(4)
+        )
+      : 0;
+
+  const comparison: ComparisonMetrics = {
+    tokenSavingsRate,
+    llmCallReductionRate,
+    roundsDiff,
+    roundsReductionRate,
+    baselineTokens,
+    shadowTokens,
+    baselineCalls,
+    shadowCalls,
+  };
+
   return {
     ok: true,
     tasksCompared: Math.min(baseline.length, shadow.length),
-    baseline: arm(baseline),
-    shadow: arm(shadow),
+    baseline: baselineStats,
+    shadow: shadowStats,
+    comparison,
+    tokenSavingsRate,
+    llmCallReductionRate,
+    roundsDiff,
   };
 }

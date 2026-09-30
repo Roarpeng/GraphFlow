@@ -44,6 +44,10 @@
     const economyModel = getString("settings-economy-model");
     const smartBaseUrl = getString("settings-smart-base-url");
     const economyBaseUrl = getString("settings-economy-base-url");
+    const workerType = getString("settings-worker-type") || "local-command";
+    const workerBaseUrl = getString("settings-worker-base-url");
+    const workerModel = getString("settings-worker-model");
+    const workerApiKey = getString("settings-worker-api-key");
 
     return {
       smartProvider,
@@ -54,6 +58,10 @@
       economyApiKey,
       economyModel,
       economyBaseUrl,
+      workerType,
+      workerBaseUrl,
+      workerModel,
+      workerApiKey,
       provider: smartProvider,
       apiKeyEnvVar: smartApiKey,
       baseUrl: smartBaseUrl,
@@ -211,6 +219,14 @@
       lines.push('<li style="color: #047857;">✓ 图谱路径：已填写</li>');
     } else {
       lines.push('<li style="color: #b45309;">○ 图谱路径：未填写</li>');
+    }
+
+    if (payload.workerType === "typesafe-jev") {
+      const modelStr = payload.workerModel || "typesafe-jev";
+      const urlStr = payload.workerBaseUrl || "http://localhost:8000/v1";
+      lines.push(`<li style="color: #047857;">✓ Worker：TypeSafe-JEV (${modelStr} @ ${urlStr})</li>`);
+    } else {
+      lines.push('<li>✓ Worker：本地命令（local-command）</li>');
     }
 
     tierReadinessList.innerHTML = lines.join("");

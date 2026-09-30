@@ -90,6 +90,26 @@ export interface EfficiencyPolicyConfig {
    * qualifying paired savings into an advisory mechanism-trial budget.
    */
   reinvest?: ReinvestEfficiencyPolicyConfig;
+  /** Worker Agent policy (local-command or typesafe-jev adapter). */
+  worker?: WorkerPolicyConfig;
+  workerPolicy?: WorkerPolicyConfig;
+  workerType?: WorkerType;
+  workerConfig?: WorkerConfig;
+}
+
+export type WorkerType = "local-command" | "typesafe-jev";
+
+export interface WorkerConfig {
+  provider?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+  timeoutMs?: number;
+}
+
+export interface WorkerPolicyConfig {
+  workerType?: WorkerType;
+  workerConfig?: WorkerConfig;
 }
 
 export interface ReinvestEfficiencyPolicyConfig {
@@ -268,4 +288,8 @@ export interface GraphFlowConfig {
    * See {@link EfficiencyPolicyConfig}.
    */
   efficiencyPolicy?: EfficiencyPolicyConfig;
+  /**
+   * Worker Agent policy (local-command or typesafe-jev adapter).
+   */
+  workerPolicy?: WorkerPolicyConfig;
 }
