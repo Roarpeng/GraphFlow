@@ -6,6 +6,7 @@ module.exports = [
     ignores: [
       "coverage/**",
       "dist/**",
+      "**/dist/**",
       "node_modules/**",
       "vscode-extension/vendor/**",
       "vscode-extension/dist/**",
