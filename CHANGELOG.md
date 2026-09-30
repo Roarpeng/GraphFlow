@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [2.0.2] — 2026-09-30
+## [Unreleased]
 
 ### Fixed — 只读诊断命令从 home 目录运行不再拒绝（Ubuntu 实测）
 
@@ -21,8 +21,6 @@ root: /home/\<user\>"——**诊断命令犯了 2.0.1 刚修过的同类错**（
 - 另：Windows 报 "unknown command config" 的机器装的是 2.0.0 之前的版本
   （usage 无 settings 命令可证），升级到本版即可。
 
-
-## [2.0.1] — 2026-09-30
 
 ### Fixed — Jev 接入真实 API 契约 + `graphflow llm-check` 自诊断
 

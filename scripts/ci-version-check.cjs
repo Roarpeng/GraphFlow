@@ -66,7 +66,9 @@ if (readme !== null) {
 // --- compare ----------------------------------------------------------------
 
 const problems = [];
-if (changelogVersion !== null && changelogVersion !== pkgVersion) {
+// An Unreleased heading accumulates fixes until the maintainer ships:
+// package.json stays at the last RELEASED version and that is correct.
+if (changelogVersion !== null && changelogVersion !== pkgVersion && !unreleased) {
   problems.push(
     `CHANGELOG.md latest heading is [${changelogVersion}] but package.json is ${pkgVersion}`,
   );
