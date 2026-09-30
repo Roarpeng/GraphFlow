@@ -30,6 +30,9 @@
     "scripts/cross-platform-check.mjs"
   ],
   "packageManager": "npm@10.9.2",
+  "workspaces": [
+    "packages/*"
+  ],
   "engines": {
     "node": ">=20",
     "npm": ">=10"
@@ -94,7 +97,8 @@
     "gate:release": "node scripts/release-gates.cjs",
     "security:audit": "node scripts/security-audit.cjs",
     "test:coverage": "vitest run --coverage",
-    "prepare": "husky || true"
+    "prepare": "husky || true",
+    "benchmark:eff": "tsx benchmarks/run-eff-bench.ts"
   },
   "lint-staged": {
     "*.ts": "eslint --fix"

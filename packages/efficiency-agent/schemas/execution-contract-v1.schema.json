@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Roarpeng/GraphFlow/main/packages/efficiency-agent/schemas/execution-contract-v1.schema.json",
+  "title": "GraphFlow Efficiency Agent execution contract v1",
+  "description": "Superset evolution of graphflow_run's executionDescriptor: the descriptor keeps task/context/steps; the contract adds the efficiency verdicts (reuse/model/execution/validation) and the decision's own cost. The substrate emits this shape as the `advisory` block on graphflow_run responses.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "taskId",
+    "mode",
+    "reuseMode",
+    "confidence",
+    "signals",
+    "context",
+    "worker",
+    "validation",
+    "decision"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "taskId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mode": {
+      "enum": [
+        "shadow",
+        "conservative",
+        "adaptive"
+      ]
+    },
+    "reuseMode": {
+      "enum": [
+        "REUSE",
+        "ADAPT",
+        "FRESH"
+      ]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "signals": {
+      "type": "object",
+      "required": [
+        "taskComplexity",
+        "executionMode",
+        "fusedStepCount",
+        "similarEpisodeCount"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "taskComplexity": {
+          "enum": [
+            "simple",
+            "complex"
+          ]
+        },
+        "executionMode": {
+          "enum": [
+            "bridge",
+            "llm"
+          ]
+        },
+        "fusedStepCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "similarEpisodeCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "topEpisodeScore": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "topEpisodeSimilarity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "required": [
+        "source",
+        "requiredAnchors"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "const": "graphflow"
+        },
+        "requiredAnchors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "maxTokens": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "worker": {
+      "type": "object",
+      "required": [
+        "modelTier",
+        "executionMode",
+        "maxRounds"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "modelTier": {
+          "enum": [
+            "economy",
+            "standard",
+            "heavy"
+          ]
+        },
+        "executionMode": {
+          "enum": [
+            "one-shot",
+            "loop"
+          ]
+        },
+        "maxRounds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "validation": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "decision": {
+      "type": "object",
+      "required": [
+        "provenance",
+        "llmCalls",
+        "durationMs"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "provenance": {
+          "enum": [
+            "deterministic",
+            "llm"
+          ]
+        },
+        "llmCalls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "provenance": {
+                "const": "deterministic"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "llmCalls": {
+                "const": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

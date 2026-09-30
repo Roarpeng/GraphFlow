@@ -1,0 +1,16 @@
+{
+  "name": "@roarpeng/graphflow-efficiency-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Efficiency decision layer for GraphFlow 2.x: Execution Contract schema, benchmark trace measurement contract, and deterministic reuse/tool/model policies. Consumes GraphFlow via MCP / public surfaces only.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p .",
+    "typecheck": "tsc -p . --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

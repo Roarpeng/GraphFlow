@@ -4,6 +4,51 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added — P2–P7 全量落地（5 agent 并行，独占文件域）+ similarity/outcome 拆分
+
+效率决策层的六个阶段一次到位，全部在 `packages/efficiency-agent`（138 个新测试 + 5 个集成测试），共享类型契约 `src/domain.ts`。
+
+- **P3 复用引擎（§7/§8）**：`fingerprint.ts` 四轨指纹（semantic/project/context/environment → reuseKey，轨间隔离：gitHead 变只动 projectStateHash）；`caches/` 三层缓存——Context（TTL）、Plan（命中前 projectStateHash 状态校验）、Result（仅 query/docs/config 类目可存可放，写类目 put 即拒绝）；`reuse-gate.ts` 保守阶梯。缓存按语义任务哈希键控 + 全指纹校验，所有失效原因（ttl-expired / project-state-changed / fingerprint-mismatch / category-not-result-safe）真实可达。
+- **P2 Execution Broker（§16）**：`broker.ts` 轮次/预算/停止条件三重约束的生命周期（worker 异常一律收敛为观测不抛出，stop() 恒在 finally 调用）；第一个 worker = `local-command-worker.ts`（execFile 数组参数、超时 SIGTERM、AbortController 停止、输出尾 2000 字符）。外部 CLI worker（claude/codex）按同一 `WorkerAdapter` 接口后续接入。
+- **P4 经验学习（§18）**：`trajectory.ts` 记录校验/按类目汇总；`policy-learner.ts` 带滞回的策略学习——成功率 <0.7 升一档（economy→standard→heavy）、≥0.9 且 ≥2×minSamples 才降档、avgRounds>1.5 转 loop、失败阶段占比 ≥30% 进 avoidPatterns；`policy-store.ts` 版本化 append-only（拒绝过期版本、单调回滚）。
+- **P5 Project Twin + 工具智能（§9/§10）**：`project-twin.ts` 确定性派生（模块/入口/关键符号/构建/测试/约定，跨文件符号 ≥2 文件才入榜）；`capability-registry.ts` success_history 驱动排序（胜率升、延迟/成本升序）；`tool-router.ts` 按能力选工具（precision≥0.8 优先，无供给→no-capability 拒绝）；`schemas/tool-capability-v1.schema.json` 补齐 Step B 第四个 schema。
+- **P6 成本优化（§20）**：`cost/model.ts` 组件聚合（总额继承最弱 provenance，R5）；`cost/optimizer.ts` 四道 floor 门（success/fidelity/safety/evidence）过滤后取最小成本，平局按成功率、id 字典序。
+- **P7 自优化闭环（§21）**：`reflection.ts` 确定性反思规则（cache-win/cache-miss/over-budget/quality-floor-miss）；`loop.ts` 决策→执行→反思→策略更新编排（学习器可注入）。
+- **集成证明**：`tests/integration-cycle.test.ts` 用全真实模块走通 冷缓存 FRESH → 回放 REUSE → 状态漂移回落 → 本地 worker 真实执行 → 轨迹汇总 → 失败类目升档 → 优化器择优 → 闭环出策略更新。
+- **similarity/outcome 拆分（上一轮基准发现的修复）**：`orchestrator-episode.ts` 的 similarEpisodes 同时携带 `score`（结局分）与 `similarity`（`taskSimilarity()` Jaccard）；advisory `decideReuseMode` 以 similarity≥0.5 为主门，无 similarity 信号才回退旧 score 门。**基准复跑：ADAPT 49/50 → 7/50**——只有真正相似的重复族兄弟通过；contract schema signals 增加 `topEpisodeSimilarity`。
+- 测试：包内 7 个新文件 138 测试 + 集成 5 测试；全仓 242 文件 / 1956 测试绿；lint、root+包双 tsc、包 dist 构建全部通过。
+
+### Added — Step A/B：50 任务基准 + provenance 门比较（`npm run benchmark:eff`）
+
+P0 计划的基准件落地。**基准在第一天就产出了一条真发现**（见末尾）。
+
+- **语料** `packages/efficiency-agent/benchmarks/eff-tasks-v1.jsonl`：50 个任务按 §24 组成（20 高重复 / 15 常规 / 10 复杂 / 5 故意失败）；regular 队列文本衍生自本仓库真实 git 历史（source 带 commit）；解析器 `src/corpus.ts` 强制组成校验，坏语料拒绝进基准。
+- **Runner** `benchmarks/run-eff-bench.ts` + 可测试核心 `benchmarks/eff-bench-lib.ts`（沿用 plugin-ab-lib 的 lib/CLI 拆分）：`run --mode=baseline|shadow [--limit N]` 双臂离线跑（bridge 路径、无 key、临时沙箱），每任务一行 TaskTrace JSONL（默认 `graphflow-out/eff-bench/`）；`compare <a> <b>` 先对每条 trace 过 `validateTraceProvenance`，**任何违规整场拒绝**（R6），干净才输出双臂统计。
+- **trace 构建器** `packages/efficiency-agent/src/bench.ts`：provenance 在构造点决定——bridge 双臂 context tokens 诚实标 `proxy(descriptor-chars/4, 0.6)`（summary 尚不暴露真实 token 计数，合同必须让这个缺口可见）；决策成本占比按 R3 标 `estimated(decisionMs/totalRunMs)`。开发中合同当场抓到一次自造违规（measured 值带 method），按 R3 改正——门是活的。
+- **episode 闭合模拟**：沙箱内每任务跑完按队列语义闭合（failure 队列记 fail）——`similarEpisodes.score` 是结局分（pass=1/pending=0/fail=-1），不闭合则 bridge episode 永远 pending=0，ADAPT 判定永远不触发，测的是一个真实项目不存在的库。
+- **全量实测**（2026-09-30，本机）：双臂各 50 任务、provenance 全净、每臂 ~23-28s；`avgContextTokens=184`、`totalLlmCalls=0`、`avgRounds=1`、shadow `avgDecisionCostShare=0.0002`（决策开销占打包耗时 0.02%）。
+- **Shadow 第一条发现（如实记录，先不改语义）**：闭合 episode 后 **49/50 判 ADAPT**——`similarEpisodes` 的 `score` 是结局分而非相似度分，0.5 阈值的实际语义退化为"top-3 相似排名里存在任何 pass episode"。修正方向是让 summary 同时携带 similarity 与 outcome、advisory 对 similarity 设阈；留给 Step D 真实 A/B 前校准（这正是 P0"只观察"的目的）。
+- 测试：`tests/eff-bench.test.ts`（语料组成 20/15/10/5、坏语料拒绝、双臂 trace 全净且 shadow 臂 ADAPT≥4/FRESH≥1、compare 接受干净臂、拒脏数据）。
+
+### Fixed — 跨项目召回隔离（P0 gate）：混库不再串台
+
+实测缺陷：在 GraphFlow 仓库根上调 `graphflow_context`，回显的 `workbench` 是**另一个项目**（铜管 FOV 视觉）的工作台主线，`dialogueHits` 也混入外项目会话。根因两层：
+
+- **`loadActiveTopic` 不验归属**：无 `taskHint` 时直接取**全库** `updatedAt` 最新的 workbench root——混库（legacy 共享 store / 显式 configPath）里最新 root 几乎必然是别人的。现在按 `workbenchRootIdFor(task, 当前 root) === rootId` 重算哈希验归属（与 diagnose 的 outline 过滤同一套"验证而非猜测"语义），不属于本工作区的 root 不再被当作活跃主题。不传 `workspaceRoot` 时保持旧行为。
+- **`searchDialogueTurns` 无会话过滤**：dialogue 召回按内容在全库 120 条窗口内匹配。现在接受 `workspaceRoot`，用存储的 session `name` + 当前 root **重算哈希**得出本工作区会话集合（`listOwnedDialogueSessionIds`，历史数据也能精确归属），过滤发生在窗口截断**之前**——外项目再活跃也挤不掉本项目的轮次；无法验证归属的轮次一律不参与召回（隔离优先于召回）。
+- **顺带修了一个绑定错误**：`previewContext` / dialogue 运行时包装器调 `bindRuntimeWorkspaceRoot` 时**从没传**项目级 `workspaceRoot`（文档优先级第 3 级形同虚设），root 一律落到 cwd 发现——项目 config 部署下归属集合按错误 root 计算，召回全灭；且同文件内 record/list 两个表面绑不同的根，互相看不见对方的会话。现在 `previewContext` + `dialogue.ts` 全部 8 处统一把 `projectWorkspaceRoot` 传进去。
+- 测试：新增 `tests/cross-project-recall-isolation.test.ts`（双 root 共享一个 store 的混库形态：scoped 召回互不泄漏、`loadActiveTopic` 不被更新的外项目 root 劫持、`previewContext` 端到端只回显本工作区内容）。
+
+### Added — 2.x 效率层地基：Shadow advisory + 决策成本账本 + 测量合同
+
+二阶段计划（Efficiency Agent）的第一批落地：Contract 不另起炉灶，作为 `graphflow_run` executionDescriptor 的超集演进；决策自身成本必须入账。
+
+- **`src/core/efficiency-advisory.ts`**：纯 Layer A（零 LLM 调用）的 Shadow advisory 构建器。REUSE 门保守：有达标相似 episode（score ≥ 0.5）→ `ADAPT`，否则 `FRESH`，**v0 里 `REUSE` 刻意不可达**（result 复用等基准证明安全后再开）；模型档位映射 simple→economy / complex→standard，确定性层**永不升到 heavy**；验证门从 fused steps 的 validate 动作推导。同输入除实测耗时外字节相同。
+- **接线**：`graphflow_run` 响应新增 `advisory` block（`routing.ts`，失败隔离——advisory 永不拖垮 run）；worker 可忽略（Shadow）。工具描述已更新。
+- **`src/learning/decision-ledger.ts`**：每次 advisory 产出向 `graphflow-out/decision-ledger.jsonl` 追加一行决策自身成本（duration 实测、llmCalls/tokenCost 对 deterministic 决策恒 0、provenance 标记）。`GRAPHFLOW_DECISION_LEDGER=0` 可关。Shadow 验收的"决策成本占比"从这里取数。
+- **`packages/efficiency-agent/`（新 workspace 包，零运行时依赖）**：边界规则=只消费 MCP/公开输出、不读 GraphFlow 内部存储、主仓不反向依赖。含测量合同（`measurement.ts`：成本字段必须带 provenance，measured>estimated>proxy，聚合取最弱，R1–R6 由校验器强制）、TaskTrace v1（`trace.ts` + `schemas/trace-v1.schema.json`，`validateTraceProvenance` 是 A/B 比较准入门——回应"LLM Calls ↓20% 目前测不到"：没有 provenance 的比较直接拒绝）、Execution Contract v1 规范类型与 `assertAdvisoryCompatible` 验收门（`contract.ts` + schema）。根 `package.json` 增加 `"workspaces": ["packages/*"]`。
+- **一致性守护**：`tests/advisory-contract-conformance.test.ts`（substrate advisory 必须过包侧 contract 门，含 JSON over-the-wire 往返）、`tests/shadow-advisory-e2e.test.ts`（bridge run 端到端：advisory 下发 + contract 门通过 + ledger 落盘一行一记录）、`tests/efficiency-advisory.test.ts`（确定性/保守复用/档位映射/验证推导/ledger 读写与断行容忍）。
+
 ### Fixed — 同一个查询的两次调用现在字节相同
 
 `graphflow_context` 是给宿主当提示前缀用的：前导字节一旦变了，它后面所有 token 重新计价。实测此前**同样的 query + 没变的仓库，两次调用产出不同字节**，原因有三类，都已修：

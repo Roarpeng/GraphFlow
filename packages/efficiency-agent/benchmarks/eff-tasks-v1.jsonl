@@ -1,0 +1,50 @@
+{"id":"rep-001","cohort":"repetition","category":"query","source":"authored","text":"Where is the model router configured in this project?"}
+{"id":"rep-002","cohort":"repetition","category":"query","source":"authored","text":"Where is the embedding policy configured in this project?"}
+{"id":"rep-003","cohort":"repetition","category":"query","source":"authored","text":"Where is the workspace root resolution configured in this project?"}
+{"id":"rep-004","cohort":"repetition","category":"query","source":"authored","text":"Where is the graph store transport selection configured in this project?"}
+{"id":"rep-005","cohort":"repetition","category":"query","source":"authored","text":"Where is the efficiency policy configured in this project?"}
+{"id":"rep-006","cohort":"repetition","category":"query","source":"authored","text":"What is the default graph store transport when none is configured?"}
+{"id":"rep-007","cohort":"repetition","category":"query","source":"authored","text":"What is the default max context token budget when none is configured?"}
+{"id":"rep-008","cohort":"repetition","category":"query","source":"authored","text":"What is the default embedding dtype when none is configured?"}
+{"id":"rep-009","cohort":"repetition","category":"query","source":"authored","text":"What is the default dialogue recall limit per search?"}
+{"id":"rep-010","cohort":"repetition","category":"query","source":"authored","text":"What is the default output directory for graph stores and ledgers?"}
+{"id":"rep-011","cohort":"repetition","category":"query","source":"authored","text":"Which tests cover dialogue turn recall?"}
+{"id":"rep-012","cohort":"repetition","category":"query","source":"authored","text":"Which tests cover workbench topic seeding?"}
+{"id":"rep-013","cohort":"repetition","category":"query","source":"authored","text":"Which tests cover context prefix byte stability?"}
+{"id":"rep-014","cohort":"repetition","category":"query","source":"authored","text":"Which tests cover the decision cost ledger?"}
+{"id":"rep-015","cohort":"repetition","category":"query","source":"authored","text":"Which tests cover the advisory contract conformance gate?"}
+{"id":"rep-016","cohort":"repetition","category":"single-file","source":"authored","text":"Export listDialogueTurnsRuntime from the CLI runtime index module"}
+{"id":"rep-017","cohort":"repetition","category":"single-file","source":"authored","text":"Export seedWorkbenchFromPlan from the CLI runtime index module"}
+{"id":"rep-018","cohort":"repetition","category":"single-file","source":"authored","text":"Export buildEfficiencyAdvisory from the package public index module"}
+{"id":"rep-019","cohort":"repetition","category":"single-file","source":"authored","text":"Export summarizeDecisionLedger from the package public index module"}
+{"id":"rep-020","cohort":"repetition","category":"single-file","source":"authored","text":"Export resolveDecisionLedgerPath from the package public index module"}
+{"id":"reg-001","cohort":"regular","category":"bugfix","source":"git-history:aa0d9f9","text":"Fix loadAllEpisodes so it no longer stops at 200 episodes"}
+{"id":"reg-002","cohort":"regular","category":"bugfix","source":"git-history:2d7ad73","text":"Make two identical graphflow_context calls produce identical bytes"}
+{"id":"reg-003","cohort":"regular","category":"bugfix","source":"git-history:e0fb8d5","text":"Count attached anchor bodies against the anchor body budget"}
+{"id":"reg-004","cohort":"regular","category":"bugfix","source":"git-history:09c3959","text":"Let agent and pre-step errors propagate instead of returning undefined"}
+{"id":"reg-005","cohort":"regular","category":"bugfix","source":"git-history:484e41e","text":"Keep CLI help text off stdout"}
+{"id":"reg-006","cohort":"regular","category":"bugfix","source":"git-history:3c4a6aa","text":"Stop AND-ing English FTS tokens so multi-word recall is not zeroed"}
+{"id":"reg-007","cohort":"regular","category":"bugfix","source":"git-history:272b602","text":"Clear all npm audit findings without a breaking dependency bump"}
+{"id":"reg-008","cohort":"regular","category":"bugfix","source":"git-history:7b35ea3","text":"Refuse to scatter project files into the home directory during install"}
+{"id":"reg-009","cohort":"regular","category":"config","source":"git-history:cdfdb6e","text":"Give each graph store its own incremental index manifest"}
+{"id":"reg-010","cohort":"regular","category":"single-file","source":"git-history:66793c2","text":"Record endLine spans for tree-sitter declared symbols"}
+{"id":"reg-011","cohort":"regular","category":"bugfix","source":"git-history:1e1167c","text":"Resolve the package via npm root -g and fail instead of skipping"}
+{"id":"reg-012","cohort":"regular","category":"config","source":"git-history:0b19141","text":"Make the opencode plugin MCP opt-in durable across installs"}
+{"id":"reg-013","cohort":"regular","category":"bugfix","source":"git-history:82639cf","text":"Fix vendored source resolution being off by one directory level"}
+{"id":"reg-014","cohort":"regular","category":"bugfix","source":"git-history:05cea54","text":"Wire the semantic recall arm into indexing"}
+{"id":"reg-015","cohort":"regular","category":"bugfix","source":"git-history:56673e0","text":"Close pending episodes from git history and a verify run"}
+{"id":"cx-001","cohort":"complex","category":"cross-module","source":"authored","text":"Refactor graph store transport selection so sqlite, json and auto share one resolution path with typed failure reasons"}
+{"id":"cx-002","cohort":"complex","category":"cross-module","source":"git-history:aef5346","text":"Design and implement per-project memory isolation across agent tools covering graph, episodes and skills"}
+{"id":"cx-003","cohort":"complex","category":"cross-module","source":"authored","text":"Add a decision-cost ledger to the efficiency evidence stream and surface its summary in diagnose"}
+{"id":"cx-004","cohort":"complex","category":"refactor","source":"authored","text":"Evolve the executionDescriptor into an Execution Contract with a deterministic shadow advisory block"}
+{"id":"cx-005","cohort":"complex","category":"refactor","source":"authored","text":"Unify the three workspace-root binding call styles into one resolver that follows the documented priority order"}
+{"id":"cx-006","cohort":"complex","category":"cross-module","source":"authored","text":"Make dialogue recall workspace-scoped end to end, from write-side session stamping to read-side hash verification"}
+{"id":"cx-007","cohort":"complex","category":"cross-module","source":"authored","text":"Introduce a measurement contract for benchmark traces and gate A/B comparison on provenance"}
+{"id":"cx-008","cohort":"complex","category":"refactor","source":"authored","text":"Consolidate the benchmark runners behind a shared config and report harness without changing their metrics"}
+{"id":"cx-009","cohort":"complex","category":"cross-module","source":"authored","text":"Design cross-project workbench isolation semantics and a migration path for legacy shared stores"}
+{"id":"cx-010","cohort":"complex","category":"cross-module","source":"authored","text":"Wire the MCP HTTP audit trail into the efficiency report as an evidence input"}
+{"id":"fail-001","cohort":"failure","category":"deliberate-failure","source":"authored","notes":"target file does not exist","text":"Fix the HNSW vector index corruption in src/vectors/hnsw.ts"}
+{"id":"fail-002","cohort":"failure","category":"deliberate-failure","source":"authored","notes":"nonsensical environment variable","text":"What is the default value of GRAPHFLOW_UNSET_ENV_TOKEN?"}
+{"id":"fail-003","cohort":"failure","category":"deliberate-failure","source":"authored","notes":"contradicts schema invariant (turns are keyed by session)","text":"Modify the dialogue turn schema to remove sessionId"}
+{"id":"fail-004","cohort":"failure","category":"deliberate-failure","source":"authored","notes":"option was retired in 1.28.0","text":"Reindex the workspace using the retired vectorStorePath option"}
+{"id":"fail-005","cohort":"failure","category":"deliberate-failure","source":"authored","notes":"advisory never returns REUSE in v0 by design","text":"Explain why graphflow_run returned REUSE for this task"}

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Roarpeng/GraphFlow/main/packages/efficiency-agent/schemas/tool-capability-v1.schema.json",
+  "title": "GraphFlow Efficiency Agent tool capability v1",
+  "type": "object",
+  "required": ["name", "capabilities", "requiredContext", "successHistory"],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "capabilities": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "costPerCallUsd": { "type": "number", "minimum": 0 },
+    "latencyMsP50": { "type": "number", "minimum": 0 },
+    "precision": { "type": "number", "minimum": 0, "maximum": 1 },
+    "requiredContext": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "successHistory": {
+      "type": "object",
+      "required": ["attempts", "successes"],
+      "additionalProperties": false,
+      "properties": {
+        "attempts": { "type": "integer", "minimum": 0 },
+        "successes": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}
