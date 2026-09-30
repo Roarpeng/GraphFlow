@@ -30,9 +30,15 @@ describe("read-only diagnostics from the home directory", () => {
   function runCli(args: string[]): { status: number; stdout: string; stderr: string } {
     // spawnSync (not execFileSync): --help prints to stderr with exit 0, and
     // the success path of execFileSync swallows stderr entirely.
+    // tsx's REAL cli entry — node_modules/.bin/tsx is a shell wrapper that
+    // plain `node` cannot execute on Windows.
     const result = spawnSync(
       process.execPath,
-      [join(REPO_ROOT, "node_modules", ".bin", "tsx"), join(REPO_ROOT, "src/surfaces/cli/index.ts"), ...args],
+      [
+        join(REPO_ROOT, "node_modules", "tsx", "dist", "cli.mjs"),
+        join(REPO_ROOT, "src/surfaces/cli/index.ts"),
+        ...args,
+      ],
       {
         cwd: fakeHome,
         encoding: "utf8",
