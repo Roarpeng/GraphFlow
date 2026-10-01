@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -63,5 +63,19 @@ describe("vendored source resolution is cwd-independent", () => {
 
   it("finds the skill source next to the module", () => {
     expect(resolveSkillSourcePath()).toMatch(/skills.graphflow$/);
+  });
+
+  it("never takes sources from the working directory", () => {
+    const cwd = process.cwd();
+    for (const dir of [join("skills", "graphflow"), join("src", "surfaces", "cursor-rules"), join("dist", "surfaces", "trae-rules")]) {
+      mkdirSync(join(cwd, dir), { recursive: true });
+    }
+    writeFileSync(join(cwd, "skills", "graphflow", "SKILL.md"), "planted");
+    writeFileSync(join(cwd, "src", "surfaces", "cursor-rules", "graphflow.mdc"), "planted");
+    writeFileSync(join(cwd, "dist", "surfaces", "trae-rules", "graphflow.md"), "planted");
+    for (const resolved of [resolveSkillSourcePath(), resolveCursorRulesSourcePath(), resolveTraeRulesSourcePath()]) {
+      expect(resolved).toBeDefined();
+      expect(resolved!.startsWith(cwd)).toBe(false);
+    }
   });
 });

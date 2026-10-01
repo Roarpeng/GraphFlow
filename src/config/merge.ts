@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import type { GraphFlowConfig } from "./schema";
+import type { GraphFlowConfig, GraphFlowConfigLayer } from "./schema";
 import { validateConfig } from "./loader";
 import { SCAFFOLD_TIERS } from "./defaults";
 
@@ -47,7 +47,7 @@ export function listConfigOverlayKeys(
 
 function isScaffoldTier(
   tier: "smart" | "economy",
-  value: { provider: string; model?: string }
+  value: { provider?: string; model?: string }
 ): boolean {
   const scaffold = SCAFFOLD_TIERS[tier];
   return value.provider === scaffold.provider && value.model === scaffold.model;
@@ -55,20 +55,27 @@ function isScaffoldTier(
 
 function mergeTier(
   base: GraphFlowConfig,
-  overlay: GraphFlowConfig,
+  overlay: GraphFlowConfigLayer,
   tier: "smart" | "economy"
 ): { provider: string; model?: string } {
-  const overlayProvidersEmpty = Object.keys(overlay.providers ?? {}).length === 0;
-  if (overlayProvidersEmpty && isScaffoldTier(tier, overlay.tiers[tier])) {
+  const overlayTier = overlay.tiers?.[tier];
+  if (!overlayTier) {
     return { ...base.tiers[tier] };
   }
-  return { ...base.tiers[tier], ...overlay.tiers[tier] };
+  const overlayProvidersEmpty = Object.keys(overlay.providers ?? {}).length === 0;
+  if (overlayProvidersEmpty && isScaffoldTier(tier, overlayTier)) {
+    return { ...base.tiers[tier] };
+  }
+  return { ...base.tiers[tier], ...overlayTier };
 }
 
-/** Merge project overlay onto root config; overlay wins for defined fields. */
-export function mergeGraphFlowConfig(base: GraphFlowConfig, overlay: GraphFlowConfig): GraphFlowConfig {
+/**
+ * Merge a project/overlay layer onto the config below it; the layer wins for
+ * the fields it defines and may omit any section.
+ */
+export function mergeGraphFlowConfig(base: GraphFlowConfig, overlay: GraphFlowConfigLayer): GraphFlowConfig {
   return validateConfig({
-    providers: { ...base.providers, ...overlay.providers },
+    providers: { ...base.providers, ...(overlay.providers as GraphFlowConfig["providers"] | undefined) },
     tiers: {
       smart: mergeTier(base, overlay, "smart"),
       economy: mergeTier(base, overlay, "economy"),
@@ -78,9 +85,9 @@ export function mergeGraphFlowConfig(base: GraphFlowConfig, overlay: GraphFlowCo
       ...base.graphPolicy,
       ...overlay.graphPolicy,
       layerQuota: {
-        l1: overlay.graphPolicy.layerQuota?.l1 ?? base.graphPolicy.layerQuota?.l1 ?? 6,
-        l2: overlay.graphPolicy.layerQuota?.l2 ?? base.graphPolicy.layerQuota?.l2 ?? 4,
-        l3: overlay.graphPolicy.layerQuota?.l3 ?? base.graphPolicy.layerQuota?.l3 ?? 3,
+        l1: overlay.graphPolicy?.layerQuota?.l1 ?? base.graphPolicy.layerQuota?.l1 ?? 6,
+        l2: overlay.graphPolicy?.layerQuota?.l2 ?? base.graphPolicy.layerQuota?.l2 ?? 4,
+        l3: overlay.graphPolicy?.layerQuota?.l3 ?? base.graphPolicy.layerQuota?.l3 ?? 3,
       },
     },
     learningPolicy: {
@@ -105,5 +112,11 @@ export function mergeGraphFlowConfig(base: GraphFlowConfig, overlay: GraphFlowCo
     // (efficiencyPolicy pre-existing, mcp.textCopy new): merge them too.
     mcp: { ...base.mcp, ...overlay.mcp },
     efficiencyPolicy: { ...base.efficiencyPolicy, ...overlay.efficiencyPolicy },
+    ...(base.reconcilePolicy || overlay.reconcilePolicy
+      ? { reconcilePolicy: { ...base.reconcilePolicy, ...overlay.reconcilePolicy } }
+      : {}),
+    ...(base.workerPolicy || overlay.workerPolicy
+      ? { workerPolicy: overlay.workerPolicy ?? base.workerPolicy }
+      : {}),
   });
 }

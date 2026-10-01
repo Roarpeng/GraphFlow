@@ -225,7 +225,7 @@ Both entry points pre-flight a real apikey+baseUrl+model greeting round-trip. A 
 
 ## Configuration
 
-Three-layer merge: global `~/.graphflow.config.json` → project `graphflow.config.json` → project `.graphflow/config.json`. Copy [graphflow.config.example.json](graphflow.config.example.json) to get started.
+One config is enough: the global `~/.graphflow.config.json` (the file the settings page edits) applies to every project and host. Optional per-project overrides go in the project's `graphflow.config.json`, then `.graphflow/config.json`; they are found from the served workspace root (`rootDir` / `GRAPHFLOW_WORKSPACE_ROOT`), not the process cwd, and need only the fields they change — e.g. `{ "graphPolicy": { "transport": "file" } }`. Copy [graphflow.config.example.json](graphflow.config.example.json) to get started.
 
 Key options:
 

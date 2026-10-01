@@ -870,7 +870,7 @@ export function readMcpHttpOptionsFromArgv(
   };
 }
 
-function installMcpProcessGuards(server: McpServer): void {
+function installMcpProcessGuards(server: McpServer): (reason: string) => void {
   process.on("uncaughtException", (error) => {
     console.error("[GraphFlow MCP] uncaughtException:", error);
     process.exit(1);
@@ -897,6 +897,7 @@ function installMcpProcessGuards(server: McpServer): void {
   };
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
+  return shutdown;
 }
 
 /**
@@ -931,7 +932,7 @@ function runMcpServerCli(): void {
   const argv = process.argv.slice(2);
   const httpOptions = readMcpHttpOptionsFromArgv(argv);
   const server = createMcpServer();
-  installMcpProcessGuards(server);
+  const shutdown = installMcpProcessGuards(server);
   attachMcpLogSink((level, message) => server.sendLogNotification(level as LoggingLevel, message));
 
   // Start file watcher only when we resolved a real project root.
@@ -986,6 +987,11 @@ function runMcpServerCli(): void {
       });
     return;
   }
+
+  // The SDK transport ignores stdin EOF and the file watcher keeps the loop
+  // alive, so without this every host restart left an orphaned server behind.
+  process.stdin.once("end", () => shutdown("stdin end"));
+  process.stdin.once("close", () => shutdown("stdin close"));
 
   // Respond to initialize immediately; watcher is background-only.
   void startStdioServer(server).catch((error) => {

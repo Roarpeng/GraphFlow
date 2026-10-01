@@ -258,13 +258,20 @@ function warnIfSqliteStoreExists(sqlitePath: string, fallbackPath: string): void
  * Every client created this process, so test teardown can release sqlite
  * handles before deleting temp dirs — Windows cannot unlink open files
  * (EBUSY), and previewContext/runTaskResult create internal clients the
- * caller never sees.
+ * caller never sees. Held weakly: runtime paths rarely close their clients, and
+ * a strong set kept every one (~17MB with its caches) alive for the life of a
+ * long-running MCP server.
  */
-const liveClients = new Set<GraphClient>();
+const liveClients = new Set<WeakRef<GraphClient>>();
+const liveClientRegistry = new FinalizationRegistry<WeakRef<GraphClient>>((ref) => {
+  liveClients.delete(ref);
+});
 
 /** Close every live client created via createGraphClient (test teardown). */
 export async function closeAllGraphClients(): Promise<void> {
-  for (const client of liveClients) {
+  for (const ref of liveClients) {
+    const client = ref.deref();
+    if (!client) continue;
     try {
       await client.close?.();
     } catch {
@@ -276,7 +283,9 @@ export async function closeAllGraphClients(): Promise<void> {
 
 export function createGraphClient(config: GraphFlowConfig): GraphClient {
   const client = buildGraphClient(config);
-  liveClients.add(client);
+  const ref = new WeakRef(client);
+  liveClients.add(ref);
+  liveClientRegistry.register(client, ref);
   return client;
 }
 

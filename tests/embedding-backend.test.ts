@@ -3,6 +3,7 @@ import type { GraphNode } from "../src/core/types";
 import type { GraphClient } from "../src/graph/client-factory";
 import {
   createEmbeddingProviderFromConfig,
+  resetEmbeddingProviderCache,
   resolveActiveEmbeddingBackend,
   resolveEffectiveEmbeddingBackend,
 } from "../src/config/embedding-factory";
@@ -75,6 +76,25 @@ describe("P0-1 semantic embedding backend", () => {
     expect(summary.provider).toBe("transformers");
     // Diagnose reports semantic intent before the first embed settles
     expect(resolveActiveEmbeddingBackend(config)).toBe("semantic");
+  });
+
+  it("shares one local provider per process so ONNX sessions are not leaked per call", () => {
+    resetEmbeddingProviderCache();
+    const config = getDefaultConfig();
+    const first = createEmbeddingProviderFromConfig(config);
+    const second = createEmbeddingProviderFromConfig(structuredClone(config));
+    expect(second).toBe(first);
+
+    resetEmbeddingQualityStats();
+    createEmbeddingProviderFromConfig(config);
+    expect(getEmbeddingQualitySummary().provider).toBe("transformers");
+
+    const otherDtype = structuredClone(config);
+    otherDtype.embeddingPolicy = { ...otherDtype.embeddingPolicy, dtype: "fp32" } as typeof otherDtype.embeddingPolicy;
+    expect(createEmbeddingProviderFromConfig(otherDtype)).not.toBe(first);
+
+    resetEmbeddingProviderCache();
+    expect(createEmbeddingProviderFromConfig(config)).not.toBe(first);
   });
 
   it("explicit fnv opts out to pure-offline hash; unset/legacy defaults stay semantic-on", () => {

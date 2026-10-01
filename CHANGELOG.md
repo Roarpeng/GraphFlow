@@ -2,6 +2,35 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed — MCP 常驻进程内存/线程无限增长（实测 36GB、3000+ 线程）
+
+- `createEmbeddingProviderFromConfig` 每次调用都新建 transformers provider 并立即预热，
+  即每次 `graphflow_context` 加载两个新的 ONNX 会话（模型权重 + 原生线程池），从不释放。
+  本地 provider 现按 (dtype, 模型缓存目录, 解析根) 进程内共享；单次预览从 ~11s 降到 ~1.1s。
+- `createGraphClient` 的 `liveClients` 强引用持有每个客户端（含缓存约 17MB），运行时路径
+  几乎不 close，常驻进程线性涨内存。改为 `WeakRef` + `FinalizationRegistry`，测试 teardown
+  的 `closeAllGraphClients` 语义不变。
+- 宿主退出后 MCP 进程成为孤儿（实测同时残留 7 组 launcher + server）：SDK 的 stdio 传输不处理
+  stdin EOF，文件监视器又让事件循环常驻。stdio 入口现在在 stdin `end`/`close` 时优雅退出，
+  launcher 随子进程一起结束。
+
+### Security — Skill/Rules 源文件不再从 cwd 解析
+
+`resolveSkillSourcePath` 等解析器把 `process.cwd()/skills/graphflow` 排在首位：在任何含
+`skills/graphflow/SKILL.md` 的目录里运行 `graphflow init`（或扩展宿主 cwd 落在该目录），就会把
+该目录的文件写进所有用户级 Agent 的 skills 目录——恶意仓库可借此投放提示注入。现只从本包
+自身位置与 vendor 运行时解析；`graphflow_skill_guide` 读取同样不再看 cwd。
+
+### Fixed — 配置分层不一致
+
+- 项目层 `graphflow.config.json` / `.graphflow/config.json` 按服务的工作区（`rootDir` /
+  `GRAPHFLOW_WORKSPACE_ROOT`）发现，不再按进程 cwd——同一项目在不同宿主下解析出不同配置。
+- 项目/覆盖层改为**部分覆盖**：只写要改的字段，其余继承全局；合并结果再校验。此前每层须是
+  完整配置，且完整层会把全局整体盖掉。损坏的项目层仍 fail-fast，损坏的覆盖层仍忽略。
+- `mergeGraphFlowConfig` 不再丢弃 `workerPolicy` / `reconcilePolicy`。
+
 ## [2.0.3] — 2026-09-30
 
 > npm 上的 2.0.2 是一次取消竞争里意外落地的部分发布（不含下方 Windows pack 修复），由本版接管 latest。

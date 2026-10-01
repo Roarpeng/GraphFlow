@@ -442,12 +442,9 @@ function getSkillGuide(section: string): string {
 
 function resolveSkillPath(): string | undefined {
   const candidates = [
-    join(process.cwd(), "skills", "graphflow", "SKILL.md"),
     join(__dirname, "..", "..", "..", "skills", "graphflow", "SKILL.md"),
     join(__dirname, "..", "..", "surfaces", "trae-skill", "graphflow", "SKILL.md"),
     join(__dirname, "..", "..", "..", "src", "surfaces", "trae-skill", "graphflow", "SKILL.md"),
-    join(process.cwd(), "src", "surfaces", "trae-skill", "graphflow", "SKILL.md"),
-    join(process.cwd(), "dist", "surfaces", "trae-skill", "graphflow", "SKILL.md"),
   ];
   for (const candidate of candidates) {
     if (existsSync(candidate)) {

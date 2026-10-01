@@ -133,11 +133,9 @@ function getTraeUserDirs(): Array<{ name: string; skillsDir: string }> {
 
 function resolveSkillSourcePath(): string | undefined {
   const candidates: string[] = [
-    join(process.cwd(), "skills", "graphflow"),
     join(__dirname, "..", "..", "..", "skills", "graphflow"),
     join(__dirname, "..", "..", "surfaces", "trae-skill", "graphflow"),
     join(__dirname, "..", "..", "..", "src", "surfaces", "trae-skill", "graphflow"),
-    join(process.cwd(), "src", "surfaces", "trae-skill", "graphflow"),
   ];
   for (const dir of candidates) {
     if (existsSync(join(dir, "SKILL.md"))) {
@@ -151,7 +149,6 @@ function resolveCursorRulesSourcePath(): string | undefined {
   const candidates: string[] = [
     join(__dirname, "..", "..", "surfaces", "cursor-rules"),
     join(__dirname, "..", "..", "..", "src", "surfaces", "cursor-rules"),
-    join(process.cwd(), "src", "surfaces", "cursor-rules"),
   ];
   for (const dir of candidates) {
     if (existsSync(join(dir, "graphflow.mdc"))) {

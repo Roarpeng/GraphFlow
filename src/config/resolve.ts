@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { EfficiencyPolicyConfig, GraphFlowConfig } from "./schema";
 import type { ObservationPolicy } from "../observations/types";
-import { loadConfigSafe } from "./loader";
+import { loadConfigSafe, readConfigLayer } from "./loader";
 import { mergeGraphFlowConfig } from "./merge";
 import { getDefaultConfig } from "./defaults";
 import { resolveGlobalConfigPath } from "./scaffold";
@@ -18,6 +18,23 @@ function genuineEnvPresent(key: string): boolean {
   }
   const value = readEnvVar(key);
   return Boolean(value && value.length > 0 && !value.startsWith("${"));
+}
+
+function usableDir(candidate: string | undefined): string | undefined {
+  const dir = candidate?.trim();
+  if (!dir || dir.includes("${") || /%[^%]+%/.test(dir) || !existsSync(dir)) return undefined;
+  return resolve(dir);
+}
+
+/**
+ * Directory whose `graphflow.config.json` / `.graphflow/config.json` form the
+ * project layers. The workspace being served wins over `process.cwd()`: an MCP
+ * host may spawn the server from its own install dir, and resolving layers
+ * from there silently dropped the project config (different transport and
+ * embedding backend than the CLI, so the two fought over the graph store).
+ */
+function projectLayerDir(bind?: { rootDir?: string }): string {
+  return usableDir(bind?.rootDir) ?? usableDir(process.env.GRAPHFLOW_WORKSPACE_ROOT) ?? process.cwd();
 }
 
 function isDefaultProjectConfigPath(path: string): boolean {
@@ -188,33 +205,27 @@ export function resolveConfig(
 
   const globalPath = resolveGlobalConfigPath();
   const globalExists = existsSync(globalPath);
-  const base = globalExists ? loadLayer(globalPath) : getDefaultConfig();
+  const base = globalExists ? loadGlobalLayer(globalPath) : getDefaultConfig();
 
-  const projectRoot = resolve("graphflow.config.json");
-  const overlayPath = resolve(".graphflow/config.json");
+  const layerDir = projectLayerDir(bind);
+  const projectRoot = resolve(layerDir, "graphflow.config.json");
+  const overlayPath = resolve(layerDir, ".graphflow/config.json");
 
-  let merged: GraphFlowConfig;
+  let merged = base;
   let projectWorkspaceRoot: string | undefined;
 
   const projectExists = existsSync(projectRoot);
   const overlayExists = existsSync(overlayPath);
 
-  if (projectExists && overlayExists) {
-    const projectLayer = loadLayer(projectRoot, { projectLayer: true });
-    const overlayLayer = loadLayer(overlayPath);
-    merged = mergeGraphFlowConfig(mergeGraphFlowConfig(base, projectLayer), overlayLayer);
-    projectWorkspaceRoot =
-      overlayLayer.graphPolicy.workspaceRoot ?? projectLayer.graphPolicy.workspaceRoot;
-  } else if (projectExists) {
-    const projectLayer = loadLayer(projectRoot, { projectLayer: true });
-    merged = mergeGraphFlowConfig(base, projectLayer);
-    projectWorkspaceRoot = projectLayer.graphPolicy.workspaceRoot;
-  } else if (overlayExists) {
-    const overlayLayer = loadLayer(overlayPath);
-    merged = mergeGraphFlowConfig(base, overlayLayer);
-    projectWorkspaceRoot = overlayLayer.graphPolicy.workspaceRoot;
-  } else {
-    merged = base;
+  if (projectExists) {
+    const applied = applyLayer(merged, projectRoot, { projectLayer: true });
+    merged = applied.config;
+    projectWorkspaceRoot = applied.workspaceRoot ?? projectWorkspaceRoot;
+  }
+  if (overlayExists) {
+    const applied = applyLayer(merged, overlayPath);
+    merged = applied.config;
+    projectWorkspaceRoot = applied.workspaceRoot ?? projectWorkspaceRoot;
   }
 
   const isZeroConfig = !projectExists && !overlayExists && !globalExists;
@@ -251,29 +262,49 @@ function mergeRuntimeWorkspaceBind(
     : undefined;
 }
 
-/**
- * Load one discovered config layer. Global and overlay layers stay forgiving
- * (a bad global must not brick every project); the PROJECT-root layer is the
- * one the user hand-writes for this checkout, so by default a load failure
- * throws instead of silently merging defaults over it.
- */
-function loadLayer(
-  path: string,
-  options?: { projectLayer?: boolean }
-): GraphFlowConfig {
+/** Load the global config; a bad one must not brick every project, so it falls back to defaults. */
+function loadGlobalLayer(path: string): GraphFlowConfig {
   const result = loadConfigSafe(path);
   if (result.usedFallback && result.error) {
-    if (options?.projectLayer) {
-      throw new Error(
-        `Failed to load project config at ${result.configPath}: ${result.error}. ` +
-          `Fix the file (a common Windows mistake is unescaped backslashes in paths — use forward slashes) ` +
-          `or remove it to fall back to the global config.`
-      );
-    }
     logger.warn({ path: result.configPath, error: result.error }, "Config layer ignored due to load failure");
     return getDefaultConfig();
   }
   return result.config;
+}
+
+/**
+ * Apply one project/overlay layer onto the config below it. A layer holds only
+ * the fields it overrides; the merged result is what gets validated. The
+ * PROJECT-root layer is hand-written for this checkout, so a broken one throws
+ * instead of silently running on the layers beneath it.
+ */
+function applyLayer(
+  below: GraphFlowConfig,
+  path: string,
+  options?: { projectLayer?: boolean }
+): { config: GraphFlowConfig; workspaceRoot?: string } {
+  const read = readConfigLayer(path);
+  let error = read.error;
+  if (read.layer) {
+    try {
+      const workspaceRoot = read.layer.graphPolicy?.workspaceRoot;
+      return {
+        config: mergeGraphFlowConfig(below, read.layer),
+        ...(workspaceRoot ? { workspaceRoot } : {}),
+      };
+    } catch (mergeError) {
+      error = mergeError instanceof Error ? mergeError.message : String(mergeError);
+    }
+  }
+  if (options?.projectLayer) {
+    throw new Error(
+      `Failed to load project config at ${resolve(path)}: ${error}. ` +
+        `Fix the file (a common Windows mistake is unescaped backslashes in paths — use forward slashes) ` +
+        `or remove it to fall back to the global config.`
+    );
+  }
+  logger.warn({ path: resolve(path), error }, "Config layer ignored due to load failure");
+  return { config: below };
 }
 
 // ---------------------------------------------------------------------------

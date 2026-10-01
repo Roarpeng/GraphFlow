@@ -137,6 +137,15 @@ export interface McpSurfaceConfig {
   textCopy?: "full" | "auto";
 }
 
+/** A project/overlay config file: any subset of sections, each partially filled. */
+export type GraphFlowConfigLayer = {
+  [K in keyof GraphFlowConfig]?: K extends "tiers"
+    ? { smart?: Partial<GraphFlowConfig["tiers"]["smart"]>; economy?: Partial<GraphFlowConfig["tiers"]["economy"]> }
+    : GraphFlowConfig[K] extends object
+      ? Partial<GraphFlowConfig[K]>
+      : GraphFlowConfig[K];
+};
+
 export interface GraphFlowConfig {
   providers: Record<string, ProviderConfig>;
   tiers: {

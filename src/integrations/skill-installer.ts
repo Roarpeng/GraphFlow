@@ -172,11 +172,13 @@ function getClaudeCodeDirs(): Array<{ name: string; claudeDir: string }> {
  * 1. Agent Plugins 1.0 `skills/graphflow/`（规范源）
  * 2. vendorRuntimeRoot（VS Code 扩展打包后 vendor/graphflow 路径）
  * 3. 兼容副本：dist/surfaces/trae-skill、src/surfaces/trae-skill
+ *
+ * Only paths relative to this package: a cwd candidate let any directory with
+ * `skills/graphflow/SKILL.md` plant its file into every user-level agent.
  */
 export function resolveSkillSourcePath(vendorRuntimeRoot?: string): string | undefined {
   const candidates: string[] = [
     // Agent Plugins 1.0 fixed discovery path (canonical source)
-    join(process.cwd(), "skills", "graphflow"),
     join(__dirname, "..", "..", "skills", "graphflow"),
     // VS Code 扩展 vendor 路径（打包后）
     ...(vendorRuntimeRoot
@@ -189,8 +191,6 @@ export function resolveSkillSourcePath(vendorRuntimeRoot?: string): string | und
     // 兼容副本 / 标准构建产物路径
     join(__dirname, "..", "surfaces", "trae-skill", "graphflow"),
     join(__dirname, "..", "..", "..", "src", "surfaces", "trae-skill", "graphflow"),
-    join(process.cwd(), "src", "surfaces", "trae-skill", "graphflow"),
-    join(process.cwd(), "dist", "surfaces", "trae-skill", "graphflow"),
   ];
   for (const dir of candidates) {
     if (existsSync(join(dir, "SKILL.md"))) {
@@ -213,8 +213,6 @@ export function resolveTraeRulesSourcePath(vendorRuntimeRoot?: string): string |
       : []),
     join(__dirname, "..", "surfaces", "trae-rules"),
     join(__dirname, "..", "..", "..", "src", "surfaces", "trae-rules"),
-    join(process.cwd(), "src", "surfaces", "trae-rules"),
-    join(process.cwd(), "dist", "surfaces", "trae-rules"),
   ];
   for (const dir of candidates) {
     if (existsSync(join(dir, "graphflow.md"))) {
@@ -238,8 +236,6 @@ function surfaceDirCandidates(
       : []),
     join(__dirname, "..", "surfaces", surfaceName),
     join(__dirname, "..", "..", "..", "src", "surfaces", surfaceName),
-    join(process.cwd(), "src", "surfaces", surfaceName),
-    join(process.cwd(), "dist", "surfaces", surfaceName),
   ].filter((dir) => existsSync(join(dir, markerFile)));
 }
 
@@ -278,8 +274,6 @@ export function resolveCursorRulesSourcePath(vendorRuntimeRoot?: string): string
     // 标准构建产物路径
     join(__dirname, "..", "surfaces", "cursor-rules"),
     join(__dirname, "..", "..", "..", "src", "surfaces", "cursor-rules"),
-    join(process.cwd(), "src", "surfaces", "cursor-rules"),
-    join(process.cwd(), "dist", "surfaces", "cursor-rules"),
   ];
   for (const dir of candidates) {
     if (existsSync(join(dir, "graphflow.mdc"))) {

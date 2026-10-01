@@ -1,6 +1,6 @@
 import { resolveConfigSecret } from "./secrets";
 import type { GraphFlowConfig } from "./schema";
-import type { EmbeddingProvider } from "../learning/embeddings";
+import type { EmbeddingProvider, ResilientLocalEmbeddingProvider } from "../learning/embeddings";
 import {
   createHashEmbeddingProvider,
   createOpenAiEmbeddingProvider,
@@ -98,6 +98,35 @@ export function resolveActiveEmbeddingBackend(config: GraphFlowConfig): "semanti
   return resolveEffectiveEmbeddingBackend(config) === "fnv" ? "off" : "semantic";
 }
 
+/**
+ * Each local provider owns an ONNX session (model weights + a native thread
+ * pool) that is never released, so it must be created once per process and
+ * shared; a fresh one per call grows memory and threads without bound.
+ */
+const localProviderCache = new Map<
+  string,
+  { provider: EmbeddingProvider; local: ResilientLocalEmbeddingProvider }
+>();
+
+/** Drop shared local providers (test isolation). */
+export function resetEmbeddingProviderCache(): void {
+  localProviderCache.clear();
+}
+
+function publishLocalProviderQuality(local: ResilientLocalEmbeddingProvider): void {
+  if (local.getBackend() === "hash") {
+    configureEmbeddingQualityMeta({ provider: "hash", model: HASH_EMBEDDING_MODEL, dimensions: EMBEDDING_DIM });
+    configureEmbeddingQualityBackend("hash");
+    return;
+  }
+  configureEmbeddingQualityMeta({
+    provider: "transformers",
+    model: CANONICAL_EMBEDDING_MODEL,
+    dimensions: CANONICAL_EMBEDDING_DIM,
+  });
+  configureEmbeddingQualityBackend("pending");
+}
+
 export function createEmbeddingProviderFromConfig(
   config: GraphFlowConfig
 ): EmbeddingProvider | undefined {
@@ -109,6 +138,16 @@ export function createEmbeddingProviderFromConfig(
   const backend = resolveEffectiveEmbeddingBackend(config);
   const modelCacheDir = resolveConfiguredModelCacheDir(config);
   const dtype = resolveEmbeddingDtype(policy?.dtype);
+  const localCacheKey =
+    backend === "transformers"
+      ? JSON.stringify([dtype, modelCacheDir ?? "", collectResolveRoots(config)])
+      : undefined;
+  const cachedLocal = localCacheKey ? localProviderCache.get(localCacheKey) : undefined;
+  if (cachedLocal) {
+    publishLocalProviderQuality(cachedLocal.local);
+    return cachedLocal.provider;
+  }
+  let localProvider: ResilientLocalEmbeddingProvider | undefined;
 
   let embeddingProvider: EmbeddingProvider | undefined;
   let model = CANONICAL_EMBEDDING_MODEL;
@@ -118,7 +157,7 @@ export function createEmbeddingProviderFromConfig(
   const createResilientLocal = (): EmbeddingProvider => {
     resolvedProviderName = "transformers";
     configureEmbeddingQualityBackend("pending");
-    return createResilientLocalEmbeddingProvider({
+    localProvider = createResilientLocalEmbeddingProvider({
       resolveRoots: collectResolveRoots(config),
       dtype,
       ...(modelCacheDir ? { modelCacheDir } : {}),
@@ -131,6 +170,7 @@ export function createEmbeddingProviderFromConfig(
         configureEmbeddingQualityBackend("hash");
       },
     });
+    return localProvider;
   };
 
   if (backend === "fnv") {
@@ -190,6 +230,9 @@ export function createEmbeddingProviderFromConfig(
       // 非阻塞：用 void 触发，预热失败由 warmupEmbeddingProvider 内部静默处理。
       // Resilient local provider will settle to hash on MODULE_NOT_FOUND without throwing.
       void warmupEmbeddingProvider(embeddingProvider);
+    }
+    if (localCacheKey && localProvider) {
+      localProviderCache.set(localCacheKey, { provider: embeddingProvider, local: localProvider });
     }
   }
 

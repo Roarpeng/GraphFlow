@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { extractEnvPlaceholderName } from "./secrets";
 import { readEnvVar } from "./env-lookup";
 import { validateGraphifyEndpoint } from "./graphify-endpoint";
-import type { GraphFlowConfig } from "./schema";
+import type { GraphFlowConfig, GraphFlowConfigLayer } from "./schema";
 import { getDefaultConfig, resolveMaxContextTokens, DEFAULT_OUTPUT_DIR } from "./defaults";
 import { resolveIncludeExtensions } from "./include-extensions.js";
 import { logger } from "../utils/logger";
@@ -184,6 +184,23 @@ export function loadConfigSafe(path = "graphflow.config.json"): LoadConfigResult
       configPath: resolvedPath,
       error: message,
     };
+  }
+}
+
+/**
+ * Parse one discovered config layer without validating it: project and overlay
+ * layers may name only the fields they override, so validity is decided on the
+ * merged result, not per file.
+ */
+export function readConfigLayer(path: string): { layer?: GraphFlowConfigLayer; error?: string } {
+  try {
+    const parsed = resolveEnvTemplates(JSON.parse(readFileSync(resolve(path), "utf8")));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { error: "config root must be a JSON object" };
+    }
+    return { layer: parsed as GraphFlowConfigLayer };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
   }
 }
 
