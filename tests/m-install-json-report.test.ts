@@ -41,23 +41,24 @@ afterEach(() => {
  */
 async function withIsolatedHome<T>(run: (init: InitModule) => T): Promise<T> {
   const home = makeTempRoot("gf-isolated-home-");
-  const prevProfile = process.env.USERPROFILE;
-  const prevHome = process.env.HOME;
-  const prevAppData = process.env.APPDATA;
-  if (process.platform === "win32") process.env.USERPROFILE = home;
-  else process.env.HOME = home;
+  const keys = ["USERPROFILE", "HOME", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "GRAPHFLOW_DSH_HOME", "KIMI_CODE_HOME"];
+  const saved = new Map(keys.map((key) => [key, process.env[key]]));
+  process.env.USERPROFILE = home;
+  process.env.HOME = home;
   process.env.APPDATA = join(home, "AppData", "Roaming");
+  process.env.LOCALAPPDATA = join(home, "AppData", "Local");
+  process.env.XDG_CONFIG_HOME = join(home, ".config");
+  process.env.GRAPHFLOW_DSH_HOME = join(home, ".dsh");
+  delete process.env.KIMI_CODE_HOME;
   vi.resetModules();
   try {
     return run((await import("../src/surfaces/cli/init")) as InitModule);
   } finally {
     vi.resetModules();
-    if (prevProfile === undefined) delete process.env.USERPROFILE;
-    else process.env.USERPROFILE = prevProfile;
-    if (prevHome === undefined) delete process.env.HOME;
-    else process.env.HOME = prevHome;
-    if (prevAppData === undefined) delete process.env.APPDATA;
-    else process.env.APPDATA = prevAppData;
+    for (const [key, value] of saved) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 }
 
@@ -99,6 +100,7 @@ describe("install JSON report for agent self-check", () => {
       },
       ok: expect.any(Boolean),
       remediation: expect.any(Array),
+      warnings: expect.any(Array),
     } satisfies Partial<InstallReport>);
 
     expect(report.skills).toMatchObject({
@@ -120,17 +122,23 @@ describe("install JSON report for agent self-check", () => {
       });
     }
 
-    // Install is only ok when post-install doctor finds no missing registrations.
+    // Install is ok when post-install doctor finds no missing registrations and no
+    // core write failed; optional extras that failed are warnings, not failures.
     expect(report.ok).toBe(
       report.doctor.ok &&
         !report.mcp.some((m) => m.status === "error") &&
-        report.claudeCodeHooks.status !== "error" &&
-        report.dshHarness.status !== "error" &&
         report.globalConfig.status !== "error"
     );
-    if (!report.ok) {
-      expect(report.remediation.length).toBeGreaterThan(0);
-    }
+    expect(report.ok).toBe(report.remediation.length === 0);
+  });
+
+  it("does not configure hosts that are not detected", async () => {
+    const report = await withIsolatedHome((init) =>
+      init.buildInstallReport(makeTempRoot("gf-install-proj-"), { bootstrapGraph: false })
+    );
+    expect(report.doctor.detectedAgents).toEqual([]);
+    expect(report.mcp.every((m) => m.status === "skipped")).toBe(true);
+    expect(report.skills.projectRules.every((r) => r.status === "skipped")).toBe(true);
   });
 
   it("formats human-readable install text from the same report", async () => {

@@ -34,7 +34,12 @@ import {
 // ── Re-exports from sub-modules ──────────────────────────────────────
 export type { FileIndexerOptions } from "./file-indexer-walker.js";
 export { DEFAULT_EXTENSIONS, DEFAULT_MAX_FILE_SIZE } from "./file-indexer-walker.js";
-export { clearGraphIndexArtifacts, hasPendingGraphIndexWork, hasIndexCache } from "./file-indexer-cache.js";
+export {
+  clearGraphIndexArtifacts,
+  hasPendingGraphIndexWork,
+  hasIndexCache,
+  indexedStoreIsIncomplete,
+} from "./file-indexer-cache.js";
 export { resolveCallerAtLine } from "./file-indexer-nodes.js";
 
 // ── Internal imports ─────────────────────────────────────────────────
@@ -590,7 +595,7 @@ export async function indexSingleFile(
   }
 
   const { nodes: fileNodes, edges: fileEdges } = buildFileNodesAndEdges(
-    relPath, stat.size, language, declared, imports
+    relPath, stat.size, language, declared, imports, content
   );
   nodes.push(...fileNodes);
   edges.push(...fileEdges);

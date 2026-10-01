@@ -12,10 +12,12 @@
  * `installViaHostAdapter` returns `unsupported` only for an id that is in the
  * registry but has neither slice (a programming error, asserted by tests).
  */
+import { mkdirSync } from "node:fs";
 import {
   CLAUDE_CODE_HOST_ADAPTER_ID,
   getClaudeCodeHostStatus,
   installClaudeCodeHost,
+  resolveClaudeCodeHostHome,
   uninstallClaudeCodeHost,
   type ClaudeCodeHostInstallResult,
   type ClaudeCodeHostStatus,
@@ -24,6 +26,7 @@ import {
   CURSOR_HOST_ADAPTER_ID,
   getCursorHostStatus,
   installCursorHost,
+  resolveCursorHome,
   uninstallCursorHost,
   type CursorHostInstallResult,
   type CursorHostStatus,
@@ -44,6 +47,7 @@ import {
   type KimiCodeHostInstallResult,
   type KimiCodeHostStatus,
 } from "./kimi-code-host-installer";
+import { resolveKimiCodeHome } from "./kimi-code-paths";
 import { getHostAdapter } from "./host-adapter";
 import {
   PROFILE_HOST_IDS,
@@ -78,6 +82,8 @@ export const HOST_ADAPTER_MIGRATED_IDS = [
 
 export interface HostAdapterInstallOptions {
   home?: string;
+  /** Configure the host even when it is not detected on this machine. */
+  force?: boolean;
 }
 
 export type HostAdapterInstallStatus = DshHarnessInstallResult["status"] | "unsupported";
@@ -96,6 +102,8 @@ export interface HostAdapterHostStatus {
   detected: boolean;
   installed: boolean;
   glueInstalled?: boolean;
+  /** DeepSeek Harness: @roarpeng/graphflow is installed in the profile (glue ships with it). */
+  packageInstalled?: boolean;
   skillInstalled?: boolean;
   mcpInstalled?: boolean;
   rulesInstalled?: boolean;
@@ -173,6 +181,7 @@ function fromDshStatus(status: DshHarnessStatus): HostAdapterHostStatus {
     detected: status.detected,
     installed: status.installed,
     glueInstalled: status.glueInstalled,
+    packageInstalled: status.packageInstalled,
     skillInstalled: status.skillInstalled,
     mcpInstalled: status.installed,
     home: status.dshHome,
@@ -267,6 +276,19 @@ export function installViaHostAdapter(
   if (adapter.id === DSH_HOST_ADAPTER_ID) {
     return withAdapterMeta(adapter.id, adapter.displayName, installDshHarness(dshHomeOptions(options)));
   }
+  if (options.force) {
+    // Hand-written slices detect their host by its home directory; creating it
+    // is what "configure this host anyway" means for them.
+    const forcedHome =
+      adapter.id === CURSOR_HOST_ADAPTER_ID
+        ? resolveCursorHome(options.home)
+        : adapter.id === CLAUDE_CODE_HOST_ADAPTER_ID
+          ? resolveClaudeCodeHostHome(options.home)
+          : adapter.id === KIMI_CODE_HOST_ADAPTER_ID
+            ? resolveKimiCodeHome(options.home)
+            : undefined;
+    if (forcedHome) mkdirSync(forcedHome, { recursive: true });
+  }
   if (adapter.id === CURSOR_HOST_ADAPTER_ID) {
     return withAdapterMeta(adapter.id, adapter.displayName, installCursorHost(sliceHomeOptions(options)));
   }
@@ -277,7 +299,10 @@ export function installViaHostAdapter(
     return withAdapterMeta(adapter.id, adapter.displayName, installKimiCodeHost(sliceHomeOptions(options)));
   }
   if (isProfileHost(adapter.id)) {
-    const profileResult = installProfileHost(adapter.id, sliceHomeOptions(options));
+    const profileResult = installProfileHost(adapter.id, {
+      ...sliceHomeOptions(options),
+      ...(options.force ? { force: true } : {}),
+    });
     if (profileResult) {
       return withAdapterMeta(adapter.id, adapter.displayName, profileResult);
     }

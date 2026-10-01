@@ -1,3 +1,4 @@
+<!-- GRAPHFLOW:BEGIN managed block — edit outside these markers only -->
 # GraphFlow for Claude Code
 
 Use GraphFlow as a local orchestration and context service.
@@ -41,3 +42,4 @@ During repository development you can also point Claude Code at this checkout:
 - Fall back to `graphflow ... --json` only if MCP is not available (including `graphflow --json outcome report <episodeId> <success>`).
 
 DeepSeek Harness: `dsh plugin --profile web add @roarpeng/graphflow` (or `npx @roarpeng/graphflow install` when `~/.dsh` exists).
+<!-- GRAPHFLOW:END -->

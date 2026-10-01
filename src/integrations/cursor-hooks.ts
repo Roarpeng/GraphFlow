@@ -22,6 +22,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { removeDirIfEmpty, writeJsonOrRemove } from "./config-file-cleanup";
 import {
   buildSessionHookScript,
   settingsReferenceHookScript,
@@ -280,8 +281,10 @@ export function uninstallCursorHooks(
     }
   }
 
-  const next: Record<string, unknown> = { ...json, hooks };
-  writeFileSync(hooksPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  if (removedAny) {
+    // `version` is the schema marker GraphFlow writes into a hooks.json it creates.
+    writeJsonOrRemove(hooksPath, { ...json, hooks }, ["version"]);
+  }
   if (existsSync(scriptPath)) {
     try {
       rmSync(scriptPath, { force: true });
@@ -289,6 +292,7 @@ export function uninstallCursorHooks(
       // Deleting the script must not block uninstall.
     }
   }
+  removeDirIfEmpty(dirname(scriptPath));
   return {
     status: removedAny ? "updated" : "skipped",
     filePath: hooksPath,

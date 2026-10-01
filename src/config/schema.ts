@@ -125,16 +125,14 @@ export interface ReinvestEfficiencyPolicyConfig {
 
 export interface McpSurfaceConfig {
   /**
-   * MCP 工具结果遗留 text 副本的策略：紧凑 JSON 超过 4KB 阈值时，"auto"
-   * （默认）把 text 降级为一行桩（structuredContent 仍是全量数据），
-   * 避免同时渲染 text+structuredContent 的宿主双倍付费；"full" 永不桩化，
-   * 是依赖 JSON.parse(text) 拿全量数据的老客户端的逃生门。
-   * Policy for the legacy text copy of MCP tool results: when the compact
-   * JSON exceeds the 4KB threshold, "auto" (default) degrades the text copy
-   * to a one-line stub (structuredContent still carries the full data) so
-   * hosts that render both text and structuredContent do not pay twice;
-   * "full" never stubs — the escape hatch for legacy clients that
-   * JSON.parse the text copy for full data.
+   * MCP 工具结果 text 副本的策略："full"（默认）永不桩化——Cursor 等宿主
+   * 只把 content[].text 交给模型；"auto" 在紧凑 JSON 超过 4KB 时把 text
+   * 降级为一行桩（structuredContent 仍是全量），仅适合会渲染
+   * structuredContent 的宿主。
+   * Policy for the text copy of MCP tool results: "full" (default) never
+   * stubs — hosts such as Cursor hand the model only content[].text; "auto"
+   * degrades text copies over 4KB to a one-line stub (structuredContent
+   * still carries the full data), for hosts that render structuredContent.
    */
   textCopy?: "full" | "auto";
 }

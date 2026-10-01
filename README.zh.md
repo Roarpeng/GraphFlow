@@ -6,7 +6,7 @@
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
-> **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（响应真正有界：压缩包之外，历史回显只以短预览下发；对现实 top-K 文件读取口径 **95.6%**，见[双基线](benchmarks/RESULTS.md)） · 跨会话学习飞轮。
+> **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（响应真正有界：压缩包之外，历史回显只以短预览下发；比整读 top-10 文件少 **95.6%** token——这是 token 数比值，不衡量回答质量，见[双基线](benchmarks/RESULTS.md)） · 跨会话学习飞轮。
 
 GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
 
@@ -85,18 +85,23 @@ graphflow llm-check      # 逐 provider 显示获胜凭证来源、检查过的�
 
 ### GraphFlow 2.x：Agent Efficiency Agent (`eff-agent`)
 
-从“省 Token”升级为“计算规避决策层（Compute Avoidance）”，支持以独立 CLI 工具运行：
+从“省 Token”升级为“计算规避决策层（Compute Avoidance）”。该包（`packages/efficiency-agent`）**尚未发布到 npm**，`npx eff-agent` 无法运行；请在克隆本仓库并 `npm install` 后从源码运行：
 
 ```bash
-# 任务真实调度执行
-npx eff-agent run "修复这个模块的类型报错" --worker=jev --policy=conservative
+# 查看用法
+npx tsx packages/efficiency-agent/bin/eff-agent.ts --help
 
-# 运行真实 50 任务基准评测
-npx eff-agent bench run benchmarks/eff-tasks-v1.jsonl --worker=jev --mode=shadow
+# 任务真实调度执行
+npx tsx packages/efficiency-agent/bin/eff-agent.ts run "修复这个模块的类型报错" --worker=jev --policy=conservative
+
+# 运行 50 任务基准语料
+npx tsx packages/efficiency-agent/bin/eff-agent.ts bench run packages/efficiency-agent/benchmarks/eff-tasks-v1.jsonl --worker=jev --mode=shadow
 
 # 严格 R1-R6 溯源门禁 A/B 对比
-npx eff-agent bench compare baseline.jsonl shadow.jsonl
+npx tsx packages/efficiency-agent/bin/eff-agent.ts bench compare baseline.jsonl shadow.jsonl
 ```
+
+首次真实 provider A/B（[benchmarks/REAL-AB-RESULTS.md](benchmarks/REAL-AB-RESULTS.md)）在 50 个任务上观测到输入 token 约少 47%，每臂只跑一次，且**未测回答质量**（成功判据仅为非空回答）；只能视为输入量观测，不能当作“质量不变的节省”。
 
 ## 核心能力
 
@@ -105,14 +110,15 @@ npx eff-agent bench compare baseline.jsonl shadow.jsonl
 | **R9 承诺账本 + 收尾审计** | 治「干着干着就忘了」：依赖 lock 一致性 / 孤儿文件接线 / 文档漂移内置检查器 + `graphflow.audit.json` 声明式规则（容器引用、驱动加载）；默认对账 git 未提交工作区；`graphflow audit` CLI + `report_outcome success` 前自动审计（`GRAPHFLOW_AUDIT_STRICT=1` 严格拒报成功）；**跨会话提醒**——下次会话首次 `graphflow_context` 返回「上次会话有 N 项未收尾」。见 [docs/closing-audit.md](docs/closing-audit.md) |
 | **R8 省钱与靠谱双主线** | `working-set` 预取（消灭探索轮次）、`challenge` 图 diff 质询、`spawn-receipt` 出生证、`facts ask` 时点查询、`quote` 诚实任务报价 |
 | **Harness** | 记忆动态、按任务召回（图锚点 + 压缩摘要 + 历史 episode + skill），有明确 L0–L3 token 预算；**符号正文进包**（前 3 个 L1 符号锚点各附声明正文，单条 ≤120 token、整包 ≤20% 预算，且只取锚点阶段剩下的预算——正文永不挤掉锚点；只有磁盘文本仍与索引期签名一致才附，否则保持纯指针，`expandAnchor` 报 `exact` / `relocated` / `drifted`；`enableSymbolBodies: false` 可关）；**打包外附加负载如实记账**（对话命中与 workbench/对话**预览回显**计入 `unbudgetedTokens`，`accountedTokens` = 压缩 + 包外负载，`estimatedSavingsPercent` 按该真实下发总量计算，`estimatedRawTokens` 不低于实际下发量；响应有界——回显为每条约 160 字符的消息预览并带 `truncated` 标记，全文留在图谱中，可经 `anchorId` 展开 / VS Code 面板查看；`recordDialogue: false` 完全关闭回显与记录） |
-| **Token 节省（双口径）** | 对现实 top-K 文件读取 **95.6%**；对朴素 grep 基线 98.5%。两者回答不同问题，**不可互换**；现实口径无法自我膨胀。见 [benchmarks/RESULTS.md](benchmarks/RESULTS.md) |
+| **Token 比值（双口径）** | 对整读同一 ranker 的 top-10 文件少 **95.6%**；对朴素 grep 基线少 98.5%。两者回答不同问题，**不可互换**。二者都只是 token 数比值，**不检验压缩包是否仍含答题所需信息**，不代表回答质量；实时 `context preview` 的节省百分比口径不同，不承诺具体数值。见 [benchmarks/RESULTS.md](benchmarks/RESULTS.md) |
+| **检索自测** | 132 条 golden 查询 Hit@5=100%、MRR=0.779——查询由作者编写、无 held-out 划分，属样本内回归门禁，不代表泛化能力；独立审计的 15 条 held-out 英文查询（未参与调参）文件级 Hit@5=80%、MRR=0.61（BM25 基线 73%/0.68）；调参用的 20 条开发集 Hit@5=85%（BM25 95%）；中文查询依赖智能体提供 `englishQuery`（提供时 5/5 命中，不提供 0/5） |
 | **效率机制（SoL-Pi 借鉴）** | 默认**全开**、可在 **GraphFlow: Settings** 逐项关闭：大输出归档为句柄（ObservationPack）、日志压缩为**逐字核验**收据（Evidence-Preserving Reducer）、按观测压力自适应预算 + 压缩建议（Online Context Compact）、编辑+验证融合（Action Fusion）；dsh 侧在模型表面自动投影大结果（`GRAPHFLOW_D_DSH_PROJECTION=0` 关）。见 [docs/efficiency-mechanisms.md](docs/efficiency-mechanisms.md) |
 | **效率/能力门禁 + 机制自动研究** | 配对双臂报告落 `graphflow-out/efficiency.json`，`governance release-gate` 新增 `--min-efficiency-qualifying` / `--max-capability-regressions` / `--min-anchor-recall-percent` / `--min-body-coverage-percent`；候选机制走 `graphflow mechanism propose\|trial\|freeze\|admit\|reject\|list`（held-out 隔离、代码强制） |
 | **对话图** | 对话轮是带时间语义的类型化图节点（`supersedes` / `same_topic` 边 + `validAt` / `invalidAt`）：被修正的结论离线检测并以修正链渲染，当前真值过滤隐藏被取代轮。历史问答可检索：`dialogue search "<query>"`（`--include-superseded` 回看历史），`graphflow_context` 预览附加纯增量 `dialogueHits`、绝不挤掉代码锚点。`dialogue fork --from` 显式分叉、`dialogue list --path` 回放路径、`dialogue traces` 多 Agent 轨迹、`artifact export-memory` 导出 `dialogues.md`（按 session 分组、含修正链与轨迹）。注入在所有代码锚点**之后**、纯增量；落盘前做**密钥脱敏**（API Key / Bearer / JWT / 连接串 / PEM），`GRAPHFLOW_DIALOGUE_REDACT=0` 可关 |
-| **飞轮复现** | `npm run proof:flywheel` 离线串检索 / skill A/B / memory A/B；见 [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md) |
+| **飞轮复现** | `npm run proof:flywheel` 离线串检索 / skill A/B / memory A/B；见 [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md)。skill / memory A/B 是手工构造图上的**合成机制测试**，不是任务成功率：采用 held-out 划分、两臂同一判据后，飞轮对未见任务**没有迁移收益**（skill 61.5% 对 61.5%；memory 51.6% 对 61.3%）。此前的“100% 对 61.5%”“100% 对 56.5%”用答案反推历史经验且两臂判据不一致，已撤回 |
 | **团队记忆** | `graphflow team serve`：tenant 隔离 + viewer/contributor/admin；非 loopback 默认强制认证；`diagnose` 报告连通与 RBAC。见 [docs/team-memory-security.md](docs/team-memory-security.md) |
 | **HostAdapter** | **全部 20 个宿主**的 install / uninstall / doctor 统一走注册表：4 个手写切片（Cursor / Claude Code / DeepSeek Harness / Kimi Code）+ 通用 profile 切片（Trae、VS Code、Windsurf、Cline、Roo、Kilo、PearAI、Gemini、Codex、Antigravity、Amazon Q、Zed、Continue、Qoder、Opencode、ZCode） |
-| **2.x 效率决策层** | 独立包 `@roarpeng/graphflow-efficiency-agent` + `eff-agent` CLI；四轨指纹、三层缓存、Layer B 小模型 Meta 决策、Dynamic Temporary Harness 动态任务沙盒、TypeSafe-JEV 强类型 AI Worker、External CLI Worker、R1-R6 溯源门禁 A/B 基准。详见 [packages/efficiency-agent/README.md](packages/efficiency-agent/README.md) |
+| **2.x 效率决策层** | 仓库内独立包 `@roarpeng/graphflow-efficiency-agent`（未发布到 npm，需从源码运行）+ `eff-agent` CLI；四轨指纹、三层缓存、Layer B 小模型 Meta 决策、Dynamic Temporary Harness 动态任务沙盒、TypeSafe-JEV 强类型 AI Worker、External CLI Worker、R1-R6 溯源门禁 A/B 基准。详见 [packages/efficiency-agent/README.md](packages/efficiency-agent/README.md) |
 | **Serena** | 并列第二个 MCP：context/plan → Serena 编辑 → `report_outcome` |
 
 完整英文对照与基准数字：[README.md](README.md)。
@@ -161,7 +167,7 @@ GraphFlow 本身就是一个 **dsh 插件包**（topic：`dsh-plugin`）。`pack
 | VS Code/Cursor 图谱面板、Settings、Workbench Tree、`@graphflow` chat | **不移植** |
 | Cursor Agent Plugins 发现 / Claude Code Session* **文件** hooks | **不移植**（dsh 用 bundle + glue） |
 
-核心价值：本地 AST 知识图谱、L1–L3 分层压缩（token 节省**双口径**并列——对现实 top-K 文件读取 **95.6%**，对朴素 grep 基线 98.5%，两者回答不同问题、不可互换）、跨会话 Episodic / Skill 飞轮。GraphFlow **不执行代码**，只给宿主 Agent 压缩上下文和计划；对话写入边界默认做密钥脱敏（`GRAPHFLOW_DIALOGUE_REDACT=0` 可关）。Workbench 数据走 MCP `graphflow_context` / `graphflow_diagnose` 即可。
+核心价值：本地 AST 知识图谱（11 种代码语言走真实 tree-sitter AST，Markdown 为正则解析）、L1–L3 分层压缩（token 比值**双口径**并列——对整读 top-10 文件少 **95.6%**，对朴素 grep 基线少 98.5%，两者回答不同问题、不可互换，且都不衡量回答质量）、跨会话 Episodic / Skill 飞轮。GraphFlow **不执行代码**，只给宿主 Agent 压缩上下文和计划；对话写入边界默认做密钥脱敏（`GRAPHFLOW_DIALOGUE_REDACT=0` 可关）。Workbench 数据走 MCP `graphflow_context` / `graphflow_diagnose` 即可。
 
 ### 安装
 
@@ -246,4 +252,4 @@ dsh plugin --profile web remove @roarpeng/graphflow
 
 完整英文文档、基准与协议：[README.md](README.md) · [ATP/IR](docs/atp-ir-spec-v1.md) · [上下文合同](docs/context-contract.md) · [经验记忆](docs/experience-memory.md) · [GraphFlow + Serena](docs/graphflow-serena.zh.md) · [竞品对比](docs/comparison.md)
 
-第三方复现飞轮 / 记忆 A/B / 检索自测：`npm run proof:flywheel`（说明见 [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md)）。
+第三方复现飞轮 / 记忆 A/B / 检索自测：`npm run proof:flywheel`（说明见 [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md)）。所有数字均为作者在本仓库上的自测，不是独立评测；综合 / 多域基准是作者自定阈值的内部检查，不作为宣传分数。

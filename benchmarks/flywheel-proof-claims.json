@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "catalogId": "flywheel-proof-claims-v1",
-  "disclaimer": "Author-run self-tests copied from tracked RESULTS markdown. Not independently verified. Live runners may rewrite *-RESULTS.md in the working tree; this catalog is the frozen comparison target.",
+  "catalogId": "flywheel-proof-claims-v2",
+  "disclaimer": "Author-run self-tests copied from tracked RESULTS markdown. Not independently verified. The retrieval golden set is author-written with no held-out split; skill-ab / memory-ab are synthetic mechanism tests (hand-built graphs, held-out split, identical criterion for both arms), not task-success rates; the token claim is a token-count ratio, not a fidelity measure. Live runners may rewrite *-RESULTS.md in the working tree; this catalog is the frozen comparison target.",
   "claims": [
     {
       "id": "retrieval-hit5",
@@ -11,7 +11,7 @@
       "metric": "hitRateAt5",
       "display": "100.0%",
       "numeric": 1,
-      "note": "Self-test in RETRIEVAL-EVAL-RESULTS.md (commit 4cda2976270d870d5c46770f30dda6f7df4eedd7, 2026-09-19). Re-baselined after v1.12→v1.24 corpus growth; deterministic across repeat runs."
+      "note": "Self-test in RETRIEVAL-EVAL-RESULTS.md (commit 4cda2976270d870d5c46770f30dda6f7df4eedd7, 2026-09-19) on 132 author-written queries with no held-out split — in-sample, not evidence of generalization. An independent 20-query held-out check (v2.0.3 audit) measured Hit@5 65% (BM25 baseline 90%) and 2/5 on Chinese queries."
     },
     {
       "id": "retrieval-mrr",
@@ -21,7 +21,7 @@
       "metric": "mrr",
       "display": "0.779",
       "numeric": 0.779,
-      "note": "Same retrieval self-test report as Hit@5."
+      "note": "Same in-sample retrieval self-test report as Hit@5 (author-written queries, no held-out split)."
     },
     {
       "id": "retrieval-ndcg5",
@@ -31,47 +31,47 @@
       "metric": "ndcgAt5",
       "display": "0.638",
       "numeric": 0.638,
-      "note": "Authoritative NDCG@5 is this RESULTS file, not a README headline if they drift."
+      "note": "Authoritative NDCG@5 is this RESULTS file, not a README headline if they drift. Same in-sample caveat as Hit@5."
     },
     {
       "id": "skill-ab-on",
       "suite": "skill-ab",
       "sourceFile": "benchmarks/RESULTS.md",
-      "sourceNeedle": "**100.0%** (26/26)",
+      "sourceNeedle": "**61.5%** (8/13)",
       "metric": "successRateA",
-      "display": "100.0% (26/26)",
-      "numeric": 1,
-      "note": "P1-2 flywheel ON success proxy. Self-test 2026-08-04."
+      "display": "61.5% (8/13)",
+      "numeric": 0.615,
+      "note": "P1-2 synthetic mechanism test, flywheel ON, 13 held-out tasks (history seeded only from the disjoint training split; same criterion as OFF). Not a task-success rate. Supersedes the answer-key-seeded, asymmetrically scored 100% vs 61.5% (2026-08-04)."
     },
     {
       "id": "skill-ab-off",
       "suite": "skill-ab",
       "sourceFile": "benchmarks/RESULTS.md",
-      "sourceNeedle": "**61.5%** (16/26)",
+      "sourceNeedle": "**61.5%** (8/13)",
       "metric": "successRateB",
-      "display": "61.5% (16/26)",
+      "display": "61.5% (8/13)",
       "numeric": 0.615,
-      "note": "P1-2 flywheel OFF success proxy. Same RESULTS.md block."
+      "note": "P1-2 synthetic mechanism test, flywheel OFF, same 13 held-out tasks and criterion. ON == OFF: no transfer to unseen tasks in this setup."
     },
     {
       "id": "memory-ab-on",
       "suite": "memory-ab",
       "sourceFile": "benchmarks/RESULTS.md",
-      "sourceNeedle": "**100.0%** (62/62)",
+      "sourceNeedle": "**51.6%** (16/31)",
       "metric": "successRateA",
-      "display": "100.0% (62/62)",
-      "numeric": 1,
-      "note": "P3 memory ON success proxy. Self-test 2026-08-04."
+      "display": "51.6% (16/31)",
+      "numeric": 0.516,
+      "note": "P3 synthetic mechanism test, memory ON, 31 held-out tasks (history seeded only from the disjoint training split; same criterion as OFF). Not a task-success rate or ROI. Supersedes the answer-key-seeded, asymmetrically scored 100% vs 56.5% (2026-08-04)."
     },
     {
       "id": "memory-ab-off",
       "suite": "memory-ab",
       "sourceFile": "benchmarks/RESULTS.md",
-      "sourceNeedle": "**56.5%** (35/62)",
+      "sourceNeedle": "**61.3%** (19/31)",
       "metric": "successRateB",
-      "display": "56.5% (35/62)",
-      "numeric": 0.565,
-      "note": "P3 memory OFF success proxy. Same RESULTS.md block."
+      "display": "61.3% (19/31)",
+      "numeric": 0.613,
+      "note": "P3 synthetic mechanism test, memory OFF, same 31 held-out tasks and criterion. Memory ON is lower (3 tasks hurt, 0 rescued) because history nodes shift package ranking."
     },
     {
       "id": "token-savings",
@@ -81,7 +81,7 @@
       "metric": "savingsPercent",
       "display": "95.6%",
       "numeric": 95.6,
-      "note": "Realistic arm (v1.17): same ranker's top-10 anchors resolved to real files and read in full (136,265 → 6,044). The naive-grep arm (98.5%) is reported separately and is an upper bound by construction. Corpus = this repo src/; cross-commit drift is expected, so re-measure and update both this claim and RESULTS.md together."
+      "note": "Realistic arm (Arm B, totals.baselineTopKFilesFullText.savingsPercent): token-count ratio of the compressed package vs reading the same ranker's top-10 anchor files in full (136,265 → 6,044). Not a fidelity/answer-quality measure. The naive-grep arm (98.5%, totals.savingsPercent) is a different arm and is never compared against this claim. Corpus = this repo src/; cross-commit drift is expected."
     }
   ]
 }

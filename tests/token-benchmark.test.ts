@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   CORPUS_QUERIES,
+  goldTargetInPackage,
   parseCorpusRoot,
   runTokenBenchmark,
   savingsPercent,
@@ -26,6 +27,16 @@ describe("token benchmark: savings math", () => {
     expect(savingsPercent(2000, 500)).toBe(75);
     expect(savingsPercent(1000, 1000)).toBe(0);
     expect(savingsPercent(0, 0)).toBe(0);
+  });
+});
+
+describe("token benchmark: fidelity proxy", () => {
+  it("checks whether the package text names a gold file", () => {
+    const pkg = "orchestrator summary\nsymbol:src\\core\\orchestrator.ts:abc1 Symbol L1";
+    expect(goldTargetInPackage(pkg, ["src/core/orchestrator.ts"])).toBe(true);
+    expect(goldTargetInPackage(pkg, ["src/routing/model-router.ts"])).toBe(false);
+    expect(goldTargetInPackage(pkg, undefined)).toBeNull();
+    expect(goldTargetInPackage(pkg, [])).toBeNull();
   });
 });
 

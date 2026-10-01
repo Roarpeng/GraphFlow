@@ -253,8 +253,9 @@ async function handleRun(
   const validationSpecs = flags.validation && flags.validation.length > 0
     ? flags.validation
     : [
-        // Default safe probe command
-        `${process.execPath} -e "console.log('task accepted: ' + process.argv[1]); process.exit(0);" "${taskText.replace(/"/g, '\\"')}"`,
+        // Default safe probe command; execPath is quoted because it contains
+        // spaces on a default Windows install (C:\Program Files\nodejs).
+        `"${process.execPath}" -e "console.log('task accepted: ' + process.argv[1]); process.exit(0);" "${taskText.replace(/"/g, '\\"')}"`,
       ];
 
   const brokerResult: BrokerResult = await runBrokeredExecution(
@@ -610,8 +611,8 @@ export async function runCli(argv: string[], options: CliIo = {}): Promise<numbe
  */
 async function handlePolicyLearn(
   positional: string[],
-  flags: Map<string, string | boolean>,
-  io: CliIo
+  flags: CliParsedFlags,
+  io: Required<CliIo>
 ): Promise<number> {
   const ledgerPath = positional[0];
   if (!ledgerPath) {
@@ -630,7 +631,7 @@ async function handlePolicyLearn(
       io.stdout("policy: no change worth making (insufficient signal or already optimal)");
       return 0;
     }
-    const outPath = typeof flags.get("out") === "string" ? String(flags.get("out")) : "graphflow-out/efficiency-policy.json";
+    const outPath = flags.out ?? "graphflow-out/efficiency-policy.json";
     mkdirSync(dirname(outPath), { recursive: true });
     writeFileSync(outPath, JSON.stringify(update, null, 2) + "\n", "utf8");
     io.stdout("policy: v" + update.version + " written to " + outPath);

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { removeDirIfEmpty, writeJsonOrRemove } from "./config-file-cleanup";
 
 /**
  * claude-code-hooks.ts — Claude Code hooks 配置生成器（P0-2）
@@ -385,8 +386,9 @@ export function uninstallClaudeCodeHooks(
     }
   }
 
-  const next: Record<string, unknown> = { ...settings, hooks };
-  writeFileSync(target, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  if (removedAny) {
+    writeJsonOrRemove(target, { ...settings, hooks });
+  }
   if (existsSync(scriptPath)) {
     try {
       rmSync(scriptPath, { force: true });
@@ -394,6 +396,7 @@ export function uninstallClaudeCodeHooks(
       // 删除脚本失败不阻断
     }
   }
+  removeDirIfEmpty(dirname(scriptPath));
   return {
     status: removedAny ? "updated" : "skipped",
     filePath: target,

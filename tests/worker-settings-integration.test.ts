@@ -222,17 +222,17 @@ describe("Worker Settings Integration", () => {
       // Verify Base URL input and note
       expect(html).toContain('id="settings-worker-base-url"');
       expect(html).toContain('value="http://localhost:8000/v1"');
-      expect(html).toContain("支持云端或本地部署模型端点，例如 http://localhost:8000/v1");
+      expect(html).toContain("本地模型如 http://localhost:8000/v1");
 
       // Verify Model input and note
       expect(html).toContain('id="settings-worker-model"');
       expect(html).toContain('value="typesafe-jev"');
-      expect(html).toContain("默认 typesafe-jev 或本地模型名称");
+      expect(html).toContain("TypeSafe 默认 jev-latest，或本地模型名称");
 
-      // Verify API Key input and note
+      // Verify API Key input and note (an env-var name is accepted, not only a literal key)
       expect(html).toContain('id="settings-worker-api-key"');
       expect(html).toContain('value="TYPESAFE_API_KEY"');
-      expect(html).toContain("支持 TYPESAFE_API_KEY，本地免密模型可留空");
+      expect(html).toContain("或填环境变量名");
     });
   });
 });

@@ -330,6 +330,7 @@ export function installCursorHost(options: { home?: string } = {}): CursorHostIn
     strategy: "npx",
     installScope: "user",
     agentIdsOverride: ids.length > 0 ? ids : ["cursor"],
+    skipMissingHostRoots: true,
   });
   const rules = installCursorRules();
   const skill = existsSync(home)

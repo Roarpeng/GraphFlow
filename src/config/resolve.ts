@@ -8,6 +8,7 @@ import { getDefaultConfig } from "./defaults";
 import { resolveGlobalConfigPath } from "./scaffold";
 import { bindRuntimeWorkspaceRoot } from "./workspace-root";
 import { applyProviderEnvFromConfig, isConfigExportedEnvKey } from "./provider-env";
+import { hydrateCredentialEnvFromRegistry, readEnvVar } from "./env-lookup";
 import { logger } from "../utils/logger";
 
 /** True when `key` holds a genuine shell-provided value (not config-exported). */
@@ -15,7 +16,7 @@ function genuineEnvPresent(key: string): boolean {
   if (isConfigExportedEnvKey(key)) {
     return false;
   }
-  const value = process.env[key]?.trim();
+  const value = readEnvVar(key);
   return Boolean(value && value.length > 0 && !value.startsWith("${"));
 }
 
@@ -63,23 +64,15 @@ export function resolveWritableConfigPath(path = "graphflow.config.json"): strin
 }
 
 function sniffAndApplyProviderEnv(config: GraphFlowConfig, isZeroConfig = false): void {
+  // 0. Windows: user env vars set after the IDE launched live only in the
+  // registry; pull them in before anything sniffs process.env.
+  hydrateCredentialEnvFromRegistry();
+
   // 1. Config values win: apply configured credentials from config into process.env if not already set
   applyProviderEnvFromConfig(config);
 
-  // 2. Alias mapping: if DEEPSEEK_API_KEY is not set, but TYPESAFE_API_KEY is, map it.
-  // A TYPESAFE_* value that was itself exported from another config is that
-  // config's credential — aliasing it would leak it across configs.
-  const typesafeGenuine = !isConfigExportedEnvKey("TYPESAFE_API_KEY");
-  const typesafeKey = typesafeGenuine ? process.env.TYPESAFE_API_KEY?.trim() : undefined;
-  if (typesafeKey && !process.env.DEEPSEEK_API_KEY?.trim()) {
-    process.env.DEEPSEEK_API_KEY = typesafeKey;
-  }
-  const typesafeBaseUrl = !isConfigExportedEnvKey("TYPESAFE_BASE_URL")
-    ? process.env.TYPESAFE_BASE_URL?.trim()
-    : undefined;
-  if (typesafeBaseUrl && !process.env.DEEPSEEK_BASE_URL?.trim()) {
-    process.env.DEEPSEEK_BASE_URL = typesafeBaseUrl;
-  }
+  // TYPESAFE_API_KEY is NOT aliased onto DeepSeek: api.typesafe.ai and
+  // api.deepseek.com are different vendors, so the alias only produced 401s.
 
   const envMap: Record<string, string> = {
     deepseek: "DEEPSEEK_API_KEY",

@@ -1281,7 +1281,7 @@ function showAgentWorkItemsPanel(
 
 function shouldShowAgentWorkItemsPanel(result: {
   mode?: string;
-  executionDescriptor?: { agentMode?: string; agentWorkItems?: unknown[] };
+  executionDescriptor?: { action?: string; agentMode?: string; agentWorkItems?: unknown[] };
   agentWorkItems?: unknown[];
 }): boolean {
   if (result.mode === "agent-delegated") {

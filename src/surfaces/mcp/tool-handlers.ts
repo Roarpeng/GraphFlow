@@ -543,18 +543,23 @@ export type TextCopyPolicy = "full" | "auto";
  */
 export const TEXT_STUB_THRESHOLD_BYTES = 4096;
 
-/** Module-wide default policy, injected from config once per executeToolCall. */
-let defaultTextCopyPolicy: TextCopyPolicy = "auto";
+/**
+ * Module-wide default policy, injected from config once per executeToolCall.
+ * Defaults to "full": several hosts (Cursor among them) hand the model only
+ * `content[].text`, so a stubbed text copy left the agent with no context.
+ * "auto" is opt-in for hosts known to render structuredContent.
+ */
+let defaultTextCopyPolicy: TextCopyPolicy = "full";
 
 /**
- * 注入模块级默认 text 副本策略（来自 mcp.textCopy 配置，非法值回退 "auto"）。
+ * 注入模块级默认 text 副本策略（来自 mcp.textCopy 配置，非法值回退 "full"）。
  * structuredResponse 的可选参数仍可逐次覆盖。
  * Set the module-wide default text-copy policy (from the mcp.textCopy config;
- * invalid values fall back to "auto"). A structuredResponse option can still
+ * invalid values fall back to "full"). A structuredResponse option can still
  * override it per call.
  */
 export function setDefaultTextCopyPolicy(policy: unknown): void {
-  defaultTextCopyPolicy = policy === "full" ? "full" : "auto";
+  defaultTextCopyPolicy = policy === "auto" ? "auto" : "full";
 }
 
 /** Fail-open config read: any failure keeps the current default policy. */

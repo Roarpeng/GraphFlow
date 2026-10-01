@@ -66,7 +66,8 @@ export async function parseFileForIndex(input: ParseFileInput): Promise<ParsedFi
     size,
     language,
     declared,
-    imports
+    imports,
+    content
   );
 
   if (officeDoc) {

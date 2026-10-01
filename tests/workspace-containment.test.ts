@@ -15,6 +15,21 @@ function scratch(): { root: string; sibling: string; cleanup: () => void } {
   return { root, sibling, cleanup: () => rmSync(base, { recursive: true, force: true }) };
 }
 
+/** Windows without admin / Developer Mode refuses file symlinks with EPERM. */
+function canCreateSymlinks(): boolean {
+  const base = mkdtempSync(join(tmpdir(), "containment-probe-"));
+  try {
+    writeFileSync(join(base, "target.txt"), "x");
+    symlinkSync(join(base, "target.txt"), join(base, "link.txt"));
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EPERM") return false;
+    throw error;
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+}
+
 describe("workspace containment", () => {
   it("accepts files inside the root", () => {
     const { root, cleanup } = scratch();
@@ -39,7 +54,7 @@ describe("workspace containment", () => {
     }
   });
 
-  it("rejects a symlink inside the root that points outside it", () => {
+  it.skipIf(!canCreateSymlinks())("rejects a symlink inside the root that points outside it", () => {
     // Passes every lexical check — the path is textually local — and would
     // otherwise import a whole foreign tree through a path that looks fine.
     const { root, sibling, cleanup } = scratch();

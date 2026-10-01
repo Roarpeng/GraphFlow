@@ -89,14 +89,11 @@
     };
   }
 
+  // Literal keys come in many vendor formats and env references in several
+  // spellings (NAME, ${NAME}, %NAME%, $NAME); whether it actually resolves
+  // is decided by the runtime on save.
   function hasResolvableApiKey(value) {
-    if (!value) {
-      return false;
-    }
-    if (/^sk-[A-Za-z0-9_-]{8,}$/.test(value)) {
-      return true;
-    }
-    return /^[A-Z][A-Z0-9_]*$/.test(value);
+    return Boolean(value && value.trim() && !/\s/.test(value.trim()));
   }
 
   function tierSnapshot(tier) {

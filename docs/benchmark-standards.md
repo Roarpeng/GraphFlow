@@ -4,7 +4,7 @@
 > 第三方复现入口（一条命令）：[`docs/flywheel-reproduction.md`](flywheel-reproduction.md) · `npm run proof:flywheel`
 > 范围：把项目内置的三套自测基准（token 节省 / Skill A/B / Memory A/B）的方法学固化为**第三方可复现的公开标准**：环境要求、运行命令、输入数据、判定标准、输出位置、复现清单与结果解读。
 
-> **诚实声明（self-test vs independent）**：本文件中引用的所有具体数字（如 98.7%、100%、56.5%）均为**项目自测结果**——由作者在作者机器上运行、未经过独立第三方复核。第三方复现时应以本文档为准重新跑出**自己的数字**，再与本文数字对比；任何"官方宣称"均应以独立复现为准。
+> **诚实声明（self-test vs independent）**：本文件中引用的所有具体数字均为**项目自测结果**——由作者在作者机器上运行、未经过独立第三方复核。第三方复现时应以本文档为准重新跑出**自己的数字**，再与本文数字对比；任何"官方宣称"均应以独立复现为准。
 
 > English abstract: This document standardizes the methodology of GraphFlow's three built-in self-test benchmarks (token-savings, Skill A/B, Memory A/B) so that third parties can reproduce them independently. All numbers cited here are self-test results; the reproduction checklist in section 7 lets anyone regenerate them. No API keys, no network, Node >= 20 required.
 
@@ -12,10 +12,10 @@
 
 | 基准 | 脚本 | 命令 | 人类可读输出 | 机器可读输出 | 自测关键数字 |
 | --- | --- | --- | --- | --- | --- |
-| Token 节省 | `benchmarks/run-token-benchmark.ts` | `npm run benchmark` | `benchmarks/RESULTS.md`（本基准区块） | `benchmarks/.cache/token-bench-results.json` | 98.7%（2026-07-28 自测）；98.9%（2026-08-02 复跑，见 §2.7 漂移说明） |
+| Token 节省 | `benchmarks/run-token-benchmark.ts` | `npm run benchmark` | `benchmarks/RESULTS.md`（本基准区块） | `benchmarks/.cache/token-bench-results.json` | 现实口径 95.6% / 朴素 grep 98.5%（2026-09-09）；仅 token 数比值，不衡量保真度或回答质量 |
 | Skill A/B（注入/召回/开销） | `benchmarks/run-skill-ab-benchmark.ts` | `npm run benchmark:skills` | `benchmarks/SKILL-AB-RESULTS.md` | — | 注入 100% / 召回 100% / 25.6 tok/任务 |
-| Skill A/B 端到端（P1-2） | `benchmarks/run-skill-ab.ts` | `npm run benchmark:ab` | `benchmarks/RESULTS.md`（P1-2 区块） | `benchmarks/.cache/skill-ab-results.json` | ON 100% vs OFF 61.5%（26 任务） |
-| Memory A/B 端到端（P3） | `benchmarks/run-memory-ab.ts` | `npm run benchmark:memory` | `benchmarks/RESULTS.md`（P3 区块） | `benchmarks/.cache/memory-ab-results.json` | ON 100% vs OFF 56.5%（62 任务） |
+| Skill A/B 端到端（P1-2） | `benchmarks/run-skill-ab.ts` | `npm run benchmark:ab` | `benchmarks/RESULTS.md`（P1-2 区块） | `benchmarks/.cache/skill-ab-results.json` | 合成机制测试：ON 61.5% vs OFF 61.5%（13 个 held-out 任务，2026-09-30） |
+| Memory A/B 端到端（P3） | `benchmarks/run-memory-ab.ts` | `npm run benchmark:memory` | `benchmarks/RESULTS.md`（P3 区块） | `benchmarks/.cache/memory-ab-results.json` | 合成机制测试：ON 51.6% vs OFF 61.3%（31 个 held-out 任务，2026-09-30） |
 
 四个脚本归属三套基准：Token 节省一套；Skill A/B 两档（P1-2 的"注入率/召回率/开销"与"端到端成功代理"）；Memory A/B（P3）在 Skill A/B 端到端框架上扩展了 HARD 任务集与归因链。
 
@@ -99,7 +99,8 @@ npm run benchmark:skills   # 等价于 tsx benchmarks/run-skill-ab-benchmark.ts
 ### 4.2 输入数据
 - **任务集（黄金查询）**：26 条 retrieval-golden 查询，**复制自** `tests/retrieval-golden.test.ts` 的 `GOLDEN_SET`——该文件是回归测试真源，归另一 agent 所有、不可修改；两个基准脚本以注释注明并**手工同步**此列表。其中 10 条为 `indirect`（golden 模块名与查询词形态不同，纯检索无法命中）。
 - **HARD 任务集（仅 P3）**：36 条 = 12 cross-module + 12 disambiguation + 12 indirect。构造上 golden 节点与查询**零 token 重叠**（节点 id 不参与可搜索文本），纯检索必然无法排名——情景记忆是唯一桥梁。
-- **历史模拟（仅 Arm A）**：P1-2 为 27 条历史任务（含 1 条 decoy）；P3 为 63 条（26 golden + 36 hard + 1 decoy）。
+- **训练 / held-out 划分**：任务按下标确定性划分——偶数下标为训练集（其历史写入 Arm A），奇数下标为 held-out（唯一被评分的任务）。训练历史中凡提及任一 held-out 任务 `expectAny` / 模块名的条目一律剔除，保证注入经验不来自被评分的答案。
+- **历史模拟（仅 Arm A）**：只含训练集历史 + 1 条 decoy（P1-2 当前 14 条；P3 当前 26 条，另有 6 条因提及 held-out 目标被剔除）。
 - **每任务种子图**：golden 文件节点 + 2 个 token 重叠干扰节点 + 1 个 module 节点 + 1 个全局 decoy 节点；哈希用项目 DJB2a（FNV 类，确定性）。
 - 参数：`TOP_K = 5`、包 token 预算 800、`MAX_HINTS = 3`、`MAX_EPISODES = 3`。
 
@@ -110,7 +111,7 @@ npm run benchmark:memory   # P3：  等价于 tsx benchmarks/run-memory-ab.ts
 ```
 
 ### 4.4 判定标准
-- **成功代理**：Arm A 成功 = 包 Top-5 命中 golden 节点 id **或**注入文本命中（hints/episodes 按模块名引用，`expectAny` 子串检查）；Arm B = 仅包 Top-5。包专用命中率单列，供同口径对比。
+- **目标浮现代理（两臂同一判据）**：包 Top-5 命中 golden 节点 id，**或**该臂注入文本中出现 `expectAny` 目标名。Arm B 不注入任何文本，因此只能靠包命中。包专用命中率单列。
 - 指标：`successRateA/B`、`rescued`（B miss → A hit）、`hurt`（B hit → A miss）、`hintInjectionRate`、`episodeRecallRate`、`meanTokenOverheadPerTask`、decoy 污染（Top-5 与注入）、wall-clock；P3 另有归因链（每个 rescued 任务的载体通道 + 相似度最高的 episode + 注入文本样本）。
 - 可复现性：确定性离线；episode id 内嵌 `Date.now()` 跨运行不同，但**排名只依赖 token/分数，不依赖 id**。
 
@@ -119,9 +120,9 @@ npm run benchmark:memory   # P3：  等价于 tsx benchmarks/run-memory-ab.ts
 - `benchmarks/.cache/skill-ab-results.json`（P1-2）、`benchmarks/.cache/memory-ab-results.json`（P3）：结构化汇总 + 逐任务明细。
 
 ### 4.6 结果解读与边界
-- 自测口径：P3 **ON 100% vs OFF 56.5%**（62 任务，rescued 27、hurt 0）；P1-2 **ON 100% vs OFF 61.5%**（26 任务，rescued 10、hurt 0）。注入侧开销 P3 平均 70.9 tok/任务、P1-2 33.2 tok/任务。
-- **成功代理 ≠ LLM 完成率**：它机械地验证"golden 目标是否出现在 Top-5 或注入文本"，不是真实任务成功率；真实收益需在 agent 上端到端 A/B。
-- Arm B 的失败是**刻意设计**（indirect/HARD 任务与 golden 零 token 重叠），用于隔离记忆层的边际价值；报告同时公开包专用命中率，避免夸大。
+- 自测口径（2026-09-30，held-out）：P1-2 **ON 61.5% vs OFF 61.5%**（13 任务，rescued 0、hurt 0）；P3 **ON 51.6% vs OFF 61.3%**（31 任务，rescued 0、hurt 3）。即对未见任务没有迁移收益，P3 还因历史节点改变包排名而略有退步。
+- **已撤回**：此前的 P3「ON 100% vs OFF 56.5%」与 P1-2「ON 100% vs OFF 61.5%」——每个被评分任务都配了一条按答案写成的历史，且 Arm A（包或注入）与 Arm B（仅包）判据不同。
+- **这是合成机制测试，≠ LLM 完成率**：图、任务与历史均为手工构造，它机械地验证"golden 目标是否出现在 Top-5 或注入文本"，不是真实任务成功率；真实收益需在 agent 上端到端 A/B。
 
 ## 5. 自测 vs 独立测试：边界与对账
 

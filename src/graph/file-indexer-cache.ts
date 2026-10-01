@@ -90,6 +90,34 @@ export function clearGraphIndexArtifacts(rootDir: string, graphStorePath: string
   });
 }
 
+/**
+ * True when the manifest claims files the store no longer holds. Another host
+ * on a different transport can fold or move the store away (JSON → SQLite
+ * merge skips code nodes; a file-transport host recreates an empty JSON), and
+ * an incremental index trusting the manifest then re-adds only changed files —
+ * observed: 704 manifest entries against 16 files left in the store. Callers
+ * must re-index with `forceReindex` when this fires.
+ */
+export function indexedStoreIsIncomplete(
+  rootDir: string,
+  manifestName: string | undefined,
+  storeNodes: ReadonlyArray<{ id: string; type?: string }> | undefined
+): boolean {
+  if (!storeNodes) {
+    return false;
+  }
+  const manifest = loadCacheState(indexManifestPath(rootDir, manifestName), false);
+  const claimed = Object.keys(manifest).length;
+  if (claimed === 0) {
+    return false;
+  }
+  let fileNodes = 0;
+  for (const node of storeNodes) {
+    if (node.type === "File") fileNodes += 1;
+  }
+  return fileNodes < claimed * 0.5;
+}
+
 /** Returns true when workspace files changed since last index (or cache is empty). */
 export function hasPendingGraphIndexWork(
   rootDir: string,

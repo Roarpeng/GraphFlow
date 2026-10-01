@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getDefaultConfig } from "../src/config/defaults";
@@ -26,6 +26,17 @@ const LLM_ENV_VARS = [
   "BAILIAN_BASE_URL",
   "DOUBAO_API_KEY",
   "DOUBAO_BASE_URL",
+  "LLM_API_KEY",
+  "LLM_BASE_URL",
+  "API_KEY",
+] as const;
+
+// Everything that can point config discovery at a real machine/repo layer.
+const ISOLATION_ENV_VARS = [
+  "GRAPHFLOW_CONFIG_HOME",
+  "GRAPHFLOW_WORKSPACE_ROOT",
+  "USERPROFILE",
+  "HOME",
 ] as const;
 
 describe("Bridge Fallback Guarantee & LLM Availability (工作 1)", () => {
@@ -51,10 +62,11 @@ describe("Bridge Fallback Guarantee & LLM Availability (工作 1)", () => {
     }
   }
 
-  const GRAPHFLOW_CONFIG_HOME_KEY = "GRAPHFLOW_CONFIG_HOME";
+  const savedIsolationEnv: Record<string, string | undefined> = {};
+  let savedCwd = process.cwd();
 
-  function createTempConfigHome(): string {
-    const dir = mkdtempSync(join(tmpdir(), "gf-bridge-home-"));
+  function createTempDir(prefix: string): string {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
     tempDirs.push(dir);
     return dir;
   }
@@ -69,22 +81,35 @@ describe("Bridge Fallback Guarantee & LLM Availability (工作 1)", () => {
 
   beforeEach(() => {
     clearAllLlmEnv();
-    // Isolate the GLOBAL config layer too: "彻底清空所有环境变量与配置" must
-    // not read this machine's real ~/.graphflow.config.json (a machine with a
-    // live key would legitimately answer "usable" and fail the guarantee).
-    // GRAPHFLOW_CONFIG_HOME is the established isolation knob (see m49).
-    if (!(GRAPHFLOW_CONFIG_HOME_KEY in savedEnv)) {
-      savedEnv[GRAPHFLOW_CONFIG_HOME_KEY] = process.env[GRAPHFLOW_CONFIG_HOME_KEY];
+    // "彻底清空所有环境变量与配置" must not read ANY real config layer: the
+    // global ~/.graphflow.config.json (GRAPHFLOW_CONFIG_HOME / home) nor the
+    // cwd project layers (resolveConfig() reads ./graphflow.config.json and
+    // ./.graphflow/config.json — the repo's own files carry a live key, which
+    // applyProviderEnvFromConfig would export and mark config-exported, so
+    // later genuine test keys would be ignored).
+    for (const key of ISOLATION_ENV_VARS) {
+      savedIsolationEnv[key] = process.env[key];
     }
-    process.env[GRAPHFLOW_CONFIG_HOME_KEY] = createTempConfigHome();
+    const home = createTempDir("gf-bridge-home-");
+    const project = createTempDir("gf-bridge-project-");
+    writeFileSync(join(project, "package.json"), '{"name":"gf-bridge-fixture","private":true}\n', "utf8");
+    process.env.GRAPHFLOW_CONFIG_HOME = home;
+    process.env.USERPROFILE = home;
+    process.env.HOME = home;
+    process.env.GRAPHFLOW_WORKSPACE_ROOT = project;
+    savedCwd = process.cwd();
+    process.chdir(project);
   });
 
   afterEach(() => {
-    const savedHome = savedEnv[GRAPHFLOW_CONFIG_HOME_KEY];
-    if (savedHome === undefined) {
-      delete process.env[GRAPHFLOW_CONFIG_HOME_KEY];
-    } else {
-      process.env[GRAPHFLOW_CONFIG_HOME_KEY] = savedHome;
+    process.chdir(savedCwd);
+    for (const key of ISOLATION_ENV_VARS) {
+      const value = savedIsolationEnv[key];
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
     }
     restoreLlmEnv();
     for (const dir of tempDirs) {
@@ -201,16 +226,17 @@ describe("Bridge Fallback Guarantee & LLM Availability (工作 1)", () => {
       expect(providerHasCredentials("deepseek", configWithProvider)).toBe(true);
     });
 
-    it("环境中存在 TYPESAFE_API_KEY 时，能够正确嗅探并作为 DeepSeek 兼容凭证识别为可用 LLM", () => {
+    it("TYPESAFE_API_KEY 不再被别名为 DeepSeek 凭证（不同厂商，别名只会产生 401）", () => {
       clearAllLlmEnv();
       process.env.TYPESAFE_API_KEY = "sk-test-typesafe-credential";
       process.env.TYPESAFE_BASE_URL = "https://api.typesafe-mock.com/v1";
 
       const resolved = resolveConfig();
-      expect(hasUsableLlmProvider(resolved)).toBe(true);
-      expect(providerHasCredentials("deepseek", resolved)).toBe(true);
-      expect(process.env.DEEPSEEK_API_KEY).toBe("sk-test-typesafe-credential");
-      expect(process.env.DEEPSEEK_BASE_URL).toBe("https://api.typesafe-mock.com/v1");
+      expect(providerHasCredentials("deepseek", resolved)).toBe(false);
+      expect(hasUsableLlmProvider(resolved)).toBe(false);
+      // Boolean-only assertions: a failure must never print a credential.
+      expect(Boolean(process.env.DEEPSEEK_API_KEY)).toBe(false);
+      expect(Boolean(process.env.DEEPSEEK_BASE_URL)).toBe(false);
 
       const configWithProvider = {
         ...getDefaultConfig(),
@@ -218,8 +244,7 @@ describe("Bridge Fallback Guarantee & LLM Availability (工作 1)", () => {
           deepseek: { model: "deepseek-chat" },
         },
       };
-      expect(hasUsableLlmProvider(configWithProvider)).toBe(true);
-      expect(providerHasCredentials("deepseek", configWithProvider)).toBe(true);
+      expect(providerHasCredentials("deepseek", configWithProvider)).toBe(false);
     });
 
     it("环境中存在 OPENAI_API_KEY 时，能够正确识别为可用 LLM", () => {

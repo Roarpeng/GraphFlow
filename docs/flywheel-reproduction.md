@@ -66,12 +66,29 @@ run (existing runners rewrite those files in the working tree).
 
 | Claim | Display | Source file (committed) |
 | --- | --- | --- |
-| Retrieval Hit@5 | **100.0%** | `benchmarks/RETRIEVAL-EVAL-RESULTS.md` (commit `4cda2976270d870d5c46770f30dda6f7df4eedd7`, 2026-09-19) |
+| Retrieval Hit@5 (in-sample: author-written queries, no held-out split) | **100.0%** | `benchmarks/RETRIEVAL-EVAL-RESULTS.md` (commit `4cda2976270d870d5c46770f30dda6f7df4eedd7`, 2026-09-19) |
 | Retrieval MRR | **0.779** | same |
 | Retrieval NDCG@5 | **0.638** | same |
-| Skill A/B success proxy | **ON 100.0% (26/26) vs OFF 61.5% (16/26)** | `benchmarks/RESULTS.md` P1-2 (2026-08-04) |
-| Memory A/B success proxy | **ON 100.0% (62/62) vs OFF 56.5% (35/62)** | `benchmarks/RESULTS.md` P3 (2026-08-04) |
-| Token savings (optional) | **95.6%** realistic arm (136,265 → 6,044) / **98.5%** naive-grep arm (410,725 → 6,044) | `benchmarks/RESULTS.md` token block (two baseline arms) |
+| Skill A/B target-surfaced (synthetic mechanism test, 13 held-out tasks) | **ON 61.5% (8/13) vs OFF 61.5% (8/13)** | `benchmarks/RESULTS.md` P1-2 (2026-09-30) |
+| Memory A/B target-surfaced (synthetic mechanism test, 31 held-out tasks) | **ON 51.6% (16/31) vs OFF 61.3% (19/31)** | `benchmarks/RESULTS.md` P3 (2026-09-30) |
+| Token ratio (optional; not a fidelity measure) | **95.6%** realistic arm (136,265 → 6,044) / **98.5%** naive-grep arm (410,725 → 6,044) | `benchmarks/RESULTS.md` token block (two baseline arms) |
+
+The catalog's token claim is the realistic arm; `--with-token` compares it with
+the live realistic arm (`totals.baselineTopKFilesFullText.savingsPercent`), never
+with the naive-grep arm.
+
+**Withdrawn (2026-09-30):** the earlier skill "ON 100% vs OFF 61.5%" and memory
+"ON 100% vs OFF 56.5%" figures. They seeded one history entry per scored task,
+written from the answer key, and scored Arm A (package **or** injected text)
+differently from Arm B (package only). The runners now use a deterministic
+train / held-out split, drop training history that names a held-out target, and
+apply one criterion to both arms — which shows no transfer (skill) or a small
+regression (memory: 3 tasks hurt because history nodes shift package ranking).
+
+An independent retrieval audit on 15 held-out English queries measured
+file-level Hit@5 = 80% and MRR = 0.61 (a plain BM25 baseline: 73% / 0.68);
+Chinese queries hit only when the agent supplies `englishQuery` (5/5 with it,
+0/5 without). The 100% golden-set figure above does not generalize.
 
 Retrieval was re-baselined on 2026-09-19 (v1.24-era corpus): the
 self-referential `src/` corpus grew through v1.12→v1.24, which shifts rank
@@ -79,15 +96,17 @@ metrics (Hit@5 stays 100%); repeat runs on the same tree are deterministic.
 
 Honest scope (already documented in the source reports):
 
-- Success proxy ≠ live-LLM task completion. It checks whether the golden
-  target lands in Top-5 or injected memory text.
+- Target-surfaced proxy ≠ live-LLM task completion. It checks whether the
+  golden target lands in the package Top-5 or in injected memory text, with
+  the same rule for both arms, on hand-built graphs.
+- Token savings are token-count ratios; they do not check that the package
+  still contains what is needed to answer.
 - Token and retrieval corpora are this repository's `src/`. Uncommitted
   edits and later commits move the numbers.
 - Skill injection (`SKILL-AB-RESULTS.md`) is a Jaccard / overhead harness.
   After the P0-2 noise gate it reports **0% hint injection** and **100%
-  episode recall** on the fixture history. The ROI claim is the P1-2 / P3
-  success-proxy blocks, not the older "injection 100% / 25.6 tok" README
-  line.
+  episode recall** on the fixture history. There is currently no ROI claim:
+  the P1-2 / P3 blocks show no transfer to held-out tasks.
 
 ## Expected artifacts
 

@@ -172,6 +172,11 @@ export function createContextRefillManager(
       }
       return pkg;
     },
+    seed(anchorIds: Iterable<string>): void {
+      for (const id of anchorIds) {
+        seenAnchors.add(id);
+      }
+    },
     async refill(evidenceHints: string[]): Promise<string[]> {
       const items: string[] = [];
       let tokens = 0;

@@ -10,6 +10,9 @@
  *   P5 Bridge 模式     — executionDescriptor 完整性、agent 分配覆盖
  *   P6 端到端性能      — 建图耗时、查询延迟、内存占用
  *
+ * 注意：各项阈值、权重与通过/失败检查均由作者自定（自评内部检查），
+ * 综合分不是独立基准分，不可与其它工具对比或作为产品宣传数字。
+ *
  * 用法：npm run benchmark:comprehensive
  *
  * 输出：
@@ -543,6 +546,8 @@ async function main() {
     generatedAt: new Date().toISOString(),
     commit: getCommitHash(),
     environment: { node: process.version, platform: `${process.platform} ${process.arch}` },
+    scoreKind: "self-graded-internal-checks",
+    scoreNote: "Thresholds, weights and pass/fail checks are chosen by the project author; not an independent benchmark and not comparable across tools.",
     scores: { ...scores, overall: overallScore },
     p1, p2, p3, p4, p5, dagQuality: dagQ, p6,
     wallClockMs,
@@ -555,7 +560,7 @@ async function main() {
   writeFileSync(RESULTS_PATH, md, "utf8");
 
   console.log(`\n${"=".repeat(60)}`);
-  console.log(`Overall Score: ${(overallScore * 100).toFixed(1)}%`);
+  console.log(`Composite (self-graded internal checks): ${(overallScore * 100).toFixed(1)}%`);
   console.log(`Results: ${RESULTS_PATH}`);
   console.log(`JSON: ${JSON_PATH}`);
   console.log(`Wall-clock: ${ms(wallClockMs)}`);
@@ -578,8 +583,16 @@ function generateMarkdown(
   lines.push(`> Commit: \`${r.commit}\``);
   lines.push(``);
 
-  // Overall score
-  lines.push(`## Overall Score`);
+  lines.push(`> **Self-graded internal checks, not an independent benchmark.** Every threshold,`);
+  lines.push(`> weight and pass/fail check below was chosen by the project author (e.g. indexing`);
+  lines.push(`> = node/edge counts vs 1500/5000; learning = four pass/fail checks on its own`);
+  lines.push(`> round-trip; planning = triage/plan-shape checks on author-written tasks). A 100%`);
+  lines.push(`> sub-score means "the author's own checks passed", not "the capability is solved".`);
+  lines.push(`> Do not quote the composite as a product score or compare it across tools.`);
+  lines.push(``);
+
+  // Composite score
+  lines.push(`## Composite Score (self-graded internal checks)`);
   lines.push(``);
   lines.push(`| Component | Score | Weight |`);
   lines.push(`| --- | --- | --- |`);
@@ -587,7 +600,7 @@ function generateMarkdown(
   for (const [k, v] of Object.entries(scores).filter(([k]) => k !== "overall")) {
     lines.push(`| ${k.charAt(0).toUpperCase() + k.slice(1)} | **${pct(v as number)}** | ${(weights[k]! * 100).toFixed(0)}% |`);
   }
-  lines.push(`| **Overall** | **${pct(overall)}** | 100% |`);
+  lines.push(`| Composite (self-graded) | ${pct(overall)} | 100% |`);
   lines.push(``);
 
   // P1

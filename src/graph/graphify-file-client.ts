@@ -15,7 +15,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import type { GraphEdge, GraphNode } from "../core/types";
 import { logger } from "../utils/logger";
-import { tokenizeForIndex, nodeSearchableText } from "./graph-utils";
+import { tokenizeForIndex, nodeSearchableText, nodeRecallText } from "./graph-utils";
 import { readGraphStoreFileChunked } from "./graph-store-json-chunks";
 
 interface GraphStore {
@@ -560,7 +560,7 @@ export class GraphifyFileClient {
   private buildIndex(nodes: GraphNode[]): Map<string, Set<string>> {
     const index = new Map<string, Set<string>>();
     for (const node of nodes) {
-      for (const tok of tokenizeForIndex(nodeSearchableText(node))) {
+      for (const tok of tokenizeForIndex(nodeRecallText(node))) {
         let set = index.get(tok);
         if (!set) {
           set = new Set();

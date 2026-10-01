@@ -610,6 +610,7 @@ export function renderSettingsHtml(): string {
                 <input type="password" id="smartApiKey" name="smartApiKey" placeholder="sk-... 或 \${DEEPSEEK_API_KEY}" />
                 <button type="button" class="btn btn-secondary btn-sm" onclick="togglePasswordVisibility('smartApiKey')">显示</button>
               </div>
+              <div class="field-hint" id="smartApiKeyStatus"></div>
             </div>
             <div class="field">
               <label for="smartBaseUrl">Base URL（可选）</label>
@@ -645,6 +646,7 @@ export function renderSettingsHtml(): string {
                 <input type="password" id="economyApiKey" name="economyApiKey" placeholder="sk-... 或 \${DEEPSEEK_API_KEY}" />
                 <button type="button" class="btn btn-secondary btn-sm" onclick="togglePasswordVisibility('economyApiKey')">显示</button>
               </div>
+              <div class="field-hint" id="economyApiKeyStatus"></div>
             </div>
             <div class="field">
               <label for="economyBaseUrl">Base URL（可选）</label>
@@ -691,15 +693,16 @@ export function renderSettingsHtml(): string {
           </div>
           <div class="field">
             <label for="workerModel">Worker Model</label>
-            <input type="text" id="workerModel" name="workerModel" placeholder="typesafe-jev" />
+            <input type="text" id="workerModel" name="workerModel" placeholder="jev-latest" />
           </div>
           <div class="field">
             <label for="workerBaseUrl">Worker Base URL</label>
-            <input type="text" id="workerBaseUrl" name="workerBaseUrl" placeholder="http://127.0.0.1:8000/v1" />
+            <input type="text" id="workerBaseUrl" name="workerBaseUrl" placeholder="https://api.typesafe.ai" />
           </div>
           <div class="field">
             <label for="workerApiKey">Worker API Key（可选）</label>
-            <input type="password" id="workerApiKey" name="workerApiKey" placeholder="免密可留空，或填 \${KEY}" />
+            <input type="password" id="workerApiKey" name="workerApiKey" placeholder="直接填 Key，或填环境变量名（如 TYPESAFE_API_KEY）" />
+            <div class="field-hint" id="workerApiKeyStatus"></div>
           </div>
           <div class="field">
             <label for="workerTimeoutMs">Worker 超时（毫秒）</label>
@@ -930,10 +933,11 @@ export function renderSettingsHtml(): string {
         }
         updateWorkerTypeUi();
         document.getElementById("workerProvider").value = data.workerProvider || "openai";
-        document.getElementById("workerModel").value = data.workerModel || "typesafe-jev";
-        document.getElementById("workerBaseUrl").value = data.workerBaseUrl || "http://127.0.0.1:8000/v1";
+        document.getElementById("workerModel").value = data.workerModel || "jev-latest";
+        document.getElementById("workerBaseUrl").value = data.workerBaseUrl || "https://api.typesafe.ai";
         document.getElementById("workerApiKey").value = data.workerApiKey || "";
         document.getElementById("workerTimeoutMs").value = data.workerTimeoutMs || 120000;
+        renderApiKeyStatus(data.apiKeyStatus || {});
 
         // Graph policy
         document.getElementById("maxContextTokens").value = data.maxContextTokens || 16000;
@@ -967,6 +971,27 @@ export function renderSettingsHtml(): string {
         }
       } catch {
         // Status is best-effort
+      }
+    }
+
+    function renderApiKeyStatus(statuses) {
+      const targets = { smart: "smartApiKeyStatus", economy: "economyApiKeyStatus", worker: "workerApiKeyStatus" };
+      for (const [tier, id] of Object.entries(targets)) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        const status = statuses[tier];
+        if (!status || status.kind === "empty") {
+          el.textContent = "";
+        } else if (status.kind === "literal") {
+          el.textContent = "已保存明文 Key";
+          el.style.color = "";
+        } else if (status.resolved) {
+          el.textContent = "✓ 已从环境变量 " + status.name + " 读取到 Key";
+          el.style.color = "var(--success, #16a34a)";
+        } else {
+          el.textContent = "✗ 环境变量 " + status.name + " 未读取到值：请检查变量名，或确认已设置在用户/系统环境变量中";
+          el.style.color = "var(--danger, #dc2626)";
+        }
       }
     }
 

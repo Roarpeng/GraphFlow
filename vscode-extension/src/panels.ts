@@ -15,7 +15,7 @@ export interface GraphSnapshotSampleNode {
 }
 
 export interface GraphSnapshotResult {
-  transport: "memory" | "mcp-http" | "file" | "sqlite";
+  transport: "memory" | "mcp-http" | "file" | "sqlite" | "auto";
   storePath?: string;
   nodeCount: number;
   edgeCount: number;
@@ -49,7 +49,7 @@ export interface WorkbenchOutline {
 
 export interface SkillInsightsResult {
   source: "graph-store" | "unavailable";
-  transport: "memory" | "mcp-http" | "file" | "sqlite";
+  transport: "memory" | "mcp-http" | "file" | "sqlite" | "auto";
   storePath?: string;
   skills: Array<{
     id: string;
@@ -163,6 +163,29 @@ export interface GraphFlowSettings {
   workerApiKey?: string;
   workerProvider?: string;
   workerTimeoutMs?: number;
+  apiKeyStatus?: { smart: ApiKeyStatus; economy: ApiKeyStatus; worker: ApiKeyStatus };
+  observationsEnabled?: boolean;
+  observationReduceEnabled?: boolean;
+  contextPressureEnabled?: boolean;
+  actionFusionEnabled?: boolean;
+}
+
+export type ApiKeyStatus =
+  | { kind: "empty" }
+  | { kind: "literal" }
+  | { kind: "env"; name: string; resolved: boolean };
+
+/** Never renders the secret — only whether the field resolves. */
+function renderApiKeyStatusHint(status: ApiKeyStatus | undefined): string {
+  if (!status || status.kind === "empty") {
+    return "";
+  }
+  if (status.kind === "literal") {
+    return `<span class="flow-hint">已保存明文 Key</span>`;
+  }
+  return status.resolved
+    ? `<span class="flow-hint">✓ 已从环境变量 ${escapeHtml(status.name)} 读取到 Key</span>`
+    : `<span class="flow-hint" style="color: var(--vscode-errorForeground)">✗ 环境变量 ${escapeHtml(status.name)} 未读取到值：请检查变量名，或确认已设置在用户/系统环境变量中</span>`;
 }
 
 export interface SettingsPanelStatus {
@@ -920,8 +943,8 @@ export function buildSettingsHtml(
   const contextPressureEnabled = settings.contextPressureEnabled !== false;
   const actionFusionEnabled = settings.actionFusionEnabled !== false;
   const workerType = settings.workerType === "typesafe-jev" ? "typesafe-jev" : "local-command";
-  const workerBaseUrl = settings.workerBaseUrl ?? "http://localhost:8000/v1";
-  const workerModel = settings.workerModel ?? "typesafe-jev";
+  const workerBaseUrl = settings.workerBaseUrl ?? "https://api.typesafe.ai";
+  const workerModel = settings.workerModel ?? "jev-latest";
   const workerApiKey = settings.workerApiKey ?? "";
   const anydocReady = Boolean(status?.anydocReady);
   const anydocLabel = anydocReady
@@ -1079,16 +1102,17 @@ export function buildSettingsHtml(
           </select>
         </label>
         <label>Model
-          <input id="settings-worker-model" name="workerModel" value="${escapeHtml(workerModel)}" placeholder="typesafe-jev" />
-          <span class="flow-hint">默认 typesafe-jev 或本地模型名称</span>
+          <input id="settings-worker-model" name="workerModel" value="${escapeHtml(workerModel)}" placeholder="jev-latest" />
+          <span class="flow-hint">TypeSafe 默认 jev-latest，或本地模型名称</span>
         </label>
         <label>Base URL
-          <input id="settings-worker-base-url" name="workerBaseUrl" value="${escapeHtml(workerBaseUrl)}" placeholder="http://localhost:8000/v1" />
-          <span class="flow-hint">支持云端或本地部署模型端点，例如 http://localhost:8000/v1</span>
+          <input id="settings-worker-base-url" name="workerBaseUrl" value="${escapeHtml(workerBaseUrl)}" placeholder="https://api.typesafe.ai" />
+          <span class="flow-hint">TypeSafe 填 https://api.typesafe.ai（无需带 /v1/systemone）；本地模型如 http://localhost:8000/v1</span>
         </label>
         <label>API Key
           <input id="settings-worker-api-key" name="workerApiKey" value="${escapeHtml(workerApiKey)}" placeholder="TYPESAFE_API_KEY" />
-          <span class="flow-hint">支持 TYPESAFE_API_KEY，本地免密模型可留空</span>
+          <span class="flow-hint">直接填 Key，或填环境变量名（TYPESAFE_API_KEY / %TYPESAFE_API_KEY% / \${TYPESAFE_API_KEY} 均可）；本地免密模型可留空</span>
+          ${renderApiKeyStatusHint(settings.apiKeyStatus?.worker)}
         </label>
       </div>
     </section>
@@ -1510,6 +1534,7 @@ function renderSettingsTierCard(
     </label>
     <label>API Key
       <input id="settings-${prefix}-api-key" name="${prefix}ApiKey" value="${escapeHtml(apiKey ?? "")}" placeholder="sk-... or DEEPSEEK_API_KEY" />
+      ${renderApiKeyStatusHint(settings.apiKeyStatus?.[tier])}
     </label>
     <label>Base URL
       <input id="settings-${prefix}-base-url" name="${prefix}BaseUrl" value="${escapeHtml(baseUrl ?? "")}" placeholder="${provider === "deepseek" ? "https://api.deepseek.com（可空）" : "https://api.openai.com/v1"}" />

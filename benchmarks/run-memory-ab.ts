@@ -25,22 +25,27 @@
  *     tokens (its node id carries the module name, but node ids are not part
  *     of searchable text — see graph-utils.nodeSearchableText), so pure
  *     retrieval cannot rank it: prior episodic experience is the only bridge.
- *   Phase 1 — history simulation (Arm A only): K historical tasks with
- *     lessons are fed through the REAL learning paths (applySkillLearning +
- *     recordEpisode), exactly like real runs. Golden-history entries mirror
- *     run-skill-ab.ts verbatim (no file-path evidence, so hints stay at the
- *     P1-2 baseline); HARD-history entries carry file-path evidence so skills
- *     form and the hint channel is exercised too.
- *   Phase 2 — per task, two configs on two identically-seeded graphs:
+ *   Phase 1 — history simulation (Arm A only): the task set is split
+ *     deterministically (even index = training split, odd index = held-out).
+ *     Only training-split history is fed through the REAL learning paths
+ *     (applySkillLearning + recordEpisode); any training entry that mentions
+ *     a held-out task's expected target is dropped, so no seeded experience
+ *     is derived from the answers that are scored. Golden-history entries
+ *     carry no file-path evidence; HARD-history entries do, so skills form
+ *     and the hint channel is exercised too.
+ *   Phase 2 — per HELD-OUT task, two configs on two identically-seeded graphs:
  *     Arm A (memory ON):  context preview package + suggestSkillHints +
  *                         findSimilarEpisodes (summarized for prompt)
  *     Arm B (memory OFF): context preview package only
  *
+ * This is a SYNTHETIC MECHANISM TEST on a hand-built graph, not an LLM
+ * task-success measurement; its numbers must not be quoted as success rates.
+ *
  * Metrics per config:
- *   - success proxy: expected golden target found within Top-K (K=5). The
- *     package anchors are the ranked retrieval channel (Top-K = first 5);
- *     for Arm A the injected hints + episode summaries are an additional
- *     channel an agent reads in full, so success counts either channel.
+ *   - target-surfaced proxy, IDENTICAL criterion for both arms: the golden
+ *     node id is within the package Top-K (K=5) anchors, OR an expected
+ *     target name appears in the arm's injected text (hints + episode
+ *     summaries). Arm B injects nothing, so only its package can pass.
  *   - hint injection rate / episode recall rate (fraction of tasks with >=1)
  *   - token overhead per task (gpt-tokenizer, gpt-4o encoding)
  *   - wall-clock per task
@@ -441,6 +446,72 @@ function targetFound(text: string, expectAny: string[]): boolean {
   return expectAny.some((needle) => lower.includes(needle.toLowerCase()));
 }
 
+/** The single success criterion applied to BOTH arms. */
+function targetSurfaced(
+  topKIds: readonly string[],
+  goldenId: string,
+  injectionText: string,
+  expectAny: string[]
+): boolean {
+  return topKIds.includes(goldenId) || targetFound(injectionText, expectAny);
+}
+
+interface HistoryEntry {
+  task: string;
+  lessons: string[];
+  evidence: string | null;
+}
+
+/** History entry for a task: GOLDEN_HISTORY[i] for golden task i, the fixture's own history for hard tasks. */
+function historyFor(task: BenchmarkTask, index: number): HistoryEntry | null {
+  if (task.kind === "golden") {
+    const entry = GOLDEN_HISTORY[index];
+    return entry ? { task: entry.task, lessons: [...entry.lessons], evidence: null } : null;
+  }
+  return task.history ? { task: task.history, lessons: task.lessons, evidence: task.evidence } : null;
+}
+
+/**
+ * Deterministic train / held-out split over ALL_TASKS. Only training-split
+ * history is seeded, and any training entry naming a held-out target is
+ * dropped so no seeded experience comes from the answers being scored.
+ */
+function splitTasksAndHistory(tasks: readonly BenchmarkTask[]): {
+  train: BenchmarkTask[];
+  heldOut: BenchmarkTask[];
+  history: HistoryEntry[];
+  leakageDropped: number;
+} {
+  const decoy = GOLDEN_HISTORY[GOLDEN_HISTORY.length - 1]!;
+  if (GOLDEN_HISTORY.length - 1 !== GOLDEN_TASKS.length) {
+    throw new Error(
+      `memory-ab: GOLDEN_HISTORY (${GOLDEN_HISTORY.length - 1} + decoy) must align 1:1 with GOLDEN_TASKS (${GOLDEN_TASKS.length})`
+    );
+  }
+  const train: BenchmarkTask[] = [];
+  const heldOut: BenchmarkTask[] = [];
+  const trainHistory: HistoryEntry[] = [];
+  tasks.forEach((task, i) => {
+    if (i % 2 === 0) {
+      train.push(task);
+      const entry = historyFor(task, i);
+      if (entry) trainHistory.push(entry);
+    } else {
+      heldOut.push(task);
+    }
+  });
+  const heldOutNeedles = heldOut.flatMap((t) => [t.module, ...t.expectAny]);
+  const history = trainHistory.filter(
+    (h) => !targetFound(`${h.task} ${h.lessons.join(" ")} ${h.evidence ?? ""}`, heldOutNeedles)
+  );
+  return {
+    train,
+    heldOut,
+    history: [...history, { task: decoy.task, lessons: [...decoy.lessons], evidence: null }],
+    leakageDropped: trainHistory.length - history.length,
+  };
+}
+
 function queryTokens(query: string): string[] {
   return query.toLowerCase().split(/[^a-z0-9]+/g).filter((t) => t.length >= 3);
 }
@@ -483,37 +554,24 @@ async function seedBaseGraph(client: GraphClient, tasks: readonly BenchmarkTask[
 // `InMemoryGraphClientAdapter` (client-factory.ts, not exported) wraps; it
 // structurally implements the full `GraphClient` interface, so it is used
 // directly here — the same code path the existing benchmarks use.
-async function seedHistory(client: GraphClient, tasks: readonly BenchmarkTask[]): Promise<void> {
-  for (const item of GOLDEN_HISTORY) {
+async function seedHistory(client: GraphClient, history: readonly HistoryEntry[]): Promise<void> {
+  for (const item of history) {
     const run = { status: "COMPLETED" as const, attempts: 1, feedback: "done" };
-    await applySkillLearning(client, item.task, run, item.lessons);
+    // Hard-domain history carries file-path evidence so the P0-2 extraction
+    // gate accepts the corpus and skills (the hint channel) actually form.
+    await applySkillLearning(
+      client,
+      item.task,
+      run,
+      item.lessons,
+      item.evidence ? { evidence: [item.evidence] } : undefined
+    );
     await recordEpisode(client, {
       task: item.task,
       plan: [{ id: "task-1", description: item.task }],
       outcome: "pass",
       keyDecisions: [],
       lessons: item.lessons,
-      attempts: 1,
-    });
-  }
-  for (const task of tasks) {
-    if (!task.history) continue;
-    const run = { status: "COMPLETED" as const, attempts: 1, feedback: "done" };
-    // Hard-domain history carries file-path evidence so the P0-2 extraction
-    // gate accepts the corpus and skills (the hint channel) actually form.
-    await applySkillLearning(
-      client,
-      task.history,
-      run,
-      task.lessons,
-      task.evidence ? { evidence: [task.evidence] } : undefined
-    );
-    await recordEpisode(client, {
-      task: task.history,
-      plan: [{ id: "task-1", description: task.history }],
-      outcome: "pass",
-      keyDecisions: [],
-      lessons: task.lessons,
       attempts: 1,
     });
   }
@@ -623,8 +681,15 @@ export interface MemoryContributor {
 }
 
 export interface MemoryAbReport {
+  /** Synthetic mechanism test on a hand-built graph; not an LLM task-success rate. */
+  kind: "synthetic-mechanism-test";
+  evaluation: "held-out-split";
   k: number;
+  /** Held-out tasks evaluated (successRate* denominators). */
   taskCount: number;
+  trainTaskCount: number;
+  historySeeded: number;
+  leakageDropped: number;
   goldenCount: number;
   hardCount: number;
   hardKinds: Record<string, number>;
@@ -654,43 +719,43 @@ export interface MemoryAbReport {
 }
 
 export async function runMemoryAbBenchmark(): Promise<MemoryAbReport> {
-  const tasks = [...ALL_TASKS];
-  if (tasks.length < 60) {
+  if (ALL_TASKS.length < 60) {
     throw new Error(
-      `memory-ab: expected >=60 tasks (26 golden + >=34 hard), got ${tasks.length}`
+      `memory-ab: expected >=60 tasks (26 golden + >=34 hard), got ${ALL_TASKS.length}`
     );
   }
   if (HARD_TASKS.length < 34) {
     throw new Error(`memory-ab: expected >=34 hard-domain tasks, got ${HARD_TASKS.length}`);
   }
+  const split = splitTasksAndHistory(ALL_TASKS);
+  const tasks = split.heldOut;
 
   const startedAt = performance.now();
 
-  // Two identically-seeded graphs; Arm A additionally accumulates the real
-  // learning history (skills + episodes) so hints/episodes exist to inject.
+  // Two identically-seeded graphs (all tasks' nodes); Arm A additionally
+  // accumulates the training-split learning history (skills + episodes).
   const clientB = new GraphifyClient() as GraphClient;
   const clientA = new GraphifyClient() as GraphClient;
-  await seedBaseGraph(clientB, tasks);
-  await seedBaseGraph(clientA, tasks);
-  await seedHistory(clientA, tasks);
+  await seedBaseGraph(clientB, ALL_TASKS);
+  await seedBaseGraph(clientA, ALL_TASKS);
+  await seedHistory(clientA, split.history);
 
   const rows: MemoryTaskResult[] = [];
 
   for (const task of tasks) {
-    // The golden target is the seeded node; retrieval success means its anchor
-    // id ranks within the Top-K package window (id membership — precise, no
-    // substring false positives from distractor/decoy nodes).
+    // Package hits use golden node id membership (precise, no substring false
+    // positives from distractor/decoy nodes); injected text names modules, so
+    // it uses the expectAny substring check. Both arms go through
+    // targetSurfaced with their own channels.
     const goldenId = `file:src/golden/${task.module}.ts`;
     const queryTokenSet = new Set(extractTaskTokens(task.query));
 
     // Arm B: context preview package only.
     const pkgB = await buildContextPackage(clientB, task.query);
     const pkgTop5B = pkgB.topKIds.includes(goldenId);
-    const successB = pkgTop5B;
+    const successB = targetSurfaced(pkgB.topKIds, goldenId, "", task.expectAny);
 
-    // Arm A: package + skill hints + episode summaries. Injected hints and
-    // episode summaries reference modules by NAME (not node id), so the
-    // injection channel uses the expectAny substring check.
+    // Arm A: package + skill hints + episode summaries.
     const pkgA = await buildContextPackage(clientA, task.query);
     const hints = await suggestSkillHints(clientA, task.query, MAX_HINTS);
     const episodes = await findSimilarEpisodes(clientA, task.query, MAX_EPISODES);
@@ -703,7 +768,7 @@ export async function runMemoryAbBenchmark(): Promise<MemoryAbReport> {
     const injectionText = [hintText, episodeText].filter(Boolean).join("\n");
     const injectionHit = targetFound(injectionText, task.expectAny);
     const pkgTop5A = pkgA.topKIds.includes(goldenId);
-    const successA = pkgTop5A || injectionHit;
+    const successA = targetSurfaced(pkgA.topKIds, goldenId, injectionText, task.expectAny);
 
     // ── Attribution chain ─────────────────────────────────────────────────
     const hintHit = targetFound(hintText, task.expectAny);
@@ -752,7 +817,7 @@ export async function runMemoryAbBenchmark(): Promise<MemoryAbReport> {
       injectedHintText: hintText,
       injectedEpisodeText: episodeText,
       successB,
-      pkgTop5B: successB,
+      pkgTop5B,
       pkgTokensB: pkgB.tokenEstimate,
       pkgItemsB: pkgB.items.length,
       successA,
@@ -838,8 +903,13 @@ export async function runMemoryAbBenchmark(): Promise<MemoryAbReport> {
   }
 
   return {
+    kind: "synthetic-mechanism-test",
+    evaluation: "held-out-split",
     k: TOP_K,
     taskCount: n,
+    trainTaskCount: split.train.length,
+    historySeeded: split.history.length,
+    leakageDropped: split.leakageDropped,
     goldenCount: tasks.filter((t) => t.kind === "golden").length,
     hardCount: tasks.filter((t) => t.kind !== "golden").length,
     hardKinds,
@@ -903,27 +973,35 @@ function renderMarkdown(report: MemoryAbReport): string {
     .join(", ");
 
   return `<!-- BEGIN P3 MEMORY-AB BENCHMARK -->
-## Episodic-Memory End-to-End A/B Benchmark — Results (P3)
+## Episodic-Memory A/B — Synthetic Mechanism Test (P3)
 
 > Appended by \`npm run benchmark:memory\` (\`benchmarks/run-memory-ab.ts\`).
 > Last run: ${new Date().toISOString()}
 > Structured JSON: \`benchmarks/.cache/memory-ab-results.json\`
 
+> **Synthetic mechanism test, not a task-success rate or ROI.** The graph, the
+> tasks and the historical experience are hand-built; no LLM executes anything.
+> Both arms are scored with one identical criterion, and Arm A's seeded history
+> comes only from a disjoint training split (entries naming a held-out target are
+> dropped). Earlier "100% vs 56.5%" numbers seeded one history entry per scored
+> task, written from the answer key, and scored the arms differently — superseded.
+
 ## Summary
 
-${report.taskCount} tasks: ${report.goldenCount} retrieval-golden queries (duplicated
-from \`tests/retrieval-golden.test.ts\`, same list as the P1-2 skill benchmark) plus
-${report.hardCount} HARD-domain tasks (${kindSummary}), run end-to-end on an
-in-memory graph seeded with the golden target, distractors and a decoy. Hard
-tasks are constructed so the golden node shares zero query tokens (node ids are
-not searchable text), so the OFF arm cannot rank them — episodic memory is the
-only bridge. Arm A additionally simulates
-${report.goldenCount + report.hardCount + 1} historical tasks through the real
-learning paths (\`applySkillLearning\` + \`recordEpisode\`).
+${report.taskCount} HELD-OUT tasks (odd indices of the full set): ${report.goldenCount} retrieval-golden
+queries (duplicated from \`tests/retrieval-golden.test.ts\`, same list as the P1-2
+skill benchmark) plus ${report.hardCount} HARD-domain tasks (${kindSummary}), run on an
+in-memory graph seeded with every task's golden target, distractors and a decoy.
+Hard tasks are constructed so the golden node shares zero query tokens (node ids
+are not searchable text), so package retrieval alone cannot rank them in either
+arm. Arm A additionally learns ${report.historySeeded} historical tasks from the
+${report.trainTaskCount}-task training split (incl. 1 decoy; ${report.leakageDropped} training entries dropped because they
+named a held-out target) through the real learning paths (\`applySkillLearning\` +
+\`recordEpisode\`).
 
 | Metric | Arm A (memory ON) | Arm B (memory OFF) |
 | --- | --- | --- |
-| **Success proxy** (golden target within Top-${report.k}) | **${pct(report.successRateA)}** (${report.tasks.filter((t) => t.successA).length}/${report.taskCount}) | **${pct(report.successRateB)}** (${report.tasks.filter((t) => t.successB).length}/${report.taskCount}) |
+| **Target surfaced** (same criterion both arms: golden id in package Top-${report.k}, or target named in injected text) | **${pct(report.successRateA)}** (${report.tasks.filter((t) => t.successA).length}/${report.taskCount}) | **${pct(report.successRateB)}** (${report.tasks.filter((t) => t.successB).length}/${report.taskCount}) |
 | Success via package Top-${report.k} only | ${pct(report.pkgTop5RateA)} | ${pct(report.pkgTop5RateB)} |
 | Tasks rescued by memory (B miss → A hit) | ${report.rescued} | — |
 | Tasks hurt by memory (B hit → A miss) | ${report.hurt} | — |
@@ -952,13 +1030,23 @@ ${rescuedRows || "| — | — | — | — | — | — |"}
 
 ## Per-task detail
 
-| Task | Golden module | Kind | Top-${report.k} (B) | Success (A) | Pkg Top-${report.k} (A) | Carry (A) | Hints | Episodes | Overhead tokens |
+| Task | Golden module | Kind | Surfaced (B) | Surfaced (A) | Pkg Top-${report.k} (A) | Carry (A) | Hints | Episodes | Overhead tokens |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 ${rows}
 
 ## Methodology & honest caveats
 
-- **Task set**: ${report.goldenCount} queries duplicated from
+- **Kind**: synthetic mechanism test on a hand-built in-memory graph. No LLM runs
+  and nothing is executed, so this is not a task-success rate or a memory ROI.
+- **Split**: even-index tasks form the training split whose history is seeded
+  into Arm A; odd-index tasks are held out and are the only tasks scored.
+  Training entries that mention any held-out \`expectAny\` / module name are
+  dropped, so the seeded experience is not derived from the scored answers.
+- **One criterion for both arms**: a task passes when the golden node id is
+  within the first ${TOP_K} package anchors, OR an \`expectAny\` target name appears
+  in the arm's injected text (hints + episode summaries). Arm B injects nothing,
+  so only its package can pass.
+- **Task set**: the golden subset is ${report.goldenCount} of the queries duplicated from
   \`tests/retrieval-golden.test.ts\` GOLDEN_SET (that file is owned by another
   agent and is not modified; this list mirrors \`benchmarks/run-skill-ab.ts\`).
   Each task's golden node id (\`file:src/golden/<module>.ts\`) contains an
@@ -966,15 +1054,6 @@ ${rows}
   (cross-module blast radius / name disambiguation / indirect-morphological)
   are authored for this benchmark; their golden node **content** deliberately
   shares zero query tokens, so pure retrieval cannot rank the target.
-- **Success proxy**: Top-K = the first ${TOP_K} ranked anchors of the compressed
-  context package (the retrieval channel); success there means the **golden
-  node id** is within those ${TOP_K} anchors (precise id membership — avoids
-  substring false positives from distractor/decoy nodes). For Arm A, the
-  injected hints + episode summaries form an additional channel an agent reads
-  in full; hints/episodes reference modules by **name**, so injection success
-  is the \`expectAny\` substring check. Arm A success = package Top-${TOP_K} hit
-  **or** injection hit. The package-only hit rate is reported separately for a
-  like-for-like retrieval comparison.
 - **Package ranking differs slightly between arms**: Arm A's graph additionally
   holds the history nodes (skills + episodes), which can shift the package
   top-${TOP_K} for a few tasks; such differences are visible in the per-task
@@ -987,11 +1066,9 @@ ${rows}
   \`extractTaskTokens\` +0.1 for a \`pass\` outcome), since scores are not
   exported. The memory-contribution summary counts each distinct episode that
   rescued >= 1 task.
-- **Arm B success is deliberately imperfect**: the ${report.taskCount - report.tasks.filter((t) => t.successB).length} tasks the OFF arm
-  misses (${report.goldenCount - report.tasks.filter((t) => t.kind === "golden" && t.successB).length} golden + the hard tasks) share zero query tokens with
-  their golden file (realistic: module names are morphologically different from
-  task wording, and symptoms cross module boundaries) — prior episodic
-  experience is the only bridge.
+- The ${report.taskCount - report.tasks.filter((t) => t.successB).length} held-out tasks the OFF arm misses share zero query tokens with
+  their golden file by construction, so only transferred experience could
+  surface them in Arm A.
 - Both arms run through the **real** retrieval and learning paths
   (\`buildEnhancedContextPackage\`, \`applySkillLearning\`, \`recordEpisode\`,
   \`suggestSkillHints\`, \`findSimilarEpisodes\`, \`summarizeEpisodeForPrompt\`)
@@ -1000,10 +1077,10 @@ ${rows}
   benchmark. Hashing is the project's DJB2a (FNV-class) — fully deterministic
   within a run; episode ids embed \`Date.now()\` so ids differ across runs, but
   ranking depends on tokens/scores, not ids.
-- This measures a mechanical success proxy, not LLM task completion. It
-  validates that episodic memory moves the needle on finding the expected
-  target, quantifies the exact token and wall-clock cost, and exposes which
-  memories earned their keep.
+- This measures a mechanical target-surfaced proxy, not LLM task completion or
+  answer quality. It reports whether training-split experience transfers to
+  unseen tasks in this toy setup, the exact token and wall-clock cost, and which
+  memories (if any) carried a held-out task.
 <!-- END P3 MEMORY-AB BENCHMARK -->`;
 }
 
@@ -1024,13 +1101,16 @@ function writeResultsMarkdown(markdown: string): void {
 }
 
 async function main(): Promise<void> {
-  process.stdout.write("GraphFlow episodic-memory end-to-end A/B benchmark (P3)\n");
+  process.stdout.write("GraphFlow episodic-memory A/B — synthetic mechanism test (P3; not a task-success rate)\n");
   process.stdout.write(
     `Task set: ${GOLDEN_TASKS.length} retrieval-golden queries + ${HARD_TASKS.length} hard-domain tasks\n`
   );
-  process.stdout.write(`History (Arm A): ${GOLDEN_HISTORY.length} golden + ${HARD_TASKS.length} hard + 1 decoy\n\n`);
 
   const report = await runMemoryAbBenchmark();
+  process.stdout.write(
+    `Split: ${report.trainTaskCount} train / ${report.taskCount} held-out; history seeded (Arm A): ` +
+      `${report.historySeeded} (incl. 1 decoy), ${report.leakageDropped} dropped for naming a held-out target\n\n`
+  );
 
   mkdirSync(dirname(JSON_PATH), { recursive: true });
   // Machine-readable artifact with reproducibility envelope (commit + date).
@@ -1044,7 +1124,7 @@ async function main(): Promise<void> {
   const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
   process.stdout.write("=".repeat(64) + "\n");
   process.stdout.write(
-    `success A(on)=${pct(report.successRateA)}  B(off)=${pct(report.successRateB)}  ` +
+    `held-out target-surfaced A(on)=${pct(report.successRateA)}  B(off)=${pct(report.successRateB)}  ` +
       `rescued=${report.rescued}  hurt=${report.hurt}\n`
   );
   process.stdout.write(

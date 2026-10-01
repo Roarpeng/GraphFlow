@@ -7,7 +7,15 @@ import {
   hasMarkdownIndex,
   hasOfficeIndex,
 } from "../../../config/include-extensions.js";
-import { formatApiKeyForConfig, formatApiKeyForSettings, resolveConfigSecret } from "../../../config/secrets";
+import {
+  describeApiKeyInput,
+  extractEnvPlaceholderName,
+  formatApiKeyForConfig,
+  formatApiKeyForSettings,
+  resolveConfigSecret,
+  type ApiKeyInputStatus,
+} from "../../../config/secrets";
+import { readEnvVar } from "../../../config/env-lookup";
 import {
   resolveConfig,
   resolveConfigPath,
@@ -35,6 +43,12 @@ declare module "./types.js" {
     workerApiKey?: string;
     workerProvider?: string;
     workerTimeoutMs?: number;
+    /** Whether each key field resolves — never the secret itself. */
+    apiKeyStatus?: {
+      smart: ApiKeyInputStatus;
+      economy: ApiKeyInputStatus;
+      worker: ApiKeyInputStatus;
+    };
   }
 }
 
@@ -201,6 +215,11 @@ export function getGraphFlowSettings(configPath = "graphflow.config.json"): Grap
     ...(worker.workerApiKey ? { workerApiKey: worker.workerApiKey } : {}),
     ...(worker.workerProvider ? { workerProvider: worker.workerProvider } : {}),
     ...(worker.workerTimeoutMs !== undefined ? { workerTimeoutMs: worker.workerTimeoutMs } : {}),
+    apiKeyStatus: {
+      smart: describeApiKeyInput(smart.apiKey),
+      economy: describeApiKeyInput(economy.apiKey),
+      worker: describeApiKeyInput(worker.workerApiKey),
+    },
   };
 }
 
@@ -337,6 +356,7 @@ export function saveGraphFlowSettings(
     const { workspaceRoot: _dropped, ...graphPolicy } = persisted.graphPolicy;
     persisted = { ...persisted, graphPolicy: graphPolicy as GraphFlowConfig["graphPolicy"] };
   }
+  persisted = restoreEnvPlaceholders(persisted, readRawConfig(actualPath)) as GraphFlowConfig;
   if (actualPath === resolveGlobalConfigPath()) {
     // Provider API keys live in the global config: keep it owner-only.
     writeConfigSecure(actualPath, `${JSON.stringify(persisted, null, 2)}\n`);
@@ -344,6 +364,31 @@ export function saveGraphFlowSettings(
     writeFileSync(actualPath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
   }
   return getGraphFlowSettings(actualPath);
+}
+
+/**
+ * The loader materializes non-key `${VAR}` fields (e.g. graphPolicy.mcpApiKey)
+ * into plaintext; a settings save must write the file's original reference
+ * back, never the value it expanded to.
+ */
+function restoreEnvPlaceholders(next: unknown, raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw) || !next || typeof next !== "object" || Array.isArray(next)) {
+    return next;
+  }
+  const out: Record<string, unknown> = { ...(next as Record<string, unknown>) };
+  for (const [key, rawValue] of Object.entries(raw as Record<string, unknown>)) {
+    if (!(key in out)) continue;
+    const current = out[key];
+    if (typeof rawValue === "string") {
+      const envName = extractEnvPlaceholderName(rawValue);
+      if (envName && typeof current === "string" && current === (readEnvVar(envName) ?? "")) {
+        out[key] = rawValue.trim();
+      }
+    } else if (rawValue && typeof rawValue === "object") {
+      out[key] = restoreEnvPlaceholders(current, rawValue);
+    }
+  }
+  return out;
 }
 
 function hasResolvableApiKey(apiKeyEnvVar?: string): boolean {
@@ -384,9 +429,13 @@ function validateTierRouting(
   }
 
   if (!hasResolvableApiKey(tier.apiKey)) {
+    const status = describeApiKeyInput(tier.apiKey);
     issues.push({
       field: `${prefix}ApiKey`,
-      message: `请为 ${label} 层填写可用的 API Key 或环境变量名`,
+      message:
+        status.kind === "env"
+          ? `${label} 层引用的环境变量 ${status.name} 读取不到值：请确认变量名拼写；Windows 下新建的用户变量已自动从注册表读取，若仍为空请检查是否设置在“用户变量/系统变量”中`
+          : `请为 ${label} 层填写可用的 API Key 或环境变量名`,
     });
   }
 

@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import type { GraphEdge, GraphNode } from "../core/types";
 import type { GraphClient } from "./client-factory";
 import { SQLITE_INDEX_MANIFEST } from "./file-indexer-cache";
-import { tokenizeForIndex, containsCJK } from "./graph-utils";
+import { tokenizeForIndex, containsCJK, nodeRecallText } from "./graph-utils";
 import { requireFromOptionalDeps, resolveSqliteDepsRoot } from "../utils/optional-deps";
 
 const requireFn = createRequire(__filename);
@@ -95,6 +95,25 @@ export function buildSearchText(content: string): string {
   return subtokens.length > 0 ? `${content} ${subtokens.join(" ")}` : content;
 }
 
+/**
+ * FTS text for a node: the same fields the re-ranker scores (content + jsdoc +
+ * name/exports/path). Indexing content alone left jsdoc — the only prose most
+ * symbols carry — unreachable by keyword recall on the sqlite transport.
+ */
+export function buildNodeSearchText(node: Pick<GraphNode, "id" | "type" | "content" | "metadata">): string {
+  return buildSearchText(nodeRecallText(node as GraphNode));
+}
+
+function parseMetadata(raw: string | null): Record<string, unknown> | undefined {
+  if (raw == null) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function rowToNode(row: NodeRow): GraphNode {
   const node: GraphNode = {
     id: row.id,
@@ -160,7 +179,7 @@ export class GraphifySqliteClient implements GraphClient {
     const currentVersion = this.db.pragma("user_version", { simple: true }) as number;
     if (currentVersion < 1) {
       this.db.exec(SCHEMA_SQL);
-      this.db.pragma("user_version = 2");
+      this.db.pragma("user_version = 3");
       return;
     }
     if (currentVersion < 2) {
@@ -168,6 +187,28 @@ export class GraphifySqliteClient implements GraphClient {
       this.migrateV1ToV2();
       this.db.pragma("user_version = 2");
     }
+    if (currentVersion < 3) {
+      // v2 → v3: searchtext covers jsdoc/name/exports/path, not just content.
+      this.backfillSearchText();
+      this.db.exec(`INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild');`);
+      this.db.pragma("user_version = 3");
+    }
+  }
+
+  private backfillSearchText(): void {
+    const rows = this.db.prepare(`SELECT rowid, id, type, content, metadata FROM nodes`).all() as Array<
+      NodeRow & { rowid: number }
+    >;
+    const update = this.db.prepare(`UPDATE nodes SET searchtext = ? WHERE rowid = ?`);
+    this.db.transaction((batch: typeof rows) => {
+      for (const row of batch) {
+        const metadata = parseMetadata(row.metadata);
+        update.run(
+          buildNodeSearchText({ id: row.id, type: row.type, content: row.content, ...(metadata ? { metadata } : {}) }),
+          row.rowid
+        );
+      }
+    })(rows);
   }
 
   private migrateV1ToV2(): void {
@@ -222,7 +263,7 @@ export class GraphifySqliteClient implements GraphClient {
     const tx = this.db.transaction((batch: GraphNode[]) => {
       for (const n of batch) {
         const metaJson = n.metadata !== undefined ? JSON.stringify(n.metadata) : null;
-        stmt.run(n.id, n.type, n.content, metaJson, buildSearchText(n.content));
+        stmt.run(n.id, n.type, n.content, metaJson, buildNodeSearchText(n));
       }
     });
     tx(nodes);
@@ -251,7 +292,7 @@ export class GraphifySqliteClient implements GraphClient {
     this.db.transaction(() => {
       for (const n of batch.nodes) {
         const metaJson = n.metadata !== undefined ? JSON.stringify(n.metadata) : null;
-        nodeStmt.run(n.id, n.type, n.content, metaJson, buildSearchText(n.content));
+        nodeStmt.run(n.id, n.type, n.content, metaJson, buildNodeSearchText(n));
       }
       for (const e of batch.edges) {
         edgeStmt.run(e.from, e.to, e.relation);

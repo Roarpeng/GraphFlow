@@ -1,4 +1,7 @@
 import { logger } from "../utils/logger.js";
+import { readEnvVar } from "../config/env-lookup.js";
+import { resolveConfigSecret } from "../config/secrets.js";
+import type { GraphFlowConfig } from "../config/schema.js";
 
 /**
  * TypeSafe System One client (REAL API contract, per docs.typesafe.ai/api).
@@ -96,17 +99,54 @@ export interface SystemOneClient {
   ): Promise<SystemOneResult<Q>>;
 }
 
+/**
+ * The client appends `/v1/systemone` itself; users often paste the full
+ * endpoint (the settings UI once suggested it), which produced
+ * `/v1/systemone/v1/systemone` 404s.
+ */
+export function normalizeTypesafeBaseUrl(url: string): string {
+  return url
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\/v1\/systemone$/i, "")
+    .replace(/\/v1$/i, "")
+    .replace(/\/+$/, "");
+}
+
 export function resolveTypesafeCredentials(options?: {
   baseUrl?: string;
   apiKey?: string;
 }): { baseUrl: string; apiKey?: string } {
-  const baseUrl = (
-    options?.baseUrl ??
-    process.env.TYPESAFE_BASE_URL ??
-    TYPESAFE_DEFAULT_BASE_URL
-  ).replace(/\/+$/, "");
-  const apiKey = options?.apiKey?.trim() || process.env.TYPESAFE_API_KEY?.trim() || undefined;
+  const baseUrl = normalizeTypesafeBaseUrl(
+    options?.baseUrl?.trim() || readEnvVar("TYPESAFE_BASE_URL") || TYPESAFE_DEFAULT_BASE_URL
+  );
+  const apiKey = options?.apiKey?.trim() || readEnvVar("TYPESAFE_API_KEY") || undefined;
   return { baseUrl, ...(apiKey ? { apiKey } : {} ) };
+}
+
+/**
+ * Client options from the configured worker (settings page "Worker" card):
+ * its API key field — a literal or an env var reference — used to be saved
+ * and then never read. Only a TypeSafe worker contributes; a local-command
+ * worker's fields describe a different endpoint.
+ */
+export function typesafeClientOptionsFromConfig(config: GraphFlowConfig): SystemOneClientOptions {
+  const policy =
+    config.workerPolicy ?? config.efficiencyPolicy?.workerPolicy ?? config.efficiencyPolicy?.worker;
+  const worker = policy?.workerConfig;
+  if (!worker) return {};
+  const isTypesafe =
+    policy?.workerType === "typesafe-jev" || /typesafe/i.test(worker.baseUrl ?? "");
+  if (!isTypesafe) return {};
+  const apiKey = resolveConfigSecret(worker.apiKey);
+  const model = worker.model?.trim();
+  return {
+    ...(worker.baseUrl?.trim() ? { baseUrl: worker.baseUrl.trim() } : {}),
+    ...(apiKey ? { apiKey } : {}),
+    // "typesafe-jev" is the adapter name the UI once used as a model placeholder.
+    ...(model && model !== "typesafe-jev" ? { model } : {}),
+    ...(worker.timeoutMs && worker.timeoutMs > 0 ? { timeoutMs: worker.timeoutMs } : {}),
+  };
 }
 
 export function createSystemOneClient(options?: SystemOneClientOptions): SystemOneClient {
@@ -124,7 +164,9 @@ export function createSystemOneClient(options?: SystemOneClientOptions): SystemO
       questions: Q
     ): Promise<SystemOneResult<Q>> {
       if (!apiKey) {
-        throw new Error("TypeSafe System One: no API key (set TYPESAFE_API_KEY)");
+        throw new Error(
+          "TypeSafe System One: no API key (set TYPESAFE_API_KEY, or the worker API key / env var name in settings)"
+        );
       }
       const body = JSON.stringify({ state, model, questions });
       let lastError: Error = new Error("TypeSafe System One: request never attempted");

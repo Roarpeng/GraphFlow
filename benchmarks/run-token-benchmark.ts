@@ -135,6 +135,36 @@ const QUERIES: readonly string[] = [
   "skill flywheel",
 ];
 
+/**
+ * Fidelity proxy gold targets for the default in-repo QUERIES: repo-relative
+ * files a correct answer must be grounded in. A query without an unambiguous
+ * owning file has no entry and is reported as n/a (never guessed). External
+ * corpus runs have no gold targets.
+ */
+const QUERY_GOLD_FILES: Readonly<Record<string, readonly string[]>> = {
+  orchestrator: ["src/core/orchestrator.ts"],
+  "context compression": ["src/graph/graph-compression.ts", "src/graph/context-slicer.ts"],
+  "model routing": ["src/routing/model-router.ts"],
+  "graph index": ["src/graph/file-indexer.ts"],
+  "token savings": ["src/graph/token-savings.ts"],
+  "preview context": ["src/surfaces/cli/runtime/graph.ts"],
+  "skill flywheel": ["src/learning/skill-flywheel.ts"],
+};
+
+/**
+ * Cheap fidelity proxy: does the compressed package text an agent receives
+ * name at least one gold target file? null when the query has no gold target.
+ * Presence of a path is necessary, not sufficient, for answering correctly.
+ */
+export function goldTargetInPackage(
+  packageText: string,
+  goldFiles: readonly string[] | undefined
+): boolean | null {
+  if (!goldFiles || goldFiles.length === 0) return null;
+  const haystack = packageText.toLowerCase().split("\\").join("/");
+  return goldFiles.some((gold) => haystack.includes(gold.toLowerCase()));
+}
+
 interface QueryResult {
   query: string;
   baselineTokens: number;
@@ -148,6 +178,10 @@ interface QueryResult {
   topKFilesBaseline: TopKFilesBaseline;
   /** Arm B savings: (topKFilesBaseline.tokens − graphflowTokens) / topKFilesBaseline.tokens × 100. */
   topKFilesSavingsPercent: number;
+  /** Fidelity proxy gold files for this query (empty = no gold target). */
+  goldFiles: readonly string[];
+  /** Whether the package text names a gold file; null when there is no gold target. */
+  goldInPackage: boolean | null;
 }
 
 function countTokens(text: string): number {
@@ -490,6 +524,17 @@ function buildResultsMarkdown(
     totals.topKFilesBaseline
   )}** | **${formatNumber(totals.graphflow)}** | **${totals.topKFilesSavings.toFixed(1)}%** |`;
 
+  const fidelityRows = results
+    .map(
+      (r) =>
+        `| \`${r.query}\` | ${r.goldFiles.length > 0 ? r.goldFiles.map((f) => `\`${f}\``).join(", ") : "—"} | ${
+          r.goldInPackage === null ? "n/a" : r.goldInPackage ? "yes" : "no"
+        } |`
+    )
+    .join("\n");
+  const goldDefined = results.filter((r) => r.goldInPackage !== null).length;
+  const goldHit = results.filter((r) => r.goldInPackage === true).length;
+
   const generatedAt = new Date().toISOString();
 
   return `${TOKEN_BEGIN}
@@ -530,6 +575,13 @@ separately, never interchangeably:
   uncompressed encoding — the fair counterfactual, and the number to quote in
   tool-to-tool comparisons.
 
+**What these percentages are — and are not.** Both are pure token-count ratios:
+compressed package (summary + anchor pointers) versus reading files in full.
+Neither checks whether the package still contains what is needed to answer the
+query; they are **not** a fidelity or answer-quality measure. The only fidelity
+signal here is the cheap proxy below (does the package name the gold file?):
+**${goldHit}/${goldDefined}** queries with a gold target.
+
 Arm A's denominator is whatever naive term-frequency grep happens to rank
 highest (often large files that merely mention a query term often); Arm B
 cannot inflate itself — anchors that resolve to fewer or smaller files make its
@@ -560,6 +612,18 @@ exactly the same files.
 | --- | --- | --- | --- | --- | --- | --- |
 ${topKRows}
 ${topKTotalRow}
+
+## Fidelity proxy — does the package name the gold file?
+
+A hand-assigned gold file per default query (queries without one unambiguous
+owning file, and every external-corpus query, are n/a). "yes" means the exact
+text an agent receives names the file; that is necessary, not sufficient, for a
+correct answer, and it is checked offline without any LLM.
+
+| Query | Gold file(s) | Named in package |
+| --- | --- | --- |
+${fidelityRows}
+| **Total** | — | **${goldHit}/${goldDefined}** |
 
 ## Run environment
 
@@ -780,6 +844,9 @@ export async function runTokenBenchmark(options: TokenBenchmarkRunOptions = {}):
           )
         : 0;
 
+    const goldFiles = usingExternalCorpus ? [] : QUERY_GOLD_FILES[query] ?? [];
+    const goldInPackage = goldTargetInPackage(contextText, goldFiles);
+
     results.push({
       query,
       baselineTokens: baseline.tokens,
@@ -789,6 +856,8 @@ export async function runTokenBenchmark(options: TokenBenchmarkRunOptions = {}):
       savingsPercent,
       topKFilesBaseline,
       topKFilesSavingsPercent,
+      goldFiles,
+      goldInPackage,
     });
 
     process.stdout.write(
@@ -833,6 +902,10 @@ export async function runTokenBenchmark(options: TokenBenchmarkRunOptions = {}):
     `TOTAL  arm B (top-${anchorTopK} files, realistic): baseline=${formatNumber(totalTopKFilesBaseline)}  ` +
       `(${totalTopKFilesFiles} distinct files)  graphflow=${formatNumber(totalGraphflow)}  ` +
       `savings=${totalTopKFilesSavings.toFixed(1)}%\n`
+  );
+  process.stdout.write(
+    `(token-count ratios only; not a fidelity measure) fidelity proxy — gold file named in package: ` +
+      `${results.filter((r) => r.goldInPackage === true).length}/${results.filter((r) => r.goldInPackage !== null).length}\n`
   );
   process.stdout.write("=".repeat(64) + "\n");
 
@@ -900,6 +973,11 @@ export async function runTokenBenchmark(options: TokenBenchmarkRunOptions = {}):
         files: totalTopKFilesFiles,
         savingsPercent: Math.round(totalTopKFilesSavings * 10) / 10,
       },
+      fidelityProxy: {
+        note: "Savings are token-count ratios only, not fidelity/answer quality. Proxy = package text names a hand-assigned gold file.",
+        queriesWithGold: results.filter((r) => r.goldInPackage !== null).length,
+        goldInPackage: results.filter((r) => r.goldInPackage === true).length,
+      },
     },
     meta: { nodeCount, indexedFiles, durationMs },
     results: results.map((r) => ({
@@ -917,6 +995,8 @@ export async function runTokenBenchmark(options: TokenBenchmarkRunOptions = {}):
         unresolvedAnchors: r.topKFilesBaseline.unresolvedAnchors,
         cappedFiles: r.topKFilesBaseline.cappedFiles,
       },
+      goldFiles: [...r.goldFiles],
+      goldInPackage: r.goldInPackage,
     })),
   };
   writeFileSync(jsonTargetPath, JSON.stringify(jsonPayload, null, 2), "utf8");

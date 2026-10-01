@@ -43,6 +43,7 @@ const L3_PIN_HINT = /alignment|deviation|goal/i;
 
 /** Max matched dialogue turns packed per preview (after effective-turns filter). */
 const DIALOGUE_PACK_MAX_TURNS = 3;
+const VECTOR_RRF_WEIGHT = 0.5;
 
 export type DuplicateModulePolicy = "continue" | "break";
 
@@ -261,7 +262,10 @@ export async function fuseVectorRecallIfEnabled(
     );
     recordIncompatibleVectorsSkipped(skipped);
     const vectorHits = linearVectorRecall(vectorCandidates, queryEmbedding, topK, minSim);
-    return reciprocalRankFusion([keywordHits, vectorHits]);
+    // Half weight: vector candidates are a re-ranking of the keyword hits, and
+    // prose (docs, skill copies) embeds closer to natural-language questions
+    // than code does, so an equal vote let every doc copy outrank the code.
+    return reciprocalRankFusion([keywordHits, vectorHits], 60, [1, VECTOR_RRF_WEIGHT]);
   } catch (error) {
     logger.warn({ error }, `Vector recall failed in ${logLabel}`);
     return keywordHits;

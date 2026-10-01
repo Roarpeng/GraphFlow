@@ -618,15 +618,20 @@ export async function embedAndAttachNodes(
   return out;
 }
 
-export function reciprocalRankFusion(rankings: GraphNode[][], k: number = 60): GraphNode[] {
+export function reciprocalRankFusion(
+  rankings: GraphNode[][],
+  k: number = 60,
+  weights?: readonly number[]
+): GraphNode[] {
   const scores = new Map<string, number>();
   const firstSeen = new Map<string, { node: GraphNode; order: number }>();
   let order = 0;
-  for (const list of rankings) {
+  for (const [listIndex, list] of rankings.entries()) {
+    const weight = weights?.[listIndex] ?? 1;
     for (let rank = 0; rank < list.length; rank += 1) {
       const node = list[rank];
       if (!node) continue;
-      scores.set(node.id, (scores.get(node.id) ?? 0) + 1 / (k + rank + 1));
+      scores.set(node.id, (scores.get(node.id) ?? 0) + weight / (k + rank + 1));
       if (!firstSeen.has(node.id)) {
         firstSeen.set(node.id, { node, order: order++ });
       }

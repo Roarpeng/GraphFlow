@@ -27,6 +27,8 @@ import { getHostAdapter } from "./host-adapter";
 import {
   getAgentSkillStatus,
   installClaudeCodeMd,
+  installManagedTemplateFile,
+  isManagedTemplateInstalled,
   removeAgentSkill,
   removeGraphFlowOwnedFile,
   resolveClaudeMdSourcePath,
@@ -213,7 +215,8 @@ function installClaudeMdAt(home: string): { status: "created" | "updated" | "ski
     return { status: "skipped", filePath: dest, message: "CLAUDE.md source not found" };
   }
   try {
-    return copyIfChanged(sourcePath, home, "CLAUDE.md");
+    // The user's own CLAUDE.md: GraphFlow owns only its marked block inside it.
+    return { ...installManagedTemplateFile(sourcePath, dest), filePath: dest };
   } catch (error) {
     return {
       status: "error",
@@ -254,7 +257,7 @@ export function getClaudeCodeHostStatus(options: { home?: string } = {}): Claude
     });
     const detected = existsSync(home);
     const mcpInstalled = detected && isMcpServerInstalled(paths.mcpPath);
-    const rulesInstalled = existsSync(paths.rulesPath);
+    const rulesInstalled = isManagedTemplateInstalled(paths.rulesPath);
     const skillInstalled = existsSync(paths.skillPath);
     return {
       hostId: CLAUDE_CODE_HOST_ADAPTER_ID,
@@ -290,7 +293,7 @@ export function getClaudeCodeHostStatus(options: { home?: string } = {}): Claude
     detected,
     installed: mcpInstalled,
     mcpInstalled,
-    rulesInstalled: existsSync(paths.rulesPath),
+    rulesInstalled: isManagedTemplateInstalled(paths.rulesPath),
     skillInstalled: skill?.installed ?? existsSync(paths.skillPath),
     hooksInstalled: hooks.installed,
     home,

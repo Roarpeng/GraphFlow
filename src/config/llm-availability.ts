@@ -8,7 +8,7 @@ const PROVIDER_ENV_KEYS: Record<ProviderName, string[]> = {
   anthropic: ["ANTHROPIC_API_KEY"],
   bailian: ["BAILIAN_API_KEY"],
   doubao: ["DOUBAO_API_KEY"],
-  deepseek: ["DEEPSEEK_API_KEY", "TYPESAFE_API_KEY"],
+  deepseek: ["DEEPSEEK_API_KEY"],
 };
 
 export interface CredentialExplanation {

@@ -26,7 +26,7 @@ import { orchestrate, type OrchestrateOptions } from "../../../core/orchestrator
 import type { TaskRunResult } from "../../../core/types";
 import { triageTask } from "../../../core/triage";
 import { createGraphClient, getLastGraphStoreBackend, resolveIndexManifestName } from "../../../graph/client-factory";
-import { indexWorkspaceFiles, hasPendingGraphIndexWork } from "../../../graph/file-indexer";
+import { indexWorkspaceFiles, hasPendingGraphIndexWork, indexedStoreIsIncomplete } from "../../../graph/file-indexer";
 import { appendFeedbackEvent } from "../../../learning/learning-events";
 import { updateEpisodeOutcome, type DeviationKind } from "../../../learning/episodic-memory";
 import {
@@ -141,10 +141,11 @@ export async function llmCheckResult(configPath?: string): Promise<LlmCheckRepor
           : undefined;
     return { provider, ...explanation, ...(model ? { model } : {}) };
   });
-  const { resolveTypesafeCredentials, TYPESAFE_DEFAULT_MODEL } = await import(
+  const { resolveTypesafeCredentials, typesafeClientOptionsFromConfig, TYPESAFE_DEFAULT_MODEL } = await import(
     "../../../routing/typesafe-systemone.js"
   );
-  const ts = resolveTypesafeCredentials();
+  const workerOptions = typesafeClientOptionsFromConfig(config);
+  const ts = resolveTypesafeCredentials(workerOptions);
   return {
     usable: providers.some((p) => p.usable),
     tiers: [
@@ -155,9 +156,9 @@ export async function llmCheckResult(configPath?: string): Promise<LlmCheckRepor
     typesafe: {
       configured: ts.apiKey !== undefined,
       baseUrl: ts.baseUrl,
-      model: TYPESAFE_DEFAULT_MODEL,
+      model: workerOptions.model ?? TYPESAFE_DEFAULT_MODEL,
       envVarsChecked: ["TYPESAFE_API_KEY", "TYPESAFE_BASE_URL"],
-      note: "System One (Jev) answers typed judgments on POST {base}/v1/systemone; it does not author commands or text.",
+      note: "System One (Jev) answers typed judgments on POST {base}/v1/systemone; it does not author commands or text. A typesafe-jev worker's configured apiKey (literal or env reference) wins over TYPESAFE_API_KEY.",
     },
     resolutionOrder: "config apiKey > localhost endpoint > domain-sniffed env > provider env keys; config-exported env values are invisible to sniffing (no self-feedback); at the adapter layer genuine shell env wins over config exports",
   };
@@ -174,9 +175,18 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       const indexOptions = config.graphPolicy.includeExtensions
         ? { includeExtensions: config.graphPolicy.includeExtensions }
         : undefined;
-      if (hasPendingGraphIndexWork(root, { ...indexOptions, manifestName: graphClient.indexManifestName })) {
+      const storeIncomplete = indexedStoreIsIncomplete(
+        root,
+        graphClient.indexManifestName,
+        graphClient.readSnapshot?.().nodes
+      );
+      if (
+        storeIncomplete ||
+        hasPendingGraphIndexWork(root, { ...indexOptions, manifestName: graphClient.indexManifestName })
+      ) {
         await indexWorkspaceFiles(graphClient, root, {
           ...indexOptions,
+          ...(storeIncomplete ? { forceReindex: true } : {}),
         });
       }
     }
@@ -298,7 +308,9 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
       // deterministic Layer A. The old worker guessed a chat-completions
       // endpoint on a fabricated domain — Jev answers typed questions.
       const { evaluateMetaAdvisory } = await import("../../../core/meta-advisory.js");
-      const { createJevMetaReflector } = await import("../../../routing/typesafe-systemone.js");
+      const { createJevMetaReflector, createSystemOneClient, typesafeClientOptionsFromConfig } = await import(
+        "../../../routing/typesafe-systemone.js"
+      );
       const built = await evaluateMetaAdvisory(
         {
           task,
@@ -311,7 +323,7 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
           project: { root: workspaceRoot, ...(gitHead ? { gitHead } : {}) },
           durationMs: 0,
         },
-        { metaReflector: createJevMetaReflector() }
+        { metaReflector: createJevMetaReflector(createSystemOneClient(typesafeClientOptionsFromConfig(config))) }
       );
       advisory = {
         ...built,

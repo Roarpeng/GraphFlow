@@ -9,8 +9,10 @@
  *   D4: config & routing (loader, routing, providers)
  *   D5: integrations (mcp, bridge, vscode)
  *
- * Metrics per domain: Hit@1, Hit@3, Hit@5, token savings vs raw baseline.
- * Aggregate weighted score comparable to CodeGraph's framework.
+ * Metrics per domain: rank-based Hit@1/3/5 and MRR over the ranked anchor
+ * channel, token savings vs raw baseline. The weighted composite is a
+ * self-graded internal check (author-written queries, self-chosen weights),
+ * not a score comparable with other tools.
  *
  * Run: npx tsx benchmarks/run-independent-bench.ts
  */
@@ -37,6 +39,33 @@ function countTokens(text: string): number {
 // ── Domain definitions ──────────────────────────────────────────────────────
 
 interface DomainQuery { query: string; expectedKeywords: string[]; }
+
+/**
+ * 1-based rank of the first relevant anchor in ranked order, or null when no
+ * anchor is relevant. An anchor is relevant when its id points into one of the
+ * domain's files, or when its own id + content contain EVERY expected keyword.
+ * Only the ranked anchor channel counts; the summary channel carries no rank.
+ */
+function firstRelevantRank(
+  anchors: ReadonlyArray<{ id: string }>,
+  domain: Pick<Domain, "filePatterns">,
+  q: DomainQuery
+): number | null {
+  const patterns = domain.filePatterns.flatMap((p) => {
+    const lower = p.toLowerCase();
+    return [lower, lower.replace(/\//g, "-")];
+  });
+  const keywords = q.expectedKeywords.map((kw) => kw.toLowerCase());
+  for (let i = 0; i < anchors.length; i += 1) {
+    const anchor = anchors[i]! as { id: string; content?: unknown };
+    const id = anchor.id.toLowerCase().replace(/\\/g, "/");
+    const text = `${id} ${typeof anchor.content === "string" ? anchor.content.toLowerCase() : ""}`;
+    if (patterns.some((p) => id.includes(p)) || keywords.every((kw) => text.includes(kw))) {
+      return i + 1;
+    }
+  }
+  return null;
+}
 
 interface Domain {
   name: string;
@@ -174,6 +203,7 @@ async function main() {
     hitAt1: number;
     hitAt3: number;
     hitAt5: number;
+    mrr: number;
     avgGfTokens: number;
     avgBaselineTokens: number;
     savingsPct: number;
@@ -183,7 +213,7 @@ async function main() {
   const domainResults: DomainResult[] = [];
 
   for (const domain of DOMAINS) {
-    let hit1 = 0, hit3 = 0, hit5 = 0;
+    let hit1 = 0, hit3 = 0, hit5 = 0, rrSum = 0;
     let totalGfTok = 0, totalBaseTok = 0;
     const n = domain.queries.length;
 
@@ -198,19 +228,13 @@ async function main() {
       const gfTok = countTokens(gfText);
       totalGfTok += gfTok;
 
-      // Check if results contain expected keywords
-      const resultText = gfText.toLowerCase();
-      const kwMatch = q.expectedKeywords.every(kw => resultText.includes(kw.toLowerCase()));
-      const anchorIds = pkg.anchorChannel.map((a) => a.id.toLowerCase()).join(" ");
-      const anchorMatch = domain.filePatterns.some(p => anchorIds.includes(p.replace(/\//g, "-").toLowerCase()));
-      const matched = kwMatch || anchorMatch;
-
-      // Partial match: at least one keyword
-      const partialMatch = q.expectedKeywords.some(kw => resultText.includes(kw.toLowerCase()));
-
-      // Hit@K: progressive credit based on anchor relevance
-      if (matched) { hit5++; hit3++; hit1++; }
-      else if (partialMatch) { hit5++; hit3++; }
+      const rank = firstRelevantRank(pkg.anchorChannel, domain, q);
+      if (rank !== null) {
+        if (rank <= 1) hit1++;
+        if (rank <= 3) hit3++;
+        if (rank <= 5) hit5++;
+        rrSum += 1 / rank;
+      }
 
       // Baseline: all domain-relevant files concatenated
       let baselineText = "";
@@ -231,36 +255,41 @@ async function main() {
       hitAt1: Math.round((hit1 / n) * 1000) / 10,
       hitAt3: Math.round((hit3 / n) * 1000) / 10,
       hitAt5: Math.round((hit5 / n) * 1000) / 10,
+      mrr: Math.round((rrSum / n) * 1000) / 1000,
       avgGfTokens: Math.round(totalGfTok / n),
       avgBaselineTokens: Math.round(totalBaseTok / n),
       savingsPct: Math.round(savingsPct * 10) / 10,
       queryCount: n,
     });
 
-    console.log(`  ${domain.name}: Hit@1=${(hit1/n*100).toFixed(0)}% Hit@3=${(hit3/n*100).toFixed(0)}% Hit@5=${(hit5/n*100).toFixed(0)}% savings=${savingsPct.toFixed(1)}%`);
+    console.log(`  ${domain.name}: Hit@1=${(hit1/n*100).toFixed(0)}% Hit@3=${(hit3/n*100).toFixed(0)}% Hit@5=${(hit5/n*100).toFixed(0)}% MRR=${(rrSum/n).toFixed(3)} savings=${savingsPct.toFixed(1)}%`);
   }
 
   // Aggregate
   const avgHit1 = domainResults.reduce((s, r) => s + r.hitAt1, 0) / domainResults.length;
   const avgHit3 = domainResults.reduce((s, r) => s + r.hitAt3, 0) / domainResults.length;
   const avgHit5 = domainResults.reduce((s, r) => s + r.hitAt5, 0) / domainResults.length;
+  const avgMrr = domainResults.reduce((s, r) => s + r.mrr, 0) / domainResults.length;
   const avgSavings = domainResults.reduce((s, r) => s + r.savingsPct, 0) / domainResults.length;
 
-  // CodeGraph-style overall score: weighted combination
+  // Self-chosen weighting of self-graded sub-scores — an internal check, not a
+  // comparable benchmark score.
   const overallScore = avgHit5 * 0.4 + avgSavings * 0.3 + avgHit3 * 0.2 + avgHit1 * 0.1;
 
   console.log(`\n── Aggregate ──`);
-  console.log(`  Hit@1: ${avgHit1.toFixed(1)}%  Hit@3: ${avgHit3.toFixed(1)}%  Hit@5: ${avgHit5.toFixed(1)}%`);
+  console.log(`  Hit@1: ${avgHit1.toFixed(1)}%  Hit@3: ${avgHit3.toFixed(1)}%  Hit@5: ${avgHit5.toFixed(1)}%  MRR: ${avgMrr.toFixed(3)}`);
   console.log(`  Avg token savings: ${avgSavings.toFixed(1)}%`);
-  console.log(`  Overall score: ${overallScore.toFixed(1)}%`);
+  console.log(`  Composite (self-graded internal check, self-chosen weights): ${overallScore.toFixed(1)}%`);
 
   // Write results
   const results = {
     generatedAt: new Date().toISOString(),
-    methodology: "CodeGraph-style 5-domain benchmark",
+    methodology: "5-domain internal check on the GraphFlow codebase (author-written queries, self-chosen thresholds and weights)",
+    scoreKind: "self-graded-internal-check",
+    relevance: "first anchor whose id points into a domain file, or whose id+content contain every expected keyword; Hit@k = rank <= k; MRR = mean(1/rank), 0 when no relevant anchor",
     graphStats: { totalNodes, totalEdges, indexMs },
     domainResults,
-    aggregate: { avgHit1, avgHit3, avgHit5, avgSavingsPct: avgSavings, overallScore },
+    aggregate: { avgHit1, avgHit3, avgHit5, avgMrr, avgSavingsPct: avgSavings, overallScore },
   };
 
   const outDir = join(__dirname, ".cache");
@@ -269,40 +298,50 @@ async function main() {
 
   // Write markdown
   const lines: string[] = [];
-  lines.push("# P3: CodeGraph-style Independent Multi-Domain Benchmark");
+  lines.push("# P3: Multi-Domain Internal Check (CodeGraph-style layout)");
   lines.push("");
   lines.push(`> Generated: ${new Date().toISOString()}`);
-  lines.push(`> Methodology: 5 domains within GraphFlow codebase, mirroring CodeGraph's multi-repo framework`);
+  lines.push(`> Methodology: 5 domains within the GraphFlow codebase itself (not independent repos)`);
   lines.push(`> Graph: ${totalNodes} nodes, ${totalEdges} edges, indexed in ${(indexMs/1000).toFixed(1)}s`);
+  lines.push("");
+  lines.push("> **Self-graded internal check, not an independent benchmark.** Queries, expected");
+  lines.push("> keywords, domain file patterns, and the composite weights were all chosen by the");
+  lines.push("> project author; there is no held-out query set. Do not quote the composite as a");
+  lines.push("> product score or compare it with other tools' numbers.");
   lines.push("");
   lines.push("## Summary");
   lines.push("");
   lines.push(`| Metric | Value |`);
   lines.push(`| --- | --- |`);
-  lines.push(`| **Overall Score** | **${overallScore.toFixed(1)}%** |`);
+  lines.push(`| Composite (self-chosen weights: 0.4·Hit@5 + 0.3·savings + 0.2·Hit@3 + 0.1·Hit@1) | ${overallScore.toFixed(1)}% |`);
   lines.push(`| Hit@1 | ${avgHit1.toFixed(1)}% |`);
   lines.push(`| Hit@3 | ${avgHit3.toFixed(1)}% |`);
   lines.push(`| Hit@5 | ${avgHit5.toFixed(1)}% |`);
-  lines.push(`| Avg token savings | ${avgSavings.toFixed(1)}% |`);
+  lines.push(`| MRR | ${avgMrr.toFixed(3)} |`);
+  lines.push(`| Avg token savings (token ratio vs domain files in full; not an answer-quality measure) | ${avgSavings.toFixed(1)}% |`);
   lines.push(`| Domains tested | ${DOMAINS.length} |`);
   lines.push(`| Total queries | ${DOMAINS.reduce((s, d) => s + d.queries.length, 0)} |`);
   lines.push("");
   lines.push("## Per-Domain Results");
   lines.push("");
-  lines.push("| Domain | Description | Hit@1 | Hit@3 | Hit@5 | GF tok | Base tok | Savings |");
-  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
+  lines.push("| Domain | Description | Hit@1 | Hit@3 | Hit@5 | MRR | GF tok | Base tok | Savings |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const r of domainResults) {
-    lines.push(`| ${r.name} | ${r.description} | ${r.hitAt1}% | ${r.hitAt3}% | ${r.hitAt5}% | ${r.avgGfTokens} | ${r.avgBaselineTokens} | ${r.savingsPct}% |`);
+    lines.push(`| ${r.name} | ${r.description} | ${r.hitAt1}% | ${r.hitAt3}% | ${r.hitAt5}% | ${r.mrr.toFixed(3)} | ${r.avgGfTokens} | ${r.avgBaselineTokens} | ${r.savingsPct}% |`);
   }
   lines.push("");
-  lines.push("## Comparison with CodeGraph");
+  lines.push("## Methodology & caveats");
   lines.push("");
-  lines.push("| Metric | CodeGraph (self-reported) | GraphFlow |");
-  lines.push("| --- | --- | --- |");
-  lines.push(`| Tool call savings | ~70% | ${avgSavings.toFixed(1)}% (token savings) |`);
-  lines.push(`| Multi-repo coverage | 7 repos | ${DOMAINS.length} domains |`);
-  lines.push(`| Retrieval Hit@5 | N/A | ${avgHit5.toFixed(1)}% |`);
-  lines.push(`| Indexing approach | File watcher incremental | Full rebuild |`);
+  lines.push("- **Relevance**: an anchor is relevant when its id points into one of the domain's files, or");
+  lines.push("  when its own id + content contain every expected keyword. Only the ranked anchor channel");
+  lines.push("  counts; the summary channel carries no rank.");
+  lines.push("- **Hit@k** = the first relevant anchor has rank <= k. **MRR** = mean of 1/rank (0 when no");
+  lines.push("  anchor is relevant). Earlier versions credited Hit@1 whenever the whole package matched,");
+  lines.push("  ignoring rank; those numbers are superseded.");
+  lines.push("- **Token savings** is a token-count ratio against concatenating every file of the domain;");
+  lines.push("  it does not check that the package still contains what is needed to answer the query.");
+  lines.push("- Corpus = GraphFlow's own `src/`; the queries were written by the author who also tunes the");
+  lines.push("  ranker, so these numbers are optimistic and are not evidence of generalization.");
   lines.push("");
   lines.push("## Reproduce");
   lines.push("");

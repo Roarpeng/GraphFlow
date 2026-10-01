@@ -148,16 +148,44 @@ function resolveNpmCommand(): string {
   return process.platform === "win32" ? "npm.cmd" : "npm";
 }
 
-function ensurePackageJson(dir: string): void {
+/**
+ * npm 12 skips dependency install scripts unless the project allows them, and
+ * rejects `--allow-scripts` on the command line for a project install. The
+ * `allowScripts` field is the supported switch; older npm ignores it.
+ * better-sqlite3 fetches its native binding in `install`, so it needs it.
+ */
+export const RUNTIME_DEPS_ALLOW_SCRIPTS: Record<string, boolean> = { "better-sqlite3": true };
+
+export function ensurePackageJson(dir: string): void {
   mkdirSync(dir, { recursive: true });
   const pkgJson = join(dir, "package.json");
-  if (!existsSync(pkgJson)) {
-    writeFileSync(
-      pkgJson,
-      JSON.stringify({ name: "graphflow-optional-deps", private: true, version: "0.0.0" }, null, 2),
-      "utf8"
-    );
+  let pkg: Record<string, unknown> = { name: "graphflow-optional-deps", private: true, version: "0.0.0" };
+  let existed = false;
+  if (existsSync(pkgJson)) {
+    try {
+      const parsed = JSON.parse(readFileSync(pkgJson, "utf8")) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        pkg = parsed as Record<string, unknown>;
+        existed = true;
+      }
+    } catch {
+      // unreadable → rewrite with defaults
+    }
   }
+  const current =
+    pkg.allowScripts && typeof pkg.allowScripts === "object" && !Array.isArray(pkg.allowScripts)
+      ? (pkg.allowScripts as Record<string, unknown>)
+      : {};
+  const missing = Object.keys(RUNTIME_DEPS_ALLOW_SCRIPTS).filter((name) => current[name] === undefined);
+  if (existed && missing.length === 0) return;
+  pkg.allowScripts = { ...current, ...RUNTIME_DEPS_ALLOW_SCRIPTS };
+  writeFileSync(pkgJson, `${JSON.stringify(pkg, null, 2)}\n`, "utf8");
+}
+
+/** A better-sqlite3 that installed but cannot find its binding: its install script did not run. */
+function scriptPolicyHint(name: RuntimeDepName, detail: string, installRoot: string): string {
+  if (name !== "better-sqlite3" || !/bindings|\.node\b|NODE_MODULE_VERSION/i.test(detail)) return "";
+  return ` (its install script likely did not run: npm >= 12 blocks dependency scripts unless ${join(installRoot, "package.json")} allows them via "allowScripts", or npm is configured with ignore-scripts)`;
 }
 
 /**
@@ -343,7 +371,8 @@ export async function ensureRuntimeDepsInstalled(options?: {
     for (const name of needsInstall(after)) {
       if (!failures.some((f) => f.startsWith(`${name}:`))) {
         const dep = after.find((d) => d.name === name);
-        failures.push(`${name}: ${dep?.loadError ?? "still missing after install"}`);
+        const detail = dep?.loadError ?? "still missing after install";
+        failures.push(`${name}: ${detail}${scriptPolicyHint(name, detail, installRootFor(name, root))}`);
       }
     }
     if (failures.length > 0) {

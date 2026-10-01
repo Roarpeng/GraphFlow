@@ -4,12 +4,21 @@
  * 封装 Trae Skill、Cursor Rules、Claude Code CLAUDE.md 的安装逻辑，
  * 可被 CLI init 和 VS Code 扩展共用。所有安装失败静默处理（log warn）。
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { isUnsafeWorkspaceFallback } from "../config/discover-workspace.js";
 import { resolveDshHome } from "./dsh-harness-installer";
 import { resolveKimiCodeHome } from "./kimi-code-paths";
+import { pruneEmptyDirsUpward } from "./config-file-cleanup";
+import {
+  GRAPHFLOW_BLOCK_BEGIN,
+  GRAPHFLOW_BLOCK_END,
+  isManagedContentInstalled,
+  removeManagedBlockFile,
+  wrapManagedBlock,
+  writeManagedBlockFile,
+} from "./managed-block";
 
 // ── 类型定义 ──────────────────────────────────────────────────────────
 
@@ -332,8 +341,51 @@ function installFile(
 
 // ── Agent 指令文件（append-with-markers 安全写入） ──────────────────────
 
-const INSTRUCTION_BEGIN = "<!-- GRAPHFLOW:BEGIN managed block — edit outside these markers only -->";
-const INSTRUCTION_END = "<!-- GRAPHFLOW:END -->";
+const INSTRUCTION_BEGIN = GRAPHFLOW_BLOCK_BEGIN;
+const INSTRUCTION_END = GRAPHFLOW_BLOCK_END;
+
+function readTemplate(sourcePath: string | undefined): string | undefined {
+  if (!sourcePath || !existsSync(sourcePath)) return undefined;
+  try {
+    return readFileSync(sourcePath, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+/** Full-file templates earlier versions copied verbatim over shared instruction files. */
+function legacyInstructionTemplates(vendorRuntimeRoot?: string): string[] {
+  const copilotDir = resolveCopilotInstructionsSourcePath(vendorRuntimeRoot);
+  return [
+    readTemplate(resolveClaudeMdSourcePath(vendorRuntimeRoot)),
+    readTemplate(copilotDir ? join(copilotDir, "graphflow.md") : undefined),
+  ].filter((item): item is string => typeof item === "string" && item.trim() !== "");
+}
+
+/**
+ * Merge a GraphFlow template into a file the user may also own (CLAUDE.md,
+ * AGENTS.md, .windsurfrules, copilot-instructions.md): the template goes inside
+ * the managed markers, everything outside them is left untouched. A file that is
+ * byte-for-byte an old full-file GraphFlow copy is converted to the block form.
+ */
+export function installManagedTemplateFile(
+  sourcePath: string,
+  filePath: string,
+  vendorRuntimeRoot?: string
+): { status: "created" | "updated" | "skipped" | "error"; message?: string } {
+  const template = readTemplate(sourcePath);
+  if (template === undefined) {
+    return { status: "skipped", message: "Source file not found" };
+  }
+  return writeManagedBlockFile(filePath, wrapManagedBlock(template), {
+    legacyWholeFile: legacyInstructionTemplates(vendorRuntimeRoot),
+  });
+}
+
+/** True when a shared instruction file carries GraphFlow guidance (block or legacy full copy). */
+export function isManagedTemplateInstalled(filePath: string, vendorRuntimeRoot?: string): boolean {
+  return isManagedContentInstalled(filePath, { legacyWholeFile: legacyInstructionTemplates(vendorRuntimeRoot) });
+}
 
 /**
  * GraphFlow 的精简 token-first 指令块（受 Windsurf 6000 字符全局规则上限约束，保持简短）。
@@ -384,40 +436,9 @@ export function buildInstructionBlock(): string {
  */
 function upsertManagedBlock(
   filePath: string,
-  destDirToCreate: string
+  _destDirToCreate: string
 ): { status: "created" | "updated" | "skipped" | "error"; message?: string } {
-  try {
-    const block = buildInstructionBlock();
-    const existed = existsSync(filePath);
-
-    if (!existed) {
-      mkdirSync(destDirToCreate, { recursive: true });
-      writeFileSync(filePath, `${block}\n`, "utf8");
-      return { status: "created" };
-    }
-
-    const current = readFileSync(filePath, "utf8");
-    const beginIdx = current.indexOf(INSTRUCTION_BEGIN);
-    const endIdx = current.indexOf(INSTRUCTION_END);
-
-    if (beginIdx !== -1 && endIdx !== -1 && endIdx > beginIdx) {
-      const before = current.slice(0, beginIdx);
-      const after = current.slice(endIdx + INSTRUCTION_END.length);
-      const next = `${before}${block.trimEnd()}${after}`;
-      if (next === current) {
-        return { status: "skipped", message: "already up to date" };
-      }
-      writeFileSync(filePath, next, "utf8");
-      return { status: "updated" };
-    }
-
-    // 无现有块：追加（保留用户已有内容）
-    const separator = current.endsWith("\n") ? "\n" : "\n\n";
-    writeFileSync(filePath, `${current}${separator}${block}\n`, "utf8");
-    return { status: "updated" };
-  } catch (error) {
-    return { status: "error", message: error instanceof Error ? error.message : String(error) };
-  }
+  return writeManagedBlockFile(filePath, buildInstructionBlock());
 }
 
 /** 各 agent 的全局指令/记忆文件目标（仅在检测到对应 marker 时写入）。 */
@@ -687,6 +708,79 @@ export function getProjectLevelRuleTargets(workspaceRoot: string): Array<{
   ];
 }
 
+export type ProjectRuleSourceType = ReturnType<typeof getProjectLevelRuleTargets>[number]["sourceType"];
+
+export interface ProjectRuleOptions {
+  /**
+   * Detected host ids (agent-mcp-installer profile ids). When given, a project
+   * file is written only if a host that reads it is present; undefined keeps
+   * the legacy "write every project file" behaviour.
+   */
+  detectedHostIds?: ReadonlySet<string>;
+}
+
+/** Project files that users commonly author themselves: GraphFlow only manages a marked block in them. */
+const SHARED_PROJECT_RULE_TYPES = new Set<ProjectRuleSourceType>(["agentic-md", "windsurf-rules", "copilot-instructions"]);
+
+/** Hosts whose presence justifies each project file; "any" = any detected host reads it (AGENTS.md). */
+const PROJECT_RULE_HOSTS: Record<ProjectRuleSourceType, readonly string[] | "any"> = {
+  "trae-rules": ["trae", "trae-windows"],
+  "trae-skill-file": ["trae", "trae-windows"],
+  "cursor-rules": ["cursor", "cursor-windows"],
+  "windsurf-rules": ["windsurf", "windsurf-windows"],
+  "claude-rules": ["claude-code", "claude-code-windows"],
+  "antigravity-rules": ["antigravity"],
+  "antigravity-skill-file": ["antigravity"],
+  "copilot-instructions": ["vscode", "vscode-windows"],
+  "agentic-md": "any",
+};
+
+const PROJECT_GEMINI_HOSTS = ["gemini", "gemini-windows", "antigravity"] as const;
+
+function anyDetected(hosts: readonly string[] | "any", detected: ReadonlySet<string> | undefined): boolean {
+  if (!detected) return true;
+  if (hosts === "any") return detected.size > 0;
+  return hosts.some((id) => detected.has(id));
+}
+
+export function isProjectRuleWanted(sourceType: ProjectRuleSourceType, detectedHostIds?: ReadonlySet<string>): boolean {
+  return anyDetected(PROJECT_RULE_HOSTS[sourceType], detectedHostIds);
+}
+
+function isProjectGeminiWanted(detectedHostIds?: ReadonlySet<string>): boolean {
+  return anyDetected(PROJECT_GEMINI_HOSTS, detectedHostIds);
+}
+
+/**
+ * Doctor view of the project files install would write, using the same host
+ * gating and the same "is GraphFlow's content there" test install relies on.
+ * Empty when the root is the home directory (install refuses to write there).
+ */
+export function getProjectLevelRuleStatus(
+  workspaceRoot: string,
+  options: ProjectRuleOptions = {}
+): AgentInstructionStatus[] {
+  if (!workspaceRoot || isUnsafeWorkspaceFallback(resolve(workspaceRoot))) return [];
+  const out: AgentInstructionStatus[] = [];
+  for (const target of getProjectLevelRuleTargets(workspaceRoot)) {
+    if (!isProjectRuleWanted(target.sourceType, options.detectedHostIds)) continue;
+    const installed = SHARED_PROJECT_RULE_TYPES.has(target.sourceType)
+      ? isManagedTemplateInstalled(target.filePath)
+      : existsSync(target.filePath);
+    out.push({ agent: target.agent, configPath: target.filePath, detected: true, installed });
+  }
+  if (isProjectGeminiWanted(options.detectedHostIds)) {
+    const geminiPath = join(workspaceRoot, "GEMINI.md");
+    out.push({
+      agent: "Antigravity/Gemini project GEMINI.md",
+      configPath: geminiPath,
+      detected: true,
+      installed: isManagedContentInstalled(geminiPath),
+    });
+  }
+  return out;
+}
+
 // ── Agent Skill 文件夹安装（真正的 Cursor / Claude / Codex Skill） ────────
 
 /**
@@ -808,7 +902,7 @@ export function installAgentSkills(vendorRuntimeRoot?: string, workspaceRoot?: s
     }
   }
 
-  if (allFailed && workspaceRoot) {
+  if (allFailed && workspaceRoot && !isUnsafeWorkspaceFallback(resolve(workspaceRoot))) {
     try {
       const workspaceSkillDir = join(workspaceRoot, ".graphflow", "skills", "graphflow");
       const wsResult = installFile(sourceSkillFile, workspaceSkillDir, "SKILL.md");
@@ -1014,7 +1108,11 @@ export function getAgentSkillStatus(): AgentInstructionStatus[] {
 /**
  * 安装 Trae Skill（SKILL.md）到所有检测到的 Trae 用户目录。
  */
-export function installTraeSkills(vendorRuntimeRoot?: string, workspaceRoot?: string): SkillInstallResult[] {
+export function installTraeSkills(
+  vendorRuntimeRoot?: string,
+  workspaceRoot?: string,
+  options: ProjectRuleOptions = {}
+): SkillInstallResult[] {
   const results: SkillInstallResult[] = [];
   const skillSourceDir = resolveSkillSourcePath(vendorRuntimeRoot);
 
@@ -1050,7 +1148,21 @@ export function installTraeSkills(vendorRuntimeRoot?: string, workspaceRoot?: st
     allFailed = true;
   }
 
-  if (workspaceRoot) {
+  // Project-scoped copies obey the same guards as the other project files:
+  // never into the home directory, and only when Trae is actually present.
+  const projectSkillsWanted =
+    Boolean(workspaceRoot) &&
+    !isUnsafeWorkspaceFallback(resolve(workspaceRoot!)) &&
+    isProjectRuleWanted("trae-skill-file", options.detectedHostIds);
+  if (workspaceRoot && !projectSkillsWanted) {
+    results.push({
+      target: "Trae project skill",
+      status: "skipped",
+      message: isUnsafeWorkspaceFallback(resolve(workspaceRoot))
+        ? "home directory is not a project root"
+        : "agent not detected",
+    });
+  } else if (workspaceRoot) {
     for (const destDir of [
       join(workspaceRoot, ".trae", "skills", "graphflow"),
       join(workspaceRoot, ".graphflow", "skills", "graphflow"),
@@ -1161,7 +1273,8 @@ export function installClaudeCodeMd(vendorRuntimeRoot?: string): SkillInstallRes
 
   for (const claude of claudeDirs) {
     try {
-      const result = installFile(sourcePath, claude.claudeDir, "CLAUDE.md");
+      // ~/.claude/CLAUDE.md is the user's own memory file: merge a managed block.
+      const result = installManagedTemplateFile(sourcePath, join(claude.claudeDir, "CLAUDE.md"), vendorRuntimeRoot);
       results.push({ target: claude.name, status: result.status, message: result.message });
     } catch (error) {
       results.push({
@@ -1184,7 +1297,8 @@ export function installClaudeCodeMd(vendorRuntimeRoot?: string): SkillInstallRes
 export function installProjectLevelRules(
   workspaceRoot: string,
   vendorRuntimeRoot?: string,
-  log?: (message: string) => void
+  log?: (message: string) => void,
+  options: ProjectRuleOptions = {}
 ): SkillInstallResult[] {
   const results: SkillInstallResult[] = [];
   if (!workspaceRoot) return results;
@@ -1213,6 +1327,10 @@ export function installProjectLevelRules(
   const targets = getProjectLevelRuleTargets(workspaceRoot);
 
   for (const target of targets) {
+    if (!isProjectRuleWanted(target.sourceType, options.detectedHostIds)) {
+      results.push({ target: target.agent, status: "skipped", message: "agent not detected" });
+      continue;
+    }
     try {
       let sourcePath: string | undefined;
 
@@ -1266,7 +1384,9 @@ export function installProjectLevelRules(
         continue;
       }
 
-      const result = installFile(sourcePath, target.destDir, basename(target.filePath));
+      const result = SHARED_PROJECT_RULE_TYPES.has(target.sourceType)
+        ? installManagedTemplateFile(sourcePath, target.filePath, vendorRuntimeRoot)
+        : installFile(sourcePath, target.destDir, basename(target.filePath));
       results.push({ target: target.agent, status: result.status, message: result.message });
 
       if (result.status === "created" || result.status === "updated") {
@@ -1287,8 +1407,14 @@ export function installProjectLevelRules(
 /**
  * 向项目根目录 GEMINI.md 写入 GraphFlow 受管指令块（Antigravity / Gemini CLI 项目级规则）。
  */
-export function installProjectGeminiInstructions(workspaceRoot: string): SkillInstallResult[] {
+export function installProjectGeminiInstructions(
+  workspaceRoot: string,
+  options: ProjectRuleOptions = {}
+): SkillInstallResult[] {
   if (!workspaceRoot) return [];
+  if (!isProjectGeminiWanted(options.detectedHostIds)) {
+    return [{ target: "Antigravity/Gemini project GEMINI.md", status: "skipped", message: "agent not detected" }];
+  }
   // Same home-root guard as installProjectLevelRules. Verified residue on a
   // machine where install was run from `~`: a 1.6 KB `~/GEMINI.md`.
   if (isUnsafeWorkspaceFallback(resolve(workspaceRoot))) {
@@ -1315,11 +1441,12 @@ export function installProjectGeminiInstructions(workspaceRoot: string): SkillIn
 export function installAllSkills(
   vendorRuntimeRoot?: string,
   log?: (message: string) => void,
-  workspaceRoot?: string
+  workspaceRoot?: string,
+  options: ProjectRuleOptions = {}
 ): SkillInstallSummary {
   const logFn = log ?? ((msg: string) => console.log(msg));
 
-  const traeSkills = installTraeSkills(vendorRuntimeRoot, workspaceRoot);
+  const traeSkills = installTraeSkills(vendorRuntimeRoot, workspaceRoot, options);
   for (const result of traeSkills) {
     if (result.status === "error") {
       logFn(`[WARN] Trae Skill ${result.target}: ${result.message}`);
@@ -1375,7 +1502,12 @@ export function installAllSkills(
 
   // 安装"真正的 Agent Skill"（Cursor / Claude Code / Codex 的 skills/graphflow/SKILL.md），
   // 这样在 Cursor 的 Skills 列表中也能看到 graphflow，而不仅仅是 Rule。
-  const agentSkills = installAgentSkills(vendorRuntimeRoot, workspaceRoot);
+  // With host gating on, an empty detection result means "nothing to configure",
+  // not "drop a fallback Skill into the project".
+  const agentSkills = installAgentSkills(
+    vendorRuntimeRoot,
+    options.detectedHostIds ? undefined : workspaceRoot
+  );
   for (const result of agentSkills) {
     if (result.status === "error") {
       logFn(`[WARN] Agent Skill ${result.target}: ${result.message}`);
@@ -1390,8 +1522,8 @@ export function installAllSkills(
 
   // 安装项目级规则文件
   const projectRules = [
-    ...installProjectLevelRules(workspaceRoot ?? "", vendorRuntimeRoot, logFn),
-    ...(workspaceRoot ? installProjectGeminiInstructions(workspaceRoot) : []),
+    ...installProjectLevelRules(workspaceRoot ?? "", vendorRuntimeRoot, logFn, options),
+    ...(workspaceRoot ? installProjectGeminiInstructions(workspaceRoot, options) : []),
   ];
 
   return { traeSkills, cursorRules, claudeMd, agentInstructions, agentSkills, projectRules };
@@ -1401,22 +1533,11 @@ export function installAllSkills(
 
 /** 从文件中移除 GraphFlow 受管指令块（如果存在） */
 export function removeManagedBlock(filePath: string): boolean {
-  if (!existsSync(filePath)) return false;
-  const current = readFileSync(filePath, "utf8");
-  const beginIdx = current.indexOf(INSTRUCTION_BEGIN);
-  const endIdx = current.indexOf(INSTRUCTION_END);
-  if (beginIdx === -1 || endIdx === -1 || endIdx <= beginIdx) return false;
-  const before = current.slice(0, beginIdx);
-  const after = current.slice(endIdx + INSTRUCTION_END.length);
-  let cleaned = `${before}${after}`;
-  // 清理多余的空行
-  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trim();
-  if (cleaned === "") {
-    try { rmSync(filePath, { force: true }); } catch { /* ignore */ }
-    return true;
+  try {
+    return removeManagedBlockFile(filePath);
+  } catch {
+    return false;
   }
-  writeFileSync(filePath, `${cleaned}\n`, "utf8");
-  return true;
 }
 
 /** 移除指定 agent 的 GraphFlow Skill 目录 */
@@ -1430,6 +1551,7 @@ export function removeAgentSkill(skillsRoot: string, skillName = "graphflow"): b
     if (existsSync(skillDir)) {
       _rimraf(skillDir);
     }
+    pruneEmptyDirsUpward(skillsRoot);
     return true;
   } catch { return false; }
 }
@@ -1480,40 +1602,33 @@ export function looksLikeGraphFlowOwnedContent(content: string): boolean {
  * - known instruction filenames that are wholly GraphFlow content → delete
  */
 export function removeGraphFlowOwnedFile(filePath: string): boolean {
+  const removed = removeGraphFlowOwnedFileContent(filePath);
+  if (removed && !existsSync(filePath)) pruneEmptyDirsUpward(dirname(filePath));
+  return removed;
+}
+
+function removeGraphFlowOwnedFileContent(filePath: string): boolean {
   if (!existsSync(filePath)) return false;
   const name = basename(filePath);
   if (/^graphflow\.(md|mdc)$/i.test(name)) {
     return removeFileIfExists(filePath);
   }
-  if (removeManagedBlock(filePath)) {
-    return true;
-  }
+  // Shared instruction files (CLAUDE.md, AGENTS.md, ...) lose only GraphFlow's
+  // managed block. Without markers the file is deleted only when it is an exact,
+  // unmodified copy of a GraphFlow template — never on a content heuristic,
+  // because a user file that merely mentions GraphFlow is still the user's.
+  // The template's own directory (the GraphFlow checkout) is never touched.
+  const legacy = isTemplateSourceDir(dirname(filePath)) ? [] : legacyInstructionTemplates();
   try {
-    const content = readFileSync(filePath, "utf8");
-    const whollyOwnedNames = new Set([
-      "CLAUDE.md",
-      "AGENTS.md",
-      "GEMINI.md",
-      ".windsurfrules",
-      "copilot-instructions.md",
-      "global_rules.md",
-    ]);
-    if (whollyOwnedNames.has(name) && looksLikeGraphFlowOwnedContent(content)) {
-      // Prefer strip if markers exist (already tried). Otherwise delete only when
-      // the file is clearly a GraphFlow template, not a mixed user doc.
-      const mostlyOurs =
-        content.includes(INSTRUCTION_BEGIN) ||
-        /^\s*#\s*GraphFlow\b/m.test(content) ||
-        content.includes("A Context-Aware Multi-Agent Orchestration Engine") ||
-        content.includes("memory & context harness");
-      if (mostlyOurs) {
-        return removeFileIfExists(filePath);
-      }
-    }
+    return removeManagedBlockFile(filePath, { legacyWholeFile: legacy });
   } catch {
     return false;
   }
-  return false;
+}
+
+function isTemplateSourceDir(dir: string): boolean {
+  const source = resolveClaudeMdSourcePath();
+  return source !== undefined && resolve(dirname(source)) === resolve(dir);
 }
 
 export interface SkillUninstallResult {
@@ -1555,7 +1670,7 @@ export function uninstallAllSkillsAndRules(workspaceRoot?: string): SkillUninsta
   // 3) Cursor user rules
   for (const cursor of getCursorRulesDirs()) {
     const filePath = join(cursor.rulesDir, "graphflow.mdc");
-    const removed = removeFileIfExists(filePath);
+    const removed = removeGraphFlowOwnedFile(filePath);
     push(`${cursor.name} rules`, filePath, removed, removed ? "removed" : "not found");
   }
 

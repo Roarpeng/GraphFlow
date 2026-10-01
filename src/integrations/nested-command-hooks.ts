@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { shellQuote } from "./claude-code-hooks";
+import { removeDirIfEmpty, writeJsonOrRemove } from "./config-file-cleanup";
 
 export interface NestedHookHandler {
   type: "command";
@@ -164,8 +165,9 @@ export function removeNestedHooks(
     else delete hooks[event];
   }
 
-  const next: Record<string, unknown> = { ...json, hooks };
-  writeFileSync(configPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  if (removed) {
+    writeJsonOrRemove(configPath, { ...json, hooks });
+  }
   return {
     result: {
       status: removed ? "updated" : "skipped",
@@ -183,4 +185,5 @@ export function removeHookScript(scriptPath: string): void {
   } catch {
     // script removal must not block uninstall
   }
+  removeDirIfEmpty(dirname(scriptPath));
 }

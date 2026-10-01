@@ -5,7 +5,7 @@ const TOKEN_SPLIT = /[^a-zA-Z0-9_\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]+/g;
 const CJK_RE = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/;
 
 const DEPRIORITIZED_PATH_PATTERNS = [
-  /(?:^|\/)\\.cursor\//i,
+  /(?:^|\/)\.cursor\//i,
   /(?:^|\/)Cursor\//,
   /(?:^|\/)docs\/integrations\//i,
   /mcp\.json$/i,
@@ -45,8 +45,51 @@ const PACKAGING_NOISE_PATH_PATTERNS = [
   /(?:^|\/)node_modules\//,
 ];
 const BUILD_OUTPUT_PATH_PATTERN = /(?:^|\/)dist\//;
-const AGENT_SKILL_PATH_PATTERN = /(?:^|\/)\.agent\//;
+/** Installed host mirrors of the GraphFlow skill/rules (copies of src/surfaces/*). */
+const AGENT_SKILL_PATH_PATTERN =
+  /(?:^|\/)\.(?:agents?|trae|claude|codex|kiro|windsurf|gemini|qoder|codebuddy|cline|roo)\//;
 const DOCS_PATH_PATTERN = /(?:^|\/)docs\//;
+const PROSE_FILE_PATTERN = /\.(?:md|mdx|mdc|txt|rst)$/i;
+const TEST_OR_BENCH_PATH_PATTERN =
+  /(?:^|\/)(?:tests?|__tests__|benchmarks?|fixtures)\/|\.(?:test|spec|bench)\.[cm]?[jt]sx?$/i;
+const TEST_INTENT_TOKENS = new Set([
+  "test",
+  "tests",
+  "testing",
+  "spec",
+  "benchmark",
+  "benchmarks",
+  "bench",
+  "fixture",
+  "fixtures",
+  "vitest",
+  "jest",
+  "测试",
+  "基准",
+]);
+/** Query words that make prose (README, SKILL.md, rules) a legitimate answer. */
+const DOC_INTENT_TOKENS = new Set([
+  "readme",
+  "doc",
+  "docs",
+  "documentation",
+  "guide",
+  "skill",
+  "skills",
+  "rule",
+  "rules",
+  "instruction",
+  "instructions",
+  "usage",
+  "tutorial",
+  "changelog",
+  "workflow",
+  "文档",
+  "说明",
+  "指南",
+  "教程",
+  "规则",
+]);
 
 const UI_PAGE_PATH_PATTERN = /(?:^|\/)src\/pages\//;
 const UI_COMPONENT_PATH_PATTERN = /(?:^|\/)src\/components\//;
@@ -281,6 +324,45 @@ export function nodeSearchableText(node: GraphNode): string {
   return parts.join(" ");
 }
 
+/** Distinct identifier terms harvested from a File node's body (see `extractBodyTerms`). */
+export function nodeBodyTerms(node: GraphNode): string {
+  const terms = node.metadata?.bodyTerms;
+  return typeof terms === "string" ? terms : "";
+}
+
+/**
+ * Text fed to keyword recall indexes: searchable text plus File body terms, so a
+ * query naming an identifier used only inside a function body can still recall
+ * its file. Ranking keeps body terms in a separate field (no length penalty).
+ */
+export function nodeRecallText(node: GraphNode): string {
+  const body = nodeBodyTerms(node);
+  const base = nodeSearchableText(node);
+  return body ? `${base} ${body}` : base;
+}
+
+const BODY_TERM_MAX = 500;
+const BODY_CJK_TERM_MAX = 120;
+
+/** Distinct lowercase identifier tokens (plus CJK comment terms) from a source body, capped for index size. */
+export function extractBodyTerms(content: string): string {
+  if (!content) return "";
+  const out: string[] = [];
+  let latin = 0;
+  let cjk = 0;
+  for (const token of tokenizeForIndex(content)) {
+    if (CJK_RE.test(token)) {
+      if (cjk >= BODY_CJK_TERM_MAX) continue;
+      cjk += 1;
+    } else {
+      if (latin >= BODY_TERM_MAX || token.length < 3 || /^\d+$/.test(token)) continue;
+      latin += 1;
+    }
+    out.push(token);
+  }
+  return out.join(" ");
+}
+
 export function dedupEdgesByKey(edges: GraphEdge[]): GraphEdge[] {
   const seen = new Set<string>();
   const result: GraphEdge[] = [];
@@ -460,6 +542,128 @@ function packagingNoisePenalty(path: string, coreIntent: boolean): number {
 }
 
 /**
+ * IDF over the candidate set, normalized so the average query term keeps its
+ * old weight of 1. Keyword recall returns every node matching ANY query term,
+ * so candidate document frequency tracks corpus frequency: "file"/"graph"/
+ * "json" appear in thousands of nodes and must not count as much as "sqlite"
+ * or "fold". Without this, broad documents (README headings) that mention
+ * many common words outranked the one file that matched the rare ones.
+ */
+const BM25_K1 = 1.2;
+const BM25_B = 0.5;
+const BODY_TERM_WEIGHT = 1;
+
+function buildQueryTermWeights(
+  nodeTokens: readonly string[][],
+  nodePaths: readonly string[],
+  queryTokens: ReadonlySet<string>,
+  queryStems: ReadonlySet<string>,
+  stemLen: number
+): { exact: Map<string, number>; stem: Map<string, number> } {
+  // Document = source file, not node: every symbol node repeats its file
+  // path, so per-node counting made a file's own name look common in
+  // proportion to how many symbols the file has.
+  const exactDocs = new Map<string, Set<string>>();
+  const stemDocs = new Map<string, Set<string>>();
+  const add = (map: Map<string, Set<string>>, term: string, doc: string): void => {
+    const docs = map.get(term);
+    if (docs) docs.add(doc);
+    else map.set(term, new Set([doc]));
+  };
+  nodeTokens.forEach((tokens, index) => {
+    const doc = nodePaths[index] || `#${index}`;
+    for (const token of tokens) {
+      if (queryTokens.has(token)) {
+        add(exactDocs, token, doc);
+      }
+      if (queryStems.size > 0 && token.length >= stemLen) {
+        const stem = token.slice(0, stemLen);
+        if (queryStems.has(stem)) add(stemDocs, stem, doc);
+      }
+    }
+  });
+  const exactDf = new Map([...exactDocs].map(([term, docs]) => [term, docs.size] as const));
+  const stemDf = new Map([...stemDocs].map(([term, docs]) => [term, docs.size] as const));
+  const total = new Set(nodePaths.map((path, index) => path || `#${index}`)).size;
+  const idf = (df: number): number => Math.log(1 + (total - df + 0.5) / (df + 0.5));
+  const normalize = (dfs: Map<string, number>): Map<string, number> => {
+    const raw = new Map<string, number>();
+    for (const [term, df] of dfs) raw.set(term, idf(df));
+    const values = [...raw.values()];
+    const mean = values.length > 0 ? values.reduce((sum, v) => sum + v, 0) / values.length : 0;
+    const out = new Map<string, number>();
+    for (const [term, value] of raw) {
+      out.set(term, mean > 0 ? Math.min(3, Math.max(0.25, value / mean)) : 1);
+    }
+    return out;
+  };
+  return { exact: normalize(exactDf), stem: normalize(stemDf) };
+}
+
+/**
+ * File-name / directory field match, deliberately independent of IDF: a query
+ * term that names the file ("worker" -> agents/worker.ts, "env" ->
+ * cli/runtime/env.ts) is strong evidence even when the same word is common in
+ * bodies elsewhere. Docs are excluded so README-style files do not gain from
+ * generic names.
+ */
+function splitPathFields(path: string): { baseTokens: Set<string>; dirTokens: Set<string> } | undefined {
+  if (!path || /\.(?:md|mdx|txt|rst)$/i.test(path)) {
+    return undefined;
+  }
+  const segments = path.replace(/\\/g, "/").split("/").filter(Boolean);
+  const base = (segments.pop() ?? "").replace(/\.[^.]+$/, "");
+  return {
+    baseTokens: new Set(tokenizeForIndex(base.replace(/[-_.]/g, " "))),
+    dirTokens: new Set(
+      segments.slice(-2).flatMap((segment) => tokenizeForIndex(segment.replace(/[-_.]/g, " ")))
+    ),
+  };
+}
+
+/** How many distinct candidate files carry each query token in their file name. */
+function buildBaseNameDf(nodePaths: readonly string[], queryTokens: ReadonlySet<string>): Map<string, number> {
+  const df = new Map<string, number>();
+  for (const path of new Set(nodePaths)) {
+    const fields = splitPathFields(path);
+    if (!fields) continue;
+    for (const token of fields.baseTokens) {
+      if (queryTokens.has(token)) df.set(token, (df.get(token) ?? 0) + 1);
+    }
+  }
+  return df;
+}
+
+function pathFieldBonus(
+  path: string,
+  queryTokens: ReadonlySet<string>,
+  baseNameDf: ReadonlyMap<string, number>
+): number {
+  const fields = splitPathFields(path);
+  if (!fields) {
+    return 0;
+  }
+  const { baseTokens, dirTokens } = fields;
+  let bonus = 0;
+  let baseMatched = 0;
+  for (const token of baseTokens) {
+    if (queryTokens.has(token)) {
+      baseMatched += 1;
+      bonus += 5 * Math.min(1, Math.max(0.3, 3 / (baseNameDf.get(token) ?? 1)));
+    }
+  }
+  if (baseMatched > 0 && baseMatched === baseTokens.size) {
+    bonus += 4;
+  }
+  for (const token of dirTokens) {
+    if (queryTokens.has(token) && !baseTokens.has(token)) {
+      bonus += 1.5;
+    }
+  }
+  return bonus;
+}
+
+/**
  * Re-rank keyword hits so integration/config/packaging noise does not dominate
  * architecture queries.
  */
@@ -493,26 +697,69 @@ export function rankNodesForContextQuery(
     queryTokens.has("slice") ||
     queryTokens.has("slices") ||
     matchQueries.some((q) => /\bslices?\b/i.test(q));
+  const intentTokens = new Set([...queryTokens, ...matchQueries.flatMap((q) => tokenizeForIndex(q))]);
+  const docIntent = [...intentTokens].some((token) => DOC_INTENT_TOKENS.has(token));
+  const testIntent = [...intentTokens].some((token) => TEST_INTENT_TOKENS.has(token));
 
-  const scored = nodes.map((node) => {
+  const nodeTokens = nodes.map((node) => tokenizeForIndex(nodeSearchableText(node)));
+  const nodeBodyTermSets = nodes.map((node) => {
+    const body = nodeBodyTerms(node);
+    return body ? new Set(body.split(" ")) : undefined;
+  });
+  const nodePaths = nodes.map((node) => extractNodeSourcePath(node));
+  const termWeight = buildQueryTermWeights(nodeTokens, nodePaths, queryTokens, queryStems, STEM_LEN);
+  const baseNameDf = buildBaseNameDf(nodePaths, queryTokens);
+  const avgNodeLength = Math.max(
+    1,
+    nodeTokens.reduce((sum, tokens) => sum + tokens.length, 0) / Math.max(1, nodeTokens.length)
+  );
+
+  const scored = nodes.map((node, nodeIndex) => {
     let score = 0;
     const path = extractNodeSourcePath(node);
-    const searchable = nodeSearchableText(node);
     let tokenHits = 0;
 
-    for (const token of tokenizeForIndex(searchable)) {
+    // BM25-style saturation + length normalization: a single occurrence scores
+    // as before, but a long jsdoc repeating "graph" ten times no longer beats
+    // a short symbol that matches several distinct query terms.
+    const tokens = nodeTokens[nodeIndex]!;
+    const exactTf = new Map<string, number>();
+    const stemTf = new Map<string, number>();
+    for (const token of tokens) {
       if (queryTokens.has(token)) {
-        score += 2;
-        tokenHits += 1;
+        exactTf.set(token, (exactTf.get(token) ?? 0) + 1);
       } else if (queryStems.size > 0 && token.length >= STEM_LEN && queryStems.has(token.slice(0, STEM_LEN))) {
-        score += 1;
-        tokenHits += 0.5;
+        const stem = token.slice(0, STEM_LEN);
+        stemTf.set(stem, (stemTf.get(stem) ?? 0) + 1);
+      }
+    }
+    const lengthNorm = 1 - BM25_B + BM25_B * (tokens.length / avgNodeLength);
+    const saturate = (tf: number): number => (tf * (BM25_K1 + 1)) / (tf + BM25_K1 * lengthNorm);
+    for (const [token, tf] of exactTf) {
+      const weight = termWeight.exact.get(token) ?? 1;
+      score += 2 * weight * saturate(tf);
+      tokenHits += weight;
+    }
+    for (const [stem, tf] of stemTf) {
+      const weight = termWeight.stem.get(stem) ?? 1;
+      score += weight * saturate(tf);
+      tokenHits += 0.5 * weight;
+    }
+    const bodyTerms = nodeBodyTermSets[nodeIndex];
+    if (bodyTerms) {
+      for (const token of queryTokens) {
+        if (exactTf.has(token) || !bodyTerms.has(token)) continue;
+        const weight = termWeight.exact.get(token) ?? 1;
+        score += BODY_TERM_WEIGHT * weight;
+        tokenHits += 0.5 * weight;
       }
     }
 
     if (tokenHits >= 2) {
       score += tokenHits;
     }
+
+    score += pathFieldBonus(path, queryTokens, baseNameDf);
 
     if (queryMatchesNode(node, matchQueries)) {
       score += 6;
@@ -544,6 +791,12 @@ export function rankNodesForContextQuery(
     }
     if (DEPRIORITIZED_PATH_PATTERNS.some((pattern) => pattern.test(path))) {
       score -= 12;
+    }
+    if (!docIntent && PROSE_FILE_PATTERN.test(path)) {
+      score -= 6;
+    }
+    if (!testIntent && TEST_OR_BENCH_PATH_PATTERN.test(path)) {
+      score -= 8;
     }
     if (node.type === "Symbol") {
       score += 3;

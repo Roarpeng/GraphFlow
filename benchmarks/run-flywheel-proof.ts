@@ -220,7 +220,7 @@ export interface FlywheelProofSummary {
 }
 
 const DISCLAIMER =
-  "Numbers quoted as publishedClaims are project self-tests (author-run, not independently verified). Compare your live JSON to benchmarks/flywheel-proof-claims.json. Cross-commit drift on src/-backed suites is expected, not a runner failure. Live runners rewrite *-RESULTS.md; do not treat those regenerations as the catalog.";
+  "Numbers quoted as publishedClaims are project self-tests (author-run, not independently verified). The retrieval golden set is author-written with no held-out split; skill-ab / memory-ab are synthetic mechanism tests on hand-built graphs (held-out split, identical criterion for both arms), not task-success rates; the token claim is a token-count ratio, not a fidelity measure. Compare your live JSON to benchmarks/flywheel-proof-claims.json. Cross-commit drift on src/-backed suites is expected, not a runner failure. Live runners rewrite *-RESULTS.md; do not treat those regenerations as the catalog.";
 
 function repoPath(rel: string): string {
   return join(REPO_ROOT, rel);
@@ -355,56 +355,59 @@ function extractLiveMetrics(withToken: boolean): LiveMetric[] {
   const skillAb = readJsonRecord("benchmarks/.cache/skill-ab-results.json");
   const memoryAb = readJsonRecord("benchmarks/.cache/memory-ab-results.json");
   const token = readJsonRecord("benchmarks/.cache/token-bench-results.json");
-  const tokenTotals = asRecord(token?.totals);
+  // The published token claim is the realistic arm (Arm B, top-K files read in
+  // full); totals.savingsPercent is the naive-grep Arm A and must not be
+  // compared against it.
+  const tokenArmB = asRecord(asRecord(token?.totals)?.baselineTopKFilesFullText);
 
   const rows: LiveMetric[] = [
     metricRow(
       "retrieval",
       "hitRateAt5",
       numericField(retrievalOverall, "hitRateAt5"),
-      publishedNumeric("retrieval", "hitRateAt5") ?? 1,
+      publishedNumeric("retrieval", "hitRateAt5") ?? Number.NaN,
       stringField(retrieval, "commit")
     ),
     metricRow(
       "retrieval",
       "mrr",
       numericField(retrievalOverall, "mrr"),
-      publishedNumeric("retrieval", "mrr") ?? 0.836,
+      publishedNumeric("retrieval", "mrr") ?? Number.NaN,
       stringField(retrieval, "commit")
     ),
     metricRow(
       "retrieval",
       "ndcgAt5",
       numericField(retrievalOverall, "ndcgAt5"),
-      publishedNumeric("retrieval", "ndcgAt5") ?? 0.671,
+      publishedNumeric("retrieval", "ndcgAt5") ?? Number.NaN,
       stringField(retrieval, "commit")
     ),
     metricRow(
       "skill-ab",
       "successRateA",
       numericField(skillAb, "successRateA"),
-      publishedNumeric("skill-ab", "successRateA") ?? 1,
+      publishedNumeric("skill-ab", "successRateA") ?? Number.NaN,
       stringField(skillAb, "commit")
     ),
     metricRow(
       "skill-ab",
       "successRateB",
       numericField(skillAb, "successRateB"),
-      publishedNumeric("skill-ab", "successRateB") ?? 0.615,
+      publishedNumeric("skill-ab", "successRateB") ?? Number.NaN,
       stringField(skillAb, "commit")
     ),
     metricRow(
       "memory-ab",
       "successRateA",
       numericField(memoryAb, "successRateA"),
-      publishedNumeric("memory-ab", "successRateA") ?? 1,
+      publishedNumeric("memory-ab", "successRateA") ?? Number.NaN,
       stringField(memoryAb, "commit")
     ),
     metricRow(
       "memory-ab",
       "successRateB",
       numericField(memoryAb, "successRateB"),
-      publishedNumeric("memory-ab", "successRateB") ?? 0.565,
+      publishedNumeric("memory-ab", "successRateB") ?? Number.NaN,
       stringField(memoryAb, "commit")
     ),
   ];
@@ -414,8 +417,8 @@ function extractLiveMetrics(withToken: boolean): LiveMetric[] {
       metricRow(
         "token",
         "savingsPercent",
-        numericField(tokenTotals, "savingsPercent"),
-        publishedNumeric("token", "savingsPercent") ?? 98.2,
+        numericField(tokenArmB, "savingsPercent"),
+        publishedNumeric("token", "savingsPercent") ?? Number.NaN,
         stringField(token, "commit")
       )
     );

@@ -99,7 +99,7 @@ describe("eff-agent CLI (HTML §12, §25)", () => {
           "--mode=broker",
           "--worker=local",
           "--policy=conservative",
-          `--validation=${process.execPath} -e "process.exit(0)"`,
+          `--validation="${process.execPath}" -e "process.exit(0)"`,
         ],
         io
       );
@@ -118,7 +118,7 @@ describe("eff-agent CLI (HTML §12, §25)", () => {
           "Shadow task",
           "--mode=shadow",
           "--worker=local",
-          `--validation=${process.execPath} -e "process.exit(0)"`,
+          `--validation="${process.execPath}" -e "process.exit(0)"`,
         ],
         io
       );
@@ -154,7 +154,7 @@ describe("eff-agent CLI (HTML §12, §25)", () => {
           "Failing task",
           "--mode=broker",
           "--worker=local",
-          `--validation=${process.execPath} -e "process.exit(1)"`,
+          `--validation="${process.execPath}" -e "process.exit(1)"`,
         ],
         io
       );

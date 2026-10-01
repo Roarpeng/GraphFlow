@@ -41,7 +41,13 @@ import {
   isFreshnessEnabled,
 } from "../../../learning/memory-freshness";
 import type { SkillState } from "../../../learning/skill-types";
-import { indexWorkspaceFiles, clearGraphIndexArtifacts, hasPendingGraphIndexWork, indexSingleFile } from "../../../graph/file-indexer";
+import {
+  indexWorkspaceFiles,
+  clearGraphIndexArtifacts,
+  hasPendingGraphIndexWork,
+  indexedStoreIsIncomplete,
+  indexSingleFile,
+} from "../../../graph/file-indexer";
 import { GraphFileWatcher } from "../../../graph/file-watcher.js";
 import { extractNodeSourcePath, queryNamesGraphNode } from "../../../graph/graph-utils";
 import { estimateTokens } from "../../../graph/context-slicer-utils";
@@ -100,6 +106,7 @@ import {
   calculateBudgetUsedPercent,
   calculateSavingsPercent,
   estimateRawContextTokens,
+  workspaceFileTokens,
   estimateTokenCount,
   loadGraphStore,
   parseSkillInsight,
@@ -422,12 +429,19 @@ export async function previewContext(
   if (config.graphPolicy.autoIndexOnPreview) {
     const root = config.graphPolicy.workspaceRoot ?? process.cwd();
     const indexOptions = buildIndexOptions(config);
+    const storeIncomplete = indexedStoreIsIncomplete(
+      root,
+      graphClient.indexManifestName,
+      graphClient.readSnapshot?.().nodes
+    );
     if (
+      storeIncomplete ||
       hasPendingGraphIndexWork(root, { ...indexOptions, manifestName: graphClient.indexManifestName }) ||
       graphStoreNeedsIndexing(config)
     ) {
       await indexWorkspaceFiles(graphClient, root, {
         ...indexOptions,
+        ...(storeIncomplete ? { forceReindex: true } : {}),
       });
     }
   }
@@ -478,7 +492,7 @@ export async function previewContext(
     effectiveMaxTokens,
     packageOptions
   );
-  await refill.initialPackage(query);
+  refill.seed(pkg.anchorChannel.map((anchor) => anchor.id));
   const refillPreview = await refill.refill([query]);
 
   const packedAnchorCount = pkg.anchorChannel.length;
@@ -543,6 +557,7 @@ export async function previewContext(
     query,
     compressedTokens: deliveredTokenEstimate,
     anchors: deliveredAnchors,
+    fileTokens: workspaceFileTokens(workspaceRoot),
   });
 
   // Record cumulative token savings for ROI tracking — deferred until AFTER

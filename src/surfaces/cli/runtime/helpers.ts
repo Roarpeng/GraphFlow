@@ -11,6 +11,7 @@ import {
   applyGraphStoreDelta,
   graphStoreDeltaPath,
 } from "../../../graph/graphify-file-client";
+import { extractNodeSourcePath } from "../../../graph/graph-utils";
 import { logger } from "../../../utils/logger";
 import type { GraphClient } from "../../../graph/client-factory";
 import type { ContextPreviewResult, SkillInsightItem } from "./types.js";
@@ -155,6 +156,13 @@ export interface RawContextEstimateInput {
   store: { nodes: GraphNode[]; edges: GraphEdge[] };
   query: string;
   compressedTokens: number;
+  /**
+   * Token size of a source file (relative path), e.g. from fs.stat. When given,
+   * each distinct anchored file counts once at its full size — the "read every
+   * matching file" alternative. Anchors whose file does not resolve fall back
+   * to their node summary.
+   */
+  fileTokens?: (relPath: string) => number | undefined;
 }
 
 /**
@@ -185,15 +193,40 @@ export function estimateRawContextTokens(input: RawContextEstimateInput): number
     }
   }
   let rawTokens = 0;
+  const countedFiles = new Set<string>();
   for (const anchor of input.anchors) {
     const node = byId.get(anchor.id);
     if (!node || !RAW_BASELINE_CODE_TYPES.has(node.type)) {
       continue;
     }
+    if (input.fileTokens) {
+      const path = extractNodeSourcePath(node);
+      if (path && countedFiles.has(path)) {
+        continue;
+      }
+      const size = path ? input.fileTokens(path) : undefined;
+      if (path && size !== undefined && size > 0) {
+        countedFiles.add(path);
+        rawTokens += size;
+        continue;
+      }
+    }
     rawTokens += estimateTokenCount(`${node.id}\n${node.type}\n${node.content}`);
   }
 
   return Math.max(input.compressedTokens, rawTokens, estimateTokenCount(input.query));
+}
+
+/** fs.stat-based `fileTokens` resolver (bytes / 4) rooted at the workspace. */
+export function workspaceFileTokens(root: string): (relPath: string) => number | undefined {
+  return (relPath) => {
+    try {
+      const stats = statSync(join(root, relPath));
+      return stats.isFile() ? Math.ceil(stats.size / 4) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
 }
 
 export function calculateSavingsPercent(rawTokens: number, compressedTokens: number): number {

@@ -13,7 +13,7 @@ afterEach(() => {
   }
 });
 
-function createIsolatedConfig(textCopy: "auto" | "full" = "auto"): string {
+function createIsolatedConfig(textCopy: "auto" | "full" | "default" = "auto"): string {
   const root = mkdtempSync(join(tmpdir(), "graphflow-structured-"));
   const configPath = join(root, "graphflow.config.json");
   const config = getDefaultConfig();
@@ -21,7 +21,7 @@ function createIsolatedConfig(textCopy: "auto" | "full" = "auto"): string {
     configPath,
     JSON.stringify({
       ...config,
-      mcp: { ...config.mcp, textCopy },
+      mcp: textCopy === "default" ? config.mcp : { ...config.mcp, textCopy },
       graphPolicy: {
         ...config.graphPolicy,
         // The MCP handler boundary has no client handle to dispose. Keep this
@@ -46,7 +46,18 @@ function parseText(response: ToolCallResponse): unknown {
 }
 
 describe("MCP structured tool results", () => {
-  it("stubs the oversized diagnose text copy by default (mcp.textCopy=auto)", async () => {
+  it("keeps the full text copy by default so text-only hosts (Cursor) get the data", async () => {
+    const configPath = createIsolatedConfig("default");
+    const response = await executeToolCall({
+      name: "graphflow_diagnose",
+      arguments: { configPath },
+    });
+    const text = response.content[0]!.text;
+    expect(Buffer.byteLength(text, "utf8")).toBeGreaterThan(4096);
+    expect(parseText(response)).toEqual(response.structuredContent);
+  });
+
+  it("stubs the oversized diagnose text copy when mcp.textCopy=auto", async () => {
     const configPath = createIsolatedConfig();
     const response = await executeToolCall({
       name: "graphflow_diagnose",
@@ -54,8 +65,8 @@ describe("MCP structured tool results", () => {
     });
     const structured = response.structuredContent as Record<string, unknown>;
 
-    // 大响应默认桩化：text 只携带定位信息，全量数据在 structuredContent。
-    // Oversized responses stub the text copy; full data lives in structuredContent.
+    // auto 策略下大响应桩化：text 只携带定位信息，全量数据在 structuredContent。
+    // Under "auto" oversized responses stub the text copy; full data lives in structuredContent.
     const textCopy = parseText(response) as { stub: boolean; hint: string; bytes: number };
     expect(textCopy.stub).toBe(true);
     expect(textCopy.bytes).toBeGreaterThan(4096);
@@ -77,8 +88,8 @@ describe("MCP structured tool results", () => {
     });
     const structured = response.structuredContent as Record<string, unknown>;
 
-    // 逃生门：full 策略下老客户端仍可从 text 副本 JSON.parse 到全量数据。
-    // Escape hatch: with "full", legacy clients still parse the full text copy.
+    // full 策略下客户端可从 text 副本 JSON.parse 到全量数据。
+    // With "full", clients parse the full data from the text copy.
     expect(structured).toEqual(parseText(response));
     expect(Object.keys(structured).sort()).toEqual([
       "flywheel",

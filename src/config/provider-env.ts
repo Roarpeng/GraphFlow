@@ -1,4 +1,5 @@
 import type { GraphFlowConfig, ProviderConfig } from "./schema";
+import { readEnvVar } from "./env-lookup";
 import { resolveConfigSecret } from "./secrets";
 
 const PROVIDER_ENV_MAP = {
@@ -100,7 +101,7 @@ function genuineEnvValue(key: string): string | undefined {
   if (configExportedEnvKeys.has(key)) {
     return undefined;
   }
-  const value = process.env[key]?.trim();
+  const value = readEnvVar(key);
   return value && value.length > 0 && !value.startsWith("${") ? value : undefined;
 }
 

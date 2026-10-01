@@ -6,13 +6,13 @@ English | [中文](README.zh.md)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
-> **The memory & context harness for coding agents.** Local-first code knowledge graph · bounded context compression (truly bounded responses: the package plus history echoes, which ship as short previews only; 95.6% vs a realistic top-K-files read, see [both baseline arms](benchmarks/RESULTS.md)) · cross-session learning flywheel.
+> **The memory & context harness for coding agents.** Local-first code knowledge graph · bounded context compression (truly bounded responses: the package plus history echoes, which ship as short previews only; 95.6% fewer tokens than reading the top-10 files in full — a token ratio, not an answer-quality measure, see [both baseline arms](benchmarks/RESULTS.md)) · cross-session learning flywheel.
 
 The community is converging on an "agent harness" vocabulary: **memory + hooks + skills** are the harness primitives that turn a stateless model into a reliable long-running agent. GraphFlow implements all three for coding agents and ships them through a portable MCP surface (Cursor, Claude Code, 15+ agents):
 
 | Harness primitive | GraphFlow implementation |
 | --- | --- |
-| **Memory** | 12-language AST code graph + Episodic / Skill / Decision nodes — project knowledge *and* project experience persist across sessions |
+| **Memory** | Code graph (11 languages parsed with real tree-sitter ASTs, plus regex-based Markdown) + Episodic / Skill / Decision nodes — project knowledge *and* project experience persist across sessions |
 | **Hooks** | Outcome auto-capture (on by default) + Claude Code `SessionEnd` / `Stop` and DeepSeek Harness `agent/disposed` glue close the learning loop automatically — no manual outcome reporting required |
 | **Skills** | A four-class flywheel (`proven` / `correctable` / `anti-pattern` / `noise`) with canary validation — skills are promoted by evidence, not by assertion |
 
@@ -33,12 +33,20 @@ It is also **local-first and portable**: everything runs offline with no API key
 
 **Third-party reproduction entry:** `npm run proof:flywheel` — one command, offline, no API key. Guide: [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md). Independent runs are welcome; open a GitHub issue titled `[benchmark] Independent reproduction — <commit>`.
 
-All headline numbers come from a **public, reproducible benchmark suite** ([benchmarks/README.md](benchmarks/README.md)) with published methodology ([docs/benchmark-standards.md](docs/benchmark-standards.md)) and machine-readable JSON dumps pinned to commits. Authoritative percentages live in the tracked RESULTS markdown; this package does not invent new scores.
+All numbers below come from a **public, reproducible benchmark suite** ([benchmarks/README.md](benchmarks/README.md)) with published methodology ([docs/benchmark-standards.md](docs/benchmark-standards.md)) and machine-readable JSON dumps pinned to commits. They are **author-run self-tests on this repository**, not independent evaluations; the caveats next to each number are part of the claim.
 
-- **Token savings, two arms — quote them separately** (8-query suite, independently re-counted with `gpt-tokenizer`): **95.6%** against the fair counterfactual (the same ranker's top-10 anchors resolved to real files and read in full: 136,265 → 6,044 tokens) and **98.5%** against a naive term-frequency grep baseline (410,725 → 6,044), whose denominator is an upper bound by construction. The realistic arm cannot inflate itself: anchors pointing at fewer or smaller files make its savings *smaller*. Details: [benchmarks/RESULTS.md](benchmarks/RESULTS.md)
-- **132-query golden retrieval set** in CI (Hit@5 = 100%, MRR = 0.779, NDCG@5 = 0.638); downloadable open dataset: [`benchmarks/datasets/retrieval-golden-v1.json`](benchmarks/datasets/retrieval-golden-v1.json) — run `npm run bench:retrieval`
-- **Skill A/B: 100% vs 61.5%** task success with the flywheel on vs off (26 tasks)
-- **Memory ROI: 100% vs 56.5%** with episodic memory on vs off (62 tasks, with attribution chains)
+What has been checked and holds up:
+
+- **Real ASTs**: 11 code languages are parsed with tree-sitter grammars (Markdown is regex-based).
+- **Deterministic**: indexing and context packaging produce byte-identical output across repeat runs.
+- **Offline**: indexing, compression and recall run with no network and no API key.
+- **Idempotent install**: re-running `install` does not duplicate MCP / skill / rules entries.
+
+Measured, with limits:
+
+- **Token ratio, two arms — quote them separately** (8 queries, re-counted with `gpt-tokenizer`): the compressed package is **95.6%** smaller than reading the same ranker's top-10 anchor files in full (136,265 → 6,044 tokens) and **98.5%** smaller than a naive term-frequency grep of the top-10 files (upper bound by construction). These are **token-count ratios only — not a fidelity or answer-quality measure**; they do not check that the package still contains what is needed to answer. Details and a cheap fidelity proxy: [benchmarks/RESULTS.md](benchmarks/RESULTS.md)
+- **132-query golden retrieval set** in CI: Hit@5 = 100%, MRR = 0.779, NDCG@5 = 0.638. **Caveat:** the queries were written by the author who also tunes the ranker and there is no held-out split, so this is an in-sample regression gate, not evidence of generalization. An independent audit on 15 held-out English queries (never used for tuning) measured file-level Hit@5 = 80% and MRR = 0.61, against a plain BM25 file baseline at 73% / 0.68; on the 20-query set used while tuning, Hit@5 = 85% vs. BM25 95%. Chinese queries rely on the agent supplying `englishQuery` (5/5 Hit@5 with it, 0/5 without). Open dataset: [`benchmarks/datasets/retrieval-golden-v1.json`](benchmarks/datasets/retrieval-golden-v1.json) — run `npm run bench:retrieval`
+- **Skill / memory A/B** are **synthetic mechanism tests** on hand-built graphs, not task-success rates. With a held-out split and one identical criterion for both arms, the flywheel shows **no transfer** to unseen tasks (skill: 61.5% on vs 61.5% off, 13 tasks; memory: 51.6% on vs 61.3% off, 31 tasks). The earlier "100% vs 61.5%" and "100% vs 56.5%" figures seeded experience from the answer key and scored the arms differently; they are withdrawn. See [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 
 Results are commit-anchored so any number above can be checked out and re-run. See [ROADMAP.md](ROADMAP.md) for the open invitation.
 
@@ -54,7 +62,7 @@ No API key needed (offline AST indexing + graph compression):
 # 1. Build the graph offline (AST indexing, no LLM)
 npx @roarpeng/graphflow graph index .
 
-# 2. Preview compressed context (anchors + summaries, 90%+ token savings)
+# 2. Preview compressed context (anchors + summaries)
 npx @roarpeng/graphflow context preview "orchestrator" --json
 ```
 
@@ -93,18 +101,23 @@ graphflow llm-check      # winning credential source per provider, env vars cons
 
 ### GraphFlow 2.x: Agent Efficiency Agent (`eff-agent`)
 
-Elevates token reduction to an independent **Compute Avoidance** decision layer, available as a standalone CLI:
+Elevates token reduction to an independent **Compute Avoidance** decision layer. The package (`packages/efficiency-agent`) is **not published to npm** — `npx eff-agent` will not work. Run it from a clone of this repository (after `npm install`):
 
 ```bash
-# Execute task with real worker dispatch
-npx eff-agent run "fix type errors in this module" --worker=jev --policy=conservative
+# Show usage
+npx tsx packages/efficiency-agent/bin/eff-agent.ts --help
 
-# Run real 50-task benchmark
-npx eff-agent bench run benchmarks/eff-tasks-v1.jsonl --worker=jev --mode=shadow
+# Execute task with real worker dispatch
+npx tsx packages/efficiency-agent/bin/eff-agent.ts run "fix type errors in this module" --worker=jev --policy=conservative
+
+# Run the 50-task benchmark corpus
+npx tsx packages/efficiency-agent/bin/eff-agent.ts bench run packages/efficiency-agent/benchmarks/eff-tasks-v1.jsonl --worker=jev --mode=shadow
 
 # Strict R1-R6 provenance-gated A/B comparison
-npx eff-agent bench compare baseline.jsonl shadow.jsonl
+npx tsx packages/efficiency-agent/bin/eff-agent.ts bench compare baseline.jsonl shadow.jsonl
 ```
+
+The first real-provider A/B ([benchmarks/REAL-AB-RESULTS.md](benchmarks/REAL-AB-RESULTS.md)) measured ~47% fewer input tokens on 50 tasks, one run per arm, with **answer quality not measured** (success = non-empty reply); treat it as a token-volume observation, not a quality-preserving saving.
 
 ## Why GraphFlow
 
@@ -112,7 +125,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 
 | Capability | **GraphFlow** | CodeGraph | Serena | Repomix |
 | --- | --- | --- | --- | --- |
-| Code graph | 12-language AST index | more mature | LSP symbols | — |
+| Code graph | 11-language tree-sitter AST index (+ regex Markdown) | more mature | LSP symbols | — |
 | Context compression | layered + graph compression + vector recall | partial | partial | whole-repo dump |
 | Planning protocol | ATP IR + DAG + agent bridge | — | — | — |
 | **Learning memory** | Episodic / Skill / Decision flywheel | — | — | — |
@@ -127,17 +140,17 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | --- | --- |
 | **Planning protocol** | ATP v1.1 (Intent / Requirement / Six Hats / 5-Why / First Principles / Decision Matrix / Planning / Reflection); simple / complex / insight modes; agent-delegated bridge without an LLM; **skill-conditioned DAG** (`skillRefs` / `avoidPatterns` on plan nodes); [ATP/IR public spec v1.1](docs/atp-ir-spec-v1.md) |
 | **Goal alignment** | Goal anchor nodes (intent five-tuple as first-class citizen, original requirement auto-injected); low-confidence clarification gate (no plan below 0.6); runtime alignment-check; deviation classification (misread-requirement / scope-creep / tech-drift); goal version chain + diffs |
-| **Knowledge graph** | 12-language AST indexing; File / Module / Symbol + **Concept / Requirement**; cross-layer edges `documents` / `implements` / `derived_from`; Office/PDF → Markdown via optional **`@firecrawl/anydoc`** (MIT). **CLI/npm**: optionalDependency. **VSIX**: not bundled; on activate the extension **auto-downloads the current-OS binary** into `~/.graphflow/optional-deps` when `graphflow.downloadAnydoc` is true (default). Disable the setting to skip network; source indexing still works. |
+| **Knowledge graph** | 11-language tree-sitter AST indexing (Markdown is regex-based); File / Module / Symbol + **Concept / Requirement**; cross-layer edges `documents` / `implements` / `derived_from`; Office/PDF → Markdown via optional **`@firecrawl/anydoc`** (MIT). **CLI/npm**: optionalDependency. **VSIX**: not bundled; on activate the extension **auto-downloads the current-OS binary** into `~/.graphflow/optional-deps` when `graphflow.downloadAnydoc` is true (default). Disable the setting to skip network; source indexing still works. |
 | **Context compression** | L1/L2/L3 layered anchors; graph compression (edge weights + PageRank, LRU cache); stem-matching recall (orchestrate ↔ orchestration); vector recall + RRF; RepoMap overview; adaptive budget; **symbol bodies** (the first three L1 symbol anchors quote their declaration — ≤120 tokens each, ≤20% of the pack, and only from budget the anchor stages left behind, so a body never displaces an anchor; quoted only when the file still matches the indexed signature, otherwise it stays a pointer, and `expandAnchor` reports `exact` / `relocated` / `drifted`; `enableSymbolBodies: false` opts out); **post-packaging accounting** (out-of-package payloads are honestly counted: dialogue recall hits and workbench/dialogue **preview echoes** land in `unbudgetedTokens`; `accountedTokens` = compressed + unbudgeted and `estimatedSavingsPercent` is computed on that true delivered total, with `estimatedRawTokens` floored at it; responses are bounded — history echoes are ~160-char message previews with a `truncated` flag, full text stays in the graph and expands via `anchorId` or the VS Code panel; `recordDialogue: false` disables echo and recording entirely) |
 | **Efficiency mechanisms (SoL-Pi borrow)** | **ObservationPack** (oversized outputs → content-addressed handle + exact paged recall), **Evidence-Preserving Reducer** (log → bounded receipt whose retained lines are re-verified verbatim), **Online Context Compact** (observed-pressure budget + economic compaction signal), **Action Fusion** (fused edit+validate steps on the bridge descriptor). **All on by default**, individually switchable in **GraphFlow: Settings**; **dsh automatic projection** rewrites over-budget tool results on the model surface (`GRAPHFLOW_D_DSH_PROJECTION=0` to disable); paired **efficiency/capability floor** (`graphflow-out/efficiency.json` + `governance release-gate` thresholds); **mechanism auto-research loop** (`graphflow mechanism`, held-out isolation). See [docs/efficiency-mechanisms.md](docs/efficiency-mechanisms.md) |
-| **Retrieval & fidelity** | Golden-set regression gate (132 queries, Hit@5=100%, MRR=0.779, NDCG@5=0.638); separate anchor-recall and normalized body-coverage metrics persisted beside token savings |
+| **Retrieval & fidelity** | Golden-set regression gate (132 author-written queries, no held-out split: Hit@5=100%, MRR=0.779, NDCG@5=0.638 in-sample; an independent 15-query held-out check got Hit@5=80% vs. BM25 73%); separate anchor-recall and normalized body-coverage metrics persisted beside token savings |
 | **Vector index** | In-process memoization + disk persistence (fingerprint-checked, seconds to restore after MCP restart) |
 | **Storage backends** | `file` / `memory` / `sqlite` (FTS5, tokenizer-enhanced `searchtext`, camelCase searchable) / **`auto` (sqlite-first with fallback)** / `mcp-http` |
 | **Learning flywheel** | Episodic memory, reflection, skill nodes (score ±1, bounded [-20,20]), nightly training, adaptive evidence-aware forgetting, **auto-capture + Claude Code hooks (on by default)**, **SkillOpt-lite** bounded guidance edits, four-class lifecycle + **canary gate for synced skills**, portable SKILL.md import/export (agentskills.io spec layout: one dir per skill + progressive-disclosure `references/`), auditable efficiency evidence (`graphflow efficiency export` → `graphflow-out/efficiency-evidence.json`), `npm run backfill:episodes`, contribution reports (`skill report` / `graphflow_diagnose` / `route diagnose`) |
 | **Team sharing** | `graphflow team serve` (tenant + RBAC) + `skill sync export/import/push/pull`; imports/pulls are a **bidirectional MERGE**; golden queries via `.graphflow/team-golden.json`; [security model + ops runbook](docs/team-memory-security.md) |
-| **Benchmarks** | [Comprehensive 92.9%](benchmarks/COMPREHENSIVE-RESULTS.md) · [Independent-style 96.2%](benchmarks/INDEPENDENT-RESULTS.md) · [context-readiness eval](benchmarks/SWE-BENCH-RESULTS.md) · token savings with **two baseline arms** — [95.6% realistic / 98.5% naive grep](benchmarks/RESULTS.md) |
+| **Benchmarks** | Self-graded internal checks ([comprehensive](benchmarks/COMPREHENSIVE-RESULTS.md), [multi-domain](benchmarks/INDEPENDENT-RESULTS.md)) · [context-readiness eval](benchmarks/SWE-BENCH-RESULTS.md) · token ratio with **two baseline arms** — [95.6% realistic / 98.5% naive grep](benchmarks/RESULTS.md) (token counts only, not answer quality) |
 | **Model routing** | Smart / Economy tiers; multi-provider health probes and fallback (DeepSeek, OpenAI, Anthropic, Bailian, Doubao) |
-| **2.x Efficiency Layer** | Standalone package `@roarpeng/graphflow-efficiency-agent` + `eff-agent` CLI: four-track fingerprinting, 3-tier caching, Layer B hybrid Meta-Agent decision, Dynamic Temporary Harness, TypeSafe-JEV Worker, External CLI Worker, R1-R6 provenance A/B benchmarks. See [packages/efficiency-agent/README.md](packages/efficiency-agent/README.md) |
+| **2.x Efficiency Layer** | In-repo package `@roarpeng/graphflow-efficiency-agent` (unpublished; run from source) + `eff-agent` CLI: four-track fingerprinting, 3-tier caching, Layer B hybrid Meta-Agent decision, Dynamic Temporary Harness, TypeSafe-JEV Worker, External CLI Worker, R1-R6 provenance A/B benchmarks. See [packages/efficiency-agent/README.md](packages/efficiency-agent/README.md) |
 | **Workbench** | Plan DAG seeds function-topic containers; collapsed outline; click `topicId` to resume; drift forks a side branch; original Q/A stored via `assistantReply` |
 | **Conversation graph** | Dialogue turns are typed graph nodes with temporal validity (`supersedes` / `same_topic` edges, `validAt` / `invalidAt`) — corrected conclusions are detected offline and rendered as correction chains, and current-truth filtering hides superseded turns. Historical Q&A is searchable: `dialogue search "<query>"` (add `--include-superseded` to look back), plus additive `dialogueHits` in every `graphflow_context` preview that never displace code anchors. Explicit forks (`dialogue fork --from <turnId>`), replay paths (`dialogue list --path <turnId>`), multi-agent traces (`dialogue traces`), and a session-grouped export with correction chains + traces in the memory pack (`artifact export-memory` → `dialogues.md`) |
 | **Observability** | `graphflow_diagnose` / `route diagnose`: provider health + graph stats + token savings + **flywheel health** (auto-capture, episodes, skills by class, session journal) + workbench outline |
@@ -247,12 +260,13 @@ A missing/malformed endpoint fails at config validation; connection or runtime r
 
 ## Benchmarks
 
-- **Comprehensive**: [COMPREHENSIVE-RESULTS.md](benchmarks/COMPREHENSIVE-RESULTS.md) — P1–P6 six-dimension evaluation, overall **92.9%** (indexing 100% / compression 64.9% / planning 100% / learning 100% / bridge 100% / performance 99.7%)
-- **Independent-style**: [INDEPENDENT-RESULTS.md](benchmarks/INDEPENDENT-RESULTS.md) — CodeGraph-style 5-domain evaluation, Hit@5 **96%**, token savings **96.6%**, overall **96.2%**
+- **Comprehensive** (self-graded internal checks): [COMPREHENSIVE-RESULTS.md](benchmarks/COMPREHENSIVE-RESULTS.md) — P1–P6 checks whose thresholds, weights and pass/fail criteria are chosen by the author (a 100% sub-score means the author's own checks passed). Useful for regression tracking; not a product score.
+- **Multi-domain** (self-graded internal check): [INDEPENDENT-RESULTS.md](benchmarks/INDEPENDENT-RESULTS.md) — 5 domains of this repo with author-written queries; rank-based Hit@k / MRR (earlier versions ignored rank). Not independent and not comparable with other tools.
 - **SWE-bench-style**: [SWE-BENCH-RESULTS.md](benchmarks/SWE-BENCH-RESULTS.md) — self-built 12-instance context-readiness eval; [SWE-BENCH-REAL-RESULTS.md](benchmarks/SWE-BENCH-REAL-RESULTS.md) — Flask real-project 10-instance file-recall eval (48.3%)
-- **Token savings**: [RESULTS.md](benchmarks/RESULTS.md) — 8 representative queries, **95.6% realistic / 98.5% naive-grep** savings (two baseline arms — quote them separately), re-counted with independent gpt-tokenizer
-- **Retrieval quality**: [RETRIEVAL-EVAL-RESULTS.md](benchmarks/RETRIEVAL-EVAL-RESULTS.md) — 132 queries, Hit@5=100%, MRR=0.779, NDCG@5=0.638
-- **Skill flywheel A/B**: [SKILL-AB-RESULTS.md](benchmarks/SKILL-AB-RESULTS.md) — after the noise gate: 0% hint injection, 100% episode recall, ~15 tok/task overhead; the ROI claim is the success-proxy pair above (100% vs 61.5%)
+- **Token ratio**: [RESULTS.md](benchmarks/RESULTS.md) — 8 representative queries, **95.6% realistic / 98.5% naive-grep** (two baseline arms — quote them separately), re-counted with independent gpt-tokenizer. Token ratio vs reading the top-10 files in full; not a fidelity/answer-quality measure. Live `context preview` responses report their own `estimatedSavingsPercent` with a different denominator; no specific live percentage is promised.
+- **Retrieval quality**: [RETRIEVAL-EVAL-RESULTS.md](benchmarks/RETRIEVAL-EVAL-RESULTS.md) — 132 author-written queries, no held-out split: Hit@5=100%, MRR=0.779, NDCG@5=0.638 (in-sample)
+- **Skill flywheel injection**: [SKILL-AB-RESULTS.md](benchmarks/SKILL-AB-RESULTS.md) — after the noise gate: 0% hint injection, 100% episode recall, ~15 tok/task overhead
+- **Skill / memory A/B** (synthetic mechanism tests, held-out split, same criterion both arms): [RESULTS.md](benchmarks/RESULTS.md) — no transfer to unseen tasks (skill 61.5% vs 61.5%; memory 51.6% vs 61.3%); not task-success rates
 
 ## VS Code / Cursor extension
 

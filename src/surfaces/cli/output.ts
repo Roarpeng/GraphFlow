@@ -6,6 +6,8 @@ export interface CliOptions {
   args: string[];
   json: boolean;
   configPath?: string;
+  /** `--help` / `-h` given after a command: show usage, run nothing. */
+  help?: boolean;
 }
 
 export interface CliCommandResult {
@@ -18,14 +20,16 @@ export function buildCliUsage(): string {
   return [
     "Usage: graphflow <command> [options]",
     "Commands:",
-    "  install [--json]            Install MCP + Skill to all detected agents",
-  "  install --workspace-build   Point every host at this checkout's build",
-    "  install --skip-deps         Install without downloading better-sqlite3 / transformers",
+    "  install [--json]            Install MCP + Skill to every detected agent (undetected agents are left untouched)",
+    "  install --host <id[,id]>    Also configure the named hosts even when not detected (e.g. --host cursor,codex)",
+    "  install --all-hosts         Configure every supported host, detected or not",
+    "  install --workspace-build   Point every host at this checkout's build",
+    "  install --skip-deps         No downloads: skip better-sqlite3 / transformers, the bootstrap graph index and the embedding model",
     "  deps status [--json]        Show where better-sqlite3 / transformers load from (bundled / optional-deps / missing)",
     "  deps install [--force] [--with-model]  Install them into ~/.graphflow/optional-deps; --with-model prefetches the quantized embedding model",
     "  doctor [--json]             自检：列出各 agent 的 MCP 与指令文件注册状态，并报告 team/mcp-http 配置",
     "  selfcheck [--json]          健康红绿清单：配置加载 / 图存储代码节点 / delta 日志 / 索引新鲜度 / LLM 真实连通探测 / 飞轮脉冲 / 对话脱敏 / 会话日志",
-    "  uninstall                   移除 MCP + Skill + Rules + hooks（插件卸后请再跑此命令）",
+    "  uninstall [--json]          移除 MCP + Skill + Rules + hooks（插件卸后请再跑此命令）",
     "  mcp remove [--agent <name>] 从指定 agent 中移除 GraphFlow MCP 配置（支持 --agent 参数）",
     "  mcp serve --http [--host <host>] [--port <port>] [--stateful] [--sse-only] [--http-token <role:token>] [--rbac]  # MCP Streamable HTTP + optional team RBAC",
     "  team serve [--host <host>] [--port <port>] [--store <dir>] [--http-token <role:token>] [--http-jwt-secret <s>] [--allow-tenant <id>]  # team memory server (auth+RBAC default off-loopback)",
@@ -44,7 +48,7 @@ export function buildCliUsage(): string {
     "  governance <knowledge-upsert|review-queue|review|trace|merge-artifacts|sign-artifact|verify-artifact-signature|encrypted-artifact-export|encrypted-artifact-import|quarantine|retention|profiles|release-gate>",
     '  plan "<task>" [--json] [--config <path>]',
     '  plan insight "<task>" [--json] [--config <path>]',
-    '  context preview "<query>" [--json] [--config <path>]',
+    '  context preview "<query>" [--no-record] [--json] [--config <path>]  # --no-record: preview only, do not store the question as a dialogue turn',
     "  graph index [path] [--json] [--config <path>]",
     "  graph file <path> [--json] [--config <path>]",
     "  graph rebuild [path] [--json] [--config <path>]",
@@ -85,9 +89,19 @@ export function buildCliUsage(): string {
     "  spawn-receipt --task \"<text>\" [--query \"<text>\"] [--max-anchors N] [--json] [--config <path>]  # R8-3: compact subagent birth receipt (anchors + retrieval instructions)",
     "  facts ask --question \"<text>\" [--as-of <iso-date>] [--limit N] [--json] [--config <path>]  # R8-4: temporal fact lookup (effective vs superseded conclusions at a point in time)",
     "  quote --estimate-tokens <n> [--min-samples N] [--json] [--config <path>]  # R8-5: task budget quote from paired-efficiency history (honest confidence)",
-    "  help | --help | -h",
+    "  help | --help | -h           (<command> --help shows that command's usage without running it)",
     "  version | --version | -v",
   ].join("\n");
+}
+
+/** Usage lines for one command (`graph index --help`); falls back to the full usage. */
+export function buildCommandUsage(command: string, args: readonly string[] = []): string {
+  const lines = buildCliUsage().split("\n");
+  const sub = args.find((arg) => !arg.startsWith("-"));
+  const matches = (prefix: string) => lines.filter((line) => line.startsWith(`  ${prefix} `) || line === `  ${prefix}`);
+  const specific = sub ? matches(`${command} ${sub}`) : [];
+  const picked = specific.length > 0 ? specific : matches(command);
+  return picked.length > 0 ? ["Usage: graphflow <command> [options]", ...picked].join("\n") : buildCliUsage();
 }
 
 /** Parse bridge outcome success tokens (true/false/pass/fail/1/0/yes/no). */
@@ -157,6 +171,7 @@ export function getCliVersion(): string {
 export function parseCliOptions(argv: string[]): CliOptions {
   const args: string[] = [];
   let json = false;
+  let help = false;
   let configPath: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -167,6 +182,12 @@ export function parseCliOptions(argv: string[]): CliOptions {
 
     if (current === "--json") {
       json = true;
+      continue;
+    }
+
+    // Only after a command: `graphflow --help` / `-h` alone is the help command itself.
+    if ((current === "--help" || current === "-h") && args.length > 0) {
+      help = true;
       continue;
     }
 
@@ -187,6 +208,7 @@ export function parseCliOptions(argv: string[]): CliOptions {
     args: args.slice(1),
     json,
     ...(configPath ? { configPath } : {}),
+    ...(help ? { help } : {}),
   };
 }
 

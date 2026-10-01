@@ -26,6 +26,7 @@ import {
 } from "../src/graph/store-migration";
 import {
   adoptUnsavedSiblingPackages,
+  ensurePackageJson,
   ensureRuntimeDepsInstalled,
   inspectRuntimeDeps,
 } from "../src/integrations/ensure-runtime-deps";
@@ -94,7 +95,12 @@ describe("M128 optional runtime deps", () => {
         mkdirSync(modules, { recursive: true });
         if (specs[0]!.startsWith("better-sqlite3")) {
           // Real binding so the ABI probe (new Database(":memory:")) passes.
-          symlinkSync(resolve("node_modules/better-sqlite3"), join(modules, "better-sqlite3"), "dir");
+          // A junction needs no symlink privilege on Windows (plain "dir" is EPERM without Developer Mode).
+          symlinkSync(
+            resolve("node_modules/better-sqlite3"),
+            join(modules, "better-sqlite3"),
+            process.platform === "win32" ? "junction" : "dir"
+          );
         } else {
           const pkgDir = join(modules, "@huggingface", "transformers");
           mkdirSync(pkgDir, { recursive: true });
@@ -122,6 +128,53 @@ describe("M128 optional runtime deps", () => {
 
     const again = await ensureRuntimeDepsInstalled({ root, isBundled: () => false, installFn: async () => undefined });
     expect(again.status).toBe("already");
+  });
+
+  it("allows better-sqlite3's install script in the install root package.json (npm >= 12)", async () => {
+    const root = tmp("gf-optdeps-");
+    const seenPkgs: Array<Record<string, unknown>> = [];
+    await ensureRuntimeDepsInstalled({
+      root,
+      isBundled: () => false,
+      installFn: async (dir) => {
+        seenPkgs.push(JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as Record<string, unknown>);
+      },
+    });
+    expect(seenPkgs.length).toBe(2);
+    for (const pkg of seenPkgs) {
+      expect(pkg.allowScripts).toEqual({ "better-sqlite3": true });
+    }
+
+    // Existing package.json keeps its fields and gains the allowlist once.
+    const dir = tmp("gf-optdeps-pkg-");
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "x", dependencies: { a: "1.0.0" } }));
+    ensurePackageJson(dir);
+    ensurePackageJson(dir);
+    expect(JSON.parse(readFileSync(join(dir, "package.json"), "utf8"))).toEqual({
+      name: "x",
+      dependencies: { a: "1.0.0" },
+      allowScripts: { "better-sqlite3": true },
+    });
+  });
+
+  it("explains a missing native binding as a blocked install script", async () => {
+    const root = tmp("gf-optdeps-");
+    const result = await ensureRuntimeDepsInstalled({
+      root,
+      isBundled: (name) => name !== "better-sqlite3",
+      installFn: async (dir) => {
+        // A package whose install script never ran: JS present, native binding absent.
+        const pkgDir = join(dir, "node_modules", "better-sqlite3");
+        mkdirSync(pkgDir, { recursive: true });
+        writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: "better-sqlite3", version: "12.0.0", main: "index.js" }));
+        writeFileSync(
+          join(pkgDir, "index.js"),
+          "module.exports = function Database() { throw new Error('Could not locate the bindings file.'); };\n"
+        );
+      },
+    });
+    expect(result.status).toBe("failed");
+    expect(result.message).toContain("allowScripts");
   });
 
   it("records unsaved anydoc in package.json so a saving npm install does not prune it", () => {

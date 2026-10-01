@@ -135,6 +135,14 @@ describe("doctor reports a host entry that launches the workspace build", () => 
     const home = mkdtempSync(join(tmpdir(), "doctor-workspace-mcp-"));
     const prevHome = process.env.HOME;
     const prevProfile = process.env.USERPROFILE;
+    const prevAppData = process.env.APPDATA;
+    const prevLocalAppData = process.env.LOCALAPPDATA;
+    const prevXdg = process.env.XDG_CONFIG_HOME;
+    // Cursor's secondary user target lives under %APPDATA%; without this the
+    // install below writes the developer's real Cursor config.
+    process.env.APPDATA = join(home, "AppData", "Roaming");
+    process.env.LOCALAPPDATA = join(home, "AppData", "Local");
+    process.env.XDG_CONFIG_HOME = join(home, ".config");
     try {
       mkdirSync(join(home, ".cursor"), { recursive: true });
       // Built *before* the preference is set, because the preference falls back
@@ -179,6 +187,14 @@ describe("doctor reports a host entry that launches the workspace build", () => 
       else process.env.HOME = prevHome;
       if (prevProfile === undefined) delete process.env.USERPROFILE;
       else process.env.USERPROFILE = prevProfile;
+      for (const [key, value] of [
+        ["APPDATA", prevAppData],
+        ["LOCALAPPDATA", prevLocalAppData],
+        ["XDG_CONFIG_HOME", prevXdg],
+      ] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
       rmSync(home, { recursive: true, force: true });
     }
   });

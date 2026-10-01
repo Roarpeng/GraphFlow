@@ -36,6 +36,17 @@ separately, never interchangeably:
   uncompressed encoding — the fair counterfactual, and the number to quote in
   tool-to-tool comparisons.
 
+**What these percentages are — and are not** (note added 2026-09-30 after an
+independent audit; numbers unchanged). Both are pure token-count ratios:
+compressed package (summary + anchor pointers) versus reading files in full.
+Neither checks whether the package still contains what is needed to answer the
+query; they are **not** a fidelity or answer-quality measure. A retroactive
+fidelity proxy from this run's persisted top-10 resolved files (a lower bound
+for "the package names the gold file"): 6 of the 7 queries with an unambiguous
+gold file pass; `context compression` resolved only to CHANGELOG / ROADMAP /
+test files, and `semantic enrichment` (no gold file) resolved to unrelated
+`SKILL.md` files. Later runs print this proxy as its own table.
+
 Arm A's denominator is whatever naive term-frequency grep happens to rank
 highest (often large files that merely mention a query term often); Arm B
 cannot inflate itself — anchors that resolve to fewer or smaller files make its
@@ -190,86 +201,82 @@ purely additive under `arms`, `inputs.anchorTopK`,
 
 
 <!-- BEGIN P1-2 SKILL-AB BENCHMARK -->
-## Skill-Flywheel End-to-End A/B Benchmark — Results (P1-2)
+## Skill-Flywheel A/B — Synthetic Mechanism Test (P1-2)
 
 > Appended by `npm run benchmark:ab` (`benchmarks/run-skill-ab.ts`).
-> Last run: 2026-08-04T11:46:40.564Z
+> Last run: 2026-09-30T14:58:25.554Z
 > Structured JSON: `benchmarks/.cache/skill-ab-results.json`
+
+> **Synthetic mechanism test, not a task-success rate.** The graph, the tasks and
+> the historical experience are hand-built; no LLM executes anything. Both arms
+> are scored with one identical criterion, and Arm A's seeded history comes only
+> from a disjoint training split (entries naming a held-out target are dropped).
+> Quote these numbers only as "does recall of prior experience transfer to unseen
+> tasks in this toy setup", never as "the flywheel raises success to X%".
 
 ## Summary
 
-26 retrieval-golden tasks (10 "indirect": the
-golden module name is morphologically distinct from the query words, e.g.
-"orchestrate" vs `orchestrator`), run end-to-end on an in-memory graph seeded
-with the golden target, distractors and a decoy. Arm A additionally simulates
-27 historical tasks through the real learning paths.
+13 HELD-OUT retrieval-golden tasks (odd indices; 5 "indirect":
+the golden module name is morphologically distinct from the query words, e.g.
+"orchestrate" vs `orchestrator`), run on an in-memory graph seeded with every
+task's golden target, distractors and a decoy. Arm A additionally learns
+14 historical tasks (from the 13-task training split, incl. 1 decoy;
+0 training entries dropped because they named a held-out target).
 
 | Metric | Arm A (flywheel ON) | Arm B (flywheel OFF) |
 | --- | --- | --- |
-| **Success proxy** (golden target within Top-5) | **100.0%** (26/26) | **61.5%** (16/26) |
+| **Target surfaced** (same criterion both arms: golden id in package Top-5, or target named in injected text) | **61.5%** (8/13) | **61.5%** (8/13) |
 | Success via package Top-5 only | 61.5% | 61.5% |
-| Tasks rescued by flywheel (B miss → A hit) | 10 | — |
+| Tasks rescued by flywheel (B miss → A hit) | 0 | — |
 | Tasks hurt by flywheel (B hit → A miss) | 0 | — |
-| Hint injection rate | 100.0% | 0% |
+| Hint injection rate | 30.8% | 0% |
 | Episode recall rate | 100.0% | 0% |
-| Mean prompt-token overhead / task | 55.1 | 0 |
-| Total prompt-token overhead | 1432 | 0 |
-| Mean package tokens / task | 639 | 46.2 |
-| Decoy contamination (Top-5) | 3.8% | 3.8% |
-| Decoy contamination (injection) | 0.0% | 0% |
-| Mean wall-clock / task | 2.5 ms | 2.0 ms |
-| Total wall-clock | 0.2 s | — |
+| Mean prompt-token overhead / task | 64.3 | 0 |
+| Total prompt-token overhead | 836 | 0 |
+| Mean package tokens / task | 189.5 | 48.8 |
+| Decoy contamination (Top-5) | 7.7% | 7.7% |
+| Decoy contamination (injection) | 76.9% | 0% |
+| Mean wall-clock / task | 19.0 ms | 53.9 ms |
+| Total wall-clock | 1.0 s | — |
 
 ## Per-task detail
 
-| Task | Golden module | Direct | Top-5 (B) | Success (A) | Pkg Top-5 (A) | Injection hit (A) | Hints | Episodes | Overhead tokens |
+| Task | Golden module | Direct | Surfaced (B) | Surfaced (A) | Pkg Top-5 (A) | Injection hit (A) | Hints | Episodes | Overhead tokens |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `orchestrate task routing` | `orchestrator` | no | miss | hit | no | yes | 2 | 3 | 90 |
-| `dag execution engine` | `dag-engine` | yes | hit | hit | yes | yes | 2 | 2 | 61 |
-| `triage task classification simple complex` | `triage` | yes | hit | hit | yes | yes | 3 | 1 | 45 |
-| `model router provider selection` | `model-router` | yes | hit | hit | yes | yes | 3 | 3 | 93 |
-| `provider health fallback chain` | `provider-health` | yes | hit | hit | yes | yes | 3 | 3 | 85 |
-| `graph compression pagerank centrality` | `graph-compression` | yes | hit | hit | yes | yes | 3 | 3 | 91 |
-| `context slicer layered package` | `context-slicer` | yes | hit | hit | yes | yes | 2 | 2 | 60 |
-| `skill flywheel hints scoring` | `skill-flywheel` | yes | hit | hit | yes | yes | 3 | 1 | 34 |
-| `episodic memory similar episodes` | `episodic-memory` | yes | hit | hit | yes | yes | 1 | 1 | 30 |
-| `embedding cosine similarity vector` | `embeddings` | no | miss | hit | no | yes | 2 | 1 | 30 |
-| `file watcher incremental index on save` | `filewatcher` | no | miss | hit | no | yes | 3 | 2 | 69 |
-| `sqlite graph storage fts5` | `sqlite-client` | yes | hit | hit | yes | yes | 2 | 3 | 89 |
-| `repo map module overview` | `repomap` | no | miss | hit | no | yes | 1 | 1 | 25 |
-| `token savings statistics` | `tokensavings` | no | miss | hit | no | yes | 2 | 2 | 56 |
-| `mcp server tool definitions` | `tool-definitions` | yes | hit | hit | yes | yes | 2 | 1 | 34 |
-| `cli output json formatting` | `formatcliresult` | no | miss | hit | no | yes | 2 | 1 | 34 |
-| `agent delegation work items bridge` | `workitem` | no | miss | hit | no | yes | 3 | 1 | 32 |
-| `six hats insight planning` | `brainstormer` | no | miss | hit | no | yes | 2 | 1 | 31 |
-| `hnsw approximate nearest neighbor index` | `hnsw` | yes | hit | hit | yes | yes | 2 | 2 | 68 |
-| `adaptive token budget estimation` | `estimatecontextbudget` | no | miss | hit | no | yes | 3 | 3 | 89 |
-| `artifact export import graph snapshot` | `artifact-manager` | yes | hit | hit | yes | yes | 3 | 3 | 89 |
-| `nightly learning trainer` | `nightly-trainer` | yes | hit | hit | yes | yes | 1 | 1 | 29 |
-| `reflect episodes extract lessons` | `reflector` | no | miss | hit | no | yes | 3 | 1 | 34 |
-| `dag checkpoint recovery taskrun` | `dag-checkpoint` | yes | hit | hit | yes | yes | 3 | 2 | 67 |
-| `cancellation timeout controller` | `cancellation` | yes | hit | hit | yes | yes | 2 | 1 | 27 |
-| `language indexers tree sitter wasm` | `language-indexers` | yes | hit | hit | yes | yes | 2 | 1 | 40 |
+| `dag execution engine` | `dag-engine` | yes | hit | hit | yes | no | 0 | 3 | 71 |
+| `model router provider selection` | `model-router` | yes | hit | hit | yes | no | 3 | 1 | 40 |
+| `graph compression pagerank centrality` | `graph-compression` | yes | hit | hit | yes | no | 3 | 1 | 40 |
+| `skill flywheel hints scoring` | `skill-flywheel` | yes | hit | hit | yes | no | 3 | 3 | 84 |
+| `embedding cosine similarity vector` | `embeddings` | no | miss | miss | no | no | 0 | 3 | 71 |
+| `sqlite graph storage fts5` | `sqlite-client` | yes | hit | hit | yes | no | 0 | 3 | 71 |
+| `token savings statistics` | `tokensavings` | no | miss | miss | no | no | 0 | 3 | 71 |
+| `cli output json formatting` | `formatcliresult` | no | miss | miss | no | no | 0 | 3 | 71 |
+| `six hats insight planning` | `brainstormer` | no | miss | miss | no | no | 0 | 3 | 71 |
+| `adaptive token budget estimation` | `estimatecontextbudget` | no | miss | miss | no | no | 1 | 1 | 33 |
+| `nightly learning trainer` | `nightly-trainer` | yes | hit | hit | yes | no | 0 | 3 | 71 |
+| `dag checkpoint recovery taskrun` | `dag-checkpoint` | yes | hit | hit | yes | no | 0 | 3 | 71 |
+| `language indexers tree sitter wasm` | `language-indexers` | yes | hit | hit | yes | no | 0 | 3 | 71 |
 
 ## Methodology & honest caveats
 
+- **Kind**: synthetic mechanism test on a hand-built in-memory graph. No LLM runs
+  and nothing is executed, so this is not a task-success rate.
 - **Task set** is duplicated from `tests/retrieval-golden.test.ts` GOLDEN_SET
   (that file is owned by another agent and is not modified). Each task's
   golden node id (`file:src/golden/<module>.ts`) contains an `expectAny`
   alternative verbatim.
-- **Success proxy**: Top-K = the first 5 ranked anchors of the compressed
-  context package (the retrieval channel); success there means the **golden
-  node id** is within those 5 anchors (precise id membership — avoids
-  substring false positives from distractor/decoy nodes). For Arm A, the
-  injected hints + episode summaries form an additional channel an agent reads
-  in full; hints/episodes reference modules by **name**, so injection success
-  is the `expectAny` substring check. Arm A success = package Top-5 hit
-  **or** injection hit. The package-only hit rate is reported separately for a
-  like-for-like retrieval comparison.
-- **Arm B success is deliberately imperfect**: for the 10
-  indirect tasks the golden file shares zero tokens with the query (realistic:
-  module names are morphologically different from task wording), so pure
-  retrieval cannot find it — prior episodic experience is the only bridge.
+- **Split**: even-index tasks form the training split whose history is seeded
+  into Arm A; odd-index tasks are held out and are the only tasks scored.
+  Training entries that mention any held-out `expectAny` / module name are
+  dropped, so the seeded experience is not derived from the scored answers.
+  Earlier versions seeded one history entry per scored task, written from the
+  answer key — those "100% vs 61.5%" numbers are superseded.
+- **One criterion for both arms**: a task passes when the golden node id is
+  within the first 5 package anchors, OR an `expectAny` target name appears
+  in the arm's injected text (hints + episode summaries). Arm B injects nothing,
+  so only its package can pass; the package-only rate is reported separately.
+- For indirect tasks the golden node shares zero tokens with the query, so
+  package retrieval alone cannot find it in either arm.
 - Both arms run through the **real** retrieval and learning paths
   (`buildEnhancedContextPackage`, `applySkillLearning`, `recordEpisode`,
   `suggestSkillHints`, `findSimilarEpisodes`, `summarizeEpisodeForPrompt`)
@@ -278,174 +285,123 @@ with the golden target, distractors and a decoy. Arm A additionally simulates
   benchmark. Hashing is the project's DJB2a (FNV-class) — fully deterministic
   within a run; episode ids embed `Date.now()` so ids differ across runs, but
   ranking depends on tokens/scores, not ids.
-- This measures a mechanical success proxy, not LLM task completion. It
-  validates that the flywheel's injected context and graph nodes move the
-  needle on finding the expected target, and quantifies the exact token and
-  wall-clock cost.
+- This measures a mechanical target-surfaced proxy, not LLM task completion or
+  answer quality. It reports whether training-split experience transfers to
+  unseen tasks in this toy setup, plus the exact token and wall-clock cost.
 <!-- END P1-2 SKILL-AB BENCHMARK -->
 
 <!-- BEGIN P3 MEMORY-AB BENCHMARK -->
-## Episodic-Memory End-to-End A/B Benchmark — Results (P3)
+## Episodic-Memory A/B — Synthetic Mechanism Test (P3)
 
 > Appended by `npm run benchmark:memory` (`benchmarks/run-memory-ab.ts`).
-> Last run: 2026-08-04T11:27:08.785Z
+> Last run: 2026-09-30T15:02:19.984Z
 > Structured JSON: `benchmarks/.cache/memory-ab-results.json`
+
+> **Synthetic mechanism test, not a task-success rate or ROI.** The graph, the
+> tasks and the historical experience are hand-built; no LLM executes anything.
+> Both arms are scored with one identical criterion, and Arm A's seeded history
+> comes only from a disjoint training split (entries naming a held-out target are
+> dropped). Earlier "100% vs 56.5%" numbers seeded one history entry per scored
+> task, written from the answer key, and scored the arms differently — superseded.
 
 ## Summary
 
-62 tasks: 26 retrieval-golden queries (duplicated
-from `tests/retrieval-golden.test.ts`, same list as the P1-2 skill benchmark) plus
-36 HARD-domain tasks (12 cross-module, 12 disambiguation, 12 indirect), run end-to-end on an
-in-memory graph seeded with the golden target, distractors and a decoy. Hard
-tasks are constructed so the golden node shares zero query tokens (node ids are
-not searchable text), so the OFF arm cannot rank them — episodic memory is the
-only bridge. Arm A additionally simulates
-63 historical tasks through the real
-learning paths (`applySkillLearning` + `recordEpisode`).
+31 HELD-OUT tasks (odd indices of the full set): 13 retrieval-golden
+queries (duplicated from `tests/retrieval-golden.test.ts`, same list as the P1-2
+skill benchmark) plus 18 HARD-domain tasks (6 cross-module, 6 disambiguation, 6 indirect), run on an
+in-memory graph seeded with every task's golden target, distractors and a decoy.
+Hard tasks are constructed so the golden node shares zero query tokens (node ids
+are not searchable text), so package retrieval alone cannot rank them in either
+arm. Arm A additionally learns 26 historical tasks from the
+31-task training split (incl. 1 decoy; 6 training entries dropped because they
+named a held-out target) through the real learning paths (`applySkillLearning` +
+`recordEpisode`).
 
 | Metric | Arm A (memory ON) | Arm B (memory OFF) |
 | --- | --- | --- |
-| **Success proxy** (golden target within Top-5) | **100.0%** (62/62) | **56.5%** (35/62) |
-| Success via package Top-5 only | 46.8% | 56.5% |
-| Tasks rescued by memory (B miss → A hit) | 27 | — |
-| Tasks hurt by memory (B hit → A miss) | 0 | — |
-| Hint injection rate | 95.2% | 0% |
+| **Target surfaced** (same criterion both arms: golden id in package Top-5, or target named in injected text) | **51.6%** (16/31) | **61.3%** (19/31) |
+| Success via package Top-5 only | 51.6% | 61.3% |
+| Tasks rescued by memory (B miss → A hit) | 0 | — |
+| Tasks hurt by memory (B hit → A miss) | 3 | — |
+| Hint injection rate | 51.6% | 0% |
 | Episode recall rate | 100.0% | 0% |
-| Distinct memories that rescued tasks | 26 | — |
-| Mean prompt-token overhead / task | 70.9 | 0 |
-| Total prompt-token overhead | 4397 | 0 |
-| Mean package tokens / task | 500.1 | 67.8 |
+| Distinct memories that rescued tasks | 0 | — |
+| Mean prompt-token overhead / task | 55.2 | 0 |
+| Total prompt-token overhead | 1710 | 0 |
+| Mean package tokens / task | 206.7 | 71 |
 | Decoy contamination (Top-5) | 3.2% | 3.2% |
-| Decoy contamination (injection) | 4.8% | 0% |
-| Mean wall-clock / task | 4.5 ms | 1.6 ms |
-| Total wall-clock | 0.6 s | — |
+| Decoy contamination (injection) | 48.4% | 0% |
+| Mean wall-clock / task | 4.5 ms | 7.1 ms |
+| Total wall-clock | 0.4 s | — |
 
 ## Memory-contribution summary (top-3 contributing memories)
 
 | Episode id | Episode task | Tasks rescued | Rescued queries | Mean similarity |
 | --- | --- | --- | --- | --- |
-| `episode:10s9w7a` | `token savings numbers audited in tokensavings` | 2 | `token savings statistics`, `numbers behind the token savings` | 0.481 |
-| `episode:1arcr65` | `mcp restart stuck vscode-extension panel` | 1 | `editor panel stuck after mcp restart` | 0.671 |
-| `episode:11q0ki` | `similar past problems matched by embeddings` | 1 | `find similar past problems` | 0.600 |
+| — | — | 0 | — | — |
 
 ## Attribution chain (rescued tasks: which memory carried the rescue)
 
 | Task | Golden module | Carry channel | Top episode id | Top episode task | Similarity |
 | --- | --- | --- | --- | --- | --- |
-| `orchestrate task routing` | `orchestrator` | episode | `episode:wkys9z` | `fixed orchestrator routing deadlock` | 0.267 |
-| `embedding cosine similarity vector` | `embeddings` | episode | `episode:cmcjy0` | `embeddings cosine similarity provider` | 0.433 |
-| `file watcher incremental index on save` | `filewatcher` | both | `episode:6q1rsq` | `filewatcher incremental index invalidation` | 0.386 |
-| `sqlite graph storage fts5` | `sqlite-client` | both | `episode:1yskm3p` | `sqlite-client fts5 migration` | 0.267 |
-| `repo map module overview` | `repomap` | episode | `episode:18ggy5r` | `repomap overview generation` | 0.267 |
-| `token savings statistics` | `tokensavings` | both | `episode:10s9w7a` | `token savings numbers audited in tokensavings` | 0.433 |
-| `cli output json formatting` | `formatcliresult` | episode | `episode:1yi5b5c` | `formatcliresult json output handling` | 0.433 |
-| `agent delegation work items bridge` | `workitem` | episode | `episode:1eu8wz0` | `workitem bridge delegation` | 0.433 |
-| `six hats insight planning` | `brainstormer` | episode | `episode:1266q47` | `brainstormer insight planning` | 0.500 |
-| `adaptive token budget estimation` | `estimatecontextbudget` | episode | `episode:mj7beu` | `estimatecontextbudget token sizing` | 0.267 |
-| `reflect episodes extract lessons` | `reflector` | episode | `episode:gnni0q` | `reflector episode lessons` | 0.267 |
-| `provider adapter crash kills routing` | `model-router` | episode | `episode:1js4gvz` | `provider adapter crash killed model-router dispatch` | 0.475 |
-| `cli flags now ignored after settings refactor` | `config-loader` | episode | `episode:1xzimbo` | `settings refactor broke cli flag loading in config-loader` | 0.373 |
-| `editor panel stuck after mcp restart` | `vscode-extension` | episode | `episode:1arcr65` | `mcp restart stuck vscode-extension panel` | 0.671 |
-| `persistent storage for graph data` | `sqlite-client` | both | `episode:150tyoi` | `graph data persisted through sqlite-client store` | 0.322 |
-| `upstream probe fails then what` | `provider-health` | both | `episode:9sh6e9` | `upstream probe failures tripped provider-health` | 0.350 |
-| `simple versus complex task split` | `triage` | both | `episode:1utbkfu` | `simple tasks bypassed triage queue` | 0.211 |
-| `learn from what went wrong` | `reflector` | episode | `episode:8bp9bm` | `what went wrong captured by reflector` | 0.529 |
-| `stop a hung run safely` | `cancellation` | both | `episode:wfucm1` | `hung run cancelled by cancellation controller` | 0.386 |
-| `numbers behind the token savings` | `tokensavings` | episode | `episode:10s9w7a` | `token savings numbers audited in tokensavings` | 0.529 |
-| `find similar past problems` | `embeddings` | both | `episode:11q0ki` | `similar past problems matched by embeddings` | 0.600 |
-| `fast nearest neighbor search` | `hnsw` | both | `episode:nbt8jp` | `nearest neighbor search too slow in hnsw` | 0.529 |
-| `protocol messages over the wire` | `atp-schema` | both | `episode:19tm79n` | `protocol message framing changed in atp-schema` | 0.211 |
-| `describe the work before planning` | `task-profile` | episode | `episode:1w559i5` | `describe work shape with task-profile` | 0.350 |
-| `pick between conflicting options` | `decision-engine` | both | `episode:e10lwi` | `conflicting options resolved by decision-engine` | 0.433 |
-| `peek at the graph state` | `snapshot-view` | episode | `episode:1el7lr7` | `snapshot-view graph state dump` | 0.433 |
-| `export the learning dataset` | `exporter` | both | `episode:1fudjbu` | `artifact-manager export compression` | 0.267 |
+| — | — | — | — | — | — |
 
 ## Per-task detail
 
-| Task | Golden module | Kind | Top-5 (B) | Success (A) | Pkg Top-5 (A) | Carry (A) | Hints | Episodes | Overhead tokens |
+| Task | Golden module | Kind | Surfaced (B) | Surfaced (A) | Pkg Top-5 (A) | Carry (A) | Hints | Episodes | Overhead tokens |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `orchestrate task routing` | `orchestrator` | golden | miss | hit | no | episode | 2 | 2 | 55 |
-| `dag execution engine` | `dag-engine` | golden | hit | hit | yes | none | 2 | 3 | 80 |
-| `triage task classification simple complex` | `triage` | golden | hit | hit | yes | none | 3 | 3 | 91 |
-| `model router provider selection` | `model-router` | golden | hit | hit | yes | none | 3 | 3 | 89 |
-| `provider health fallback chain` | `provider-health` | golden | hit | hit | yes | none | 3 | 3 | 85 |
-| `graph compression pagerank centrality` | `graph-compression` | golden | hit | hit | yes | none | 3 | 3 | 85 |
-| `context slicer layered package` | `context-slicer` | golden | hit | hit | yes | none | 2 | 2 | 57 |
-| `skill flywheel hints scoring` | `skill-flywheel` | golden | hit | hit | yes | none | 3 | 3 | 79 |
-| `episodic memory similar episodes` | `episodic-memory` | golden | hit | hit | yes | none | 3 | 3 | 78 |
-| `embedding cosine similarity vector` | `embeddings` | golden | miss | hit | no | episode | 2 | 2 | 60 |
-| `file watcher incremental index on save` | `filewatcher` | golden | miss | hit | no | both | 3 | 3 | 92 |
-| `sqlite graph storage fts5` | `sqlite-client` | golden | miss | hit | no | both | 3 | 3 | 88 |
-| `repo map module overview` | `repomap` | golden | miss | hit | no | episode | 0 | 1 | 20 |
-| `token savings statistics` | `tokensavings` | golden | miss | hit | no | both | 3 | 3 | 79 |
-| `mcp server tool definitions` | `tool-definitions` | golden | hit | hit | yes | none | 3 | 3 | 100 |
-| `cli output json formatting` | `formatcliresult` | golden | miss | hit | no | episode | 1 | 2 | 60 |
-| `agent delegation work items bridge` | `workitem` | golden | miss | hit | no | episode | 3 | 3 | 79 |
-| `six hats insight planning` | `brainstormer` | golden | miss | hit | no | episode | 0 | 1 | 20 |
-| `hnsw approximate nearest neighbor index` | `hnsw` | golden | hit | hit | yes | none | 3 | 3 | 89 |
-| `adaptive token budget estimation` | `estimatecontextbudget` | golden | miss | hit | no | episode | 2 | 3 | 77 |
-| `artifact export import graph snapshot` | `artifact-manager` | golden | hit | hit | yes | none | 3 | 3 | 83 |
-| `nightly learning trainer` | `nightly-trainer` | golden | hit | hit | yes | none | 2 | 2 | 54 |
-| `reflect episodes extract lessons` | `reflector` | golden | miss | hit | no | episode | 3 | 2 | 57 |
-| `dag checkpoint recovery taskrun` | `dag-checkpoint` | golden | hit | hit | yes | none | 0 | 2 | 47 |
-| `cancellation timeout controller` | `cancellation` | golden | hit | hit | yes | none | 3 | 2 | 53 |
-| `language indexers tree sitter wasm` | `language-indexers` | golden | hit | hit | yes | none | 3 | 3 | 96 |
-| `provider adapter crash kills routing` | `model-router` | cross-module | miss | hit | no | episode | 3 | 3 | 79 |
-| `adding an embedding provider changed graph scores` | `graph-compression` | cross-module | hit | hit | no | none | 3 | 3 | 78 |
-| `cli flags now ignored after settings refactor` | `config-loader` | cross-module | miss | hit | no | episode | 3 | 1 | 32 |
-| `indexer reindex wipes mcp session state` | `mcp-server` | cross-module | hit | hit | no | none | 3 | 3 | 85 |
-| `new language grammar breaks file watching` | `file-watcher` | cross-module | hit | hit | yes | none | 3 | 3 | 84 |
-| `sqlite migration loses episodic history` | `episodic-memory` | cross-module | hit | hit | yes | none | 3 | 3 | 84 |
-| `tool schema update confuses agent profiles` | `tool-definitions` | cross-module | hit | hit | no | none | 3 | 3 | 75 |
-| `nightly training corrupts workspace config` | `workspace-root` | cross-module | hit | hit | no | none | 3 | 3 | 78 |
-| `editor panel stuck after mcp restart` | `vscode-extension` | cross-module | miss | hit | no | episode | 3 | 3 | 88 |
-| `query expansion returns chinese results` | `query-expand` | cross-module | hit | hit | yes | none | 3 | 1 | 35 |
-| `feedback loop inflates skill scores` | `skill-flywheel` | cross-module | hit | hit | no | none | 3 | 3 | 85 |
-| `atomic skill writes lock the whole store` | `skill-store` | cross-module | hit | hit | yes | none | 3 | 3 | 72 |
-| `tree walker skips hidden directories` | `file-indexer-walker` | disambiguation | hit | hit | yes | none | 3 | 1 | 47 |
-| `persistent storage for graph data` | `sqlite-client` | disambiguation | miss | hit | no | both | 3 | 3 | 90 |
-| `cached context goes stale on file save` | `context-cache` | disambiguation | hit | hit | yes | none | 3 | 3 | 96 |
-| `which agent gets this task` | `agent-assignment` | disambiguation | hit | hit | yes | none | 3 | 2 | 58 |
-| `upstream probe fails then what` | `provider-health` | disambiguation | miss | hit | no | both | 3 | 2 | 59 |
-| `simple versus complex task split` | `triage` | disambiguation | miss | hit | no | both | 3 | 2 | 65 |
-| `learn from what went wrong` | `reflector` | disambiguation | miss | hit | no | episode | 3 | 3 | 87 |
-| `stop a hung run safely` | `cancellation` | disambiguation | miss | hit | no | both | 2 | 2 | 61 |
-| `numbers behind the token savings` | `tokensavings` | disambiguation | miss | hit | no | episode | 3 | 3 | 82 |
-| `find similar past problems` | `embeddings` | disambiguation | miss | hit | no | both | 3 | 1 | 33 |
-| `fast nearest neighbor search` | `hnsw` | disambiguation | miss | hit | no | both | 3 | 1 | 39 |
-| `did the run stay on target` | `goal-anchor` | disambiguation | hit | hit | yes | none | 3 | 3 | 93 |
-| `execute the chosen provider` | `provider-executor` | indirect | hit | hit | yes | none | 3 | 3 | 80 |
-| `what can each role do` | `role-capabilities` | indirect | hit | hit | yes | none | 3 | 2 | 68 |
-| `protocol messages over the wire` | `atp-schema` | indirect | miss | hit | no | both | 3 | 3 | 90 |
-| `describe the work before planning` | `task-profile` | indirect | miss | hit | no | episode | 3 | 3 | 77 |
-| `transition states in order` | `state-machine` | indirect | hit | hit | yes | none | 3 | 3 | 95 |
-| `break the goal into steps` | `planner` | indirect | hit | hit | yes | none | 3 | 3 | 87 |
-| `pick between conflicting options` | `decision-engine` | indirect | miss | hit | no | both | 3 | 1 | 34 |
-| `peek at the graph state` | `snapshot-view` | indirect | miss | hit | no | episode | 3 | 3 | 75 |
-| `stats about the knowledge graph` | `graph-analysis` | indirect | hit | hit | no | none | 3 | 3 | 81 |
-| `bootstrap skills from scratch` | `seed-skills` | indirect | hit | hit | yes | none | 3 | 2 | 60 |
-| `export the learning dataset` | `exporter` | indirect | miss | hit | no | both | 3 | 3 | 77 |
-| `detect app routes automatically` | `framework-routes` | indirect | hit | hit | yes | none | 2 | 1 | 35 |
+| `dag execution engine` | `dag-engine` | golden | hit | hit | yes | none | 1 | 1 | 24 |
+| `model router provider selection` | `model-router` | golden | hit | hit | yes | none | 3 | 3 | 82 |
+| `graph compression pagerank centrality` | `graph-compression` | golden | hit | hit | yes | none | 3 | 2 | 62 |
+| `skill flywheel hints scoring` | `skill-flywheel` | golden | hit | hit | yes | none | 3 | 3 | 74 |
+| `embedding cosine similarity vector` | `embeddings` | golden | miss | miss | no | none | 0 | 3 | 64 |
+| `sqlite graph storage fts5` | `sqlite-client` | golden | miss | miss | no | none | 3 | 1 | 42 |
+| `token savings statistics` | `tokensavings` | golden | miss | miss | no | none | 0 | 3 | 64 |
+| `cli output json formatting` | `formatcliresult` | golden | miss | miss | no | none | 1 | 1 | 34 |
+| `six hats insight planning` | `brainstormer` | golden | miss | miss | no | none | 0 | 3 | 64 |
+| `adaptive token budget estimation` | `estimatecontextbudget` | golden | miss | miss | no | none | 0 | 1 | 21 |
+| `nightly learning trainer` | `nightly-trainer` | golden | hit | hit | yes | none | 1 | 3 | 73 |
+| `dag checkpoint recovery taskrun` | `dag-checkpoint` | golden | hit | hit | yes | none | 0 | 3 | 64 |
+| `language indexers tree sitter wasm` | `language-indexers` | golden | hit | hit | yes | none | 1 | 1 | 34 |
+| `adding an embedding provider changed graph scores` | `graph-compression` | cross-module | hit | hit | yes | none | 3 | 3 | 89 |
+| `indexer reindex wipes mcp session state` | `mcp-server` | cross-module | hit | miss | no | none | 2 | 3 | 81 |
+| `sqlite migration loses episodic history` | `episodic-memory` | cross-module | hit | hit | yes | none | 0 | 3 | 64 |
+| `nightly training corrupts workspace config` | `workspace-root` | cross-module | hit | hit | yes | none | 0 | 1 | 26 |
+| `query expansion returns chinese results` | `query-expand` | cross-module | hit | hit | yes | none | 0 | 3 | 64 |
+| `atomic skill writes lock the whole store` | `skill-store` | cross-module | hit | hit | yes | none | 3 | 2 | 55 |
+| `persistent storage for graph data` | `sqlite-client` | disambiguation | miss | miss | no | none | 3 | 1 | 42 |
+| `which agent gets this task` | `agent-assignment` | disambiguation | hit | hit | yes | none | 0 | 3 | 64 |
+| `simple versus complex task split` | `triage` | disambiguation | miss | miss | no | none | 0 | 3 | 64 |
+| `stop a hung run safely` | `cancellation` | disambiguation | miss | miss | no | none | 0 | 3 | 64 |
+| `find similar past problems` | `embeddings` | disambiguation | miss | miss | no | none | 0 | 3 | 64 |
+| `did the run stay on target` | `goal-anchor` | disambiguation | hit | miss | no | none | 3 | 2 | 65 |
+| `what can each role do` | `role-capabilities` | indirect | hit | hit | yes | none | 0 | 1 | 22 |
+| `describe the work before planning` | `task-profile` | indirect | miss | miss | no | none | 1 | 1 | 31 |
+| `break the goal into steps` | `planner` | indirect | hit | miss | no | none | 1 | 1 | 31 |
+| `peek at the graph state` | `snapshot-view` | indirect | miss | miss | no | none | 3 | 2 | 54 |
+| `bootstrap skills from scratch` | `seed-skills` | indirect | hit | hit | yes | none | 0 | 3 | 64 |
+| `detect app routes automatically` | `framework-routes` | indirect | hit | hit | yes | none | 0 | 3 | 64 |
 
 ## Methodology & honest caveats
 
-- **Task set**: 26 queries duplicated from
+- **Kind**: synthetic mechanism test on a hand-built in-memory graph. No LLM runs
+  and nothing is executed, so this is not a task-success rate or a memory ROI.
+- **Split**: even-index tasks form the training split whose history is seeded
+  into Arm A; odd-index tasks are held out and are the only tasks scored.
+  Training entries that mention any held-out `expectAny` / module name are
+  dropped, so the seeded experience is not derived from the scored answers.
+- **One criterion for both arms**: a task passes when the golden node id is
+  within the first 5 package anchors, OR an `expectAny` target name appears
+  in the arm's injected text (hints + episode summaries). Arm B injects nothing,
+  so only its package can pass.
+- **Task set**: the golden subset is 13 of the queries duplicated from
   `tests/retrieval-golden.test.ts` GOLDEN_SET (that file is owned by another
   agent and is not modified; this list mirrors `benchmarks/run-skill-ab.ts`).
   Each task's golden node id (`file:src/golden/<module>.ts`) contains an
-  `expectAny` alternative verbatim. The 36 HARD tasks
+  `expectAny` alternative verbatim. The 18 HARD tasks
   (cross-module blast radius / name disambiguation / indirect-morphological)
   are authored for this benchmark; their golden node **content** deliberately
   shares zero query tokens, so pure retrieval cannot rank the target.
-- **Success proxy**: Top-K = the first 5 ranked anchors of the compressed
-  context package (the retrieval channel); success there means the **golden
-  node id** is within those 5 anchors (precise id membership — avoids
-  substring false positives from distractor/decoy nodes). For Arm A, the
-  injected hints + episode summaries form an additional channel an agent reads
-  in full; hints/episodes reference modules by **name**, so injection success
-  is the `expectAny` substring check. Arm A success = package Top-5 hit
-  **or** injection hit. The package-only hit rate is reported separately for a
-  like-for-like retrieval comparison.
 - **Package ranking differs slightly between arms**: Arm A's graph additionally
   holds the history nodes (skills + episodes), which can shift the package
   top-5 for a few tasks; such differences are visible in the per-task
@@ -458,11 +414,9 @@ learning paths (`applySkillLearning` + `recordEpisode`).
   `extractTaskTokens` +0.1 for a `pass` outcome), since scores are not
   exported. The memory-contribution summary counts each distinct episode that
   rescued >= 1 task.
-- **Arm B success is deliberately imperfect**: the 27 tasks the OFF arm
-  misses (11 golden + the hard tasks) share zero query tokens with
-  their golden file (realistic: module names are morphologically different from
-  task wording, and symptoms cross module boundaries) — prior episodic
-  experience is the only bridge.
+- The 12 held-out tasks the OFF arm misses share zero query tokens with
+  their golden file by construction, so only transferred experience could
+  surface them in Arm A.
 - Both arms run through the **real** retrieval and learning paths
   (`buildEnhancedContextPackage`, `applySkillLearning`, `recordEpisode`,
   `suggestSkillHints`, `findSimilarEpisodes`, `summarizeEpisodeForPrompt`)
@@ -471,8 +425,8 @@ learning paths (`applySkillLearning` + `recordEpisode`).
   benchmark. Hashing is the project's DJB2a (FNV-class) — fully deterministic
   within a run; episode ids embed `Date.now()` so ids differ across runs, but
   ranking depends on tokens/scores, not ids.
-- This measures a mechanical success proxy, not LLM task completion. It
-  validates that episodic memory moves the needle on finding the expected
-  target, quantifies the exact token and wall-clock cost, and exposes which
-  memories earned their keep.
+- This measures a mechanical target-surfaced proxy, not LLM task completion or
+  answer quality. It reports whether training-split experience transfers to
+  unseen tasks in this toy setup, the exact token and wall-clock cost, and which
+  memories (if any) carried a held-out task.
 <!-- END P3 MEMORY-AB BENCHMARK -->

@@ -102,8 +102,12 @@ with the regression suite `tests/retrieval-golden.test.ts` and published as
 repo's `src/`.
 Metrics: Hit-rate@1/3/5/10, MRR, NDCG@5/10, per-domain breakdown.
 
-Self-test result (see `RETRIEVAL-EVAL-RESULTS.md`): **Hit-rate@5 = 100.0%**,
-MRR = 0.836, NDCG@5 = 0.671, negative-sample precision = 100%.
+Self-test result (see `RETRIEVAL-EVAL-RESULTS.md`, 2026-09-19): **Hit-rate@5 = 100.0%**,
+MRR = 0.779, NDCG@5 = 0.638, negative-sample precision = 100%. The queries are
+author-written and there is no held-out split, so this is an in-sample
+regression gate, not evidence of generalization; an independent audit on 15
+held-out English queries measured file-level Hit@5 = 80%, MRR = 0.61 (BM25
+baseline 73% / 0.68), and Hit@5 = 85% vs. BM25 95% on the 20-query tuning set.
 
 ### 2. Token savings — `npm run bench:token`
 
@@ -112,28 +116,38 @@ simulated context-less agent (grep + read top-10 files in full), counting
 tokens on both sides with `gpt-tokenizer` (gpt-4o encoding). 8 fixed golden
 queries over this repo's `src/`.
 
-Self-test result: **98.2% total savings** (baseline 274,434 → GraphFlow 4,928
-tokens, 2026-08-04). Historical runs: 98.9% (2026-08-02), 98.7% (2026-07-28) —
-the corpus is this repo itself, so numbers drift with `src/`; compare only
-same-`commit` runs.
+Self-test result (2026-09-09, two arms): **95.6%** vs reading the same ranker's
+top-10 anchor files in full (136,265 → 6,044 tokens) and **98.5%** vs the naive
+grep arm (410,725 → 6,044). Older single-arm runs: 98.2% (2026-08-04), 98.9%
+(2026-08-02), 98.7% (2026-07-28). These are **token-count ratios, not a
+fidelity or answer-quality measure**; the report adds a cheap fidelity proxy
+(does the package name the gold file?). The corpus is this repo itself, so
+numbers drift with `src/`; compare only same-`commit` runs.
 
 ### 3. Skill flywheel A/B — `npm run bench:skill-ab`
 
-Two tiers: injection/recall/overhead on 8 fixture tasks, and an end-to-end
-success proxy (P1-2) on the 26 retrieval-golden queries with seeded
-in-memory graphs, Arm A (flywheel ON) vs Arm B (OFF).
+Two tiers: injection/recall/overhead on 8 fixture tasks, and a synthetic
+mechanism test (P1-2) on the 26 retrieval-golden queries with hand-built
+in-memory graphs, Arm A (flywheel ON) vs Arm B (OFF). Even-index tasks are
+the training split (their history is seeded into Arm A), odd-index tasks are
+held out and scored; both arms use one identical criterion.
 
-Self-test result (P1-2): **ON 100.0% vs OFF 61.5%** success proxy (26 tasks,
-rescued=10, hurt=0, overhead 33.2 tok/task).
+Self-test result (P1-2, 2026-09-30): **ON 61.5% vs OFF 61.5%** target-surfaced
+on 13 held-out tasks (rescued=0, hurt=0) — no transfer. Not a task-success
+rate. The earlier "ON 100% vs OFF 61.5%" seeded history from the answer key
+and scored the arms differently; it is withdrawn.
 
 ### 4. Episodic-memory A/B — `npm run bench:memory`
 
 P3 extension of the A/B framework: 62 tasks (26 golden + 36 HARD tasks whose
 golden nodes share **zero tokens** with the query, so pure retrieval cannot
-win) with a full attribution chain per rescued task.
+win) with a full attribution chain per rescued task. Same train / held-out
+split and identical criterion as P1-2.
 
-Self-test result: **ON 100.0% vs OFF 56.5%** (rescued=27, hurt=0, overhead
-70.9 tok/task).
+Self-test result (2026-09-30): **ON 51.6% vs OFF 61.3%** target-surfaced on
+31 held-out tasks (rescued=0, hurt=3). Synthetic mechanism test, not a memory
+ROI. The earlier "ON 100% vs OFF 56.5%" is withdrawn for the same reasons as
+P1-2.
 
 ## Environment
 

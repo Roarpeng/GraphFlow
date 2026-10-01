@@ -9,8 +9,8 @@
  */
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import type { PrivacyAuditFacts } from "../types.js";
+import { resolveGlobalConfigPath } from "../../config/scaffold.js";
 
 const WORKSPACE_ARTIFACTS = [
   "graphflow-out/graphflow-graph.sqlite",
@@ -63,7 +63,7 @@ export function collectPrivacyFacts(
     }
   }
 
-  const globalPath = options?.globalConfigPath ?? join(homedir(), ".graphflow.config.json");
+  const globalPath = options?.globalConfigPath ?? resolveGlobalConfigPath();
   let globalExists = false;
   let mode: string | undefined;
   try {

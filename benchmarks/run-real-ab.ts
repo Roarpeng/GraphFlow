@@ -20,6 +20,10 @@
  *
  * This script spends real money by design. Guards: GRAPHFLOW_REAL_BENCH=0
  * refuses to run; --limit caps tasks; sequential calls with a polite delay.
+ *
+ * What it does NOT measure: answer quality. "success" is a non-empty reply,
+ * and each task runs once per arm, so the input-token delta is reported with
+ * its per-task spread (paired stddev / 95% CI) rather than as a bare mean.
  */
 
 import { execFileSync } from "node:child_process";
@@ -58,6 +62,28 @@ function flag(name: string, argv: string[]): string | undefined {
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** Paired per-task stats of (shadow - baseline) / baseline input tokens, in percent. */
+function pairedDeltaStats(pairs: ReadonlyArray<{ baseline: number; shadow: number }>): {
+  n: number;
+  meanPct: number;
+  medianPct: number;
+  sdPct: number;
+  ci95Pct: [number, number];
+} {
+  const deltas = pairs
+    .filter((p) => p.baseline > 0)
+    .map((p) => ((p.shadow - p.baseline) / p.baseline) * 100);
+  const n = deltas.length;
+  if (n === 0) return { n: 0, meanPct: 0, medianPct: 0, sdPct: 0, ci95Pct: [0, 0] };
+  const mean = deltas.reduce((a, b) => a + b, 0) / n;
+  const sorted = [...deltas].sort((a, b) => a - b);
+  const median = n % 2 === 1 ? sorted[(n - 1) / 2]! : (sorted[n / 2 - 1]! + sorted[n / 2]!) / 2;
+  const sd = n > 1 ? Math.sqrt(deltas.reduce((s, d) => s + (d - mean) ** 2, 0) / (n - 1)) : 0;
+  const half = n > 1 ? (1.96 * sd) / Math.sqrt(n) : 0;
+  const r1 = (x: number): number => Math.round(x * 10) / 10;
+  return { n, meanPct: r1(mean), medianPct: r1(median), sdPct: r1(sd), ci95Pct: [r1(mean - half), r1(mean + half)] };
+}
 
 interface CallOutcome {
   ok: boolean;
@@ -206,6 +232,7 @@ async function main(): Promise<void> {
   const baselineTraces: TaskTrace[] = [];
   const shadowTraces: TaskTrace[] = [];
   const violations: string[] = [];
+  const inputPairs: Array<{ baseline: number; shadow: number }> = [];
 
   for (let i = 0; i < tasks.length; i += 1) {
     const task = tasks[i]!;
@@ -290,6 +317,7 @@ async function main(): Promise<void> {
 
     const bIn = baselineCall.promptTokens;
     const sIn = shadowCall.promptTokens;
+    if (baselineCall.ok && shadowCall.ok) inputPairs.push({ baseline: bIn, shadow: sIn });
     const delta = bIn > 0 ? Math.round(((sIn - bIn) / bIn) * 100) : 0;
     console.log(
       `  [${i + 1}/${tasks.length}] ${task.id} ${call(baselineCall.ok)}/${call(shadowCall.ok)} ` +
@@ -330,8 +358,17 @@ async function main(): Promise<void> {
   console.log(`Context/input tokens : baseline=${b.avgContextTokens} shadow=${s.avgContextTokens} (${inDelta >= 0 ? "+" : ""}${inDelta}%)`);
   console.log(`LLM calls (total)    : baseline=${b.totalLlmCalls} shadow=${s.totalLlmCalls}`);
   console.log(`Rounds (avg)         : baseline=${b.avgRounds} shadow=${s.avgRounds}`);
-  console.log(`Success rate         : baseline=${b.successRate} shadow=${s.successRate}`);
+  console.log(`Success rate         : baseline=${b.successRate} shadow=${s.successRate} (criterion: non-empty reply — answer quality NOT measured)`);
   console.log(`Decision cost share  : ${s.avgDecisionCostShare ?? "n/a"}`);
+  const paired = pairedDeltaStats(inputPairs);
+  console.log(
+    `Input-token delta per task (paired, n=${paired.n}, one run per arm): mean ${paired.meanPct}% ` +
+      `median ${paired.medianPct}% sd ${paired.sdPct}pp 95% CI [${paired.ci95Pct[0]}%, ${paired.ci95Pct[1]}%]`
+  );
+  console.log(
+    "Note: both arms are capped at the same 6000-char context budget; the shadow arm sends the package summary only, " +
+      "so the delta mostly reflects how far below the cap the summary lands, not answer quality."
+  );
 }
 
 function call(ok: boolean): string {

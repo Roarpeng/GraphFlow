@@ -1,3 +1,4 @@
+<!-- GRAPHFLOW:BEGIN managed block — edit outside these markers only -->
 # GraphFlow Token-First Rule (GitHub Copilot)
 
 GraphFlow is a graph-based context and planning service backed by a persistent MCP server. It turns codebases into queryable knowledge graphs, delivering token-efficient compressed context, task planning, and orchestration.
@@ -77,3 +78,4 @@ graphflow --json outcome report <episodeId> <success>
 ```
 
 Treat GraphFlow outputs as structured machine-readable data, not prose.
+<!-- GRAPHFLOW:END -->

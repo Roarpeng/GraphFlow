@@ -1,11 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import {
   buildAgentProfiles,
   buildMcpServerNode,
-  installMcpToDetectedAgents,
   resolveWindowsNpxLaunch,
   toWindowsPathFromWsl,
 } from "../src/integrations/agent-mcp-installer";
@@ -198,24 +197,45 @@ describe("M63 Antigravity / Gemini / Copilot install", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("installMcpToDetectedAgents writes ${workspaceFolder} for user-scope npx, not absolute paths", () => {
-    const results = installMcpToDetectedAgents({
-      strategy: "npx",
-      installScope: "user",
-      workspaceRoot: "/wrong/project/root",
-      agentIdsOverride: ["antigravity"],
-    });
-    expect(results.some((r) => r.agentId === "antigravity")).toBe(true);
+  it("installMcpToDetectedAgents writes ${workspaceFolder} for user-scope npx, not absolute paths", async () => {
+    // Isolated home: this writes a real MCP config, and the profile registry
+    // captures the home directory on first import, hence the module reset.
+    const home = mkdtempSync(join(tmpdir(), "gf-m63-home-"));
+    const keys = ["USERPROFILE", "HOME", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME"] as const;
+    const saved = new Map(keys.map((key) => [key, process.env[key]]));
+    process.env.USERPROFILE = home;
+    process.env.HOME = home;
+    process.env.APPDATA = join(home, "AppData", "Roaming");
+    process.env.LOCALAPPDATA = join(home, "AppData", "Local");
+    process.env.XDG_CONFIG_HOME = join(home, ".config");
+    vi.resetModules();
+    try {
+      const installer = await import("../src/integrations/agent-mcp-installer");
+      const results = installer.installMcpToDetectedAgents({
+        strategy: "npx",
+        installScope: "user",
+        workspaceRoot: "/wrong/project/root",
+        agentIdsOverride: ["antigravity"],
+        globalInstallOverride: null,
+      });
+      expect(results.some((r) => r.agentId === "antigravity")).toBe(true);
 
-    const written = results.find((r) => r.configPath.includes("antigravity/mcp_config.json"));
-    if (written && existsSync(written.configPath)) {
-      const json = JSON.parse(readFileSync(written.configPath, "utf8")) as {
+      const written = results.find((r) => r.configPath.replace(/\\/g, "/").includes("antigravity/mcp_config.json"));
+      expect(written?.configPath.startsWith(home)).toBe(true);
+      const json = JSON.parse(readFileSync(written!.configPath, "utf8")) as {
         mcpServers?: { graphflow?: { env?: Record<string, string> } };
       };
       expect(json.mcpServers?.graphflow?.env?.GRAPHFLOW_WORKSPACE_ROOT).toBe("${workspaceFolder}");
       expect(json.mcpServers?.graphflow?.env?.GRAPHFLOW_WORKSPACE_ROOT).not.toBe(
         "/wrong/project/root"
       );
+    } finally {
+      vi.resetModules();
+      for (const [key, value] of saved) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      rmSync(home, { recursive: true, force: true });
     }
   });
 

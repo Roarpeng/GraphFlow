@@ -3,10 +3,11 @@ import {
   workspaceBuildServerPath,
 } from "./workspace-build";
 import { execFileSync, execSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir, release } from "node:os";
 import { profileRegistry } from "./agent-profiles";
+import { writeJsonOrRemove } from "./config-file-cleanup";
 import { resolveDshHome } from "./dsh-harness-installer";
 import { resolveKimiCodeHome } from "./kimi-code-paths";
 
@@ -70,6 +71,12 @@ export interface McpInstallOptions {
   preferGlobalInstall?: boolean;
   /** Test hook: override the global-install probe. `null` forces the npx path. */
   globalInstallOverride?: GlobalGraphflowInstall | null;
+  /**
+   * Skip user targets whose host application directory does not exist
+   * (see isUserTargetPresent). Defaults to true for auto-detected agents and
+   * false when `agentIdsOverride` names the agents explicitly.
+   */
+  skipMissingHostRoots?: boolean;
 }
 
 export interface GlobalGraphflowInstall {
@@ -764,6 +771,37 @@ function escapeRegExp(value: string): string {
 }
 
 /** Inspect detected agents and whether GraphFlow MCP is present in each config file. */
+/**
+ * Directory that belongs to the host application for a user-level config path:
+ * the first segment below APPDATA / LOCALAPPDATA / XDG config / home
+ * (`%APPDATA%\Cursor`, `~/.cursor`). Undefined for files directly in one of
+ * those roots (`~/.claude.json`) or paths outside them.
+ */
+function hostRootOf(configPath: string): string | undefined {
+  const { home, appData, localAppData } = resolveHomePaths();
+  const xdg = process.env.XDG_CONFIG_HOME?.trim() || join(home, ".config");
+  const target = resolve(configPath);
+  for (const base of [appData, localAppData, xdg, home]) {
+    if (!base) continue;
+    const rel = relative(resolve(base), target);
+    if (!rel || rel.startsWith("..") || isAbsolute(rel)) continue;
+    const parts = rel.split(/[\\/]+/);
+    return parts.length <= 1 ? undefined : join(base, parts[0]!);
+  }
+  return undefined;
+}
+
+/**
+ * A profile's secondary user target (e.g. `%APPDATA%\Cursor\...\mcp.json` when
+ * only `~/.cursor` exists) belongs to an application that is not installed.
+ * Writing it would create that application's directory tree from nothing.
+ */
+export function isUserTargetPresent(configPath: string): boolean {
+  if (existsSync(configPath)) return true;
+  const root = hostRootOf(configPath);
+  return root === undefined || existsSync(root);
+}
+
 export function getMcpInstallStatus(serverName = "graphflow"): McpAgentInstallStatus[] {
   const detectedIds = new Set(detectInstalledAgents().map((agent) => agent.id));
   const profiles = buildAgentProfiles();
@@ -778,7 +816,7 @@ export function getMcpInstallStatus(serverName = "graphflow"): McpAgentInstallSt
 
     for (const userTarget of profile.userTargets) {
       const key = `${userTarget.configPath}::${userTarget.serversKey}::${userTarget.configFormat ?? "json"}`;
-      if (seen.has(key)) {
+      if (seen.has(key) || !isUserTargetPresent(userTarget.configPath)) {
         continue;
       }
       seen.add(key);
@@ -996,7 +1034,7 @@ export function probeMcpEntryPoint(
   const serverName = options.serverName ?? "graphflow";
   const empty: McpEntryPointInfo = { fromPublishedPackage: false };
   try {
-    if (!existsSync(configPath)) return empty;
+    if (isTomlPath(configPath) || !existsSync(configPath)) return empty;
     const json = readJsonConfig(configPath);
     const entry =
       (json.mcp as Record<string, unknown> | undefined)?.[serverName] ??
@@ -1988,7 +2026,37 @@ function resolveTargetsForAgents(
   });
 }
 
+function isTomlPath(path: string): boolean {
+  return /\.toml$/i.test(path);
+}
+
+/**
+ * Read-only JSON config load for status / doctor / removal paths. Never writes:
+ * an unreadable or non-JSON file (including TOML) reads as `{}`.
+ */
 function readJsonConfig(path: string): Record<string, unknown> {
+  if (isTomlPath(path) || !existsSync(path)) {
+    return {};
+  }
+  try {
+    const raw = readFileSync(path, "utf8").trim();
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * JSON config load right before GraphFlow rewrites the file. A corrupt file is
+ * copied to a single `<file>.bak` (overwritten, never one per run) and then
+ * treated as empty so registration can proceed.
+ */
+function readJsonConfigForWrite(path: string): Record<string, unknown> {
+  if (isTomlPath(path)) {
+    throw new Error(`refusing to rewrite TOML config ${path} as JSON`);
+  }
   if (!existsSync(path)) {
     return {};
   }
@@ -1997,26 +2065,34 @@ function readJsonConfig(path: string): Record<string, unknown> {
     return {};
   }
   try {
-    return JSON.parse(raw) as Record<string, unknown>;
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
   } catch {
-    // Existing config is corrupt (manual edit, encoding issue, etc).
-    // Back it up and start fresh so registration can proceed instead of failing.
-    try {
-      const backupPath = `${path}.bak-${Date.now()}`;
-      writeFileSync(backupPath, raw, "utf8");
-    } catch {
-      // Ignore backup failure — proceed with reset
-    }
-    return {};
+    // fall through to the single backup below
   }
+  try {
+    writeFileSync(`${path}.bak`, raw, "utf8");
+  } catch {
+    // Ignore backup failure — proceed with reset
+  }
+  return {};
 }
 
-function writeJsonConfig(path: string, json: Record<string, unknown>): void {
+function writeJsonConfig(path: string, json: Record<string, unknown>): boolean {
+  const payload = `${JSON.stringify(json, null, 2)}\n`;
+  if (existsSync(path)) {
+    try {
+      if (readFileSync(path, "utf8") === payload) return false;
+    } catch {
+      // unreadable: rewrite below
+    }
+  }
   const dir = dirname(path);
   if (dir && dir !== ".") {
     mkdirSync(dir, { recursive: true });
   }
-  writeFileSync(path, `${JSON.stringify(json, null, 2)}\n`, "utf8");
+  writeFileSync(path, payload, "utf8");
+  return true;
 }
 
 function removeCodexMcpSection(content: string, serverName: string): string {
@@ -2056,17 +2132,17 @@ function injectIntoOpencodeConfig(
   configPath: string,
   serverName: string,
   node: McpServerNode
-): "injected" | "created" | "updated" {
+): McpInjectStatus {
   const existed = existsSync(configPath);
-  const json = readJsonConfig(configPath);
+  const json = readJsonConfigForWrite(configPath);
   const servers = (json.mcp as Record<string, OpencodeMcpServerNode> | undefined) ?? {};
   const serverExisted = !!servers[serverName];
   servers[serverName] = formatOpencodeMcpEntry(node);
   json.mcp = servers;
-  writeJsonConfig(configPath, json);
+  const written = writeJsonConfig(configPath, json);
   if (!existed) return "created";
   if (!serverExisted) return "injected";
-  return "updated";
+  return written ? "updated" : "skipped";
 }
 
 function removeOpencodeMcpEntry(
@@ -2087,7 +2163,8 @@ function removeOpencodeMcpEntry(
   } else {
     json.mcp = servers;
   }
-  writeJsonConfig(configPath, json);
+  // opencode.json carries a `$schema` pointer GraphFlow may have created with it.
+  writeJsonOrRemove(configPath, json, ["$schema"]);
   return true;
 }
 
@@ -2145,18 +2222,18 @@ function injectIntoZcodeConfig(
   configPath: string,
   serverName: string,
   node: McpServerNode
-): "injected" | "created" | "updated" {
+): McpInjectStatus {
   const existed = existsSync(configPath);
-  const json = readJsonConfig(configPath);
+  const json = readJsonConfigForWrite(configPath);
   const mcp = (json.mcp as Record<string, unknown> | undefined) ?? {};
   const servers = getZcodeServers(json);
   const serverExisted = !!servers[serverName];
   servers[serverName] = formatZcodeMcpEntry(node);
   json.mcp = { ...mcp, servers };
-  writeJsonConfig(configPath, json);
+  const written = writeJsonConfig(configPath, json);
   if (!existed) return "created";
   if (!serverExisted) return "injected";
-  return "updated";
+  return written ? "updated" : "skipped";
 }
 
 function removeZcodeMcpEntry(configPath: string, serverName: string): boolean {
@@ -2180,7 +2257,7 @@ function removeZcodeMcpEntry(configPath: string, serverName: string): boolean {
   } else {
     json.mcp = { ...mcp, servers };
   }
-  writeJsonConfig(configPath, json);
+  writeJsonOrRemove(configPath, json);
   return true;
 }
 
@@ -2215,13 +2292,16 @@ function injectIntoCodexToml(
   configPath: string,
   serverName: string,
   node: McpServerNode
-): "injected" | "created" | "updated" {
+): McpInjectStatus {
   const existed = existsSync(configPath);
   const previous = existed ? readFileSync(configPath, "utf8") : "";
   const serverExisted = existed && new RegExp(`^\\[mcp_servers\\.${escapeRegExp(serverName)}\\]`, "m").test(previous);
   const cleaned = removeCodexMcpSection(previous, serverName);
   const block = formatCodexMcpTomlBlock(serverName, node);
   const next = cleaned.length > 0 ? `${cleaned}\n\n${block}\n` : `${block}\n`;
+  if (existed && next === previous) {
+    return "skipped";
+  }
   const dir = dirname(configPath);
   if (dir && dir !== ".") {
     mkdirSync(dir, { recursive: true });
@@ -2232,13 +2312,15 @@ function injectIntoCodexToml(
   return "updated";
 }
 
+type McpInjectStatus = "injected" | "created" | "updated" | "skipped";
+
 function injectIntoAgentConfig(
   configPath: string,
   serversKey: McpServersKey,
   configFormat: McpConfigFormat,
   serverName: string,
   node: McpServerNode
-): "injected" | "created" | "updated" {
+): McpInjectStatus {
   if (configFormat === "codex-toml") {
     return injectIntoCodexToml(configPath, serverName, node);
   }
@@ -2256,9 +2338,9 @@ function injectIntoConfig(
   serversKey: McpServersKey,
   serverName: string,
   node: McpServerNode
-): "injected" | "created" | "updated" {
+): McpInjectStatus {
   const existed = existsSync(configPath);
-  const json = readJsonConfig(configPath);
+  const json = readJsonConfigForWrite(configPath);
   const servers = (json[serversKey] as Record<string, McpServerNode> | undefined) ?? {};
 
   const serverExisted = !!servers[serverName];
@@ -2292,11 +2374,11 @@ function injectIntoConfig(
     delete servers[serverName].cwd;
   }
   json[serversKey] = servers;
-  writeJsonConfig(configPath, json);
-  
+  const written = writeJsonConfig(configPath, json);
+
   if (!existed) return "created";
   if (!serverExisted) return "injected";
-  return "updated";
+  return written ? "updated" : "skipped";
 }
 
 /** 从 JSON 配置文件中移除指定 MCP 服务器的配置条目 */
@@ -2319,7 +2401,7 @@ export function removeMcpEntry(
   } else {
     json[serversKey] = servers;
   }
-  writeJsonConfig(configPath, json);
+  writeJsonOrRemove(configPath, json);
   return true;
 }
 
@@ -2337,7 +2419,11 @@ export function removeCodexMcpEntry(
     return false;
   }
   const cleaned = removeCodexMcpSection(content, serverName);
-  writeFileSync(configPath, cleaned.length > 0 ? `${cleaned}\n` : "", "utf8");
+  if (cleaned.trim().length === 0) {
+    rmSync(configPath, { force: true });
+  } else {
+    writeFileSync(configPath, `${cleaned}\n`, "utf8");
+  }
   return true;
 }
 
@@ -2391,7 +2477,7 @@ function mergeHostEnv(
   // stdio env it needs is already set by the node itself.
   if (target.configFormat === "codex-toml") return false;
   try {
-    const json = readJsonConfig(configPath);
+    const json = readJsonConfigForWrite(configPath);
     const servers = (json[target.serversKey] as Record<string, Record<string, unknown>> | undefined) ?? {};
     const entry = servers[serverName];
     if (!entry || typeof entry !== "object") return false;
@@ -2451,7 +2537,10 @@ export function installMcpToDetectedAgents(options: McpInstallOptions): McpInsta
             : {}),
         }
       : options;
-  const targets = resolveTargetsForAgents(agentIds, options.workspaceRoot, installScope);
+  const skipMissingHostRoots = options.skipMissingHostRoots ?? options.agentIdsOverride === undefined;
+  const targets = resolveTargetsForAgents(agentIds, options.workspaceRoot, installScope).filter(
+    (target) => target.scope !== "user" || !skipMissingHostRoots || isUserTargetPresent(target.configPath)
+  );
   for (const target of targets) {
     // When the workspace build is preferred, every host launches this checkout's
     // `dist/` instead of the published package. Without this, an npx launcher

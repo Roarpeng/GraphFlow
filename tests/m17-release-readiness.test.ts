@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config/loader";
+import { resolveConfigSecret } from "../src/config/secrets";
 import { resolveModelForRole } from "../src/routing/model-router";
 import { buildCliUsage, getCliVersion } from "../src/surfaces/cli/output";
 import { runTask } from "../src/surfaces/cli/runtime";
@@ -70,7 +71,9 @@ describe("M17 release readiness", () => {
       );
 
       const config = loadConfig(configPath);
-      expect(config.providers.openai?.apiKey).toBe("openai-from-env");
+      // apiKey placeholders stay lazy (resolved by resolveConfigSecret at use).
+      expect(config.providers.openai?.apiKey).toBe("${OPENAI_API_KEY}");
+      expect(resolveConfigSecret(config.providers.openai?.apiKey)).toBe("openai-from-env");
       expect(config.graphPolicy.mcpApiKey).toBe("graphify-from-env");
     } finally {
       rmSync(root, { recursive: true, force: true });

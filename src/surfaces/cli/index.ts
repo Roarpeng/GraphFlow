@@ -119,6 +119,7 @@ import { validateConfigDetailed, type ConfigValidationResult } from "../../confi
 import { isDeviationKind } from "../../learning/episodic-memory";
 import {
   buildCliUsage,
+  buildCommandUsage,
   collectCliFlagValues,
   formatCliResult,
   getCliVersion,
@@ -177,6 +178,23 @@ async function executeDepsCommand(args: string[]): Promise<CliCommandResult> {
 async function executeCommand(command: string, args: string[], configPath?: string): Promise<CliCommandResult | undefined> {
   if (command === "install") {
     const { buildInstallReport, formatInstallLegacyText } = require("./init") as typeof import("./init");
+    const skipDeps = args.includes("--skip-deps");
+    const hostFlag = collectCliFlagValues(args, "--host").flatMap((value) => value.split(","));
+    const forceHosts = args.includes("--all-hosts")
+      ? ("all" as const)
+      : hostFlag.map((id) => id.trim()).filter(Boolean);
+    const { HOST_ADAPTER_MIGRATED_IDS } = await import("../../integrations/host-adapter-install.js");
+    const unknownHosts = forceHosts === "all" ? [] : forceHosts.filter((id) => !HOST_ADAPTER_MIGRATED_IDS.includes(id));
+    if (unknownHosts.length > 0) {
+      process.exitCode = 1;
+      return {
+        command: "install",
+        data: { error: `unknown host id(s): ${unknownHosts.join(", ")}`, knownHosts: [...HOST_ADAPTER_MIGRATED_IDS] },
+        legacyText: `unknown host id(s): ${unknownHosts.join(", ")}\nknown hosts: ${HOST_ADAPTER_MIGRATED_IDS.join(", ")}`,
+      };
+    }
+    // --skip-deps promises no downloads; the bootstrap index loads the ~100MB embedding model.
+    const installOptions = { forceHosts, bootstrapGraph: !skipDeps };
     // `--workspace-build` points every host at *this* checkout's build instead of
     // the published package, so editing GraphFlow actually changes what hosts run.
     // It lives in a global marker rather than an env var because hosts launch the
@@ -191,7 +209,8 @@ async function executeCommand(command: string, args: string[], configPath?: stri
         enabled: workspaceBuildFlag === "--workspace-build",
         workspaceRoot: process.cwd(),
       });
-      const data = buildInstallReport(process.cwd());
+      const data = buildInstallReport(process.cwd(), installOptions);
+      markFirstUseDone();
       if (!data.ok) process.exitCode = 1;
       const target = preference.enabled
         ? `${data.mcp.length} host entries -> ${preference.workspaceRoot}/dist/surfaces/mcp/server.js`
@@ -202,13 +221,14 @@ async function executeCommand(command: string, args: string[], configPath?: stri
         legacyText: `workspace build ${preference.enabled ? "enabled" : "disabled"} (${preference.status}): ${target}; marker at ${preference.filePath}; ${formatInstallLegacyText(data)}\nRun 'graphflow settings' to configure in browser`,
       };
     }
-    const data = buildInstallReport(process.cwd());
+    const data = buildInstallReport(process.cwd(), installOptions);
+    markFirstUseDone();
     if (!data.ok) {
       process.exitCode = 1;
     }
     let runtimeDepsText = "";
     let runtimeDeps: unknown;
-    if (!args.includes("--skip-deps")) {
+    if (!skipDeps) {
       const { ensureRuntimeDepsInstalled, isRuntimeDepsAutoInstallDisabled } = await import(
         "../../integrations/ensure-runtime-deps.js"
       );
@@ -320,12 +340,13 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   }
 
   if (command === "uninstall") {
-    const { runUninstall } = require("./init");
-    runUninstall();
+    const { buildUninstallReport, formatUninstallLegacyText } = require("./init") as typeof import("./init");
+    const data = buildUninstallReport(process.cwd());
+    if (!data.ok) process.exitCode = 1;
     return {
       command: "uninstall",
-      data: {},
-      legacyText: `Uninstall complete`,
+      data,
+      legacyText: formatUninstallLegacyText(data),
     };
   }
 
@@ -1283,6 +1304,7 @@ async function executeCommand(command: string, args: string[], configPath?: stri
       ...(topicId ? { topicId } : {}),
       ...(resumeFrom ? { resumeFromTurnId: resumeFrom } : {}),
       ...(reply ? { assistantReply: reply } : {}),
+      ...(args.includes("--no-record") ? { recordDialogue: false } : {}),
     });
     return {
       command: "context-preview",
@@ -2047,34 +2069,50 @@ function formatValidationResult(data: ConfigValidationResult): string {
  * postinstall entirely. The first real command completes registration; help /
  * version stay read-only.
  */
+function firstUseMarkerPath(): string {
+  return join(homedir(), ".graphflow-install-version");
+}
+
+/** Record that registration ran, so the first-use backstop never repeats it. */
+function markFirstUseDone(): void {
+  try {
+    writeFileSync(firstUseMarkerPath(), getCliVersion(), "utf8");
+  } catch {
+    // marker write failure → the backstop may run once more; harmless.
+  }
+}
+
+/**
+ * Commands that must not trigger the backstop: read-only diagnostics (doctor on
+ * a fresh box stays an observation), commands that do their own registration or
+ * removal (install would otherwise run twice, uninstall would install first),
+ * and long-running servers.
+ */
+const FIRST_USE_EXEMPT_COMMANDS = new Set([
+  "help", "--help", "-h", "version", "--version", "-v",
+  "doctor", "diagnose", "audit", "llm-check", "selfcheck",
+  "install", "uninstall", "init", "config", "deps", "mcp", "settings",
+]);
+
 async function runFirstUseBootstrap(command: string): Promise<void> {
   if (process.env.GRAPHFLOW_SKIP_POSTINSTALL === "1" || process.env.CI === "true") return;
-  // Read-only diagnostics must never mutate the machine: doctor/diagnose on a
-  // fresh box stay pure observations instead of triggering the installer.
-  const readOnlyCommands = new Set([
-    "help", "--help", "-h", "version", "--version", "-v",
-    "doctor", "diagnose", "audit", "llm-check",
-  ]);
-  if (readOnlyCommands.has(command)) return;
-  const markerPath = join(homedir(), ".graphflow-install-version");
+  if (FIRST_USE_EXEMPT_COMMANDS.has(command)) return;
+  if (existsSync(firstUseMarkerPath())) return;
+  // Marker first: a crash or a concurrent second command must not re-run it.
+  markFirstUseDone();
+  // stderr throughout: stdout belongs to the command that is about to run.
   try {
-    if (existsSync(markerPath)) return;
-    console.log("[GraphFlow] 首次使用检测：尚未完成注册（postinstall 可能被跳过或镜像包不完整），自动执行安装注册...");
+    console.error("[GraphFlow] 首次使用检测：尚未完成注册（postinstall 可能被跳过或镜像包不完整），自动执行安装注册...");
     // Lazy require (not a top-level import): init.ts and this entrypoint
     // would form an import cycle otherwise.
     const { buildInstallReport, formatInstallLegacyText } = require("./init") as typeof import("./init");
-    const report = buildInstallReport(process.cwd());
-    console.log(formatInstallLegacyText(report));
-    writeFileSync(markerPath, getCliVersion(), "utf8");
-    console.log("[GraphFlow] 首次注册完成。若上方出现 Skill source not found，说明镜像包不完整——请用官方源重装：npm install -g @roarpeng/graphflow --registry=https://registry.npmjs.org");
+    // No bootstrap index here: the command itself may index, and it would load the embedding model twice.
+    const report = buildInstallReport(process.cwd(), { bootstrapGraph: false });
+    console.error(formatInstallLegacyText(report));
+    console.error("[GraphFlow] 首次注册完成。若上方出现 Skill source not found，说明镜像包不完整——请用官方源重装：npm install -g @roarpeng/graphflow --registry=https://registry.npmjs.org");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[GraphFlow] 首次注册失败（不影响当前命令）：${message}。可手动执行 graphflow install。`);
-    try {
-      writeFileSync(markerPath, getCliVersion(), "utf8");
-    } catch {
-      // marker write failure → retried on the next command; harmless.
-    }
+    console.error(`[GraphFlow] 首次注册失败（不影响当前命令）：${message}。可手动执行 graphflow install。`);
   }
 }
 
@@ -2092,6 +2130,19 @@ async function main(): Promise<void> {
     console.error(buildCliUsageWithSettings());
     process.exitCode = 1;
     return;
+  }
+
+  // `<command> --help`: usage only, before anything that could touch the machine.
+  if (options.help) {
+    console.error(buildCommandUsage(command, options.args));
+    return;
+  }
+
+  // With --json, stdout carries exactly one JSON document. Progress lines that
+  // commands and installers print via console.log/info go to stderr instead.
+  if (options.json) {
+    console.log = (...items: unknown[]) => console.error(...items);
+    console.info = (...items: unknown[]) => console.error(...items);
   }
 
   // First-run bootstrap backstop: mirrors can serve stale/partial packages
@@ -2122,7 +2173,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log(formatCliResult(result, options.json));
+  process.stdout.write(`${formatCliResult(result, options.json)}\n`);
 }
 
 main().catch((error) => {

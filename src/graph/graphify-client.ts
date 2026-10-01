@@ -1,6 +1,6 @@
 import type { GraphEdge, GraphNode } from "../core/types";
 
-import { tokenizeForIndex, nodeSearchableText } from "./graph-utils";
+import { tokenizeForIndex, nodeSearchableText, nodeRecallText } from "./graph-utils";
 
 export class GraphifyClient {
   private readonly nodes = new Map<string, GraphNode>();
@@ -115,7 +115,7 @@ export class GraphifyClient {
   }
 
   private removeNodeFromIndex(node: GraphNode): void {
-    for (const tok of tokenizeForIndex(nodeSearchableText(node))) {
+    for (const tok of tokenizeForIndex(nodeRecallText(node))) {
       const set = this.index.get(tok);
       if (set) {
         set.delete(node.id);
@@ -127,7 +127,7 @@ export class GraphifyClient {
   }
 
   private indexNode(node: GraphNode): void {
-    for (const tok of tokenizeForIndex(nodeSearchableText(node))) {
+    for (const tok of tokenizeForIndex(nodeRecallText(node))) {
       let set = this.index.get(tok);
       if (!set) {
         set = new Set();

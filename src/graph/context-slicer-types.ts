@@ -85,6 +85,8 @@ export interface SubgraphExpansionOptions {
 
 export interface ContextRefillManager {
   initialPackage(query: string): Promise<LayeredContextPackage>;
+  /** Mark anchors of an already-built package as seen, without rebuilding it. */
+  seed(anchorIds: Iterable<string>): void;
   refill(evidenceHints: string[]): Promise<string[]>;
 }
 

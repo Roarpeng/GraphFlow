@@ -1,15 +1,14 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { ensureGlobalGraphFlowConfig } from "../../config/scaffold";
+import { ensureGlobalGraphFlowConfig, resolveGlobalConfigPath } from "../../config/scaffold";
 import { resolveConfig } from "../../config/resolve";
 import { diagnoseTeamConfig, type TeamDiagnosis } from "../team/diagnose.js";
 import {
   installAllSkills,
   uninstallAllSkillsAndRules,
   getTraeInstallStatus,
-  getAntigravityInstallStatus,
-  getCopilotInstallStatus,
+  getProjectLevelRuleStatus,
   getAgentInstructionStatus,
   getAgentSkillStatus,
   type SkillInstallSummary,
@@ -306,9 +305,15 @@ export interface InstallReport {
   dshHarness: DshHarnessInstallResult;
   /** Post-install doctor self-check (never silently skip failures). */
   doctor: DoctorReport;
-  /** True when MCP install had no errors and doctor reports no missing items. */
+  /**
+   * True when GraphFlow is registered with every detected host: global config
+   * written, no core MCP write failed and doctor has no missing items.
+   * Optional extras (hooks, DSH glue, skills/rules) failing only add warnings.
+   */
   ok: boolean;
   remediation: string[];
+  /** Non-fatal problems: optional pieces that could not be installed. */
+  warnings: string[];
   /** R9+: dead-entry repairs (entries launching missing files) performed before injection. */
   repairs: DanglingRepairResult[];
 }
@@ -316,6 +321,11 @@ export interface InstallReport {
 export interface BuildInstallReportOptions {
   /** When false, skip async graph bootstrap (tests / dry structural install). Default true. */
   bootstrapGraph?: boolean;
+  /**
+   * Host ids to configure even when not detected (`install --host`), or "all"
+   * (`install --all-hosts`). Default: detected hosts only.
+   */
+  forceHosts?: readonly string[] | "all";
 }
 
 export function buildInstallReport(
@@ -323,6 +333,7 @@ export function buildInstallReport(
   options: BuildInstallReportOptions = {}
 ): InstallReport {
   const bootstrapGraph = options.bootstrapGraph !== false;
+  const forceHosts = options.forceHosts ?? [];
   const globalConfig = ensureGlobalGraphFlowConfig();
   // One-command promise: repair dead entries (extension launchers removed by
   // IDE upgrades, moved installs) BEFORE the normal injection pass so the
@@ -333,8 +344,11 @@ export function buildInstallReport(
   // profile-backed slice for the rest. Adding a host no longer needs edits here.
   const hostInstalls = new Map<string, HostAdapterInstallResult>();
   for (const hostId of HOST_ADAPTER_MIGRATED_IDS) {
-    hostInstalls.set(hostId, installViaHostAdapter(hostId));
+    const force = forceHosts === "all" || forceHosts.includes(hostId);
+    hostInstalls.set(hostId, installViaHostAdapter(hostId, force ? { force: true } : {}));
   }
+  // After the host pass so forced hosts count as present for project files.
+  const detectedHostIds = new Set(detectInstalledAgents().map((agent) => agent.id));
   const hostResult = (hostId: string): HostAdapterInstallResult =>
     hostInstalls.get(hostId) ?? {
       hostId,
@@ -354,7 +368,7 @@ export function buildInstallReport(
   // that are not part of a host slice (Trae user Skills, project-level rules).
   // Every write is idempotent, so the adapter pass above remains authoritative.
   // Silent during report build so `--json` is not polluted; human text comes from formatInstallLegacyText.
-  const skills = installAllSkills(undefined, () => undefined, workspaceRoot);
+  const skills = installAllSkills(undefined, () => undefined, workspaceRoot, { detectedHostIds });
   const mcp = installMcpToDetectedAgents({
     strategy: "npx",
     installScope: "user",
@@ -379,63 +393,43 @@ export function buildInstallReport(
   }
 
   const doctor = buildDoctorReport(workspaceRoot);
-  const mcpHasError = mcp.some((item) => item.status === "error");
-  const hooksHasError = claudeCodeHooks.status === "error";
-  const dshHasError = dshHarness.status === "error";
-  const hostHasError = [...hostInstalls.values()].some((item) => item.status === "error");
-  const skillHasError = [
+  const mcpErrors = mcp.filter((item) => item.status === "error");
+  const skillErrors = [
     ...skills.traeSkills,
     ...skills.cursorRules,
     ...skills.claudeMd,
     ...skills.agentInstructions,
     ...skills.agentSkills,
     ...skills.projectRules,
-  ].some((item) => item.status === "error");
-  const ok =
-    doctor.ok &&
-    !mcpHasError &&
-    !hooksHasError &&
-    !dshHasError &&
-    !hostHasError &&
-    globalConfig.status !== "error";
+  ].filter((item) => item.status === "error");
+
+  // Fatal: GraphFlow is not reachable from a host the user has. A host slice
+  // error counts only when that host's MCP entry is what doctor finds missing;
+  // otherwise it failed on an optional part (hooks, glue, skill, rules).
+  const doctorHostFailed = new Set(
+    doctor.hosts.filter((host) => host.verdict === "missing" || host.verdict === "partial").map((host) => host.hostId)
+  );
   const remediation: string[] = [];
-  if (!ok) {
-    if (globalConfig.status === "error") {
-      remediation.push(
-        `Fix global config creation at ${globalConfig.path}${globalConfig.message ? `: ${globalConfig.message}` : "."}`
-      );
-    }
-    if (mcpHasError) {
-      remediation.push("Re-run `graphflow install` after fixing MCP target paths for agents marked error.");
-    }
-    if (hooksHasError) {
-      remediation.push(
-        `Fix Claude Code hooks install at ${claudeCodeHooks.filePath ?? ""}${
-          claudeCodeHooks.message ? `: ${claudeCodeHooks.message}` : "."
-        }`
-      );
-    }
-    if (dshHasError) {
-      remediation.push(
-        `Fix DeepSeek Harness overlay at ${dshHarness.filePath ?? ""}${
-          dshHarness.message ? `: ${dshHarness.message}` : "."
-        }`
-      );
-    }
-    for (const result of hostInstalls.values()) {
-      if (result.status !== "error") continue;
-      if (result.hostId === DSH_HOST_ADAPTER_ID) continue; // covered above
-      remediation.push(
-        `Fix ${result.displayName} HostAdapter install${result.filePath ? ` at ${result.filePath}` : ""}${
-          result.message ? `: ${result.message}` : "."
-        }`
-      );
-    }
-    if (skillHasError) {
-      remediation.push("Inspect skill/rules targets marked error and ensure agent directories are writable.");
-    }
-    remediation.push(...doctor.remediation);
+  const warnings: string[] = [];
+  if (globalConfig.status === "error") {
+    remediation.push(
+      `Fix global config creation at ${globalConfig.path}${globalConfig.message ? `: ${globalConfig.message}` : "."}`
+    );
   }
+  for (const item of mcpErrors) {
+    remediation.push(`Fix MCP config for ${item.agentName} at ${item.configPath}${item.message ? `: ${item.message}` : "."}`);
+  }
+  for (const result of hostInstalls.values()) {
+    if (result.status !== "error") continue;
+    const text = `${result.displayName}${result.filePath ? ` (${result.filePath})` : ""}: ${result.message ?? "install error"}`;
+    if (doctorHostFailed.has(result.hostId)) remediation.push(`Fix ${text}`);
+    else warnings.push(text);
+  }
+  for (const item of skillErrors) {
+    warnings.push(`skill/rules ${item.target}: ${item.message ?? "error"}`);
+  }
+  if (!doctor.ok) remediation.push(...doctor.remediation);
+  const ok = globalConfig.status !== "error" && mcpErrors.length === 0 && doctor.ok && remediation.length === 0;
 
   return {
     command: "install",
@@ -452,6 +446,7 @@ export function buildInstallReport(
     doctor,
     ok,
     remediation,
+    warnings,
   };
 }
 
@@ -531,6 +526,10 @@ export function formatInstallLegacyText(report: InstallReport): string {
     `doctor ok=${report.doctor.ok} installed=${report.doctor.summary.installed} missing=${report.doctor.summary.missing} stale=${report.doctor.summary.stale} install ok=${report.ok}`
   );
 
+  for (const warning of report.warnings) {
+    lines.push(`[WARN] ${warning}`);
+  }
+
   if (report.remediation.length > 0) {
     lines.push("");
     lines.push("Remediation:");
@@ -568,8 +567,9 @@ export function runInit() {
     console.log(`[SKIP] Global config already exists: ${globalConfig.path}`);
   }
 
-  // 2. Install all skills/rules via skill-installer
-  installAllSkills(undefined, (message: string) => console.log(message), workspaceRoot);
+  // 2. Install skills/rules for the hosts present on this machine
+  const detectedHostIds = new Set(detectInstalledAgents().map((agent) => agent.id));
+  installAllSkills(undefined, (message: string) => console.log(message), workspaceRoot, { detectedHostIds });
 
   // 3. Bootstrap graph index
   void bootstrapGraphIndex(workspaceRoot).catch((error) => {
@@ -577,56 +577,72 @@ export function runInit() {
     console.warn(`[WARN] Bootstrap graph index skipped: ${message}`);
   });
 
-  console.log(`[FINISH] Initialization complete! Global config: ${join(homedir(), ".graphflow.config.json")}`);
+  console.log(`[FINISH] Initialization complete! Global config: ${resolveGlobalConfigPath()}`);
   console.log("[HINT] To run init on npm install, set GRAPHFLOW_ENABLE_POSTINSTALL=1");
-}
-
-export function runUninstall(workspaceRoot: string = process.cwd()) {
-  console.log("[START] Uninstalling GraphFlow (MCP + Skills + Rules + hooks)...");
-
-  // 1. Per-host removal through HostAdapter (every registry host).
-  //    Runs first so the per-host slice owns its own MCP / Skill / rules / hooks.
-  for (const hostId of HOST_ADAPTER_MIGRATED_IDS) {
-    const label = getHostAdapter(hostId)?.displayName ?? hostId;
-    const hostStatus = getHostAdapterInstallStatus(hostId);
-    if (!hostStatus?.detected) {
-      console.log(`[SKIP] ${label}: not detected`);
-      continue;
-    }
-    const hostUninstalled = uninstallViaHostAdapter(hostId);
-    const icon = hostUninstalled.status === "updated" ? "[REMOVED]" : "[SKIP]";
-    console.log(`${icon} ${label}: ${hostUninstalled.message ?? hostUninstalled.status}`);
-  }
-
-  // 2. Legacy sweep for anything not host-scoped (workspace MCP entries,
-  //    Trae user Skills, project-level rules, stray managed blocks).
-  const mcpResults = uninstallMcpFromDetectedAgents({ workspaceRoot });
-  for (const result of mcpResults) {
-    const icon = result.removed ? "[REMOVED]" : "[SKIP]";
-    const scope = result.scope ? ` (${result.scope})` : "";
-    console.log(`${icon} MCP ${result.agentName}${scope}: ${result.message}`);
-  }
-
-  const skillResults = uninstallAllSkillsAndRules(workspaceRoot);
-  let skillRemoved = 0;
-  for (const result of skillResults) {
-    if (!result.removed) continue;
-    skillRemoved += 1;
-    console.log(`[REMOVED] ${result.target}: ${result.path}`);
-  }
-  console.log(`[INFO] Skills/Rules removed: ${skillRemoved}/${skillResults.length} targets`);
-
-  console.log("[FINISH] Uninstall complete.");
-  console.log("[HINT] If you also installed the Agent Plugin, remove it in Cursor Customize / Plugins,");
-  console.log("       and delete any local symlink under ~/.cursor/plugins/local/graphflow.");
 }
 
 export interface UninstallReport {
   command: "uninstall";
+  hosts: Array<{ hostId: string; displayName: string; status: string; message?: string }>;
   mcp: McpRemoveResult[];
   skills: SkillUninstallResult[];
-  hooks?: { status: string; message?: string };
   ok: boolean;
+}
+
+/** Remove GraphFlow from every detected host. Pure: returns a report, prints nothing. */
+export function buildUninstallReport(workspaceRoot: string = process.cwd()): UninstallReport {
+  // 1. Per-host removal through HostAdapter (every registry host).
+  //    Runs first so the per-host slice owns its own MCP / Skill / rules / hooks.
+  const hosts: UninstallReport["hosts"] = [];
+  for (const hostId of HOST_ADAPTER_MIGRATED_IDS) {
+    const displayName = getHostAdapter(hostId)?.displayName ?? hostId;
+    if (!getHostAdapterInstallStatus(hostId)?.detected) {
+      hosts.push({ hostId, displayName, status: "skipped", message: "not detected" });
+      continue;
+    }
+    const result = uninstallViaHostAdapter(hostId);
+    hosts.push({
+      hostId,
+      displayName,
+      status: result.status,
+      ...(result.message !== undefined ? { message: result.message } : {}),
+    });
+  }
+
+  // 2. Legacy sweep for anything not host-scoped (workspace MCP entries,
+  //    Trae user Skills, project-level rules, stray managed blocks).
+  const mcp = uninstallMcpFromDetectedAgents({ workspaceRoot });
+  const skills = uninstallAllSkillsAndRules(workspaceRoot);
+  const ok = !hosts.some((host) => host.status === "error");
+  return { command: "uninstall", hosts, mcp, skills, ok };
+}
+
+export function formatUninstallLegacyText(report: UninstallReport): string {
+  const lines = ["[START] Uninstalling GraphFlow (MCP + Skills + Rules + hooks)..."];
+  for (const host of report.hosts) {
+    const icon = host.status === "updated" ? "[REMOVED]" : host.status === "error" ? "[ERROR]" : "[SKIP]";
+    lines.push(`${icon} ${host.displayName}: ${host.message ?? host.status}`);
+  }
+  for (const result of report.mcp) {
+    const icon = result.removed ? "[REMOVED]" : "[SKIP]";
+    const scope = result.scope ? ` (${result.scope})` : "";
+    lines.push(`${icon} MCP ${result.agentName}${scope}: ${result.message}`);
+  }
+  const removed = report.skills.filter((result) => result.removed);
+  for (const result of removed) {
+    lines.push(`[REMOVED] ${result.target}: ${result.path}`);
+  }
+  lines.push(`[INFO] Skills/Rules removed: ${removed.length}/${report.skills.length} targets`);
+  lines.push("[FINISH] Uninstall complete.");
+  lines.push("[HINT] If you also installed the Agent Plugin, remove it in Cursor Customize / Plugins,");
+  lines.push("       and delete any local symlink under ~/.cursor/plugins/local/graphflow.");
+  return lines.join("\n");
+}
+
+export function runUninstall(workspaceRoot: string = process.cwd()): UninstallReport {
+  const report = buildUninstallReport(workspaceRoot);
+  console.log(formatUninstallLegacyText(report));
+  return report;
 }
 
 export type DoctorCheckStatus = "installed" | "missing" | "n/a" | "stale";
@@ -647,11 +663,31 @@ export interface DoctorCheckItem {
    * conclusion.
    */
   message?: string;
+  /** HostAdapter id this check belongs to; the host verdict is computed from these checks only. */
+  hostId?: string;
+}
+
+export type DoctorHostVerdict = "installed" | "partial" | "missing" | "stale";
+
+export interface DoctorHostSummary {
+  hostId: string;
+  agent: string;
+  /**
+   * installed: every check installed (n/a ignored); missing: the MCP entry is
+   * missing; partial: MCP present but an extra (skill/hooks/rules) missing;
+   * stale: a check points at an outdated build.
+   */
+  verdict: DoctorHostVerdict;
+  installed: number;
+  missing: number;
+  stale: number;
 }
 
 export interface DoctorReport {
   command: "doctor";
   detectedAgents: Array<{ id: string; name: string }>;
+  /** One verdict per detected host, derived from that host's checks below. */
+  hosts: DoctorHostSummary[];
   checks: DoctorCheckItem[];
   summary: {
     total: number;
@@ -674,9 +710,12 @@ function toDoctorStatus(installed: boolean, detected = true): DoctorCheckStatus 
   return detected ? "missing" : "n/a";
 }
 
-function pushHostAdapterDoctorChecks(checks: DoctorCheckItem[], hostId: string): void {
+function pushHostAdapterDoctorChecks(allChecks: DoctorCheckItem[], hostId: string): void {
   const status = getHostAdapterInstallStatus(hostId);
   if (!status?.detected) return;
+  const checks = {
+    push: (...items: DoctorCheckItem[]) => allChecks.push(...items.map((item) => ({ ...item, hostId }))),
+  };
 
   // There is deliberately no "registered by plugin" special case for opencode
   // any more. It existed because this code once claimed opencode's plugin Hooks
@@ -786,15 +825,48 @@ function pushHostAdapterDoctorChecks(checks: DoctorCheckItem[], hostId: string):
   }
 
   if (hostId === DSH_HOST_ADAPTER_ID && status.patchPath) {
+    // `graphflow install` writes the MCP overlay only; the glue row ships with the
+    // dsh plugin package. Without the package the glue is not expected, so it
+    // is n/a rather than a failure `install` could never fix.
+    const glueExpected = status.packageInstalled === true || status.glueInstalled === true;
     checks.push({
       category: "hooks",
       agent: "DeepSeek Harness glue",
       path: `${status.patchPath}#${DSH_GLUE_ROW_ID}`,
       scope: "user",
-      status: toDoctorStatus(status.glueInstalled ?? false, true),
+      status: glueExpected ? toDoctorStatus(status.glueInstalled ?? false, true) : "n/a",
       detected: true,
+      ...(glueExpected
+        ? {}
+        : { message: "optional: installed by `dsh plugin --profile web add @roarpeng/graphflow`" }),
     });
   }
+}
+
+function summarizeHosts(checks: readonly DoctorCheckItem[]): DoctorHostSummary[] {
+  const byHost = new Map<string, DoctorCheckItem[]>();
+  for (const check of checks) {
+    if (!check.hostId) continue;
+    const list = byHost.get(check.hostId) ?? [];
+    list.push(check);
+    byHost.set(check.hostId, list);
+  }
+  return [...byHost.entries()].map(([hostId, items]) => {
+    const installed = items.filter((c) => c.status === "installed").length;
+    const missing = items.filter((c) => c.status === "missing").length;
+    const stale = items.filter((c) => c.status === "stale").length;
+    const mcpMissing = items.some((c) => c.category === "mcp" && c.status === "missing");
+    const verdict: DoctorHostVerdict =
+      stale > 0 ? "stale" : missing === 0 ? "installed" : mcpMissing || installed === 0 ? "missing" : "partial";
+    return {
+      hostId,
+      agent: getHostAdapter(hostId)?.displayName ?? hostId,
+      verdict,
+      installed,
+      missing,
+      stale,
+    };
+  });
 }
 
 export function buildDoctorReport(workspaceRoot: string = process.cwd()): DoctorReport {
@@ -818,7 +890,7 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
     });
   }
 
-  const globalConfigPath = join(homedir(), ".graphflow.config.json");
+  const globalConfigPath = resolveGlobalConfigPath();
   checks.push({
     category: "config",
     agent: "GraphFlow",
@@ -828,9 +900,11 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
     detected: true,
   });
 
-  for (const status of getTraeInstallStatus(workspaceRoot)) {
+  // Trae user Skills (only for Trae installs present on this machine). Antigravity's
+  // user Skill + MCP are covered by its HostAdapter checks below.
+  for (const status of getTraeInstallStatus()) {
     checks.push({
-      category: "project",
+      category: "skill",
       agent: status.agent,
       path: status.configPath,
       status: toDoctorStatus(status.installed, status.detected),
@@ -838,19 +912,11 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
     });
   }
 
-  for (const status of getAntigravityInstallStatus(workspaceRoot)) {
+  // Project files: exactly the set `install` writes for the detected hosts.
+  const detectedHostIds = new Set(agents.map((agent) => agent.id));
+  for (const status of getProjectLevelRuleStatus(workspaceRoot, { detectedHostIds })) {
     checks.push({
       category: "project",
-      agent: status.agent,
-      path: status.configPath,
-      status: toDoctorStatus(status.installed, status.detected),
-      detected: status.detected,
-    });
-  }
-
-  for (const status of getCopilotInstallStatus(workspaceRoot)) {
-    checks.push({
-      category: "instruction",
       agent: status.agent,
       path: status.configPath,
       status: toDoctorStatus(status.installed, true),
@@ -913,6 +979,7 @@ export function buildDoctorReport(workspaceRoot: string = process.cwd()): Doctor
   return {
     command: "doctor",
     detectedAgents: agents.map((a) => ({ id: a.id, name: a.name })),
+    hosts: summarizeHosts(checks),
     checks,
     summary: {
       total: checks.length,
@@ -944,15 +1011,23 @@ export function formatDoctorLegacyText(report: DoctorReport): string {
     );
   }
 
+  for (const host of report.hosts) {
+    lines.push(
+      `[HOST] ${host.agent}: ${host.verdict} (installed=${host.installed} missing=${host.missing}${host.stale ? ` stale=${host.stale}` : ""})`
+    );
+  }
+
   for (const check of report.checks) {
     const icon =
       check.status === "installed"
         ? "[INSTALLED]"
         : check.status === "missing"
           ? "[MISSING]"
-          : "[N/A]";
+          : check.status === "stale"
+            ? "[STALE]"
+            : "[N/A]";
     const scope = check.scope ? ` (${check.scope})` : "";
-    lines.push(`${icon} ${check.agent}${scope}: ${check.path}`);
+    lines.push(`${icon} ${check.agent}${scope}: ${check.path}${check.message ? ` — ${check.message}` : ""}`);
   }
 
   lines.push(
@@ -994,7 +1069,8 @@ export function runMcpRemove(agentId?: string) {
 async function bootstrapGraphIndex(workspaceRoot: string): Promise<void> {
   const { indexGraph } = await import("./runtime.js");
   const result = await indexGraph(workspaceRoot);
-  console.log(
+  // stderr: this lands after the command's result, which may be `--json` on stdout.
+  console.error(
     `[INDEX] Bootstrap complete: indexedFiles=${result.indexedFiles}; indexedSymbols=${result.indexedSymbols}`
   );
 }

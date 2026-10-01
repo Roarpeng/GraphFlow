@@ -337,6 +337,7 @@ export function installKimiCodeHost(options: { home?: string } = {}): KimiCodeHo
     installScope: "user",
     omitWorkspaceFolderPlaceholder: true,
     agentIdsOverride: ids.length > 0 ? ids : ["kimi-code"],
+    skipMissingHostRoots: true,
   });
   const rules = existsSync(home)
     ? installKimiAgentsMd(home)

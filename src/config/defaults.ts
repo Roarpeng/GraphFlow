@@ -104,12 +104,13 @@ export function getDefaultConfig(): GraphFlowConfig {
       limit: 20,
     },
     mcp: {
-      // 大响应（紧凑 JSON > 4KB）的 text 副本默认桩化，structuredContent 保持
-      // 全量；设 "full" 保留全量 text 副本（老客户端逃生门）。
-      // Oversized responses (compact JSON > 4KB) stub the text copy by default
-      // while structuredContent keeps the full data; set "full" to keep the
-      // full text copy (escape hatch for legacy clients).
-      textCopy: "auto",
+      // 默认 "full"：Cursor 等宿主只把 content[].text 交给模型，桩化会让
+      // 智能体拿不到上下文。"auto" 仅适合确认会渲染 structuredContent 的宿主。
+      // Default "full": hosts such as Cursor hand the model only
+      // content[].text, so stubbing left agents without context. "auto"
+      // (stub text copies > 4KB) is opt-in for hosts that render
+      // structuredContent.
+      textCopy: "full",
     },
     workerPolicy: {
       workerType: DEFAULT_WORKER_TYPE,

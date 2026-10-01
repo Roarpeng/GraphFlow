@@ -176,10 +176,8 @@ describe("HostAdapter profile-backed install slice", () => {
 
       const removed = uninstallViaHostAdapter("windsurf");
       expect(removed.status).toBe("updated");
-      const after = JSON.parse(readFileSync(mcpPath, "utf8")) as {
-        mcpServers?: Record<string, unknown>;
-      };
-      expect(after.mcpServers?.graphflow).toBeUndefined();
+      // The config held only GraphFlow's entry, so uninstall deletes it instead of leaving `{}`.
+      expect(existsSync(mcpPath)).toBe(false);
       expect(getHostAdapterInstallStatus("windsurf")?.mcpInstalled).toBe(false);
     } finally {
       if (prevProfile === undefined) delete process.env.USERPROFILE;

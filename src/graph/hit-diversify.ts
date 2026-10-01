@@ -77,9 +77,31 @@ function sourceFileForNode(node: GraphNode): string {
 }
 
 /**
- * Cap Symbol hits per source file and round-robin across files so a hub file
- * (e.g. useGameStore.ts) cannot monopolize the L1 package.
- * File / Module / other node types are preserved in encounter order (no cap).
+ * Copies of one file shipped under several roots (skills/x/SKILL.md,
+ * .trae/skills/x/SKILL.md, src/surfaces/.../SKILL.md) index to symbols with the
+ * same name hash and identical content; keep only the best-ranked copy. The id
+ * hash covers the symbol name only, so content must match too — two different
+ * index.ts files exporting the same name are not copies.
+ */
+function duplicateCopyKey(node: GraphNode, file: string): string | undefined {
+  if (node.type !== "Symbol" || file.startsWith("__node__:") || !node.content) {
+    return undefined;
+  }
+  const hash = node.id.slice(node.id.lastIndexOf(":") + 1);
+  if (!hash || hash === node.id) {
+    return undefined;
+  }
+  const base = file.slice(file.lastIndexOf("/") + 1);
+  // Content embeds the location ("... @skills/x/SKILL.md:249"), which differs per copy.
+  const body = node.content.replace(/@\S+:\d+/g, "");
+  return `${base}:${hash}:${body}`;
+}
+
+/**
+ * Cap Symbol hits per source file so a hub file (e.g. useGameStore.ts) cannot
+ * monopolize the L1 package. Retrieval order is preserved otherwise: File /
+ * Module nodes stay where they ranked instead of jumping ahead of better
+ * Symbol hits, which with a small L1 quota decided the whole package.
  */
 export function diversifyHitsBySourceFile(
   hits: GraphNode[],
@@ -90,56 +112,32 @@ export function diversifyHitsBySourceFile(
     return hits;
   }
 
-  const fileOrder: string[] = [];
-  const symbolsByFile = new Map<string, GraphNode[]>();
-  const nonSymbols: GraphNode[] = [];
-  const nonSymbolSeen = new Set<string>();
+  const perFile = new Map<string, number>();
+  const emitted = new Set<string>();
+  const copies = new Set<string>();
+  const diversified: GraphNode[] = [];
 
   for (const hit of hits) {
-    if (hit.type !== "Symbol") {
-      if (!nonSymbolSeen.has(hit.id)) {
-        nonSymbolSeen.add(hit.id);
-        nonSymbols.push(hit);
-      }
+    if (emitted.has(hit.id)) {
       continue;
     }
     const file = sourceFileForNode(hit) || hit.id;
-    if (!symbolsByFile.has(file)) {
-      symbolsByFile.set(file, []);
-      fileOrder.push(file);
-    }
-    symbolsByFile.get(file)!.push(hit);
-  }
-
-  const cappedByFile = new Map<string, GraphNode[]>();
-  for (const file of fileOrder) {
-    cappedByFile.set(file, (symbolsByFile.get(file) ?? []).slice(0, maxSymbols));
-  }
-
-  const diversified: GraphNode[] = [];
-  const emitted = new Set<string>();
-
-  // Emit non-symbols first (File anchors help sibling expansion seeds).
-  for (const node of nonSymbols) {
-    diversified.push(node);
-    emitted.add(node.id);
-  }
-
-  let round = 0;
-  let addedInRound = true;
-  while (addedInRound) {
-    addedInRound = false;
-    for (const file of fileOrder) {
-      const bucket = cappedByFile.get(file) ?? [];
-      const node = bucket[round];
-      if (!node || emitted.has(node.id)) {
+    const copyKey = duplicateCopyKey(hit, file);
+    if (copyKey) {
+      if (copies.has(copyKey)) {
         continue;
       }
-      diversified.push(node);
-      emitted.add(node.id);
-      addedInRound = true;
+      copies.add(copyKey);
     }
-    round += 1;
+    if (hit.type === "Symbol") {
+      const count = perFile.get(file) ?? 0;
+      if (count >= maxSymbols) {
+        continue;
+      }
+      perFile.set(file, count + 1);
+    }
+    diversified.push(hit);
+    emitted.add(hit.id);
   }
 
   return diversified;

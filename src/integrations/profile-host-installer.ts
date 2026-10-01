@@ -242,14 +242,20 @@ export interface ProfileHostInstallOptions {
   home?: string;
   /** Test hook: override the MCP profile ids (empty array = no agents, no writes). */
   agentIdsOverride?: readonly string[];
+  /** Configure the host even when none of its profiles is detected (`install --host <id>`). */
+  force?: boolean;
 }
 
-function mcpInstallOptions(spec: ProfileHostSpec, options: ProfileHostInstallOptions): McpInstallOptions {
+function mcpInstallOptions(
+  spec: ProfileHostSpec,
+  options: ProfileHostInstallOptions,
+  profileIds: readonly string[]
+): McpInstallOptions {
   return {
     strategy: "npx",
     installScope: "user",
-    agentIdsOverride:
-      options.agentIdsOverride !== undefined ? [...options.agentIdsOverride] : [...spec.profileIds],
+    agentIdsOverride: options.agentIdsOverride !== undefined ? [...options.agentIdsOverride] : [...profileIds],
+    skipMissingHostRoots: !options.force && options.agentIdsOverride === undefined,
     ...(spec.preferGlobalInstall ? { preferGlobalInstall: true } : {}),
   };
 }
@@ -265,7 +271,17 @@ export function installProfileHost(
   const spec = getProfileHostSpec(hostId);
   if (!spec) return undefined;
 
-  const mcp = installMcpToDetectedAgents(mcpInstallOptions(spec, options));
+  // Only hosts present on this machine get config files; `force` is the explicit
+  // opt-in for the rest. Writing an undetected host's config also creates its
+  // marker directory, which then makes every later run "detect" it.
+  const detectedIds = new Set(detectInstalledAgents().map((agent) => agent.id));
+  const detectedProfileIds = spec.profileIds.filter((id) => detectedIds.has(id));
+  if (detectedProfileIds.length === 0 && !options.force && options.agentIdsOverride === undefined) {
+    return { status: "skipped", message: `${getHostAdapter(hostId)?.displayName ?? hostId} not detected` };
+  }
+  const profileIds = detectedProfileIds.length > 0 ? detectedProfileIds : spec.profileIds;
+
+  const mcp = installMcpToDetectedAgents(mcpInstallOptions(spec, options, profileIds));
   const skills = spec.skillTargets ? skillParts(installSkillToTargets(spec.skillTargets)) : [];
   const instructions = spec.instructionTargets
     ? skillParts(installInstructionsToTargets(spec.instructionTargets))

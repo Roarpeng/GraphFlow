@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { extractEnvPlaceholderName } from "./secrets";
+import { readEnvVar } from "./env-lookup";
 import { validateGraphifyEndpoint } from "./graphify-endpoint";
 import type { GraphFlowConfig } from "./schema";
 import { getDefaultConfig, resolveMaxContextTokens, DEFAULT_OUTPUT_DIR } from "./defaults";
@@ -142,7 +143,7 @@ function checkEnvPlaceholders(config: GraphFlowConfig, issues: ValidationIssue[]
   let match: RegExpExecArray | null;
   while ((match = envVarRegex.exec(configStr)) !== null) {
     const envName = match[1];
-    if (envName && !process.env[envName]) {
+    if (envName && !readEnvVar(envName)) {
       issues.push({ severity: "warning", field: "env", message: `Environment variable ${envName} is not set` });
     }
   }
@@ -186,11 +187,21 @@ export function loadConfigSafe(path = "graphflow.config.json"): LoadConfigResult
   }
 }
 
-function resolveEnvTemplates(value: unknown): unknown {
+/**
+ * `apiKey` fields keep their `${VAR}` placeholder: every consumer resolves
+ * them lazily through resolveConfigSecret. Materializing here turned a var
+ * that was merely invisible at load time into `""` — which reads as "user
+ * cleared this key" — and settings saves then wrote the plaintext (or the
+ * empty string) back to disk, losing the reference.
+ */
+function resolveEnvTemplates(value: unknown, key?: string): unknown {
   if (typeof value === "string") {
     const envName = extractEnvPlaceholderName(value);
     if (envName) {
-      return process.env[envName] ?? "";
+      if (key === "apiKey") {
+        return value.trim();
+      }
+      return readEnvVar(envName) ?? "";
     }
     return value;
   }
@@ -201,7 +212,7 @@ function resolveEnvTemplates(value: unknown): unknown {
 
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value).map(([key, nested]) => [key, resolveEnvTemplates(nested)])
+      Object.entries(value).map(([nestedKey, nested]) => [nestedKey, resolveEnvTemplates(nested, nestedKey)])
     );
   }
 

@@ -12,19 +12,25 @@
  *     sync manually). For every task a small in-memory graph is seeded with the
  *     "golden" file node (the expected target), two token-overlapping
  *     distractor nodes, a module node, and one global decoy node.
- *   Phase 1 — history simulation (Arm A only): K historical tasks with lessons
- *     are fed through the REAL learning paths (applySkillLearning +
- *     recordEpisode), exactly like real runs.
- *   Phase 2 — per task, two configs on two identically-seeded graphs:
+ *   Phase 1 — history simulation (Arm A only): the task set is split
+ *     deterministically (even index = training split, odd index = held-out).
+ *     Only training-split history is fed through the REAL learning paths
+ *     (applySkillLearning + recordEpisode); any training entry that mentions
+ *     a held-out task's expected target is dropped, so no seeded experience
+ *     is derived from the answers that are scored.
+ *   Phase 2 — per HELD-OUT task, two configs on two identically-seeded graphs:
  *     Arm A (flywheel ON):  context preview package + suggestSkillHints +
  *                           findSimilarEpisodes (summarized for prompt)
  *     Arm B (flywheel OFF): context preview package only
  *
+ * This is a SYNTHETIC MECHANISM TEST on a hand-built graph, not an LLM
+ * task-success measurement; its numbers must not be quoted as success rates.
+ *
  * Metrics per config:
- *   - success proxy: expected golden target found within Top-K (K=5). The
- *     package anchors are the ranked retrieval channel (Top-K = first 5);
- *     for Arm A the injected hints + episode summaries are an additional
- *     channel an agent reads in full, so success counts either channel.
+ *   - target-surfaced proxy, IDENTICAL criterion for both arms: the golden
+ *     node id is within the package Top-K (K=5) anchors, OR an expected
+ *     target name appears in the arm's injected text (hints + episode
+ *     summaries). Arm B injects nothing, so only its package can pass.
  *   - hint injection rate / episode recall rate (fraction of tasks with >=1)
  *   - token overhead per task (gpt-tokenizer, gpt-4o encoding)
  *   - wall-clock per task
@@ -210,6 +216,63 @@ function targetFound(text: string, expectAny: string[]): boolean {
   return expectAny.some((needle) => lower.includes(needle.toLowerCase()));
 }
 
+/** The single success criterion applied to BOTH arms. */
+function targetSurfaced(
+  topKIds: readonly string[],
+  goldenId: string,
+  injectionText: string,
+  expectAny: string[]
+): boolean {
+  return topKIds.includes(goldenId) || targetFound(injectionText, expectAny);
+}
+
+interface HistoryEntry {
+  task: string;
+  lessons: string[];
+}
+
+/**
+ * Deterministic train / held-out split. HISTORY_TASKS[i] is the history of
+ * GOLDEN_TASKS[i]; only training-split history is seeded, and any training
+ * entry naming a held-out target is dropped so no seeded experience comes
+ * from the answers being scored.
+ */
+function splitTasksAndHistory(): {
+  train: GoldenTaskFixture[];
+  heldOut: GoldenTaskFixture[];
+  history: HistoryEntry[];
+  leakageDropped: number;
+} {
+  const decoy = HISTORY_TASKS[HISTORY_TASKS.length - 1]!;
+  const aligned = HISTORY_TASKS.slice(0, -1);
+  if (aligned.length !== GOLDEN_TASKS.length) {
+    throw new Error(
+      `skill-ab: HISTORY_TASKS (${aligned.length} + decoy) must align 1:1 with GOLDEN_TASKS (${GOLDEN_TASKS.length})`
+    );
+  }
+  const train: GoldenTaskFixture[] = [];
+  const heldOut: GoldenTaskFixture[] = [];
+  const trainHistory: HistoryEntry[] = [];
+  GOLDEN_TASKS.forEach((task, i) => {
+    if (i % 2 === 0) {
+      train.push(task);
+      trainHistory.push(aligned[i]!);
+    } else {
+      heldOut.push(task);
+    }
+  });
+  const heldOutNeedles = heldOut.flatMap((t) => [t.module, ...t.expectAny]);
+  const history = trainHistory.filter(
+    (h) => !targetFound(`${h.task} ${h.lessons.join(" ")}`, heldOutNeedles)
+  );
+  return {
+    train,
+    heldOut,
+    history: [...history, decoy],
+    leakageDropped: trainHistory.length - history.length,
+  };
+}
+
 function queryTokens(query: string): string[] {
   return query.toLowerCase().split(/[^a-z0-9]+/g).filter((t) => t.length >= 3);
 }
@@ -252,8 +315,8 @@ async function seedBaseGraph(client: GraphClient, tasks: readonly GoldenTaskFixt
 // `InMemoryGraphClientAdapter` (client-factory.ts, not exported) wraps; it
 // structurally implements the full `GraphClient` interface, so it is used
 // directly here — the same code path the existing skill benchmark uses.
-async function seedHistory(client: GraphClient): Promise<void> {
-  for (const item of HISTORY_TASKS) {
+async function seedHistory(client: GraphClient, history: readonly HistoryEntry[]): Promise<void> {
+  for (const item of history) {
     const run = { status: "COMPLETED" as const, attempts: 1, feedback: "done" };
     await applySkillLearning(client, item.task, run, item.lessons);
     await recordEpisode(client, {
@@ -302,7 +365,7 @@ export interface SkillAbTaskResult {
   task: string;
   module: string;
   direct: boolean;
-  /** Arm B (flywheel OFF): golden target within Top-K of the package anchors. */
+  /** Arm B (flywheel OFF): target surfaced under the shared criterion (package only; no injection). */
   successB: boolean;
   pkgTop5B: boolean;
   pkgTokensB: number;
@@ -326,8 +389,15 @@ export interface SkillAbTaskResult {
 }
 
 export interface SkillAbReport {
+  /** Synthetic mechanism test on a hand-built graph; not an LLM task-success rate. */
+  kind: "synthetic-mechanism-test";
+  evaluation: "held-out-split";
   k: number;
+  /** Held-out tasks evaluated (successRate* denominators). */
   taskCount: number;
+  trainTaskCount: number;
+  historySeeded: number;
+  leakageDropped: number;
   indirectCount: number;
   successRateA: number;
   successRateB: number;
@@ -352,39 +422,39 @@ export interface SkillAbReport {
 }
 
 export async function runSkillAbBenchmark(): Promise<SkillAbReport> {
-  const tasks = [...GOLDEN_TASKS];
-  if (tasks.length < 20) {
+  if (GOLDEN_TASKS.length < 20) {
     throw new Error(
-      `skill-ab: expected >=20 golden tasks (mirroring the retrieval-golden suite), got ${tasks.length}`
+      `skill-ab: expected >=20 golden tasks (mirroring the retrieval-golden suite), got ${GOLDEN_TASKS.length}`
     );
   }
+  const split = splitTasksAndHistory();
+  const tasks = split.heldOut;
 
   const startedAt = performance.now();
 
-  // Two identically-seeded graphs; Arm A additionally accumulates the real
-  // learning history (skills + episodes) so hints/episodes exist to inject.
+  // Two identically-seeded graphs (all tasks' nodes); Arm A additionally
+  // accumulates the training-split learning history (skills + episodes).
   const clientB = new GraphifyClient() as GraphClient;
   const clientA = new GraphifyClient() as GraphClient;
-  await seedBaseGraph(clientB, tasks);
-  await seedBaseGraph(clientA, tasks);
-  await seedHistory(clientA);
+  await seedBaseGraph(clientB, GOLDEN_TASKS);
+  await seedBaseGraph(clientA, GOLDEN_TASKS);
+  await seedHistory(clientA, split.history);
 
   const rows: SkillAbTaskResult[] = [];
 
   for (const task of tasks) {
-    // The golden target is the seeded node; retrieval success means its anchor
-    // id ranks within the Top-K package window (id membership — precise, no
-    // substring false positives from distractor/decoy nodes).
+    // Package hits use golden node id membership (precise, no substring false
+    // positives from distractor/decoy nodes); injected text names modules, so
+    // it uses the expectAny substring check. Both arms go through
+    // targetSurfaced with their own channels.
     const goldenId = `file:src/golden/${task.module}.ts`;
 
     // Arm B: context preview package only.
     const pkgB = await buildContextPackage(clientB, task.query);
     const pkgTop5B = pkgB.topKIds.includes(goldenId);
-    const successB = pkgTop5B;
+    const successB = targetSurfaced(pkgB.topKIds, goldenId, "", task.expectAny);
 
-    // Arm A: package + skill hints + episode summaries. Injected hints and
-    // episode summaries reference modules by NAME (not node id), so the
-    // injection channel uses the expectAny substring check.
+    // Arm A: package + skill hints + episode summaries.
     const pkgA = await buildContextPackage(clientA, task.query);
     const hints = await suggestSkillHints(clientA, task.query, MAX_HINTS);
     const episodes = await findSimilarEpisodes(clientA, task.query, MAX_EPISODES);
@@ -397,14 +467,14 @@ export async function runSkillAbBenchmark(): Promise<SkillAbReport> {
     const injectionText = [hintText, episodeText].filter(Boolean).join("\n");
     const injectionHit = targetFound(injectionText, task.expectAny);
     const pkgTop5A = pkgA.topKIds.includes(goldenId);
-    const successA = pkgTop5A || injectionHit;
+    const successA = targetSurfaced(pkgA.topKIds, goldenId, injectionText, task.expectAny);
 
     rows.push({
       task: task.query,
       module: task.module,
       direct: task.direct,
       successB,
-      pkgTop5B: successB,
+      pkgTop5B,
       pkgTokensB: pkgB.tokenEstimate,
       pkgItemsB: pkgB.items.length,
       successA,
@@ -442,8 +512,13 @@ export async function runSkillAbBenchmark(): Promise<SkillAbReport> {
   const decoyInjected = rows.filter((r) => r.decoyInjected).length;
 
   return {
+    kind: "synthetic-mechanism-test",
+    evaluation: "held-out-split",
     k: TOP_K,
     taskCount: n,
+    trainTaskCount: split.train.length,
+    historySeeded: split.history.length,
+    leakageDropped: split.leakageDropped,
     indirectCount: tasks.filter((t) => !t.direct).length,
     successRateA: Math.round((successA / n) * 1000) / 1000,
     successRateB: Math.round((successB / n) * 1000) / 1000,
@@ -483,23 +558,31 @@ function renderMarkdown(report: SkillAbReport): string {
   const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
   return `<!-- BEGIN P1-2 SKILL-AB BENCHMARK -->
-## Skill-Flywheel End-to-End A/B Benchmark — Results (P1-2)
+## Skill-Flywheel A/B — Synthetic Mechanism Test (P1-2)
 
 > Appended by \`npm run benchmark:ab\` (\`benchmarks/run-skill-ab.ts\`).
 > Last run: ${new Date().toISOString()}
 > Structured JSON: \`benchmarks/.cache/skill-ab-results.json\`
 
+> **Synthetic mechanism test, not a task-success rate.** The graph, the tasks and
+> the historical experience are hand-built; no LLM executes anything. Both arms
+> are scored with one identical criterion, and Arm A's seeded history comes only
+> from a disjoint training split (entries naming a held-out target are dropped).
+> Quote these numbers only as "does recall of prior experience transfer to unseen
+> tasks in this toy setup", never as "the flywheel raises success to X%".
+
 ## Summary
 
-${report.taskCount} retrieval-golden tasks (${report.indirectCount} "indirect": the
-golden module name is morphologically distinct from the query words, e.g.
-"orchestrate" vs \`orchestrator\`), run end-to-end on an in-memory graph seeded
-with the golden target, distractors and a decoy. Arm A additionally simulates
-${HISTORY_TASKS.length} historical tasks through the real learning paths.
+${report.taskCount} HELD-OUT retrieval-golden tasks (odd indices; ${report.indirectCount} "indirect":
+the golden module name is morphologically distinct from the query words, e.g.
+"orchestrate" vs \`orchestrator\`), run on an in-memory graph seeded with every
+task's golden target, distractors and a decoy. Arm A additionally learns
+${report.historySeeded} historical tasks (from the ${report.trainTaskCount}-task training split, incl. 1 decoy;
+${report.leakageDropped} training entries dropped because they named a held-out target).
 
 | Metric | Arm A (flywheel ON) | Arm B (flywheel OFF) |
 | --- | --- | --- |
-| **Success proxy** (golden target within Top-${report.k}) | **${pct(report.successRateA)}** (${report.tasks.filter((t) => t.successA).length}/${report.taskCount}) | **${pct(report.successRateB)}** (${report.tasks.filter((t) => t.successB).length}/${report.taskCount}) |
+| **Target surfaced** (same criterion both arms: golden id in package Top-${report.k}, or target named in injected text) | **${pct(report.successRateA)}** (${report.tasks.filter((t) => t.successA).length}/${report.taskCount}) | **${pct(report.successRateB)}** (${report.tasks.filter((t) => t.successB).length}/${report.taskCount}) |
 | Success via package Top-${report.k} only | ${pct(report.pkgTop5RateA)} | ${pct(report.pkgTop5RateB)} |
 | Tasks rescued by flywheel (B miss → A hit) | ${report.rescued} | — |
 | Tasks hurt by flywheel (B hit → A miss) | ${report.hurt} | — |
@@ -515,29 +598,30 @@ ${HISTORY_TASKS.length} historical tasks through the real learning paths.
 
 ## Per-task detail
 
-| Task | Golden module | Direct | Top-${report.k} (B) | Success (A) | Pkg Top-${report.k} (A) | Injection hit (A) | Hints | Episodes | Overhead tokens |
+| Task | Golden module | Direct | Surfaced (B) | Surfaced (A) | Pkg Top-${report.k} (A) | Injection hit (A) | Hints | Episodes | Overhead tokens |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 ${rows}
 
 ## Methodology & honest caveats
 
+- **Kind**: synthetic mechanism test on a hand-built in-memory graph. No LLM runs
+  and nothing is executed, so this is not a task-success rate.
 - **Task set** is duplicated from \`tests/retrieval-golden.test.ts\` GOLDEN_SET
   (that file is owned by another agent and is not modified). Each task's
   golden node id (\`file:src/golden/<module>.ts\`) contains an \`expectAny\`
   alternative verbatim.
-- **Success proxy**: Top-K = the first ${TOP_K} ranked anchors of the compressed
-  context package (the retrieval channel); success there means the **golden
-  node id** is within those ${TOP_K} anchors (precise id membership — avoids
-  substring false positives from distractor/decoy nodes). For Arm A, the
-  injected hints + episode summaries form an additional channel an agent reads
-  in full; hints/episodes reference modules by **name**, so injection success
-  is the \`expectAny\` substring check. Arm A success = package Top-${TOP_K} hit
-  **or** injection hit. The package-only hit rate is reported separately for a
-  like-for-like retrieval comparison.
-- **Arm B success is deliberately imperfect**: for the ${report.indirectCount}
-  indirect tasks the golden file shares zero tokens with the query (realistic:
-  module names are morphologically different from task wording), so pure
-  retrieval cannot find it — prior episodic experience is the only bridge.
+- **Split**: even-index tasks form the training split whose history is seeded
+  into Arm A; odd-index tasks are held out and are the only tasks scored.
+  Training entries that mention any held-out \`expectAny\` / module name are
+  dropped, so the seeded experience is not derived from the scored answers.
+  Earlier versions seeded one history entry per scored task, written from the
+  answer key — those "100% vs 61.5%" numbers are superseded.
+- **One criterion for both arms**: a task passes when the golden node id is
+  within the first ${TOP_K} package anchors, OR an \`expectAny\` target name appears
+  in the arm's injected text (hints + episode summaries). Arm B injects nothing,
+  so only its package can pass; the package-only rate is reported separately.
+- For indirect tasks the golden node shares zero tokens with the query, so
+  package retrieval alone cannot find it in either arm.
 - Both arms run through the **real** retrieval and learning paths
   (\`buildEnhancedContextPackage\`, \`applySkillLearning\`, \`recordEpisode\`,
   \`suggestSkillHints\`, \`findSimilarEpisodes\`, \`summarizeEpisodeForPrompt\`)
@@ -546,10 +630,9 @@ ${rows}
   benchmark. Hashing is the project's DJB2a (FNV-class) — fully deterministic
   within a run; episode ids embed \`Date.now()\` so ids differ across runs, but
   ranking depends on tokens/scores, not ids.
-- This measures a mechanical success proxy, not LLM task completion. It
-  validates that the flywheel's injected context and graph nodes move the
-  needle on finding the expected target, and quantifies the exact token and
-  wall-clock cost.
+- This measures a mechanical target-surfaced proxy, not LLM task completion or
+  answer quality. It reports whether training-split experience transfers to
+  unseen tasks in this toy setup, plus the exact token and wall-clock cost.
 <!-- END P1-2 SKILL-AB BENCHMARK -->`;
 }
 
@@ -570,11 +653,14 @@ function writeResultsMarkdown(markdown: string): void {
 }
 
 async function main(): Promise<void> {
-  process.stdout.write("GraphFlow skill-flywheel end-to-end A/B benchmark (P1-2)\n");
+  process.stdout.write("GraphFlow skill-flywheel A/B — synthetic mechanism test (P1-2; not a task-success rate)\n");
   process.stdout.write(`Task set: ${GOLDEN_TASKS.length} retrieval-golden queries (duplicated from tests/retrieval-golden.test.ts)\n`);
-  process.stdout.write(`History (Arm A): ${HISTORY_TASKS.length} tasks (incl. 1 decoy)\n\n`);
 
   const report = await runSkillAbBenchmark();
+  process.stdout.write(
+    `Split: ${report.trainTaskCount} train / ${report.taskCount} held-out; history seeded (Arm A): ` +
+      `${report.historySeeded} (incl. 1 decoy), ${report.leakageDropped} dropped for naming a held-out target\n\n`
+  );
 
   mkdirSync(dirname(JSON_PATH), { recursive: true });
   // Machine-readable artifact with reproducibility envelope (commit + date).
@@ -588,7 +674,7 @@ async function main(): Promise<void> {
   const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
   process.stdout.write("=".repeat(64) + "\n");
   process.stdout.write(
-    `success A(on)=${pct(report.successRateA)}  B(off)=${pct(report.successRateB)}  ` +
+    `held-out target-surfaced A(on)=${pct(report.successRateA)}  B(off)=${pct(report.successRateB)}  ` +
       `rescued=${report.rescued}  hurt=${report.hurt}\n`
   );
   process.stdout.write(

@@ -72,16 +72,24 @@ GraphFlow 2.x 效率决策层的落地包（v0.1：schema + 合同 + 纯函数�
 ## 命令行与基准运行（CLI & Benchmark）
 
 ### 1. 独立 eff-agent CLI
+
+本包是 `private: true`，**未发布到 npm**，`npx eff-agent` 会失败。请在仓库根目录 `npm install` 后从源码运行：
+
 ```bash
+# 查看用法
+npx tsx packages/efficiency-agent/bin/eff-agent.ts --help
+
 # 运行单个任务（Broker 真实调度）
-npx eff-agent run "修复某个模块的类型报错" --worker=jev --policy=conservative
+npx tsx packages/efficiency-agent/bin/eff-agent.ts run "修复某个模块的类型报错" --worker=jev --policy=conservative
 
 # 运行真实模型基准
-npx eff-agent bench run benchmarks/eff-tasks-v1.jsonl --worker=jev --mode=shadow
+npx tsx packages/efficiency-agent/bin/eff-agent.ts bench run packages/efficiency-agent/benchmarks/eff-tasks-v1.jsonl --worker=jev --mode=shadow
 
 # 严格 R1-R6 溯源门禁 A/B 比较
-npx eff-agent bench compare baseline.jsonl shadow.jsonl
+npx tsx packages/efficiency-agent/bin/eff-agent.ts bench compare baseline.jsonl shadow.jsonl
 ```
+
+真实 A/B 的 token 数来自 provider usage，但**不测回答质量**（成功判据仅为非空回答），且每臂只跑一次；引用 token 节省时请同时写明样本量与这一限制（见 `benchmarks/REAL-AB-RESULTS.md`）。
 
 ### 2. 仓库内部基准脚本（含真实 Worker 臂）
 ```bash

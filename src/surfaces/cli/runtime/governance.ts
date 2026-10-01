@@ -320,10 +320,10 @@ export function releaseGate(
       },
     ];
     const failures = checks.flatMap((check) => {
-      if ("required" in check && check.actual < check.required) {
+      if (check.required !== undefined && check.actual < check.required) {
         return [`${check.name}: ${check.actual} < ${check.required}`];
       }
-      if ("maximum" in check && check.actual > check.maximum) {
+      if (check.maximum !== undefined && check.actual > check.maximum) {
         return [`${check.name}: ${check.actual} > ${check.maximum}`];
       }
       return [];
@@ -351,10 +351,10 @@ export function releaseGate(
     },
   ];
   const failures = checks.flatMap((check) => {
-    if ("required" in check && check.actual < check.required) {
+    if (check.required !== undefined && check.actual < check.required) {
       return [`${check.name}: ${check.actual} < ${check.required}`];
     }
-    if ("maximum" in check && check.actual > check.maximum) {
+    if (check.maximum !== undefined && check.actual > check.maximum) {
       return [`${check.name}: ${check.actual} > ${check.maximum}`];
     }
     return [];
