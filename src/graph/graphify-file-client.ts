@@ -899,7 +899,16 @@ export class GraphifyFileClient {
         (e) => !(e.from === from && e.to === to && e.relation === relation)
       ),
     };
-    if (this.tryAppendDelta(entry, { op: "delete", edges: [{ from, to, relation }] }, next, null)) {
+    if (
+      this.tryAppendDelta(
+        entry,
+        { op: "delete", edges: [{ from, to, relation }] },
+        next,
+        null,
+        // Edge-only delete: node tokens are untouched, keep the index alive.
+        { oldNodes: [], newNodes: [] }
+      )
+    ) {
       return;
     }
     this.writeStore(next, null);

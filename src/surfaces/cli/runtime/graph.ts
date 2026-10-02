@@ -383,9 +383,25 @@ let pendingVectorPass: AbortController | undefined;
 let pendingVectorTarget:
   | { client: GraphClient; provider: import("../../../learning/embeddings").EmbeddingProvider }
   | undefined;
+/** True while a deferred embedding pass is executing on pendingVectorTarget's client. */
+let vectorPassInFlight = false;
 
 export function setPreviewVectorsAfterReply(enabled: boolean): void {
   previewVectorsAfterReply = enabled;
+}
+
+/**
+ * Release the vector subsystem's ownership of a superseded target client.
+ * The deferred pass hands the preview client here instead of closing it (the
+ * pass may still run); when a NEWER preview replaces the target, the old
+ * client must not be left to the GC — in a resident MCP server every
+ * indexed preview leaked exactly one sqlite handle (EBUSY-locked WAL on
+ * Windows, live-reproduced). If a pass is mid-flight on it, the pass's own
+ * finally closes it once done; otherwise close now.
+ */
+function releaseVectorTargetClient(client: GraphClient): void {
+  if (vectorPassInFlight) return; // pass finally will close it
+  closeGraphClientQuietly(client);
 }
 
 function scheduleVectorPass(): void {
@@ -398,6 +414,7 @@ function scheduleVectorPass(): void {
   const timer = setTimeout(() => {
     if (controller.signal.aborted) return;
     const priorityIds = new Set(pendingVectorIds);
+    vectorPassInFlight = true;
     void ensureEmbeddings(client, provider, {
       signal: controller.signal,
       priorityIds,
@@ -407,7 +424,14 @@ function scheduleVectorPass(): void {
       .then(() => {
         if (!controller.signal.aborted) for (const id of priorityIds) pendingVectorIds.delete(id);
       })
-      .catch((error) => logger.warn({ error }, "Deferred embedding pass failed"));
+      .catch((error) => logger.warn({ error }, "Deferred embedding pass failed"))
+      .finally(() => {
+        vectorPassInFlight = false;
+        // Superseded while we ran: nobody else will ever close this client.
+        if (pendingVectorTarget?.client !== client) {
+          closeGraphClientQuietly(client);
+        }
+      });
   }, 250);
   timer.unref?.();
 }
@@ -461,6 +485,9 @@ async function refreshIndexForPreview(config: GraphFlowConfig, graphClient: Grap
     },
   });
   await indexWorkspaceFiles(recording, root, { ...structuralOptions, ...force });
+  if (pendingVectorTarget && pendingVectorTarget.client !== graphClient) {
+    releaseVectorTargetClient(pendingVectorTarget.client);
+  }
   pendingVectorTarget = { client: graphClient, provider };
   return true;
 }
@@ -476,11 +503,18 @@ export async function warmContextPreview(rootDir: string, configPath?: string): 
   await import("../../../core/triage.js");
   await import("../../../graph/context-slicer.js");
   const graphClient = createGraphClient(config);
-  if (config.graphPolicy.autoIndexOnPreview) {
-    await refreshIndexForPreview(config, graphClient);
+  // refreshIndexForPreview may hand the client to the deferred vector pass —
+  // in that case the vector subsystem owns closing it; otherwise we close it.
+  let handedOff = false;
+  try {
+    if (config.graphPolicy.autoIndexOnPreview) {
+      handedOff = await refreshIndexForPreview(config, graphClient);
+    }
+    await createEmbeddingProviderFromConfig(config)?.embed("warmup");
+    estimateTokens("warmup");
+  } finally {
+    if (!handedOff) closeGraphClientQuietly(graphClient);
   }
-  await createEmbeddingProviderFromConfig(config)?.embed("warmup");
-  estimateTokens("warmup");
 }
 
 export async function previewContext(

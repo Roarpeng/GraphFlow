@@ -888,12 +888,21 @@ function installMcpProcessGuards(server: McpServer): (reason: string) => void {
     }
     shuttingDown = true;
     console.error(`[GraphFlow MCP] Received ${signal}, shutting down gracefully...`);
-    void server.sdkServer
-      .close()
-      .catch(() => {
+    void (async () => {
+      // Release graph handles (incl. the deferred-vector target client, which
+      // nothing else owns once no further preview arrives) before exit so WAL
+      // files are not left EBUSY-locked on Windows.
+      try {
+        const { closeAllGraphClients } = await import("../../graph/client-factory.js");
+        await closeAllGraphClients();
+      } catch {
+        // Best-effort handle release.
+      }
+      await server.sdkServer.close().catch(() => {
         // Best-effort close; fall through to exit.
-      })
-      .finally(() => process.exit(0));
+      });
+      process.exit(0);
+    })();
     setTimeout(() => process.exit(0), 1000).unref();
   };
   process.on("SIGTERM", () => shutdown("SIGTERM"));

@@ -16,8 +16,6 @@ import { GraphifyFileClient } from "../src/graph/graphify-file-client";
 function makeLargeStore(): { root: string; client: GraphifyFileClient } {
   const root = mkdtempSync(join(tmpdir(), "gf-idxpatch-"));
   const storePath = join(root, "graph.json");
-  // Base store must exceed GRAPH_STORE_DELTA_MIN_BASE_BYTES so upserts take
-  // the delta path (the fix only matters there).
   const filler = "lorem ipsum filler content ".repeat(200);
   const nodes = Array.from({ length: 60 }, (_, i) => ({
     id: `file:src/mod${i}.ts`,
@@ -25,13 +23,26 @@ function makeLargeStore(): { root: string; client: GraphifyFileClient } {
     content: `module${i} unique${i}token ${filler}`,
   }));
   writeFileSync(storePath, JSON.stringify({ nodes, edges: [] }), "utf8");
-  return { root, client: new GraphifyFileClient(storePath) };
+  // Lower the delta-path thresholds so this small store still takes the
+  // DELTA route (the production default is 4MB base / 2MB log — at that size
+  // the first commit of this test silently exercised the full-rewrite path
+  // and never ran patchIndexInPlace at all; caught in review round 2).
+  return { root, client: new GraphifyFileClient(storePath, { deltaMinBaseBytes: 1024, deltaCompactBytes: 64 * 1024 }) };
 }
 
 describe("file store inverted index survives small incremental writes", () => {
   it("keyword queries work after an upsert without a full rebuild (old tokens gone, new tokens hit)", async () => {
     const { root, client } = makeLargeStore();
     try {
+      // The delta log must exist: the upserts below take the delta path.
+      const { existsSync } = await import("node:fs");
+      await client.upsertNodes([
+        { id: "dialogue:s0:0000", type: "Decision", content: "prime delta path" },
+      ]);
+      if (!existsSync(join(root, "graph.json.delta.jsonl"))) {
+        throw new Error("test setup failed: upserts did not take the delta path");
+      }
+
       // Prime the inverted index.
       const before = await client.queryByKeyword("unique7token");
       expect(before.map((n) => n.id)).toContain("file:src/mod7.ts");

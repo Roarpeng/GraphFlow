@@ -11,6 +11,13 @@ All notable changes to this project are documented in this file.
 - **file 传输倒排索引增量修补（Wave 2，读路径写放大）**:preview 的自身写（对话轮/workbench topic）走 delta 追加时不再把倒排索引置 null——按被触及节点的旧 token 删除/新 token 插入原地修补，成本 O(触及节点 token) 而非全店重分词 O(n×content)；删除节点同样修补。全量重写路径保持原语义。与全量重建的等价性有测试背书。
 - **两个无界增长文件（P1）**:`token-savings.json` records 环形上限 2000 条（存量超限文件下次写入自愈；被截明细的聚合计数折入持久化 `truncatedPrefix`，累计统计与全量日志完全一致）；`.graphflow/mcp-http-audit.jsonl` 追加改用进程内尾条缓存（size 未变即用缓存 seq/prevHash，连续追加零全量读；哈希链语义逐字节不变，`resetAuditTailCache` 测试钩子）。
 
+### Fixed — 第二轮复审修复（Wave 3）
+
+- **deferred 向量路径的图客户端所有权闭环（复审 #1，高）**：preview 触发索引时若把 client 移交给延迟 embedding pass，此前无人再关闭它——常驻 MCP server 每个 preview 泄漏一个 sqlite 句柄（Windows 上 WAL 文件 EBUSY 锁定，探针实证）。现在：pass 完成时若已被更新 target 取代则自行关闭；`refreshIndexForPreview` 覆盖 target 时释放旧 client（pass 进行中则留给其 finally）；`warmContextPreview` 尊重移交布尔值并在 finally 关闭自有 client；**server 优雅停机新增 `closeAllGraphClients()`**（SIGTERM/SIGINT/stdin EOF 路径），退出前释放全部图句柄。
+- **`m-index-patch` 测试空转修正（复审 #2，中）**：首版测试的 store 仅 328KB（< 4MB delta 阈值），`patchIndexInPlace` 从未被执行——改用构造选项 `deltaMinBaseBytes: 1024` 压低阈值并加"delta 文件必须存在"守卫，测试现在真正覆盖增量修补路径（修补正确性已由复审的 >4MB 探针独立背书）。
+- **git 失败结果不再入 5s 缓存（复审 #3，低）**：broken repo 修复后最长 5s 仍用非 gitignore walk 的陈旧失败缓存——现在 `status!==0` 与 spawn 异常同样不记忆化，下次调用即重试。
+- **`deleteEdge` 保留倒排索引（复审 #5 项，info→修）**：边删除不触及任何节点 token，补空 patch 使索引免于全量重建。
+
 ### Fixed — TS/JS AST 索引依赖与降级可观测
 
 - **`typescript`(`^6.0.3`)进入 `optionalDependencies`**:此前仅存在于 devDependencies,npm 全局/npx

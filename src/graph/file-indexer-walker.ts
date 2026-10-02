@@ -172,6 +172,12 @@ export function readGitVisibleFiles(rootDir: string): Set<string> | undefined {
     // next call retries git instead of locking in the fallback walk for a TTL.
     return undefined;
   }
+  // A git FAILURE (broken repo, status !== 0) is not memoized either: caching
+  // undefined locked in the non-gitignore-aware walk for the whole TTL even
+  // after the repo was repaired (review round 2 probe). Retry next call.
+  if (visible === undefined) {
+    return undefined;
+  }
   gitVisibleCache.set(rootDir, { visible, at: Date.now() });
   return visible;
 }
