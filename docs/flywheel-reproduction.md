@@ -85,10 +85,10 @@ train / held-out split, drop training history that names a held-out target, and
 apply one criterion to both arms — which shows no transfer (skill) or a small
 regression (memory: 3 tasks hurt because history nodes shift package ranking).
 
-An independent retrieval audit on 15 held-out English queries measured
-file-level Hit@5 = 80% and MRR = 0.61 (a plain BM25 baseline: 73% / 0.68);
-Chinese queries hit only when the agent supplies `englishQuery` (5/5 with it,
-0/5 without). The 100% golden-set figure above does not generalize.
+The pinned held-out evidence lives in
+[`benchmarks/flywheel-proof-claims.json`](../benchmarks/flywheel-proof-claims.json):
+the v2.0.3 20-query held-out audit measured Hit@5 65% (BM25 baseline 90%) and
+2/5 on Chinese queries. The 100% golden-set figure above does not generalize.
 
 Retrieval was re-baselined on 2026-09-19 (v1.24-era corpus): the
 self-referential `src/` corpus grew through v1.12→v1.24, which shifts rank

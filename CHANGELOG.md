@@ -18,6 +18,10 @@ All notable changes to this project are documented in this file.
 - **git 失败结果不再入 5s 缓存（复审 #3，低）**：broken repo 修复后最长 5s 仍用非 gitignore walk 的陈旧失败缓存——现在 `status!==0` 与 spawn 异常同样不记忆化，下次调用即重试。
 - **`deleteEdge` 保留倒排索引（复审 #5 项，info→修）**：边删除不触及任何节点 token，补空 patch 使索引免于全量重建。
 
+### Fixed — 承诺核验收口（round 3 verification）
+
+- **中文查询口径对齐到有工件的证据**：README（英/中）与 docs/flywheel-reproduction.md 中 "englishQuery 提供 5/5、不提供 0/5" 的断言无仓库工件支撑，且与权威冻结目录 `benchmarks/flywheel-proof-claims.json` 记载的 v2.0.3 held-out 审计（中文查询 2/5）冲突——三处全部改为引用该 commit 锚定目录；flywheel-reproduction.md 同时移除无工件的 "15-query independent audit" 段，替换为 claims 目录的实测口径。
+
 ### Fixed — TS/JS AST 索引依赖与降级可观测
 
 - **`typescript`(`^6.0.3`)进入 `optionalDependencies`**:此前仅存在于 devDependencies,npm 全局/npx
