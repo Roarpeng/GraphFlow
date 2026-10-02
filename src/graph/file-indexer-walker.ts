@@ -105,14 +105,44 @@ export function isGeneratedOrLockFile(filePathOrName: string): boolean {
 }
 
 /**
+ * In-process memo for `git ls-files` results, per rootDir. Every preview
+ * freshness check walks the workspace, and each walk used to spawn git with a
+ * 256MB maxBuffer — the most expensive step on the preview hot path. A
+ * .git/index change inside the TTL stays invisible, which is acceptable: the
+ * freshness check's full compare (hasPendingGraphIndexWork) still sees actual
+ * file changes afterwards.
+ */
+const GIT_VISIBLE_CACHE_TTL_MS = 5_000;
+
+interface GitVisibleCacheEntry {
+  /** Shared instance — callers must treat the returned set as read-only. */
+  visible: Set<string> | undefined;
+  at: number;
+}
+
+const gitVisibleCache = new Map<string, GitVisibleCacheEntry>();
+
+/** Test hook: drop the in-process git-visible memo. */
+export function resetGitVisibleCache(): void {
+  gitVisibleCache.clear();
+}
+
+/**
  * Repo-relative POSIX paths git considers part of the working tree (tracked +
  * untracked, minus ignored). Returns undefined when the directory is not a git
  * checkout or git cannot be run, so callers fall back to the plain walk.
+ * Results (including the "git failed" undefined) are memoized per rootDir for
+ * GIT_VISIBLE_CACHE_TTL_MS so repeated walks do not re-spawn git.
  */
 export function readGitVisibleFiles(rootDir: string): Set<string> | undefined {
   if (!existsSync(join(rootDir, ".git"))) {
     return undefined;
   }
+  const cached = gitVisibleCache.get(rootDir);
+  if (cached && Date.now() - cached.at < GIT_VISIBLE_CACHE_TTL_MS) {
+    return cached.visible;
+  }
+  let visible: Set<string> | undefined;
   try {
     const result = spawnSync(
       "git",
@@ -130,18 +160,20 @@ export function readGitVisibleFiles(rootDir: string): Set<string> | undefined {
       ],
       { encoding: "buffer", maxBuffer: 256 * 1024 * 1024 }
     );
-    if (result.status !== 0 || !result.stdout) {
-      return undefined;
+    if (result.status === 0 && result.stdout) {
+      visible = new Set<string>();
+      const text = result.stdout.toString("utf8");
+      for (const entry of text.split("\u0000")) {
+        if (entry) visible.add(entry);
+      }
     }
-    const text = result.stdout.toString("utf8");
-    const visible = new Set<string>();
-    for (const entry of text.split("\u0000")) {
-      if (entry) visible.add(entry);
-    }
-    return visible;
   } catch {
+    // Transient spawn failure (git missing, EAGAIN): do not memoize, so the
+    // next call retries git instead of locking in the fallback walk for a TTL.
     return undefined;
   }
+  gitVisibleCache.set(rootDir, { visible, at: Date.now() });
+  return visible;
 }
 
 /**

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { GraphFlowConfig } from "../config/schema";
+import { logger } from "../utils/logger";
 
 /**
  * Cumulative token savings tracker.
@@ -9,9 +10,12 @@ import type { GraphFlowConfig } from "../config/schema";
  * statistics so users can quantify ROI (return on investment) of using
  * GraphFlow's context compression.
  *
- * Stats are persisted to graphflow-out/token-savings.json as an append-only
- * record log (`records`, plus the capped `recentRecords` view) with aggregate
- * counters recomputed from that log.
+ * Stats are persisted to graphflow-out/token-savings.json as a ring-capped
+ * record log (`records`, newest MAX_SAVINGS_RECORDS entries, plus the capped
+ * `recentRecords` view) with aggregate counters recomputed from that log.
+ * The counted contribution of detail records dropped by the ring cap is
+ * folded into the persisted `truncatedPrefix` summary, so cumulative totals
+ * stay authoritative across truncation.
  *
  * Probe exclusion rule / 探针排除规则：cumulative fields (`totalRuns`,
  * `totalRawTokens`, `totalCompressedTokens`, `totalSavedTokens`,
@@ -19,12 +23,16 @@ import type { GraphFlowConfig } from "../config/schema";
  * records with `rawTokens < MIN_COUNTED_RAW_TOKENS` (1000) — noise-level
  * queries such as repeated demo/orchestrator smoke probes that water down the
  * ROI; real code questions never come in below that magnitude. The raw
- * records themselves are kept (`records` / `recentRecords`), never deleted.
- * Aggregates are recomputed on load (read-side), so legacy files without the
- * full log are re-derived from the retained `recentRecords` window — the
- * stats self-heal from probe pollution on read.
- * 累计口径排除 rawTokens < 1000 的噪声级探针记录；原始记录保留不删；聚合在
- * 读取侧重算，旧文件（无全量日志）从保留的 recentRecords 窗口重算自愈。
+ * records themselves are kept within the ring window (`records` capped at
+ * MAX_SAVINGS_RECORDS, `recentRecords` capped at 50); detail records dropped
+ * by the ring cap still count toward the aggregates through the persisted
+ * `truncatedPrefix` summary. Aggregates are recomputed on load (read-side),
+ * so legacy files without the full log are re-derived from the retained
+ * `recentRecords` window — the stats self-heal from probe pollution on read.
+ * 累计口径排除 rawTokens < 1000 的噪声级探针记录；原始记录在环形窗口内保留
+ * （records 上限 MAX_SAVINGS_RECORDS）；被丢弃的明细经 truncatedPrefix 折算
+ * 继续计入聚合计数；聚合在读取侧重算，旧文件（无全量日志）从保留的
+ * recentRecords 窗口重算自愈。
  *
  * `savingsPercent` is packaging ROI (estimated-raw vs compressed tokens).
  * It is not retrieval Hit@k, body coverage, or lossless source fidelity —
@@ -65,9 +73,104 @@ export interface SavingsStats {
  */
 export const MIN_COUNTED_RAW_TOKENS = 1000;
 
-/** Persisted shape: the public stats plus the full append-only record log. */
+/**
+ * Cap on the persisted `records` detail log (ring retention: keep the newest
+ * MAX_SAVINGS_RECORDS entries). Without it every preview appends one record
+ * and rewrites the whole file, growing token-savings.json without bound.
+ * Truncation only affects the detail log: the counted contribution of the
+ * dropped records is folded into the persisted `truncatedPrefix` summary, so
+ * the cumulative aggregates (totalRuns / totalRawTokens / ...) stay
+ * authoritative. Loading an over-cap legacy file also truncates once, so
+ * existing oversized files self-heal on the next write.
+ * 明细日志环形保留最新 2000 条；被丢弃记录的累计贡献折入 truncatedPrefix，
+ * 聚合计数不受影响；加载超限存量文件即截一次，下次写入自愈。
+ */
+export const MAX_SAVINGS_RECORDS = 2000;
+
+/** The cumulative fields derived from counted records (probe rule applied). */
+type CountedAggregates = Pick<
+  SavingsStats,
+  | "totalRuns"
+  | "totalRawTokens"
+  | "totalCompressedTokens"
+  | "totalSavedTokens"
+  | "averageSavingsPercent"
+  | "firstRunAt"
+  | "lastRunAt"
+>;
+
+/** Persisted shape: the public stats plus the full record log. */
 interface PersistedSavingsStats extends SavingsStats {
   records: SavingsRecord[];
+  /**
+   * Counted-aggregate contribution of detail records already dropped by the
+   * MAX_SAVINGS_RECORDS ring cap. Absent when nothing has been dropped.
+   */
+  truncatedPrefix?: CountedAggregates;
+}
+
+function zeroCountedAggregates(): CountedAggregates {
+  return {
+    totalRuns: 0,
+    totalRawTokens: 0,
+    totalCompressedTokens: 0,
+    totalSavedTokens: 0,
+    averageSavingsPercent: 0,
+    firstRunAt: null,
+    lastRunAt: null,
+  };
+}
+
+/** Defensive parse of the persisted `truncatedPrefix` (garbage → zeros). */
+function normalizeCountedAggregates(value: unknown): CountedAggregates {
+  if (typeof value !== "object" || value === null) return zeroCountedAggregates();
+  const raw = value as Partial<CountedAggregates>;
+  const count = (input: unknown): number =>
+    typeof input === "number" && Number.isFinite(input) && input > 0 ? input : 0;
+  const stamp = (input: unknown): string | null =>
+    typeof input === "string" && input.length > 0 ? input : null;
+  // totalSavedTokens / averageSavingsPercent are always re-derived on merge.
+  return {
+    totalRuns: count(raw.totalRuns),
+    totalRawTokens: count(raw.totalRawTokens),
+    totalCompressedTokens: count(raw.totalCompressedTokens),
+    totalSavedTokens: 0,
+    averageSavingsPercent: 0,
+    firstRunAt: stamp(raw.firstRunAt),
+    lastRunAt: stamp(raw.lastRunAt),
+  };
+}
+
+function hasCountedContribution(prefix: CountedAggregates): boolean {
+  return prefix.totalRuns > 0 || prefix.totalRawTokens > 0;
+}
+
+/**
+ * Combine two counted-aggregate blocks (e.g. the truncated-out prefix with
+ * the retained ring window). Sums are additive; derived fields and the
+ * ISO-timestamp extremes are recomputed, so the result equals what
+ * computeCountedAggregates would produce over the un-truncated log.
+ */
+function mergeCountedAggregates(left: CountedAggregates, right: CountedAggregates): CountedAggregates {
+  const totalRawTokens = left.totalRawTokens + right.totalRawTokens;
+  const totalCompressedTokens = left.totalCompressedTokens + right.totalCompressedTokens;
+  const totalSavedTokens = totalRawTokens - totalCompressedTokens;
+  const firsts = [left.firstRunAt, right.firstRunAt]
+    .filter((value): value is string => typeof value === "string")
+    .sort();
+  const lasts = [left.lastRunAt, right.lastRunAt]
+    .filter((value): value is string => typeof value === "string")
+    .sort();
+  return {
+    totalRuns: left.totalRuns + right.totalRuns,
+    totalRawTokens,
+    totalCompressedTokens,
+    totalSavedTokens,
+    averageSavingsPercent:
+      totalRawTokens > 0 ? Math.round((totalSavedTokens / totalRawTokens) * 100) : 0,
+    firstRunAt: firsts[0] ?? null,
+    lastRunAt: lasts[lasts.length - 1] ?? null,
+  };
 }
 
 function emptySavingsStats(): SavingsStats {
@@ -88,18 +191,7 @@ function emptySavingsStats(): SavingsStats {
  * records (`rawTokens < MIN_COUNTED_RAW_TOKENS` — see the header rule).
  * 从记录日志重算累计字段，排除 rawTokens < 1000 的探针记录。
  */
-function computeCountedAggregates(
-  records: readonly SavingsRecord[]
-): Pick<
-  SavingsStats,
-  | "totalRuns"
-  | "totalRawTokens"
-  | "totalCompressedTokens"
-  | "totalSavedTokens"
-  | "averageSavingsPercent"
-  | "firstRunAt"
-  | "lastRunAt"
-> {
+function computeCountedAggregates(records: readonly SavingsRecord[]): CountedAggregates {
   const counted = records.filter((record) => record.rawTokens >= MIN_COUNTED_RAW_TOKENS);
   const totalRawTokens = counted.reduce((sum, record) => sum + record.rawTokens, 0);
   const totalCompressedTokens = counted.reduce((sum, record) => sum + record.compressedTokens, 0);
@@ -154,14 +246,32 @@ function loadStats(statsPath: string): PersistedSavingsStats {
     // 旧文件没有全量 records 日志 → 从保留的 recentRecords 窗口重算（自愈）。
     // Read-side filter + recompute: probes never reach the cumulative fields;
     // legacy files without the full log re-derive from the retained window.
-    const records = Array.isArray(parsed.records)
+    let records = Array.isArray(parsed.records)
       ? parsed.records
       : Array.isArray(parsed.recentRecords)
         ? parsed.recentRecords
         : [];
+    let truncatedPrefix = normalizeCountedAggregates(parsed.truncatedPrefix);
+    if (records.length > MAX_SAVINGS_RECORDS) {
+      // 加载即截：超限存量文件在下一次写入时自愈为环形窗口；被丢弃明细的
+      // 累计贡献折入 truncatedPrefix，聚合计数不受影响。
+      // Load-time cap: a legacy over-cap file self-heals on the next write;
+      // dropped detail keeps counting through the prefix summary.
+      const dropped = records.slice(0, records.length - MAX_SAVINGS_RECORDS);
+      records = records.slice(records.length - MAX_SAVINGS_RECORDS);
+      truncatedPrefix = mergeCountedAggregates(
+        truncatedPrefix,
+        computeCountedAggregates(dropped)
+      );
+      logger.info(
+        `token-savings: capped detail records to the newest ${MAX_SAVINGS_RECORDS} ` +
+          `(folded ${dropped.length} dropped records into the cumulative aggregates)`
+      );
+    }
     return {
-      ...computeCountedAggregates(records),
+      ...mergeCountedAggregates(truncatedPrefix, computeCountedAggregates(records)),
       records,
+      ...(hasCountedContribution(truncatedPrefix) ? { truncatedPrefix } : {}),
       recentRecords: Array.isArray(parsed.recentRecords) ? parsed.recentRecords : [],
     };
   } catch {
@@ -177,10 +287,14 @@ function saveStats(statsPath: string, stats: PersistedSavingsStats): void {
 /**
  * Record a single savings event and update cumulative stats.
  *
- * Every record is appended to the persisted log (raw records are never
- * dropped); the cumulative counters are then recomputed through the probe
- * exclusion rule (`rawTokens >= MIN_COUNTED_RAW_TOKENS`).
- * 每条记录都完整落盘；累计口径经探针排除规则重算（rawTokens ≥ 1000 才计入）。
+ * Every record is appended to the persisted log, which is ring-capped at
+ * MAX_SAVINGS_RECORDS (the oldest detail records are dropped once the cap is
+ * reached; their counted contribution is folded into `truncatedPrefix` so the
+ * cumulative counters through the probe exclusion rule keep covering the full
+ * history). The cumulative counters are recomputed via
+ * `rawTokens >= MIN_COUNTED_RAW_TOKENS`.
+ * 每条记录完整落盘；明细日志环形保留最新 MAX_SAVINGS_RECORDS 条，被丢弃记录
+ * 经 truncatedPrefix 折算继续计入累计口径（rawTokens ≥ 1000 才计入）。
  *
  * @param config GraphFlow config
  * @param record The savings record to append
@@ -193,15 +307,33 @@ export function recordSavings(config: GraphFlowConfig, record: SavingsRecord): v
     kind: record.kind ?? "tokens-not-fidelity",
   };
 
-  const records = [...stats.records, stored];
+  let records = [...stats.records, stored];
+  let truncatedPrefix = stats.truncatedPrefix ?? zeroCountedAggregates();
+  if (records.length > MAX_SAVINGS_RECORDS) {
+    // 环形保留最新记录：最旧的明细折入累计口径后丢弃。
+    // Ring retention: fold the oldest detail records into the cumulative
+    // aggregates, then drop them from the persisted log.
+    const dropped = records.slice(0, records.length - MAX_SAVINGS_RECORDS);
+    records = records.slice(records.length - MAX_SAVINGS_RECORDS);
+    truncatedPrefix = mergeCountedAggregates(
+      truncatedPrefix,
+      computeCountedAggregates(dropped)
+    );
+    logger.info(
+      `token-savings: records ring cap reached; dropped ${dropped.length} oldest ` +
+        `detail record(s), cumulative aggregates preserved`
+    );
+  }
+
   stats.recentRecords.unshift(stored);
   if (stats.recentRecords.length > MAX_RECENT_RECORDS) {
     stats.recentRecords = stats.recentRecords.slice(0, MAX_RECENT_RECORDS);
   }
 
   saveStats(statsPath, {
-    ...computeCountedAggregates(records),
+    ...mergeCountedAggregates(truncatedPrefix, computeCountedAggregates(records)),
     records,
+    ...(hasCountedContribution(truncatedPrefix) ? { truncatedPrefix } : {}),
     recentRecords: stats.recentRecords,
   });
 }

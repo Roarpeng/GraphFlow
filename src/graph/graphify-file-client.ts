@@ -394,6 +394,9 @@ export class GraphifyFileClient {
     const entry = this.readStoreEntry();
     const store = entry.store;
     const nodeMap = new Map(store.nodes.map((node) => [node.id, node]));
+    const previousById = incomingNodes.length > 0
+      ? new Map(incomingNodes.map((node) => [node.id, nodeMap.get(node.id)]))
+      : undefined;
     for (const node of incomingNodes) {
       nodeMap.set(node.id, node);
     }
@@ -423,11 +426,20 @@ export class GraphifyFileClient {
     const upsertOp: DeltaUpsertOp = {
       op: "upsert",
       ...(incomingNodes.length > 0 ? { nodes: incomingNodes } : {}),
-      ...(incomingEdges.length > 0 && addedEdges > 0
+      ...(incomingEdges.length >  0 && addedEdges > 0
         ? { edges: next.edges.slice(store.edges.length, store.edges.length + addedEdges) }
         : {}),
     };
-    if (this.tryAppendDelta(entry, upsertOp, next, edgeKeys)) {
+    if (
+      this.tryAppendDelta(entry, upsertOp, next, edgeKeys, previousById
+        ? {
+            oldNodes: incomingNodes
+              .map((n) => previousById.get(n.id))
+              .filter((n): n is GraphNode => n !== undefined),
+            newNodes: incomingNodes,
+          }
+        : undefined)
+    ) {
       return;
     }
     this.writeStore(next, edgeKeys);
@@ -437,12 +449,19 @@ export class GraphifyFileClient {
    * Append an operation to the delta log when it is small relative to the store.
    * Returns false when the caller must compact (large batch, no base file yet, or
    * the log would outgrow its threshold).
+   *
+   * `indexPatch` lets small incremental writes (dialogue turns, workbench
+   * topics — the preview read path's own writes) keep the inverted index alive
+   * by removing the old tokens of the touched nodes and adding the new ones.
+   * Without it every such write nulled the index and the NEXT keyword query
+   * re-tokenized the whole store (O(n x content) after every preview).
    */
   private tryAppendDelta(
     entry: StoreCacheEntry,
     op: DeltaOp,
     nextStore: GraphStore,
-    edgeKeys: Set<string> | null
+    edgeKeys: Set<string> | null,
+    indexPatch?: { oldNodes: GraphNode[]; newNodes: GraphNode[] }
   ): boolean {
     if (entry.stat === null) {
       return false;
@@ -472,7 +491,7 @@ export class GraphifyFileClient {
     try {
       mkdirSync(dirname(deltaPath), { recursive: true });
       appendFileSync(deltaPath, `${JSON.stringify(op)}\n`, "utf8");
-      this.updateCacheAfterWrite(nextStore, edgeKeys, statIfExists(deltaPath));
+      this.updateCacheAfterWrite(nextStore, edgeKeys, statIfExists(deltaPath), indexPatch);
       return true;
     } catch (error) {
       logger.warn(
@@ -774,7 +793,8 @@ export class GraphifyFileClient {
   private updateCacheAfterWrite(
     store: GraphStore,
     edgeKeys: Set<string> | null,
-    deltaStat: FileStat | null = null
+    deltaStat: FileStat | null = null,
+    indexPatch?: { oldNodes: GraphNode[]; newNodes: GraphNode[] }
   ): void {
     const absPath = resolve(this.storePath);
     let stat: FileStat | null = null;
@@ -785,7 +805,45 @@ export class GraphifyFileClient {
       // Extremely unlikely immediately after rename; leave stat null so the
       // next read re-validates from disk.
     }
-    graphifyFileStoreCache.set(absPath, { store, index: null, stat, edgeKeys, deltaStat });
+    const prev = graphifyFileStoreCache.get(absPath);
+    const index =
+      indexPatch && prev?.index
+        ? this.patchIndexInPlace(prev.index, indexPatch.oldNodes, indexPatch.newNodes)
+        : null;
+    graphifyFileStoreCache.set(absPath, { store, index, stat, edgeKeys, deltaStat });
+  }
+
+  /**
+   * Keep an existing inverted index valid across a small mutation by removing
+   * the touched nodes' OLD tokens and adding their NEW ones (both directions:
+   * pure upsert passes old+new with the same id; delete passes old only).
+   * Cost is O(tokens of touched nodes) instead of the full-store rebuild.
+   */
+  private patchIndexInPlace(
+    index: Map<string, Set<string>>,
+    oldNodes: GraphNode[],
+    newNodes: GraphNode[]
+  ): Map<string, Set<string>> {
+    for (const node of oldNodes) {
+      for (const tok of tokenizeForIndex(nodeRecallText(node))) {
+        const set = index.get(tok);
+        if (set) {
+          set.delete(node.id);
+          if (set.size === 0) index.delete(tok);
+        }
+      }
+    }
+    for (const node of newNodes) {
+      for (const tok of tokenizeForIndex(nodeRecallText(node))) {
+        let set = index.get(tok);
+        if (!set) {
+          set = new Set();
+          index.set(tok, set);
+        }
+        set.add(node.id);
+      }
+    }
+    return index;
   }
 
   private edgeKey(edge: GraphEdge): string {
@@ -806,7 +864,17 @@ export class GraphifyFileClient {
       edges: store.edges.filter((e) => !(idSet.has(e.from) || idSet.has(e.to))),
     };
     // A per-file prune during a re-index must not rewrite the whole store.
-    if (this.tryAppendDelta(entry, { op: "delete", nodeIds: ids }, next, null)) {
+    if (
+      this.tryAppendDelta(
+        entry,
+        { op: "delete", nodeIds: ids },
+        next,
+        null,
+        // Keep the inverted index alive: drop the deleted nodes' tokens
+        // instead of forcing a full-store rebuild on the next keyword query.
+        { oldNodes: store.nodes.filter((n) => idSet.has(n.id)), newNodes: [] }
+      )
+    ) {
       return;
     }
     this.writeStore(next, null);

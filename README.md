@@ -12,11 +12,11 @@ The community is converging on an "agent harness" vocabulary: **memory + hooks +
 
 | Harness primitive | GraphFlow implementation |
 | --- | --- |
-| **Memory** | Code graph (11 languages parsed with real tree-sitter ASTs, plus regex-based Markdown) + Episodic / Skill / Decision nodes — project knowledge *and* project experience persist across sessions |
+| **Memory** | Code graph (10 tree-sitter grammar languages incl. C/C++; TypeScript/JavaScript via the TypeScript compiler — optional dependency, falls back to regex extraction with reduced symbol detail when absent; plus regex-based Markdown) + Episodic / Skill / Decision nodes — project knowledge *and* project experience persist across sessions |
 | **Hooks** | Outcome auto-capture (on by default) + Claude Code `SessionEnd` / `Stop` and DeepSeek Harness `agent/disposed` glue close the learning loop automatically — no manual outcome reporting required |
 | **Skills** | A four-class flywheel (`proven` / `correctable` / `anti-pattern` / `noise`) with canary validation — skills are promoted by evidence, not by assertion |
 
-Pure TypeScript/Node. CLI + MCP + VS Code extension. Fully offline, no API key required.
+Pure TypeScript/Node. CLI + MCP + VS Code extension. Local-first: indexing, compression and recall need no API key; the default semantic-embedding backend downloads its model from huggingface.co once (on failure it degrades to a fully offline hash backend; set `embeddingProvider: "fnv"` to never touch the network).
 
 ## Why a harness, not another RAG
 
@@ -27,7 +27,7 @@ Most "memory" products are either **static injection** (load `CLAUDE.md` / rules
 
 GraphFlow is a harness: **memory is dynamic and typed**. Each request retrieves only what the current decision needs — graph anchors, compressed summaries, similar past episodes, applicable skills — under an explicit token budget (L0–L3 layered compression; measured against a realistic top-K-files read, see [benchmarks/RESULTS.md](benchmarks/RESULTS.md)). What the agent learns (outcomes, lessons, skills) is written back through hooks, so the harness gets better with use.
 
-It is also **local-first and portable**: everything runs offline with no API key, and the whole surface is exposed over MCP, so the same memory travels across agents instead of being locked into one vendor's format.
+It is also **local-first and portable**: everything runs with no API key (the default semantic-embedding backend downloads its model from huggingface.co once and degrades to a fully offline hash backend on failure), and the whole surface is exposed over MCP, so the same memory travels across agents instead of being locked into one vendor's format.
 
 ## Proof, not promises
 
@@ -37,15 +37,15 @@ All numbers below come from a **public, reproducible benchmark suite** ([benchma
 
 What has been checked and holds up:
 
-- **Real ASTs**: 11 code languages are parsed with tree-sitter grammars (Markdown is regex-based).
+- **Real ASTs**: 10 code languages are parsed with real tree-sitter grammars (incl. C/C++); TypeScript/JavaScript go through the TypeScript compiler (optional dependency; falls back to regex extraction with reduced symbol detail when absent); Markdown is regex-based.
 - **Deterministic**: indexing and context packaging produce byte-identical output across repeat runs.
-- **Offline**: indexing, compression and recall run with no network and no API key.
+- **Local-first**: indexing, compression and recall need no API key; the default semantic-embedding backend downloads its model from huggingface.co once (fails down to a fully offline hash backend; set `embeddingProvider: "fnv"` to never touch the network).
 - **Idempotent install**: re-running `install` does not duplicate MCP / skill / rules entries.
 
 Measured, with limits:
 
 - **Token ratio, two arms — quote them separately** (8 queries, re-counted with `gpt-tokenizer`): the compressed package is **95.6%** smaller than reading the same ranker's top-10 anchor files in full (136,265 → 6,044 tokens) and **98.5%** smaller than a naive term-frequency grep of the top-10 files (upper bound by construction). These are **token-count ratios only — not a fidelity or answer-quality measure**; they do not check that the package still contains what is needed to answer. Details and a cheap fidelity proxy: [benchmarks/RESULTS.md](benchmarks/RESULTS.md)
-- **132-query golden retrieval set** in CI: Hit@5 = 100%, MRR = 0.779, NDCG@5 = 0.638. **Caveat:** the queries were written by the author who also tunes the ranker and there is no held-out split, so this is an in-sample regression gate, not evidence of generalization. An independent audit on 15 held-out English queries (never used for tuning) measured file-level Hit@5 = 80% and MRR = 0.61, against a plain BM25 file baseline at 73% / 0.68; on the 20-query set used while tuning, Hit@5 = 85% vs. BM25 95%. Chinese queries rely on the agent supplying `englishQuery` (5/5 Hit@5 with it, 0/5 without). Open dataset: [`benchmarks/datasets/retrieval-golden-v1.json`](benchmarks/datasets/retrieval-golden-v1.json) — run `npm run bench:retrieval`
+- **132-query golden retrieval set** gates CI at ≥80% recall / ≥90% top-K; the commit-pinned benchmark (`npm run bench:retrieval`) currently measures Hit@5 = 100%, MRR = 0.779, NDCG@5 = 0.638. **Caveat:** the queries were written by the author who also tunes the ranker and there is no held-out split, so this is an in-sample regression gate, not evidence of generalization. Chinese queries rely on the agent supplying `englishQuery` (5/5 Hit@5 with it, 0/5 without). Open dataset: [`benchmarks/datasets/retrieval-golden-v1.json`](benchmarks/datasets/retrieval-golden-v1.json) — run `npm run bench:retrieval`
 - **Skill / memory A/B** are **synthetic mechanism tests** on hand-built graphs, not task-success rates. With a held-out split and one identical criterion for both arms, the flywheel shows **no transfer** to unseen tasks (skill: 61.5% on vs 61.5% off, 13 tasks; memory: 51.6% on vs 61.3% off, 31 tasks). The earlier "100% vs 61.5%" and "100% vs 56.5%" figures seeded experience from the answer key and scored the arms differently; they are withdrawn. See [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 
 Results are commit-anchored so any number above can be checked out and re-run. See [ROADMAP.md](ROADMAP.md) for the open invitation.
@@ -126,7 +126,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 
 | Capability | **GraphFlow** | CodeGraph | Serena | Repomix |
 | --- | --- | --- | --- | --- |
-| Code graph | 11-language tree-sitter AST index (+ regex Markdown) | more mature | LSP symbols | — |
+| Code graph | 10-language tree-sitter AST index + TS/JS via the TypeScript compiler (+ regex Markdown) | more mature | LSP symbols | — |
 | Context compression | layered + graph compression + vector recall | partial | partial | whole-repo dump |
 | Planning protocol | ATP IR + DAG + agent bridge | — | — | — |
 | **Learning memory** | Episodic / Skill / Decision flywheel | — | — | — |
@@ -141,10 +141,10 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | --- | --- |
 | **Planning protocol** | ATP v1.1 (Intent / Requirement / Six Hats / 5-Why / First Principles / Decision Matrix / Planning / Reflection); simple / complex / insight modes; agent-delegated bridge without an LLM; **skill-conditioned DAG** (`skillRefs` / `avoidPatterns` on plan nodes); [ATP/IR public spec v1.1](docs/atp-ir-spec-v1.md) |
 | **Goal alignment** | Goal anchor nodes (intent five-tuple as first-class citizen, original requirement auto-injected); low-confidence clarification gate (no plan below 0.6); runtime alignment-check; deviation classification (misread-requirement / scope-creep / tech-drift); goal version chain + diffs |
-| **Knowledge graph** | 11-language tree-sitter AST indexing (Markdown is regex-based); File / Module / Symbol + **Concept / Requirement**; cross-layer edges `documents` / `implements` / `derived_from`; Office/PDF → Markdown via optional **`@firecrawl/anydoc`** (MIT). **CLI/npm**: optionalDependency. **VSIX**: not bundled; on activate the extension **auto-downloads the current-OS binary** into `~/.graphflow/optional-deps` when `graphflow.downloadAnydoc` is true (default). Disable the setting to skip network; source indexing still works. |
+| **Knowledge graph** | AST indexing across 10 tree-sitter grammar languages (incl. C/C++) plus TypeScript/JavaScript via the TypeScript compiler (optional dependency; falls back to regex extraction with reduced symbol detail when absent); Markdown is regex-based; File / Module / Symbol + **Concept / Requirement**; cross-layer edges `documents` / `implements` / `derived_from`; Office/PDF → Markdown via optional **`@firecrawl/anydoc`** (MIT). **CLI/npm**: optionalDependency. **VSIX**: not bundled; on activate the extension **auto-downloads the current-OS binary** into `~/.graphflow/optional-deps` when `graphflow.downloadAnydoc` is true (default). Disable the setting to skip network; source indexing still works. |
 | **Context compression** | L1/L2/L3 layered anchors; graph compression (edge weights + PageRank, LRU cache); stem-matching recall (orchestrate ↔ orchestration); vector recall + RRF; RepoMap overview; adaptive budget; **symbol bodies** (the first three L1 symbol anchors quote their declaration — ≤120 tokens each, ≤20% of the pack, and only from budget the anchor stages left behind, so a body never displaces an anchor; quoted only when the file still matches the indexed signature, otherwise it stays a pointer, and `expandAnchor` reports `exact` / `relocated` / `drifted`; `enableSymbolBodies: false` opts out); **post-packaging accounting** (out-of-package payloads are honestly counted: dialogue recall hits and workbench/dialogue **preview echoes** land in `unbudgetedTokens`; `accountedTokens` = compressed + unbudgeted and `estimatedSavingsPercent` is computed on that true delivered total, with `estimatedRawTokens` floored at it; responses are bounded — history echoes are ~160-char message previews with a `truncated` flag, full text stays in the graph and expands via `anchorId` or the VS Code panel; `recordDialogue: false` disables echo and recording entirely) |
 | **Efficiency mechanisms (SoL-Pi borrow)** | **ObservationPack** (oversized outputs → content-addressed handle + exact paged recall), **Evidence-Preserving Reducer** (log → bounded receipt whose retained lines are re-verified verbatim), **Online Context Compact** (observed-pressure budget + economic compaction signal), **Action Fusion** (fused edit+validate steps on the bridge descriptor). **All on by default**, individually switchable in **GraphFlow: Settings**; **dsh automatic projection** rewrites over-budget tool results on the model surface (`GRAPHFLOW_D_DSH_PROJECTION=0` to disable); paired **efficiency/capability floor** (`graphflow-out/efficiency.json` + `governance release-gate` thresholds); **mechanism auto-research loop** (`graphflow mechanism`, held-out isolation). See [docs/efficiency-mechanisms.md](docs/efficiency-mechanisms.md) |
-| **Retrieval & fidelity** | Golden-set regression gate (132 author-written queries, no held-out split: Hit@5=100%, MRR=0.779, NDCG@5=0.638 in-sample; an independent 15-query held-out check got Hit@5=80% vs. BM25 73%); separate anchor-recall and normalized body-coverage metrics persisted beside token savings |
+| **Retrieval & fidelity** | Golden-set CI gate ≥80% recall / ≥90% top-K (132 author-written queries, no held-out split; commit-pinned benchmark: Hit@5=100%, MRR=0.779, NDCG@5=0.638 in-sample); separate anchor-recall and normalized body-coverage metrics persisted beside token savings |
 | **Vector index** | In-process memoization + disk persistence (fingerprint-checked, seconds to restore after MCP restart) |
 | **Storage backends** | `file` / `memory` / `sqlite` (FTS5, tokenizer-enhanced `searchtext`, camelCase searchable) / **`auto` (sqlite-first with fallback)** / `mcp-http` |
 | **Learning flywheel** | Episodic memory, reflection, skill nodes (score ±1, bounded [-20,20]), nightly training, adaptive evidence-aware forgetting, **auto-capture + Claude Code hooks (on by default)**, **SkillOpt-lite** bounded guidance edits, four-class lifecycle + **canary gate for synced skills**, portable SKILL.md import/export (agentskills.io spec layout: one dir per skill + progressive-disclosure `references/`), auditable efficiency evidence (`graphflow efficiency export` → `graphflow-out/efficiency-evidence.json`), `npm run backfill:episodes`, contribution reports (`skill report` / `graphflow_diagnose` / `route diagnose`) |

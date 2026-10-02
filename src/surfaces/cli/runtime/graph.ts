@@ -412,8 +412,14 @@ function scheduleVectorPass(): void {
   timer.unref?.();
 }
 
-/** Bring the structural index up to date before packaging (autoIndexOnPreview). */
-async function refreshIndexForPreview(config: GraphFlowConfig, graphClient: GraphClient): Promise<void> {
+/**
+ * Bring the structural index up to date before packaging (autoIndexOnPreview).
+ *
+ * Returns true when the deferred vector pass took ownership of `graphClient`
+ * (stored in pendingVectorTarget): the caller must then NOT close the client —
+ * the deferred pass still needs it after the reply goes out.
+ */
+async function refreshIndexForPreview(config: GraphFlowConfig, graphClient: GraphClient): Promise<boolean> {
   const root = config.graphPolicy.workspaceRoot ?? process.cwd();
   const indexOptions = buildIndexOptions(config);
   const storeIncomplete = indexedStoreIsIncomplete(
@@ -426,13 +432,13 @@ async function refreshIndexForPreview(config: GraphFlowConfig, graphClient: Grap
     !hasPendingGraphIndexWork(root, { ...indexOptions, manifestName: graphClient.indexManifestName }) &&
     !graphStoreNeedsIndexing(config)
   ) {
-    return;
+    return false;
   }
   const force = storeIncomplete ? { forceReindex: true } : {};
   const provider = indexOptions.embeddingProvider;
   if (!previewVectorsAfterReply || !provider) {
     await indexWorkspaceFiles(graphClient, root, { ...indexOptions, ...force });
-    return;
+    return false;
   }
   const { embeddingProvider: _later, ...structuralOptions } = indexOptions;
   void _later;
@@ -456,6 +462,7 @@ async function refreshIndexForPreview(config: GraphFlowConfig, graphClient: Grap
   });
   await indexWorkspaceFiles(recording, root, { ...structuralOptions, ...force });
   pendingVectorTarget = { client: graphClient, provider };
+  return true;
 }
 
 /**
@@ -493,6 +500,19 @@ export async function previewContext(
     return await buildPreview(query, configPath, rootDir, englishQuery, dialogue, contextPressure);
   } finally {
     scheduleVectorPass();
+  }
+}
+
+/**
+ * Release a preview/index-owned client without ever failing the caller: close
+ * errors (double close, EBUSY on Windows teardown) are logged, not propagated
+ * into the returned result.
+ */
+async function closeGraphClientQuietly(client: GraphClient): Promise<void> {
+  try {
+    await client.close?.();
+  } catch (error) {
+    logger.warn({ error }, "Failed to close graph client");
   }
 }
 
@@ -549,205 +569,226 @@ async function buildPreview(
   const cached = bypassCache ? undefined : getCachedContext(query, workspaceRoot);
   const graphClient = createGraphClient(config);
   if (cached) {
-    const attached = await attachWorkbenchThenDialogue(cached, graphClient, config, query, dialogue);
-    // 响应硬预算：超限按序降级并重算记账，避免宿主在自身传输上限处截断。
-    // Hard response budget: degrade in order so the host never truncates.
-    const budgeted = applyResponseBudget(attached);
-    return pressureBlock ? { ...budgeted, contextPressure: pressureBlock } : budgeted;
+    // Cache hit: the client only served the dialogue/workbench attach. Close it
+    // before returning — nothing lazy in the returned payload references it
+    // (sqlite snapshots are self-contained; rowToSnapshotNode captures raw rows).
+    try {
+      const attached = await attachWorkbenchThenDialogue(cached, graphClient, config, query, dialogue);
+      // 响应硬预算：超限按序降级并重算记账，避免宿主在自身传输上限处截断。
+      // Hard response budget: degrade in order so the host never truncates.
+      const budgeted = applyResponseBudget(attached);
+      return pressureBlock ? { ...budgeted, contextPressure: pressureBlock } : budgeted;
+    } finally {
+      await closeGraphClientQuietly(graphClient);
+    }
   }
 
-  if (config.graphPolicy.autoIndexOnPreview) {
-    await refreshIndexForPreview(config, graphClient);
-  }
-
-  const packageOptions: import("../../../graph/context-slicer").LayeredPackageOptions = {
-    ...(config.graphPolicy.layerQuota ? { layerQuota: config.graphPolicy.layerQuota } : {}),
-    ...buildEmbeddingOptions(config),
-    workspaceRoot: config.graphPolicy.workspaceRoot ?? process.cwd(),
-    ...(englishQuery?.trim() ? { englishQuery: englishQuery.trim() } : {}),
-  };
-
-  const compressionPolicy = config.graphPolicy.compression;
-
-  // Graph-structure compression is zero-cost; enabled by default unless explicitly disabled.
-  packageOptions.enableGraphCompression = compressionPolicy?.enableGraphCompression !== false;
-
-  // RepoMap overview fallback for tight budgets (opt-in).
-  if (compressionPolicy?.enableRepoMapFallback === true) {
-    packageOptions.enableRepoMapFallback = true;
-  }
-
-  // Adaptive budget: auto-enable for complex tasks unless explicitly disabled.
-  const { triageTask } = await import("../../../core/triage.js");
-  const taskMode = triageTask(query);
-  const enableAdaptiveBudget =
-    compressionPolicy?.enableAdaptiveBudget !== false &&
-    (compressionPolicy?.enableAdaptiveBudget === true || taskMode === "complex");
-  // Observed-pressure budgeting (GF-3) owns the budget when enabled, so the
-  // complexity-based taskMode estimate must not overwrite it.
-  if (enableAdaptiveBudget && !pressurePolicy.enabled) {
-    packageOptions.taskMode = taskMode;
-  }
-
-  // Semantic compression (minicpm/economy LLM) is opt-in via config.
-  // Note: compression-model module removed; semantic compression disabled.
-
-  const { buildEnhancedContextPackage } = await import("../../../graph/context-slicer.js");
-  const pkg = await buildEnhancedContextPackage(
-    graphClient,
-    query,
-    query,
-    effectiveMaxTokens,
-    packageOptions
-  );
-
-  const refill = createContextRefillManager(
-    graphClient,
-    effectiveMaxTokens,
-    packageOptions
-  );
-  refill.seed(pkg.anchorChannel.map((anchor) => anchor.id));
-  const refillPreview = await refill.refill([query]);
-
-  const packedAnchorCount = pkg.anchorChannel.length;
-  // anchorChannel carries per-anchor relevance; a CJK query whose anchor head
-  // scores below QUERY_TRANSLATE_LOW_RELEVANCE_THRESHOLD delegates translation
-  // even when the anchor count alone would have cleared the threshold.
-  const queryTranslationDelegation = shouldDelegateQueryTranslation(
-    query,
-    packedAnchorCount,
-    englishQuery,
-    pkg.anchorChannel
-  )
-    ? {
-        agentWorkItems: [buildQueryTranslateWorkItem(query, workspaceRoot)],
-        agentInstructions: buildQueryTranslateInstructions(query),
-        agentMode: "delegated-llm" as const,
-      }
-    : undefined;
-
-  // CJK 低命中处置 / CJK low-hit handling: when translation delegation fired
-  // via the LOW-RELEVANCE dimension (the count cleared the legacy threshold
-  // but the anchor head shares almost no wording with the query), the packed
-  // channel is dominated by zero-relevance filler from workspace-path
-  // expansion. Delivering ~15 unrelated anchors as if they were results
-  // wastes the caller's attention — trim the payload to anchors that actually
-  // matched (relevance > 0, capped), align summary + accounting with what is
-  // delivered, and say so on a spine line.
-  let deliveredAnchors: ContextPreviewResult["anchors"] = pkg.anchorChannel;
-  let deliveredSummary: string[] = pkg.summaryChannel;
-  const packedQuality = anchorRelevanceQuality(pkg.anchorChannel);
-  const lowRelevanceDelegation =
-    queryTranslationDelegation !== undefined &&
-    packedAnchorCount >= QUERY_TRANSLATE_HIT_THRESHOLD &&
-    packedQuality !== undefined &&
-    packedQuality < QUERY_TRANSLATE_LOW_RELEVANCE_THRESHOLD;
-  if (lowRelevanceDelegation) {
-    deliveredAnchors = pkg.anchorChannel
-      .filter((item) => typeof item.relevance === "number" && item.relevance > 0)
-      .slice(0, QUERY_TRANSLATE_RELEVANCE_TOP_K_DELIVERED);
-    const keptPaths = new Set(
-      deliveredAnchors.map((item) => {
-        const stem = item.id.replace(/^(file|symbol|module):/, "").replace(/:[0-9a-f]{6,}$/, "");
-        return stem.includes(":") ? stem.split(":")[0]! : stem;
-      })
-    );
-    const keptDecision = deliveredAnchors.some((item) => item.type === "Decision");
-    deliveredSummary = pkg.summaryChannel.filter(
-      (line) =>
-        (keptDecision && line.startsWith("Decision:")) ||
-        Array.from(keptPaths).some((path) => path.length > 0 && line.includes(path))
-    );
-    deliveredSummary = [
-      `[低相关中文命中] 仅 ${deliveredAnchors.length}/${packedAnchorCount} 个 anchor 与查询共享词元；其余已裁剪。请回答 query-translate-en 工作项并用 englishQuery 重试。`,
-      ...deliveredSummary,
-    ];
-  }
-  const deliveredTokenEstimate = estimateSummaryLinesTokens(deliveredSummary);
-
-  // Raw baseline over the DELIVERED anchor set — see estimateRawContextTokens.
-  const rawTokenEstimate = estimateRawContextTokens({
-    store: await resolveGraphStoreAfterIndex(config, graphClient),
-    query,
-    compressedTokens: deliveredTokenEstimate,
-    anchors: deliveredAnchors,
-    fileTokens: workspaceFileTokens(workspaceRoot),
-  });
-
-  // Record cumulative token savings for ROI tracking — deferred until AFTER
-  // the post-packaging attach (see the end of this function) so the persisted
-  // ROI covers the true accounted payload, not just the layered package.
-
-  // Byte-stable head, volatile tail / 稳定头 + 变动尾.
-  //
-  // A host that caches this block as a prompt prefix only gets a hit while the
-  // leading bytes repeat — one differing byte re-prices everything behind it. So
-  // key order is part of the contract: everything derived from (query, store)
-  // comes first — `query`, `summary`, `anchors`, `anchorBodies`, the stable
-  // `tokenBudget` fields, `refillPreview` — and fields that can move between two
-  // otherwise identical calls (per-call accounting, degradation steps, the
-  // dialogue/workbench echoes, economics, cache layout) are appended after.
-  // Anchors are NOT reordered here; only the envelope's field order changes.
-  const result: ContextPreviewResult = {
-    query,
-    ...(englishQuery?.trim() ? { englishQuery: englishQuery.trim() } : {}),
-    summary: deliveredSummary,
-    anchors: deliveredAnchors,
-    ...(pkg.bodies ? { anchorBodies: pkg.bodies } : {}),
-    tokenBudget: {
-      maxContextTokens: effectiveMaxTokens,
-      estimatedRawTokens: rawTokenEstimate,
-      compressedTokens: deliveredTokenEstimate,
-      budgetUsedPercent: calculateBudgetUsedPercent(deliveredTokenEstimate, effectiveMaxTokens),
-      // Recomputed by the post-packaging accounting below, so it rides last
-      // inside the budget block rather than ahead of the fields that stay put.
-      estimatedSavingsPercent: calculateSavingsPercent(rawTokenEstimate, deliveredTokenEstimate),
-    },
-    refillPreview,
-    summaryCount: deliveredSummary.length,
-    anchorCount: deliveredAnchors.length,
-    tokenEstimate: deliveredTokenEstimate,
-    truncated: pkg.truncated,
-    // --- volatile tail: per-call accounting and additive echoes ---
-    anchorsByLayer: {
-      l1: deliveredAnchors.filter((item) => item.layer === "L1").length,
-      l2: deliveredAnchors.filter((item) => item.layer === "L2").length,
-      l3: deliveredAnchors.filter((item) => item.layer === "L3").length,
-    },
-    ...(queryTranslationDelegation ?? {}),
-  };
-
-  if (!bypassCache) {
-    cacheContextResult(query, workspaceRoot, result);
-  }
-
-  const attached = await attachWorkbenchThenDialogue(result, graphClient, config, query, dialogue);
-  // 响应硬预算：超限按序降级并重算记账；ROI 也按降级后的真实下发量入账。
-  // Hard response budget applies before ROI recording so the persisted savings
-  // cover what was actually sent (the degraded payload), not the pre-cap one.
-  const budgeted = applyResponseBudget(attached);
-
-  // ROI 记账延后到 attach 之后：持久化的节省统计必须覆盖真实下发总量
-  // （budgeted + unbudgeted），否则 dialogue recall / workbench 行触发时
-  // token-savings.json 会系统性乐观。/ Record cumulative token savings AFTER
-  // the post-packaging attach so the persisted ROI uses the accounted total.
+  // Preview-owned client: every use below is awaited inline, so the handle can
+  // be released as soon as the package is built (finally covers error paths).
+  let vectorPassOwnsClient = false;
   try {
-    const accountedTokens = budgeted.accountedTokens ?? budgeted.tokenBudget.compressedTokens;
-    recordSavings(config, {
-      timestamp: new Date().toISOString(),
-      query,
-      rawTokens: budgeted.tokenBudget.estimatedRawTokens,
-      compressedTokens: accountedTokens,
-      savingsPercent: budgeted.tokenBudget.estimatedSavingsPercent,
-      source: "preview_context",
-    });
-  } catch {
-    // Savings tracking is best-effort; don't fail the preview if it errors
-  }
+    if (config.graphPolicy.autoIndexOnPreview) {
+      vectorPassOwnsClient = await refreshIndexForPreview(config, graphClient);
+    }
 
-  return pressureBlock
-    ? await attachContextEconomics({ ...budgeted, contextPressure: pressureBlock }, graphClient, query, config)
-    : await attachContextEconomics(budgeted, graphClient, query, config);
+    const packageOptions: import("../../../graph/context-slicer").LayeredPackageOptions = {
+      ...(config.graphPolicy.layerQuota ? { layerQuota: config.graphPolicy.layerQuota } : {}),
+      ...buildEmbeddingOptions(config),
+      workspaceRoot: config.graphPolicy.workspaceRoot ?? process.cwd(),
+      ...(englishQuery?.trim() ? { englishQuery: englishQuery.trim() } : {}),
+    };
+
+    const compressionPolicy = config.graphPolicy.compression;
+
+    // Graph-structure compression is zero-cost; enabled by default unless explicitly disabled.
+    packageOptions.enableGraphCompression = compressionPolicy?.enableGraphCompression !== false;
+
+    // RepoMap overview fallback for tight budgets (opt-in).
+    if (compressionPolicy?.enableRepoMapFallback === true) {
+      packageOptions.enableRepoMapFallback = true;
+    }
+
+    // Adaptive budget: auto-enable for complex tasks unless explicitly disabled.
+    const { triageTask } = await import("../../../core/triage.js");
+    const taskMode = triageTask(query);
+    const enableAdaptiveBudget =
+      compressionPolicy?.enableAdaptiveBudget !== false &&
+      (compressionPolicy?.enableAdaptiveBudget === true || taskMode === "complex");
+    // Observed-pressure budgeting (GF-3) owns the budget when enabled, so the
+    // complexity-based taskMode estimate must not overwrite it.
+    if (enableAdaptiveBudget && !pressurePolicy.enabled) {
+      packageOptions.taskMode = taskMode;
+    }
+
+    // Semantic compression (minicpm/economy LLM) is opt-in via config.
+    // Note: compression-model module removed; semantic compression disabled.
+
+    const { buildEnhancedContextPackage } = await import("../../../graph/context-slicer.js");
+    const pkg = await buildEnhancedContextPackage(
+      graphClient,
+      query,
+      query,
+      effectiveMaxTokens,
+      packageOptions
+    );
+
+    const refill = createContextRefillManager(
+      graphClient,
+      effectiveMaxTokens,
+      packageOptions
+    );
+    refill.seed(pkg.anchorChannel.map((anchor) => anchor.id));
+    const refillPreview = await refill.refill([query]);
+
+    const packedAnchorCount = pkg.anchorChannel.length;
+    // anchorChannel carries per-anchor relevance; a CJK query whose anchor head
+    // scores below QUERY_TRANSLATE_LOW_RELEVANCE_THRESHOLD delegates translation
+    // even when the anchor count alone would have cleared the threshold.
+    const queryTranslationDelegation = shouldDelegateQueryTranslation(
+      query,
+      packedAnchorCount,
+      englishQuery,
+      pkg.anchorChannel
+    )
+      ? {
+          agentWorkItems: [buildQueryTranslateWorkItem(query, workspaceRoot)],
+          agentInstructions: buildQueryTranslateInstructions(query),
+          agentMode: "delegated-llm" as const,
+        }
+      : undefined;
+
+    // CJK 低命中处置 / CJK low-hit handling: when translation delegation fired
+    // via the LOW-RELEVANCE dimension (the count cleared the legacy threshold
+    // but the anchor head shares almost no wording with the query), the packed
+    // channel is dominated by zero-relevance filler from workspace-path
+    // expansion. Delivering ~15 unrelated anchors as if they were results
+    // wastes the caller's attention — trim the payload to anchors that actually
+    // matched (relevance > 0, capped), align summary + accounting with what is
+    // delivered, and say so on a spine line.
+    let deliveredAnchors: ContextPreviewResult["anchors"] = pkg.anchorChannel;
+    let deliveredSummary: string[] = pkg.summaryChannel;
+    const packedQuality = anchorRelevanceQuality(pkg.anchorChannel);
+    const lowRelevanceDelegation =
+      queryTranslationDelegation !== undefined &&
+      packedAnchorCount >= QUERY_TRANSLATE_HIT_THRESHOLD &&
+      packedQuality !== undefined &&
+      packedQuality < QUERY_TRANSLATE_LOW_RELEVANCE_THRESHOLD;
+    if (lowRelevanceDelegation) {
+      deliveredAnchors = pkg.anchorChannel
+        .filter((item) => typeof item.relevance === "number" && item.relevance > 0)
+        .slice(0, QUERY_TRANSLATE_RELEVANCE_TOP_K_DELIVERED);
+      const keptPaths = new Set(
+        deliveredAnchors.map((item) => {
+          const stem = item.id.replace(/^(file|symbol|module):/, "").replace(/:[0-9a-f]{6,}$/, "");
+          return stem.includes(":") ? stem.split(":")[0]! : stem;
+        })
+      );
+      const keptDecision = deliveredAnchors.some((item) => item.type === "Decision");
+      deliveredSummary = pkg.summaryChannel.filter(
+        (line) =>
+          (keptDecision && line.startsWith("Decision:")) ||
+          Array.from(keptPaths).some((path) => path.length > 0 && line.includes(path))
+      );
+      deliveredSummary = [
+        `[低相关中文命中] 仅 ${deliveredAnchors.length}/${packedAnchorCount} 个 anchor 与查询共享词元；其余已裁剪。请回答 query-translate-en 工作项并用 englishQuery 重试。`,
+        ...deliveredSummary,
+      ];
+    }
+    const deliveredTokenEstimate = estimateSummaryLinesTokens(deliveredSummary);
+
+    // Raw baseline over the DELIVERED anchor set — see estimateRawContextTokens.
+    const rawTokenEstimate = estimateRawContextTokens({
+      store: await resolveGraphStoreAfterIndex(config, graphClient),
+      query,
+      compressedTokens: deliveredTokenEstimate,
+      anchors: deliveredAnchors,
+      fileTokens: workspaceFileTokens(workspaceRoot),
+    });
+
+    // Record cumulative token savings for ROI tracking — deferred until AFTER
+    // the post-packaging attach (see the end of this function) so the persisted
+    // ROI covers the true accounted payload, not just the layered package.
+
+    // Byte-stable head, volatile tail / 稳定头 + 变动尾.
+    //
+    // A host that caches this block as a prompt prefix only gets a hit while the
+    // leading bytes repeat — one differing byte re-prices everything behind it. So
+    // key order is part of the contract: everything derived from (query, store)
+    // comes first — `query`, `summary`, `anchors`, `anchorBodies`, the stable
+    // `tokenBudget` fields, `refillPreview` — and fields that can move between two
+    // otherwise identical calls (per-call accounting, degradation steps, the
+    // dialogue/workbench echoes, economics, cache layout) are appended after.
+    // Anchors are NOT reordered here; only the envelope's field order changes.
+    const result: ContextPreviewResult = {
+      query,
+      ...(englishQuery?.trim() ? { englishQuery: englishQuery.trim() } : {}),
+      summary: deliveredSummary,
+      anchors: deliveredAnchors,
+      ...(pkg.bodies ? { anchorBodies: pkg.bodies } : {}),
+      tokenBudget: {
+        maxContextTokens: effectiveMaxTokens,
+        estimatedRawTokens: rawTokenEstimate,
+        compressedTokens: deliveredTokenEstimate,
+        budgetUsedPercent: calculateBudgetUsedPercent(deliveredTokenEstimate, effectiveMaxTokens),
+        // Recomputed by the post-packaging accounting below, so it rides last
+        // inside the budget block rather than ahead of the fields that stay put.
+        estimatedSavingsPercent: calculateSavingsPercent(rawTokenEstimate, deliveredTokenEstimate),
+      },
+      refillPreview,
+      summaryCount: deliveredSummary.length,
+      anchorCount: deliveredAnchors.length,
+      tokenEstimate: deliveredTokenEstimate,
+      truncated: pkg.truncated,
+      // --- volatile tail: per-call accounting and additive echoes ---
+      anchorsByLayer: {
+        l1: deliveredAnchors.filter((item) => item.layer === "L1").length,
+        l2: deliveredAnchors.filter((item) => item.layer === "L2").length,
+        l3: deliveredAnchors.filter((item) => item.layer === "L3").length,
+      },
+      ...(queryTranslationDelegation ?? {}),
+    };
+
+    if (!bypassCache) {
+      cacheContextResult(query, workspaceRoot, result);
+    }
+
+    const attached = await attachWorkbenchThenDialogue(result, graphClient, config, query, dialogue);
+    // 响应硬预算：超限按序降级并重算记账；ROI 也按降级后的真实下发量入账。
+    // Hard response budget applies before ROI recording so the persisted savings
+    // cover what was actually sent (the degraded payload), not the pre-cap one.
+    const budgeted = applyResponseBudget(attached);
+
+    // ROI 记账延后到 attach 之后：持久化的节省统计必须覆盖真实下发总量
+    // （budgeted + unbudgeted），否则 dialogue recall / workbench 行触发时
+    // token-savings.json 会系统性乐观。/ Record cumulative token savings AFTER
+    // the post-packaging attach so the persisted ROI uses the accounted total.
+    try {
+      const accountedTokens = budgeted.accountedTokens ?? budgeted.tokenBudget.compressedTokens;
+      recordSavings(config, {
+        timestamp: new Date().toISOString(),
+        query,
+        rawTokens: budgeted.tokenBudget.estimatedRawTokens,
+        compressedTokens: accountedTokens,
+        savingsPercent: budgeted.tokenBudget.estimatedSavingsPercent,
+        source: "preview_context",
+      });
+    } catch {
+      // Savings tracking is best-effort; don't fail the preview if it errors
+    }
+
+    const withEconomics = pressureBlock
+      ? await attachContextEconomics({ ...budgeted, contextPressure: pressureBlock }, graphClient, query, config)
+      : await attachContextEconomics(budgeted, graphClient, query, config);
+    return withEconomics;
+  } finally {
+    // All client access on the main path (index refresh, packaging, refill,
+    // attach, economics) is finished and nothing in the returned payload holds
+    // a lazy reference to it — release the handle unless the deferred vector
+    // pass (refreshIndexForPreview → pendingVectorTarget) took ownership.
+    if (!vectorPassOwnsClient) {
+      await closeGraphClientQuietly(graphClient);
+    }
+  }
 }
 
 const lastPackageLines = new Map<string, string[]>();
@@ -1349,8 +1390,14 @@ export async function indexFile(
 
   const indexOptions = buildIndexOptions(config);
 
-  const result = await indexSingleFile(graphClient, root, absPath, indexOptions);
-  return { ...result, path: absPath };
+  try {
+    const result = await indexSingleFile(graphClient, root, absPath, indexOptions);
+    return { ...result, path: absPath };
+  } finally {
+    // Watcher/save-hook callers fire this per changed file: an unclosed handle
+    // per event leaks sqlite descriptors until the process exits.
+    await closeGraphClientQuietly(graphClient);
+  }
 }
 
 export async function rebuildGraph(
@@ -2571,8 +2618,10 @@ export function startFileWatcherIfEnabled(
 
   watcher.onChange((files) => {
     for (const file of files) {
-      void indexFile(file, configPath).catch(() => {
-        // Incremental index failures are best-effort; don’t crash the watcher
+      void indexFile(file, configPath).catch((error) => {
+        // Incremental index failures stay best-effort (never crash the watcher),
+        // but never silent: a swallowed failure hides a stale index for days.
+        logger.warn({ error, file }, "Incremental file index failed");
       });
     }
   });

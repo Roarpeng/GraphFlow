@@ -5,7 +5,7 @@
  * used for incremental indexing decisions.
  */
 
-import { readFileSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { readFileSync, mkdirSync, writeFileSync, rmSync, existsSync, statSync } from "node:fs";
 import { GRAPH_STORE_DELTA_SUFFIX } from "./graphify-file-client.js";
 import { join, dirname } from "node:path";
 import { logger } from "../utils/logger.js";
@@ -73,6 +73,41 @@ export function saveCacheState(cachePath: string, cacheState: CacheState): void 
   }
 }
 
+const CACHE_STATE_MEMO_LIMIT = 64;
+const cacheStateMemo = new Map<string, { fingerprint: string; state: CacheState }>();
+
+/**
+ * loadCacheState memoized in-process, keyed by (path, mtimeMs, size): a
+ * rewrite invalidates immediately, an unchanged file skips the JSON.parse.
+ *
+ * Motivation (P0-1b): the preview freshness chain parses the same manifest
+ * (124KB index-state.json on this repo) twice per call — indexedStoreIsIncomplete
+ * and hasPendingGraphIndexWork each did a full loadCacheState. The returned
+ * object is SHARED between callers: treat it as read-only. The one caller that
+ * mutates its cache state (file-indexer's incremental upsert) still uses the
+ * uncached loadCacheState.
+ */
+export function loadCacheStateCached(cachePath: string): CacheState {
+  let fingerprint: string;
+  try {
+    const stat = statSync(cachePath);
+    fingerprint = `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    // Missing or unreadable: readFileSync fails fast, nothing worth memoizing.
+    return loadCacheState(cachePath, false);
+  }
+  const memo = cacheStateMemo.get(cachePath);
+  if (memo && memo.fingerprint === fingerprint) {
+    return memo.state;
+  }
+  const state = loadCacheState(cachePath, false);
+  if (cacheStateMemo.size >= CACHE_STATE_MEMO_LIMIT) {
+    cacheStateMemo.clear();
+  }
+  cacheStateMemo.set(cachePath, { fingerprint, state });
+  return state;
+}
+
 /**
  * Remove graph store and index cache for a full rebuild. Vectors live in node
  * metadata inside the store, so they go with it.
@@ -106,7 +141,9 @@ export function indexedStoreIsIncomplete(
   if (!storeNodes) {
     return false;
   }
-  const manifest = loadCacheState(indexManifestPath(rootDir, manifestName), false);
+  // Shared memo: refreshIndexForPreview calls this and hasPendingGraphIndexWork
+  // back to back — the same manifest must not be JSON.parsed twice per preview.
+  const manifest = loadCacheStateCached(indexManifestPath(rootDir, manifestName));
   const claimed = Object.keys(manifest).length;
   if (claimed === 0) {
     return false;
@@ -133,7 +170,7 @@ export function hasPendingGraphIndexWork(
     return true;
   }
 
-  const cacheState = loadCacheState(indexManifestPath(rootDir, options?.manifestName), false);
+  const cacheState = loadCacheStateCached(indexManifestPath(rootDir, options?.manifestName));
   const scanned = walkScannableFiles(rootDir, includeExtensions, maxFileSizeBytes, {
     ...(options?.respectGitIgnore === false ? { respectGitIgnore: false } : {}),
   });

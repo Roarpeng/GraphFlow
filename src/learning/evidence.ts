@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export type EvidenceSource = "manual" | "ci" | "agent" | "hook" | "reconcile";
@@ -137,11 +137,53 @@ export function readAuditEvents(path: string): GovernanceAuditEvent[] {
     .map((line) => JSON.parse(line) as GovernanceAuditEvent);
 }
 
+/**
+ * In-process tail cache for `appendGovernanceAudit`, keyed by audit path:
+ * the file size observed at the last full read plus the last event. The audit
+ * file is append-only, so an unchanged `statSync().size` means an unchanged
+ * file — the cached last event (seq/prevHash for the hash chain) can be
+ * reused without re-reading and JSON.parsing the whole log on every append.
+ * 多进程说明：另一进程追加后 size 变化 → 缓存失效 → 全量重读，行为正确；
+ * audit 只追加不改写，"同尺寸覆盖" 不可能发生，故 size 相同即视为未变。
+ * Multi-process note: another process's append changes the size, so the cache
+ * invalidates and the file is re-read — correct. A same-size overwrite would
+ * defeat the size check, but the audit log is append-only, so that cannot
+ * happen.
+ */
+interface AuditTailCacheEntry {
+  size: number;
+  lastEvent: GovernanceAuditEvent | undefined;
+}
+
+const auditTailCache = new Map<string, AuditTailCacheEntry>();
+
+/** Test hook: drop the in-process audit tail cache (simulates a fresh process). */
+export function resetAuditTailCache(): void {
+  auditTailCache.clear();
+}
+
+function readLastAuditEvent(path: string): GovernanceAuditEvent | undefined {
+  if (!existsSync(path)) {
+    auditTailCache.delete(path);
+    return undefined;
+  }
+  const size = statSync(path).size;
+  const cached = auditTailCache.get(path);
+  if (cached && cached.size === size) {
+    return cached.lastEvent;
+  }
+  // Simplicity first: any size change triggers one full re-read (which also
+  // picks up another process's appends), then refreshes the cache.
+  const lastEvent = readAuditEvents(path).at(-1);
+  auditTailCache.set(path, { size, lastEvent });
+  return lastEvent;
+}
+
 export function appendGovernanceAudit(
   path: string,
   input: Omit<GovernanceAuditEvent, "seq" | "at" | "prevHash" | "hash">
 ): GovernanceAuditEvent {
-  const previous = readAuditEvents(path).at(-1);
+  const previous = readLastAuditEvent(path);
   const withoutHash = {
     seq: (previous?.seq ?? 0) + 1,
     at: new Date().toISOString(),
@@ -151,6 +193,8 @@ export function appendGovernanceAudit(
   const event: GovernanceAuditEvent = { ...withoutHash, hash: eventHash(withoutHash) };
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(event)}\n`, { flag: "a", encoding: "utf8" });
+  // Keep the cache warm for the next append: our own write changed the size.
+  auditTailCache.set(path, { size: statSync(path).size, lastEvent: event });
   return event;
 }
 

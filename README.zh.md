@@ -8,7 +8,7 @@
 
 > **给编程 Agent 用的记忆与上下文 harness。** 本地优先的代码知识图谱 · 有界上下文压缩（响应真正有界：压缩包之外，历史回显只以短预览下发；比整读 top-10 文件少 **95.6%** token——这是 token 数比值，不衡量回答质量，见[双基线](benchmarks/RESULTS.md)） · 跨会话学习飞轮。
 
-GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，完全离线，无需 API Key。
+GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor、Claude Code、DeepSeek Harness、15+ Agent），让无状态模型变成可长期工作的编码助手。它**不是编排执行器**：先压缩上下文、再规划，执行交给宿主 Agent。纯 TypeScript/Node，CLI + MCP + VS Code 扩展，本地优先，无需 API Key——索引/压缩/召回不需要 API Key；默认语义向量后端首次会从 huggingface.co 下载一次模型（失败自动降级到完全离线的 hash 后端；设 `embeddingProvider: "fnv"` 可完全不联网）。
 
 **一条命令安装承诺**：`npm i -g @roarpeng/graphflow` = 安装 + 注册 + 检测 + 修复；VSIX 激活同样自动完成注册，并把运行时同步到稳定目录 `~/.graphflow/runtime/`，MCP 条目指向稳定路径——IDE 升级删旧扩展目录不再导致悬空。两种安装方式都是装完即用，三平台一致。
 
@@ -112,7 +112,7 @@ npx tsx packages/efficiency-agent/bin/eff-agent.ts bench compare runs/baseline.j
 | **R8 省钱与靠谱双主线** | `working-set` 预取（消灭探索轮次）、`challenge` 图 diff 质询、`spawn-receipt` 出生证、`facts ask` 时点查询、`quote` 诚实任务报价 |
 | **Harness** | 记忆动态、按任务召回（图锚点 + 压缩摘要 + 历史 episode + skill），有明确 L0–L3 token 预算；**符号正文进包**（前 3 个 L1 符号锚点各附声明正文，单条 ≤120 token、整包 ≤20% 预算，且只取锚点阶段剩下的预算——正文永不挤掉锚点；只有磁盘文本仍与索引期签名一致才附，否则保持纯指针，`expandAnchor` 报 `exact` / `relocated` / `drifted`；`enableSymbolBodies: false` 可关）；**打包外附加负载如实记账**（对话命中与 workbench/对话**预览回显**计入 `unbudgetedTokens`，`accountedTokens` = 压缩 + 包外负载，`estimatedSavingsPercent` 按该真实下发总量计算，`estimatedRawTokens` 不低于实际下发量；响应有界——回显为每条约 160 字符的消息预览并带 `truncated` 标记，全文留在图谱中，可经 `anchorId` 展开 / VS Code 面板查看；`recordDialogue: false` 完全关闭回显与记录） |
 | **Token 比值（双口径）** | 对整读同一 ranker 的 top-10 文件少 **95.6%**；对朴素 grep 基线少 98.5%。两者回答不同问题，**不可互换**。二者都只是 token 数比值，**不检验压缩包是否仍含答题所需信息**，不代表回答质量；实时 `context preview` 的节省百分比口径不同，不承诺具体数值。见 [benchmarks/RESULTS.md](benchmarks/RESULTS.md) |
-| **检索自测** | 132 条 golden 查询 Hit@5=100%、MRR=0.779——查询由作者编写、无 held-out 划分，属样本内回归门禁，不代表泛化能力；独立审计的 15 条 held-out 英文查询（未参与调参）文件级 Hit@5=80%、MRR=0.61（BM25 基线 73%/0.68）；调参用的 20 条开发集 Hit@5=85%（BM25 95%）；中文查询依赖智能体提供 `englishQuery`（提供时 5/5 命中，不提供 0/5） |
+| **检索自测** | 132 条 golden 查询的 CI 门禁为 ≥80% recall / ≥90% top-K；commit 锚定基准（`npm run bench:retrieval`）当前实测 Hit@5=100%、MRR=0.779、NDCG@5=0.638——查询由作者编写、无 held-out 划分，属样本内回归门禁，不代表泛化能力；中文查询依赖智能体提供 `englishQuery`（提供时 5/5 命中，不提供 0/5） |
 | **效率机制（SoL-Pi 借鉴）** | 默认**全开**、可在 **GraphFlow: Settings** 逐项关闭：大输出归档为句柄（ObservationPack）、日志压缩为**逐字核验**收据（Evidence-Preserving Reducer）、按观测压力自适应预算 + 压缩建议（Online Context Compact）、编辑+验证融合（Action Fusion）；dsh 侧在模型表面自动投影大结果（`GRAPHFLOW_D_DSH_PROJECTION=0` 关）。见 [docs/efficiency-mechanisms.md](docs/efficiency-mechanisms.md) |
 | **效率/能力门禁 + 机制自动研究** | 配对双臂报告落 `graphflow-out/efficiency.json`，`governance release-gate` 新增 `--min-efficiency-qualifying` / `--max-capability-regressions` / `--min-anchor-recall-percent` / `--min-body-coverage-percent`；候选机制走 `graphflow mechanism propose\|trial\|freeze\|admit\|reject\|list`（held-out 隔离、代码强制） |
 | **对话图** | 对话轮是带时间语义的类型化图节点（`supersedes` / `same_topic` 边 + `validAt` / `invalidAt`）：被修正的结论离线检测并以修正链渲染，当前真值过滤隐藏被取代轮。历史问答可检索：`dialogue search "<query>"`（`--include-superseded` 回看历史），`graphflow_context` 预览附加纯增量 `dialogueHits`、绝不挤掉代码锚点。`dialogue fork --from` 显式分叉、`dialogue list --path` 回放路径、`dialogue traces` 多 Agent 轨迹、`artifact export-memory` 导出 `dialogues.md`（按 session 分组、含修正链与轨迹）。注入在所有代码锚点**之后**、纯增量；落盘前做**密钥脱敏**（API Key / Bearer / JWT / 连接串 / PEM），`GRAPHFLOW_DIALOGUE_REDACT=0` 可关 |
@@ -168,7 +168,7 @@ GraphFlow 本身就是一个 **dsh 插件包**（topic：`dsh-plugin`）。`pack
 | VS Code/Cursor 图谱面板、Settings、Workbench Tree、`@graphflow` chat | **不移植** |
 | Cursor Agent Plugins 发现 / Claude Code Session* **文件** hooks | **不移植**（dsh 用 bundle + glue） |
 
-核心价值：本地 AST 知识图谱（11 种代码语言走真实 tree-sitter AST，Markdown 为正则解析）、L1–L3 分层压缩（token 比值**双口径**并列——对整读 top-10 文件少 **95.6%**，对朴素 grep 基线少 98.5%，两者回答不同问题、不可互换，且都不衡量回答质量）、跨会话 Episodic / Skill 飞轮。GraphFlow **不执行代码**，只给宿主 Agent 压缩上下文和计划；对话写入边界默认做密钥脱敏（`GRAPHFLOW_DIALOGUE_REDACT=0` 可关）。Workbench 数据走 MCP `graphflow_context` / `graphflow_diagnose` 即可。
+核心价值：本地 AST 知识图谱（10 种语言走真实 tree-sitter AST（含 C/C++）；TypeScript/JavaScript 走 TypeScript 编译器（可选依赖，缺失时降级正则抽取、符号细节减少）；Markdown 为正则解析）、L1–L3 分层压缩（token 比值**双口径**并列——对整读 top-10 文件少 **95.6%**，对朴素 grep 基线少 98.5%，两者回答不同问题、不可互换，且都不衡量回答质量）、跨会话 Episodic / Skill 飞轮。GraphFlow **不执行代码**，只给宿主 Agent 压缩上下文和计划；对话写入边界默认做密钥脱敏（`GRAPHFLOW_DIALOGUE_REDACT=0` 可关）。Workbench 数据走 MCP `graphflow_context` / `graphflow_diagnose` 即可。
 
 ### 安装
 

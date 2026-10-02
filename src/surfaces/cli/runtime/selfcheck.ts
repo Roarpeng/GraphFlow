@@ -8,6 +8,7 @@ import { resolveIndexManifestName } from "../../../graph/client-factory";
 import { loadGraphStore } from "./helpers";
 import { redactSecrets } from "../../../learning/dialogue-thread";
 import { hasUsableLlmProvider } from "../../../config/llm-availability";
+import { getTypescriptBackendStatus } from "../../../graph/language-indexers/typescript";
 
 /**
  * `graphflow selfcheck` — one command, read-only, ~seconds: is this
@@ -115,6 +116,25 @@ export async function runSelfcheck(
     });
   } catch (error) {
     items.push({ name: "index-freshness", status: "warn", detail: error instanceof Error ? error.message : String(error) });
+  }
+
+  // 4b. TS/JS indexer backend — the primary user language used to degrade to
+  // regex extraction silently when the optional 'typescript' package was
+  // absent from an npm global/npx install tree (only a stderr log remained).
+  try {
+    const backend = getTypescriptBackendStatus();
+    items.push(
+      backend === "compiler"
+        ? { name: "ts-indexer", status: "ok", detail: "TS/JS parsed with the TypeScript compiler" }
+        : {
+            name: "ts-indexer",
+            status: "warn",
+            detail:
+              "TS/JS fell back to REGEX extraction — the optional 'typescript' package did not resolve from this install; AST features (calls/inherits/jsdoc) are degraded",
+          },
+    );
+  } catch (error) {
+    items.push({ name: "ts-indexer", status: "warn", detail: error instanceof Error ? error.message : String(error) });
   }
 
   // 5. LLM round-trip — configured health lies; only a real call tells the truth.

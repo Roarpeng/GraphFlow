@@ -18,6 +18,17 @@ function loadTs(): typeof TsNs | null {
   return tsModule;
 }
 
+/**
+ * Which backend TS/JS extraction currently runs on, so `graphflow selfcheck`
+ * can surface the silent degradation instead of leaving it in stderr logs:
+ * "compiler" once the optional `typescript` package has resolved successfully
+ * (module-level memo — the require is attempted at most once), "regex" when it
+ * did not and extraction falls back to regex (calls/inherits/jsdoc degraded).
+ */
+export function getTypescriptBackendStatus(): "compiler" | "regex" {
+  return loadTs() !== null ? "compiler" : "regex";
+}
+
 const EXTS = [".ts", ".tsx", ".js", ".jsx"];
 
 function extOf(relPath: string): string {

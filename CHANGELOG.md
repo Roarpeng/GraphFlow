@@ -2,6 +2,42 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed — 代码审计驱动的性能与诚实性批次（Wave 1+2，每项均代码级复现后修复）
+
+- **preview 热路径（P0）**:`readGitVisibleFiles` 增加进程内 5s TTL 缓存——此前每次 preview 都 spawn 一个 `git ls-files` 子进程（256MB maxBuffer）；manifest（index-state.json，124KB）从双重解析合并为 `loadCacheStateCached` 单次记忆化（mtime:size 指纹失效，上限 64 条）。
+- **连接生命周期（P0）**:`previewContext`/`indexFile` 全路径 `try/finally` 关闭自己创建的图客户端（缓存命中分支同样）——此前每次 preview/watcher 保存都新开 sqlite 连接且永不关闭，常驻 MCP 进程的 fd/WAL 映射持续累积。延迟向量通道（deferred embedding）移交的客户端除外。watcher 增量索引失败从 `.catch(() => {})` 静默吞错改为 `logger.warn`。
+- **file 传输倒排索引增量修补（Wave 2，读路径写放大）**:preview 的自身写（对话轮/workbench topic）走 delta 追加时不再把倒排索引置 null——按被触及节点的旧 token 删除/新 token 插入原地修补，成本 O(触及节点 token) 而非全店重分词 O(n×content)；删除节点同样修补。全量重写路径保持原语义。与全量重建的等价性有测试背书。
+- **两个无界增长文件（P1）**:`token-savings.json` records 环形上限 2000 条（存量超限文件下次写入自愈；被截明细的聚合计数折入持久化 `truncatedPrefix`，累计统计与全量日志完全一致）；`.graphflow/mcp-http-audit.jsonl` 追加改用进程内尾条缓存（size 未变即用缓存 seq/prevHash，连续追加零全量读；哈希链语义逐字节不变，`resetAuditTailCache` 测试钩子）。
+
+### Fixed — TS/JS AST 索引依赖与降级可观测
+
+- **`typescript`(`^6.0.3`)进入 `optionalDependencies`**:此前仅存在于 devDependencies,npm 全局/npx
+  安装树上没有 TS 编译器,TS/JS(目标用户主力语言)索引静默降级为正则解析(仅 `logger.error`,
+  用户不可见)。现在默认安装大概率带上编译器,同时平台解析失败也不毁安装(尊重既有降级路径)。
+- **降级可观测**:`src/graph/language-indexers/typescript.ts` 新增导出
+  `getTypescriptBackendStatus(): "compiler" | "regex"`(模块级 memo:`loadTs` 成功一次即
+  "compiler",require 失败发生降级即 "regex")。
+- **`graphflow selfcheck` 新增 `ts-indexer` 检查**:compiler → ok("TS/JS parsed with the
+  TypeScript compiler");regex → warn("TS/JS fell back to REGEX extraction — the optional
+  'typescript' package did not resolve from this install; AST features (calls/inherits/jsdoc)
+  are degraded")。
+- **`disclosure.network` 补 `https://huggingface.co`**:仅用于首次语义嵌入模型下载,可经
+  `HF_ENDPOINT` 镜像;`embeddingProvider: "fnv"` 可完全避免该网络访问(已在
+  `disclosure.permissions.network` 注明)。
+
+### Docs — README 口径诚实化（中英同步，12 处）
+
+- "11 languages tree-sitter ASTs" → 准确口径:10 个 tree-sitter 文法语言(含 C/C++)+ TS/JS 走 TypeScript 编译器(可选依赖,缺失降级正则);Markdown 正则。
+- "Fully offline / 完全离线" 三处绝对化表述 → "本地优先":默认语义向量后端首次从 huggingface.co 下载一次模型,失败降级完全离线 hash 后端;`embeddingProvider:"fnv"` 可完全不联网。
+- "golden set in CI: Hit@5=100%" → CI 门禁实为 ≥80% recall / ≥90% top-K;100%/MRR/NDCG 是 commit 锚定基准快照。
+- 删除无工件支撑的 "independent audit 15 held-out queries" 及 20-query 开发集数字(仓库内无数据集/脚本/结果)。
+
+### Tests
+
+- 新增 17 用例:`m-hotpath-fixes`(5)、`m-index-patch`(3)、`m-unbounded-files`(4)、`m-ts-indexer-status`(5)。全量 288 文件 / 2707 用例绿,tsc/eslint 干净。
+
 ## [2.1.0] — 2026-10-02
 > 修复 2.0.3 中 MCP 常驻进程内存/线程无限增长、`graphflow-mcp --http` 只能服务一次请求两个问题——都需要升级到本版才生效；
 > 另含凭证环境变量优先、上下文预览提速约 45%、Efficiency Agent 2.x 包（仓库内，未发布到 npm）。
