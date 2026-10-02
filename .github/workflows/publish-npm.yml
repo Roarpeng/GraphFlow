@@ -16,6 +16,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # gate:release runs the Efficiency Agent golden gate, which resolves every corpus baseCommit.
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
