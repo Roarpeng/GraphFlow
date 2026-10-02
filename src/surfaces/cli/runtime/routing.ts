@@ -377,6 +377,32 @@ export async function runTaskResult(
     }
 
     // 当无 LLM 时，严格保障平滑走 bridge 模式，状态统一返回 DELEGATED，保留完整 AST 上下文与 Layer A Advisory
+    // U1 cost ledger: every LLM call this run made (provider usage captured in
+    // provider-executor) is drained and persisted here — the run's own cost
+    // trail, cache hits included. Failures never break the run.
+    try {
+      const { drainProviderUsageEvents } = await import("../../../routing/provider-executor.js");
+      const { appendCostEvent } = await import("../../../learning/cost-ledger.js");
+      for (const event of drainProviderUsageEvents()) {
+        appendCostEvent(config, {
+          ts: event.ts,
+          kind: "llm",
+          role: event.role,
+          tier: event.tier,
+          provider: event.provider,
+          model: event.model,
+          ...(event.usage.promptTokens !== undefined ? { promptTokens: event.usage.promptTokens } : {}),
+          ...(event.usage.completionTokens !== undefined ? { completionTokens: event.usage.completionTokens } : {}),
+          ...(event.usage.promptCacheHitTokens !== undefined ? { cacheHitTokens: event.usage.promptCacheHitTokens } : {}),
+          ...(event.usage.promptCacheMissTokens !== undefined ? { cacheMissTokens: event.usage.promptCacheMissTokens } : {}),
+          ...(event.usage.promptCacheWriteTokens !== undefined ? { cacheWriteTokens: event.usage.promptCacheWriteTokens } : {}),
+          ...(result.episodeId ? { sessionId: result.episodeId } : {}),
+        });
+      }
+    } catch {
+      // Cost accounting is best-effort observability.
+    }
+
     if (!hasExternalLlm && result.status !== "DELEGATED") {
       return {
         status: "DELEGATED" as const,
@@ -914,8 +940,46 @@ export async function planAndBrainstormResult(
       planSource: "llm" as const,
       probe,
     };
+    // U3 plan challenge gate (rules version — zero LLM): graph facts question
+    // the model-produced plan (external callers / deleted symbols). Advisory
+    // by default; GRAPHFLOW_PLAN_GATE=enforce downgrades to suggested.
+    let challenges: string[] | undefined;
+    try {
+      const { extractTouchedFromPlan, buildChallengeList } = await import("../../../graph/diff-challenge.js");
+      const touched = extractTouchedFromPlan(nodes);
+      if (touched.files.length > 0 || touched.symbols.length > 0) {
+        const challengeClient = createGraphClient(config);
+        try {
+          const list = await buildChallengeList(challengeClient, {
+            touchedFiles: touched.files,
+            planNodes: nodes,
+            maxChallenges: 10,
+          });
+          const found = list.challenges.map((challenge) => challenge.question);
+          if (found.length > 0) challenges = found;
+        } finally {
+          challengeClient.close?.();
+        }
+      }
+    } catch {
+      // Challenge gate is fail-open; planning never depends on it.
+    }
+    const gated =
+      challenges && challenges.length > 0
+        ? process.env.GRAPHFLOW_PLAN_GATE === "enforce"
+          ? {
+              ...result,
+              nodesStatus: "suggested" as const,
+              complete: false,
+              requiresAgentBridge: true,
+              challenges,
+              challengeNote:
+                "Plan downgraded by GRAPHFLOW_PLAN_GATE=enforce: graph-fact challenges unanswered — address them before executing.",
+            }
+          : { ...result, challenges, challengeNote: "Graph-fact challenges to answer before executing (advisory)." }
+        : result;
     const workbench = await maybeSeedWorkbench(task, nodes, configPath);
-    return workbench ? { ...result, workbench } : result;
+    return workbench ? { ...gated, workbench } : gated;
   }
 
   // LLM attempted but failed/timed out → keep template content, but mark it
@@ -1100,6 +1164,27 @@ export async function reportOutcome(
 
   const sanitizedLessons = sanitizeOutcomeLessons(lessons ?? []);
 
+  // U1: attach this task's own LLM cost trail (drained from provider-executor)
+  // to the closing episode — the per-task cost snapshot for the flywheel.
+  let costSummary: import("../../../learning/episodic-memory").EpisodeCostSummary | undefined;
+  try {
+    const { drainProviderUsageEvents } = await import("../../../routing/provider-executor.js");
+    const events = drainProviderUsageEvents();
+    if (events.length > 0) {
+      let promptTokens = 0;
+      let completionTokens = 0;
+      let cacheHitTokens = 0;
+      for (const event of events) {
+        promptTokens += event.usage.promptTokens ?? 0;
+        completionTokens += event.usage.completionTokens ?? 0;
+        cacheHitTokens += event.usage.promptCacheHitTokens ?? 0;
+      }
+      costSummary = { promptTokens, completionTokens, ...(cacheHitTokens > 0 ? { cacheHitTokens } : {}), calls: events.length };
+    }
+  } catch {
+    // Cost snapshot is best-effort.
+  }
+
   // Always update episode outcome (success/fail), even when skill learning is dampened.
   const applyOutcome = () =>
     updateEpisodeOutcome(
@@ -1108,7 +1193,8 @@ export async function reportOutcome(
       success ? "pass" : "fail",
       sanitizedLessons,
       deviation,
-      evidenceInput
+      evidenceInput,
+      costSummary
     );
   let updated = await applyOutcome();
   // A JSON-fallback host (no better-sqlite3) loses its store file whenever a

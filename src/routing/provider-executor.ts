@@ -2,7 +2,7 @@ import type { AgentRole } from "../core/types";
 import { isAbortError, runAbortable } from "../core/cancellation";
 import { resolveConfig } from "../config/resolve";
 import { logger } from "../utils/logger";
-import type { ModelSelection } from "./model-router";
+import type { ModelSelection, ModelTier } from "./model-router";
 import { anthropicGenerateText } from "./provider-adapters/anthropic";
 import { bailianGenerateText } from "./provider-adapters/bailian";
 import { deepseekGenerateText, deepseekGenerateTextDetailed } from "./provider-adapters/deepseek";
@@ -95,6 +95,52 @@ let lastProviderUsage: ProviderUsageStats | undefined;
 
 export function getLastProviderUsage(): ProviderUsageStats | undefined {
   return lastProviderUsage;
+}
+
+/**
+ * U1 cost ledger — one queued usage record per successful LLM call, drained
+ * by the cost-ledger writer (server/tool-handler side). Kept as a pull queue
+ * so the executor stays free of filesystem concerns.
+ */
+export interface ProviderUsageEvent {
+  role: AgentRole;
+  tier: ModelTier;
+  provider: ModelSelection["provider"];
+  model: string;
+  ts: string;
+  usage: ProviderUsageStats;
+}
+
+/** Bound the queue: a consumer that never drains must not grow memory unbounded. */
+const MAX_PENDING_USAGE_EVENTS = 500;
+
+const pendingUsageEvents: ProviderUsageEvent[] = [];
+
+/** Take and clear the queued usage events (oldest first). */
+export function drainProviderUsageEvents(): ProviderUsageEvent[] {
+  return pendingUsageEvents.splice(0, pendingUsageEvents.length);
+}
+
+/**
+ * Queue the usage of the call that just succeeded. DeepSeek reports usage on
+ * both its paths (tool loop + detailed generate), so its capture is complete;
+ * the other adapters currently return plain strings with no usage object —
+ * best-effort: events are simply absent until they grow usage support.
+ */
+function queueUsageEvent(role: AgentRole, selection: ModelSelection): void {
+  const usage = lastProviderUsage;
+  if (!usage) return;
+  pendingUsageEvents.push({
+    role,
+    tier: selection.tier,
+    provider: selection.provider,
+    model: selection.model,
+    ts: new Date().toISOString(),
+    usage,
+  });
+  if (pendingUsageEvents.length > MAX_PENDING_USAGE_EVENTS) {
+    pendingUsageEvents.splice(0, pendingUsageEvents.length - MAX_PENDING_USAGE_EVENTS);
+  }
 }
 
 function hasAnyContext(context?: PromptContext): boolean {
@@ -356,6 +402,9 @@ export async function executeRolePrompt(
   }
 
   const execute = async (abortSignal: AbortSignal): Promise<string> => {
+    // Per-attempt reset: adapters that report no usage would otherwise leak the
+    // PREVIOUS call's stats into this call's cost event (misattribution).
+    lastProviderUsage = undefined;
     const req: ProviderTextRequest = { ...request, signal: abortSignal };
     return dispatchProvider(req, selection, enableTools);
   };
@@ -378,6 +427,7 @@ export async function executeRolePrompt(
       const value = await runAbortable(label, timeoutMs, signal, execute, "provider.fetch");
       circuitState.failures = 0;
       delete circuitState.openedUntil;
+      queueUsageEvent(role, selection);
       return value;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -444,6 +494,7 @@ export async function executeRolePrompt(
 export function __resetProviderCircuitsForTests(): void {
   circuitByProvider.clear();
   lastProviderUsage = undefined;
+  pendingUsageEvents.splice(0, pendingUsageEvents.length);
 }
 
 export type { ProviderChatMessage };

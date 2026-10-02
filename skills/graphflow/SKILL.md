@@ -244,6 +244,8 @@ The response echoes workbench/dialogue history only as **message previews** (eac
 }
 ```
 
+**Where these fields live (U2 stable text copy):** the legacy `content[].text` copy of a preview carries only the stable face — `query`, `summary`, `anchors`, the `dialogueThread` echo — in that fixed order, closed by `"volatile-metrics": "see structuredContent"`. The numeric fields above (`tokenBudget`, `unbudgetedTokens`, `accountedTokens`, `contextPressure`) moved out of the text copy into **structuredContent** only: they change every call and one moved byte re-prices the host's whole cached prefix. If your host shows only `content[].text`, read the numbers from structuredContent before reporting savings; `anchors` order inside the package is (layer, id), not relevance rank — the relevance score rides on each anchor.
+
 **Always report to user:** `accountedTokens` (= `compressedTokens` + `unbudgetedTokens`) with the savings %, anchor count, key summary findings. Savings % alone understates the true delivered payload — quote the accounted total.
 
 ### Workflow 1b: Chinese / CJK queries (agent translates → English search)
@@ -277,6 +279,12 @@ Step 2: graphflow_plan(task: "<task description>")
   - Without GraphFlow LLM: returns mode=agent-delegated + agentWorkItems
     (simple-plan-intent, simple-plan-decomposition) and optional suggestedNodes.
     MUST submit/merge via graphflow_insight before treating the DAG as final.
+  - The merge response may carry `challenges[]`: pre-execution challenge questions
+    grounded in graph facts (external-caller compatibility / deleted symbols /
+    requirement links). The agent MUST answer these challenges before executing;
+    any step it cannot answer is a plan blind spot — revisit the plan, do not
+    execute around it. Missing/empty `challenges` means no graph-grounded risk
+    was found (or the gate failed open) — not a green light to skip review.
   - Local suggestedNodes are heuristic hints only.
   - Result includes workbench.topics and workbench.outline (mainline DAG + side branches).
 Step 3: Review workbench.outline (function nodes), not chat turns. Wake later with graphflow workbench tree or graphflow_diagnose (graph.workbenchOutline).

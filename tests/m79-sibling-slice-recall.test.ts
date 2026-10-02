@@ -186,8 +186,27 @@ describe("M79 sibling slice recall", () => {
     const sliceStemHits = SLICE_NAMES.filter((name) => blob.includes(name));
     expect(sliceStemHits.length).toBeGreaterThanOrEqual(4);
 
-    const l1Anchors = pkg.anchorChannel.filter((a) => a.layer === "L1").slice(0, 8);
-    expect(l1Anchors.some((a) => a.id.includes("monsters.ts") || a.id === noise.id)).toBe(false);
+    // U2 order-contract change (volatile-field/prefix-stability work):
+    // anchorChannel is now (layer, id) ordered — "first 8" is lexicographic,
+    // not a relevance rank, and monsters.ts (web/src/data < web/src/store)
+    // sorts early. The selection set is unchanged (the sort runs after packing
+    // and cannot add or drop anchors); the noise-quality intent moves to the
+    // per-anchor relevance annotation: monsters anchors must stay strictly
+    // less relevant than the L1 head quality, so noise rides the package as a
+    // pointer instead of masquerading as the head.
+    const monstersRelevance = Math.max(
+      0,
+      ...pkg.anchorChannel
+        .filter((a) => a.id.includes("monsters.ts") || a.id === noise.id)
+        .map((a) => a.relevance ?? 0)
+    );
+    const nonNoiseL1Relevance = Math.max(
+      0,
+      ...pkg.anchorChannel
+        .filter((a) => a.layer === "L1" && !a.id.includes("monsters.ts") && a.id !== noise.id)
+        .map((a) => a.relevance ?? 0)
+    );
+    expect(monstersRelevance).toBeLessThan(nonNoiseL1Relevance);
 
     // Diversify cap: at most 2 symbols from useGameStore in the whole package is ideal;
     // after sibling File inject, store symbols may still appear — cap applies before expand.

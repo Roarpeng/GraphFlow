@@ -45,6 +45,13 @@ const L3_PIN_HINT = /alignment|deviation|goal/i;
 const DIALOGUE_PACK_MAX_TURNS = 3;
 const VECTOR_RRF_WEIGHT = 0.5;
 
+/**
+ * Presentation order of the layers inside `anchorChannel`: L1 code first, L2
+ * modules, L3 governance/dialogue last — the order the pack stages already
+ * produced, made explicit now that the exit sort needs a total order.
+ */
+const LAYER_RANK: Record<"L1" | "L2" | "L3", number> = { L1: 0, L2: 1, L3: 2 };
+
 export type DuplicateModulePolicy = "continue" | "break";
 
 export interface PackState {
@@ -131,7 +138,21 @@ export function createPackState(
 export function toLayeredPackage(state: PackState, budget: PackBudget): LayeredContextPackage {
   return {
     summaryChannel: state.summaryChannel,
-    anchorChannel: state.anchorChannel,
+    // 分数决定选谁进入包，id 决定包内顺序 / The score decides WHO enters the
+    // package, the id decides the order inside it.
+    //
+    // Every decision that quality depends on — quota truncation, budget stops,
+    // neighbor-expansion seeds (`anchorChannel.slice(0, 5)`), module-id
+    // derivation — reads the channel in packed (score) order BEFORE this sort,
+    // so selection is untouched. The sort only fixes presentation. Score order
+    // is not byte-stable across rounds: equal-score tie groups inherit store
+    // row order and `expandSubgraph`'s BFS insertion order, so the same anchor
+    // set could serialize differently on a rebuild. (layer, id) is a total,
+    // content-derived order — the host's prefix cache only hits while leading
+    // bytes repeat, so stable order is what makes the package cacheable at all.
+    anchorChannel: [...state.anchorChannel].sort(
+      (a, b) => LAYER_RANK[a.layer] - LAYER_RANK[b.layer] || a.id.localeCompare(b.id)
+    ),
     tokenEstimate: budget.tokens,
     truncated: budget.truncated,
     ...(state.bodyStats ? { bodies: state.bodyStats } : {}),
@@ -501,6 +522,33 @@ export async function injectL3SkillsAndPins(
   }
 }
 
+/**
+ * Presentation order for the SELECTED dialogue lines: sessionId lexicographic,
+ * then seq ascending (the in-session clock), so the same selected set always
+ * lands in the same order regardless of when each turn was last touched.
+ * `updatedAt` is only a fallback tie-break when a stored record has no seq —
+ * it moves on edits, so it must never be the primary key (the old hits→
+ * updatedAt ordering reshuffled two rounds apart whenever one turn got edited).
+ */
+interface DialogueTurnOrderKey {
+  id: string;
+  sessionId?: string;
+  seq?: number;
+  updatedAt?: number;
+}
+
+function compareDialogueTurnOrder(a: DialogueTurnOrderKey, b: DialogueTurnOrderKey): number {
+  const bySession = (a.sessionId ?? "").localeCompare(b.sessionId ?? "");
+  if (bySession !== 0) return bySession;
+  const aHasSeq = typeof a.seq === "number";
+  const bHasSeq = typeof b.seq === "number";
+  if (aHasSeq && bHasSeq && a.seq !== b.seq) return (a.seq as number) - (b.seq as number);
+  if (aHasSeq !== bHasSeq) return aHasSeq ? -1 : 1;
+  const byUpdated = (a.updatedAt ?? 0) - (b.updatedAt ?? 0);
+  if (byUpdated !== 0) return byUpdated;
+  return a.id.localeCompare(b.id);
+}
+
 async function collectDialogueContextLines(
   client: GraphClient,
   query: string,
@@ -528,6 +576,9 @@ async function collectDialogueContextLines(
         return { turn, hits };
       })
       .filter((s) => s.hits > 0)
+      // Selection still by query match quality (hits desc): the score decides
+      // WHO enters the package. The tie-breaks stay deterministic for a given
+      // store state but never influence the presentation order below.
       .sort(
         (a, b) =>
           b.hits - a.hits ||
@@ -536,6 +587,10 @@ async function collectDialogueContextLines(
       )
       .slice(0, DIALOGUE_PACK_MAX_TURNS);
     if (scored.length === 0) return [];
+    // Presentation order for the already-selected slice: sessionId → seq, so
+    // the packed dialogue lines are byte-stable across rounds and across
+    // sessions instead of tracking whichever turn was edited most recently.
+    scored.sort((a, b) => compareDialogueTurnOrder(a.turn, b.turn));
 
     const byId = new Map(allTurns.map((t) => [t.id, t]));
     const lines: DialogueContextLine[] = [];

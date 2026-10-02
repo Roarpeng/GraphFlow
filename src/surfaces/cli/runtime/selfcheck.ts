@@ -137,6 +137,28 @@ export async function runSelfcheck(
     items.push({ name: "ts-indexer", status: "warn", detail: error instanceof Error ? error.message : String(error) });
   }
 
+  // 4c. Cost ledger — is the cost trail actually being written?
+  try {
+    const { summarizeCost } = await import("../../../learning/cost-ledger.js");
+    const summary = summarizeCost(config, { kind: "llm" });
+    if (summary.calls > 0) {
+      const cachePct = summary.promptTokens > 0 ? Math.round((summary.cacheHitTokens / summary.promptTokens) * 100) : 0;
+      items.push({
+        name: "cost-ledger",
+        status: "ok",
+        detail: `${summary.calls} LLM calls recorded; estCost≈${summary.estCostMgc.toFixed(4)} 元; cacheHit ${cachePct}% of prompt tokens${summary.unpricedCalls > 0 ? ` (${summary.unpricedCalls} unpriced)` : ""}`,
+      });
+    } else {
+      items.push({
+        name: "cost-ledger",
+        status: "na",
+        detail: "no own-LLM cost recorded yet (bridge mode records host-delivered bytes only)",
+      });
+    }
+  } catch (error) {
+    items.push({ name: "cost-ledger", status: "warn", detail: error instanceof Error ? error.message : String(error) });
+  }
+
   // 5. LLM round-trip — configured health lies; only a real call tells the truth.
   if (hasUsableLlmProvider(config)) {
     try {
@@ -161,6 +183,38 @@ export async function runSelfcheck(
     }
   } else {
     items.push({ name: "llm-probe", status: "na", detail: "no LLM provider configured — plan/run will bridge to the connected agent" });
+  }
+
+  // 5b. Judgment tier — which brain answers the cheap-verification roles
+  // (plan challenge gate, distillation, lesson extraction)? Local Jev first,
+  // then cloud economy, then deterministic rules — the ladder must be visible.
+  try {
+    const { resolveTypesafeCredentials, typesafeClientOptionsFromConfig } = await import(
+      "../../../routing/typesafe-systemone.js"
+    );
+    const options = typesafeClientOptionsFromConfig(config);
+    const creds = resolveTypesafeCredentials(options);
+    if (creds?.apiKey) {
+      const base = options.baseUrl ?? "";
+      const local = /localhost|127\.0\.0\.1|::1/.test(base);
+      items.push({
+        name: "judgment-tier",
+        status: "ok",
+        detail: local
+          ? `local-jev (${base}) — typed judgments at ~zero marginal cost`
+          : "cloud-jev (typesafe.ai) — typed judgments over the network",
+      });
+    } else if (hasUsableLlmProvider(config)) {
+      items.push({ name: "judgment-tier", status: "ok", detail: "cloud-economy — judgment roles route to the configured economy tier" });
+    } else {
+      items.push({
+        name: "judgment-tier",
+        status: "na",
+        detail: "rules-only — challenge gate runs on graph facts, distillation on heuristics; zero LLM cost",
+      });
+    }
+  } catch (error) {
+    items.push({ name: "judgment-tier", status: "warn", detail: error instanceof Error ? error.message : String(error) });
   }
 
   // 6. Flywheel pulse.

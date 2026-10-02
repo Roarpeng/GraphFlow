@@ -243,6 +243,9 @@ export async function submitAgentInsight(
       ...(merged.intentConfidence !== undefined
         ? { intentConfidence: merged.intentConfidence }
         : {}),
+      // U3 plan challenge gate: graph-fact questions the agent must answer
+      // before executing the merged plan (external callers / deleted symbols).
+      ...(merged.challenges !== undefined ? { challenges: merged.challenges } : {}),
     };
   }
   return result;

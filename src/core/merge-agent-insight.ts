@@ -13,6 +13,8 @@ import {
 import { CLARIFICATION_CONFIDENCE_THRESHOLD } from "./goal-anchor";
 import type { GraphClient } from "../graph/client-factory";
 import { GraphifyClient } from "../graph/graphify-client";
+import { buildChallengeList, extractTouchedFromPlan } from "../graph/diff-challenge";
+import { logger } from "../utils/logger";
 import type { GraphNode, TaskNode } from "./types";
 import { parseAgentInsightResponse } from "./submit-agent-insight";
 
@@ -33,6 +35,11 @@ export interface MergeAgentInsightsResult {
   needsClarification?: boolean;
   /** Effective intent confidence after any clarification round. */
   intentConfidence?: number;
+  /**
+   * U3 计划质询门：基于图事实的执行前质询问句（每条一行，外部调用方兼容性 /
+   * 被删符号 / 需求关联）。质询为空或生成失败（fail-open）时不附加该字段。
+   */
+  challenges?: string[];
 }
 
 function normalizeTask(task: string): string {
@@ -67,7 +74,12 @@ async function loadAllNodes(client: GraphClient): Promise<GraphNode[]> {
     return client.snapshot().nodes;
   }
   if (client.readSnapshot) {
-    return client.readSnapshot().nodes;
+    try {
+      return client.readSnapshot().nodes;
+    } catch {
+      // fail-open：快照读取失败时降级走倒排查询，merge 主流程不因此中断
+      return client.queryByKeyword("agent-insight");
+    }
   }
   return client.queryByKeyword("agent-insight");
 }
@@ -346,10 +358,39 @@ export function mergeAgentInsights(
   };
 }
 
+/** 计划质询门截断上限：merge 场景下质询是提示而非审查，10 条封顶防噪 */
+const PLAN_CHALLENGE_MAX = 10;
+
+/**
+ * U3 计划质询门：对 merge 产出的最终 plan 跑图 diff 质询，返回每条一行的
+ * 中文问句。fail-open 语义：质询抛错/超时/为空 → 返回 undefined，merge 照常。
+ */
+async function buildPlanChallenges(
+  client: GraphClient,
+  plan: TaskNode[]
+): Promise<string[] | undefined> {
+  if (plan.length === 0) return undefined;
+  try {
+    const touched = extractTouchedFromPlan(plan);
+    const list = await buildChallengeList(client, {
+      touchedFiles: touched.files,
+      planNodes: plan,
+      maxChallenges: PLAN_CHALLENGE_MAX,
+    });
+    const questions = list.challenges.map((challenge) => challenge.question);
+    return questions.length > 0 ? questions : undefined;
+  } catch (error) {
+    logger.warn({ error }, "计划质询门失败，merge 结果不附加 challenges（fail-open）");
+    return undefined;
+  }
+}
+
 export async function mergeAgentInsightsFromGraph(
   client: GraphClient,
   task: string
 ): Promise<MergeAgentInsightsResult> {
   const records = await loadAgentInsightRecords(client, task);
-  return mergeAgentInsights(task, records);
+  const merged = mergeAgentInsights(task, records);
+  const challenges = await buildPlanChallenges(client, merged.plan);
+  return challenges ? { ...merged, challenges } : merged;
 }

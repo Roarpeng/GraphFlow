@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added — 成本经济学升级 Phase 1(U1 台账 / U2 前缀可缓存性 / U3 质询门)+ 判断层自检
+
+- **U1 成本台账(两栏测量)**:`provider-executor` 全路径捕获 ProviderUsageStats(含 promptCacheHit/Miss/Write,此前解析后零消费)→ `drainProviderUsageEvents`;新 `src/learning/cost-ledger.ts` 落 `graphflow-out/cost-ledger.jsonl`(llm/deliver 两类事件,>4000 行截老保新 2000);新 `src/routing/model-prices.ts` 价格表(DeepSeek/OpenAI/Anthropic 近似价,env `GRAPHFLOW_PRICE_*` 可覆盖;localhost/127.0.0.1 baseUrl 一律零价=本地判断层免费;cacheHit 按 0.1 因子计价)。**栏 A** 自有 LLM 成本:run 出口与 MCP 工具出口双 drain 落账,`reportOutcome` 把 drain 汇总快照进 `EpisodeRecord.costSummary`;**栏 B** 宿主交付字节:每个 MCP 工具响应的 text copy 字节数(归因贡献,非宿主账单——宿主侧计费不可测,已注释明示)。selfcheck 新增 `cost-ledger` 项(estCost/cacheHit%)。
+- **U2 宿主前缀可缓存性契约**:锚点通道出口统一稳定排序(**分数决定选谁、id 决定顺序**——quota/budget 等质量决策读排序前的 packed 序,选择集合与质量零变化,只有展示顺序变稳);dialogue 行按 (sessionId, seq) 稳定序(去 updatedAt 变序);`graphflow_context` 的 text copy 只投影稳定面,易变数值(tokenBudget 全部/unbudgetedTokens/accountedTokens/contextPressure/updatedAt)移出 text copy 只留 structuredContent(尾行 `volatile-metrics: see structuredContent`);同 query TTL 过期重算时锚点集合签名不变则复用上一轮字节(context-cache `stableCopyTrail`)。新 `src/graph/response-stability.ts` 的 `computePrefixStability`(UTF-8 字节口径)。**顺序语义变化**:anchorChannel=(layer,id) 字典序——retrieval-rank 基线经文档化机制刷新(132 条纯重排,recall 100%/top-K ≥90% 不变);m79 断言改 relevance 语义(成员资格不变)。
+- **U3 计划质询门(规则版,零 LLM)**:`diff-challenge` 新增 `planNodes` 入参与 `extractTouchedFromPlan`(文件/camelCase/PascalCase/snake_case 提取,符号经图精确解析落文件,不臆测);**桥接主集成**——`graphflow_insight merge` 对合并后的 agent 计划自动跑图事实质询(external-caller/deleted-symbol/requirement-link,≤10 条),`challenges[]` 附 merge 响应(MCP 面已透传),SKILL.md 指示执行前必须回答;**LLM 路径同挂**(planSource=llm 时 advisory 默认,`GRAPHFLOW_PLAN_GATE=enforce` 命中即降级 suggested);fail-open 全路径。live:本机 LLM 计划命中 10 条质询。
+- **U6(部分)判断层自检**:selfcheck 新增 `judgment-tier` 项——local-jev(localhost baseUrl)/cloud-jev/cloud-economy/**rules-only** 四态可见(存量 TypeSafe System One 客户端即判断层,`TYPESAFE_API_KEY` 或 economy 侧挂即启用)。
+- **效率门诚实化**:`evaluateEfficiencyFloor` 在显式阈值 + 0 配对记录时以明确指引 FAIL("no paired-arm data — run mechanism trial / benchmarks --record"),不再让 "0 < 1" 冒充质量结论。
+
+### Tests
+
+- 新增 25 用例:`m-cost-ledger`(7:价格/env 覆盖/localhost 零价/截断/聚合/episode 快照)、`m-context-stability`(9:字节稳定/前缀追加/dialogue 稳定序/text copy 禁入字段/trail 复用/prefixStability)、`m-plan-challenge-gate`(9:命中/符号解析/fail-open/截断/提取单元)。全量 **291 文件 / 2732 用例绿**,tsc/eslint 干净。
+- 已知边界(登记):自定义 config+全新空图的 E2E merge 计划组装为空(默认配置 m80 全绿覆盖同流程);openai 适配器 usage 捕获为 best-effort 待扩展(deepseek 完整)。
+
+
+
 ### Fixed — 代码审计驱动的性能与诚实性批次（Wave 1+2，每项均代码级复现后修复）
 
 - **preview 热路径（P0）**:`readGitVisibleFiles` 增加进程内 5s TTL 缓存——此前每次 preview 都 spawn 一个 `git ls-files` 子进程（256MB maxBuffer）；manifest（index-state.json，124KB）从双重解析合并为 `loadCacheStateCached` 单次记忆化（mtime:size 指纹失效，上限 64 条）。

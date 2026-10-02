@@ -33,6 +33,11 @@ import {
 } from "../../observations/index";
 import { discoverWorkspaceRoot } from "../../config/discover-workspace";
 import type { ObservedContextUsage } from "../../graph/context-pressure";
+import {
+  recordStableContextTextCopy,
+  reuseStableContextTextCopy,
+} from "../../graph/context-cache";
+import type { ContextPreviewResult } from "../cli/runtime/types";
 import { resolveConfig, resolveEfficiencyPolicy, toObservationPolicy } from "../../config/resolve";
 import type { ObservationPolicy } from "../../observations/types";
 
@@ -84,6 +89,49 @@ function readObservedContextUsage(value: unknown): ObservedContextUsage | undefi
 }
 
 export async function executeToolCall(
+  call: ToolCall,
+  server?: McpServer,
+  _hooks?: ExecutionHooks
+): Promise<ToolCallResponse & { structuredContent: Record<string, unknown> }> {
+  const response = await executeToolCallInner(call, server, _hooks);
+  // U1 cost ledger (栏 B): every tool response's text copy enters the host
+  // conversation — its byte size is GraphFlow's attributable contribution to
+  // the host's token bill (host-side billing itself is NOT meterable from
+  // here; this is contribution accounting, not invoicing). Best-effort.
+  try {
+    const textCopy = response.content?.[0]?.text ?? "";
+    const { appendCostEvent } = await import("../../learning/cost-ledger.js");
+    const { resolveConfig } = await import("../../config/resolve.js");
+    const config = resolveConfig(readOptionalString(call.arguments?.configPath));
+    appendCostEvent(config, {
+      ts: new Date().toISOString(),
+      kind: "deliver",
+      ...(call.name ? { role: call.name } : {}),
+      deliveredBytes: Buffer.byteLength(textCopy, "utf8"),
+    });
+    // Residual LLM usage (e.g. advisory/Jev calls made outside the run path)
+    // is drained here so an MCP session's cost trail is complete.
+    const { drainProviderUsageEvents } = await import("../../routing/provider-executor.js");
+    for (const event of drainProviderUsageEvents()) {
+      appendCostEvent(config, {
+        ts: event.ts,
+        kind: "llm",
+        role: event.role,
+        tier: event.tier,
+        provider: event.provider,
+        model: event.model,
+        ...(event.usage.promptTokens !== undefined ? { promptTokens: event.usage.promptTokens } : {}),
+        ...(event.usage.completionTokens !== undefined ? { completionTokens: event.usage.completionTokens } : {}),
+        ...(event.usage.promptCacheHitTokens !== undefined ? { cacheHitTokens: event.usage.promptCacheHitTokens } : {}),
+      });
+    }
+  } catch {
+    // Observability must never fail a tool call.
+  }
+  return response;
+}
+
+async function executeToolCallInner(
   call: ToolCall,
   server?: McpServer,
   _hooks?: ExecutionHooks
@@ -236,7 +284,9 @@ export async function executeToolCall(
         );
       }
       if (query && !anchorId) {
-        return structuredResponse(
+        return stableContextPreviewResponse(
+          query,
+          readOptionalString(args.rootDir),
           await previewContext(
             query,
             readOptionalString(args.configPath),
@@ -249,7 +299,9 @@ export async function executeToolCall(
       }
       if (query && anchorId) {
         // Both provided: default to preview behavior for backward compatibility
-        return structuredResponse(
+        return stableContextPreviewResponse(
+          query,
+          readOptionalString(args.rootDir),
           await previewContext(
             query,
             readOptionalString(args.configPath),
@@ -617,6 +669,63 @@ function serializeTextCopy(data: unknown, policy: TextCopyPolicy): string {
 interface StructuredResponseOptions {
   /** 逐次覆盖模块级 text 副本策略。 / Per-call text-copy policy override. */
   textCopy?: TextCopyPolicy;
+  /**
+   * 直接给定 text 副本字节（graphflow_context 预览的稳定面渲染路径专用）：
+   * 覆盖默认序列化，structuredContent 不受影响。
+   * Ready-made text-copy bytes (graphflow_context preview's stable-face
+   * rendering path): overrides the default serialization; structuredContent
+   * is unaffected.
+   */
+  textOverride?: string;
+}
+
+/**
+ * graphflow_context 预览的稳定面 text copy / stable-face text copy.
+ *
+ * The legacy text copy used to be the full compact JSON of the preview result,
+ * so every volatile number sitting mid-envelope (the whole `tokenBudget`
+ * block, `unbudgetedTokens` / `accountedTokens`, the `contextPressure`
+ * numerics, any `updatedAt`) rewrote the leading bytes a host was trying to
+ * cache. This projection keeps only the content-derived blocks — query,
+ * summary, anchors, the dialogueThread echo — in that fixed order, and closes
+ * with a stable one-line pointer instead of the numbers:
+ * `volatile-metrics: see structuredContent`. The numbers still ride in
+ * structuredContent untouched (the full result object), so nothing is lost —
+ * it is just no longer allowed to move the prefix.
+ */
+export function renderStablePreviewTextCopy(result: ContextPreviewResult): Record<string, unknown> {
+  return {
+    query: result.query,
+    ...(result.englishQuery !== undefined ? { englishQuery: result.englishQuery } : {}),
+    summary: result.summary,
+    anchors: result.anchors,
+    ...(result.dialogueThread !== undefined ? { dialogueThread: result.dialogueThread } : {}),
+    "volatile-metrics": "see structuredContent",
+  };
+}
+
+/**
+ * graphflow_context preview response: stable text copy + full structuredContent.
+ *
+ * Byte reuse across TTL-expired rounds: when the fresh result's anchor set has
+ * the same ordered signature as the previous round's (see
+ * `reuseStableContextTextCopy`), the previously served bytes are handed back
+ * verbatim; otherwise the stable face is re-rendered and recorded. The
+ * `rootDir` here is the caller-visible one — when it is not passed, the key
+ * falls back to workspace discovery and may miss the runtime cache's own key,
+ * which only means "render fresh" (still byte-stable), never wrong bytes.
+ */
+function stableContextPreviewResponse(
+  query: string,
+  rootDir: string | undefined,
+  result: ContextPreviewResult
+): ToolCallResponse & { structuredContent: Record<string, unknown> } {
+  const cacheRoot = rootDir ?? discoverWorkspaceRoot() ?? process.cwd();
+  const reused = reuseStableContextTextCopy(query, cacheRoot, result.anchors);
+  const text =
+    reused ?? serializeTextCopy(renderStablePreviewTextCopy(result), defaultTextCopyPolicy);
+  recordStableContextTextCopy(query, cacheRoot, result.anchors, text);
+  return structuredResponse(result, { textOverride: text });
 }
 
 export function structuredResponse(
@@ -632,7 +741,9 @@ export function structuredResponse(
         // Legacy text copy is compact JSON: pretty indentation is pure overhead
         // on the wire and in host rendering; clients that JSON.parse this copy
         // see the same data as structuredContent, byte-for-byte unindented.
-        text: serializeTextCopy(data, options?.textCopy ?? defaultTextCopyPolicy),
+        text:
+          options?.textOverride ??
+          serializeTextCopy(data, options?.textCopy ?? defaultTextCopyPolicy),
       },
     ],
   };

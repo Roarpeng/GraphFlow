@@ -274,8 +274,18 @@ export function evaluateEfficiencyFloor(
     { name: "efficiency-qualifying", actual: report.qualifying, required: minQualifying },
     { name: "efficiency-capability-regressions", actual: report.capabilityRegressions, maximum: maxCapabilityRegressions },
   ];
+  // An explicit floor with ZERO recorded comparisons is a data gap, not a
+  // passing grade: say so instead of letting "0 < 1" masquerade as a quality
+  // verdict. Paired arms are produced by `graphflow mechanism trial` or the
+  // benchmarks (`npm run bench:* -- --record`).
+  const noData =
+    minQualifying > 0 && report.totalComparisons === 0
+      ? [
+          "efficiency-qualifying: 0 recorded comparisons — no paired-arm data to judge (run 'graphflow mechanism trial' or benchmarks with --record); refusing to pass on absence of evidence",
+        ]
+      : [];
   const failures = checks.flatMap((check) => {
-    if (check.required !== undefined && check.actual < check.required) {
+    if (check.required !== undefined && check.actual < check.required && !(check.name === "efficiency-qualifying" && noData.length > 0)) {
       return [check.name + ": " + check.actual + " < " + check.required];
     }
     if (check.maximum !== undefined && check.actual > check.maximum) {
@@ -283,7 +293,7 @@ export function evaluateEfficiencyFloor(
     }
     return [];
   });
-  return { ok: failures.length === 0, checks, failures };
+  return { ok: failures.length === 0 && noData.length === 0, checks, failures: [...failures, ...noData] };
 }
 
 /**

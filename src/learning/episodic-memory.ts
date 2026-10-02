@@ -45,6 +45,19 @@ export interface EpisodeRecord {
   deviation?: DeviationKind;
   /** P0 evidence package: commit + diff + tests + confirmation. */
   evidence?: OutcomeEvidence;
+  /**
+   * U1 cost ledger — token totals for the calls this episode burned, attached
+   * at outcome-report time so a pass/fail verdict always carries its bill.
+   */
+  costSummary?: EpisodeCostSummary;
+}
+
+/** U1 — per-episode token totals (see EpisodeRecord.costSummary). */
+export interface EpisodeCostSummary {
+  promptTokens: number;
+  completionTokens: number;
+  cacheHitTokens?: number;
+  calls: number;
 }
 
 /** Drift taxonomy shared by alignment-check submit and outcome report. */
@@ -149,6 +162,7 @@ export async function recordEpisode(
       ...(episode.result !== undefined ? { result: episode.result } : {}),
       ...(episode.deviation !== undefined ? { deviation: episode.deviation } : {}),
       ...(episode.evidence !== undefined ? { evidence: episode.evidence } : {}),
+      ...(episode.costSummary !== undefined ? { costSummary: episode.costSummary } : {}),
   };
 
   const node: GraphNode = {
@@ -192,7 +206,8 @@ export async function updateEpisodeOutcome(
   outcome: "pass" | "fail",
   lessons?: string[],
   deviation?: DeviationKind,
-  evidenceInput?: OutcomeEvidenceInput
+  evidenceInput?: OutcomeEvidenceInput,
+  costSummary?: EpisodeCostSummary
 ): Promise<EpisodeRecord | undefined> {
   if (!client.getNodesByIds) {
     return undefined;
@@ -214,6 +229,7 @@ export async function updateEpisodeOutcome(
     ...(normalizeOutcomeEvidence(evidenceInput)
       ? { evidence: normalizeOutcomeEvidence(evidenceInput)! }
       : {}),
+    ...(costSummary !== undefined ? { costSummary } : {}),
     updatedAt: Date.now(),
   };
   const updatedNode: GraphNode = {
@@ -558,6 +574,7 @@ function deserialize(node: GraphNode): EpisodeRecord | undefined {
       ...(typeof parsed.result === "string" && parsed.result.length > 0 ? { result: parsed.result } : {}),
       ...(isDeviationKind(parsed.deviation) ? { deviation: parsed.deviation } : {}),
       ...(parsed.evidence ? { evidence: parsed.evidence as OutcomeEvidence } : {}),
+      ...(parsed.costSummary ? { costSummary: parsed.costSummary } : {}),
     };
   } catch {
     return undefined;
