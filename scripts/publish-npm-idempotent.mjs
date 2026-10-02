@@ -25,6 +25,29 @@ function npmViewVersion() {
   return (result.stdout || "").trim() || null;
 }
 
+/**
+ * Read dist-tags straight from the origin registry with cache-busting.
+ * `npm view` negotiates with CDN edge caches that can serve a stale
+ * packument for minutes after a successful publish (live: v2.2.0's run
+ * polled `npm view` every 10s for 80s — all 2.1.0 — while the origin
+ * dist-tags had already flipped to 2.2.0). The REST endpoint with a
+ * timestamp query and no-store headers bypasses that.
+ */
+async function originDistTagsLatest() {
+  try {
+    const response = await fetch(
+      `https://registry.npmjs.org/-/package/${encodeURIComponent(name).replace("%40", "@")}/dist-tags?t=${Date.now()}`,
+      { headers: { accept: "application/json", "cache-control": "no-store" } }
+    );
+    if (!response.ok) return null;
+    const tags = await response.json();
+    return typeof tags.latest === "string" ? tags.latest : null;
+  } catch {
+    return null;
+  }
+}
+
+async function main() {
 const published = npmViewVersion();
 if (published === version) {
   console.log(
@@ -72,11 +95,11 @@ if (publish.status === 0) {
   // short window after a successful publish (live: v2.1.0's tag run failed
   // red here while dist-tags had already flipped) — poll briefly before
   // declaring failure.
-  const VERIFY_ATTEMPTS = 8;
+  const VERIFY_ATTEMPTS = 9;
   const VERIFY_DELAY_MS = 10_000;
   let landed = null;
   for (let attempt = 1; attempt <= VERIFY_ATTEMPTS; attempt += 1) {
-    landed = npmViewVersion();
+    landed = (await originDistTagsLatest()) ?? npmViewVersion();
     if (landed === version) break;
     if (attempt < VERIFY_ATTEMPTS) {
       console.log(`registry still reports ${landed ?? "no version"} (attempt ${attempt}/${VERIFY_ATTEMPTS}) — polling again in ${VERIFY_DELAY_MS / 1000}s...`);
@@ -108,3 +131,9 @@ if (alreadyPublished || npmViewVersion() === version) {
 
 console.error(`npm publish failed with exit code ${publish.status ?? 1}`);
 process.exit(publish.status ?? 1);
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  process.exit(1);
+});
