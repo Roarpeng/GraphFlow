@@ -63,7 +63,16 @@ npx @roarpeng/graphflow@latest uninstall  # 一键移除所有 Agent 上的注�
 
 Agent 应先调 `graphflow_context` 拿压缩上下文，再视需要调用 `graphflow_plan`。没有 LLM API Key（或 Key 已失效——plan/run 都会做真实问候探测）时会桥接到宿主 Agent（agent-delegated）：`graphflow_plan` 返回 `planSource: "probe-failed-bridge"` + 降级原因，`graphflow_run` 直接 `DELEGATED`（attempts=0 + executionDescriptor + bridgeReason）——坏 Key 与没配 Key 行为完全一致，不会把重试预算烧在占位符上。需要符号级精确编辑时，把 Serena 作为第二个 MCP server 并列挂载——见 [GraphFlow + Serena 联合方案](docs/graphflow-serena.zh.md)（配置示例：[`examples/graphflow-serena.mcp.json`](examples/graphflow-serena.mcp.json)）。
 
-健康自检一条命令：`graphflow selfcheck`（配置加载 / 图存储代码节点 / delta 日志 / 索引新鲜度 / **LLM 真实连通** / 飞轮脉冲 / 对话脱敏 / 会话日志，红绿清单，`--json` 可编程消费）。
+健康自检一条命令：`graphflow selfcheck`（配置加载 / 图存储代码节点 / delta 日志 / 索引新鲜度 / **LLM 真实连通** / **判断层层级** / **成本台账** / 飞轮脉冲 / 对话脱敏 / 会话日志，红绿清单，`--json` 可编程消费）。
+
+### 成本经济学（2.2）：台账 / 可缓存前缀 / 质询门 / 判断层
+
+- **成本台账**：每次自有 LLM 调用的真实 usage（prompt/completion token、**prompt-cache 命中**）落 `graphflow-out/cost-ledger.jsonl`，按价格表计价（`GRAPHFLOW_PRICE_*` env 可覆盖；localhost 端点一律零价=本地模型免费）；每个 MCP 响应的 text copy 字节数记为对宿主账单的**归因贡献**（宿主侧计费本身不可计量——归因而非账单）。`selfcheck` 报 estCost 与缓存命中率；闭环 episode 携带 `costSummary` 快照。
+- **宿主前缀可缓存**：锚点**分数决定选谁、id 决定顺序**——同查询跨轮字节级一致；易变数值只留 structuredContent、绝不进 text copy。GraphFlow 块稳定 ⇒ 宿主 prompt 缓存持续命中（缓存读约 1 折）。
+- **计划质询门（规则版，零 LLM）**：merge 后的桥接计划与模型计划都会被图事实质询（计划触及符号的外部调用方/被删符号/需求关联），`challenges[]` 随 merge 响应与 plan 结果返回，执行前必须回答；`GRAPHFLOW_PLAN_GATE=enforce` 未答计划降级 suggested。
+- **负知识库**：带教训的失败沉淀为 `anti-pattern-lesson` 节点，**同类失败 ≥2 个不同 episode 实证**后进入下一次计划的 avoid 列表（"N 次 episode 实证"）；后续 pass 会 resolve 并从零重开证据周期。
+- **判断层**：便宜验证角色（质询/蒸馏）沿 `rules-only → Jev（TypeSafe System One 类型化判定，TYPESAFE_API_KEY，localhost=免费） → 云端 economy` 自动升级；selfcheck 显示当前层级，零配置用户恒为 rules-only。
+- **ObservationPack 默认化**：超限的 MCP text copy 自动打包为内容寻址句柄 + 头尾预览（`content/handle` 可精确召回），**先于桩化**——大响应不再灌满对话史。
 
 ### Web 可视化配置后台（本地轻量服务）
 

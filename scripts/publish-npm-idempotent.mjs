@@ -68,11 +68,24 @@ if (publish.status === 0) {
   // OIDC publish once exited 0 with full notices + provenance while the
   // registry packument was never modified (live incident, 2.0.3). The only
   // trustworthy success signal is the version being readable from the
-  // registry afterwards.
-  const landed = npmViewVersion();
+  // registry afterwards. BUT the registry serves stale packuments for a
+  // short window after a successful publish (live: v2.1.0's tag run failed
+  // red here while dist-tags had already flipped) — poll briefly before
+  // declaring failure.
+  const VERIFY_ATTEMPTS = 8;
+  const VERIFY_DELAY_MS = 10_000;
+  let landed = null;
+  for (let attempt = 1; attempt <= VERIFY_ATTEMPTS; attempt += 1) {
+    landed = npmViewVersion();
+    if (landed === version) break;
+    if (attempt < VERIFY_ATTEMPTS) {
+      console.log(`registry still reports ${landed ?? "no version"} (attempt ${attempt}/${VERIFY_ATTEMPTS}) — polling again in ${VERIFY_DELAY_MS / 1000}s...`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, VERIFY_DELAY_MS);
+    }
+  }
   if (landed !== version) {
     console.error(
-      `npm publish exited 0 but the registry still reports ${landed ?? "no version"} — ` +
+      `npm publish exited 0 but the registry still reports ${landed ?? "no version"} after ${VERIFY_ATTEMPTS} attempts — ` +
         `the publish did NOT land. Failing loudly instead of a false green.`
     );
     process.exit(1);

@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [2.2.0] — 2026-10-02
 
 ### Added — 成本经济学升级 Phase 2+3(U4 SoL-Pi 接线 / U5 负知识库 / U6 判断层 / U7-U8 设计稿)
 

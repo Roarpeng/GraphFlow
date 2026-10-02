@@ -217,12 +217,21 @@ graphflow audit                            # R9: closing audit — dangling deps
 graphflow route diagnose                   # routing diagnostics (real planner/worker round-trip probes, not config presence)
 graphflow learn nightly                    # nightly learning
 graphflow doctor                           # install self-check
-graphflow selfcheck                        # health red/green list: config / graph store / delta log / LLM reachability / flywheel / redaction
+graphflow selfcheck                        # health red/green list: config / graph store / delta log / LLM reachability / judgment tier / cost ledger / flywheel / redaction
 ```
 
 ### When the LLM is unavailable, plan and run bridge to the agent
 
 Both entry points pre-flight a real apikey+baseUrl+model greeting round-trip. A dead or mis-credentialed provider is treated **exactly like no provider**: `graphflow_plan` returns `planSource: "probe-failed-bridge"` (+ `degradeReason`), `graphflow_run` switches to bridge mode (`DELEGATED`, `attempts: 0`, `executionDescriptor` + `bridgeReason` with the underlying error). No retry budget is burned on echo placeholders, and no bridged plan ever reads like a model-produced final DAG.
+
+### Cost economics (2.2): ledger, cacheable prefix, challenge gate, judgment tier
+
+- **Cost ledger** — every own LLM call's real usage (prompt/completion tokens, **prompt-cache hits**) lands in `graphflow-out/cost-ledger.jsonl`, priced via a table you can override with `GRAPHFLOW_PRICE_*` env vars (localhost endpoints price at zero — local models are free by definition); every MCP response's text-copy bytes are recorded as your attributable contribution to the host's bill (host-side billing itself is not meterable from GraphFlow — attribution, not invoicing). `graphflow selfcheck` reports estCost and cache-hit ratio; closed episodes carry a `costSummary` snapshot.
+- **Host-prefix cacheability** — anchor ordering is score-for-selection, id-for-order, so the same query yields byte-identical context blocks across turns; volatile metrics (tokenBudget numbers etc.) live in structuredContent only, never in the text copy. Stable GraphFlow blocks keep the host agent's prompt cache hitting (cache reads price at ~1/10).
+- **Plan challenge gate (rules, zero LLM)** — merged bridge plans and model plans are questioned by graph facts (external callers of the symbols you plan to touch, deleted symbols, requirement links): `challenges[]` rides the `graphflow_insight` merge response and plan results; answer them before executing. `GRAPHFLOW_PLAN_GATE=enforce` downgrades unanswered plans to `suggested`.
+- **Negative knowledge** — a failure reported with lessons becomes an `anti-pattern-lesson` node; after the **same** failure is evidenced by ≥2 distinct episodes it enters the next plan's avoid-list ("N episodes verified"). A later pass resolves it and re-arms the evidence cycle from zero.
+- **Judgment tier** — cheap-verification roles (plan challenges, distillation) upgrade automatically along the ladder `rules-only → Jev (TypeSafe System One typed judgments, `TYPESAFE_API_KEY`, localhost = free) → cloud economy`; `selfcheck` shows which tier you are on. Zero-config users stay rules-only forever.
+- **ObservationPack by default** — oversized MCP text copies are packed into a content-addressed handle + head/tail preview (recallable via `content/handle`), **before** stubbing, so big responses stop flooding the conversation history.
 
 ## Configuration
 
