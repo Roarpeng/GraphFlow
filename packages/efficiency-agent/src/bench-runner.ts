@@ -46,7 +46,9 @@ function git(cwd: string, args: string[]): string {
 /** Working-tree changes, ignoring the efficiency layer's own state dir. */
 export function workspaceChanges(cwd: string): string[] {
   try {
-    return git(cwd, ["status", "--porcelain", "--", ".", ":(exclude)graphflow-out"])
+    // node_modules is the symlink createTaskWorkspace adds; `node_modules/` ignore rules skip
+    // directories only, so on POSIX git reports the link itself as untracked.
+    return git(cwd, ["status", "--porcelain", "--", ".", ":(exclude)graphflow-out", ":(exclude)node_modules"])
       .split(/\r?\n/)
       .filter((line) => line.trim().length > 0);
   } catch {

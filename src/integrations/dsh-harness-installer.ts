@@ -131,6 +131,8 @@ export function isDshHarnessDetected(dshHome = resolveDshHome()): boolean {
 export interface BuildDshInsertPatchOptions {
   /** Include `@roarpeng/graphflow/dsh` glue row. Default true (matches repo cordis.patch.yml). */
   includeGlue?: boolean;
+  /** Home holding `.graphflow/workspace-build.json`. Default: `os.homedir()`. */
+  home?: string;
 }
 
 /**
@@ -145,7 +147,7 @@ export function buildGraphFlowDshInsertPatch(options: BuildDshInsertPatchOptions
   // dsh is the one host that keeps launching the published package while you edit
   // this checkout. Falls back to the npx launcher exactly like every other host
   // when the preference is off or the build is missing.
-  const workspaceBuild = resolveWorkspaceBuildServerPath();
+  const workspaceBuild = resolveWorkspaceBuildServerPath(options.home === undefined ? {} : { home: options.home });
   // `command` and `args` are keys of `config:`, so they sit at eight spaces, level
   // with `serverName`/`transport` — not the ten a plain list item would take.
   // Getting this wrong yields a patch that still parses but puts the launcher at

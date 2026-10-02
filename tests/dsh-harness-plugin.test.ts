@@ -50,12 +50,30 @@ describe("DeepSeek Harness dsh plugin", () => {
 
   it("cordis.patch.yml matches the installer insert layer", () => {
     const file = readFileSync(join(__dirname, "..", "cordis.patch.yml"), "utf8");
-    const insert = buildGraphFlowDshInsertPatch().trim();
+    // The shipped file is the default launcher; a developer's workspace-build opt-in must not leak in.
+    const insert = buildGraphFlowDshInsertPatch({ home: makeTempRoot("gf-dsh-home-") }).trim();
     expect(file).toContain(`id: ${DSH_MCP_ROW_ID}`);
     expect(file).toContain("name: '@deepseek-ai/dsh-mcp-client'");
     expect(file).toContain("serverName: graphflow");
     expect(file).toContain("graphflow-mcp");
     expect(file.replace(/\r\n/g, "\n")).toContain(insert);
+  });
+
+  it("reads the workspace-build preference from the given home", () => {
+    const home = makeTempRoot("gf-dsh-home-");
+    const workspace = makeTempRoot("gf-dsh-ws-");
+    const serverPath = join(workspace, "dist", "surfaces", "mcp", "server.js");
+    mkdirSync(join(workspace, "dist", "surfaces", "mcp"), { recursive: true });
+    writeFileSync(serverPath, "// test build\n", "utf8");
+    mkdirSync(join(home, ".graphflow"), { recursive: true });
+    writeFileSync(
+      join(home, ".graphflow", "workspace-build.json"),
+      JSON.stringify({ enabled: true, workspaceRoot: workspace }),
+      "utf8"
+    );
+
+    expect(buildGraphFlowDshInsertPatch({ home })).toContain(serverPath);
+    expect(buildGraphFlowDshInsertPatch({ home: makeTempRoot("gf-dsh-home-") })).toContain("command: npx");
   });
 
   it("skips install when ~/.dsh is absent", () => {

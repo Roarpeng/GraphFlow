@@ -79,7 +79,8 @@ function settleFakeChild(child: FakeSpawnChild, exitCode: number | null, stdout 
 describe("dsh insert layer includes cwd and glue", () => {
   it("buildGraphFlowDshInsertPatch matches root cordis.patch.yml including cwd", () => {
     const file = readFileSync(join(__dirname, "..", "cordis.patch.yml"), "utf8").replace(/\r\n/g, "\n");
-    const insert = buildGraphFlowDshInsertPatch().trim();
+    // The shipped file is the default launcher; a developer's workspace-build opt-in must not leak in.
+    const insert = buildGraphFlowDshInsertPatch({ home: makeTempRoot("gf-dsh-home-") }).trim();
     expect(insert).toContain("cwd: !!js process.cwd()");
     expect(insert).toContain(`id: ${DSH_GLUE_ROW_ID}`);
     expect(insert).toContain(`name: '${DSH_GLUE_PACKAGE}'`);
