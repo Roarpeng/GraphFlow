@@ -95,7 +95,15 @@ jobs:
           VERSION=$(node -p "require('./vscode-extension/package.json').version")
           echo "Publishing ${DISPLAY} (${NAME}) v${VERSION} to VS Code Marketplace (PAT mode)..."
           cd vscode-extension
-          vsce publish --no-git-tag-version --pat "$VSCE_PAT"
+          set +e
+          out=$(vsce publish --no-git-tag-version --pat "$VSCE_PAT" 2>&1); code=$?
+          set -e
+          echo "$out"
+          if [ $code -ne 0 ]; then
+            # Re-running a release tag must not fail on a version that already landed.
+            if echo "$out" | grep -qi "already exists"; then echo "v${VERSION} is already on the Marketplace; skipping (idempotent)."; exit 0; fi
+            exit $code
+          fi
           echo "published=true" >> "$GITHUB_OUTPUT"
 
       - name: Install Azure CLI
@@ -115,7 +123,14 @@ jobs:
           VERSION=$(node -p "require('./vscode-extension/package.json').version")
           echo "Publishing ${DISPLAY} (${NAME}) v${VERSION} to VS Code Marketplace (Entra ID mode)..."
           cd vscode-extension
-          vsce publish --no-git-tag-version --azure-credential
+          set +e
+          out=$(vsce publish --no-git-tag-version --azure-credential 2>&1); code=$?
+          set -e
+          echo "$out"
+          if [ $code -ne 0 ]; then
+            if echo "$out" | grep -qi "already exists"; then echo "v${VERSION} is already on the Marketplace; skipping (idempotent)."; exit 0; fi
+            exit $code
+          fi
           echo "published=true" >> "$GITHUB_OUTPUT"
 
       - name: Log GraphFlow Tool publish success
