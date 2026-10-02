@@ -2,7 +2,9 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [2.1.0] — 2026-10-02
+> 修复 2.0.3 中 MCP 常驻进程内存/线程无限增长、`graphflow-mcp --http` 只能服务一次请求两个问题——都需要升级到本版才生效；
+> 另含凭证环境变量优先、上下文预览提速约 45%、Efficiency Agent 2.x 包（仓库内，未发布到 npm）。
 
 ### Added — Efficiency Agent 2.x 工程规范落地（`packages/efficiency-agent`）
 
@@ -74,6 +76,11 @@ All notable changes to this project are documented in this file.
   假 `server.js`；之后未沙箱的 dsh 测试又读到这个标记而失败。`vitest.config.ts` 固定 `pool: "forks"`，
   `tests/helpers/setup.ts` 在 worker 线程中直接拒绝运行。
 - `tests/workspace-build.test.ts` 的 `newWorkspace` 在 `return` 之后才登记临时目录，清理从未执行（每次运行泄漏数十个目录）。
+- dsh 的两条 `cordis.patch.yml` 一致性测试读的是开发者真实的 workspace-build 偏好，开启后必然失败；
+  `buildGraphFlowDshInsertPatch` 新增 `home` 选项，测试改传空的临时 home。
+- Efficiency Agent：`createTaskWorkspace` 在 worktree 里软链 `node_modules`，POSIX 上 `node_modules/` 忽略规则
+  不匹配软链，`git status` 把它报成未跟踪文件，`noChanges` 拒答判定在 Linux/macOS 上恒失败（CI 唯一失败用例）；
+  `workspaceChanges` 排除 `node_modules`。
 
 ### Fixed — MCP episode 往返与根套件负载抖动
 
