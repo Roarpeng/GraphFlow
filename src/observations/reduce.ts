@@ -158,6 +158,23 @@ async function readArchivedSource(rootDir: string, sha: string): Promise<string 
 
 export async function reduceObservationImpl(opts: ReduceObservationInput): Promise<ReduceResult> {
   const policy = opts.policy;
+  // U4-1: the settings switch must gate this path for real. Before this check
+  // `efficiencyPolicy.observations.reduce.enabled` gated zero code paths, so
+  // the settings panel switch (settings-server/panels) controlled nothing. An
+  // explicit reduce call under reduce.enabled=false is now REJECTED with a
+  // stated reason instead of silently standing in for the full content — and
+  // instead of silently reducing while the user believes the mechanism is off.
+  if (!policy.reduce.enabled) {
+    return failure(
+      "reduce-disabled",
+      "[reduce disabled] efficiencyPolicy.observations.reduce.enabled=false: the explicit reduce request " +
+        "was rejected rather than answered with an unverified full copy. Re-enable the switch in graphflow " +
+        "settings to mint verified receipts, or recall the handle / keep the caller-supplied content for " +
+        "exact bytes.",
+      opts.handle ?? "",
+      0
+    );
+  }
   try {
     // 1. Resolve the archived source of truth.
     let sourceHandle = "";

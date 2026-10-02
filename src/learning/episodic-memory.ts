@@ -16,6 +16,10 @@ import {
   registerGoldenEvidenceTokens,
 } from "./skill-admission";
 import {
+  resolveAntiPatternLessonsForTask,
+  upsertAntiPatternLessonsFromEpisode,
+} from "./skill-flywheel";
+import {
   normalizeOutcomeEvidence,
   type OutcomeEvidence,
   type OutcomeEvidenceInput,
@@ -239,6 +243,14 @@ export async function updateEpisodeOutcome(
   await client.upsertNodes([updatedNode]);
   if (recentEpisodeNodes.has(episodeId)) rememberEpisodeNode(updatedNode);
   if (outcome === "pass") {
+    // U5 negative knowledge base: a pass on this task retires its unresolved
+    // anti-pattern lessons so they stop injecting into plan prompts.
+    // Best-effort — must never block outcome reporting.
+    try {
+      await resolveAntiPatternLessonsForTask(client, updated.task);
+    } catch {
+      // 教训退出失败不影响 outcome 回填
+    }
     // 叠加真实 episode/symbol 证据到动态 golden 词集：pass episode 的
     // plan 描述 / keyDecisions 是执行成功的真实符号证据（best-effort，
     // 失败不阻断 outcome 回填）。
@@ -259,6 +271,20 @@ export async function updateEpisodeOutcome(
       } catch {
         // Distillation must never block outcome reporting.
       }
+    }
+  } else if (updated.lessons.length > 0) {
+    // U5 negative knowledge base: a failing episode's reported lessons become
+    // anti-pattern-lesson Decision nodes (injected only after the failCount
+    // precision gate). Task echoes are filtered inside the upsert.
+    // Best-effort — must never block outcome reporting.
+    try {
+      await upsertAntiPatternLessonsFromEpisode(client, {
+        id: updated.id,
+        task: updated.task,
+        lessons: updated.lessons,
+      });
+    } catch {
+      // 负知识沉淀失败不影响 outcome 回填
     }
   }
   return updated;

@@ -27,7 +27,7 @@
  * client panel (web/client.js).
  */
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -1407,14 +1407,83 @@ export function closePendingEpisodeForCwd(cwd, config = {}) {
  *     startSeq, endSeq }, sourceEventSeqs })
  * GraphFlow archives the exact bytes first, then replaces the over-budget
  * result with a handle projection that keeps the head/tail and tells the
- * model how to recall exact pages. ON by default (best config); set
- * GRAPHFLOW_D_DSH_PROJECTION=0 to disable. Every failure is swallowed so the
- * harness loop is never broken.
+ * model how to recall exact pages. ON by default (best config); disable via
+ * the GraphFlow settings switch (efficiencyPolicy.observations.enabled, the
+ * same switch the settings panel writes) or GRAPHFLOW_D_DSH_PROJECTION=0.
+ * Every failure is swallowed so the harness loop is never broken.
+ *
+ * Switch priority (U4-1): env GRAPHFLOW_D_DSH_PROJECTION is the
+ * highest-priority escape hatch (any explicit value, truthy or falsy, wins);
+ * without it the GraphFlow settings switch governs, read best-effort from the
+ * config layers (see readObservationsSwitch); an unreadable or absent switch
+ * keeps the default-ON best config.
  */
-export function isObservationProjectionEnabled(env = process.env) {
+export function isObservationProjectionEnabled(env = process.env, workspace, config) {
   const raw = env[PROJECTION_ENV]?.trim().toLowerCase();
-  // Default ON (best config): only an explicit falsy value disables it.
-  return !(raw === "0" || raw === "false" || raw === "off" || raw === "no" || raw === "disabled");
+  // Env escape hatch: an explicitly set value (falsy OR truthy) always wins
+  // over the settings switch, so operators can always force the projection
+  // on/off regardless of what the config files say.
+  if (raw !== undefined && raw !== "") {
+    return !(raw === "0" || raw === "false" || raw === "off" || raw === "no" || raw === "disabled");
+  }
+  const setting = readObservationsSwitch(workspace, config);
+  if (typeof setting === "boolean") return setting;
+  // Default ON (best config): only an explicit falsy env value or an explicit
+  // settings `false` disables it.
+  return true;
+}
+
+/**
+ * Best-effort read of the GraphFlow settings switch
+ * `efficiencyPolicy.observations.enabled` for one workspace. Layer order
+ * mirrors resolveConfig (src/config/resolve.ts): global
+ * `$GRAPHFLOW_CONFIG_HOME|.graphflow.config.json` as the base, then the
+ * workspace's `graphflow.config.json`, then the `.graphflow/config.json`
+ * overlay — the LATER layer that defines the field wins (field-wise merge).
+ *
+ * Best-effort by design: unreadable/missing files or an absent field mean "no
+ * opinion" (undefined) and the caller keeps its default. Results are cached
+ * once per plugin process (per workspace), so a settings flip applies to a
+ * running dsh session only via the env escape hatch or a plugin reload.
+ * Never throws.
+ * @param {string|undefined} workspace
+ * @param {GraphFlowDshPluginConfig} [config]
+ * @returns {boolean|undefined}
+ */
+const observationsSwitchCache = new Map();
+
+export function readObservationsSwitch(workspace, config = {}) {
+  try {
+    if (typeof workspace !== "string" || !workspace.trim()) return undefined;
+    const env = envOf(config);
+    const configHome = env.GRAPHFLOW_CONFIG_HOME?.trim() || undefined;
+    const cacheKey = (configHome ?? "") + "|" + workspace;
+    const cached = observationsSwitchCache.get(cacheKey);
+    if (cached) return cached.value;
+    const readLayer = (file) => {
+      try {
+        const parsed = JSON.parse(readFileSync(file, "utf8"));
+        const enabled = parsed?.efficiencyPolicy?.observations?.enabled;
+        return typeof enabled === "boolean" ? enabled : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    const layers = [
+      join(configHome ?? homedir(), ".graphflow.config.json"),
+      join(workspace, "graphflow.config.json"),
+      join(workspace, ".graphflow", "config.json"),
+    ];
+    let value;
+    for (const file of layers) {
+      const layerValue = readLayer(file);
+      if (layerValue !== undefined) value = layerValue;
+    }
+    observationsSwitchCache.set(cacheKey, { value });
+    return value;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Concatenate the text blocks of one dsh tool-result event; "" when absent. */
@@ -1480,7 +1549,7 @@ async function packObservationViaCli(text, workspace, config) {
 export async function projectToolResultEvent(params = {}) {
   const { session, event, workspace, config = {}, packText } = params;
   try {
-    if (!isObservationProjectionEnabled(envOf(config))) return { projected: false, reason: "disabled" };
+    if (!isObservationProjectionEnabled(envOf(config), workspace, config)) return { projected: false, reason: "disabled" };
     if (!event || event.type !== "tool/result") return { projected: false, reason: "not-tool-result" };
     if (!session || typeof session.append !== "function") return { projected: false, reason: "no-surface-api" };
     const message = event?.data?.message;
@@ -1496,9 +1565,10 @@ export async function projectToolResultEvent(params = {}) {
     const tool = String(event?.data?.name ?? event?.data?.callName ?? message?.source?.name ?? "tool");
     const blocks = Array.isArray(message.content) ? message.content : [];
     const head = blocks.length > 0 ? blocks[0] : { type: "tool-result", content: [] };
+    const projectionText = buildObservationProjection(tool, packed);
     const replacementMessage = {
       ...message,
-      content: [{ ...head, content: [{ type: "text", text: buildObservationProjection(tool, packed) }] }],
+      content: [{ ...head, content: [{ type: "text", text: projectionText }] }],
     };
     const appended = session.append(
       "tool/result",
@@ -1513,9 +1583,151 @@ export async function projectToolResultEvent(params = {}) {
       handle: packed.handle,
       originalSeq: event.seq,
       replacementSeq: appended && typeof appended === "object" ? appended.seq : undefined,
+      // Model-visible bytes after the replace — feeds the session pressure
+      // accounting (see noteObservationPressure).
+      projectedBytes: Buffer.byteLength(projectionText, "utf8"),
     };
   } catch (error) {
     return { projected: false, reason: "error", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Session-level observation pressure accounting (U4 / SoL-Pi Compact supply).
+ *
+ * Every tool/result accumulates its raw bytes into a per-session counter;
+ * when the ObservationPack projection replaces an over-budget result, the
+ * model-visible bytes count the (much smaller) projection instead. The
+ * counter is persisted best-effort to `<workspace>/.graphflow/observation-pressure.json`
+ * keyed by dsh session id.
+ *
+ * Honest wiring note — why a file and not a direct parameter: this plugin
+ * NEVER calls `graphflow_context` preview itself. The compression-relevant
+ * context calls in dsh are made by the HOST AGENT over MCP, which the plugin
+ * cannot intercept, and the plugin's own CLI usage (`context preview --reply`,
+ * `observe pack`) has no context-pressure parameter (checked the CLI surface
+ * in src/surfaces/cli/index.ts: `context preview` parses --session/--topic-id/
+ * --resume-from/--reply/--config only). The file is therefore the supply
+ * channel: any graphflow_context caller (host hook, future MCP middleware, or
+ * the agent itself when pointed at the file) reads the latest entry and passes
+ * `{ usedTokens: usedTokensEstimate, maxTokens: <known window, or omitted> }`
+ * as contextPressure. Note GraphFlow's toContextPressure intentionally drops
+ * a bare usedTokens estimate (it never fabricates a window) — the estimate
+ * only bites once combined with a known maxTokens.
+ *
+ * All helpers never throw; accounting is strictly optional.
+ */
+const OBSERVATION_PRESSURE_RELATIVE = join(".graphflow", "observation-pressure.json");
+/** Rough token heuristic for the pressure estimate (bytes per token). */
+const PRESSURE_BYTES_PER_TOKEN = 4;
+/** Sessions kept in the pressure file (oldest updatedAt dropped first). */
+const PRESSURE_FILE_MAX_SESSIONS = 32;
+
+const observationPressureBySession = new WeakMap();
+
+/**
+ * @param {number} bytes
+ * @returns {number}
+ */
+export function estimateTokensFromBytes(bytes) {
+  return Number.isFinite(bytes) && bytes > 0 ? Math.max(1, Math.round(bytes / PRESSURE_BYTES_PER_TOKEN)) : 0;
+}
+
+/**
+ * Count one tool/result's raw bytes into the session counter. Returns a
+ * pending record to hand to settleObservationPressure once the projection
+ * outcome is known. Never throws.
+ * @param {object} session - the dsh session object (WeakMap key)
+ * @param {object|undefined} event - the `tool/result` session event
+ * @returns {{entry: {rawBytes: number, visibleBytes: number, observations: number, updatedAt: number}, rawBytes: number}|undefined}
+ */
+export function noteObservationPressure(session, event) {
+  try {
+    if (!session || typeof session !== "object") return undefined;
+    let entry = observationPressureBySession.get(session);
+    if (!entry) {
+      entry = { rawBytes: 0, visibleBytes: 0, observations: 0, updatedAt: 0 };
+      observationPressureBySession.set(session, entry);
+    }
+    const text = extractToolResultText(event);
+    const raw = typeof text === "string" ? Buffer.byteLength(text, "utf8") : 0;
+    entry.rawBytes += raw;
+    entry.updatedAt = Date.now();
+    return { entry, rawBytes: raw };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Settle one pending tool/result: the model-visible bytes are the projection
+ * when it happened, else the raw bytes. Never throws.
+ * @param {{entry: object, rawBytes: number}|undefined} pending
+ * @param {number|undefined} projectedBytes
+ */
+export function settleObservationPressure(pending, projectedBytes) {
+  try {
+    if (!pending || !pending.entry) return;
+    const surface =
+      Number.isFinite(projectedBytes) && projectedBytes >= 0 ? projectedBytes : pending.rawBytes;
+    pending.entry.visibleBytes += surface;
+    pending.entry.observations += 1;
+    pending.entry.updatedAt = Date.now();
+  } catch {
+    // accounting is optional
+  }
+}
+
+/**
+ * Serializable snapshot of one session's counters (the file's entry shape).
+ * @param {string} sessionId
+ * @param {{rawBytes: number, visibleBytes: number, observations: number, updatedAt: number}} entry
+ */
+export function observationPressureSnapshot(sessionId, entry) {
+  return {
+    sessionId,
+    rawBytes: entry.rawBytes,
+    visibleBytes: entry.visibleBytes,
+    observations: entry.observations,
+    usedTokensEstimate: estimateTokensFromBytes(entry.visibleBytes),
+    updatedAt: new Date(entry.updatedAt).toISOString(),
+  };
+}
+
+/**
+ * Persist one session's counters into the workspace pressure file
+ * (read-modify-write, capped session count, corrupt file restarts fresh).
+ * Best-effort: returns false on any failure, never throws.
+ * @param {string|undefined} workspace
+ * @param {string|undefined} sessionId
+ * @param {object} entry
+ * @returns {boolean}
+ */
+export function writeObservationPressureFile(workspace, sessionId, entry) {
+  try {
+    if (typeof workspace !== "string" || !workspace.trim() || !sessionId || !entry) return false;
+    const file = join(workspace, OBSERVATION_PRESSURE_RELATIVE);
+    let sessions = {};
+    try {
+      const parsed = JSON.parse(readFileSync(file, "utf8"));
+      if (parsed && typeof parsed === "object" && parsed.sessions && typeof parsed.sessions === "object") {
+        sessions = parsed.sessions;
+      }
+    } catch {
+      // corrupt or missing file — restart fresh
+    }
+    sessions[sessionId] = observationPressureSnapshot(sessionId, entry);
+    const ids = Object.keys(sessions).sort((a, b) =>
+      String(sessions[a]?.updatedAt ?? "").localeCompare(String(sessions[b]?.updatedAt ?? ""))
+    );
+    for (const id of ids.slice(0, Math.max(0, ids.length - PRESSURE_FILE_MAX_SESSIONS))) {
+      delete sessions[id];
+    }
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ sessions }, null, 2), "utf8");
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -1638,15 +1850,33 @@ export function apply(ctx, config = {}) {
         if (!session || typeof session !== "object") return;
         const type = event?.type;
         if (type === "tool/result") {
-          // ObservationPack projection (opt-in, fail-open): archive the raw
-          // result and replace the surface node with a handle projection.
+          // ObservationPack projection (fail-open): archive the raw result and
+          // replace the surface node with a handle projection. Session
+          // pressure accounting rides along: the raw bytes count first, and
+          // the projection outcome (smaller visible bytes) settles the
+          // counter, which is then persisted as the Compact pressure supply
+          // (see noteObservationPressure for the honest channel note).
           const projectionWorkspace = session?.header?.cwd ?? config.cwd;
+          const pending = noteObservationPressure(session, event);
+          const settle = (result) => {
+            try {
+              settleObservationPressure(
+                pending,
+                result && result.projected ? result.projectedBytes : undefined
+              );
+              if (pending) writeObservationPressureFile(projectionWorkspace, session?.id, pending.entry);
+            } catch {
+              // accounting is optional
+            }
+          };
           projectToolResultEvent({
             session,
             event,
             workspace: projectionWorkspace,
             config,
-          }).catch(() => {});
+          })
+            .then(settle)
+            .catch(() => settle(undefined));
           return;
         }
         if (type === "assistant/message") {

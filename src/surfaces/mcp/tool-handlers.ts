@@ -31,6 +31,7 @@ import {
   recallObservation,
   reduceObservation,
 } from "../../observations/index";
+import { resolveObservationPolicy } from "../../observations/policy";
 import { discoverWorkspaceRoot } from "../../config/discover-workspace";
 import type { ObservedContextUsage } from "../../graph/context-pressure";
 import {
@@ -284,9 +285,10 @@ async function executeToolCallInner(
         );
       }
       if (query && !anchorId) {
-        return stableContextPreviewResponse(
+        return await stableContextPreviewResponse(
           query,
           readOptionalString(args.rootDir),
+          readOptionalString(args.configPath),
           await previewContext(
             query,
             readOptionalString(args.configPath),
@@ -299,9 +301,10 @@ async function executeToolCallInner(
       }
       if (query && anchorId) {
         // Both provided: default to preview behavior for backward compatibility
-        return stableContextPreviewResponse(
+        return await stableContextPreviewResponse(
           query,
           readOptionalString(args.rootDir),
+          readOptionalString(args.configPath),
           await previewContext(
             query,
             readOptionalString(args.configPath),
@@ -714,18 +717,97 @@ export function renderStablePreviewTextCopy(result: ContextPreviewResult): Recor
  * `rootDir` here is the caller-visible one — when it is not passed, the key
  * falls back to workspace discovery and may miss the runtime cache's own key,
  * which only means "render fresh" (still byte-stable), never wrong bytes.
+ *
+ * U4-3 conservative default: an oversized text copy (above the observation
+ * inline threshold, default 8KB, while observations are enabled) is packed
+ * into the observation store and replaced with the same recallable handle
+ * projection the dsh host hook inserts — pack BEFORE the lossy stub, because
+ * a packed copy can be recalled byte-exact while a stub cannot. On pack
+ * failure (or a disabled mechanism) the response falls back to the existing
+ * serialization path (full copy / auto stub) unchanged. structuredContent
+ * always keeps the full result, plus `observationHandle` when packing served
+ * the text copy.
  */
-function stableContextPreviewResponse(
+async function stableContextPreviewResponse(
   query: string,
   rootDir: string | undefined,
+  configPath: string | undefined,
   result: ContextPreviewResult
-): ToolCallResponse & { structuredContent: Record<string, unknown> } {
+): Promise<ToolCallResponse & { structuredContent: Record<string, unknown> }> {
   const cacheRoot = rootDir ?? discoverWorkspaceRoot() ?? process.cwd();
   const reused = reuseStableContextTextCopy(query, cacheRoot, result.anchors);
+  // Pack-first only on a fresh render: reused bytes are the previously served
+  // copy (already packed when it was oversized — handle recovered below).
+  const packed =
+    reused === undefined
+      ? await maybePackPreviewTextCopy(
+          JSON.stringify(renderStablePreviewTextCopy(result)),
+          cacheRoot,
+          configPath
+        )
+      : undefined;
   const text =
-    reused ?? serializeTextCopy(renderStablePreviewTextCopy(result), defaultTextCopyPolicy);
+    reused ??
+    (packed?.projected ?? serializeTextCopy(renderStablePreviewTextCopy(result), defaultTextCopyPolicy));
   recordStableContextTextCopy(query, cacheRoot, result.anchors, text);
-  return structuredResponse(result, { textOverride: text });
+  const observationHandle = packed?.handle ?? matchObservationHandleInText(reused);
+  return structuredResponse(
+    observationHandle !== undefined ? { ...result, observationHandle } : result,
+    { textOverride: text }
+  );
+}
+
+/** Handle marker of an observation projection already embedded in served text. */
+const OBSERVATION_HANDLE_IN_TEXT_RE = /\[graphflow observation [^\]]*\] handle=(gfo:[0-9a-f]{16})/;
+
+function matchObservationHandleInText(text: string | undefined): string | undefined {
+  if (typeof text !== "string") return undefined;
+  return OBSERVATION_HANDLE_IN_TEXT_RE.exec(text)?.[1];
+}
+
+/**
+ * Pack an oversized preview text copy into the observation store and return
+ * the handle projection (dsh host-hook format). Returns undefined — and the
+ * caller keeps its existing text-copy path — when the copy is within the
+ * inline threshold, observations are disabled, or the pack fails. Fail-open:
+ * never throws.
+ */
+async function maybePackPreviewTextCopy(
+  text: string,
+  rootDir: string,
+  configPath: string | undefined
+): Promise<{ handle: string; projected: string } | undefined> {
+  try {
+    // Observation policy (threshold/enabled) comes from the same
+    // efficiencyPolicy.observations section the settings switch writes;
+    // resolution is fail-open to the built-in defaults.
+    let basePolicy: ObservationPolicy | undefined;
+    try {
+      basePolicy = toObservationPolicy(
+        resolveEfficiencyPolicy(resolveConfig(configPath, { rootDir }))
+      );
+    } catch {
+      basePolicy = undefined;
+    }
+    const policy = resolveObservationPolicy(basePolicy);
+    if (!policy.enabled) return undefined;
+    if (Buffer.byteLength(text, "utf8") <= policy.inlineThresholdBytes) return undefined;
+
+    const packed = await packObservation({ rootDir, content: text, policy });
+    if (packed.fallback) return undefined; // fall back to the existing stub/full path
+
+    const projected = [
+      "[graphflow observation context-preview] handle=" + packed.handle +
+        " lines=" + packed.lines + " bytes=" + packed.sizeBytes,
+      packed.head,
+      "...",
+      packed.tail,
+      "(recall exact bytes with graphflow_context handle=" + packed.handle + ")",
+    ].join("\n");
+    return { handle: packed.handle, projected };
+  } catch {
+    return undefined; // fail open to the existing serialization path
+  }
 }
 
 export function structuredResponse(

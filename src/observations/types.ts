@@ -21,8 +21,12 @@ export interface ObservationReducePolicy {
  * Observation store policy. Every field is optional at the call site; the
  * resolver fills in DEFAULT_OBSERVATION_POLICY values.
  *
- * `enabled` is advisory for future integration wiring: the direct API calls in
- * this module always operate (an explicit call is explicit intent).
+ * `enabled` gates the automatic surfaces (host-hook projection, the dsh
+ * projection glue, oversized-copy packing on the MCP preview path); the
+ * explicit pack/recall API calls in this module still always operate (an
+ * explicit call is explicit intent). `reduce.enabled` additionally gates the
+ * reducer: an explicit reduce call under `reduce.enabled=false` is rejected
+ * with a `reduce-disabled` fallback result rather than silently reducing.
  */
 export interface ObservationPolicy {
   enabled?: boolean;

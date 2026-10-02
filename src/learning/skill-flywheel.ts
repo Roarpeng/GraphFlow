@@ -1218,6 +1218,257 @@ async function collectTaskSkillCandidates(
   return { atoms, ranked, avoid };
 }
 
+// ── U5 negative knowledge base: anti-pattern-lesson Decision nodes ──────
+
+/**
+ * U5 — negative knowledge base. Lessons reported by FAILING episodes are
+ * persisted as Decision nodes (`metadata.kind = "anti-pattern-lesson"`), and
+ * only a lesson backed by >= 2 failing episodes (failCount precision gate)
+ * is injected into plan packaging as an "avoid" pattern. A later PASS on the
+ * same taskKey resolves the node so stale lessons stop injecting.
+ */
+export const ANTI_PATTERN_LESSON_KIND = "anti-pattern-lesson";
+const ANTI_PATTERN_LESSON_PREFIX = "anti-pattern-lesson:";
+/** Precision gate: a lesson must be backed by at least this many failing episodes. */
+export const ANTI_PATTERN_LESSON_MIN_FAIL_COUNT = 2;
+/** Injection cap for lesson avoids (independent of the skill avoid cap). */
+export const ANTI_PATTERN_LESSON_MAX_INJECTED = 3;
+/** taskKey = normalized task text truncated to this many characters. */
+const LESSON_TASK_KEY_MAX = 80;
+/** Bookkeeping cap for episodeIds on one lesson node. */
+const LESSON_EPISODE_IDS_MAX = 10;
+
+export interface AntiPatternLessonRecord {
+  lesson: string;
+  /** Normalized task text (first 80 chars) — groups lessons per task. */
+  taskKey: string;
+  /** Deterministic symbol tokens extracted from lesson+task (first 3). */
+  symbolRefs: string[];
+  /** Failing episodes backing this lesson since the last resolve. */
+  failCount: number;
+  episodeIds: string[];
+  updatedAt: number;
+  /** Set when a pass on the same taskKey retired this lesson. */
+  resolvedAt?: number;
+}
+
+/** Normalizable lesson key: lowercase + collapsed whitespace. */
+function normalizeLessonText(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+export function buildLessonTaskKey(task: string): string {
+  return normalizeLessonText(task).slice(0, LESSON_TASK_KEY_MAX);
+}
+
+/** File/symbol tokens (length >= 3) from lesson+task, first 3, deduped. */
+export function extractLessonSymbolRefs(lesson: string, task: string): string[] {
+  return dedup(
+    extractProjectSymbols(`${lesson} ${task}`)
+      .map((symbol) => symbol.trim())
+      .filter((symbol) => symbol.length >= 3)
+  ).slice(0, 3);
+}
+
+/**
+ * 任务回显门: a lesson that merely re-voices the task text (mutual containment
+ * with >= 80% length overlap) is a task echo, not knowledge — same rule as the
+ * task-echo gate in applySkillLearning.
+ */
+export function isTaskEchoLesson(task: string, lesson: string): boolean {
+  const t = task.trim().toLowerCase();
+  const l = lesson.trim().toLowerCase();
+  if (!t || !l) return false;
+  if (l === t) return true;
+  return (
+    (t.includes(l) || l.includes(t)) &&
+    Math.min(l.length, t.length) >= 0.8 * Math.max(l.length, t.length)
+  );
+}
+
+/**
+ * Deterministic lesson node id: fingerprint over taskKey + normalized lesson +
+ * symbolRefs, hashed with the same scheme as skill ids. Different lessons on
+ * the same task produce different fingerprints → independent nodes.
+ */
+export function antiPatternLessonNodeId(task: string, lesson: string): string {
+  const taskKey = buildLessonTaskKey(task);
+  const lessonKey = normalizeLessonText(lesson);
+  const symbolRefs = extractLessonSymbolRefs(lesson, task);
+  return `${ANTI_PATTERN_LESSON_PREFIX}${hashText(`${taskKey}|${lessonKey}|${symbolRefs.join(",")}`)}`;
+}
+
+function isAntiPatternLessonNode(node: GraphNode): boolean {
+  return (
+    node.id.startsWith(ANTI_PATTERN_LESSON_PREFIX) &&
+    node.metadata?.kind === ANTI_PATTERN_LESSON_KIND
+  );
+}
+
+export function parseAntiPatternLesson(
+  node: GraphNode
+): AntiPatternLessonRecord | undefined {
+  if (!isAntiPatternLessonNode(node)) return undefined;
+  try {
+    const parsed = JSON.parse(node.content) as Partial<AntiPatternLessonRecord>;
+    if (typeof parsed.lesson !== "string" || parsed.lesson.length === 0) {
+      return undefined;
+    }
+    return {
+      lesson: parsed.lesson,
+      taskKey: typeof parsed.taskKey === "string" ? parsed.taskKey : "",
+      symbolRefs: Array.isArray(parsed.symbolRefs)
+        ? parsed.symbolRefs.filter((s): s is string => typeof s === "string")
+        : [],
+      failCount:
+        typeof parsed.failCount === "number" && Number.isFinite(parsed.failCount)
+          ? Math.max(0, Math.floor(parsed.failCount))
+          : 0,
+      episodeIds: Array.isArray(parsed.episodeIds)
+        ? parsed.episodeIds.filter((s): s is string => typeof s === "string")
+        : [],
+      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
+      ...(typeof parsed.resolvedAt === "number" ? { resolvedAt: parsed.resolvedAt } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function loadAntiPatternLessonNode(
+  client: GraphClient,
+  id: string
+): Promise<GraphNode | undefined> {
+  if (client.getNodesByIds) {
+    const nodes = await client.getNodesByIds([id]);
+    return nodes.find((node) => node.id === id);
+  }
+  if (client.readSnapshot) {
+    return client.readSnapshot().nodes.find((node) => node.id === id);
+  }
+  return undefined;
+}
+
+/**
+ * Every anti-pattern-lesson node in the store. Prefers the snapshot (the only
+ * complete read — keyword queries are LIMIT 200 in SQLite and the kind is not
+ * part of searchable text); the keyword path stays as a best-effort fallback.
+ */
+export async function listAntiPatternLessonNodes(client: GraphClient): Promise<GraphNode[]> {
+  if (client.readSnapshot) {
+    return client.readSnapshot().nodes.filter(isAntiPatternLessonNode);
+  }
+  const hits = await client.queryByKeyword(ANTI_PATTERN_LESSON_KIND);
+  return hits.filter(isAntiPatternLessonNode);
+}
+
+/** Episode material the negative knowledge base learns from. */
+export interface EpisodeLessonSource {
+  id: string;
+  task: string;
+  lessons: string[];
+}
+
+/**
+ * U5 layer 1: persist a failing episode's lessons as anti-pattern-lesson
+ * Decision nodes. Idempotent upsert per (taskKey, lesson, symbolRefs)
+ * fingerprint: failCount += 1 and episodeIds append-deduped. Task echoes are
+ * skipped. A node that was resolved by a pass restarts its evidence cycle at
+ * failCount = 1 so a single fresh failure cannot immediately re-inject it.
+ */
+export async function upsertAntiPatternLessonsFromEpisode(
+  client: GraphClient,
+  episode: EpisodeLessonSource
+): Promise<number> {
+  const now = Date.now();
+  const updates: GraphNode[] = [];
+  for (const raw of episode.lessons) {
+    const lesson = raw.trim();
+    if (!lesson) continue;
+    if (isTaskEchoLesson(episode.task, lesson)) continue;
+    const id = antiPatternLessonNodeId(episode.task, lesson);
+    const existingNode = await loadAntiPatternLessonNode(client, id);
+    const existing = existingNode ? parseAntiPatternLesson(existingNode) : undefined;
+    const rearming = existing?.resolvedAt !== undefined;
+    const failCount = rearming ? 1 : (existing?.failCount ?? 0) + 1;
+    const episodeIds =
+      rearming || !existing
+        ? [episode.id]
+        : dedup([...existing.episodeIds, episode.id]).slice(-LESSON_EPISODE_IDS_MAX);
+    const record: AntiPatternLessonRecord = {
+      lesson,
+      taskKey: buildLessonTaskKey(episode.task),
+      symbolRefs: extractLessonSymbolRefs(lesson, episode.task),
+      failCount,
+      episodeIds,
+      updatedAt: now,
+    };
+    updates.push({
+      id,
+      type: "Decision",
+      content: JSON.stringify(record),
+      metadata: { kind: ANTI_PATTERN_LESSON_KIND },
+    });
+  }
+  if (updates.length > 0) {
+    await client.upsertNodes(updates);
+  }
+  return updates.length;
+}
+
+/**
+ * U5 layer 3: a PASS on a task retires its unresolved lessons (resolvedAt
+ * stamp + failCount reset) so they stop injecting into plan packaging.
+ */
+export async function resolveAntiPatternLessonsForTask(
+  client: GraphClient,
+  task: string
+): Promise<number> {
+  const taskKey = buildLessonTaskKey(task);
+  const nodes = await listAntiPatternLessonNodes(client);
+  const now = Date.now();
+  const updates: GraphNode[] = [];
+  for (const node of nodes) {
+    const record = parseAntiPatternLesson(node);
+    if (!record || record.taskKey !== taskKey) continue;
+    if (record.resolvedAt !== undefined) continue;
+    updates.push({
+      ...node,
+      content: JSON.stringify({ ...record, failCount: 0, resolvedAt: now, updatedAt: now }),
+    });
+  }
+  if (updates.length > 0) {
+    await client.upsertNodes(updates);
+  }
+  return updates.length;
+}
+
+/** U5 layer 2 read path: unresolved lessons with failCount >= precision gate. */
+export async function loadInjectableAntiPatternLessons(
+  client: GraphClient,
+  limit = ANTI_PATTERN_LESSON_MAX_INJECTED
+): Promise<AntiPatternLessonRecord[]> {
+  const records = (await listAntiPatternLessonNodes(client))
+    .map(parseAntiPatternLesson)
+    .filter((record): record is AntiPatternLessonRecord => record !== undefined)
+    .filter(
+      (record) =>
+        record.resolvedAt === undefined &&
+        record.failCount >= ANTI_PATTERN_LESSON_MIN_FAIL_COUNT
+    );
+  records.sort((a, b) => {
+    if (b.failCount !== a.failCount) return b.failCount - a.failCount;
+    if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt;
+    return a.lesson.localeCompare(b.lesson);
+  });
+  return records.slice(0, Math.max(0, limit));
+}
+
+/** Prompt line for an injectable lesson: `avoid: <lesson 前 100 字符>(<N> 次 episode 实证)`. */
+export function formatAntiPatternLessonAvoid(record: AntiPatternLessonRecord): string {
+  return `avoid: ${record.lesson.slice(0, 100)}(${record.failCount} 次 episode 实证)`;
+}
+
 /**
  * Skill-conditioned DAG helper: returns proven/correctable refs plus anti-patterns
  * to avoid, without bumping composite use counters (read-only for plan packaging).
@@ -1236,6 +1487,22 @@ export async function suggestSkillConditionHints(
     .slice(0, Math.max(0, maxHints))
     .map((item) => item.name)
     .filter((name) => !skillRefs.includes(name));
+
+  // U5 negative knowledge base: lessons proven by >= 2 failing episodes join
+  // the avoid list beside skill avoids (own cap of 3, global top by failCount).
+  // Best-effort — negative-knowledge lookup must never break plan packaging.
+  try {
+    const lessons = await loadInjectableAntiPatternLessons(client);
+    for (const record of lessons) {
+      const formatted = formatAntiPatternLessonAvoid(record);
+      if (!avoidPatterns.includes(formatted)) {
+        avoidPatterns.push(formatted);
+      }
+    }
+  } catch {
+    // ignore lesson lookup failures
+  }
+
   return { skillRefs, avoidPatterns };
 }
 

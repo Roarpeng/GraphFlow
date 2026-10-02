@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added — 成本经济学升级 Phase 2+3(U4 SoL-Pi 接线 / U5 负知识库 / U6 判断层 / U7-U8 设计稿)
+
+- **U4a 装饰开关修复(两处 settings 开关真实生效)**:`reduceObservationImpl` 入口门控 `reduce.enabled`——false 时返回明确拒绝理由(含开关路径与恢复指引),不再静默全量/静默压缩,MCP `reduce:true` 入口被 settings 真实控住;dsh 自动投影判定改为三级优先 **env 显式值 > settings(observations.enabled,三层配置逐层合并镜像 resolveConfig)> 默认开**,settings 关闭后投影拒绝执行(不 spawn CLI)。
+- **U4b Compact 压力供给(替代通道,诚实约束已注释)**:dsh plugin 会话级计数器(每个 tool/result 累计原始 bytes,投影成功后结算为投影 bytes),持久化 `.graphflow/observation-pressure.json`(≤32 会话,never throws);注:`toContextPressure` 有意丢弃"只有 usedTokens 无 maxTokens"的信号,估算需与已知窗口组合才真正生效——该约束在代码与设计上均如实保留。
+- **U4c ObservationPack 保守默认(MCP preview)**:text copy 超 `inlineThresholdBytes`(默认 8192)且机制开启时自动 `packObservation`——**pack 优先于桩化**(句柄可召回,桩化丢信息),失败回退既有桩化路径;structuredContent 附 `observationHandle`。大响应进对话史的体积从源头收敛。
+- **U5 负知识库(fail → 教训 → 注入)**:`updateEpisodeOutcome` fail 分支对非任务回显的 lessons 幂等 upsert `anti-pattern-lesson` 节点(指纹=taskKey+lessonKey+symbolRefs,failCount/episodeIds 累积,episodeIds ≤10);**精度门 failCount≥2** 才注入——`suggestSkillConditionHints` 的 avoidPatterns 追加前 3 条(`avoid: <教训>(N 次 episode 实证)`),单次失败不注入;pass 分支 resolve 同 taskKey 教训(重开证据周期语义:再失败从 failCount=1 重新累计,不借旧账)。
+- **U6 判断层路由(存量复用)**:确认 TypeSafe System One 客户端(`src/routing/typesafe-systemone.ts`,真实 API 契约:choice/score/noul 类型化判定)即判断层;`TYPESAFE_API_KEY`(或 economy 侧挂 localhost)启用;selfcheck `judgment-tier` 报告 local-jev / cloud-jev / cloud-economy / rules-only 四态。零配置用户恒为 rules-only,降级可见。
+- **U7/U8 设计稿**:`docs/design-output-toolfirst.md`(输出侧 tool-first:executionDescriptor 的 resultProtocol/edit-intent-v1、SKILL.md 输出纪律"引用锚点不复述原文"、意图密度测量里程碑)、`docs/design-blast-radius.md`(working-set 与 diff-challenge 合并为 N 跳影响面引擎,viaPath 全路径 reason,迁移以现有测试锁定行为)。
+
+### Tests
+
+- 新增 24 用例:`u4-sol-pi-wiring`(17:reduce 门控/dsh 三级优先/压力计数结算落盘/preview pack 召回闭环/回退)、`m-anti-pattern-lessons`(7:两次失败注入/单次不注入/复读拦截/pass resolve/独立指纹/上限 3/去重有界)。
+
+
+
 ### Added — 成本经济学升级 Phase 1(U1 台账 / U2 前缀可缓存性 / U3 质询门)+ 判断层自检
 
 - **U1 成本台账(两栏测量)**:`provider-executor` 全路径捕获 ProviderUsageStats(含 promptCacheHit/Miss/Write,此前解析后零消费)→ `drainProviderUsageEvents`;新 `src/learning/cost-ledger.ts` 落 `graphflow-out/cost-ledger.jsonl`(llm/deliver 两类事件,>4000 行截老保新 2000);新 `src/routing/model-prices.ts` 价格表(DeepSeek/OpenAI/Anthropic 近似价,env `GRAPHFLOW_PRICE_*` 可覆盖;localhost/127.0.0.1 baseUrl 一律零价=本地判断层免费;cacheHit 按 0.1 因子计价)。**栏 A** 自有 LLM 成本:run 出口与 MCP 工具出口双 drain 落账,`reportOutcome` 把 drain 汇总快照进 `EpisodeRecord.costSummary`;**栏 B** 宿主交付字节:每个 MCP 工具响应的 text copy 字节数(归因贡献,非宿主账单——宿主侧计费不可测,已注释明示)。selfcheck 新增 `cost-ledger` 项(estCost/cacheHit%)。
