@@ -183,7 +183,12 @@ interface StoreCacheEntry {
   /** Stat of the delta log when this entry was validated (null when absent). */
   deltaStat: FileStat | null;
   stat: FileStat | null;
+  /** Stat of the newest merged backup the store fell back to (see readMergedBackup). */
+  backupStat?: FileStat | null;
 }
+
+/** Suffix the SQLite host gives a JSON store it folded in (store-migration.ts). */
+export const MERGED_BACKUP_SUFFIX = ".merged-bak";
 
 /**
  * Process-wide store cache keyed by the absolute store path, so every
@@ -335,6 +340,20 @@ function statIfExists(absPath: string): FileStat | null {
 function sameStat(a: FileStat | null, b: FileStat | null): boolean {
   if (a === null || b === null) return a === b;
   return a.mtimeMs === b.mtimeMs && a.size === b.size;
+}
+
+/**
+ * Stat of the newest merged backup of a missing JSON store, or null. Only a
+ * store that was folded into a sibling SQLite store has backups worth reading;
+ * a JSON store deleted on purpose (no sibling) stays empty.
+ */
+function newestBackupStat(absPath: string): FileStat | null {
+  if (!/\.json$/i.test(absPath) || !existsSync(absPath.replace(/\.json$/i, ".sqlite"))) {
+    return null;
+  }
+  return (
+    statIfExists(`${absPath}${MERGED_BACKUP_SUFFIX}.latest`) ?? statIfExists(`${absPath}${MERGED_BACKUP_SUFFIX}`)
+  );
 }
 
 export class GraphifyFileClient {
@@ -588,8 +607,14 @@ export class GraphifyFileClient {
     const current = statIfExists(absPath);
     const deltaPath = resolve(deltaPathFor(absPath));
     const deltaStat = statIfExists(deltaPath);
+    const backupStat = current === null ? newestBackupStat(absPath) : null;
     const cached = graphifyFileStoreCache.get(absPath);
-    if (cached && sameStat(cached.stat, current) && sameStat(cached.deltaStat, deltaStat)) {
+    if (
+      cached &&
+      sameStat(cached.stat, current) &&
+      sameStat(cached.deltaStat, deltaStat) &&
+      sameStat(cached.backupStat ?? null, backupStat)
+    ) {
       return cached;
     }
 
@@ -609,7 +634,11 @@ export class GraphifyFileClient {
       }
     }
 
-    const store = base ?? (current === null ? { nodes: [], edges: [] } : this.parseStoreFile(absPath));
+    const store =
+      base ??
+      (current === null
+        ? (backupStat !== null ? this.readMergedBackup(absPath) : undefined) ?? { nodes: [], edges: [] }
+        : this.parseStoreFile(absPath));
     const merged = this.applyDelta(store, deltaPath, deltaStat);
     const entry: StoreCacheEntry = {
       store: merged,
@@ -617,9 +646,39 @@ export class GraphifyFileClient {
       stat: current,
       edgeKeys: null,
       deltaStat,
+      backupStat,
     };
     graphifyFileStoreCache.set(absPath, entry);
     return entry;
+  }
+
+  /**
+   * A host with SQLite folds this JSON store in and renames it away. A
+   * JSON-only host (no better-sqlite3) would then read an empty store and
+   * lose every memory written before the merge (e.g. "Episode not found" for
+   * an episode it just created). Rebuild from the backups instead: first
+   * backup, then the rotated latest one (and their delta logs) on top.
+   */
+  private readMergedBackup(absPath: string): GraphStore | undefined {
+    const nodes = new Map<string, GraphNode>();
+    const edges = new Map<string, GraphEdge>();
+    try {
+      for (const suffix of [MERGED_BACKUP_SUFFIX, `${MERGED_BACKUP_SUFFIX}.latest`]) {
+        const backup = `${absPath}${suffix}`;
+        if (!existsSync(backup)) continue;
+        const backupDelta = `${deltaPathFor(absPath)}${suffix}`;
+        const layer = this.applyDelta(this.parseStoreFile(backup), backupDelta, statIfExists(backupDelta));
+        for (const node of layer.nodes) nodes.set(node.id, node);
+        for (const edge of layer.edges) edges.set(`${edge.from}\u0000${edge.to}\u0000${edge.relation}`, edge);
+      }
+    } catch (error) {
+      logger.warn(
+        { error: error instanceof Error ? error.message : String(error), absPath },
+        "merged graph store backup unreadable; starting from an empty store"
+      );
+      return undefined;
+    }
+    return nodes.size > 0 || edges.size > 0 ? { nodes: [...nodes.values()], edges: [...edges.values()] } : undefined;
   }
 
   /** Merge the delta log (when present) into a freshly loaded base store. */

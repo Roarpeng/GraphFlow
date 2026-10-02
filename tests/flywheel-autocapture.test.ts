@@ -110,6 +110,24 @@ describe("auto-capture switch (default on)", () => {
     expect(nodes).toHaveLength(0);
   });
 
+  it("finalizeEpisode journals under the run's workspaceRoot, not process.cwd()", async () => {
+    vi.stubEnv("GRAPHFLOW_AUTO_CAPTURE", "");
+    const client = makeClient();
+    const root = makeTempRoot("gf-auto-root-");
+    const { finalizeEpisode } = await import("../src/core/orchestrator-episode");
+    await finalizeEpisode(
+      "delegate the widget fix",
+      [],
+      { status: "DELEGATED", attempts: 1, feedback: "bridge" } as never,
+      [],
+      [],
+      { graphClient: client, workspaceRoot: root }
+    );
+    const entries = readJournalEntries(resolveSessionJournalPath(root));
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.status).toBe("DELEGATED");
+  });
+
   it("records a pending episode when the env var is unset (default on)", async () => {
     vi.stubEnv("GRAPHFLOW_AUTO_CAPTURE", "");
     const client = makeClient();

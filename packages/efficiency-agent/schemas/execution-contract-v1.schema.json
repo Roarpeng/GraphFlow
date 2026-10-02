@@ -137,6 +137,10 @@
         "maxRounds": {
           "type": "integer",
           "minimum": 1
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },
@@ -203,6 +207,15 @@
         "gitHead": {
           "type": "string",
           "minLength": 1
+        },
+        "workingTreeHash": {
+          "type": "string"
+        },
+        "graphVersion": {
+          "type": "string"
+        },
+        "toolchainHash": {
+          "type": "string"
         }
       }
     },
@@ -223,6 +236,18 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "avoidPatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -243,6 +268,16 @@
           "capability": {
             "type": "string",
             "minLength": 1
+          },
+          "risk": {
+            "enum": [
+              "R0",
+              "R1",
+              "R2",
+              "R3",
+              "R4",
+              "R5"
+            ]
           }
         }
       }
@@ -257,6 +292,92 @@
         "version": {
           "type": "integer",
           "minimum": 1
+        }
+      }
+    },
+    "decisionId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique per decision: replay and rollback key (spec section 24)."
+    },
+    "reuseEvidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "validationPolicy": {
+      "type": "object",
+      "required": [
+        "required",
+        "evidenceRequired"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "evidenceRequired": {
+          "type": "boolean"
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "required": [
+        "maxInputTokens",
+        "maxOutputTokens",
+        "maxToolCalls",
+        "maxRounds",
+        "maxWallMs"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "maxInputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxToolCalls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxRounds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxWallMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "required": [
+        "read",
+        "write",
+        "network"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "read": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "write": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "network": {
+          "type": "boolean"
         }
       }
     }

@@ -33,6 +33,11 @@ export interface ToolCapability {
   /** Context keys that must be present before this tool is usable. */
   requiredContext: string[];
   successHistory: ToolSuccessHistory;
+  /** Spec §7 capabilities the tool needs (filesystem.read, process.exec, ...). */
+  permission?: string[];
+  /** Spec §8 risk class of invoking the tool. */
+  risk?: "R0" | "R1" | "R2" | "R3" | "R4" | "R5";
+  version?: string;
 }
 
 export interface ToolRegistry {
@@ -68,6 +73,9 @@ function cloneCapability(capability: ToolCapability): ToolCapability {
     ...(capability.precision !== undefined ? { precision: capability.precision } : {}),
     requiredContext: [...capability.requiredContext],
     successHistory: { ...capability.successHistory },
+    ...(capability.permission !== undefined ? { permission: [...capability.permission] } : {}),
+    ...(capability.risk !== undefined ? { risk: capability.risk } : {}),
+    ...(capability.version !== undefined ? { version: capability.version } : {}),
   };
 }
 

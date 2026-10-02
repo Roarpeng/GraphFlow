@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { applyProviderEnvFromConfig } from "../src/config/provider-env";
+import {
+  applyProviderEnvFromConfig,
+  isConfigExportedEnvKey,
+  literalApiKeyProblem,
+  resolveProviderApiKey,
+} from "../src/config/provider-env";
 import { resolveConfig } from "../src/config/resolve";
 import { validateConfig } from "../src/config/loader";
 import { pickChatContent } from "../src/routing/provider-adapters/types";
@@ -251,5 +256,78 @@ describe("M64 DeepSeek provider + config env bridge", () => {
     expect(req.thinking).toBe("disabled");
     expect(req.responseFormat).toBeUndefined();
     expect(req.maxTokens).toBe(32);
+  });
+
+  describe("env-first key resolution", () => {
+    const deepseekViaOpenAi = { apiKey: "sk-stale-literal-0000", baseUrl: "https://api.deepseek.com" };
+
+    it("a genuine vendor env key shadows a stale literal on a cross-vendor entry", () => {
+      clearProviderEnv();
+      process.env.DEEPSEEK_API_KEY = "sk-genuine-env";
+      const r = resolveProviderApiKey("openai", deepseekViaOpenAi);
+      expect(r).toMatchObject({ key: "sk-genuine-env", source: "env", envVar: "DEEPSEEK_API_KEY", literalShadowed: true });
+
+      const cfg = validateConfig({
+        providers: { openai: deepseekViaOpenAi },
+        tiers: {
+          smart: { provider: "openai", model: "deepseek-v4-pro" },
+          economy: { provider: "openai", model: "deepseek-v4-flash" },
+        },
+        budgetPolicy: { runTokenCap: 2000 },
+        graphPolicy: { enableAutoBuild: true, transport: "memory", maxContextTokens: 1500 },
+        learningPolicy: { enableFlywheel: false, trainingCadence: "nightly", exportPath: "graphflow-out/x.jsonl" },
+      });
+      applyProviderEnvFromConfig(cfg);
+      expect(process.env.OPENAI_API_KEY).toBe("sk-genuine-env");
+      expect(process.env.OPENAI_BASE_URL).toBe("https://api.deepseek.com");
+    });
+
+    it("falls back to the literal only when no env key exists", () => {
+      clearProviderEnv();
+      expect(resolveProviderApiKey("openai", deepseekViaOpenAi)).toMatchObject({
+        key: "sk-stale-literal-0000",
+        source: "config-literal",
+      });
+    });
+
+    it("rejects placeholder literals and honours explicit env references", () => {
+      clearProviderEnv();
+      for (const bad of ["your-api-key", "sk-xxxxxxxx", "<DEEPSEEK_KEY>", "sk abc"]) {
+        const r = resolveProviderApiKey("deepseek", { apiKey: bad });
+        expect(r.key).toBeUndefined();
+        expect(r.literalRejected).toBeTruthy();
+        expect(literalApiKeyProblem(bad)).toBeTruthy();
+      }
+      expect(resolveProviderApiKey("deepseek", { apiKey: "disabled" })).toEqual({});
+      process.env.GF_M64_REF = "sk-from-ref";
+      try {
+        expect(resolveProviderApiKey("deepseek", { apiKey: "${GF_M64_REF}" })).toMatchObject({
+          key: "sk-from-ref",
+          source: "config-env-ref",
+        });
+      } finally {
+        delete process.env.GF_M64_REF;
+      }
+    });
+
+    it("a value overwritten after export counts as genuine again", () => {
+      clearProviderEnv();
+      const cfg = validateConfig({
+        providers: { deepseek: { apiKey: "sk-config-literal", baseUrl: "https://api.deepseek.com" } },
+        tiers: {
+          smart: { provider: "deepseek", model: "deepseek-v4-pro" },
+          economy: { provider: "deepseek", model: "deepseek-v4-flash" },
+        },
+        budgetPolicy: { runTokenCap: 2000 },
+        graphPolicy: { enableAutoBuild: true, transport: "memory", maxContextTokens: 1500 },
+        learningPolicy: { enableFlywheel: false, trainingCadence: "nightly", exportPath: "graphflow-out/x.jsonl" },
+      });
+      applyProviderEnvFromConfig(cfg);
+      expect(isConfigExportedEnvKey("DEEPSEEK_API_KEY")).toBe(true);
+      process.env.DEEPSEEK_API_KEY = "sk-shell";
+      expect(isConfigExportedEnvKey("DEEPSEEK_API_KEY")).toBe(false);
+      applyProviderEnvFromConfig(cfg);
+      expect(process.env.DEEPSEEK_API_KEY).toBe("sk-shell");
+    });
   });
 });

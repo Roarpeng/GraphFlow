@@ -6,6 +6,7 @@ import type {
   WorkerCommand,
   WorkerObservation,
 } from "../domain.js";
+import { readCredentialEnv, type CredentialEnvOptions } from "../host/credential-env.js";
 import { measured, type Measurement } from "../measurement.js";
 
 /**
@@ -46,8 +47,13 @@ export interface TypeSafeJevWorkerOptions {
   name?: string;
   /** System One base URL. Defaults to TYPESAFE_BASE_URL or https://api.typesafe.ai. */
   baseUrl?: string;
-  /** Bearer key. Defaults to TYPESAFE_API_KEY. Absent => local-only validation. */
+  /**
+   * Bearer key. Defaults to TYPESAFE_API_KEY from process.env, then (Windows)
+   * the persisted user/machine environment. Absent => local-only validation.
+   */
   apiKey?: string;
+  /** Lookup options for the default key source (tests inject platform/exec). */
+  credentialEnv?: CredentialEnvOptions;
   /** System One model id. Defaults to "jev-latest". */
   model?: string;
   /** Default timeout for command execution and judgment calls. */
@@ -180,11 +186,14 @@ export function createTypeSafeJevWorker(options?: TypeSafeJevWorkerOptions): Wor
     process.env.TYPESAFE_BASE_URL ??
     TYPESAFE_DEFAULT_BASE_URL
   ).replace(/\/+$/, "");
-  // Explicit option wins, then env. NOTE: DEEPSEEK_API_KEY is deliberately
-  // NOT a fallback — api.typesafe.ai and api.deepseek.com are different
-  // services with different keys (the old cross-fallback produced 401s).
-  const apiKey =
-    options?.apiKey !== undefined ? options.apiKey : (process.env.TYPESAFE_API_KEY ?? "");
+  // Explicit option wins, then env (registry fallback on Windows), resolved
+  // lazily so prepare/execute never touch the registry. NOTE: DEEPSEEK_API_KEY
+  // is deliberately NOT a fallback — api.typesafe.ai and api.deepseek.com are
+  // different services with different keys (the old cross-fallback produced 401s).
+  const resolveApiKey = (): string =>
+    options?.apiKey !== undefined
+      ? options.apiKey
+      : (readCredentialEnv("TYPESAFE_API_KEY", options?.credentialEnv) ?? "");
   const model = options?.model ?? TYPESAFE_DEFAULT_MODEL;
   const defaultTimeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const fetchImpl = options?.fetch ?? globalThis.fetch;
@@ -258,6 +267,7 @@ export function createTypeSafeJevWorker(options?: TypeSafeJevWorkerOptions): Wor
      */
     async validate(observation: WorkerObservation): Promise<ValidationOutcome> {
       const exitOk = observation.exitCode === 0;
+      const apiKey = resolveApiKey();
       if (!apiKey) {
         return {
           passed: exitOk,

@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
@@ -23,6 +27,58 @@ async function postJson(
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
+
+describe("graphflow-mcp --http (server entry point)", () => {
+  it("serves more than one stateless request", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "gf-http-cli-"));
+    writeFileSync(join(workspace, "a.ts"), "export const a = 1;\n");
+    const child = spawn(
+      process.execPath,
+      [resolve("node_modules/tsx/dist/cli.mjs"), resolve("src/surfaces/mcp/server.ts"), "--http", "--port", "0"],
+      {
+        cwd: workspace,
+        env: {
+          ...process.env,
+          GRAPHFLOW_WORKSPACE_ROOT: workspace,
+          GRAPHFLOW_SKIP_EMBEDDING_WARMUP: "1",
+        },
+        stdio: ["ignore", "ignore", "pipe"],
+        windowsHide: true,
+      }
+    );
+    try {
+      const url = await new Promise<string>((resolveUrl, reject) => {
+        let stderr = "";
+        const timer = setTimeout(() => reject(new Error(`server did not listen: ${stderr.slice(-500)}`)), 45_000);
+        child.stderr!.setEncoding("utf8");
+        child.stderr!.on("data", (chunk: string) => {
+          stderr += chunk;
+          const match = /Streamable HTTP listening on (\S+)/.exec(stderr);
+          if (match) {
+            clearTimeout(timer);
+            resolveUrl(match[1]!);
+          }
+        });
+        child.once("exit", (code) => reject(new Error(`server exited ${code}: ${stderr.slice(-500)}`)));
+      });
+      const client = new Client({ name: "graphflow-cli-http", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(url)));
+      expect(await client.ping()).toEqual({});
+      const tools = await client.listTools();
+      expect(tools.tools.map((tool) => tool.name)).toContain("graphflow_context");
+      const guide = await client.callTool({ name: "graphflow_skill_guide", arguments: { section: "tools" } });
+      expect(guide.isError).not.toBe(true);
+      await client.close();
+    } finally {
+      if (process.platform === "win32" && child.pid) {
+        spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+      } else {
+        child.kill("SIGKILL");
+      }
+      rmSync(workspace, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  }, 60_000);
+});
 
 describe("GraphFlow MCP Streamable HTTP matrix", () => {
   it("supports the draft stateless core over HTTP JSON responses", async () => {

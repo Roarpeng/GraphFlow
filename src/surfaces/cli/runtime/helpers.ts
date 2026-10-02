@@ -5,6 +5,7 @@ import type { GraphEdge, GraphNode } from "../../../core/types";
 import type { GraphFlowConfig } from "../../../config/schema";
 import { resolveGraphStorePath } from "../../../config/paths";
 import { GraphifySqliteClient } from "../../../graph/sqlite-client";
+import { SQLITE_INDEX_MANIFEST } from "../../../graph/file-indexer-cache";
 import { readGraphStoreFileChunked } from "../../../graph/graph-store-json-chunks";
 import {
   GRAPH_STORE_MAX_READ_BYTES,
@@ -53,6 +54,15 @@ export async function resolveGraphStoreAfterIndex(
   graphClient: GraphClient
 ): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
   if (config.graphPolicy.transport === "memory" && graphClient.readSnapshot) {
+    return graphClient.readSnapshot();
+  }
+  // Same SQLite file loadGraphStore would open: reuse the open connection
+  // instead of a second full read through a fresh one.
+  if (
+    graphClient.readSnapshot &&
+    graphClient.indexManifestName === SQLITE_INDEX_MANIFEST &&
+    /\.sqlite$/i.test(resolveGraphStorePath(config))
+  ) {
     return graphClient.readSnapshot();
   }
 

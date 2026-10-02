@@ -95,6 +95,7 @@
     "sync:surfaces": "node scripts/sync-surfaces.cjs",
     "ci": "npm run lint && npm run build && npm test && npm run build:extension && npm run test:extension",
     "gate:release": "node scripts/release-gates.cjs",
+    "gate:eff-agent": "node packages/efficiency-agent/scripts/release-gate.mjs",
     "security:audit": "node scripts/security-audit.cjs",
     "test:coverage": "vitest run --coverage",
     "prepare": "node scripts/prepare-hook.cjs",

@@ -97,9 +97,8 @@ function newWorkspace(prefix: string): string {
   // short 8.3 form on Windows (RUNNER~1) while os.homedir() and the written
   // entry carry the long form (runneradmin); comparing the two forms is a
   // difference in spelling, not in location.
-  return realpathSync(dir);
   tempRoots.push(dir);
-  return dir;
+  return realpathSync(dir);
 }
 
 interface HostEntry {

@@ -65,9 +65,11 @@ export function buildRunTrace(observation: RunObservation): TaskTrace {
     // delegated to the connected agent outside this benchmark's scope.
     llm: { calls: measured(0) },
     tools: [],
-    rounds: measured(Math.max(1, observation.attempts)),
+    rounds: measured(Math.max(0, observation.attempts)),
     validation: [],
+    // Packaging succeeded — not a task outcome; no oracle judged it.
     result: { success: observation.packaged },
+    judged: false,
   };
   if (observation.advisory) {
     const share =

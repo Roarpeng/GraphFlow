@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://graphflow.dev/schemas/efficiency-agent/policy-v1.schema.json",
+  "title": "GraphFlow Efficiency Agent security policy v1",
+  "description": "Capability/risk security policy (spec §6-§9). A file that fails this schema makes eff-agent fall back to the fail-closed strict policy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "externalWriteApproval",
+    "networkDefault",
+    "riskActions",
+    "protectedPaths",
+    "maxSubAgents",
+    "budgets"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "externalWriteApproval": {
+      "type": "boolean",
+      "description": "EFF_EXTERNAL_WRITE_APPROVAL: R2 actions require operator approval."
+    },
+    "networkDefault": {
+      "type": "boolean",
+      "description": "EFF_NETWORK_DEFAULT: when false, any command needing network.connect is denied."
+    },
+    "riskActions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["R0", "R1", "R2", "R3", "R4", "R5"],
+      "properties": {
+        "R0": { "$ref": "#/$defs/riskAction" },
+        "R1": { "$ref": "#/$defs/riskAction" },
+        "R2": { "$ref": "#/$defs/riskAction" },
+        "R3": { "$ref": "#/$defs/riskAction" },
+        "R4": { "$ref": "#/$defs/riskAction" },
+        "R5": { "$ref": "#/$defs/riskAction" }
+      }
+    },
+    "protectedPaths": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "maxSubAgents": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "EFF_SUBAGENT: maximum concurrently running sub-agents (the primary worker agent is not counted)."
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxRounds", "maxToolCalls", "maxInputTokens", "maxOutputTokens", "maxWallMs"],
+      "properties": {
+        "maxRounds": { "type": "integer", "minimum": 1 },
+        "maxToolCalls": { "type": "integer", "minimum": 1 },
+        "maxInputTokens": { "type": "integer", "minimum": 1 },
+        "maxOutputTokens": { "type": "integer", "minimum": 1 },
+        "maxWallMs": { "type": "integer", "minimum": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "riskAction": {
+      "type": "string",
+      "enum": ["allow", "allow-bounded", "approval", "deny", "confirm"]
+    }
+  }
+}

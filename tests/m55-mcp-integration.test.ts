@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { writeFileSync, unlinkSync, mkdtempSync, rmSync } from "node:fs";
+import { writeFileSync, unlinkSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getDefaultConfig } from "../src/config/defaults";
@@ -15,9 +15,42 @@ function parseToolText(response: { content: Array<{ type: string; text?: string 
   return JSON.parse(text);
 }
 
-/** 创建隔离的临时配置（file transport + 唯一路径），确保全量测试时不被其他测试干扰 */
+/**
+ * 创建隔离的临时配置（file transport + 唯一路径 + 小型夹具工作区），确保全量测试时
+ * 不被其他测试干扰。工作区不能指向仓库根：每个用例都会从空 store 起步自动索引，
+ * 全仓索引在满载机器上超过 60s 超时（实测 65s/70s）。
+ * Isolated config over a tiny fixture workspace: indexing the whole repo from an
+ * empty store per case took 65-70s under load and hit the 60s timeout.
+ */
 function createIsolatedConfig(): { configPath: string; cleanup: () => void } {
   const tmpRoot = mkdtempSync(join(tmpdir(), "gf-m55-"));
+  const workspaceRoot = join(tmpRoot, "ws");
+  mkdirSync(join(workspaceRoot, "src"), { recursive: true });
+  writeFileSync(join(workspaceRoot, "package.json"), JSON.stringify({ name: "gf-m55-fixture" }), "utf8");
+  writeFileSync(
+    join(workspaceRoot, "src", "orchestrator.ts"),
+    [
+      'import { packageForBridge } from "./bridge-mode";',
+      "",
+      "/** Orchestrator entry: plans a task and hands it to bridge mode. */",
+      "export function orchestrate(task: string): string {",
+      "  return packageForBridge(task);",
+      "}",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+  writeFileSync(
+    join(workspaceRoot, "src", "bridge-mode.ts"),
+    [
+      "/** Bridge mode packages the orchestrator task for an external agent. */",
+      "export function packageForBridge(task: string): string {",
+      "  return `bridge:${task}`;",
+      "}",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
   const configPath = join(tmpRoot, "graphflow.config.json");
   const graphStorePath = join(tmpRoot, "graphflow-out", "graphflow-graph.json");
   const config = {
@@ -31,7 +64,10 @@ function createIsolatedConfig(): { configPath: string; cleanup: () => void } {
       graphStorePath,
       autoIndexOnPreview: true,
       autoIndexOnRun: true,
-      workspaceRoot: process.cwd(),
+      workspaceRoot,
+      // 流程用例只断言锚点/计数，不依赖语义向量；默认 transformers 首次使用会
+      // 同步加载 ONNX 模型。/ Flow cases assert anchors and counts only.
+      embeddingProvider: "fnv" as const,
     },
   };
   writeFileSync(configPath, JSON.stringify(config), "utf8");

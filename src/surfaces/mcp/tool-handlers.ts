@@ -100,7 +100,11 @@ export async function executeToolCall(
   switch (call.name) {
     case "graphflow_run":
       return structuredResponse(
-        await runTaskResult(readRequiredString(args.task, "task"), readOptionalString(args.configPath))
+        await runTaskResult(
+          readRequiredString(args.task, "task"),
+          readOptionalString(args.configPath),
+          readOptionalString(args.rootDir)
+        )
       );
     case "graphflow_report_outcome": {
       const lessonsRaw = args.lessons;
@@ -147,7 +151,8 @@ export async function executeToolCall(
           readOptionalString(args.configPath),
           deviation,
           hasEngHints ? engineeringHints : undefined,
-          evidence
+          evidence,
+          readOptionalString(args.rootDir)
         )
       );
     }

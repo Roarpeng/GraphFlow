@@ -1,6 +1,7 @@
 import { logger } from "../utils/logger.js";
 import { readEnvVar } from "../config/env-lookup.js";
-import { resolveConfigSecret } from "../config/secrets.js";
+import { extractEnvPlaceholderName, resolveConfigSecret } from "../config/secrets.js";
+import { literalApiKeyProblem } from "../config/provider-env.js";
 import type { GraphFlowConfig } from "../config/schema.js";
 
 /**
@@ -138,7 +139,13 @@ export function typesafeClientOptionsFromConfig(config: GraphFlowConfig): System
   const isTypesafe =
     policy?.workerType === "typesafe-jev" || /typesafe/i.test(worker.baseUrl ?? "");
   if (!isTypesafe) return {};
-  const apiKey = resolveConfigSecret(worker.apiKey);
+  // Env first: an exported TYPESAFE_API_KEY beats a (possibly stale) literal;
+  // a config literal is used only when no env key exists and it looks valid.
+  const configKey = resolveConfigSecret(worker.apiKey);
+  const literal = Boolean(worker.apiKey?.trim()) && !extractEnvPlaceholderName(worker.apiKey);
+  const apiKey =
+    readEnvVar("TYPESAFE_API_KEY") ||
+    (configKey && !(literal && literalApiKeyProblem(configKey)) ? configKey : undefined);
   const model = worker.model?.trim();
   return {
     ...(worker.baseUrl?.trim() ? { baseUrl: worker.baseUrl.trim() } : {}),

@@ -5,8 +5,11 @@
  *   npx tsx benchmarks/run-eff-bench.ts run --mode shadow
  *   npx tsx benchmarks/run-eff-bench.ts compare graphflow-out/eff-bench/baseline.jsonl graphflow-out/eff-bench/shadow.jsonl
  *
- * Arms are offline (bridge path, no LLM keys) and deterministic in shape:
- * they measure packaging + advising cost, not worker outcomes. The compare
+ * Default arms are offline (bridge path, no LLM keys): no worker executes, so
+ * they measure packaging + advising cost only. Every trace is unjudged
+ * (judged=false) and success rates are N/A. Context tokens are chars/4
+ * proxies, never measured. --worker arms run only real validation commands
+ * (substrate advisory, or --validation) and are unjudged too. The compare
  * subcommand refuses traces that violate the measurement contract.
  */
 
@@ -46,6 +49,7 @@ async function main(): Promise<void> {
         ? providerFlag
         : undefined;
     const model = flag("model", rest);
+    const validation = flag("validation", rest);
     const outPath =
       flag("out", rest) ??
       `graphflow-out/eff-bench/${mode}${worker && worker !== "baseline" ? `-${worker}` : ""}.jsonl`;
@@ -58,9 +62,17 @@ async function main(): Promise<void> {
       worker,
       provider,
       model,
+      ...(validation && validation !== "true" ? { validationCommands: [validation] } : {}),
     });
 
-    console.log(`mode=${summary.mode} tasks=${summary.tasksRun} out=${summary.outPath}`);
+    console.log(
+      `mode=${summary.mode} execution=${summary.executionMode} tasks=${summary.tasksRun} out=${summary.outPath}`
+    );
+    console.log(`scope: ${summary.scope}`);
+    console.log(
+      `packaged=${summary.packagedCount}/${summary.tasksRun} executed=${summary.executedCount} ` +
+        `judged=${summary.judgedTraces} successRate=${summary.successRate === null ? "N/A" : summary.successRate}`
+    );
     console.log(`byCohort=${JSON.stringify(summary.byCohort)}`);
     console.log(`reuseMode=${JSON.stringify(summary.reuseModeDistribution)}`);
     console.log(
@@ -94,8 +106,15 @@ async function main(): Promise<void> {
     console.log(`tasksCompared=${report.tasksCompared}`);
     console.log(`baseline=${JSON.stringify(report.baseline)}`);
     console.log(`shadow=${JSON.stringify(report.shadow)}`);
+    const rate = (r: number | null | undefined): string => (r === null || r === undefined ? "N/A" : String(r));
+    console.log(
+      `successRate=baseline:${rate(report.baseline?.successRate)} (judged ${report.baseline?.judgedTraces ?? 0}) ` +
+        `shadow:${rate(report.shadow?.successRate)} (judged ${report.shadow?.judgedTraces ?? 0})`
+    );
     if (report.comparison) {
-      console.log(`tokenSavingsRate=${(report.comparison.tokenSavingsRate * 100).toFixed(2)}%`);
+      console.log(
+        `tokenSavingsRate=${(report.comparison.tokenSavingsRate * 100).toFixed(2)}% (provenance: ${report.comparison.tokenProvenance})`
+      );
       console.log(`llmCallReductionRate=${(report.comparison.llmCallReductionRate * 100).toFixed(2)}%`);
       console.log(
         `roundsComparison=baseline:${report.baseline?.avgRounds} vs shadow:${report.shadow?.avgRounds} (diff: ${report.comparison.roundsDiff})`
@@ -105,7 +124,7 @@ async function main(): Promise<void> {
   }
 
   console.error(
-    "usage: run-eff-bench.ts run [--mode=baseline|shadow] [--limit=N] [--out=PATH] [--worker=baseline|typesafe-jev|local] [--provider=deepseek|openai|local] [--model=NAME] | compare <a.jsonl> <b.jsonl>"
+    "usage: run-eff-bench.ts run [--mode=baseline|shadow] [--limit=N] [--out=PATH] [--worker=baseline|typesafe-jev|local] [--provider=deepseek|openai|local] [--model=NAME] [--validation=CMD] | compare <a.jsonl> <b.jsonl>"
   );
   process.exitCode = 2;
 }

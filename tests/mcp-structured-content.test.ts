@@ -32,6 +32,9 @@ function createIsolatedConfig(textCopy: "auto" | "full" | "default" = "auto"): s
         autoIndexOnSave: false,
         graphStorePath: join(root, "graphflow-graph.json"),
         workspaceRoot: root,
+        // Shape-only matrix: skip the ONNX model load the default
+        // transformers provider pays on first use (tens of seconds under load).
+        embeddingProvider: "fnv",
       },
     }),
     "utf8"

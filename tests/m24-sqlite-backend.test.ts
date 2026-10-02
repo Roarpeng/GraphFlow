@@ -41,6 +41,32 @@ afterAll(() => {
   }
 });
 
+describe.skipIf(!hasBetterSqlite3())("SQLite readSnapshot nodes (metadata parsed on access)", () => {
+  it("behaves like plain data: enumerable, serializable, assignable, isolated per snapshot", async () => {
+    const client = freshClient("lazy-meta");
+    await client.upsertNodes([
+      { id: "m1", type: "Decision", content: "with meta", metadata: { kind: "dialogue-turn", tags: ["a"] } },
+      { id: "m2", type: "File", content: "no meta" },
+    ]);
+    const first = client.readSnapshot().nodes.find((n) => n.id === "m1")!;
+    expect(Object.keys(first)).toContain("metadata");
+    expect(JSON.parse(JSON.stringify(first))).toEqual({
+      id: "m1",
+      type: "Decision",
+      content: "with meta",
+      metadata: { kind: "dialogue-turn", tags: ["a"] },
+    });
+    expect({ ...first }.metadata).toEqual({ kind: "dialogue-turn", tags: ["a"] });
+    (first.metadata!.tags as string[]).push("mutated");
+    first.metadata = { replaced: true };
+    expect(first.metadata).toEqual({ replaced: true });
+
+    const second = client.readSnapshot().nodes;
+    expect(second.find((n) => n.id === "m1")!.metadata).toEqual({ kind: "dialogue-turn", tags: ["a"] });
+    expect("metadata" in second.find((n) => n.id === "m2")!).toBe(false);
+  });
+});
+
 describe.skipIf(!hasBetterSqlite3())("M24 SQLite + FTS5 backend", () => {
   it("A: FTS5 multi-token query ranks the all-token node first, without dropping partial matches", async () => {
     // Multi-token queries join with OR, not AND. AND required one node to contain

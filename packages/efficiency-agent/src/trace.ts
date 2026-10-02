@@ -11,11 +11,31 @@ import {
  * provenance gate that makes two traces comparable.
  */
 
+/** Mirrors `task.category.enum` in schemas/trace-v1.schema.json. */
+export const TRACE_TASK_CATEGORIES = [
+  "query",
+  "single-file",
+  "multi-file",
+  "bugfix",
+  "refactor",
+  "test",
+  "docs",
+  "config",
+  "cross-module",
+  "deliberate-failure",
+] as const;
+
+export type TraceTaskCategory = (typeof TRACE_TASK_CATEGORIES)[number];
+
+export function isTraceTaskCategory(value: unknown): value is TraceTaskCategory {
+  return typeof value === "string" && (TRACE_TASK_CATEGORIES as readonly string[]).includes(value);
+}
+
 export interface TraceTaskInfo {
   text: string;
   /** Substrate advisory task hash (advisoryTaskId) when the task went through graphflow_run. */
   taskId?: string;
-  /** Benchmark task category: query | single-file | multi-file | bugfix | refactor | test | docs | config | cross-module | deliberate-failure. */
+  /** One of TRACE_TASK_CATEGORIES; anything else fails the schema and the provenance gate. */
   category: string;
 }
 
@@ -23,6 +43,8 @@ export interface TraceRunInfo {
   worker: string;
   /** baseline = no efficiency layer; shadow/conservative/adaptive per the 2.x rollout. */
   mode: "baseline" | "shadow" | "conservative" | "adaptive";
+  /** Benchmark track (spec §18) when the run came from `bench run`. */
+  arm?: "baseline" | "graphflow" | "shadow" | "conservative" | "adaptive";
   startedAt: string;
   finishedAt?: string;
 }
@@ -57,6 +79,56 @@ export interface TraceDecision {
   costShare?: Measurement;
 }
 
+/** Spec §24: what every decision stores so it can be replayed and rolled back. */
+export interface TraceDecisionRecord {
+  decisionId: string;
+  policyVersion: number;
+  contractVersion: string;
+  workerVersion?: string;
+  toolVersions: Record<string, string>;
+  cacheNamespace: string;
+  securityPolicyVersion?: string;
+  /** Mode the operator asked for; `run.mode` is what the flags allowed. */
+  requestedMode?: "advisory" | "baseline" | "shadow" | "conservative" | "adaptive";
+  /** Feature flags in effect for this decision. */
+  flags?: Record<string, boolean>;
+}
+
+export type TraceStage =
+  | "flags"
+  | "fingerprint"
+  | "twin"
+  | "experience"
+  | "context"
+  | "reuse-gate"
+  | "security"
+  | "tool-routing"
+  | "model-routing"
+  | "cost"
+  | "execute"
+  | "validate"
+  | "replan"
+  | "learn"
+  | "fail-open";
+
+/** Spec §3: every state transition leaves reason + evidence + policyVersion. */
+export interface TraceEvent {
+  at: string;
+  stage: TraceStage;
+  outcome: string;
+  reason: string;
+  evidence: string[];
+  policyVersion: number;
+}
+
+export type RiskClass = "R0" | "R1" | "R2" | "R3" | "R4" | "R5";
+
+export interface TraceSecurityDecision {
+  verdict: "allow" | "deny" | "approval-required";
+  risk: RiskClass;
+  reasons: string[];
+}
+
 export interface TaskTrace {
   schemaVersion: "1.0";
   traceId: string;
@@ -69,6 +141,24 @@ export interface TaskTrace {
   rounds: Measurement;
   validation: Array<{ name: string; passed: boolean }>;
   result: { success: boolean };
+  sessionId?: string;
+  projectId?: string;
+  /** Four-track reuseKey of the task fingerprint. */
+  fingerprint?: string;
+  model?: { provider: string; tier: string };
+  cost?: { estimated?: Measurement; actual?: Measurement };
+  validationStatus?: "passed" | "failed" | "unverified" | "not-run";
+  securityDecision?: TraceSecurityDecision;
+  record?: TraceDecisionRecord;
+  events?: TraceEvent[];
+  /** Regression guards (never judge success; feed the regression rate). */
+  regression?: { passed: boolean; checks: Array<{ name: string; passed: boolean }> };
+  /**
+   * Whether an oracle judged `result.success`. Unjudged traces (no oracle,
+   * or a packaging-only run) never enter a success rate.
+   */
+  judged?: boolean;
+  oracle?: { passed: boolean; checks: Array<{ name: string; passed: boolean }> };
   decision?: TraceDecision;
   failure?: { stage: string; reason: string };
 }
@@ -87,6 +177,10 @@ export function validateTraceProvenance(trace: TaskTrace): string[] {
     violations.push(...validateMeasurement(field, m));
   };
 
+  if (!isTraceTaskCategory(trace.task.category)) {
+    violations.push(`task.category: "${trace.task.category}" is not a trace-v1 category`);
+  }
+
   check("context.tokens", trace.context.tokens);
   check("llm.calls", trace.llm.calls);
   check("llm.inputTokens", trace.llm.inputTokens);
@@ -98,6 +192,8 @@ export function validateTraceProvenance(trace: TaskTrace): string[] {
     check(`tools[${index}].calls`, tool.calls);
     check(`tools[${index}].latencyMs`, tool.latencyMs);
   });
+  check("cost.estimated", trace.cost?.estimated);
+  check("cost.actual", trace.cost?.actual);
   if (trace.decision) {
     check("decision.durationMs", trace.decision.durationMs);
     check("decision.llmCalls", trace.decision.llmCalls);

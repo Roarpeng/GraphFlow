@@ -39,6 +39,9 @@ function createIsolatedConfig(textCopy: "auto" | "full" = "auto"): string {
         autoIndexOnSave: false,
         graphStorePath: join(root, "graphflow-graph.json"),
         workspaceRoot: root,
+        // 只测序列化形状：跳过默认 transformers 首次使用时的 ONNX 模型加载。
+        // Serialization-only: skip the default provider's ONNX model load.
+        embeddingProvider: "fnv",
       },
       // mcp.textCopy 策略随用例注入；默认 "auto" 与既有用例行为一致。
       // mcp.textCopy policy per case; the default "auto" keeps the behavior

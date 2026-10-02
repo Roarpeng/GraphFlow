@@ -14,9 +14,27 @@ export type ReuseMode = "REUSE" | "ADAPT" | "FRESH";
 export type ModelTier = "economy" | "standard" | "heavy";
 export type ExecutionMode = "one-shot" | "loop";
 
+export interface ContractBudget {
+  maxInputTokens: number;
+  maxOutputTokens: number;
+  maxToolCalls: number;
+  maxRounds: number;
+  maxWallMs: number;
+}
+
+export interface ContractPermissions {
+  read: string[];
+  write: string[];
+  network: boolean;
+}
+
 export interface ExecutionContractV1 {
   schemaVersion: "1.0";
   taskId: string;
+  /** Unique per decision (replay / rollback key, spec §24). */
+  decisionId?: string;
+  /** Evidence behind the reuse verdict (cache verdict reasons, similar episodes). */
+  reuseEvidence?: string[];
   mode: "shadow" | "conservative" | "adaptive";
   reuseMode: ReuseMode;
   confidence: number;
@@ -26,6 +44,8 @@ export interface ExecutionContractV1 {
     fusedStepCount: number;
     similarEpisodeCount: number;
     topEpisodeScore?: number;
+    /** Jaccard task similarity of the closest prior episode (0..1). */
+    topEpisodeSimilarity?: number;
   };
   context: {
     source: "graphflow";
@@ -37,22 +57,31 @@ export interface ExecutionContractV1 {
   project?: {
     root: string;
     gitHead?: string;
+    workingTreeHash?: string;
+    graphVersion?: string;
+    toolchainHash?: string;
   };
   /** §5: experience pointers the decision consumed. */
   experience?: {
     episodes: string[];
     topSimilarity?: number;
+    skills?: string[];
+    avoidPatterns?: string[];
   };
   /** §5: capability-based tool needs (selected by capability, not name). */
-  tools?: Array<{ name: string; capability: string }>;
+  tools?: Array<{ name: string; capability: string; risk?: "R0" | "R1" | "R2" | "R3" | "R4" | "R5" }>;
   /** §21 closed loop: a learned policy overrode the deterministic hints. */
   policyApplied?: { version: number };
   worker: {
     modelTier: ModelTier;
     executionMode: ExecutionMode;
     maxRounds: number;
+    provider?: string;
   };
   validation: string[];
+  validationPolicy?: { required: boolean; evidenceRequired: boolean };
+  budget?: ContractBudget;
+  permissions?: ContractPermissions;
   decision: {
     provenance: "deterministic" | "llm";
     llmCalls: number;
@@ -115,6 +144,29 @@ export function assertAdvisoryCompatible(advisory: unknown): string[] {
       a.tools.some((t) => typeof t?.name !== "string" || typeof t?.capability !== "string"))
   ) {
     fail("tools: {name, capability}[] required when present");
+  }
+  if (a.decisionId !== undefined && (typeof a.decisionId !== "string" || a.decisionId.length === 0)) {
+    fail("decisionId: non-empty string required when present");
+  }
+  if (a.budget !== undefined) {
+    for (const key of ["maxInputTokens", "maxOutputTokens", "maxToolCalls", "maxRounds", "maxWallMs"] as const) {
+      if (typeof a.budget[key] !== "number" || a.budget[key] < 0) fail(`budget.${key}: non-negative number required`);
+    }
+  }
+  if (
+    a.permissions !== undefined &&
+    (!Array.isArray(a.permissions.read) || !Array.isArray(a.permissions.write) || typeof a.permissions.network !== "boolean")
+  ) {
+    fail("permissions: read[], write[] and network boolean required when present");
+  }
+  if (
+    a.validationPolicy !== undefined &&
+    (typeof a.validationPolicy.required !== "boolean" || typeof a.validationPolicy.evidenceRequired !== "boolean")
+  ) {
+    fail("validationPolicy: required and evidenceRequired booleans required when present");
+  }
+  if (a.validationPolicy?.required === true && Array.isArray(a.validation) && a.validation.length === 0) {
+    fail("validationPolicy.required: at least one validation command required");
   }
   if (a.policyApplied !== undefined && typeof a.policyApplied.version !== "number") {
     fail("policyApplied: version number required when present");

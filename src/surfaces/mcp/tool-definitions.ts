@@ -1,5 +1,47 @@
+/** MCP ToolAnnotations (spec 2025-06-18+). Hints only — clients must not treat them as enforcement. */
+export interface ToolAnnotations {
+  title: string;
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  openWorldHint: boolean;
+}
+
+/**
+ * Risk levels shared with the efficiency agent's risk policy: R0 read-only, R1 bounded-local,
+ * R2 external side effect, R3 secret/escape, R4 destructive, R5 agent-spawn.
+ */
+export type GraphFlowToolRisk = "R0" | "R1" | "R2" | "R3" | "R4" | "R5";
+
+/** Capability ids from packages/efficiency-agent/policies/capabilities-v1.json. */
+export type GraphFlowToolCapability =
+  | "filesystem.read"
+  | "filesystem.write"
+  | "process.exec"
+  | "network.connect"
+  | "git.write"
+  | "package.install"
+  | "secret.read"
+  | "agent.spawn";
+
+/**
+ * GraphFlow-namespaced `_meta` keys. `risk`/`capabilities` describe the
+ * default configuration (no LLM key, no team server); the `conditional*`
+ * keys apply only when the operator configured that provider.
+ * `writeScope`: "none", "graphflow-state" (GraphFlow's own graph/memory
+ * store, default graphflow-out/), or "caller-path" (a path the caller names).
+ */
+export interface ToolGovernanceMeta {
+  "graphflow/risk": GraphFlowToolRisk;
+  "graphflow/capabilities": GraphFlowToolCapability[];
+  "graphflow/writeScope": "none" | "graphflow-state" | "caller-path";
+  "graphflow/conditionalCapabilities"?: GraphFlowToolCapability[];
+  "graphflow/conditionalRisk"?: GraphFlowToolRisk;
+}
+
 export interface ToolDefinition {
   name: string;
+  title?: string;
   description: string;
   $schema?: string;
   inputSchema: {
@@ -8,7 +50,163 @@ export interface ToolDefinition {
     required?: string[];
     additionalProperties?: boolean;
   };
+  annotations?: ToolAnnotations;
+  _meta?: ToolGovernanceMeta;
 }
+
+interface ToolGovernance {
+  annotations: ToolAnnotations;
+  _meta: ToolGovernanceMeta;
+}
+
+const TOOL_GOVERNANCE: Record<string, ToolGovernance> = {
+  graphflow_run: {
+    annotations: {
+      title: "GraphFlow Run (plan + context package)",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    _meta: {
+      "graphflow/risk": "R1",
+      "graphflow/capabilities": ["filesystem.read", "filesystem.write", "process.exec"],
+      "graphflow/writeScope": "graphflow-state",
+      "graphflow/conditionalCapabilities": ["network.connect"],
+      "graphflow/conditionalRisk": "R2",
+    },
+  },
+  graphflow_report_outcome: {
+    annotations: {
+      title: "GraphFlow Report Outcome",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    _meta: {
+      "graphflow/risk": "R1",
+      "graphflow/capabilities": ["filesystem.read", "filesystem.write"],
+      "graphflow/writeScope": "graphflow-state",
+    },
+  },
+  graphflow_context: {
+    annotations: {
+      title: "GraphFlow Context (preview / expand)",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    _meta: {
+      "graphflow/risk": "R1",
+      "graphflow/capabilities": ["filesystem.read", "filesystem.write"],
+      "graphflow/writeScope": "graphflow-state",
+    },
+  },
+  graphflow_plan: {
+    annotations: {
+      title: "GraphFlow Plan (DAG + workbench)",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    _meta: {
+      "graphflow/risk": "R1",
+      "graphflow/capabilities": ["filesystem.read", "filesystem.write"],
+      "graphflow/writeScope": "graphflow-state",
+      "graphflow/conditionalCapabilities": ["network.connect"],
+      "graphflow/conditionalRisk": "R2",
+    },
+  },
+  graphflow_index: {
+    annotations: {
+      title: "GraphFlow Index Workspace",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    _meta: {
+      "graphflow/risk": "R1",
+      "graphflow/capabilities": ["filesystem.read", "filesystem.write"],
+      "graphflow/writeScope": "graphflow-state",
+    },
+  },
+  graphflow_insight: {
+    annotations: {
+      title: "GraphFlow Insight (submit / merge)",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    _meta: {
+      "graphflow/risk": "R1",
+      "graphflow/capabilities": ["filesystem.read", "filesystem.write"],
+      "graphflow/writeScope": "graphflow-state",
+    },
+  },
+  graphflow_skill_insights: {
+    annotations: {
+      title: "GraphFlow Skill Insights",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    _meta: {
+      "graphflow/risk": "R0",
+      "graphflow/capabilities": ["filesystem.read"],
+      "graphflow/writeScope": "none",
+    },
+  },
+  graphflow_diagnose: {
+    annotations: {
+      title: "GraphFlow Diagnose",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    _meta: {
+      "graphflow/risk": "R0",
+      "graphflow/capabilities": ["filesystem.read"],
+      "graphflow/writeScope": "none",
+      "graphflow/conditionalCapabilities": ["network.connect"],
+      "graphflow/conditionalRisk": "R2",
+    },
+  },
+  graphflow_artifact: {
+    annotations: {
+      title: "GraphFlow Artifact (export / import)",
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    _meta: {
+      "graphflow/risk": "R1",
+      "graphflow/capabilities": ["filesystem.read", "filesystem.write"],
+      "graphflow/writeScope": "caller-path",
+    },
+  },
+  graphflow_skill_guide: {
+    annotations: {
+      title: "GraphFlow Skill Guide",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    _meta: {
+      "graphflow/risk": "R0",
+      "graphflow/capabilities": [],
+      "graphflow/writeScope": "none",
+    },
+  },
+};
 
 export function getToolDefinitions(): ToolDefinition[] {
   const tools: Array<Omit<ToolDefinition, "$schema">> = [
@@ -20,6 +218,7 @@ export function getToolDefinitions(): ToolDefinition[] {
         properties: {
           task: { type: "string", description: "Task description to plan and package." },
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+          rootDir: { type: "string", description: "Optional workspace root override." },
         },
         required: ["task"],
         additionalProperties: false,
@@ -70,6 +269,7 @@ export function getToolDefinitions(): ToolDefinition[] {
           userConfirmed: { type: "boolean", description: "Whether a human explicitly confirmed the result." },
           evidenceSource: { type: "string", enum: ["manual", "ci", "agent", "hook"], description: "Origin of the evidence package." },
           configPath: { type: "string", description: "Optional path to graphflow.config.json." },
+          rootDir: { type: "string", description: "Optional workspace root override; pass the same rootDir given to graphflow_run." },
         },
         required: ["episodeId", "success"],
         additionalProperties: false,
@@ -274,8 +474,24 @@ export function getToolDefinitions(): ToolDefinition[] {
       },
     },
   ];
-  return tools.map((tool) => ({
-    ...tool,
-    $schema: "https://json-schema.org/draft/2020-12/schema",
-  }));
+  return tools.map((tool) => {
+    const governance = TOOL_GOVERNANCE[tool.name];
+    return {
+      ...tool,
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      ...(governance
+        ? {
+            title: governance.annotations.title,
+            annotations: { ...governance.annotations },
+            _meta: {
+              ...governance._meta,
+              "graphflow/capabilities": [...governance._meta["graphflow/capabilities"]],
+              ...(governance._meta["graphflow/conditionalCapabilities"]
+                ? { "graphflow/conditionalCapabilities": [...governance._meta["graphflow/conditionalCapabilities"]] }
+                : {}),
+            },
+          }
+        : {}),
+    };
+  });
 }

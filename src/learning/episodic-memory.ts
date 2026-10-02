@@ -66,6 +66,39 @@ const EPISODE_SENTINEL = "episode";
 
 let idCounter = 0;
 
+/**
+ * Episode nodes recorded by this process (bounded, oldest evicted first). A
+ * long-lived server keeps them so an outcome report still resolves its own
+ * episode after the backing store file was swapped underneath it.
+ */
+const RECENT_EPISODE_LIMIT = 128;
+const recentEpisodeNodes = new Map<string, GraphNode>();
+
+function rememberEpisodeNode(node: GraphNode): void {
+  recentEpisodeNodes.delete(node.id);
+  recentEpisodeNodes.set(node.id, node);
+  while (recentEpisodeNodes.size > RECENT_EPISODE_LIMIT) {
+    const oldest = recentEpisodeNodes.keys().next().value;
+    if (oldest === undefined) break;
+    recentEpisodeNodes.delete(oldest);
+  }
+}
+
+/**
+ * Re-insert an episode this process recorded when the client no longer has
+ * it. Returns false when the id is unknown here or the store already has it.
+ */
+export async function restoreRecentEpisode(client: GraphClient, episodeId: string): Promise<boolean> {
+  const remembered = recentEpisodeNodes.get(episodeId);
+  if (!remembered) return false;
+  if (client.getNodesByIds) {
+    const existing = await client.getNodesByIds([episodeId]);
+    if (existing.some((n) => n.id === episodeId)) return false;
+  }
+  await client.upsertNodes([remembered]);
+  return true;
+}
+
 export function extractTaskTokens(task: string): string[] {
   const out = new Set<string>();
   for (const raw of task.toLowerCase().split(/\s+/)) {
@@ -143,6 +176,7 @@ export async function recordEpisode(
   }
 
   await client.upsertNodes([episodeNode]);
+  rememberEpisodeNode(episodeNode);
   return record;
 }
 
@@ -187,6 +221,7 @@ export async function updateEpisodeOutcome(
     metadata: { ...node.metadata, record: serialize(updated) },
   };
   await client.upsertNodes([updatedNode]);
+  if (recentEpisodeNodes.has(episodeId)) rememberEpisodeNode(updatedNode);
   if (outcome === "pass") {
     // 叠加真实 episode/symbol 证据到动态 golden 词集：pass episode 的
     // plan 描述 / keyDecisions 是执行成功的真实符号证据（best-effort，

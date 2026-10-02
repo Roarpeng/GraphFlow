@@ -153,7 +153,7 @@ export async function finalizeEpisode(
           status: run.status,
           ...(existingEpisodeId ? { existingEpisodeId } : {}),
         },
-        { workspaceRoot: process.cwd() }
+        { workspaceRoot: options.workspaceRoot ?? process.cwd() }
       );
     } catch {
       // 自动捕获失败不阻断主流程

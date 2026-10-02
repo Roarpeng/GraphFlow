@@ -27,6 +27,7 @@
       "properties": {
         "worker": { "type": "string", "minLength": 1 },
         "mode": { "enum": ["baseline", "shadow", "conservative", "adaptive"] },
+        "arm": { "enum": ["baseline", "graphflow", "shadow", "conservative", "adaptive"] },
         "startedAt": { "type": "string", "format": "date-time" },
         "finishedAt": { "type": "string", "format": "date-time" }
       }
@@ -65,6 +66,117 @@
       "additionalProperties": false,
       "properties": { "success": { "type": "boolean" } }
     },
+    "sessionId": { "type": "string" },
+    "projectId": { "type": "string" },
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}\\|[0-9a-f]{16}\\|[0-9a-f]{16}\\|[0-9a-f]{16}$"
+    },
+    "model": {
+      "type": "object",
+      "required": ["provider", "tier"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string" },
+        "tier": { "type": "string" }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "estimated": { "$ref": "#/$defs/measurement" },
+        "actual": { "$ref": "#/$defs/measurement" }
+      }
+    },
+    "validationStatus": { "enum": ["passed", "failed", "unverified", "not-run"] },
+    "securityDecision": {
+      "type": "object",
+      "required": ["verdict", "risk", "reasons"],
+      "additionalProperties": false,
+      "properties": {
+        "verdict": { "enum": ["allow", "deny", "approval-required"] },
+        "risk": { "enum": ["R0", "R1", "R2", "R3", "R4", "R5"] },
+        "reasons": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "record": {
+      "type": "object",
+      "description": "Spec section 24: everything a decision stores for replay and rollback.",
+      "required": ["decisionId", "policyVersion", "contractVersion", "toolVersions", "cacheNamespace"],
+      "additionalProperties": false,
+      "properties": {
+        "decisionId": { "type": "string", "minLength": 1 },
+        "policyVersion": { "type": "integer", "minimum": 0 },
+        "contractVersion": { "type": "string" },
+        "workerVersion": { "type": "string" },
+        "toolVersions": { "type": "object", "additionalProperties": { "type": "string" } },
+        "cacheNamespace": { "type": "string" },
+        "securityPolicyVersion": { "type": "string" },
+        "requestedMode": { "enum": ["advisory", "baseline", "shadow", "conservative", "adaptive"] },
+        "flags": { "type": "object", "additionalProperties": { "type": "boolean" } }
+      }
+    },
+    "events": {
+      "type": "array",
+      "description": "Spec section 3: every state transition with reason, evidence and policy version.",
+      "items": {
+        "type": "object",
+        "required": ["at", "stage", "outcome", "reason", "evidence", "policyVersion"],
+        "additionalProperties": false,
+        "properties": {
+          "at": { "type": "string", "format": "date-time" },
+          "stage": {
+            "enum": ["flags", "fingerprint", "twin", "experience", "context", "reuse-gate", "security", "tool-routing", "model-routing", "cost", "execute", "validate", "replan", "learn", "fail-open"]
+          },
+          "outcome": { "type": "string" },
+          "reason": { "type": "string" },
+          "evidence": { "type": "array", "items": { "type": "string" } },
+          "policyVersion": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "regression": {
+      "type": "object",
+      "required": ["passed", "checks"],
+      "additionalProperties": false,
+      "properties": {
+        "passed": { "type": "boolean" },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "passed"],
+            "additionalProperties": false,
+            "properties": { "name": { "type": "string" }, "passed": { "type": "boolean" } }
+          }
+        }
+      }
+    },
+    "judged": {
+      "type": "boolean",
+      "description": "Whether an oracle judged result.success. Unjudged traces never enter a success rate."
+    },
+    "oracle": {
+      "type": "object",
+      "required": ["passed", "checks"],
+      "additionalProperties": false,
+      "properties": {
+        "passed": { "type": "boolean" },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "passed"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "passed": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
     "decision": {
       "type": "object",
       "required": ["reuseMode", "durationMs", "llmCalls"],
@@ -94,9 +206,12 @@
       "properties": {
         "value": { "type": "number" },
         "provenance": { "enum": ["measured", "estimated", "proxy"] },
-        "method": { "type": "string", "minLength": 1 },
+        "method": { "type": "string", "minLength": 1, "pattern": "\\S" },
         "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
-      }
+      },
+      "if": { "properties": { "provenance": { "const": "measured" } } },
+      "then": { "properties": { "method": false, "confidence": false } },
+      "else": { "required": ["method"], "properties": { "method": { "type": "string" } } }
     },
     "context": {
       "type": "object",

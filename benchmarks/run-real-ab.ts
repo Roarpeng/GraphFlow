@@ -1,7 +1,7 @@
 /**
  * Step D — the REAL-provider A/B benchmark (2.x plan §14-0.3 / §22 / §23).
  *
- *   npm run benchmark:real [-- --limit=N --model=NAME --skip-index]
+ *   npm run benchmark:real [-- --limit=N --model=NAME --skip-index --resume]
  *
  * Two arms over the same 50-task corpus, same model, same single round:
  *  - baseline: context acquired the TRADITIONAL way — grep the task terms,
@@ -27,12 +27,12 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { loadCorpus, readTraces, compareEffBench } from "./eff-bench-lib";
 import { buildRealWorkerTrace } from "./eff-bench-lib";
 import { resolveConfig } from "../src/config/resolve";
-import { resolveConfigSecret } from "../src/config/secrets";
+import { resolveProviderApiKey } from "../src/config/provider-env";
 import { previewContext } from "../src/surfaces/cli/runtime";
 import { triageTask } from "../src/core/triage";
 import { buildEfficiencyAdvisory } from "../src/core/efficiency-advisory";
@@ -161,23 +161,37 @@ function grepContextBlock(taskText: string, budgetChars: number): string {
   const scored: Array<{ file: string; hits: number }> = [];
   for (const dir of ["src", "packages/efficiency-agent/src", "benchmarks"]) {
     for (const term of terms) {
-      try {
-        const out = execFileSync(
-          "grep",
-          ["-rli", term, dir, "--include=*.ts"],
-          { cwd: REPO_ROOT, timeout: 10_000, maxBuffer: 8 * 1024 * 1024 }
-        )
-          .toString()
-          .trim()
-          .split("\n")
-          .filter(Boolean);
-        for (const file of out.slice(0, 8)) {
-          const existing = scored.find((s) => s.file === file);
-          if (existing) existing.hits += 1;
-          else scored.push({ file, hits: 1 });
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        try {
+          // git grep: present wherever the repo is (plain grep is absent on Windows).
+          const out = execFileSync(
+            "git",
+            ["grep", "-l", "-i", "-F", "--untracked", term, "--", `${dir}/*.ts`],
+            { cwd: REPO_ROOT, timeout: 60_000, maxBuffer: 8 * 1024 * 1024 }
+          )
+            .toString()
+            .trim()
+            .split("\n")
+            .filter(Boolean);
+          for (const file of out.slice(0, 8)) {
+            const existing = scored.find((s) => s.file === file);
+            if (existing) existing.hits += 1;
+            else scored.push({ file, hits: 1 });
+          }
+          break;
+        } catch (error) {
+          // exit 1 = no match for this term. A timeout or an abnormal exit (killed,
+          // console Ctrl+C = 0xC000013A, no status) is retried once, then skipped
+          // with a warning; a real git error (status 2..255) still aborts, since it
+          // would silently starve the baseline arm.
+          const { status, code } = error as { status?: number | null; code?: string };
+          if (status === 1) break;
+          const transient = code === "ETIMEDOUT" || status === null || status === undefined || status > 255;
+          if (!transient) throw error;
+          if (attempt === 2) {
+            console.warn(`  baseline grep failed twice for term "${term}" in ${dir} (${code ?? status}); term skipped`);
+          }
         }
-      } catch {
-        // no match for this term — grep exits 1
       }
     }
   }
@@ -217,11 +231,16 @@ async function main(): Promise<void> {
   // Real credentials from the machine's resolved config (deepseek).
   const config = resolveConfig();
   const deepseek = config.providers["deepseek"];
-  const apiKey = deepseek?.apiKey ? resolveConfigSecret(deepseek.apiKey) : undefined;
+  const apiKey = resolveProviderApiKey("deepseek", deepseek).key;
   const baseUrl = (deepseek?.baseUrl ?? "https://api.deepseek.com").replace(/\/+$/, "");
   const model = flag("model", process.argv.slice(2)) ?? config.tiers.economy.model;
   if (!apiKey) {
     console.error("refused: no deepseek credential in the resolved config");
+    process.exitCode = 2;
+    return;
+  }
+  if (!model) {
+    console.error("refused: no model (pass --model or set tiers.economy.model)");
     process.exitCode = 2;
     return;
   }
@@ -234,8 +253,31 @@ async function main(): Promise<void> {
   const violations: string[] = [];
   const inputPairs: Array<{ baseline: number; shadow: number }> = [];
 
+  // Each finished task is appended here; --resume replays it instead of paying
+  // for the same provider calls again after an interrupted run.
+  const checkpointPath = resolve(OUT_DIR, "real-ab.checkpoint.jsonl");
+  const done = new Set<string>();
+  if (process.argv.includes("--resume") && existsSync(checkpointPath)) {
+    for (const line of readFileSync(checkpointPath, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      const entry = JSON.parse(line) as CheckpointEntry;
+      if (entry.model !== model || done.has(entry.id) || !tasks.some((t) => t.id === entry.id)) continue;
+      done.add(entry.id);
+      baselineTraces.push(entry.baseline);
+      shadowTraces.push(entry.shadow);
+      if (entry.pair) inputPairs.push(entry.pair);
+      for (const [label, trace] of [["baseline", entry.baseline], ["shadow", entry.shadow]] as const) {
+        violations.push(...validateTraceProvenance(trace).map((v) => `${entry.id}/${label}: ${v}`));
+      }
+    }
+    console.log(`resume: ${done.size} task(s) restored from ${checkpointPath}`);
+  } else {
+    writeFileSync(checkpointPath, "", "utf8");
+  }
+
   for (let i = 0; i < tasks.length; i += 1) {
     const task = tasks[i]!;
+    if (done.has(task.id)) continue;
     const startedAt = new Date().toISOString();
 
     // ── baseline arm: traditional grep context under the SAME char budget ──
@@ -317,7 +359,16 @@ async function main(): Promise<void> {
 
     const bIn = baselineCall.promptTokens;
     const sIn = shadowCall.promptTokens;
-    if (baselineCall.ok && shadowCall.ok) inputPairs.push({ baseline: bIn, shadow: sIn });
+    const pair = baselineCall.ok && shadowCall.ok ? { baseline: bIn, shadow: sIn } : undefined;
+    if (pair) inputPairs.push(pair);
+    const entry: CheckpointEntry = {
+      id: task.id,
+      model,
+      baseline: baselineTrace,
+      shadow: shadowTrace,
+      ...(pair ? { pair } : {}),
+    };
+    appendFileSync(checkpointPath, JSON.stringify(entry) + "\n", "utf8");
     const delta = bIn > 0 ? Math.round(((sIn - bIn) / bIn) * 100) : 0;
     console.log(
       `  [${i + 1}/${tasks.length}] ${task.id} ${call(baselineCall.ok)}/${call(shadowCall.ok)} ` +
@@ -369,6 +420,14 @@ async function main(): Promise<void> {
     "Note: both arms are capped at the same 6000-char context budget; the shadow arm sends the package summary only, " +
       "so the delta mostly reflects how far below the cap the summary lands, not answer quality."
   );
+}
+
+interface CheckpointEntry {
+  id: string;
+  model: string;
+  baseline: TaskTrace;
+  shadow: TaskTrace;
+  pair?: { baseline: number; shadow: number };
 }
 
 function call(ok: boolean): string {

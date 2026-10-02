@@ -13,7 +13,8 @@ import {
 } from "../../../core/agent-delegation";
 import { resolveConfig, resolveEfficiencyPolicy } from "../../../config/resolve";
 import { resolveGraphStorePath, resolveLearningPath } from "../../../config/paths";
-import { buildEfficiencyAdvisory } from "../../../core/efficiency-advisory";
+import { buildEfficiencyAdvisory, extractInlinedAnchorIds } from "../../../core/efficiency-advisory";
+import { projectValidationGates } from "../../../core/project-validation";
 import {
   appendDecisionLedgerRecord,
   loadEfficiencyPolicy,
@@ -28,7 +29,11 @@ import { triageTask } from "../../../core/triage";
 import { createGraphClient, getLastGraphStoreBackend, resolveIndexManifestName } from "../../../graph/client-factory";
 import { indexWorkspaceFiles, hasPendingGraphIndexWork, indexedStoreIsIncomplete } from "../../../graph/file-indexer";
 import { appendFeedbackEvent } from "../../../learning/learning-events";
-import { updateEpisodeOutcome, type DeviationKind } from "../../../learning/episodic-memory";
+import {
+  restoreRecentEpisode,
+  updateEpisodeOutcome,
+  type DeviationKind,
+} from "../../../learning/episodic-memory";
 import {
   verifyOutcomeEvidence,
   type OutcomeEvidenceInput,
@@ -158,14 +163,18 @@ export async function llmCheckResult(configPath?: string): Promise<LlmCheckRepor
       baseUrl: ts.baseUrl,
       model: workerOptions.model ?? TYPESAFE_DEFAULT_MODEL,
       envVarsChecked: ["TYPESAFE_API_KEY", "TYPESAFE_BASE_URL"],
-      note: "System One (Jev) answers typed judgments on POST {base}/v1/systemone; it does not author commands or text. A typesafe-jev worker's configured apiKey (literal or env reference) wins over TYPESAFE_API_KEY.",
+      note: "System One (Jev) answers typed judgments on POST {base}/v1/systemone; it does not author commands or text. An exported TYPESAFE_API_KEY wins; a typesafe-jev worker's configured apiKey (env reference, or a literal that passes the placeholder check) is the fallback.",
     },
-    resolutionOrder: "config apiKey > localhost endpoint > domain-sniffed env > provider env keys; config-exported env values are invisible to sniffing (no self-feedback); at the adapter layer genuine shell env wins over config exports",
+    resolutionOrder: "genuine env key of the endpoint vendor (process env, then Windows registry) > config ${ENV} reference > config literal (placeholder/whitespace literals rejected) > localhost endpoint > provider env keys; config-exported env values are invisible to sniffing (no self-feedback)",
   };
 }
 
-export async function runTaskResult(task: string, configPath?: string): Promise<RunTaskSummary> {
-  const config = resolveConfig(configPath);
+export async function runTaskResult(
+  task: string,
+  configPath?: string,
+  rootDir?: string
+): Promise<RunTaskSummary> {
+  const config = resolveConfig(configPath, rootDir ? { rootDir } : undefined);
   const eventsPath = resolveLearningPath(config, "eventsPath");
 
   try {
@@ -226,6 +235,7 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
     }
     const orchestrateOptions: OrchestrateOptions = {
       graphClient,
+      workspaceRoot: config.graphPolicy.workspaceRoot ?? rootDir ?? process.cwd(),
       enableAutoGraphSync: config.graphPolicy.enableAutoBuild,
       maxContextTokens: config.graphPolicy.maxContextTokens,
       enableEpisodicMemory: config.learningPolicy.enableFlywheel,
@@ -318,6 +328,8 @@ export async function runTaskResult(task: string, configPath?: string): Promise<
           executionMode,
           fusedSteps: result.executionDescriptor?.steps ?? [],
           ...(result.similarEpisodes ? { similarEpisodes: result.similarEpisodes } : {}),
+          requiredAnchors: extractInlinedAnchorIds(result.executionDescriptor?.context),
+          projectValidation: projectValidationGates(workspaceRoot),
           maxContextTokens: config.graphPolicy.maxContextTokens,
           ...(contextCacheHit !== undefined ? { contextCacheHit } : {}),
           project: { root: workspaceRoot, ...(gitHead ? { gitHead } : {}) },
@@ -1067,9 +1079,11 @@ export async function reportOutcome(
   /** Optional episode → Requirement/Concept/code derived_from links (Engineering KG). */
   engineeringHints?: EngineeringLinkHints,
   /** Optional commit/diff/test evidence package. */
-  evidenceInput?: OutcomeEvidenceInput
+  evidenceInput?: OutcomeEvidenceInput,
+  /** Workspace the episode's run was bound to (same binding as runTaskResult). */
+  rootDir?: string
 ): Promise<ReportOutcomeResult> {
-  const config = resolveConfig(configPath);
+  const config = resolveConfig(configPath, rootDir ? { rootDir } : undefined);
   const graphClient = createGraphClient(config);
 
   // P0-2: prune legacy pure-noise skill nodes (no symbol evidence) at load,
@@ -1087,14 +1101,21 @@ export async function reportOutcome(
   const sanitizedLessons = sanitizeOutcomeLessons(lessons ?? []);
 
   // Always update episode outcome (success/fail), even when skill learning is dampened.
-  const updated = await updateEpisodeOutcome(
-    graphClient,
-    episodeId,
-    success ? "pass" : "fail",
-    sanitizedLessons,
-    deviation,
-    evidenceInput
-  );
+  const applyOutcome = () =>
+    updateEpisodeOutcome(
+      graphClient,
+      episodeId,
+      success ? "pass" : "fail",
+      sanitizedLessons,
+      deviation,
+      evidenceInput
+    );
+  let updated = await applyOutcome();
+  // A JSON-fallback host (no better-sqlite3) loses its store file whenever a
+  // SQLite host merges it away; an episode this process ran is re-inserted.
+  if (!updated && (await restoreRecentEpisode(graphClient, episodeId))) {
+    updated = await applyOutcome();
+  }
   if (!updated) {
     return { ok: false, reason: `Episode not found: ${episodeId}` };
   }

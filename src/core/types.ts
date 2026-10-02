@@ -143,6 +143,8 @@ export interface OrchestrationInput {
 
 export interface OrchestrateOptions {
   graphClient?: GraphClient;
+  /** Workspace the run is bound to; the session journal lives under it (default process.cwd()). */
+  workspaceRoot?: string;
   enableAutoGraphSync?: boolean;
   enableNearLosslessMode?: boolean;
   nearLosslessQuery?: string;

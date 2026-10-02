@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "classes": [
+    {
+      "id": "R0",
+      "name": "read-only",
+      "severity": 0,
+      "description": "Read-only inspection with no side effects (git status, ls, reading non-secret files).",
+      "defaultAction": "allow"
+    },
+    {
+      "id": "R1",
+      "name": "bounded-local",
+      "severity": 1,
+      "description": "Bounded local execution or workspace-contained writes (tests, builds, edits inside the workspace).",
+      "defaultAction": "allow-bounded"
+    },
+    {
+      "id": "R2",
+      "name": "external-side-effect",
+      "severity": 3,
+      "description": "External or shared-state side effects: network access, package installs, publishing, pushing, git state changes.",
+      "defaultAction": "approval"
+    },
+    {
+      "id": "R3",
+      "name": "secret-or-escape",
+      "severity": 5,
+      "description": "Secret or credential access, privilege escalation, or commands that cannot be inspected safely.",
+      "defaultAction": "deny"
+    },
+    {
+      "id": "R4",
+      "name": "destructive",
+      "severity": 4,
+      "description": "Destructive or irreversible operations (recursive deletes, hard resets, force pushes, dropping databases, disk formatting).",
+      "defaultAction": "confirm"
+    },
+    {
+      "id": "R5",
+      "name": "agent-spawn",
+      "severity": 2,
+      "description": "Spawning additional AI agents (unbounded consumption risk); bounded by maxSubAgents and budgets.",
+      "defaultAction": "allow-bounded"
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "externalWriteApproval": true,
+  "networkDefault": false,
+  "riskActions": {
+    "R0": "allow",
+    "R1": "allow-bounded",
+    "R2": "approval",
+    "R3": "deny",
+    "R4": "confirm",
+    "R5": "allow-bounded"
+  },
+  "protectedPaths": [
+    ".git/**",
+    ".env",
+    ".env.*",
+    ".envrc",
+    "**/*.pem",
+    "**/*.key",
+    "**/*.p12",
+    "**/*.pfx",
+    "**/id_rsa*",
+    "**/id_dsa*",
+    "**/id_ecdsa*",
+    "**/id_ed25519*",
+    "**/.npmrc",
+    "**/.pypirc",
+    "**/.netrc",
+    "**/.git-credentials",
+    "**/.ssh/**",
+    "**/.aws/**",
+    "**/.gnupg/**",
+    "**/credentials*"
+  ],
+  "maxSubAgents": 0,
+  "budgets": {
+    "maxRounds": 8,
+    "maxToolCalls": 64,
+    "maxInputTokens": 400000,
+    "maxOutputTokens": 64000,
+    "maxWallMs": 1800000
+  }
+}

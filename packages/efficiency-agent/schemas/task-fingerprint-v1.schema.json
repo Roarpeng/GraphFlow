@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Roarpeng/GraphFlow/main/packages/efficiency-agent/schemas/task-fingerprint-v1.schema.json",
+  "title": "GraphFlow Efficiency Agent task fingerprint v1 (plan §8, four tracks)",
+  "description": "Each track hash is the first 16 hex chars of sha256 over the track's canonical JSON. reuseKey joins the four hashes with '|' and is the reuse engine's primary key. `facts` optionally carries the inputs the hashes were computed from.",
+  "type": "object",
+  "required": ["semanticTaskHash", "projectStateHash", "contextStateHash", "environmentStateHash", "reuseKey"],
+  "additionalProperties": false,
+  "properties": {
+    "semanticTaskHash": { "$ref": "#/$defs/hash16" },
+    "projectStateHash": { "$ref": "#/$defs/hash16" },
+    "contextStateHash": { "$ref": "#/$defs/hash16" },
+    "environmentStateHash": { "$ref": "#/$defs/hash16" },
+    "reuseKey": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}\\|[0-9a-f]{16}\\|[0-9a-f]{16}\\|[0-9a-f]{16}$"
+    },
+    "facts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "task": { "type": "string", "minLength": 1 },
+        "project": {
+          "type": "object",
+          "required": ["relevantFileHashes"],
+          "additionalProperties": false,
+          "properties": {
+            "gitHead": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            "workingTreeHash": { "type": "string" },
+            "relevantFileHashes": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            },
+            "dependencyLockHash": { "type": "string" }
+          }
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "graphVersion": { "type": "string" },
+            "contextPolicyVersion": { "type": "string" },
+            "workingSetHash": { "type": "string" }
+          }
+        },
+        "environment": {
+          "type": "object",
+          "required": ["toolVersions"],
+          "additionalProperties": false,
+          "properties": {
+            "toolVersions": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            },
+            "runtimeVersion": { "type": "string" },
+            "selectedProvider": { "type": "string" },
+            "dynamicStateFingerprint": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "hash16": { "type": "string", "pattern": "^[0-9a-f]{16}$" }
+  }
+}

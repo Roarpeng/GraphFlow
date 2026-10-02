@@ -74,7 +74,6 @@ import {
   runSkillReset,
   runSkillPrune,
   runSkillConsolidate,
-  runTask,
   runTaskResult,
   submitAgentInsightResult,
   mergeAgentInsightResult,
@@ -425,18 +424,22 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   }
 
   if (command === "run") {
-    const task = args.join(" ").trim();
+    const rootDir = readCliFlagValue(args, "--root-dir");
+    const task = args
+      .filter((part, index) => part !== "--root-dir" && args[index - 1] !== "--root-dir")
+      .join(" ")
+      .trim();
     if (!task) {
-      console.log("Task is required.");
+      console.log("Task is required. Usage: graphflow run <task> [--root-dir <dir>]");
       process.exitCode = 1;
       return undefined;
     }
 
-    const data = await runTaskResult(task, configPath);
+    const data = await runTaskResult(task, configPath, rootDir);
     return {
       command,
       data,
-      legacyText: await runTask(task, configPath),
+      legacyText: `status=${data.status}; attempts=${data.attempts}; feedback=${data.feedback}`,
     };
   }
 
@@ -444,7 +447,7 @@ async function executeCommand(command: string, args: string[], configPath?: stri
     const episodeId = args[1]?.trim();
     const success = parseCliSuccess(args[2]);
     if (!episodeId || success === undefined) {
-      console.log("Usage: graphflow outcome report <episodeId> <success> [--lesson <text>]... [--commit <sha>] [--diff <diff>] [--test-command <cmd>] [--test-result pass|fail|unknown] [--user-confirmed] ...");
+      console.log("Usage: graphflow outcome report <episodeId> <success> [--lesson <text>]... [--commit <sha>] [--diff <diff>] [--test-command <cmd>] [--test-result pass|fail|unknown] [--user-confirmed] [--root-dir <dir>] ...");
       process.exitCode = 1;
       return undefined;
     }
@@ -489,7 +492,8 @@ async function executeCommand(command: string, args: string[], configPath?: stri
             ...(codeHints.length > 0 ? { codeHints } : {}),
           }
         : undefined,
-      evidence
+      evidence,
+      readCliFlagValue(args, "--root-dir")
     );
     return {
       command: "outcome-report",
@@ -1970,6 +1974,7 @@ async function executeCommand(command: string, args: string[], configPath?: stri
   // only place the usage banner was still going to stdout, so an unknown
   // command printed help text into a script's stdout pipe). stderr keeps the
   // machine-readable channel clean.
+  console.error(`graphflow: unknown command "${command}"`);
   console.error(buildCliUsageWithSettings());
   process.exitCode = 1;
   return undefined;
@@ -2163,6 +2168,10 @@ async function main(): Promise<void> {
   }
 
   const result = await executeCommand(command, options.args, options.configPath);
+  if (!result && process.exitCode !== undefined && process.exitCode !== 0) {
+    // A known command already reported its own usage error or failure.
+    return;
+  }
   if (!result) {
     // An unrecognised command lands here. Say so on stderr and keep stdout
     // empty, so a script reading stdout gets nothing rather than help text it

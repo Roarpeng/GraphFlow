@@ -159,8 +159,9 @@ export function createTemporaryHarness(
       try {
         // ── 1. TRIVIAL COMPLEXITY: Deterministic fast-path (Zero-LLM) ──
         if (complexity === "trivial") {
-          // If contract indicates safe REUSE or caller needs no deep execution
-          if (contract.reuseMode === "REUSE" || !worker) {
+          // Only a REUSE verdict (a validated cached result) completes without
+          // running anything; a missing worker is not evidence of success.
+          if (contract.reuseMode === "REUSE") {
             return {
               status: "completed",
               complexity,
@@ -169,6 +170,17 @@ export function createTemporaryHarness(
               observations: [],
               validation: { passed: true, checks: [{ name: "deterministic-cache-hit", passed: true }] },
               stopReason: "trivial-fast-path",
+            };
+          }
+          if (!worker) {
+            return {
+              status: "failed",
+              complexity,
+              rounds: 0,
+              durationMs: Date.now() - startedAt,
+              observations: [],
+              validation: { passed: false, checks: [{ name: "no-worker", passed: false }] },
+              stopReason: "no-worker",
             };
           }
 
@@ -481,9 +493,9 @@ export function createTemporaryHarness(
               }
             }
           } else {
-            // Complex harness executed sub-agents without standalone worker adapter
-            status = "completed";
-            stopReason = "sub-agents-completed";
+            // Sub-agents ran but nothing validated their output.
+            status = "failed";
+            stopReason = "no-worker-validation";
           }
 
           return {

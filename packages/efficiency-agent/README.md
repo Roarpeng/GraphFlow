@@ -11,7 +11,9 @@ GraphFlow 2.x 效率决策层的落地包（v0.1：schema + 合同 + 纯函数�
 2. 不 import 主包内部模块，不打开 `graphflow-out/graphflow-graph.*`。
 3. 主仓（GraphFlow 1.x substrate）不反向依赖本包；两侧通过
    JSON schema（`schemas/`）对齐，演进以 schema 版本号为准。
-4. 本包保持零 runtime 依赖；类型与校验器是纯函数。
+4. 唯一 runtime 依赖是 `@modelcontextprotocol/sdk`（作为 MCP 客户端调用
+   `graphflow_context`）；类型、校验器与决策逻辑是纯函数，I/O 只在
+   `src/host/` 与 `bin/`。兼容矩阵见 `docs/GRAPHFLOW_COMPATIBILITY.md`。
 
 ## 内容
 
@@ -25,7 +27,7 @@ GraphFlow 2.x 效率决策层的落地包（v0.1：schema + 合同 + 纯函数�
 - `src/contract.ts` — Execution Contract v1：`graphflow_run` advisory 的
   规范类型（executionDescriptor 的超集演进），`assertAdvisoryCompatible`
   验收 MCP advisory JSON。
-- `src/corpus.ts` + `benchmarks/eff-tasks-v1.jsonl` — 50 任务语料（§24 组成
+- `src/corpus.ts` + `benchmarks/golden-v1.jsonl` — 50 任务语料（§24 组成
   20/15/10/5；regular 队列文本衍生自本仓库真实 git 历史）。
 - `src/bench.ts` — 纯 trace 构建器（provenance 在构造点决定）。
 
@@ -47,11 +49,20 @@ GraphFlow 2.x 效率决策层的落地包（v0.1：schema + 合同 + 纯函数�
   * simple：单 Worker One-shot 模式
   * medium：Worker + 专用工具链 + 受控退避重试
   * complex：任务专属临时沙盒（Context 规划 + 专用工具集 + Sub-agents 调度 + 严格 Budget Cap 熔断 + 安全资源清理）。
-- `bin/eff-agent.ts` —
-  §12/§25 独立原生 CLI 命令行入口，支持直接运行任务与基准评测：
-  * `eff-agent run <task> [--mode=broker|shadow|advisory] [--worker=local|jev|external]`
-  * `eff-agent bench run <tasks.jsonl> [--worker=typesafe-jev|local] [--mode=baseline|shadow]`
-  * `eff-agent bench compare <baseline.jsonl> <shadow.jsonl>`
+- `src/agent/pipeline.ts` — §27 端到端管线：flags → 指纹 → Project Twin
+  （带 provenance 的 ProjectFact）→ 经验检索 → 缓存判定（命名空间化）→
+  GraphFlow MCP 上下文 → Reuse Gate → 安全门 → 工具/模型路由 → 合同 →
+  成本优化 → 动态 harness 执行/验证/重规划 → 写入审计 → 经验/策略生命周期 → trace。
+  `runPipelineFailOpen` 实现 §9「Agent 故障 → 回退原生 worker」。
+- `src/flags.ts` — §22 特性开关（默认值与规范一致；默认 broker 被封顶为 shadow）。
+- `src/security/` + `policies/` — §6–§8 能力模型、R0–R5 风险分级、策略判定
+  （默认 / STRICT 失败关闭）、脱敏、不可信内容包裹、注入检测、缓存准入。
+- `src/observability/` — §3/§11 事件记录、OTel(OTLP JSON) 映射、trace replay。
+- `src/learning/policy-lifecycle.ts` — §15 Evidence Gate → Shadow → Canary →
+  Production / Anti-pattern，支持回滚。
+- `src/bench-runner.ts` + `src/bench-compare.ts` — §18 五轨基准（独立 worktree、
+  oracle 判定、隐藏测试、回归守卫）与 §28 验收门。
+- `bin/eff-agent.ts` — §25 CLI（见下）。
 - `src/learning/`（**P4**）— TrajectoryRecord 校验/汇总、带滞回的策略
   学习（成功率 <0.7 升档、≥0.9 且 2×minSamples 才降档、avgRounds>1.5 转
   loop、失败阶段 ≥30% 进 avoidPatterns）、版本化 append-only 策略存储。
@@ -71,48 +82,75 @@ GraphFlow 2.x 效率决策层的落地包（v0.1：schema + 合同 + 纯函数�
 
 ## 命令行与基准运行（CLI & Benchmark）
 
-### 1. 独立 eff-agent CLI
+本包是 `private: true`，**未发布到 npm**。请在仓库根目录 `npm install` 后从源码运行
+（下文 `eff-agent` = `npx tsx packages/efficiency-agent/bin/eff-agent.ts`）。
 
-本包是 `private: true`，**未发布到 npm**，`npx eff-agent` 会失败。请在仓库根目录 `npm install` 后从源码运行：
+### 1. 运行任务（§27 管线）
 
 ```bash
-# 查看用法
-npx tsx packages/efficiency-agent/bin/eff-agent.ts --help
+# 只生成 Execution Contract（Shadow Advisor，不执行）
+eff-agent run "修复 X 的类型报错" --mode advisory
 
-# 运行单个任务（Broker 真实调度）
-npx tsx packages/efficiency-agent/bin/eff-agent.ts run "修复某个模块的类型报错" --worker=jev --policy=conservative
-
-# 运行真实模型基准
-npx tsx packages/efficiency-agent/bin/eff-agent.ts bench run packages/efficiency-agent/benchmarks/eff-tasks-v1.jsonl --worker=jev --mode=shadow
-
-# 严格 R1-R6 溯源门禁 A/B 比较
-npx tsx packages/efficiency-agent/bin/eff-agent.ts bench compare baseline.jsonl shadow.jsonl
+# 真实执行：外部 agent CLI 执行任务，验证命令判定成败
+eff-agent run "修复 X 的类型报错" --worker external --cli-command claude --cli-args "-p" \
+  --validation "npx tsc --noEmit" --policy conservative
 ```
 
-真实 A/B 的 token 数来自 provider usage，但**不测回答质量**（成功判据仅为非空回答），且每臂只跑一次；引用 token 节省时请同时写明样本量与这一限制（见 `benchmarks/REAL-AB-RESULTS.md`）。
+- 没有执行器也没有验证命令 → `not-executed`（退出码 3），绝不报成功。
+- 执行了但没有验证 → `unverified`（4）；安全策略拒绝 → `blocked`（5，R2 可 `--approve`）；
+  写入越权（只读任务改文件、写 `.env` 等受保护路径）→ `violation`（6）。
+- GraphFlow MCP 不可用 → 回退 twin-only 上下文；缓存损坏 → FRESH；安全策略文件损坏 →
+  STRICT（失败关闭）；经验存储不可写 → 本次不学习；管线自身异常 → 原生 worker 路径（`FAIL-OPEN`）。
+- 低延迟（§10 决策 P50 < 1.5 s）：默认每个 `eff-agent` 进程拉起一次 GraphFlow（冷启动约 4–5 s）。
+  反复调用时先常驻一个服务，再用 URL 连接（实测决策 P50 1.35 s）：
 
-### 2. 仓库内部基准脚本（含真实 Worker 臂）
+  ```bash
+  graphflow-mcp --http --port 7357          # 在项目目录常驻（或 npm run start:mcp -- --http --port 7357）
+  EFF_GRAPHFLOW_MCP=http://127.0.0.1:7357/mcp eff-agent run "…" --mode shadow
+  ```
+
+  非回环地址必须设置 `EFF_GRAPHFLOW_MCP_TOKEN`（服务端用 `--http-token` 配同一值）。
+
+### 2. 特性开关与回滚（§22 / §24）
+
 ```bash
-# 离线模拟臂
-npm run benchmark:eff -- run --mode=baseline
-npm run benchmark:eff -- run --mode=shadow
-
-# 真实 Worker 臂（支持 TypeSafe-JEV 或 DeepSeek）
-npm run benchmark:eff -- run --mode=shadow --worker=typesafe-jev --provider=deepseek
-
-# A/B 对比输出真实 Token 节约率与 LLM 调用减少率
-npm run benchmark:eff -- compare graphflow-out/eff-bench/baseline.jsonl graphflow-out/eff-bench/shadow.jsonl
+eff-agent flags                          # 查看生效值及来源（default < flags.json < env）
+eff-agent flags set EFF_AGENT_ENABLED=1 EFF_SHADOW_MODE=0
+eff-agent flags rollback                 # 一键回到 shadow（原生 worker 行为）
+eff-agent cache invalidate               # 命名空间代数 +1，所有旧缓存失效
+eff-agent policy status | policy rollback
+eff-agent trace replay graphflow-out/eff-agent/traces.jsonl --otel-out spans.json
 ```
 
-```
-npm run benchmark:eff -- run --mode=baseline   # → graphflow-out/eff-bench/baseline.jsonl
-npm run benchmark:eff -- run --mode=shadow     # → graphflow-out/eff-bench/shadow.jsonl
-npm run benchmark:eff -- compare graphflow-out/eff-bench/{baseline,shadow}.jsonl
+默认值即规范 §22：`EFF_AGENT_ENABLED=0`、`EFF_SHADOW_MODE=1`、`EFF_PLAN_REUSE=0`、
+`EFF_RESULT_REUSE=0`、`EFF_SELF_LEARNING=0`、`EFF_NETWORK_DEFAULT=0`……
+因此不开启开关时 `--mode broker` 会被封顶为 shadow，并在输出中说明原因。
+每次决策在 trace 中记录 `decisionId / policyVersion / contractVersion / workerVersion /
+toolVersions / cacheNamespace / securityPolicyVersion / flags`。
+
+### 3. 基准（§18 五轨）
+
+```bash
+eff-agent bench run packages/efficiency-agent/benchmarks/golden-v1.jsonl \
+  --arm baseline --cli-command claude --cli-args "-p" --output runs/baseline.jsonl
+eff-agent bench run packages/efficiency-agent/benchmarks/golden-v1.jsonl \
+  --arm adaptive --cli-command claude --cli-args "-p" --output runs/adaptive.jsonl
+eff-agent bench compare runs/baseline.jsonl runs/adaptive.jsonl --gate
 ```
 
-双臂离线（bridge 路径、无 LLM key、临时沙箱、episode 按队列语义闭合：
-failure 队列记 fail），测量的是打包+决策管线成本，不是 worker 结局——
-worker 结局臂随 P2 broker 到来。
+- 轨道：`baseline`（原生）/ `graphflow`（仅注入 GraphFlow 上下文）/ `shadow` /
+  `conservative` / `adaptive`；每个任务在固定 `baseCommit` 的独立 git worktree 中运行。
+- 成功只由 oracle 判定（输出断言、文件断言、隐藏测试 overlay、拒绝判定）；未判定任务不进成功率；
+  `guards` 失败计入回归率。
+- `compare` 输出 success/fidelity/tokens/llmCalls/toolCalls/rounds/latency(P50/P95)/
+  cacheHit/reuseRate/regressionRate/Net Saving，并给出 §28 验收门；`--gate` 时任一门失败退出 1。
+- 外部 agent CLI 内部的 LLM 调用不可观测：`llm.calls` 标为 `proxy`（agent 调用次数），
+  token 为 `estimated`（prompt 字符/4）——比较器会显示 provenance，不把它们当测量值。
+
+### 4. 仓库根的离线基准脚本
+
+`npm run benchmark:eff -- run --mode=baseline|shadow` 只测打包与决策管线成本
+（不执行任务，trace 一律 `judged: false`），不能用于成功率结论。
 
 ## 校准发现（Shadow 第一条，已修复）
 

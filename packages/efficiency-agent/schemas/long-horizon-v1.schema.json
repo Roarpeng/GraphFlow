@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Roarpeng/GraphFlow/main/packages/efficiency-agent/schemas/long-horizon-v1.schema.json",
+  "title": "GraphFlow Efficiency Agent Long-Horizon session v1 (plan §18, one JSONL line)",
+  "description": "One session of benchmarks/long-horizon-v1.jsonl: 3-8 ordered steps run in ONE worktree, spanning >= 2 agent sessions (a new session number = a fresh executor with no conversation memory). expect.reuse: fresh = nothing equivalent ran before; reuse-allowed = equivalentTo produced an equivalent result and no step since changed the workspace; must-refresh = an equivalent result exists but the workspace changed since, so replaying it is stale. expect.memory = required iff dependsOn is non-empty. Ordering and cross-step consistency are enforced by src/corpus.ts parseLongHorizonCorpus and scripts/check-golden.mjs.",
+  "type": "object",
+  "required": ["id", "dataset", "template", "title", "baseCommit", "refs", "steps"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^lh-[0-9]{3}$" },
+    "dataset": { "const": "long-horizon-v1" },
+    "template": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 8 },
+    "baseCommit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["path"],
+        "additionalProperties": false,
+        "properties": { "path": { "$ref": "#/$defs/relPath" }, "symbol": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "steps": { "type": "array", "minItems": 3, "maxItems": 8, "items": { "$ref": "#/$defs/step" } }
+  },
+  "$defs": {
+    "relPath": { "type": "string", "minLength": 1, "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(^|[/\\\\])\\.\\.([/\\\\]|$)).+$" },
+    "stepId": { "type": "string", "pattern": "^lh-[0-9]{3}-s[1-8]$" },
+    "commandList": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "step": {
+      "type": "object",
+      "required": ["id", "step", "session", "category", "text", "dependsOn", "expect", "oracle"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/stepId" },
+        "step": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "session": { "type": "integer", "minimum": 1 },
+        "category": {
+          "enum": ["query", "single-file", "multi-file", "bugfix", "refactor", "test", "docs", "config", "cross-module"]
+        },
+        "text": { "type": "string", "minLength": 8 },
+        "dependsOn": { "type": "array", "items": { "$ref": "#/$defs/stepId" }, "uniqueItems": true },
+        "equivalentTo": { "$ref": "#/$defs/stepId" },
+        "expect": {
+          "type": "object",
+          "required": ["reuse", "memory", "stateChange"],
+          "additionalProperties": false,
+          "properties": {
+            "reuse": { "enum": ["fresh", "reuse-allowed", "must-refresh"] },
+            "memory": { "enum": ["none", "required"] },
+            "stateChange": { "type": "boolean" }
+          }
+        },
+        "oracle": { "$ref": "#/$defs/oracle" },
+        "guards": { "$ref": "#/$defs/commandList" },
+        "notes": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "type": "object", "properties": { "expect": { "type": "object", "properties": { "reuse": { "const": "fresh" } } } } },
+          "then": { "type": "object", "not": { "type": "object", "required": ["equivalentTo"], "properties": { "equivalentTo": true } } },
+          "else": { "type": "object", "required": ["equivalentTo"], "properties": { "equivalentTo": true } }
+        },
+        {
+          "if": { "type": "object", "properties": { "expect": { "type": "object", "properties": { "memory": { "const": "required" } } } } },
+          "then": { "type": "object", "properties": { "dependsOn": { "type": "array", "minItems": 1 } } },
+          "else": { "type": "object", "properties": { "dependsOn": { "type": "array", "maxItems": 0 } } }
+        }
+      ]
+    },
+    "oracle": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "outputAnyOf": { "$ref": "#/$defs/commandList" },
+        "outputAllOf": { "$ref": "#/$defs/commandList" },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["path", "pattern"],
+            "additionalProperties": false,
+            "properties": { "path": { "$ref": "#/$defs/relPath" }, "pattern": { "type": "string", "minLength": 1 } }
+          }
+        },
+        "commands": { "$ref": "#/$defs/commandList" }
+      }
+    }
+  }
+}

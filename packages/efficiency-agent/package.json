@@ -9,9 +9,31 @@
   "bin": {
     "eff-agent": "./dist/bin/eff-agent.js"
   },
+  "files": [
+    "dist",
+    "src",
+    "bin",
+    "schemas",
+    "benchmarks/golden-v1.jsonl",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p . && npx tsc bin/eff-agent.ts --outDir dist --rootDir . --target es2022 --module NodeNext --moduleResolution NodeNext --types node --ignoreConfig",
-    "typecheck": "tsc -p . --noEmit"
+    "typecheck": "tsc -p . --noEmit && tsc bin/eff-agent.ts --noEmit --target es2022 --module NodeNext --moduleResolution NodeNext --types node --strict --exactOptionalPropertyTypes --noUncheckedIndexedAccess --skipLibCheck --ignoreConfig",
+    "test": "vitest run --config vitest.config.ts",
+    "gate": "node scripts/release-gate.mjs",
+    "sbom": "node scripts/supply-chain.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "tsx": "^4.22.3",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.6"
   },
   "engines": {
     "node": ">=20"

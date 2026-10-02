@@ -1,0 +1,2 @@
+# gen-extended.mjs --check compares these byte-for-byte with its own LF output.
+packages/efficiency-agent/benchmarks/** text eol=lf

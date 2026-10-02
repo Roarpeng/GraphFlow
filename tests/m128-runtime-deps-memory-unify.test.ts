@@ -420,6 +420,39 @@ describe("M128 JSON → SQLite store merge", () => {
     ]);
     sqlite.close?.();
   });
+
+  it("a JSON-only host still sees memories after a SQLite host merged its store away", async () => {
+    const root = tmp("gf-merge-view-");
+    const out = join(root, "graphflow-out");
+    const sqlitePath = join(out, "graphflow-graph.sqlite");
+    const jsonPath = join(out, "graphflow-graph.json");
+
+    const jsonHost = new GraphifyFileClient(jsonPath);
+    await jsonHost.upsertNodes([
+      record({ id: "episode:pending", type: "Decision", content: "run" }, { createdAt: "2026-09-01T00:00:00Z" }),
+    ]);
+
+    const sqlite = new GraphifySqliteClient(sqlitePath);
+    mergeSiblingJsonStoreIntoSqlite(sqlite, sqlitePath);
+    expect(existsSync(jsonPath)).toBe(false);
+
+    // Same JSON host, same process: the episode it created is still visible...
+    expect(jsonHost.readSnapshot().nodes.map((n) => n.id)).toContain("episode:pending");
+    // ...and its next write keeps it instead of starting from an empty store.
+    await jsonHost.upsertNodes([
+      record({ id: "episode:next", type: "Decision", content: "next" }, { createdAt: "2026-09-02T00:00:00Z" }),
+    ]);
+    expect(new GraphifyFileClient(jsonPath).readSnapshot().nodes.map((n) => n.id).sort()).toEqual([
+      "episode:next",
+      "episode:pending",
+    ]);
+
+    // Without a sibling SQLite store a missing JSON store stays empty (deleted on purpose).
+    const lone = join(tmp("gf-merge-lone-"), "graphflow-graph.json");
+    writeFileSync(`${lone}${MERGED_BACKUP_SUFFIX}`, JSON.stringify({ nodes: [{ id: "x", type: "Decision", content: "x" }], edges: [] }));
+    expect(new GraphifyFileClient(lone).readSnapshot().nodes).toEqual([]);
+    sqlite.close?.();
+  });
 });
 
 describe("M128 per-store index manifest", () => {

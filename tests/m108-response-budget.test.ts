@@ -60,6 +60,12 @@ function writeTempConfig(root: string): string {
           transport: "file",
           graphStorePath: join(root, "graph-store.json"),
           maxContextTokens: 400,
+          // 默认 transformers 首次 preview 会同步加载 ONNX 模型（满载机器实测
+          // ~38s，原生初始化阻塞事件循环，2s 超时无法打断）；本文件只测预算形状。
+          // The default transformers provider loads the ONNX model on the first
+          // preview (~38s measured under load; native init blocks the event loop
+          // so the 2s timeout cannot preempt it). Budget shape needs no vectors.
+          embeddingProvider: "fnv",
         },
         learningPolicy: {
           enableFlywheel: true,

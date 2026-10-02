@@ -103,6 +103,8 @@ describe("Real Worker Benchmark & Measurement Contract (R1-R6)", () => {
         worker: "typesafe-jev",
         apiKey: "tsk-bench",
         fetch: mockFetch,
+        // An operator-supplied command really runs; the Jev worker judges it.
+        validationCommands: ["node --version"],
       });
 
       expect(baselineRun.tasksRun).toBe(4);
@@ -125,7 +127,7 @@ describe("Real Worker Benchmark & Measurement Contract (R1-R6)", () => {
         expect(trace.result.success).toBe(true);
       }
 
-      // Now run shadow arm: REUSE tasks will record 0 LLM calls, saving tokens
+      // Shadow arm does the same work; it only records the advisory.
       const shadowRun = await runEffBench({
         mode: "shadow",
         limit: 4,
@@ -133,6 +135,7 @@ describe("Real Worker Benchmark & Measurement Contract (R1-R6)", () => {
         worker: "typesafe-jev",
         apiKey: "tsk-bench",
         fetch: mockFetch,
+        validationCommands: ["node --version"],
       });
 
       expect(shadowRun.tasksRun).toBe(4);
@@ -148,7 +151,7 @@ describe("Real Worker Benchmark & Measurement Contract (R1-R6)", () => {
       // Baseline: 4 tasks, 1 call each, 1000 tokens each -> 4 calls, 4000 tokens, avgRounds 1.5
       const bTraces: TaskTrace[] = [
         buildRealWorkerTrace({
-          task: { text: "Task 1", category: "regular" },
+          task: { text: "Task 1", category: "single-file" },
           worker: "typesafe-jev",
           mode: "baseline",
           startedAt: new Date().toISOString(),
@@ -161,7 +164,7 @@ describe("Real Worker Benchmark & Measurement Contract (R1-R6)", () => {
           totalTokens: 1000,
         }),
         buildRealWorkerTrace({
-          task: { text: "Task 2", category: "regular" },
+          task: { text: "Task 2", category: "single-file" },
           worker: "typesafe-jev",
           mode: "baseline",
           startedAt: new Date().toISOString(),
@@ -174,7 +177,7 @@ describe("Real Worker Benchmark & Measurement Contract (R1-R6)", () => {
           totalTokens: 1000,
         }),
         buildRealWorkerTrace({
-          task: { text: "Task 3", category: "repetition" },
+          task: { text: "Task 3", category: "query" },
           worker: "typesafe-jev",
           mode: "baseline",
           startedAt: new Date().toISOString(),
@@ -187,7 +190,7 @@ describe("Real Worker Benchmark & Measurement Contract (R1-R6)", () => {
           totalTokens: 1000,
         }),
         buildRealWorkerTrace({
-          task: { text: "Task 4", category: "repetition" },
+          task: { text: "Task 4", category: "query" },
           worker: "typesafe-jev",
           mode: "baseline",
           startedAt: new Date().toISOString(),
@@ -207,7 +210,7 @@ describe("Real Worker Benchmark & Measurement Contract (R1-R6)", () => {
       // Avg rounds = 1.0 (vs 1.5)
       const sTraces: TaskTrace[] = [
         buildRealWorkerTrace({
-          task: { text: "Task 1", category: "regular" },
+          task: { text: "Task 1", category: "single-file" },
           worker: "typesafe-jev",
           mode: "shadow",
           startedAt: new Date().toISOString(),
@@ -221,7 +224,7 @@ describe("Real Worker Benchmark & Measurement Contract (R1-R6)", () => {
           advisory: { taskId: "t1", reuseMode: "FRESH", durationMs: 20, llmCalls: 0 },
         }),
         buildRealWorkerTrace({
-          task: { text: "Task 2", category: "regular" },
+          task: { text: "Task 2", category: "single-file" },
           worker: "typesafe-jev",
           mode: "shadow",
           startedAt: new Date().toISOString(),
@@ -235,7 +238,7 @@ describe("Real Worker Benchmark & Measurement Contract (R1-R6)", () => {
           advisory: { taskId: "t2", reuseMode: "ADAPT", durationMs: 20, llmCalls: 0 },
         }),
         buildRealWorkerTrace({
-          task: { text: "Task 3", category: "repetition" },
+          task: { text: "Task 3", category: "query" },
           worker: "typesafe-jev",
           mode: "shadow",
           startedAt: new Date().toISOString(),
@@ -249,7 +252,7 @@ describe("Real Worker Benchmark & Measurement Contract (R1-R6)", () => {
           advisory: { taskId: "t3", reuseMode: "REUSE", durationMs: 20, llmCalls: 0 },
         }),
         buildRealWorkerTrace({
-          task: { text: "Task 4", category: "repetition" },
+          task: { text: "Task 4", category: "query" },
           worker: "typesafe-jev",
           mode: "shadow",
           startedAt: new Date().toISOString(),
@@ -297,7 +300,7 @@ describe("Real Worker Benchmark & Measurement Contract (R1-R6)", () => {
       const dirtyPath = join(outDir, "gate-dirty.jsonl");
 
       const cleanTrace = buildRealWorkerTrace({
-        task: { text: "Task Valid", category: "regular" },
+        task: { text: "Task Valid", category: "single-file" },
         worker: "typesafe-jev",
         mode: "baseline",
         startedAt: new Date().toISOString(),

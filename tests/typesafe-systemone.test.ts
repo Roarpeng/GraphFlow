@@ -233,14 +233,17 @@ describe("graphflow llm-check", () => {
     const report = await llmCheckResult(configPath);
     expect(report.usable).toBe(true);
     const deepseek = report.providers.find((p) => p.provider === "deepseek")!;
-    expect(deepseek.source).toBe("config-key");
+    // Env first: a genuine DEEPSEEK_API_KEY shadows the config literal.
+    expect(deepseek.source).toBe("env:DEEPSEEK_API_KEY");
+    expect(deepseek.detail).toContain("config literal apiKey ignored");
     expect(deepseek.usable).toBe(true);
     expect(deepseek.envVarsChecked).toContain("DEEPSEEK_API_KEY");
 
+    delete process.env.DEEPSEEK_API_KEY;
+    const literalOnly = await llmCheckResult(configPath);
+    // No env key: the config literal is the fallback...
+    expect(literalOnly.providers.find((p) => p.provider === "deepseek")!.source).toBe("config-key");
     process.env.DEEPSEEK_API_KEY = "genuine-env-key";
-    const withEnv = await llmCheckResult(configPath);
-    // Config apiKey still wins the availability verdict (branch 1)...
-    expect(withEnv.providers.find((p) => p.provider === "deepseek")!.source).toBe("config-key");
     // ...but a provider with NO config entry resolves from genuine env —
     // proven with a config whose TIERS point at openai (candidates come from
     // tiers + config providers; openai has no providers entry there).

@@ -46,6 +46,23 @@ usage 取自 provider 响应（R2 measured），R6 provenance 门全净。
 5. grep 基线是"合理但特定"的反事实（top-3 文件 × 250 行 × 6000 字符）；
    更完整的对照沿用 `npm run benchmark`（token-benchmark Arm A/B）。
 
+## 复跑（2026-10-02，修复基线检索与断点续跑后）
+
+同模型（deepseek-v4-flash）、同 50 任务、同 6000 字符预算，每臂 1 次；
+基线臂改用 `git grep`（此前 Windows 上 `grep` 缺失被当成"无匹配"，基线上下文偏少），
+长跑支持 `--resume` 断点续跑。provenance：CLEAN。
+
+| 指标 | baseline | shadow | Δ |
+|---|---|---|---|
+| Context/input tokens（均值，n=50） | 1828 | 835 | **-54%** |
+| 逐任务配对差值 | — | — | 均值 -54.2%，中位数 -52.6%，sd 8.1pp，95% CI [-56.5%, -52.0%] |
+| LLM calls（总） | 50 | 50 | 0 |
+| Rounds（均值） | 1 | 1 | 0 |
+| 成功率 | 不计（判据仅为非空回答） | 不计 | — |
+
+基线均值从 1578 升到 1828，正是基线检索修复的效果；shadow 仍为 835。上文"如实说明"
+各条照旧成立：-54% 是输入量观测，不是"质量不变的节省"，回答质量未测。
+
 ## 工件
 
 - `graphflow-out/eff-bench/real-baseline.jsonl` / `real-shadow.jsonl`

@@ -2,6 +2,8 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    // Not threads: see tests/helpers/setup.ts (HOME sandboxing needs a real process).
+    pool: "forks",
     setupFiles: ["tests/helpers/setup.ts"],
     exclude: [
       '**/node_modules/**',

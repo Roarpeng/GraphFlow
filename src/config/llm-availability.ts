@@ -1,7 +1,11 @@
 import type { GraphFlowConfig, ProviderConfig } from "./schema";
-import { resolveConfigSecret } from "./secrets";
 import type { ProviderName } from "../routing/model-router";
-import { isLocalhostEndpoint, detectApiKeyFromEndpoint, isConfigExportedEnvKey } from "./provider-env";
+import {
+  isLocalhostEndpoint,
+  detectApiKeyFromEndpoint,
+  isConfigExportedEnvKey,
+  resolveProviderApiKey,
+} from "./provider-env";
 
 const PROVIDER_ENV_KEYS: Record<ProviderName, string[]> = {
   openai: ["OPENAI_API_KEY"],
@@ -43,7 +47,7 @@ export function explainProviderCredentials(provider: string, config: GraphFlowCo
   const details = config.providers[provider];
   const envBaseUrl = isConfigExportedEnvKey(baseKey) ? undefined : process.env[baseKey]?.trim();
   const effectiveBaseUrl = details?.baseUrl?.trim() || envBaseUrl;
-  const detail = details
+  let detail = details
     ? `config.providers.${provider}: ${details.apiKey ? "apiKey set" : "apiKey empty"}${details.baseUrl ? `, baseUrl=${details.baseUrl}` : ""}${envBaseUrl ? `, env ${baseKey}=${envBaseUrl}` : ""}`
     : `no config.providers.${provider} entry${envBaseUrl ? `; env ${baseKey}=${envBaseUrl}` : ""}`;
 
@@ -53,15 +57,24 @@ export function explainProviderCredentials(provider: string, config: GraphFlowCo
     source = "disabled-by-config";
   } else if (details?.apiKey !== undefined) {
     const raw = details.apiKey.trim();
-    const resolved = raw && resolveConfigSecret(details.apiKey);
     if (raw === "" || raw.toLowerCase() === "disabled" || raw.toLowerCase() === "none") {
       source = "config-key-cleared";
-    } else if (resolved && resolved.length > 0 && !resolved.startsWith("${")) {
-      // A ${VAR} placeholder that RESOLVED means the credential actually came
-      // from that env var (resolveConfig materializes genuine env keys into
-      // tier providers this way) — report the true origin, not "config-key".
-      const placeholder = /^\$\{([A-Z0-9_]+)\}$/.exec(raw);
-      source = placeholder ? `env:${placeholder[1]}` : "config-key";
+    } else {
+      const resolution = resolveProviderApiKey(provider, details);
+      if (resolution.envVar && !envVarsChecked.includes(resolution.envVar)) {
+        envVarsChecked.unshift(resolution.envVar);
+      }
+      if (resolution.source === "env" || resolution.source === "config-env-ref") {
+        source = `env:${resolution.envVar}`;
+      } else if (resolution.source === "config-literal") {
+        source = "config-key";
+      }
+      if (resolution.literalShadowed) {
+        detail += `; config literal apiKey ignored (env ${resolution.envVar} takes precedence)`;
+      }
+      if (resolution.literalRejected) {
+        detail += `; config literal apiKey rejected: ${resolution.literalRejected}`;
+      }
     }
   }
   if (source === "none" && effectiveBaseUrl && isLocalhostEndpoint(effectiveBaseUrl)) {
@@ -101,8 +114,7 @@ export function providerHasCredentials(provider: string, config: GraphFlowConfig
     if (rawKey === "" || rawKey.toLowerCase() === "disabled" || rawKey.toLowerCase() === "none") {
       return false;
     }
-    const resolved = resolveConfigSecret(details.apiKey);
-    if (resolved && resolved.length > 0 && !resolved.startsWith("${")) {
+    if (resolveProviderApiKey(provider, details).key) {
       return true;
     }
   }

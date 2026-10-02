@@ -1,0 +1,298 @@
+name: Efficiency Agent
+
+on:
+  push:
+    branches: [main]
+    tags: ["eff-agent-v*"]
+    paths:
+      - "packages/efficiency-agent/**"
+      - "src/surfaces/mcp/**"
+      - "src/core/efficiency-advisory.ts"
+      - ".github/workflows/efficiency-agent.yml"
+  pull_request:
+    paths:
+      - "packages/efficiency-agent/**"
+      - "src/surfaces/mcp/**"
+      - "src/core/efficiency-advisory.ts"
+      - ".github/workflows/efficiency-agent.yml"
+  workflow_dispatch:
+    inputs:
+      cli_command:
+        description: "Agent CLI for the live golden benchmark (e.g. claude, codex). Empty = gate + provenance only."
+        required: false
+        default: ""
+      cli_args:
+        description: "Extra arguments passed to the CLI (optional)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 2 * * *"
+
+concurrency:
+  group: efficiency-agent-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Release gate (spec §19): code, contract, security, cache, golden, chaos,
+  # perf and package gates. Any blocking gate failure fails the job.
+  gate:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The golden gate resolves every corpus baseCommit / overlay commit.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Enable package manager
+        run: corepack enable
+
+      - name: Install root dependencies
+        run: npm ci --no-audit
+        env:
+          GRAPHFLOW_SKIP_POSTINSTALL: "1"
+          HUSKY: "0"
+
+      - name: Rebuild native modules
+        run: npm rebuild better-sqlite3
+
+      - name: Efficiency Agent release gate
+        run: node packages/efficiency-agent/scripts/release-gate.mjs
+        env:
+          GRAPHFLOW_SKIP_EMBEDDING_WARMUP: "1"
+
+      - name: Upload gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eff-agent-gate-${{ matrix.os }}
+          path: packages/efficiency-agent/artifacts/
+          if-no-files-found: warn
+
+  # Supply chain (spec §20): tarball + SHA256SUMS + SBOM + provenance.json,
+  # plus a signed SLSA build provenance attestation for the tarball.
+  provenance:
+    needs: gate
+    if: >-
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')))
+      || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Enable package manager
+        run: corepack enable
+
+      - name: Install root dependencies
+        run: npm ci --no-audit
+        env:
+          GRAPHFLOW_SKIP_POSTINSTALL: "1"
+          HUSKY: "0"
+
+      - name: Build, pack, checksum, SBOM, provenance
+        run: node packages/efficiency-agent/scripts/supply-chain.mjs
+
+      - name: Verify checksum
+        working-directory: packages/efficiency-agent/artifacts
+        run: sha256sum -c SHA256SUMS
+
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: packages/efficiency-agent/artifacts/*.tgz
+
+      - name: Upload supply-chain artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: eff-agent-supply-chain
+          path: packages/efficiency-agent/artifacts/
+          if-no-files-found: error
+
+  # Live golden benchmark: baseline vs broker/adaptive on the 50-task corpus.
+  # Runs on workflow_dispatch with cli_command, or nightly when the repo
+  # variable EFF_AGENT_CLI is set. Otherwise it is a reported no-op.
+  golden-live:
+    needs: gate
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      CLI_COMMAND: ${{ github.event_name == 'workflow_dispatch' && inputs.cli_command || vars.EFF_AGENT_CLI }}
+      CLI_ARGS: ${{ github.event_name == 'workflow_dispatch' && inputs.cli_args || vars.EFF_AGENT_CLI_ARGS }}
+
+    steps:
+      - name: Report skip
+        if: env.CLI_COMMAND == ''
+        run: echo "[golden-live] no cli_command input and repo variable EFF_AGENT_CLI not set — live golden benchmark skipped (opt-in)."
+
+      - name: Checkout
+        if: env.CLI_COMMAND != ''
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        if: env.CLI_COMMAND != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Enable package manager
+        if: env.CLI_COMMAND != ''
+        run: corepack enable
+
+      - name: Install root dependencies
+        if: env.CLI_COMMAND != ''
+        run: npm ci --no-audit
+        env:
+          GRAPHFLOW_SKIP_POSTINSTALL: "1"
+          HUSKY: "0"
+
+      - name: Rebuild native modules
+        if: env.CLI_COMMAND != ''
+        run: npm rebuild better-sqlite3
+
+      - name: Baseline run
+        if: env.CLI_COMMAND != ''
+        env:
+          GRAPHFLOW_SKIP_EMBEDDING_WARMUP: "1"
+        run: |
+          mkdir -p runs
+          set -- --cli-command "$CLI_COMMAND"
+          if [ -n "$CLI_ARGS" ]; then set -- "$@" --cli-args "$CLI_ARGS"; fi
+          npx tsx packages/efficiency-agent/bin/eff-agent.ts bench run packages/efficiency-agent/benchmarks/golden-v1.jsonl \
+            --worker baseline "$@" --output runs/baseline.jsonl
+
+      - name: Broker (adaptive policy) run
+        if: env.CLI_COMMAND != ''
+        env:
+          GRAPHFLOW_SKIP_EMBEDDING_WARMUP: "1"
+        run: |
+          set -- --cli-command "$CLI_COMMAND"
+          if [ -n "$CLI_ARGS" ]; then set -- "$@" --cli-args "$CLI_ARGS"; fi
+          npx tsx packages/efficiency-agent/bin/eff-agent.ts bench run packages/efficiency-agent/benchmarks/golden-v1.jsonl \
+            --mode broker --policy adaptive "$@" --output runs/adaptive.jsonl
+
+      - name: Compare
+        if: env.CLI_COMMAND != ''
+        run: npx tsx packages/efficiency-agent/bin/eff-agent.ts bench compare runs/baseline.jsonl runs/adaptive.jsonl | tee runs/compare.txt
+
+      - name: Upload runs
+        if: always() && env.CLI_COMMAND != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: eff-agent-golden-live
+          path: runs/
+          if-no-files-found: warn
+
+  # Nightly tracks (spec §18): Golden-Extended 200 and Long-Horizon 20, same
+  # baseline-vs-adaptive comparison and the same EFF_AGENT_CLI opt-in. The
+  # static dataset checks already run in the gate job on every push.
+  datasets-nightly:
+    needs: gate
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      matrix:
+        dataset: [golden-extended-v1, long-horizon-v1]
+      fail-fast: false
+    env:
+      CLI_COMMAND: ${{ github.event_name == 'workflow_dispatch' && inputs.cli_command || vars.EFF_AGENT_CLI }}
+      CLI_ARGS: ${{ github.event_name == 'workflow_dispatch' && inputs.cli_args || vars.EFF_AGENT_CLI_ARGS }}
+      DATASET: packages/efficiency-agent/benchmarks/${{ matrix.dataset }}.jsonl
+
+    steps:
+      - name: Report skip
+        if: env.CLI_COMMAND == ''
+        run: echo "[datasets-nightly] ${{ matrix.dataset }} skipped — no cli_command input and repo variable EFF_AGENT_CLI not set (opt-in)."
+
+      - name: Checkout
+        if: env.CLI_COMMAND != ''
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        if: env.CLI_COMMAND != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Enable package manager
+        if: env.CLI_COMMAND != ''
+        run: corepack enable
+
+      - name: Install root dependencies
+        if: env.CLI_COMMAND != ''
+        run: npm ci --no-audit
+        env:
+          GRAPHFLOW_SKIP_POSTINSTALL: "1"
+          HUSKY: "0"
+
+      - name: Rebuild native modules
+        if: env.CLI_COMMAND != ''
+        run: npm rebuild better-sqlite3
+
+      - name: Baseline run
+        if: env.CLI_COMMAND != ''
+        env:
+          GRAPHFLOW_SKIP_EMBEDDING_WARMUP: "1"
+        run: |
+          mkdir -p runs
+          set -- --cli-command "$CLI_COMMAND"
+          if [ -n "$CLI_ARGS" ]; then set -- "$@" --cli-args "$CLI_ARGS"; fi
+          npx tsx packages/efficiency-agent/bin/eff-agent.ts bench run "$DATASET" --worker baseline "$@" --output runs/baseline.jsonl
+
+      - name: Broker (adaptive policy) run
+        if: env.CLI_COMMAND != ''
+        env:
+          GRAPHFLOW_SKIP_EMBEDDING_WARMUP: "1"
+        run: |
+          set -- --cli-command "$CLI_COMMAND"
+          if [ -n "$CLI_ARGS" ]; then set -- "$@" --cli-args "$CLI_ARGS"; fi
+          npx tsx packages/efficiency-agent/bin/eff-agent.ts bench run "$DATASET" --mode broker --policy adaptive "$@" --output runs/adaptive.jsonl
+
+      - name: Compare
+        if: env.CLI_COMMAND != ''
+        run: npx tsx packages/efficiency-agent/bin/eff-agent.ts bench compare runs/baseline.jsonl runs/adaptive.jsonl | tee runs/compare.txt
+
+      - name: Upload runs
+        if: always() && env.CLI_COMMAND != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: eff-agent-${{ matrix.dataset }}-nightly
+          path: runs/
+          if-no-files-found: warn

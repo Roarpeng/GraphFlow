@@ -418,19 +418,25 @@ export async function seedWorkbenchFromPlan(
     updatedAt: now,
   };
 
-  await persistRoot(client, root);
-  for (const topic of topics) {
-    await persistTopic(client, topic);
-    await upsertUniqueEdges(client, [{ from: topic.id, to: root.id, relation: "part_of" }]);
-  }
+  const edges: GraphEdge[] = topics.map((topic) => ({ from: topic.id, to: root.id, relation: "part_of" }));
   for (const step of steps) {
     const fromId = idByStep.get(step.id);
     if (!fromId) continue;
     for (const dep of step.dependencies) {
       const toId = idByStep.get(dep);
       if (!toId) continue;
-      await upsertUniqueEdges(client, [{ from: fromId, to: toId, relation: "depends_on" }]);
+      edges.push({ from: fromId, to: toId, relation: "depends_on" });
     }
+  }
+  // One write for the whole seed: the file backend rewrites its entire store
+  // per call, so per-topic writes made an N-step plan cost 2N+1 rewrites.
+  const nodes = [rootNode(root), ...topics.map(topicNode)];
+  const freshEdges = uniqueNewEdges(client, edges);
+  if (client.upsertGraph) {
+    await client.upsertGraph({ nodes, edges: freshEdges });
+  } else {
+    await client.upsertNodes(nodes);
+    if (freshEdges.length > 0) await client.upsertEdges(freshEdges);
   }
 
   return { root, topics };
@@ -705,37 +711,41 @@ async function loadAncestors(
   return chain.reverse();
 }
 
-async function persistTopic(client: GraphClient, topic: WorkbenchTopicRecord): Promise<void> {
+function topicNode(topic: WorkbenchTopicRecord): GraphNode {
   const prefix = topic.isolated ? "旁支" : "主线";
-  await client.upsertNodes([
-    {
-      id: topic.id,
-      type: "Decision",
-      content: `workbench-topic ${prefix} ${topic.title} # ${clip(topic.description, 120)}`,
-      metadata: {
-        kind: WORKBENCH_TOPIC_KIND,
-        record: JSON.stringify(topic),
-        mainline: topic.mainline,
-        isolated: topic.isolated,
-        title: topic.title,
-      },
+  return {
+    id: topic.id,
+    type: "Decision",
+    content: `workbench-topic ${prefix} ${topic.title} # ${clip(topic.description, 120)}`,
+    metadata: {
+      kind: WORKBENCH_TOPIC_KIND,
+      record: JSON.stringify(topic),
+      mainline: topic.mainline,
+      isolated: topic.isolated,
+      title: topic.title,
     },
-  ]);
+  };
+}
+
+function rootNode(root: WorkbenchRootRecord): GraphNode {
+  return {
+    id: root.id,
+    type: "Decision",
+    content: `workbench-root ${clip(root.task, 160)} active=${root.activeTopicId}`,
+    metadata: {
+      kind: WORKBENCH_ROOT_KIND,
+      record: JSON.stringify(root),
+      activeTopicId: root.activeTopicId,
+    },
+  };
+}
+
+async function persistTopic(client: GraphClient, topic: WorkbenchTopicRecord): Promise<void> {
+  await client.upsertNodes([topicNode(topic)]);
 }
 
 async function persistRoot(client: GraphClient, root: WorkbenchRootRecord): Promise<void> {
-  await client.upsertNodes([
-    {
-      id: root.id,
-      type: "Decision",
-      content: `workbench-root ${clip(root.task, 160)} active=${root.activeTopicId}`,
-      metadata: {
-        kind: WORKBENCH_ROOT_KIND,
-        record: JSON.stringify(root),
-        activeTopicId: root.activeTopicId,
-      },
-    },
-  ]);
+  await client.upsertNodes([rootNode(root)]);
 }
 
 async function loadTopic(client: GraphClient, topicId: string): Promise<WorkbenchTopicRecord | undefined> {
@@ -772,13 +782,24 @@ async function collectWorkbenchNodes(client: GraphClient): Promise<GraphNode[]> 
   return Array.from(byId.values());
 }
 
-async function upsertUniqueEdges(client: GraphClient, edges: GraphEdge[]): Promise<void> {
-  if (edges.length === 0) return;
+function uniqueNewEdges(client: GraphClient, edges: GraphEdge[]): GraphEdge[] {
+  if (edges.length === 0) return [];
   const snapshot = client.readSnapshot?.();
-  const existing = new Set(
+  const seen = new Set(
     (snapshot?.edges ?? []).map((edge) => `${edge.from}|${edge.relation}|${edge.to}`)
   );
-  const fresh = edges.filter((edge) => !existing.has(`${edge.from}|${edge.relation}|${edge.to}`));
+  const fresh: GraphEdge[] = [];
+  for (const edge of edges) {
+    const key = `${edge.from}|${edge.relation}|${edge.to}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    fresh.push(edge);
+  }
+  return fresh;
+}
+
+async function upsertUniqueEdges(client: GraphClient, edges: GraphEdge[]): Promise<void> {
+  const fresh = uniqueNewEdges(client, edges);
   if (fresh.length === 0) return;
   await client.upsertEdges(fresh);
 }

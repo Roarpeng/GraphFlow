@@ -8,8 +8,16 @@ import type { CacheVerdict, ResultSafeCategory, TaskFingerprint } from "../domai
  * 结果缓存：仅结果安全类目（query/docs/config）可回放；写类目在 put 时即被
  * 拒绝（reason "category-not-result-safe"），从根本上排除旧写入结果回放。
  *
- * Hit requires FULL reuseKey equality (all four tracks).
+ * Hit requires FULL reuseKey equality (all four tracks) AND an entry no older
+ * than `ttlMs` (miss reason "ttl-expired"), mirroring the context cache.
+ * A replayed result skips execution and validation entirely, so its staleness
+ * budget is tighter than the context cache's (default 6 h vs 24 h): the
+ * fingerprint covers repo state, but not state outside it (installed tools,
+ * remote docs, the agent's model) that a read-only answer may depend on.
+ * 结果回放跳过执行与验证，TTL 默认 6 小时，严于上下文缓存的 24 小时。
  */
+
+export const DEFAULT_RESULT_TTL_MS = 6 * 60 * 60_000;
 
 /** Minimal key-value store abstraction; 注入式 KV 存储，包内不碰 fs。 */
 export interface KVStore {
@@ -80,7 +88,8 @@ function notResultSafeVerdict(): CacheVerdict {
   };
 }
 
-export function createResultCache(store: KVStore): ResultCache {
+export function createResultCache(store: KVStore, opts: { ttlMs?: number } = {}): ResultCache {
+  const ttlMs = opts.ttlMs ?? DEFAULT_RESULT_TTL_MS;
   function get(
     fingerprint: TaskFingerprint,
     category: string,
@@ -103,6 +112,17 @@ export function createResultCache(store: KVStore): ResultCache {
           hit: false,
           reason: "fingerprint-mismatch",
           fingerprintMatch: false,
+          entryAgeMs,
+        },
+      };
+    }
+    if (entryAgeMs > ttlMs) {
+      return {
+        verdict: {
+          kind: "result",
+          hit: false,
+          reason: "ttl-expired",
+          fingerprintMatch: true,
           entryAgeMs,
         },
       };

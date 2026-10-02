@@ -133,6 +133,32 @@ function rowToNode(row: NodeRow): GraphNode {
   return node;
 }
 
+/**
+ * Snapshot readers mostly filter on id/type and touch few nodes' metadata, so
+ * the JSON is parsed on first access. The property stays enumerable and
+ * assignable, and every snapshot gets its own parse.
+ */
+function rowToSnapshotNode(row: NodeRow): GraphNode {
+  const node: GraphNode = { id: row.id, type: row.type, content: row.content };
+  const raw = row.metadata;
+  if (raw == null) return node;
+  const settle = (value: Record<string, unknown> | undefined) =>
+    Object.defineProperty(node, "metadata", { value, writable: true, enumerable: true, configurable: true });
+  Object.defineProperty(node, "metadata", {
+    enumerable: true,
+    configurable: true,
+    get() {
+      const value = parseMetadata(raw);
+      settle(value);
+      return value;
+    },
+    set(value: Record<string, unknown> | undefined) {
+      settle(value);
+    },
+  });
+  return node;
+}
+
 function escapeFtsToken(token: string): string {
   return `"${token.replace(/"/g, '""')}"`;
 }
@@ -159,9 +185,25 @@ function buildFtsMatch(tokens: string[], query: string): string {
   return parts.join(" OR ");
 }
 
+type EdgeRow = { from: string; to: string; relation: GraphEdge["relation"] };
+
+/** Raw rows of the last full read stay reusable this long without a read. */
+const SNAPSHOT_ROWS_IDLE_MS = 15_000;
+
 export class GraphifySqliteClient implements GraphClient {
   readonly indexManifestName = SQLITE_INDEX_MANIFEST;
   private readonly db: import("better-sqlite3").Database;
+  /**
+   * One preview reads the whole store many times. Raw rows are reused while
+   * neither this connection wrote (`writeGen`) nor another connection or
+   * process committed (`data_version`); every call still builds fresh node
+   * objects, so callers may mutate what they get.
+   */
+  private snapshotRows:
+    | { nodeRows: NodeRow[]; edgeRows: EdgeRow[]; writeGen: number; dataVersion: number }
+    | undefined;
+  private snapshotTimer: NodeJS.Timeout | undefined;
+  private writeGen = 0;
 
   constructor(dbPath: string) {
     const dir = dirname(dbPath);
@@ -256,6 +298,7 @@ export class GraphifySqliteClient implements GraphClient {
 
   async upsertNodes(nodes: GraphNode[]): Promise<void> {
     if (nodes.length === 0) return;
+    this.writeGen += 1;
     const stmt = this.db.prepare(
       `INSERT INTO nodes(id, type, content, metadata, searchtext) VALUES(?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET type=excluded.type, content=excluded.content, metadata=excluded.metadata, searchtext=excluded.searchtext`
@@ -271,6 +314,7 @@ export class GraphifySqliteClient implements GraphClient {
 
   async upsertEdges(edges: GraphEdge[]): Promise<void> {
     if (edges.length === 0) return;
+    this.writeGen += 1;
     const stmt = this.db.prepare(
       `INSERT OR IGNORE INTO edges(from_id, to_id, relation) VALUES(?, ?, ?)`
     );
@@ -284,6 +328,7 @@ export class GraphifySqliteClient implements GraphClient {
 
   /** Nodes and edges in ONE transaction: either the whole batch lands or none of it. */
   upsertGraphSync(batch: { nodes: GraphNode[]; edges: GraphEdge[] }): void {
+    this.writeGen += 1;
     const nodeStmt = this.db.prepare(
       `INSERT INTO nodes(id, type, content, metadata, searchtext) VALUES(?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET type=excluded.type, content=excluded.content, metadata=excluded.metadata, searchtext=excluded.searchtext`
@@ -301,15 +346,27 @@ export class GraphifySqliteClient implements GraphClient {
   }
 
   readSnapshot(): { nodes: GraphNode[]; edges: GraphEdge[] } {
-    const nodeRows = this.db
-      .prepare(`SELECT id, type, content, metadata FROM nodes`)
-      .all() as NodeRow[];
-    const edgeRows = this.db
-      .prepare(`SELECT from_id AS "from", to_id AS "to", relation FROM edges`)
-      .all() as Array<{ from: string; to: string; relation: GraphEdge["relation"] }>;
+    const dataVersion = this.db.pragma("data_version", { simple: true }) as number;
+    let rows = this.snapshotRows;
+    if (!rows || rows.writeGen !== this.writeGen || rows.dataVersion !== dataVersion) {
+      const nodeRows = this.db
+        .prepare(`SELECT id, type, content, metadata FROM nodes`)
+        .all() as NodeRow[];
+      const edgeRows = this.db
+        .prepare(`SELECT from_id AS "from", to_id AS "to", relation FROM edges`)
+        .all() as EdgeRow[];
+      rows = { nodeRows, edgeRows, writeGen: this.writeGen, dataVersion };
+      this.snapshotRows = rows;
+    }
+    if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
+    this.snapshotTimer = setTimeout(() => {
+      this.snapshotRows = undefined;
+      this.snapshotTimer = undefined;
+    }, SNAPSHOT_ROWS_IDLE_MS);
+    this.snapshotTimer.unref?.();
     return {
-      nodes: nodeRows.map(rowToNode),
-      edges: edgeRows.map((row) => ({ from: row.from, to: row.to, relation: row.relation })),
+      nodes: rows.nodeRows.map(rowToSnapshotNode),
+      edges: rows.edgeRows.map((row) => ({ from: row.from, to: row.to, relation: row.relation })),
     };
   }
 
@@ -397,6 +454,7 @@ export class GraphifySqliteClient implements GraphClient {
 
   async deleteNodes(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
+    this.writeGen += 1;
     this.db.transaction(() => {
       // SQLITE_MAX_VARIABLE_NUMBER default is 999; chunk to stay clear of it.
       const CHUNK = 400;
@@ -414,15 +472,20 @@ export class GraphifySqliteClient implements GraphClient {
   }
 
   async deleteEdge(from: string, to: string, relation: GraphEdge["relation"]): Promise<void> {
+    this.writeGen += 1;
     const stmt = this.db.prepare(`DELETE FROM edges WHERE from_id = ? AND to_id = ? AND relation = ?`);
     stmt.run(from, to, relation);
   }
 
   vacuum(): void {
+    this.writeGen += 1;
     this.db.exec("VACUUM");
   }
 
   close(): void {
+    if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
+    this.snapshotTimer = undefined;
+    this.snapshotRows = undefined;
     this.db.close();
   }
 }

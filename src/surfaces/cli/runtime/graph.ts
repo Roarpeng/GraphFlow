@@ -42,6 +42,11 @@ import {
 } from "../../../learning/memory-freshness";
 import type { SkillState } from "../../../learning/skill-types";
 import {
+  DEFAULT_EMBEDDING_RUN_DEADLINE_MS,
+  DEFAULT_EMBEDDING_RUN_LIMIT,
+  ensureEmbeddings,
+} from "../../../learning/embedding-refresh";
+import {
   indexWorkspaceFiles,
   clearGraphIndexArtifacts,
   hasPendingGraphIndexWork,
@@ -366,7 +371,132 @@ function buildIndexOptions(config: GraphFlowConfig): {
   };
 }
 
+/**
+ * Long-lived servers set this: vectors for nodes a preview re-indexed are
+ * computed shortly after the reply instead of before it. The structural index
+ * (files, symbols, edges) is still refreshed before packaging, so anchors are
+ * never stale; only the vector arm sees those nodes one call later.
+ */
+let previewVectorsAfterReply = false;
+const pendingVectorIds = new Set<string>();
+let pendingVectorPass: AbortController | undefined;
+let pendingVectorTarget:
+  | { client: GraphClient; provider: import("../../../learning/embeddings").EmbeddingProvider }
+  | undefined;
+
+export function setPreviewVectorsAfterReply(enabled: boolean): void {
+  previewVectorsAfterReply = enabled;
+}
+
+function scheduleVectorPass(): void {
+  pendingVectorPass?.abort();
+  const target = pendingVectorTarget;
+  if (!target || pendingVectorIds.size === 0) return;
+  const { client, provider } = target;
+  const controller = new AbortController();
+  pendingVectorPass = controller;
+  const timer = setTimeout(() => {
+    if (controller.signal.aborted) return;
+    const priorityIds = new Set(pendingVectorIds);
+    void ensureEmbeddings(client, provider, {
+      signal: controller.signal,
+      priorityIds,
+      limit: DEFAULT_EMBEDDING_RUN_LIMIT * 2,
+      deadlineMs: DEFAULT_EMBEDDING_RUN_DEADLINE_MS * 2,
+    })
+      .then(() => {
+        if (!controller.signal.aborted) for (const id of priorityIds) pendingVectorIds.delete(id);
+      })
+      .catch((error) => logger.warn({ error }, "Deferred embedding pass failed"));
+  }, 250);
+  timer.unref?.();
+}
+
+/** Bring the structural index up to date before packaging (autoIndexOnPreview). */
+async function refreshIndexForPreview(config: GraphFlowConfig, graphClient: GraphClient): Promise<void> {
+  const root = config.graphPolicy.workspaceRoot ?? process.cwd();
+  const indexOptions = buildIndexOptions(config);
+  const storeIncomplete = indexedStoreIsIncomplete(
+    root,
+    graphClient.indexManifestName,
+    graphClient.readSnapshot?.().nodes
+  );
+  if (
+    !storeIncomplete &&
+    !hasPendingGraphIndexWork(root, { ...indexOptions, manifestName: graphClient.indexManifestName }) &&
+    !graphStoreNeedsIndexing(config)
+  ) {
+    return;
+  }
+  const force = storeIncomplete ? { forceReindex: true } : {};
+  const provider = indexOptions.embeddingProvider;
+  if (!previewVectorsAfterReply || !provider) {
+    await indexWorkspaceFiles(graphClient, root, { ...indexOptions, ...force });
+    return;
+  }
+  const { embeddingProvider: _later, ...structuralOptions } = indexOptions;
+  void _later;
+  const recording = new Proxy(graphClient, {
+    get(target, prop) {
+      if (prop === "upsertGraph" && target.upsertGraph) {
+        return async (batch: { nodes?: GraphNode[]; edges?: GraphEdge[] }) => {
+          for (const node of batch.nodes ?? []) pendingVectorIds.add(node.id);
+          return target.upsertGraph!(batch);
+        };
+      }
+      if (prop === "upsertNodes") {
+        return async (nodes: GraphNode[]) => {
+          for (const node of nodes) pendingVectorIds.add(node.id);
+          return target.upsertNodes(nodes);
+        };
+      }
+      const value = Reflect.get(target, prop, target) as unknown;
+      return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+  await indexWorkspaceFiles(recording, root, { ...structuralOptions, ...force });
+  pendingVectorTarget = { client: graphClient, provider };
+}
+
+/**
+ * Pay the one-time costs of the first preview ahead of it: module loads, the
+ * store open (and any sibling JSON merge), the structural index refresh, the
+ * embedding model and the tokenizer.
+ */
+export async function warmContextPreview(rootDir: string, configPath?: string): Promise<void> {
+  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath, { rootDir }), { rootDir });
+  await import("../../../graph/context-cache.js");
+  await import("../../../core/triage.js");
+  await import("../../../graph/context-slicer.js");
+  const graphClient = createGraphClient(config);
+  if (config.graphPolicy.autoIndexOnPreview) {
+    await refreshIndexForPreview(config, graphClient);
+  }
+  await createEmbeddingProviderFromConfig(config)?.embed("warmup");
+  estimateTokens("warmup");
+}
+
 export async function previewContext(
+  query: string,
+  configPath?: string,
+  rootDir?: string,
+  englishQuery?: string,
+  dialogue?: PreviewDialogueOptions,
+  contextPressure?: ObservedContextUsage
+): Promise<ContextPreviewResult> {
+  if (!previewVectorsAfterReply) {
+    return buildPreview(query, configPath, rootDir, englishQuery, dialogue, contextPressure);
+  }
+  // A running deferred pass would compete with this preview for the CPU.
+  pendingVectorPass?.abort();
+  try {
+    return await buildPreview(query, configPath, rootDir, englishQuery, dialogue, contextPressure);
+  } finally {
+    scheduleVectorPass();
+  }
+}
+
+async function buildPreview(
   query: string,
   configPath?: string,
   rootDir?: string,
@@ -427,23 +557,7 @@ export async function previewContext(
   }
 
   if (config.graphPolicy.autoIndexOnPreview) {
-    const root = config.graphPolicy.workspaceRoot ?? process.cwd();
-    const indexOptions = buildIndexOptions(config);
-    const storeIncomplete = indexedStoreIsIncomplete(
-      root,
-      graphClient.indexManifestName,
-      graphClient.readSnapshot?.().nodes
-    );
-    if (
-      storeIncomplete ||
-      hasPendingGraphIndexWork(root, { ...indexOptions, manifestName: graphClient.indexManifestName }) ||
-      graphStoreNeedsIndexing(config)
-    ) {
-      await indexWorkspaceFiles(graphClient, root, {
-        ...indexOptions,
-        ...(storeIncomplete ? { forceReindex: true } : {}),
-      });
-    }
+    await refreshIndexForPreview(config, graphClient);
   }
 
   const packageOptions: import("../../../graph/context-slicer").LayeredPackageOptions = {
@@ -1547,7 +1661,19 @@ export async function getSkillInsights(
   configPath?: string,
   limit = 12,
   rootDir?: string
-): Promise<SkillInsightsResult> {  const config = bindRuntimeWorkspaceRoot(resolveConfig(configPath, rootDir ? { rootDir } : undefined), rootDir ? { rootDir } : undefined);
+): Promise<SkillInsightsResult> {
+  // Same bind discipline as getFlywheelReport: a bare bind re-discovers from
+  // cwd and drops the config's workspaceRoot, so an empty store would index
+  // whatever directory the process happens to run in.
+  const resolved = resolveConfig(configPath, rootDir ? { rootDir } : undefined);
+  const config = bindRuntimeWorkspaceRoot(
+    resolved,
+    rootDir
+      ? { rootDir }
+      : resolved.graphPolicy.workspaceRoot
+        ? { projectWorkspaceRoot: resolved.graphPolicy.workspaceRoot }
+        : undefined
+  );
   const boundedLimit = Math.max(1, limit);
 
   if (config.graphPolicy.transport === "mcp-http") {

@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Roarpeng/GraphFlow/main/packages/efficiency-agent/schemas/golden-extended-task-v1.schema.json",
+  "title": "GraphFlow Efficiency Agent Golden-Extended task v1 (plan §18, one JSONL line)",
+  "description": "One task of benchmarks/golden-extended-v1.jsonl. Corpus-level rules (60/80/45/15 composition, >= 3 tasks per category, paraphrase families sharing category and oracle, refs/absentRefs resolved against git at baseCommit) are enforced by src/corpus.ts parseGoldenExtendedCorpus and scripts/check-golden.mjs.",
+  "type": "object",
+  "required": ["id", "dataset", "cohort", "category", "source", "baseCommit", "text"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^ext-(rep|reg|cx|fail)-[0-9]{3}$" },
+    "dataset": { "const": "golden-extended-v1" },
+    "cohort": { "enum": ["repetition", "regular", "complex", "failure"] },
+    "category": {
+      "enum": ["query", "single-file", "multi-file", "bugfix", "refactor", "test", "docs", "config", "cross-module", "deliberate-failure"]
+    },
+    "source": { "type": "string", "minLength": 1 },
+    "baseCommit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "family": { "type": "string", "pattern": "^fam-[a-z0-9-]+$" },
+    "variant": { "type": "integer", "minimum": 1 },
+    "text": { "type": "string", "minLength": 8 },
+    "notes": { "type": "string" },
+    "oracle": { "$ref": "#/$defs/oracle" },
+    "guards": { "$ref": "#/$defs/commandList" },
+    "refs": { "type": "array", "items": { "$ref": "#/$defs/ref" } },
+    "absentRefs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/absentRef" } }
+  },
+  "allOf": [
+    {
+      "if": { "type": "object", "properties": { "cohort": { "const": "repetition" } }, "required": ["cohort"] },
+      "then": { "type": "object", "required": ["family", "variant"], "properties": { "family": true, "variant": true } },
+      "else": {
+        "not": {
+          "anyOf": [
+            { "type": "object", "required": ["family"], "properties": { "family": true } },
+            { "type": "object", "required": ["variant"], "properties": { "variant": true } }
+          ]
+        }
+      }
+    },
+    {
+      "if": { "type": "object", "properties": { "cohort": { "const": "failure" } }, "required": ["cohort"] },
+      "then": {
+        "type": "object",
+        "required": ["oracle", "absentRefs"],
+        "properties": {
+          "category": { "const": "deliberate-failure" },
+          "oracle": { "type": "object", "required": ["refusal"], "properties": { "refusal": true } },
+          "absentRefs": true
+        }
+      },
+      "else": { "type": "object", "required": ["refs"], "properties": { "refs": { "type": "array", "minItems": 1 } } }
+    },
+    {
+      "if": { "type": "object", "not": { "type": "object", "required": ["oracle"], "properties": { "oracle": true } } },
+      "then": {
+        "type": "object",
+        "required": ["guards", "notes"],
+        "properties": { "cohort": { "const": "complex" }, "guards": true, "notes": { "type": "string", "pattern": "unjudged" } }
+      }
+    }
+  ],
+  "$defs": {
+    "commandList": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "relPath": { "type": "string", "minLength": 1, "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(^|[/\\\\])\\.\\.([/\\\\]|$)).+$" },
+    "ref": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": { "path": { "$ref": "#/$defs/relPath" }, "symbol": { "type": "string", "minLength": 1 } }
+    },
+    "absentRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": { "path": { "$ref": "#/$defs/relPath" }, "text": { "type": "string", "minLength": 1 } }
+    },
+    "oracle": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "outputAnyOf": { "$ref": "#/$defs/commandList" },
+        "outputAllOf": { "$ref": "#/$defs/commandList" },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["path", "pattern"],
+            "additionalProperties": false,
+            "properties": { "path": { "$ref": "#/$defs/relPath" }, "pattern": { "type": "string", "minLength": 1 } }
+          }
+        },
+        "commands": { "$ref": "#/$defs/commandList" },
+        "overlayFrom": {
+          "type": "object",
+          "required": ["commit", "paths"],
+          "additionalProperties": false,
+          "properties": {
+            "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+            "paths": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/relPath" } }
+          }
+        },
+        "refusal": {
+          "type": "object",
+          "required": ["signals"],
+          "additionalProperties": false,
+          "properties": {
+            "signals": { "$ref": "#/$defs/commandList" },
+            "noChanges": { "type": "boolean" }
+          }
+        }
+      },
+      "dependentRequired": { "overlayFrom": ["commands"] }
+    }
+  }
+}

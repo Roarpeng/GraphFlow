@@ -228,12 +228,21 @@ export function dialogueTurnIdFor(sessionId: string, seq: number): string {
   return `${DIALOGUE_TURN_PREFIX}${sessionHash}:${String(seq).padStart(4, "0")}`;
 }
 
+/** Indexer-produced code nodes are never dialogue records; skip their metadata. */
+const CODE_NODE_TYPES = new Set(["File", "Module", "Symbol"]);
+
+function hasDialogueKind(node: GraphNode, prefix: string, kind: string): boolean {
+  if (node.id.startsWith(prefix)) return true;
+  if (CODE_NODE_TYPES.has(node.type)) return false;
+  return node.metadata?.kind === kind;
+}
+
 export function isDialogueTurnNode(node: GraphNode): boolean {
-  return node.metadata?.kind === DIALOGUE_TURN_KIND || node.id.startsWith(DIALOGUE_TURN_PREFIX);
+  return hasDialogueKind(node, DIALOGUE_TURN_PREFIX, DIALOGUE_TURN_KIND);
 }
 
 export function isDialogueSessionNode(node: GraphNode): boolean {
-  return node.metadata?.kind === DIALOGUE_SESSION_KIND || node.id.startsWith(DIALOGUE_SESSION_PREFIX);
+  return hasDialogueKind(node, DIALOGUE_SESSION_PREFIX, DIALOGUE_SESSION_KIND);
 }
 
 export function parseDialogueTurn(node: GraphNode): DialogueTurnRecord | undefined {

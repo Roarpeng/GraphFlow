@@ -12,9 +12,9 @@
 import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import type { GraphEdge, GraphNode } from "../core/types";
 import { logger } from "../utils/logger";
-import { GRAPH_STORE_DELTA_SUFFIX, GraphifyFileClient } from "./graphify-file-client";
+import { GRAPH_STORE_DELTA_SUFFIX, GraphifyFileClient, MERGED_BACKUP_SUFFIX } from "./graphify-file-client";
 
-export const MERGED_BACKUP_SUFFIX = ".merged-bak";
+export { MERGED_BACKUP_SUFFIX };
 export const MERGE_MARKER_SUFFIX = ".merge-log.json";
 
 const DIALOGUE_TURN_ID = /^dialogue:([^:]+):(\d+)$/;

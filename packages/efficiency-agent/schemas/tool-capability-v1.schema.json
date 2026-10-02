@@ -28,6 +28,24 @@
         "attempts": { "type": "integer", "minimum": 0 },
         "successes": { "type": "integer", "minimum": 0 }
       }
-    }
+    },
+    "permission": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "filesystem.read",
+          "filesystem.write",
+          "process.exec",
+          "network.connect",
+          "git.write",
+          "package.install",
+          "secret.read",
+          "agent.spawn"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "risk": { "enum": ["R0", "R1", "R2", "R3", "R4", "R5"] },
+    "version": { "type": "string", "minLength": 1 }
   }
 }

@@ -4,6 +4,115 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added — Efficiency Agent 2.x 工程规范落地（`packages/efficiency-agent`）
+
+- §27 端到端管线（`eff-agent run`）：真实指纹/Project Twin/经验检索/命名空间缓存/GraphFlow MCP
+  上下文/Reuse Gate/安全门/工具与模型路由/合同/成本优化/动态 harness/写入审计/trace。
+  无执行器不再报成功：`not-executed`/`unverified`/`blocked`/`violation` 各有独立退出码。
+- §22 特性开关（默认值与规范一致，broker 默认封顶为 shadow）+ `flags rollback` 一键回滚；
+  §9 fail-open/closed（GraphFlow 故障→twin-only、缓存损坏→FRESH、策略文件损坏→STRICT、
+  遥测不可写→不学习、管线异常→原生 worker）。
+- §6–§8 安全：能力模型、R0–R5 风险分级与默认/STRICT 策略、验证命令与 worker 启动的准入判定、
+  运行后基于 git porcelain 的写入审计、脱敏、不可信内容包裹、注入检测、缓存准入（防投毒）。
+- §2 Execution Contract v1 增量字段（decisionId/budget/permissions/validationPolicy/provider/
+  graphVersion/toolchainHash/avoidPatterns），schema 与 TS 校验双向一致。
+- §11/§24 trace：事件序列（stage/outcome/reason/evidence/policyVersion）、决策记录、
+  安全判定、成本；`trace replay` 与 OTLP JSON 导出。§15 策略生命周期（Shadow→Canary→Production）。
+- §18 基准：五轨（baseline/graphflow/shadow/conservative/adaptive），固定 baseCommit 的独立
+  worktree、oracle 判定、隐藏测试、回归守卫；`bench compare` 输出 delta、Net Saving 与 §28 验收门。
+- `benchmarks/eff-tasks-v1.jsonl` 更名为 `golden-v1.jsonl`（50 任务全部带 baseCommit 与 oracle）。
+- §18 数据集补齐：Golden-Extended 200（15 个任务族，`scripts/gen-extended.mjs` 生成并可 `--check`
+  复现）与 Long-Horizon 20（125 步，同一会话共用一个 worktree，逐步标注 fresh/reuse-allowed/
+  must-refresh）。`check-golden.mjs --dataset all`（84 个提交、0 错误）与可复现检查进入 release gate
+  的 golden 门；workflow 新增 `datasets-nightly` 夜间矩阵（需 `EFF_AGENT_CLI`，未配置时报告跳过）。
+- 常驻 GraphFlow 服务：`EFF_GRAPHFLOW_MCP=http://127.0.0.1:PORT/mcp` 以 Streamable HTTP 连接已运行的
+  `graphflow-mcp --http --port PORT`，不再每个进程冷启动；非回环地址必须带 `EFF_GRAPHFLOW_MCP_TOKEN`
+  （Bearer），否则以拒绝原因 fail-open。实测本仓决策 P50：每进程拉起已发布 2.0.3 为 5.3 s、拉起本仓
+  源码服务为 4.6 s、常驻 HTTP 为 **1.35 s**（规范目标 < 1.5 s）。冷进程本身达不到目标：node+模块≈1 s、
+  ONNX 嵌入模型≈1.7 s、tokenizer≈0.3 s，再加一次预览。
+- §19/§20 发布门禁 `npm run gate:eff-agent`（code/contract/security/cache/golden/chaos/perf/package
+  八门，缺测试即 FAIL）、GitHub workflow、SBOM/SHA256SUMS/provenance、secret scan。
+
+### Fixed — Efficiency Agent 测试中发现的缺陷
+
+- **安全**：结果缓存回放发生在安全门之前，被拒绝（deny/approval-required）的请求仍可回放缓存结果；
+  且验证命令与执行器参数不在指纹中，换了验证命令或 `--model` 也会命中。现安全门先于回放，
+  验证命令、执行器 args/promptVia/env 键名进入指纹环境轨（env 值不入，防泄密）。
+- Windows `.cmd` 垫片（npm 安装的 claude/codex/gemini、`npm test`）超时只杀掉 cmd.exe，真实进程
+  持有管道导致超时失效（实测 500ms 超时跑满 17s）。agent 与验证 worker 改为 `taskkill /T /F` 杀进程树。
+- complex harness 的"同一失败重复两次"停止条件只比较 agent 自身退出码，验证在进步时也在第 2 轮停止；
+  现同时比较验证反馈。
+- 自由填写的类别（`--category`、语料 `category`）写入 trace 后不符合 schema，`bench compare` 也照收；
+  现 CLI 退出码 2、语料报违规、管线回退到分类器，provenance 门拒收。trace schema 补齐 R2–R4
+  度量规则，与 TS 校验一致。bugfix 分类覆盖 crashes/crashed/failed 等词形。
+- `eff-agent` 读取 GraphFlow 上下文时优先使用 MCP `structuredContent`（`mcp.textCopy: "auto"` 下
+  大响应的文本副本只是占位）。
+- CLI：已知命令自身报错（如 `governance release-gate` 未达标）时不再附带误导性的
+  `unknown command "governance"`。
+- 结果缓存此前永不过期（回放跳过执行与验证）；新增 TTL（默认 6h，`ttl-expired`），
+  `PipelineDeps.cacheTtlMs` 可分别覆盖 context/result TTL。
+- 写审计改为内容签名快照：可检测重复修改已脏文件、git-ignored 文件写入，以及子目录根下越出工作区的写入
+  （旧逻辑把 `../sibling` 误算成根内文件放行）；`writeAudit` 新增 `rewrittenDirty`/`ignoredChanged`/`outsideRoot`；
+  声明写范围越出根目录时执行前即拒绝（R3）。
+- 新增 `readCredentialEnv`（Windows 注册表 env 回退，30s 缓存，`GRAPHFLOW_NO_REGISTRY_ENV=1` 关闭）；
+  TypeSafe-JEV worker 默认用它读取 `TYPESAFE_API_KEY`。
+
+### Fixed — 上下文预览延迟与 HTTP 模式
+
+- `graphflow-mcp --http` 只能服务第一个请求：服务入口把同一个 SDK Server 交给每个无状态 HTTP
+  transport，第二个请求起即 "Already connected to a transport"。现每个 transport 新建 Server
+  （新增入口级回归测试，回退修复即失败）。
+- SQLite `readSnapshot` 每次都为全部节点 `JSON.parse` 元数据，一次预览调用约 8 次（每次≈90 ms
+  + GC）。快照节点的元数据改为首次访问时解析（仍可枚举/序列化/赋值，各快照互不影响）；对话节点
+  判定先看 id 前缀并跳过 File/Module/Symbol 代码节点。暖预览 1.0–1.3 s → 0.57–0.65 s，检索金标
+  149/149 不变。
+
+### Fixed — 测试写入真实用户目录
+- 安装器测试靠改 `process.env.HOME/USERPROFILE/APPDATA` 做沙箱；在 `--pool=threads` 下这份 env 只在线程内生效，
+  `os.homedir()` 仍指向真实用户目录，于是写出了真实的 `~/.graphflow/workspace-build.json`，并把多个宿主
+  （Claude Code、opencode、Gemini、Cursor、Windsurf、VS Code、Trae）的 graphflow 条目改成已删除临时目录里的
+  假 `server.js`；之后未沙箱的 dsh 测试又读到这个标记而失败。`vitest.config.ts` 固定 `pool: "forks"`，
+  `tests/helpers/setup.ts` 在 worker 线程中直接拒绝运行。
+- `tests/workspace-build.test.ts` 的 `newWorkspace` 在 `return` 之后才登记临时目录，清理从未执行（每次运行泄漏数十个目录）。
+
+### Fixed — MCP episode 往返与根套件负载抖动
+
+- `graphflow_report_outcome` 对同一 MCP server 刚由 `graphflow_run` 创建的 episode 报 "Episode not found"：
+  运行时无法加载 `better-sqlite3` 时 episode 写入 JSON 回退存储，而任一 SQLite 宿主（源码 CLI/测试/扩展）
+  打开同一图会把 JSON 合并进 SQLite 并改名移走。现进程内保留近期 episode（上限 128），report 未命中时
+  恢复写回后重试；返回形状不变。
+- `graphflow_run` / `graphflow_report_outcome` 新增可选 `rootDir`（此前被忽略）；CLI `outcome report` 新增 `--root-dir`。
+- `graphflow_skill_insights` 在空图上不再按进程 cwd 索引整个仓库，改为遵循配置的 `workspaceRoot`。
+- 从计划生成 workbench 改为一次批量 `upsertGraph`（此前每个 topic 全量重写 file 存储，N 步 = 2N+1 次）。
+- 跨进程/重启后 episode 仍丢失的存储层根因：SQLite 宿主合并后把 JSON 存储改名为 `.merged-bak`，
+  无 better-sqlite3 的 JSON 宿主随即读到空存储。`GraphifyFileClient` 在 JSON 缺失、存在同名 `.sqlite`
+  且有合并备份时，改从备份（首份 + `.latest` 及其 delta）重建视图，下一次写入即带回全部记忆；
+  无 SQLite 兄弟（用户主动删除）仍为空。
+- CLI `graphflow run` 实际把任务**执行了两次**（`runTaskResult` 之后又为 legacy 文本调用 `runTask`），
+  每次产生两个 episode、只有一个会被回报——这正是 governance `pending-ratio` 偏高的来源之一。现只执行一次，
+  并新增 `--root-dir`。
+- 自动捕获的会话日志此前写到 `process.cwd()`（测试会污染仓库 `.graphflow/session-journal.jsonl`）；
+  `OrchestrateOptions.workspaceRoot` 现由 `runTaskResult` 传入运行绑定的工作区。
+- MCP 集成测试改用临时小 fixture 工作区与 `fnv` 嵌入（不再每例加载 ONNX、索引全仓库），未调大任何超时；
+  新增 `tests/mcp-episode-roundtrip.test.ts`（含"存储被合并移走"场景与 CLI 路径）。
+
+### Fixed — 凭证解析：环境变量优先，过期明文不再遮蔽（DeepSeek 401 根因）
+
+- 实测根因：全局配置 `providers.openai` 指向 `api.deepseek.com` 且存了一个过期明文 key，两个 tier
+  都走 `provider=openai`；旧逻辑只在**同名**变量（`OPENAI_API_KEY`）已存在时才让 env 胜出，于是用户
+  导出的 `DEEPSEEK_API_KEY` 从未被采用，所有调用 401。
+- 新增 `resolveProviderApiKey`（`src/config/provider-env.ts`）统一取 key，顺序：**端点厂商的真实环境变量**
+  （进程 env → Windows 注册表）> 配置 `${NAME}` 引用 > 通过占位符/空白检查的配置明文。
+  `applyProviderEnvFromConfig`、`providerHasCredentials`、`llm-check` 来源说明、TypeSafe worker 选 key、
+  `benchmarks/run-real-ab.ts` 全部改用此顺序；明文被遮蔽或被拒时 `llm-check` 的 detail 会写明原因。
+- 跨厂商防泄漏：某条目指向 deepseek 而 shell 里有真实 `OPENAI_API_KEY` 时，不再把 OpenAI 的 key 发给 deepseek。
+- 配置导出键的"自有"判定改为按值比对：被 shell/测试/注册表水合覆盖后即视为真实 env，不再被下一次配置导出覆盖。
+- `benchmarks/run-real-ab.ts` 基线臂用 `grep` 取上下文，Windows 无 `grep` 时 ENOENT 被当成"无匹配"吞掉，
+  基线实际**零上下文**（输入恒 ~40 token），对比失真；改用 `git grep`，非"无匹配"错误直接抛出。
+- `benchmarks/run-real-ab.ts` 长跑中断即前功尽弃（控制台 Ctrl+C 会连带杀掉 `git grep`，状态码 0xC000013A 被当成
+  致命错误）：瞬时失败（超时/被信号杀/无状态码）重试一次，再失败只跳过该检索词；每完成一个任务追加写
+  `graphflow-out/eff-bench/real-ab.checkpoint.jsonl`，`--resume` 按模型与任务 id 恢复已完成任务并复验溯源。
+
 ### Fixed — MCP 常驻进程内存/线程无限增长（实测 36GB、3000+ 线程）
 
 - `createEmbeddingProviderFromConfig` 每次调用都新建 transformers provider 并立即预热，

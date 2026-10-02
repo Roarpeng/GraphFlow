@@ -445,6 +445,7 @@ export function createMcpServer(
           throw new TeamAuthorizationError(decision);
         }
       }
+      if (contextWarmup) await contextWarmup;
       return await executeToolCallImpl(call, wrapper);
     } catch (error) {
       if (error instanceof TeamAuthorizationError) {
@@ -928,6 +929,28 @@ function scheduleRuntimeDepsInstall(server: McpServer): void {
   timer.unref();
 }
 
+/** Set by the server CLI; tool calls wait for it so they never race the warmup. */
+let contextWarmup: Promise<void> | undefined;
+
+/**
+ * A long-lived server lets vectors for re-indexed nodes land after the reply.
+ * With GRAPHFLOW_MCP_WARMUP=1 (short-lived callers that spawn a server per
+ * task) the first preview's one-time costs start at boot, overlapping with the
+ * caller's own work instead of adding to its first call.
+ */
+function prepareContextPath(workspaceRoot: string | undefined): void {
+  contextWarmup = (async () => {
+    const graph = await import("../cli/runtime/graph.js");
+    graph.setPreviewVectorsAfterReply(true);
+    if (!workspaceRoot || process.env.GRAPHFLOW_MCP_WARMUP !== "1") return;
+    const { isUnsafeWorkspaceFallback } = await import("../../config/discover-workspace.js");
+    if (isUnsafeWorkspaceFallback(workspaceRoot)) return;
+    await graph.warmContextPreview(workspaceRoot);
+  })().catch((error) => {
+    console.error("[GraphFlow MCP] context warmup failed:", error instanceof Error ? error.message : error);
+  });
+}
+
 function runMcpServerCli(): void {
   const argv = process.argv.slice(2);
   const httpOptions = readMcpHttpOptionsFromArgv(argv);
@@ -939,6 +962,7 @@ function runMcpServerCli(): void {
   // Cursor often spawns MCP with cwd=user home; watching that freezes startup
   // by indexing AppData/Chrome/OneDrive and flooding stderr.
   const workspaceRoot = ensureMcpWorkspaceEnv();
+  prepareContextPath(workspaceRoot);
   void (async () => {
     if (!workspaceRoot) {
       const message =
@@ -975,7 +999,8 @@ function runMcpServerCli(): void {
   scheduleRuntimeDepsInstall(server);
 
   if (httpOptions) {
-    void startStreamableHttpServer(() => server, httpOptions)
+    // One SDK Server per HTTP transport: the SDK refuses a second connect.
+    void startStreamableHttpServer(() => createMcpServer(), httpOptions)
       .then((started) => {
         console.error(
           `[GraphFlow MCP] Streamable HTTP listening on ${started.url} (${started.stateful ? "stateful" : "stateless"})`

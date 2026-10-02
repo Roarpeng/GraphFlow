@@ -49,7 +49,7 @@ function isStale(node: GraphNode, fingerprint: string, dim: number): boolean {
 export async function ensureEmbeddings(
   client: GraphClient,
   provider: EmbeddingProvider,
-  options?: { limit?: number; deadlineMs?: number; signal?: AbortSignal }
+  options?: { limit?: number; deadlineMs?: number; signal?: AbortSignal; priorityIds?: ReadonlySet<string> }
 ): Promise<VectorBackfillResult> {
   if (typeof provider.fingerprint !== "function") {
     return { missing: 0, stale: 0, refreshed: 0, skippedReason: "unknown-fingerprint" };
@@ -76,6 +76,11 @@ export async function ensureEmbeddings(
 
   const hashBackend = isHashFingerprint(fingerprint);
   const work = hashBackend ? missingNodes : [...staleNodes, ...missingNodes];
+  const priority = options?.priorityIds;
+  if (priority && priority.size > 0) {
+    // Stable sort: listed nodes first, everything else keeps its order.
+    work.sort((a, b) => Number(priority.has(b.id)) - Number(priority.has(a.id)));
+  }
 
   const limit = options?.limit ?? DEFAULT_EMBEDDING_RUN_LIMIT;
   const deadlineMs = options?.deadlineMs ?? DEFAULT_EMBEDDING_RUN_DEADLINE_MS;

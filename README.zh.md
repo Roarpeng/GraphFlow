@@ -91,17 +91,18 @@ graphflow llm-check      # 逐 provider 显示获胜凭证来源、检查过的�
 # 查看用法
 npx tsx packages/efficiency-agent/bin/eff-agent.ts --help
 
-# 任务真实调度执行
-npx tsx packages/efficiency-agent/bin/eff-agent.ts run "修复这个模块的类型报错" --worker=jev --policy=conservative
+# 通过 agent CLI 执行任务，由你自己的验证命令判定
+npx tsx packages/efficiency-agent/bin/eff-agent.ts run "修复这个模块的类型报错" --worker external --cli-command claude --cli-args "-p" --validation "npm run typecheck"
 
-# 运行 50 任务基准语料
-npx tsx packages/efficiency-agent/bin/eff-agent.ts bench run packages/efficiency-agent/benchmarks/eff-tasks-v1.jsonl --worker=jev --mode=shadow
+# 在两个轨道上运行 50 任务黄金语料（每任务独立 git worktree，oracle 判定）
+npx tsx packages/efficiency-agent/bin/eff-agent.ts bench run packages/efficiency-agent/benchmarks/golden-v1.jsonl --cli-command claude --cli-args "-p" --arm baseline --output runs/baseline.jsonl
+npx tsx packages/efficiency-agent/bin/eff-agent.ts bench run packages/efficiency-agent/benchmarks/golden-v1.jsonl --cli-command claude --cli-args "-p" --arm adaptive --output runs/adaptive.jsonl
 
-# 严格 R1-R6 溯源门禁 A/B 对比
-npx tsx packages/efficiency-agent/bin/eff-agent.ts bench compare baseline.jsonl shadow.jsonl
+# 溯源门禁 A/B 对比；--gate 在任一 §28 验收门未通过时失败
+npx tsx packages/efficiency-agent/bin/eff-agent.ts bench compare runs/baseline.jsonl runs/adaptive.jsonl --gate
 ```
 
-首次真实 provider A/B（[benchmarks/REAL-AB-RESULTS.md](benchmarks/REAL-AB-RESULTS.md)）在 50 个任务上观测到输入 token 约少 47%，每臂只跑一次，且**未测回答质量**（成功判据仅为非空回答）；只能视为输入量观测，不能当作“质量不变的节省”。
+首次真实 provider A/B（[benchmarks/REAL-AB-RESULTS.md](benchmarks/REAL-AB-RESULTS.md)）在 50 个任务上观测到输入 token 约少 47%（2026-10-02 修复基线检索后复跑：-54%，配对 95% CI -56.5% ~ -52.0%），每臂只跑一次，且**未测回答质量**（成功判据仅为非空回答）；只能视为输入量观测，不能当作“质量不变的节省”。
 
 ## 核心能力
 

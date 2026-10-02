@@ -325,9 +325,12 @@ describe("tool capability schema (schemas/tool-capability-v1.schema.json)", () =
       "costPerCallUsd",
       "latencyMsP50",
       "name",
+      "permission",
       "precision",
       "requiredContext",
+      "risk",
       "successHistory",
+      "version",
     ]);
     expect(schema.properties.successHistory?.required).toEqual(["attempts", "successes"]);
     expect(schema.$id.endsWith("tool-capability-v1.schema.json")).toBe(true);

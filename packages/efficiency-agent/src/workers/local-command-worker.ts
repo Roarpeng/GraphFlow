@@ -1,10 +1,11 @@
-import { execFile, type ExecFileException } from "node:child_process";
+import { execFile, type ChildProcess, type ExecFileException } from "node:child_process";
 import type {
   ValidationOutcome,
   WorkerAdapter,
   WorkerCommand,
   WorkerObservation,
 } from "../domain.js";
+import { killProcessTree, resolveSpawn } from "../host/spawn-command.js";
 
 /**
  * P2 worker #1 — progressive onboarding (2.x plan §16): a LOCAL COMMAND
@@ -121,6 +122,13 @@ function toObservation(
   };
 }
 
+/** A process tree killed on timeout: the exit code is taskkill's, not the command's. */
+function timedOutObservation(observation: WorkerObservation, timeoutMs: number): WorkerObservation {
+  const note = `[worker] process tree killed after timeout ${timeoutMs}ms`;
+  const { exitCode: _exitCode, ...rest } = observation;
+  return { ...rest, stderrTail: cap(rest.stderrTail ? `${rest.stderrTail}\n${note}` : note) };
+}
+
 /**
  * Create the local command worker. One worker instance tracks at most one
  * in-flight child; `stop()` aborts it and is a safe no-op at any other point
@@ -132,8 +140,8 @@ export function createLocalCommandWorker(
   const name = options?.name ?? "local-command";
   const defaultTimeoutMs = options?.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  /** Abort handle for the in-flight execute (also referenced by stop()). */
-  let inFlight: AbortController | undefined;
+  /** Abort handle + child for the in-flight execute (also referenced by stop()). */
+  let inFlight: { controller: AbortController; child: ChildProcess } | undefined;
 
   return {
     name,
@@ -170,14 +178,22 @@ export function createLocalCommandWorker(
       return new Promise<WorkerObservation>((resolve) => {
         let settled = false;
         const controller = new AbortController();
-        execFile(
-          command.command,
-          command.args,
+        const spawnSpec = resolveSpawn(command.command, command.args);
+        // Windows: execFile's timeout kills only the direct child (cmd.exe for
+        // a .cmd shim such as npm), leaving the real process holding the pipes.
+        const treeKill = process.platform === "win32";
+        let treeKilled = false;
+        let treeTimer: NodeJS.Timeout | undefined;
+        const child = execFile(
+          spawnSpec.command,
+          spawnSpec.args,
           {
-            timeout: timeoutMs,
+            timeout: treeKill ? 0 : timeoutMs,
             killSignal: "SIGTERM",
             windowsHide: true,
             signal: controller.signal,
+            maxBuffer: 16 * 1024 * 1024,
+            ...(spawnSpec.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
             ...(command.cwd !== undefined ? { cwd: command.cwd } : {}),
           },
           (error, stdout, stderr) => {
@@ -185,13 +201,21 @@ export function createLocalCommandWorker(
               return;
             }
             settled = true;
-            if (inFlight === controller) {
+            if (treeTimer) clearTimeout(treeTimer);
+            if (inFlight?.controller === controller) {
               inFlight = undefined;
             }
-            resolve(toObservation(error, stdout, stderr, Date.now() - startedAt, timeoutMs));
+            const observation = toObservation(error, stdout, stderr, Date.now() - startedAt, timeoutMs);
+            resolve(treeKilled ? timedOutObservation(observation, timeoutMs) : observation);
           }
         );
-        inFlight = controller;
+        if (treeKill) {
+          treeTimer = setTimeout(() => {
+            treeKilled = true;
+            killProcessTree(child);
+          }, timeoutMs);
+        }
+        inFlight = { controller, child };
       });
     },
 
@@ -220,13 +244,14 @@ export function createLocalCommandWorker(
      * completion, or called twice — never throws.
      */
     async stop(): Promise<void> {
-      const controller = inFlight;
-      if (controller === undefined) {
+      const current = inFlight;
+      if (current === undefined) {
         return;
       }
       inFlight = undefined;
+      if (process.platform === "win32") killProcessTree(current.child);
       try {
-        controller.abort();
+        current.controller.abort();
       } catch {
         // stop() must never throw regardless of the controller's state.
       }

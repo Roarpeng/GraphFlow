@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "capabilities": [
+    {
+      "id": "filesystem.read",
+      "description": "Read files inside the workspace.",
+      "defaultGranted": true,
+      "typicalRisk": "R0"
+    },
+    {
+      "id": "filesystem.write",
+      "description": "Create, modify or delete files inside the workspace; protected paths are always excluded.",
+      "defaultGranted": true,
+      "typicalRisk": "R1"
+    },
+    {
+      "id": "process.exec",
+      "description": "Run a local process (tests, builds, scripts).",
+      "defaultGranted": true,
+      "typicalRisk": "R1"
+    },
+    {
+      "id": "network.connect",
+      "description": "Open network connections (HTTP, SSH, package registries, git remotes).",
+      "defaultGranted": false,
+      "typicalRisk": "R2"
+    },
+    {
+      "id": "git.write",
+      "description": "Mutate git state: commits, branches, config, pushes or remote repository changes.",
+      "defaultGranted": false,
+      "typicalRisk": "R2"
+    },
+    {
+      "id": "package.install",
+      "description": "Install, update or download third-party packages.",
+      "defaultGranted": false,
+      "typicalRisk": "R2"
+    },
+    {
+      "id": "secret.read",
+      "description": "Read credentials, private keys, tokens or secret environment variables.",
+      "defaultGranted": false,
+      "typicalRisk": "R3"
+    },
+    {
+      "id": "agent.spawn",
+      "description": "Launch an additional AI agent process (sub-agent).",
+      "defaultGranted": false,
+      "typicalRisk": "R5"
+    }
+  ]
+}

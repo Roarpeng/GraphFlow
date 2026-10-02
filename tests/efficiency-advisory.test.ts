@@ -8,6 +8,8 @@ import {
   decideModelTier,
   decideReuseMode,
   deriveValidation,
+  extractExecutableCommand,
+  extractInlinedAnchorIds,
 } from "../src/core/efficiency-advisory";
 import {
   appendDecisionLedgerRecord,
@@ -82,6 +84,35 @@ describe("efficiency advisory (deterministic Layer A)", () => {
         { id: "s3", action: "validate", command: "npm test" },
       ])
     ).toEqual(["npm test"]);
+  });
+
+  it("never ships plan prose as a validation gate", () => {
+    const proseOnly = [
+      { id: "s1", action: "edit" as const, target: "实现: X", command: "验证: Fix the embedding provider" },
+      { id: "s2", action: "validate" as const, command: "check that recall works" },
+    ];
+    expect(deriveValidation(proseOnly)).toEqual([]);
+    expect(deriveValidation(proseOnly, ["npm run typecheck", "npm test"])).toEqual([
+      "npm run typecheck",
+      "npm test",
+    ]);
+    expect(
+      deriveValidation([{ id: "s1", action: "validate", command: "then run `npx vitest run tests/a.test.ts`" }])
+    ).toEqual(["npx vitest run tests/a.test.ts"]);
+    // Query-only plans (no edit step) get no project gates.
+    expect(deriveValidation([], ["npm test"])).toEqual([]);
+  });
+
+  it("extracts the anchor ids a descriptor inlined as source excerpts", () => {
+    const context = [
+      "### src/a.ts:1 [anchor symbol:src/a.ts:abc]",
+      "### src/b.ts:9 (truncated) [anchor symbol:src/b.ts:def]",
+      "### src/a.ts:1 [anchor symbol:src/a.ts:abc]",
+    ].join("\n");
+    expect(extractInlinedAnchorIds(context)).toEqual(["symbol:src/a.ts:abc", "symbol:src/b.ts:def"]);
+    expect(extractInlinedAnchorIds(undefined)).toEqual([]);
+    expect(extractExecutableCommand("验证: npm test")).toBeUndefined();
+    expect(extractExecutableCommand("npm run build")).toBe("npm run build");
   });
 
   it("advisory surfaces episode signals and anchor budget", () => {

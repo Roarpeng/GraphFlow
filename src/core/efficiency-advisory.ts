@@ -104,6 +104,11 @@ export interface AdvisoryInput {
   contextCacheHit?: boolean;
   /** §5: project identity (workspace root; gitHead best-effort). */
   project?: { root: string; gitHead?: string };
+  /**
+   * Project-level gates (e.g. `npm run typecheck`) used when the task edits
+   * code but the plan itself carries no executable validation command.
+   */
+  projectValidation?: string[];
   /** Measured advisory computation time (the caller owns the clock). */
   durationMs: number;
 }
@@ -180,11 +185,55 @@ export function decideExecution(
     : { executionMode: "one-shot", maxRounds: 1 };
 }
 
-/** Validation gates ride in as the validate-classified fused step commands. */
-export function deriveValidation(fusedSteps: FusedStep[]): string[] {
-  const commands = fusedSteps
-    .filter((step) => step.action === "validate" && step.command)
-    .map((step) => step.command!.trim());
+const EXECUTABLE_PREFIX =
+  /^(npm|npx|pnpm|yarn|bun|deno|node|tsc|vitest|jest|mocha|eslint|prettier|python3?|pytest|pip|go|cargo|make|mvn|gradle|dotnet|git|bash|sh|pwsh|powershell|ruff|mypy)(\s|$)/i;
+
+/**
+ * Fused step `command` fields carry the plan node's prose ("验证: …") as often
+ * as a real command. Only a string that starts with a known executable — or
+ * a backtick-quoted command inside prose — can gate a contract.
+ */
+export function extractExecutableCommand(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (EXECUTABLE_PREFIX.test(trimmed) && !/[\u3400-\u9fff]/.test(trimmed)) {
+    return trimmed;
+  }
+  for (const match of trimmed.matchAll(/`([^`]+)`/g)) {
+    const inner = match[1]!.trim();
+    if (EXECUTABLE_PREFIX.test(inner)) {
+      return inner;
+    }
+  }
+  return undefined;
+}
+
+/** Anchor ids the descriptor inlined as source excerpts (`[anchor <id>]` titles). */
+export function extractInlinedAnchorIds(context: string | undefined, limit = 15): string[] {
+  if (!context) return [];
+  const ids: string[] = [];
+  for (const match of context.matchAll(/\[anchor ([^\]\s]+)\]/g)) {
+    const id = match[1]!;
+    if (!ids.includes(id)) ids.push(id);
+    if (ids.length >= limit) break;
+  }
+  return ids;
+}
+
+/**
+ * Validation gates: executable commands from validate/run steps and from
+ * fused edit steps; when an edit carries none, fall back to the project's own
+ * gates so a write contract never ships with an empty validation list.
+ */
+export function deriveValidation(fusedSteps: FusedStep[], projectValidation: string[] = []): string[] {
+  const commands: string[] = [];
+  for (const step of fusedSteps) {
+    if (!step.command) continue;
+    const command = extractExecutableCommand(step.command);
+    if (command) commands.push(command);
+  }
+  if (commands.length === 0 && fusedSteps.some((step) => step.action === "edit")) {
+    commands.push(...projectValidation);
+  }
   return Array.from(new Set(commands)).slice(0, 8);
 }
 
@@ -261,7 +310,7 @@ export function buildEfficiencyAdvisory(input: AdvisoryInput): EfficiencyAdvisor
       modelTier: decideModelTier(input.taskComplexity),
       ...decideExecution(input.taskComplexity),
     },
-    validation: deriveValidation(fusedSteps),
+    validation: deriveValidation(fusedSteps, input.projectValidation),
     decision: {
       provenance: "deterministic",
       llmCalls: 0,

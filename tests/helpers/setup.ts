@@ -9,6 +9,15 @@
  *
  * Individual tests can still override these env vars explicitly.
  */
+import { isMainThread } from "node:worker_threads";
+
+// Installer tests sandbox HOME/USERPROFILE/APPDATA through process.env. In a
+// worker thread that copy never reaches os.homedir(), so they write the real
+// user's host configs (observed: ~/.claude.json pointing at a deleted temp build).
+if (!isMainThread) {
+  throw new Error("GraphFlow tests must run in the forks pool; --pool=threads writes to the real home directory.");
+}
+
 process.env.GRAPHFLOW_EMBEDDING_TIMEOUT_MS ??= "2000";
 process.env.GRAPHFLOW_PROVIDER_TIMEOUT_MS ??= "2000";
 // The Windows registry env fallback would leak the developer's real

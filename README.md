@@ -107,17 +107,18 @@ Elevates token reduction to an independent **Compute Avoidance** decision layer.
 # Show usage
 npx tsx packages/efficiency-agent/bin/eff-agent.ts --help
 
-# Execute task with real worker dispatch
-npx tsx packages/efficiency-agent/bin/eff-agent.ts run "fix type errors in this module" --worker=jev --policy=conservative
+# Execute a task through an agent CLI, judged by your own validation command
+npx tsx packages/efficiency-agent/bin/eff-agent.ts run "fix type errors in this module" --worker external --cli-command claude --cli-args "-p" --validation "npm run typecheck"
 
-# Run the 50-task benchmark corpus
-npx tsx packages/efficiency-agent/bin/eff-agent.ts bench run packages/efficiency-agent/benchmarks/eff-tasks-v1.jsonl --worker=jev --mode=shadow
+# Run the 50-task golden corpus on two arms (per-task git worktree, oracle-judged)
+npx tsx packages/efficiency-agent/bin/eff-agent.ts bench run packages/efficiency-agent/benchmarks/golden-v1.jsonl --cli-command claude --cli-args "-p" --arm baseline --output runs/baseline.jsonl
+npx tsx packages/efficiency-agent/bin/eff-agent.ts bench run packages/efficiency-agent/benchmarks/golden-v1.jsonl --cli-command claude --cli-args "-p" --arm adaptive --output runs/adaptive.jsonl
 
-# Strict R1-R6 provenance-gated A/B comparison
-npx tsx packages/efficiency-agent/bin/eff-agent.ts bench compare baseline.jsonl shadow.jsonl
+# Provenance-gated A/B comparison; --gate fails unless every §28 acceptance gate passes
+npx tsx packages/efficiency-agent/bin/eff-agent.ts bench compare runs/baseline.jsonl runs/adaptive.jsonl --gate
 ```
 
-The first real-provider A/B ([benchmarks/REAL-AB-RESULTS.md](benchmarks/REAL-AB-RESULTS.md)) measured ~47% fewer input tokens on 50 tasks, one run per arm, with **answer quality not measured** (success = non-empty reply); treat it as a token-volume observation, not a quality-preserving saving.
+The first real-provider A/B ([benchmarks/REAL-AB-RESULTS.md](benchmarks/REAL-AB-RESULTS.md)) measured ~47% fewer input tokens on 50 tasks (rerun 2026-10-02 after fixing the baseline retrieval: −54%, paired 95% CI −56.5% to −52.0%), one run per arm, with **answer quality not measured** (success = non-empty reply); treat it as a token-volume observation, not a quality-preserving saving.
 
 ## Why GraphFlow
 
