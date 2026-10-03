@@ -31,7 +31,7 @@ import {
 } from "../cli/runtime";
 import { getRuntimeTimelineSummary } from "../../core/cancellation";
 import { ensureMcpWorkspaceEnv } from "../../config/discover-workspace.js";
-import { attachMcpLogSink } from "../../utils/logger.js";
+import { attachMcpLogSink, logger } from "../../utils/logger.js";
 import { getToolDefinitions, type ToolDefinition } from "./tool-definitions.js";
 import {
   executeToolCall as executeToolCallImpl,
@@ -275,6 +275,15 @@ export interface McpHttpServerOptions {
   auditPath?: string;
   /** Enforce viewer/contributor/admin on tools/call. Default: on when auth is configured. */
   rbac?: boolean;
+  /**
+   * Idle TTL (ms) for stateful HTTP sessions: sessions with no request for
+   * longer than this are closed via the same cleanup path as an explicit
+   * DELETE. Default 30 minutes; 0 disables the sweep. Precedence: this
+   * option, then GRAPHFLOW_HTTP_SESSION_TTL_MS.
+   */
+  sessionTtlMs?: number;
+  /** Idle-session sweep cadence (ms). Default 60s; shrunk by tests only. */
+  sessionSweepIntervalMs?: number;
 }
 
 export interface McpHttpAuthOptions extends TokenAuthConfig {
@@ -296,6 +305,8 @@ interface HttpMcpSession {
   tenant?: string;
   server: McpServer;
   transport: StreamableHTTPServerTransport;
+  /** Epoch ms of the last request routed to this session; drives the idle-TTL sweep. */
+  lastActivityAt: number;
 }
 
 export async function executeToolCall(
@@ -596,6 +607,44 @@ function validateHttpHost(req: IncomingMessage, host: string, allowedHosts: stri
   });
 }
 
+/** Default idle TTL for stateful HTTP sessions: 30 minutes. */
+export const DEFAULT_HTTP_SESSION_TTL_MS = 30 * 60_000;
+/** Default cadence of the idle-session sweep timer. */
+const HTTP_SESSION_SWEEP_INTERVAL_MS = 60_000;
+
+/**
+ * Resolve the stateful-session idle TTL. Precedence: the explicit option,
+ * then GRAPHFLOW_HTTP_SESSION_TTL_MS, then the 30-minute default. 0 disables
+ * the sweep; unparsable values fall back to the default (never disables
+ * by accident).
+ */
+export function resolveHttpSessionTtlMs(
+  override?: number,
+  rawEnv: string | undefined = process.env.GRAPHFLOW_HTTP_SESSION_TTL_MS
+): number {
+  const raw: number | string | undefined = override ?? rawEnv;
+  if (raw === undefined || raw === "") return DEFAULT_HTTP_SESSION_TTL_MS;
+  const value = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(value) || value < 0) return DEFAULT_HTTP_SESSION_TTL_MS;
+  return Math.floor(value);
+}
+
+/**
+ * Shared cleanup for one HTTP session — the exact path an explicit DELETE
+ * (transport close) takes, reused by the idle-TTL sweep and server shutdown:
+ * deregister the server, drop it from the session map, close the transport.
+ */
+async function teardownHttpMcpSession(
+  session: HttpMcpSession,
+  sessions?: Map<string, HttpMcpSession>
+): Promise<void> {
+  connectedServers.delete(session.server);
+  if (sessions && session.id && session.tenant) {
+    sessions.delete(`${session.tenant}\u0000${session.id}`);
+  }
+  await session.transport.close().catch(() => undefined);
+}
+
 async function handleWithHttpMcpSession(
   req: IncomingMessage,
   res: ServerResponse,
@@ -610,11 +659,7 @@ async function handleWithHttpMcpSession(
   const dispose = (): void => {
     if (disposed) return;
     disposed = true;
-    connectedServers.delete(session.server);
-    if (options?.sessions && session.id && session.tenant) {
-      options.sessions.delete(`${session.tenant}\u0000${session.id}`);
-    }
-    void session.transport.close().catch(() => undefined);
+    void teardownHttpMcpSession(session, options?.sessions);
   };
   const stateful = options?.stateful === true;
   session.transport.onclose = dispose;
@@ -650,6 +695,14 @@ export async function startStreamableHttpServer(
   const enableJsonResponse = options.enableJsonResponse ?? process.env.GRAPHFLOW_MCP_HTTP_JSON_RESPONSE !== "0";
   const endpoint = normalizeHttpEndpoint(options.endpoint ?? process.env.GRAPHFLOW_MCP_HTTP_ENDPOINT);
   const sessions = new Map<string, HttpMcpSession>();
+  const sessionTtlMs = resolveHttpSessionTtlMs(options.sessionTtlMs);
+  let sessionSweeper: ReturnType<typeof setInterval> | undefined;
+  const stopSessionSweeper = (): void => {
+    if (sessionSweeper !== undefined) {
+      clearInterval(sessionSweeper);
+      sessionSweeper = undefined;
+    }
+  };
 
   if (!isLoopbackHost(host) && !options.allowedHosts?.length) {
     throw new Error(`Refusing to bind MCP HTTP to non-loopback ${host} without explicit allowedHosts`);
@@ -718,6 +771,8 @@ export async function startStreamableHttpServer(
           writeHttpJsonError(res, 404, -32001, "GraphFlow MCP session not found", null);
           return;
         }
+        // Every routed request refreshes the idle clock the TTL sweep reads.
+        existing.lastActivityAt = Date.now();
         await handleWithHttpMcpSession(req, res, existing, { sessions, stateful });
         return;
       }
@@ -739,7 +794,7 @@ export async function startStreamableHttpServer(
         ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
       });
       const serverInstance = createServerInstance();
-      session = { server: serverInstance, transport };
+      session = { server: serverInstance, transport, lastActivityAt: Date.now() };
       // SDK 1.30 types optional callbacks as `T | undefined`, which its own
       // exactOptionalPropertyTypes build rejects structurally despite runtime
       // compatibility. Keep the narrow local cast at this SDK boundary.
@@ -771,6 +826,7 @@ export async function startStreamableHttpServer(
     options.signal.addEventListener(
       "abort",
       () => {
+        stopSessionSweeper();
         void httpServer.close();
       },
       { once: true }
@@ -786,6 +842,28 @@ export async function startStreamableHttpServer(
     throw new Error("GraphFlow MCP HTTP listener did not return a TCP address");
   }
 
+  // Stateful sessions whose client never sends DELETE would otherwise keep
+  // the transport + SDK Server alive for the process lifetime. Sweep idle
+  // sessions on a timer; each victim goes through the same teardown as DELETE.
+  if (stateful && sessionTtlMs > 0) {
+    const rawInterval = options.sessionSweepIntervalMs ?? HTTP_SESSION_SWEEP_INTERVAL_MS;
+    const sweepIntervalMs =
+      Number.isFinite(rawInterval) && rawInterval > 0 ? rawInterval : HTTP_SESSION_SWEEP_INTERVAL_MS;
+    sessionSweeper = setInterval(() => {
+      const now = Date.now();
+      for (const session of [...sessions.values()]) {
+        if (!session.id || !session.tenant) continue;
+        const idleMs = now - session.lastActivityAt;
+        if (idleMs < sessionTtlMs) continue;
+        logger.info(
+          `[GraphFlow MCP] HTTP session ${session.tenant}/${session.id} idle for ${Math.round(idleMs / 1000)}s (TTL ${Math.round(sessionTtlMs / 1000)}s); closing`
+        );
+        void teardownHttpMcpSession(session, sessions);
+      }
+    }, sweepIntervalMs);
+    sessionSweeper.unref();
+  }
+
   return {
     httpServer,
     url: `http://${host === "::1" ? `[${host}]` : host}:${address.port}${endpoint}`,
@@ -794,9 +872,9 @@ export async function startStreamableHttpServer(
     port: address.port,
     stateful,
     async close(): Promise<void> {
+      stopSessionSweeper();
       for (const session of [...sessions.values()]) {
-        connectedServers.delete(session.server);
-        await session.transport.close().catch(() => undefined);
+        await teardownHttpMcpSession(session);
       }
       sessions.clear();
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));

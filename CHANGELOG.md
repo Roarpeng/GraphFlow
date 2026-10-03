@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed — 第 0 步性能与健壮性(迁移 Rust 前的架构债清偿,复审登记项全闭环)
+
+- **file 传输读路径共享缓存(P2-8)**:`GraphifyFileClient.peekStore()` 静态共享读入口(走进程内 `graphifyFileStoreCache`,stat 校验+delta 已应用,不开句柄不写);`graphStoreNeedsIndexing` 与 `readFileGraphStore`/`resolveGraphStoreAfterIndex` 不再各自 readFileSync+JSON.parse 整个 9.5MB store——每 preview 省 2 次全量读+解析。消费方 mutation 全审计(全只读),peek 结果仍做浅拷贝防御未来调用方。
+- **embedding 后台推理限额**:deferred pass 从每 preview 最多 512 次 ONNX CPU 推理降为默认 128(`GRAPHFLOW_EMBEDDING_PASS_LIMIT` 可覆盖;deadline 不变兜底)。
+- **sqlite 并发硬化**:构造 `busy_timeout=15s`(原 5s);`migrate()` 无锁快路径(健康库并发打开零写锁)+ `BEGIN IMMEDIATE` 锁内 user_version 双检——两进程同时首开旧库不再因 duplicate column 构造失败;`mergeSiblingJsonStoreIntoSqlite` 的 snapshot→plan→upsert→rename 全段进目标写锁,锁内重检 JSON 兄弟存在性(输家不再用过期快照覆盖赢家重编号的对话轮——混合宿主丢写入根因),无 `withMergeLock` 的目标降级 best-effort 锁文件。
+- **HTTP stateful 会话空闲 TTL**:默认 30 分钟(`GRAPHFLOW_HTTP_SESSION_TTL_MS`,0 禁用),每请求刷新活跃;DELETE/TTL 扫描/关服共用同一 teardown;弃置会话不再随进程永生。
+- **快照物化缓存:实测否决(诚实登记)**:对真实库(95.4% 行带 metadata,均 968B)A/B 测量——任何保留"每快照独立可变对象"契约的缓存方案(structuredClone 10x、JSON 重解析 7x 负优化)都劣于现状 lazy getter;结论写入 `rowToSnapshotNode` 注释+契约测试锁定。根治 P0-3 需改 preview 调用方(一次 preview 8-12 次 readSnapshot),留待后续。
+- 测试加固:TTL 扫描用例改静默等待+双探测(轮询会刷新活跃时间,自相矛盾——原固定 500ms 在全量负载下窗口不足)。
+
+### Tests
+
+- 新增 26 用例:`m-fileread-cache`(12:peek 零重读探针/行为等价/大文件回退/限额 env)、`sqlite-concurrency-hardening`(9:构造竞态/健康库零锁/合并锁序/输家跳过/锁文件回退/快照契约)、`mcp-http-session-ttl`(5)。全量 **296 文件 / 2782 用例绿**,tsc/eslint 干净。
+
 ## [2.2.0] — 2026-10-02
 
 ### Added — 成本经济学升级 Phase 2+3(U4 SoL-Pi 接线 / U5 负知识库 / U6 判断层 / U7-U8 设计稿)

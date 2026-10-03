@@ -1850,12 +1850,14 @@ export function apply(ctx, config = {}) {
         if (!session || typeof session !== "object") return;
         const type = event?.type;
         if (type === "tool/result") {
-          // ObservationPack projection (fail-open): archive the raw result and
-          // replace the surface node with a handle projection. Session
-          // pressure accounting rides along: the raw bytes count first, and
-          // the projection outcome (smaller visible bytes) settles the
-          // counter, which is then persisted as the Compact pressure supply
-          // (see noteObservationPressure for the honest channel note).
+          // ObservationPack projection: ON by default, disable via
+          // GRAPHFLOW_D_DSH_PROJECTION=0 or the settings switch
+          // (efficiencyPolicy.observations.enabled); fail-open. Archive the
+          // raw result and replace the surface node with a handle projection.
+          // Session pressure accounting rides along: the raw bytes count
+          // first, and the projection outcome (smaller visible bytes) settles
+          // the counter, which is then persisted as the Compact pressure
+          // supply (see noteObservationPressure for the honest channel note).
           const projectionWorkspace = session?.header?.cwd ?? config.cwd;
           const pending = noteObservationPressure(session, event);
           const settle = (result) => {

@@ -356,6 +356,142 @@ function newestBackupStat(absPath: string): FileStat | null {
   );
 }
 
+function parseStoreFile(absPath: string): GraphStore {
+  if (!existsSync(absPath)) {
+    return { nodes: [], edges: [] };
+  }
+
+  const raw = readFileSync(absPath, "utf8");
+  graphifyFileStoreParseCount += 1;
+  if (!raw.trim()) {
+    return { nodes: [], edges: [] };
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<GraphStore>;
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error("Graph store JSON root must be an object");
+    }
+    return {
+      nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
+      edges: Array.isArray(parsed.edges) ? parsed.edges : [],
+    };
+  } catch (error) {
+    logger.warn(
+      { error, storePath: absPath },
+      "Corrupt graph store JSON; returning empty store (run graphflow_rebuild to repair)"
+    );
+    return { nodes: [], edges: [] };
+  }
+}
+
+/** Merge the delta log (when present) into a freshly loaded base store. */
+function applyDeltaToStore(base: GraphStore, deltaPath: string, deltaStat: FileStat | null): GraphStore {
+  if (deltaStat === null || deltaStat.size === 0) {
+    return base;
+  }
+  let contents: string;
+  try {
+    contents = readFileSync(deltaPath, "utf8");
+  } catch (error) {
+    logger.warn(
+      { error: error instanceof Error ? error.message : String(error), deltaPath },
+      "graph store delta unreadable; using the base store"
+    );
+    return base;
+  }
+  return applyGraphStoreDelta(base, contents);
+}
+
+/**
+ * A host with SQLite folds this JSON store in and renames it away. A
+ * JSON-only host (no better-sqlite3) would then read an empty store and
+ * lose every memory written before the merge (e.g. "Episode not found" for
+ * an episode it just created). Rebuild from the backups instead: first
+ * backup, then the rotated latest one (and their delta logs) on top.
+ */
+function readMergedBackupStore(absPath: string): GraphStore | undefined {
+  const nodes = new Map<string, GraphNode>();
+  const edges = new Map<string, GraphEdge>();
+  try {
+    for (const suffix of [MERGED_BACKUP_SUFFIX, `${MERGED_BACKUP_SUFFIX}.latest`]) {
+      const backup = `${absPath}${suffix}`;
+      if (!existsSync(backup)) continue;
+      const backupDelta = `${deltaPathFor(absPath)}${suffix}`;
+      const layer = applyDeltaToStore(parseStoreFile(backup), backupDelta, statIfExists(backupDelta));
+      for (const node of layer.nodes) nodes.set(node.id, node);
+      for (const edge of layer.edges) edges.set(`${edge.from}\u0000${edge.to}\u0000${edge.relation}`, edge);
+    }
+  } catch (error) {
+    logger.warn(
+      { error: error instanceof Error ? error.message : String(error), absPath },
+      "merged graph store backup unreadable; starting from an empty store"
+    );
+    return undefined;
+  }
+  return nodes.size > 0 || edges.size > 0 ? { nodes: [...nodes.values()], edges: [...edges.values()] } : undefined;
+}
+
+/**
+ * Module-level store read (cache-validated) shared by every GraphifyFileClient
+ * instance AND by static peekers that must not construct a client.
+ *
+ * Return the validated cache entry for this store path: a cheap statSync
+ * against the recorded mtime+size decides between a cache hit and a full
+ * read + JSON.parse. All cache operations are synchronous, and every public
+ * caller runs its whole body without yielding, so no async gap can observe
+ * a half-updated entry (single-threaded safety).
+ */
+function readStoreCacheEntry(storePath: string): StoreCacheEntry {
+  const absPath = resolve(storePath);
+  const current = statIfExists(absPath);
+  const deltaPath = resolve(deltaPathFor(absPath));
+  const deltaStat = statIfExists(deltaPath);
+  const backupStat = current === null ? newestBackupStat(absPath) : null;
+  const cached = graphifyFileStoreCache.get(absPath);
+  if (
+    cached &&
+    sameStat(cached.stat, current) &&
+    sameStat(cached.deltaStat, deltaStat) &&
+    sameStat(cached.backupStat ?? null, backupStat)
+  ) {
+    return cached;
+  }
+
+  let base: GraphStore | undefined;
+  if (current !== null && current.size > GRAPH_STORE_MAX_READ_BYTES) {
+    // Above the single-string limit: parse in bounded chunks instead of
+    // throwing ERR_STRING_TOO_LONG from readFileSync.
+    try {
+      const chunked = readGraphStoreFileChunked(absPath);
+      base = { nodes: chunked.nodes as GraphNode[], edges: chunked.edges as GraphEdge[] };
+    } catch (error) {
+      logger.warn(
+        { error: error instanceof Error ? error.message : String(error), absPath },
+        "Chunked graph store read failed"
+      );
+      throw graphStoreTooLargeError(absPath, current.size);
+    }
+  }
+
+  const store =
+    base ??
+    (current === null
+      ? (backupStat !== null ? readMergedBackupStore(absPath) : undefined) ?? { nodes: [], edges: [] }
+      : parseStoreFile(absPath));
+  const merged = applyDeltaToStore(store, deltaPath, deltaStat);
+  const entry: StoreCacheEntry = {
+    store: merged,
+    index: null,
+    stat: current,
+    edgeKeys: null,
+    deltaStat,
+    backupStat,
+  };
+  graphifyFileStoreCache.set(absPath, entry);
+  return entry;
+}
+
 export class GraphifyFileClient {
   constructor(
     private readonly storePath: string,
@@ -615,136 +751,38 @@ export class GraphifyFileClient {
   }
 
   /**
-   * Return the validated cache entry for this store path: a cheap statSync
-   * against the recorded mtime+size decides between a cache hit and a full
-   * read + JSON.parse. All cache operations are synchronous, and every public
-   * method runs its whole body without yielding, so no async gap can observe
-   * a half-updated entry (single-threaded safety).
+   * Cheap shared-cache read of a store file WITHOUT constructing a client,
+   * opening handles, or writing anything.
+   *
+   * The preview read path (`graphStoreNeedsIndexing`, `readFileGraphStore`)
+   * used to bypass this process-wide cache and pay its own readFileSync +
+   * JSON.parse per call — on a 9.5MB store that was two full reads + parses
+   * per preview even though a GraphifyFileClient instance had the very same
+   * file cached. peekStore routes those reads through the same statSync-
+   * validated entry (mtime+size checked, delta log applied), so a hit costs
+   * one statSync and a miss populates the cache the file client then shares.
+   *
+   * Contract: the returned arrays belong to the SHARED cache entry — treat
+   * them as read-only (shallow-copy before any mutation). Returns undefined
+   * when the file does not exist or exceeds the single-string read limit
+   * (callers take their own chunked path for huge stores).
    */
-  private readStoreEntry(): StoreCacheEntry {
-    const absPath = resolve(this.storePath);
+  static peekStore(storePath: string): { nodes: GraphNode[]; edges: GraphEdge[] } | undefined {
+    const absPath = resolve(storePath);
     const current = statIfExists(absPath);
-    const deltaPath = resolve(deltaPathFor(absPath));
-    const deltaStat = statIfExists(deltaPath);
-    const backupStat = current === null ? newestBackupStat(absPath) : null;
-    const cached = graphifyFileStoreCache.get(absPath);
-    if (
-      cached &&
-      sameStat(cached.stat, current) &&
-      sameStat(cached.deltaStat, deltaStat) &&
-      sameStat(cached.backupStat ?? null, backupStat)
-    ) {
-      return cached;
+    if (current === null || current.size > GRAPH_STORE_MAX_READ_BYTES) {
+      return undefined;
     }
-
-    let base: GraphStore | undefined;
-    if (current !== null && current.size > GRAPH_STORE_MAX_READ_BYTES) {
-      // Above the single-string limit: parse in bounded chunks instead of
-      // throwing ERR_STRING_TOO_LONG from readFileSync.
-      try {
-        const chunked = readGraphStoreFileChunked(absPath);
-        base = { nodes: chunked.nodes as GraphNode[], edges: chunked.edges as GraphEdge[] };
-      } catch (error) {
-        logger.warn(
-          { error: error instanceof Error ? error.message : String(error), absPath },
-          "Chunked graph store read failed"
-        );
-        throw graphStoreTooLargeError(absPath, current.size);
-      }
-    }
-
-    const store =
-      base ??
-      (current === null
-        ? (backupStat !== null ? this.readMergedBackup(absPath) : undefined) ?? { nodes: [], edges: [] }
-        : this.parseStoreFile(absPath));
-    const merged = this.applyDelta(store, deltaPath, deltaStat);
-    const entry: StoreCacheEntry = {
-      store: merged,
-      index: null,
-      stat: current,
-      edgeKeys: null,
-      deltaStat,
-      backupStat,
-    };
-    graphifyFileStoreCache.set(absPath, entry);
-    return entry;
+    return readStoreCacheEntry(absPath).store;
   }
 
   /**
-   * A host with SQLite folds this JSON store in and renames it away. A
-   * JSON-only host (no better-sqlite3) would then read an empty store and
-   * lose every memory written before the merge (e.g. "Episode not found" for
-   * an episode it just created). Rebuild from the backups instead: first
-   * backup, then the rotated latest one (and their delta logs) on top.
+   * Return the validated cache entry for this store path (see
+   * readStoreCacheEntry): a cheap statSync against the recorded mtime+size
+   * decides between a cache hit and a full read + JSON.parse.
    */
-  private readMergedBackup(absPath: string): GraphStore | undefined {
-    const nodes = new Map<string, GraphNode>();
-    const edges = new Map<string, GraphEdge>();
-    try {
-      for (const suffix of [MERGED_BACKUP_SUFFIX, `${MERGED_BACKUP_SUFFIX}.latest`]) {
-        const backup = `${absPath}${suffix}`;
-        if (!existsSync(backup)) continue;
-        const backupDelta = `${deltaPathFor(absPath)}${suffix}`;
-        const layer = this.applyDelta(this.parseStoreFile(backup), backupDelta, statIfExists(backupDelta));
-        for (const node of layer.nodes) nodes.set(node.id, node);
-        for (const edge of layer.edges) edges.set(`${edge.from}\u0000${edge.to}\u0000${edge.relation}`, edge);
-      }
-    } catch (error) {
-      logger.warn(
-        { error: error instanceof Error ? error.message : String(error), absPath },
-        "merged graph store backup unreadable; starting from an empty store"
-      );
-      return undefined;
-    }
-    return nodes.size > 0 || edges.size > 0 ? { nodes: [...nodes.values()], edges: [...edges.values()] } : undefined;
-  }
-
-  /** Merge the delta log (when present) into a freshly loaded base store. */
-  private applyDelta(base: GraphStore, deltaPath: string, deltaStat: FileStat | null): GraphStore {
-    if (deltaStat === null || deltaStat.size === 0) {
-      return base;
-    }
-    let contents: string;
-    try {
-      contents = readFileSync(deltaPath, "utf8");
-    } catch (error) {
-      logger.warn(
-        { error: error instanceof Error ? error.message : String(error), deltaPath },
-        "graph store delta unreadable; using the base store"
-      );
-      return base;
-    }
-    return applyGraphStoreDelta(base, contents);
-  }
-
-  private parseStoreFile(absPath: string): GraphStore {
-    if (!existsSync(absPath)) {
-      return { nodes: [], edges: [] };
-    }
-
-    const raw = readFileSync(absPath, "utf8");
-    graphifyFileStoreParseCount += 1;
-    if (!raw.trim()) {
-      return { nodes: [], edges: [] };
-    }
-
-    try {
-      const parsed = JSON.parse(raw) as Partial<GraphStore>;
-      if (!parsed || typeof parsed !== "object") {
-        throw new Error("Graph store JSON root must be an object");
-      }
-      return {
-        nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
-        edges: Array.isArray(parsed.edges) ? parsed.edges : [],
-      };
-    } catch (error) {
-      logger.warn(
-        { error, storePath: this.storePath },
-        "Corrupt graph store JSON; returning empty store (run graphflow_rebuild to repair)"
-      );
-      return { nodes: [], edges: [] };
-    }
+  private readStoreEntry(): StoreCacheEntry {
+    return readStoreCacheEntry(this.storePath);
   }
 
   private writeStore(store: GraphStore, edgeKeys: Set<string> | null = null): void {

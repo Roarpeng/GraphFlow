@@ -43,7 +43,6 @@ import {
 import type { SkillState } from "../../../learning/skill-types";
 import {
   DEFAULT_EMBEDDING_RUN_DEADLINE_MS,
-  DEFAULT_EMBEDDING_RUN_LIMIT,
   ensureEmbeddings,
 } from "../../../learning/embedding-refresh";
 import {
@@ -106,7 +105,7 @@ import {
 } from "../../../learning/workbench-topic.js";
 import { buildEmbeddingOptions } from "./env.js";
 import { applyResponseBudget } from "./response-budget.js";
-import { graphStoreDeltaPath } from "../../../graph/graphify-file-client.js";
+import { GraphifyFileClient, graphStoreDeltaPath } from "../../../graph/graphify-file-client.js";
 import {
   calculateBudgetUsedPercent,
   calculateSavingsPercent,
@@ -163,18 +162,26 @@ function readSkillOutcomeKind(content: string): SkillOutcomeKind | undefined {
   return undefined;
 }
 
-function graphStoreNeedsIndexing(config: GraphFlowConfig): boolean {
+/**
+ * Whether the resolved graph store holds a real code index (File/Symbol/Module
+ * nodes). Exported for tests.
+ *
+ * File-transport reads go through `GraphifyFileClient.peekStore` — the
+ * process-wide, statSync-validated shared cache — instead of this module doing
+ * its own readFileSync + JSON.parse on every preview (a 9.5MB store was fully
+ * read and parsed here per preview just to count node types).
+ */
+export function graphStoreNeedsIndexing(config: GraphFlowConfig): boolean {
   const storePath = resolveGraphStorePath(config);
   if (config.graphPolicy.transport === "auto" && !existsSync(storePath)) {
     // Auto transport may have fallen back to the JSON store on this machine.
     const fallbackPath = storePath.replace(/\.sqlite$/i, ".json");
     if (existsSync(fallbackPath)) {
-      try {
-        const parsed = JSON.parse(readFileSync(fallbackPath, "utf8")) as { nodes?: Array<{ type?: string }> };
-        return !Array.isArray(parsed.nodes) || !storeHasCodeNodes(parsed.nodes);
-      } catch {
-        return true;
+      const peeked = GraphifyFileClient.peekStore(fallbackPath);
+      if (peeked) {
+        return !Array.isArray(peeked.nodes) || !storeHasCodeNodes(peeked.nodes);
       }
+      return true;
     }
     return true;
   }
@@ -186,12 +193,16 @@ function graphStoreNeedsIndexing(config: GraphFlowConfig): boolean {
   if (config.graphPolicy.transport === "sqlite" || config.graphPolicy.transport === "auto") {
     return false;
   }
-  try {
-    const parsed = JSON.parse(readFileSync(storePath, "utf8")) as { nodes?: Array<{ type?: string }> };
-    return !Array.isArray(parsed.nodes) || !storeHasCodeNodes(parsed.nodes);
-  } catch {
-    return true;
+  const peeked = GraphifyFileClient.peekStore(storePath);
+  if (peeked) {
+    return !Array.isArray(peeked.nodes) || !storeHasCodeNodes(peeked.nodes);
   }
+  // peek declines stores above the single-string read limit. A base store
+  // that big only exists on an indexed workspace, and it cannot be re-parsed
+  // as one string here anyway — treat it as indexed (the old path threw
+  // ERR_STRING_TOO_LONG inside the try and returned true, which forced a
+  // doomed re-index of an un-parseable file).
+  return false;
 }
 
 /**
@@ -404,6 +415,26 @@ function releaseVectorTargetClient(client: GraphClient): void {
   closeGraphClientQuietly(client);
 }
 
+/**
+ * Per-pass node budget of the deferred embedding pass that runs after a reply.
+ *
+ * The historical value was `DEFAULT_EMBEDDING_RUN_LIMIT * 2` = 512: with
+ * previewVectorsAfterReply enabled, every preview queued up to 512 ONNX CPU
+ * inferences in the background — measured as the dominant post-preview
+ * background cost. 128 already covers the typical single-preview incremental
+ * batch; the deadline below stays the backstop for bigger backlogs (leftover
+ * ids are re-queued on the next preview).
+ *
+ * Override with GRAPHFLOW_EMBEDDING_PASS_LIMIT (any positive integer).
+ */
+const DEFAULT_DEFERRED_EMBEDDING_PASS_LIMIT = 128;
+
+/** Resolve the deferred embedding pass limit (env-overridable, default 128). */
+export function resolveDeferredEmbeddingPassLimit(): number {
+  const raw = Number(process.env.GRAPHFLOW_EMBEDDING_PASS_LIMIT);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_DEFERRED_EMBEDDING_PASS_LIMIT;
+}
+
 function scheduleVectorPass(): void {
   pendingVectorPass?.abort();
   const target = pendingVectorTarget;
@@ -418,7 +449,7 @@ function scheduleVectorPass(): void {
     void ensureEmbeddings(client, provider, {
       signal: controller.signal,
       priorityIds,
-      limit: DEFAULT_EMBEDDING_RUN_LIMIT * 2,
+      limit: resolveDeferredEmbeddingPassLimit(),
       deadlineMs: DEFAULT_EMBEDDING_RUN_DEADLINE_MS * 2,
     })
       .then(() => {

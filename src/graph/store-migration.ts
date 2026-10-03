@@ -9,7 +9,7 @@
  * renamed to `*.merged-bak`, so both halves become one store again.
  */
 
-import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import type { GraphEdge, GraphNode } from "../core/types";
 import { logger } from "../utils/logger";
 import { GRAPH_STORE_DELTA_SUFFIX, GraphifyFileClient, MERGED_BACKUP_SUFFIX } from "./graphify-file-client";
@@ -248,26 +248,107 @@ export function planJsonIntoSqliteMerge(
  * host keeps writing JSON, so later merges rotate a single `.latest` copy
  * instead of accumulating one full store per merge.
  */
+function renameWithRetry(from: string, to: string): void {
+  // Windows rename can fail transiently (EPERM) while a scanner or another
+  // process still holds a handle — same retry shape as
+  // GraphifyFileClient.writeStore.
+  const maxRetries = 5;
+  for (let i = 0; i < maxRetries; i += 1) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EPERM" && i < maxRetries - 1) {
+        sleepMs(50);
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
 function moveToBackup(path: string): void {
   const first = `${path}${MERGED_BACKUP_SUFFIX}`;
   if (!existsSync(first)) {
-    renameSync(path, first);
+    renameWithRetry(path, first);
     return;
   }
   const latest = `${first}.latest`;
   rmSync(latest, { force: true });
-  renameSync(path, latest);
+  renameWithRetry(path, latest);
+}
+
+function sleepMs(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+const MERGE_LOCK_SUFFIX = ".merge-lock";
+const MERGE_LOCK_WAIT_MS = 10_000;
+const MERGE_LOCK_STALE_MS = 30_000;
+
+/**
+ * Best-effort mutex via an exclusively-created lock file, for merge targets
+ * that cannot hand out the SQLite write lock (test doubles, mixed hosts).
+ * Node has no cross-platform flock, so this is advisory only: it does not
+ * exclude a process that holds the real BEGIN IMMEDIATE lock. A stale lock
+ * (crashed holder) is stolen; past the wait deadline the merge degrades to
+ * running unlocked — it is idempotent and retried on the next open anyway.
+ */
+function withMergeLockFile<T>(sqlitePath: string, fn: () => T): T {
+  const lockPath = `${sqlitePath}${MERGE_LOCK_SUFFIX}`;
+  const deadline = Date.now() + MERGE_LOCK_WAIT_MS;
+  for (;;) {
+    let fd: number;
+    try {
+      fd = openSync(lockPath, "wx");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      try {
+        if (Date.now() - statSync(lockPath).mtimeMs > MERGE_LOCK_STALE_MS) {
+          rmSync(lockPath, { force: true });
+        }
+      } catch {
+        // the lock vanished between stat and rm — the next attempt acquires it
+      }
+      if (Date.now() > deadline) return fn();
+      sleepMs(50);
+      continue;
+    }
+    try {
+      return fn();
+    } finally {
+      try {
+        closeSync(fd);
+      } catch {
+        // handle already closed
+      }
+      rmSync(lockPath, { force: true });
+    }
+  }
 }
 
 export interface SqliteMergeTarget {
   readSnapshot(): { nodes: GraphNode[]; edges: GraphEdge[] };
   upsertGraphSync(batch: { nodes: GraphNode[]; edges: GraphEdge[] }): void;
+  /**
+   * Run `fn` while holding the store's write lock, serializing concurrent
+   * merges of the same JSON sibling across processes. Optional: production
+   * targets implement it with BEGIN IMMEDIATE; without it the merge falls
+   * back to a best-effort lock file.
+   */
+  withMergeLock?<T>(fn: () => T): T;
 }
 
 /**
  * Merge `<store>.json` (+ delta log) into the SQLite store at `sqlitePath`.
  * No-op when no JSON sibling exists. A failed merge leaves the JSON store in
  * place so the next open retries.
+ *
+ * The snapshot → plan → upsert → rename section runs under the target's write
+ * lock: two processes merging the same sibling serialize, the second one
+ * re-checks under the lock and skips once the first has renamed the JSON store
+ * away. Without that, the loser would upsert a plan computed from a pre-merge
+ * snapshot and clobber the winner's renumbered dialogue turns.
  */
 export function mergeSiblingJsonStoreIntoSqlite(
   target: SqliteMergeTarget,
@@ -278,22 +359,34 @@ export function mergeSiblingJsonStoreIntoSqlite(
     return undefined;
   }
   try {
+    // Read the JSON side before taking the lock: it is not covered by the
+    // SQLite lock anyway, and this keeps the write-lock hold time down to the
+    // snapshot → plan → upsert → rename section.
     const json = new GraphifyFileClient(jsonPath).readSnapshot();
-    const plan = planJsonIntoSqliteMerge(target.readSnapshot(), json);
-    target.upsertGraphSync({ nodes: plan.nodes, edges: plan.edges });
+    const runMerge = (): StoreMergeStats | undefined => {
+      // Under the lock: a peer may have completed this merge (and renamed the
+      // JSON store away) while we waited for the lock. Our plan inputs are
+      // stale — skip instead of clobbering.
+      if (!existsSync(jsonPath)) return undefined;
+      const plan = planJsonIntoSqliteMerge(target.readSnapshot(), json);
+      target.upsertGraphSync({ nodes: plan.nodes, edges: plan.edges });
 
-    moveToBackup(jsonPath);
-    const deltaPath = `${jsonPath}${GRAPH_STORE_DELTA_SUFFIX}`;
-    if (existsSync(deltaPath)) {
-      moveToBackup(deltaPath);
-    }
-    writeFileSync(
-      `${sqlitePath}${MERGE_MARKER_SUFFIX}`,
-      `${JSON.stringify({ mergedAt: new Date().toISOString(), from: jsonPath, stats: plan.stats }, null, 2)}\n`,
-      "utf8"
-    );
-    logger.info({ jsonPath, sqlitePath, stats: plan.stats }, "[graphflow] merged JSON graph store into SQLite");
-    return plan.stats;
+      moveToBackup(jsonPath);
+      const deltaPath = `${jsonPath}${GRAPH_STORE_DELTA_SUFFIX}`;
+      if (existsSync(deltaPath)) {
+        moveToBackup(deltaPath);
+      }
+      writeFileSync(
+        `${sqlitePath}${MERGE_MARKER_SUFFIX}`,
+        `${JSON.stringify({ mergedAt: new Date().toISOString(), from: jsonPath, stats: plan.stats }, null, 2)}\n`,
+        "utf8"
+      );
+      logger.info({ jsonPath, sqlitePath, stats: plan.stats }, "[graphflow] merged JSON graph store into SQLite");
+      return plan.stats;
+    };
+    return typeof target.withMergeLock === "function"
+      ? target.withMergeLock(runMerge)
+      : withMergeLockFile(sqlitePath, runMerge);
   } catch (error) {
     logger.warn({ error, jsonPath, sqlitePath }, "[graphflow] JSON → SQLite store merge failed; will retry on next open");
     return undefined;

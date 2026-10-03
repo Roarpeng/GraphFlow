@@ -9,6 +9,7 @@ import { SQLITE_INDEX_MANIFEST } from "../../../graph/file-indexer-cache";
 import { readGraphStoreFileChunked } from "../../../graph/graph-store-json-chunks";
 import {
   GRAPH_STORE_MAX_READ_BYTES,
+  GraphifyFileClient,
   applyGraphStoreDelta,
   graphStoreDeltaPath,
 } from "../../../graph/graphify-file-client";
@@ -98,6 +99,18 @@ export function readFileGraphStore(
     }
   }
 
+  // Shared-cache fast path: the file transport keeps one statSync-validated
+  // parsed store per path (delta log already applied), so a preview that just
+  // peeked at the store for indexing checks does not re-read + re-parse the
+  // whole JSON here. Shallow-copied per call — same discipline as
+  // GraphifyFileClient.readSnapshot — so callers may sort/filter/push freely
+  // without corrupting the shared cache entry.
+  const peeked = GraphifyFileClient.peekStore(storePath);
+  if (peeked) {
+    return { nodes: [...peeked.nodes], edges: [...peeked.edges] };
+  }
+
+  // Fallback (peek declines missing/oversized files): direct read + parse.
   try {
     const raw = readFileSync(storePath, "utf8");
     const base: { nodes: GraphNode[]; edges: GraphEdge[] } = raw.trim()

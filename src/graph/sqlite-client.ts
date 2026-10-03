@@ -83,6 +83,9 @@ CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_id);
 CREATE INDEX IF NOT EXISTS idx_edges_relation ON edges(relation);
 `;
 
+/** Current store schema version (PRAGMA user_version). */
+const SCHEMA_VERSION = 3;
+
 /**
  * FTS indexes `searchtext` = raw content + tokenizer-aligned subtokens.
  * Without this, camelCase identifiers are indexed as ONE token by FTS5
@@ -137,6 +140,15 @@ function rowToNode(row: NodeRow): GraphNode {
  * Snapshot readers mostly filter on id/type and touch few nodes' metadata, so
  * the JSON is parsed on first access. The property stays enumerable and
  * assignable, and every snapshot gets its own parse.
+ *
+ * A materialized-object row cache was measured on this repository's own
+ * 9.8k-node store and rejected: 95% of rows carry ~1KB metadata, and mutation
+ * isolation (each snapshot gets its own parse — see m24) forces a deep copy
+ * per cached node, making a snapshot 7-10x SLOWER (structuredClone 91ms,
+ * JSON re-parse 68ms vs 8-9ms for building these lazy nodes). An object
+ * literal-getter rewrite measured neutral (interleaved A/B medians 7.32 vs
+ * 7.58 ms untouched, 11.95 vs 11.95 ms with 5% metadata touched), so the
+ * defineProperty form stays.
  */
 function rowToSnapshotNode(row: NodeRow): GraphNode {
   const node: GraphNode = { id: row.id, type: row.type, content: row.content };
@@ -212,28 +224,53 @@ export class GraphifySqliteClient implements GraphClient {
     }
     const Database = loadBetterSqlite3();
     this.db = new Database(dbPath);
+    // Wait out a concurrent writer (a peer process mid-migration or merge)
+    // instead of failing the first statement with SQLITE_BUSY. Set before the
+    // WAL switch, which itself needs a brief exclusive lock.
+    this.db.pragma("busy_timeout = 15000");
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("synchronous = NORMAL");
     this.migrate();
   }
 
+  /**
+   * Migrations run under the SQLite write lock. Two processes first-opening
+   * the same v1/v2 store both pass a bare version check; the loser then fails
+   * `ALTER TABLE ... ADD COLUMN` with "duplicate column" and its constructor
+   * dies. BEGIN IMMEDIATE serializes them: the loser blocks (busy_timeout),
+   * re-reads user_version under the lock, sees the winner's bump and skips.
+   * An up-to-date store takes no write lock at all, so concurrent opens of a
+   * healthy database stay fully parallel. The nested db.transaction() calls in
+   * the backfills demote to savepoints inside this manual transaction, and
+   * user_version/DDL writes roll back with it if a step fails.
+   */
   private migrate(): void {
-    const currentVersion = this.db.pragma("user_version", { simple: true }) as number;
-    if (currentVersion < 1) {
-      this.db.exec(SCHEMA_SQL);
-      this.db.pragma("user_version = 3");
-      return;
-    }
-    if (currentVersion < 2) {
-      // v1 → v2: add searchtext column, rebuild FTS over tokenizer-aligned text.
-      this.migrateV1ToV2();
-      this.db.pragma("user_version = 2");
-    }
-    if (currentVersion < 3) {
-      // v2 → v3: searchtext covers jsdoc/name/exports/path, not just content.
-      this.backfillSearchText();
-      this.db.exec(`INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild');`);
-      this.db.pragma("user_version = 3");
+    if ((this.db.pragma("user_version", { simple: true }) as number) >= SCHEMA_VERSION) return;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const currentVersion = this.db.pragma("user_version", { simple: true }) as number;
+      if (currentVersion < 1) {
+        this.db.exec(SCHEMA_SQL);
+        this.db.pragma(`user_version = ${SCHEMA_VERSION}`);
+      } else {
+        if (currentVersion < 2) {
+          // v1 → v2: add searchtext column, rebuild FTS over tokenizer-aligned text.
+          this.migrateV1ToV2();
+          this.db.pragma("user_version = 2");
+        }
+        if (currentVersion < 3) {
+          // v2 → v3: searchtext covers jsdoc/name/exports/path, not just content.
+          this.backfillSearchText();
+          this.db.exec(`INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild');`);
+          this.db.pragma("user_version = 3");
+        }
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      if (this.db.inTransaction) {
+        this.db.exec("ROLLBACK");
+      }
+      throw error;
     }
   }
 
@@ -343,6 +380,32 @@ export class GraphifySqliteClient implements GraphClient {
         edgeStmt.run(e.from, e.to, e.relation);
       }
     })();
+  }
+
+  /**
+   * Run `fn` while holding the SQLite write lock (BEGIN IMMEDIATE). Used by
+   * the JSON → SQLite merge so two processes merging the same JSON sibling
+   * serialize: the second blocks, re-checks under the lock, and skips instead
+   * of clobbering the first's renumbered dialogue turns from a stale snapshot.
+   * Calls into readSnapshot / upsertGraphSync keep working inside the lock —
+   * their db.transaction() demotes to a savepoint in this manual transaction.
+   */
+  withMergeLock<T>(fn: () => T): T {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = fn();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      if (this.db.inTransaction) {
+        try {
+          this.db.exec("ROLLBACK");
+        } catch {
+          // the connection already left the transaction
+        }
+      }
+      throw error;
+    }
   }
 
   readSnapshot(): { nodes: GraphNode[]; edges: GraphEdge[] } {
