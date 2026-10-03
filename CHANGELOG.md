@@ -19,6 +19,12 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — configPath 穿透角色/探测链（跨工作区操作用错配置的 live 事故）
+
+- **根因(两处泄漏)**:`diagnoseRoutingResult` 的 role 解析闭包调用 `resolveModelForRole/resolveModelWithFallback` 时丢弃了 configPath(回落到进程 cwd 层);`executeRolePrompt` 内部 `resolveConfig()` 无参——同样解析 cwd 层并据此装配 provider 环境。后果:从 A 仓库对 B 项目跑 `--config` 时,模型/凭据来自 A 的层——live:对 Ele 工作区的探测把 `gpt-4.1-mini`(GraphFlow 仓库层的默认)发到了 Ele 的 DeepSeek 端点。
+- **修复**:resolve 闭包穿透 configPath;`executeRolePrompt` 的 opts 增加 `configPath`(`resolveConfig(opts?.configPath)`);probe 全链接线——`probeRoleConnectivity` 增参,plan/run 两处预检探测与 `probeRoutingConnectivity` 均传入。其他 executeRolePrompt 调用点不传则维持 cwd 语义(零回归)。
+- **live 验证**:Ele selfcheck 的 llm-probe 不再出现 gpt-4.1-mini——模型解析正确;剩余的 "Missing provider credentials" 是该工作区的真实状态(Ele 层以 `${OPENAI_API_KEY}` 占位覆盖了全局明文 key 且该 env 未设),探测如实报告。
+
 ### Fixed — providerPriority 开放给已配置的自定义 provider(用户工作区被 fail-fast 挡死的 live 事故)
 
 - **根因**:`providers` 映射是开放的(`Record<string, ProviderConfig>`,支持任意 OpenAI 兼容自定义端点),但 `routingPolicy.providerPriority` 的校验是封闭五元枚举(openai/anthropic/bailian/doubao/deepseek)——两者自相矛盾。用户在优先级里列出自己配置的 provider(如 `openbmb` 连 localhost 服务)时,叠加项目层 fail-fast 直接让整个工作区无法加载配置(错误提示还误导性地指向"反斜杠路径")。

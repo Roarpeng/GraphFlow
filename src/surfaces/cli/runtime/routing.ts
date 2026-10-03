@@ -221,7 +221,7 @@ export async function runTaskResult(
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), probeMs);
       try {
-        const probe = await probeRoleConnectivity("worker", selection, controller.signal);
+        const probe = await probeRoleConnectivity("worker", selection, controller.signal, configPath);
         if (!probe.ok) {
           executionMode = "bridge";
           bridgeReason =
@@ -491,10 +491,10 @@ export function diagnoseRoutingResult(configPath?: string): RoutingDiagnosisResu
 
   const resolve = (role: "planner" | "worker" | "validator") => {
     if (!config.routingPolicy?.enableDynamicRouting) {
-      return resolveModelForRole(role);
+      return resolveModelForRole(role, configPath);
     }
 
-    return resolveModelWithFallback(role, health, chain);
+    return resolveModelWithFallback(role, health, chain, configPath);
   };
 
   const planner = resolve("planner");
@@ -740,7 +740,8 @@ function diagnosisRoleToSelection(
 async function probeRoleConnectivity(
   role: "planner" | "worker",
   selection: ModelSelection,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  configPath?: string
 ): Promise<RoutingConnectivityProbe> {
   const started = Date.now();
   // A genuine probe reply is a SHORT model answer to the greeting. Non-strict
@@ -752,7 +753,9 @@ async function probeRoleConnectivity(
   // full apikey+baseUrl+model round-trip that returns a real answer is.
   const PROBE_INSTRUCTION = "Reply with exactly: ok";
   try {
-    const sample = await executeRolePrompt(role, PROBE_INSTRUCTION, selection, undefined, signal);
+    const sample = await executeRolePrompt(role, PROBE_INSTRUCTION, selection, undefined, signal, {
+      configPath,
+    });
     const cleaned = sample.trim().slice(0, 120);
     const masked =
       /^\[(openai|anthropic|bailian|doubao|deepseek):/i.test(cleaned) ||
@@ -810,7 +813,7 @@ export async function probeRoutingConnectivity(
   const withTimeout = (role: "planner" | "worker", selection: ModelSelection) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    return probeRoleConnectivity(role, selection, controller.signal).finally(() =>
+    return probeRoleConnectivity(role, selection, controller.signal, configPath).finally(() =>
       clearTimeout(timer)
     );
   };
@@ -887,7 +890,7 @@ export async function planAndBrainstormResult(
   const probeTimer = setTimeout(() => probeController.abort(), probeTimeoutMs);
   let probe: RoutingConnectivityProbe;
   try {
-    probe = await probeRoleConnectivity("planner", selection, probeController.signal);
+    probe = await probeRoleConnectivity("planner", selection, probeController.signal, configPath);
   } finally {
     clearTimeout(probeTimer);
   }

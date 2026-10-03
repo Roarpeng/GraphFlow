@@ -368,9 +368,15 @@ export async function executeRolePrompt(
   selection: ModelSelection,
   context?: PromptContext,
   signal?: AbortSignal,
-  opts?: { disableTools?: boolean }
+  opts?: { disableTools?: boolean; configPath?: string | undefined }
 ): Promise<string> {
-  const config = resolveConfig();
+  // opts.configPath threads the CALLER's workspace config through (probe/run
+  // are invoked with an explicit --config for another project); without it
+  // this bare resolveConfig() resolved the process-cwd layers and assembled
+  // provider env / role knobs from the WRONG project (live: a probe from the
+  // GraphFlow repo against an Ele workspace sent gpt-4.1-mini — the cwd
+  // layer's default — to Ele's DeepSeek endpoint).
+  const config = resolveConfig(opts?.configPath);
   // Anchor sources are inlined into the prompt itself (not just carried on the
   // context object) so the message builder in role-capabilities — which does
   // not know about anchorSources — still delivers the source bytes to the
