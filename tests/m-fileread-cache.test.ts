@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
+import { closeSync, mkdtempSync, openSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -15,10 +15,7 @@ import type { GraphEdge, GraphNode } from "../src/core/types";
 import { getDefaultConfig } from "../src/config/defaults";
 import type { GraphFlowConfig } from "../src/config/schema";
 import { readFileGraphStore, resolveGraphStoreAfterIndex } from "../src/surfaces/cli/runtime/helpers";
-import {
-  graphStoreNeedsIndexing,
-  resolveDeferredEmbeddingPassLimit,
-} from "../src/surfaces/cli/runtime/graph";
+import { graphStoreNeedsIndexing, resolveDeferredEmbeddingPassLimit } from "../src/surfaces/cli/runtime/graph";
 
 /**
  * Step-0 performance fix, domain A — the file-transport READ path used to
@@ -242,3 +239,39 @@ describe("deferred embedding pass limit", () => {
 function getFileSizeOrThrow(path: string): number {
   return statSync(path).size;
 }
+
+
+describe("graphStoreNeedsIndexing semantic locks (review round 2)", () => {
+  it("code nodes living only in the delta log count as indexed (post-peek semantics)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "gf-peek-delta-"));
+    try {
+      const storePath = join(root, "graph.json");
+      // Tiny base without code nodes; threshold lowered so upserts take delta.
+      const file = new GraphifyFileClient(storePath, { deltaMinBaseBytes: 1, deltaCompactBytes: 64 * 1024 });
+      await file.upsertNodes([{ id: "dialogue:a", type: "Decision", content: "conversation only" }]);
+      await file.upsertNodes([{ id: "file:src/x.ts", type: "File", content: "code node via delta" }]);
+      await file.close?.();
+      // Pre-peek code path read only the base and would have returned true
+      // (re-index trigger); the peek path applies the delta, sees the code
+      // node, and correctly reports an indexed store.
+      const cfg = { ...getDefaultConfig(), graphPolicy: { ...getDefaultConfig().graphPolicy, transport: "file" as const, graphStorePath: storePath, workspaceRoot: root } };
+      expect(graphStoreNeedsIndexing(cfg)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("an oversized base store reports not-needs-indexing instead of a doomed re-index loop", async () => {
+    const root = mkdtempSync(join(tmpdir(), "gf-peek-oversize-"));
+    try {
+      const storePath = join(root, "graph.json");
+      const fh = openSync(storePath, "w");
+      truncateSync(fh, 512 * 1024 * 1024 + 1); // NTFS sparse: instant
+      closeSync(fh);
+      const cfg = { ...getDefaultConfig(), graphPolicy: { ...getDefaultConfig().graphPolicy, transport: "file" as const, graphStorePath: storePath, workspaceRoot: root } };
+      expect(graphStoreNeedsIndexing(cfg)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

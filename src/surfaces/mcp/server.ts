@@ -307,6 +307,13 @@ interface HttpMcpSession {
   transport: StreamableHTTPServerTransport;
   /** Epoch ms of the last request routed to this session; drives the idle-TTL sweep. */
   lastActivityAt: number;
+  /**
+   * Open response streams (stateful GET SSE listeners). A session with open
+   * streams is NOT idle regardless of lastActivityAt: a silent long-lived
+   * listener is alive by definition, and sweeping it would cut the stream
+   * mid-flight (review round: the idle clock only saw request starts).
+   */
+  openStreams: Set<ServerResponse>;
 }
 
 export async function executeToolCall(
@@ -663,6 +670,14 @@ async function handleWithHttpMcpSession(
   };
   const stateful = options?.stateful === true;
   session.transport.onclose = dispose;
+  // Track open response streams for the idle-TTL sweep: an SSE listener that
+  // stays connected keeps the session alive even with no further requests.
+  const tracksOpenStream =
+    stateful && req.method === "GET" && !res.writableEnded;
+  if (tracksOpenStream) {
+    session.openStreams.add(res);
+    res.once("close", () => session.openStreams.delete(res));
+  }
   // Stateful sessions survive the HTTP response; DELETE or transport close owns
   // their lifecycle. Uninitialized stateful attempts are cleaned with the response.
   res.once("close", () => {
@@ -794,7 +809,7 @@ export async function startStreamableHttpServer(
         ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
       });
       const serverInstance = createServerInstance();
-      session = { server: serverInstance, transport, lastActivityAt: Date.now() };
+      session = { server: serverInstance, transport, lastActivityAt: Date.now(), openStreams: new Set() };
       // SDK 1.30 types optional callbacks as `T | undefined`, which its own
       // exactOptionalPropertyTypes build rejects structurally despite runtime
       // compatibility. Keep the narrow local cast at this SDK boundary.
@@ -853,6 +868,10 @@ export async function startStreamableHttpServer(
       const now = Date.now();
       for (const session of [...sessions.values()]) {
         if (!session.id || !session.tenant) continue;
+        // An open response stream (silent SSE listener) keeps the session
+        // alive: the stream IS activity, closing it mid-flight would break a
+        // healthy long-lived consumer (review round 2 finding).
+        if (session.openStreams.size > 0) continue;
         const idleMs = now - session.lastActivityAt;
         if (idleMs < sessionTtlMs) continue;
         logger.info(

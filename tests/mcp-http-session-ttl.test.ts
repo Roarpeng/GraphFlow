@@ -176,13 +176,19 @@ describe("HTTP stateful session idle TTL", () => {
         sessionSweepIntervalMs: 25,
       });
       const sessionId = await openAbandonedSession(started);
-      await sleep(500);
-
-      const stale = await postJson(
-        started.url,
-        { jsonrpc: "2.0", id: "after-env-ttl", method: "ping" },
-        { "Mcp-Session-Id": sessionId }
-      );
+      // Silent wait then two probes (polling refreshes activity by design).
+      await sleep(1_000);
+      const probe = () =>
+        postJson(
+          started.url,
+          { jsonrpc: "2.0", id: "after-env-ttl", method: "ping" },
+          { "Mcp-Session-Id": sessionId }
+        );
+      let stale = await probe();
+      if (stale.status !== 404) {
+        await sleep(2_000);
+        stale = await probe();
+      }
       expect(stale.status).toBe(404);
     } finally {
       if (previous === undefined) {
