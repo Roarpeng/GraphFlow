@@ -102,9 +102,14 @@ export function validateConfigDetailed(path = "graphflow.config.json"): ConfigVa
 
   if (parsed.routingPolicy?.providerPriority) {
     const allowed = new Set(["openai", "anthropic", "bailian", "doubao", "deepseek"]);
-    const invalid = parsed.routingPolicy.providerPriority.some((p) => !allowed.has(p));
-    if (invalid) {
-      issues.push({ severity: "error", field: "routingPolicy.providerPriority", message: "Contains unknown provider" });
+    for (const key of Object.keys(parsed.providers ?? {})) allowed.add(key);
+    const invalid = parsed.routingPolicy.providerPriority.filter((p) => !allowed.has(p));
+    if (invalid.length > 0) {
+      issues.push({
+        severity: "error",
+        field: "routingPolicy.providerPriority",
+        message: `Unknown provider(s): ${invalid.join(", ")} — use a built-in (openai/anthropic/bailian/doubao/deepseek) or a key defined under "providers"`,
+      });
     }
   }
 
@@ -344,10 +349,19 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
   // and store against the user's intent.
 
   if (input.routingPolicy?.providerPriority) {
+    // The five built-in adapters plus every key the user configured under
+    // `providers` (custom OpenAI-compatible endpoints). The providers map is
+    // open (Record<string, ProviderConfig>) — a priority listing a configured
+    // custom provider is valid; rejecting it bricked the whole workspace
+    // under the project-layer fail-fast (live: an openbmb localhost endpoint).
     const allowed = new Set(["openai", "anthropic", "bailian", "doubao", "deepseek"]);
-    const invalid = input.routingPolicy.providerPriority.some((provider) => !allowed.has(provider));
-    if (invalid) {
-      throw new Error("Invalid config: routingPolicy.providerPriority contains unknown provider.");
+    for (const key of Object.keys(input.providers ?? {})) allowed.add(key);
+    const invalid = input.routingPolicy.providerPriority.filter((provider) => !allowed.has(provider));
+    if (invalid.length > 0) {
+      throw new Error(
+        `Invalid config: routingPolicy.providerPriority contains unknown provider(s): ${invalid.join(", ")}. ` +
+          `Known: the five built-ins (openai/anthropic/bailian/doubao/deepseek) and any key defined under "providers".`
+      );
     }
   }
 

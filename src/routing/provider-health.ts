@@ -53,7 +53,10 @@ export function buildProviderHealthMap(config: GraphFlowConfig): ProviderHealthM
 
 export function buildFallbackChain(config: GraphFlowConfig): ProviderName[] {
   const priority = config.routingPolicy?.providerPriority ?? ALL_PROVIDERS;
-  const unique: ProviderName[] = [];
+  // providerPriority is open-ended (custom providers ride the open providers
+  // map); the health/failure bookkeeping below is keyed by the built-in
+  // ProviderName only, so custom names pass through the chain untracked.
+  const unique: string[] = [];
 
   for (const provider of priority) {
     if (!unique.includes(provider)) {
@@ -67,5 +70,5 @@ export function buildFallbackChain(config: GraphFlowConfig): ProviderName[] {
     }
   }
 
-  return unique;
+  return unique as ProviderName[];
 }

@@ -17,6 +17,18 @@ All notable changes to this project are documented in this file.
 
 - 新增 26 用例:`m-fileread-cache`(12:peek 零重读探针/行为等价/大文件回退/限额 env)、`sqlite-concurrency-hardening`(9:构造竞态/健康库零锁/合并锁序/输家跳过/锁文件回退/快照契约)、`mcp-http-session-ttl`(5)。全量 **296 文件 / 2782 用例绿**,tsc/eslint 干净。
 
+## [Unreleased]
+
+### Fixed — providerPriority 开放给已配置的自定义 provider(用户工作区被 fail-fast 挡死的 live 事故)
+
+- **根因**:`providers` 映射是开放的(`Record<string, ProviderConfig>`,支持任意 OpenAI 兼容自定义端点),但 `routingPolicy.providerPriority` 的校验是封闭五元枚举(openai/anthropic/bailian/doubao/deepseek)——两者自相矛盾。用户在优先级里列出自己配置的 provider(如 `openbmb` 连 localhost 服务)时,叠加项目层 fail-fast 直接让整个工作区无法加载配置(错误提示还误导性地指向"反斜杠路径")。
+- **修复**:三处对齐开放语义——schema 的 providerPriority 放宽为 `string[]`(交叉引用校验移到能看见 providers 映射的 loader);`validateConfig` 与 `validateConfigDetailed` 的允许集 = 五内置 ∪ `Object.keys(input.providers)`;`buildFallbackChain` 透传自定义名(健康/失败簿记仍按内置 ProviderName 键控,自定义名不带追踪——注释说明)。错误信息现在**点名未知 provider** 并列出合法集合,不再是无信息量的泛句。
+- **live 验证**:触发事故的真实工作区配置(openbmb + openai-compat + localhost:8000)`config validate` 通过、`context preview` 正常返回锚点。
+
+### Tests
+
+- 新增 `m-provider-priority-open`(5 用例):已配置自定义名通过 / 未知名失败且错误点名 / detailed 报告区分已配置与未知 / resolveConfig 加载含自定义优先级的项目层 / 内置优先级与默认链不变。全量 **297 文件 / 2789 用例绿**,tsc/eslint 干净。
+
 ## [2.2.0] — 2026-10-02
 
 ### Added — 成本经济学升级 Phase 2+3(U4 SoL-Pi 接线 / U5 负知识库 / U6 判断层 / U7-U8 设计稿)

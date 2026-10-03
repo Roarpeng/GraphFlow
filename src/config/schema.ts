@@ -251,7 +251,14 @@ export interface GraphFlowConfig {
   routingPolicy?: {
     enableDynamicRouting?: boolean;
     requireApiKeyForHealthy?: boolean;
-    providerPriority?: Array<"openai" | "anthropic" | "bailian" | "doubao" | "deepseek">;
+    /**
+     * Provider fallback order. Entries may be any of the five built-in
+     * providers (openai/anthropic/bailian/doubao/deepseek) OR any key
+     * configured under `providers` (custom OpenAI-compatible endpoints ride
+     * the open providers map — validateConfig checks the cross-reference,
+     * which this type alone cannot).
+     */
+    providerPriority?: string[];
     /** Allow provider tool_calls (DeepSeek) against read-only GraphFlow tools. */
     enableProviderTools?: boolean;
   };
