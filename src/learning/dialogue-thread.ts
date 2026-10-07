@@ -842,6 +842,9 @@ async function loadSession(
 }
 
 async function collectDialogueNodes(client: GraphClient): Promise<GraphNode[]> {
+  if (client.listDialogueNodes) {
+    return client.listDialogueNodes();
+  }
   const snapshot = client.readSnapshot?.();
   if (snapshot) {
     return snapshot.nodes.filter((node) => isDialogueTurnNode(node) || isDialogueSessionNode(node));
@@ -887,6 +890,12 @@ export async function listOwnedDialogueSessionIds(
 
 async function upsertUniqueEdges(client: GraphClient, edges: GraphEdge[]): Promise<void> {
   if (edges.length === 0) return;
+  // File and sqlite upserts are idempotent. Reading the snapshot only to drop
+  // duplicates forces every dialogue record to materialize the code graph.
+  if (client.edgesAreIdempotent?.() === true) {
+    await client.upsertEdges(edges);
+    return;
+  }
   const snapshot = client.readSnapshot?.();
   const existing = new Set(
     (snapshot?.edges ?? []).map((edge) => `${edge.from}|${edge.relation}|${edge.to}`)

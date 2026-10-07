@@ -6,6 +6,7 @@ import type { GraphClient } from "./client-factory";
 import { SQLITE_INDEX_MANIFEST } from "./file-indexer-cache";
 import { tokenizeForIndex, containsCJK, nodeRecallText } from "./graph-utils";
 import { requireFromOptionalDeps, resolveSqliteDepsRoot } from "../utils/optional-deps";
+import { isDialogueRecordNode } from "./dialogue-node-match";
 
 const requireFn = createRequire(__filename);
 
@@ -204,6 +205,10 @@ const SNAPSHOT_ROWS_IDLE_MS = 15_000;
 
 export class GraphifySqliteClient implements GraphClient {
   readonly indexManifestName = SQLITE_INDEX_MANIFEST;
+  /** INSERT OR IGNORE makes a repeated edge a no-op, so callers skip the snapshot pre-read. */
+  edgesAreIdempotent(): boolean {
+    return true;
+  }
   private readonly db: import("better-sqlite3").Database;
   /**
    * One preview reads the whole store many times. Raw rows are reused while
@@ -452,6 +457,25 @@ export class GraphifySqliteClient implements GraphClient {
       )
       .all(match) as NodeRow[];
     return rows.map(rowToNode);
+  }
+
+  /**
+   * Dialogue rows only. A full `readSnapshot()` pulls every code node into JS;
+   * this scan stays in SQLite and returns the thread.
+   */
+  async listDialogueNodes(): Promise<GraphNode[]> {
+    const rows = this.db
+      .prepare(
+        `SELECT id, type, content, metadata FROM nodes
+         WHERE id LIKE 'dialogue-session:%'
+            OR id LIKE 'dialogue:%'
+            OR (
+              type NOT IN ('File', 'Module', 'Symbol')
+              AND json_extract(metadata, '$.kind') IN ('dialogue-turn', 'dialogue-session')
+            )`
+      )
+      .all() as NodeRow[];
+    return rows.map(rowToNode).filter((node) => isDialogueRecordNode(node));
   }
 
   async getNodesByIds(ids: string[]): Promise<GraphNode[]> {

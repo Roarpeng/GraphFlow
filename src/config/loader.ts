@@ -92,6 +92,19 @@ export function validateConfigDetailed(path = "graphflow.config.json"): ConfigVa
         issues.push({ severity: "error", field: "graphPolicy.includeExtensions", message: "Extensions must start with '.'" });
       }
     }
+    if (parsed.graphPolicy.excludeGlobs !== undefined) {
+      const globs = parsed.graphPolicy.excludeGlobs;
+      const invalid = !Array.isArray(globs) || globs.some((rule) => typeof rule !== "string" || rule.trim() === "");
+      if (invalid) {
+        issues.push({ severity: "error", field: "graphPolicy.excludeGlobs", message: "excludeGlobs entries must be non-empty strings" });
+      }
+    }
+    if (parsed.graphPolicy.maxFileSizeBytes !== undefined) {
+      const size = parsed.graphPolicy.maxFileSizeBytes;
+      if (typeof size !== "number" || !Number.isFinite(size) || size < 1) {
+        issues.push({ severity: "error", field: "graphPolicy.maxFileSizeBytes", message: "maxFileSizeBytes must be a positive number" });
+      }
+    }
     if (parsed.graphPolicy.workspaceRoot) {
       issues.push({ severity: "warning", field: "graphPolicy.workspaceRoot", message: "workspaceRoot in config is deprecated; resolved from process.cwd() at runtime" });
     }
@@ -339,6 +352,21 @@ export function validateConfig(input: GraphFlowConfig): GraphFlowConfig {
     const invalid = input.graphPolicy.includeExtensions.some((ext) => !ext.startsWith("."));
     if (invalid) {
       throw new Error("Invalid config: graphPolicy.includeExtensions must start with '.'.");
+    }
+  }
+
+  if (input.graphPolicy.excludeGlobs !== undefined) {
+    const globs = input.graphPolicy.excludeGlobs;
+    const invalid = !Array.isArray(globs) || globs.some((rule) => typeof rule !== "string" || rule.trim() === "");
+    if (invalid) {
+      throw new Error("Invalid config: graphPolicy.excludeGlobs entries must be non-empty strings.");
+    }
+  }
+
+  if (input.graphPolicy.maxFileSizeBytes !== undefined) {
+    const size = input.graphPolicy.maxFileSizeBytes;
+    if (typeof size !== "number" || !Number.isFinite(size) || size < 1) {
+      throw new Error("Invalid config: graphPolicy.maxFileSizeBytes must be a positive number.");
     }
   }
 

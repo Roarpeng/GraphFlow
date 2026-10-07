@@ -107,6 +107,10 @@ export async function runSelfcheck(
   try {
     const pending = hasPendingGraphIndexWork(root, {
       ...(config.graphPolicy.includeExtensions ? { includeExtensions: config.graphPolicy.includeExtensions } : {}),
+      ...(config.graphPolicy.excludeGlobs?.length ? { excludeGlobs: config.graphPolicy.excludeGlobs } : {}),
+      ...(typeof config.graphPolicy.maxFileSizeBytes === "number"
+        ? { maxFileSizeBytes: config.graphPolicy.maxFileSizeBytes }
+        : {}),
       manifestName: resolveIndexManifestName(config),
     });
     items.push({

@@ -13,6 +13,11 @@ All notable changes to this project are documented in this file.
 
 - `importSkillsFromMarkdownRuntime`, `exportSkillsToMarkdownRuntime`, and `extractDialogueKnowledgeRuntime` now `close()` the graph client in `finally`. Default `auto` transport opens better-sqlite3; leaving that handle open makes a later `rmSync` of `graphflow-graph.sqlite` fail with `EBUSY` on Windows.
 
+### Fixed — large workspaces no longer have to be fully indexed, and dialogue record no longer materializes a huge file graph
+
+- `graphPolicy.excludeGlobs` and `graphPolicy.maxFileSizeBytes` are honored by workspace index, single-file index, and the pending-index check. `<workspace>/.graphflowignore` uses the same rules (`name/` at any depth, anchored `path/to/dir/`, basename globs, path globs). Negation and nested ignore files are not supported. Markdown stays on the 200KB source cap; the 5MB document cap applies to office/PDF only.
+- `dialogue record` on a file store larger than 512MB streams just the dialogue nodes and appends a delta line. It does not `JSON.parse` the code graph. SQLite `listDialogueNodes()` returns the same rows with a SQL filter instead of `readSnapshot()`.
+
 ## [Unreleased]
 
 ### Fixed — 第 0 步性能与健壮性(迁移 Rust 前的架构债清偿,复审登记项全闭环)

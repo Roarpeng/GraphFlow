@@ -10,6 +10,7 @@ import { GraphifySqliteClient } from "./sqlite-client";
 import { mergeSiblingJsonStoreIntoSqlite } from "./store-migration";
 import { CACHE_FILE, SQLITE_INDEX_MANIFEST } from "./file-indexer-cache";
 import { existsSync } from "node:fs";
+import { isDialogueRecordNode } from "./dialogue-node-match";
 
 export interface GraphStoreSnapshot {
   nodes: GraphNode[];
@@ -33,6 +34,16 @@ export interface GraphClient {
   upsertGraph?(batch: { nodes?: GraphNode[]; edges?: GraphEdge[] }): Promise<void>;
   queryByKeyword(query: string): Promise<GraphNode[]>;
   readSnapshot?(): GraphStoreSnapshot;
+  /**
+   * Dialogue turns and sessions without materializing the rest of the graph.
+   * Backends that cannot project fall back to `readSnapshot` at the call site.
+   */
+  listDialogueNodes?(): Promise<GraphNode[]>;
+  /**
+   * When true, `upsertEdges` is idempotent and callers must not `readSnapshot`
+   * solely to drop duplicate edges (that read is the large-graph OOM).
+   */
+  edgesAreIdempotent?(): boolean;
   getNodesByIds?(ids: string[]): Promise<GraphNode[]>;
   getNeighbors?(
     nodeIds: string[],
@@ -113,6 +124,10 @@ class MutationAwareGraphClient implements GraphClient {
     return this.inner.indexManifestName;
   }
 
+  edgesAreIdempotent(): boolean {
+    return this.inner.edgesAreIdempotent?.() === true;
+  }
+
   async upsertNodes(nodes: GraphNode[]): Promise<void> {
     await this.inner.upsertNodes(nodes);
     markGraphMutated(nodes.map((n) => n.id));
@@ -148,6 +163,11 @@ class MutationAwareGraphClient implements GraphClient {
 
   async queryByKeyword(query: string): Promise<GraphNode[]> {
     return this.inner.queryByKeyword(query);
+  }
+
+  async listDialogueNodes(): Promise<GraphNode[]> {
+    if (this.inner.listDialogueNodes) return this.inner.listDialogueNodes();
+    return this.readSnapshot().nodes.filter((node) => isDialogueRecordNode(node));
   }
 
   readSnapshot(): GraphStoreSnapshot {

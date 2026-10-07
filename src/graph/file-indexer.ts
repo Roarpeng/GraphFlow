@@ -44,6 +44,7 @@ export { resolveCallerAtLine } from "./file-indexer-nodes.js";
 
 // ── Internal imports ─────────────────────────────────────────────────
 import { DEFAULT_EXTENSIONS, DEFAULT_MAX_FILE_SIZE, normalizePath, extOf, walkScannableFiles } from "./file-indexer-walker.js";
+import { loadWorkspaceIgnore } from "./workspace-ignore.js";
 import type { FileIndexerOptions } from "./file-indexer-walker.js";
 import { indexManifestPath, loadCacheState, saveCacheState } from "./file-indexer-cache.js";
 import type {
@@ -262,6 +263,7 @@ export async function indexWorkspaceFiles(
 
   const scanned = walkScannableFiles(rootDir, includeExtensions, maxFileSizeBytes, {
     ...(options?.respectGitIgnore === false ? { respectGitIgnore: false } : {}),
+    ...(options?.excludeGlobs?.length ? { excludeGlobs: options.excludeGlobs } : {}),
   });
   const currentRelPaths = new Set(scanned.map((file) => file.relPath));
 
@@ -470,6 +472,7 @@ export async function indexSingleFile(
     FileIndexerOptions,
     | "includeExtensions"
     | "maxFileSizeBytes"
+    | "excludeGlobs"
     | "embeddingProvider"
     | "referenceEdgeMaxDefinitionFiles"
     | "referenceEdgeMaxPerFile"
@@ -507,6 +510,21 @@ export async function indexSingleFile(
     };
   }
 
+  const relPath = normalizePath(relative(rootDir, absPath));
+  const ignore = loadWorkspaceIgnore(
+    rootDir,
+    options?.excludeGlobs && options.excludeGlobs.length > 0 ? { excludeGlobs: options.excludeGlobs } : undefined
+  );
+  if (ignore?.(relPath, false)) {
+    return {
+      indexedFiles: 0,
+      indexedSymbols: 0,
+      indexedReferences: 0,
+      skipped: true,
+      reason: "excluded by .graphflowignore or graphPolicy.excludeGlobs",
+    };
+  }
+
   const officeDoc = isOfficeDocumentPath(absPath);
   const sizeLimit = officeDoc
     ? Math.max(maxFileSizeBytes, DEFAULT_DOCUMENT_MAX_FILE_SIZE)
@@ -528,7 +546,6 @@ export async function indexSingleFile(
     return { indexedFiles: 0, indexedSymbols: 0, indexedReferences: 0, skipped: true, reason: "file exceeds maxFileSizeBytes" };
   }
 
-  const relPath = normalizePath(relative(rootDir, absPath));
   const mtimeMs = stat.mtimeMs;
   let content = "";
   let currentHash = "";

@@ -22,6 +22,17 @@ export interface ChunkedGraphStore {
   edges: unknown[];
 }
 
+export interface ChunkedGraphStoreReadOptions {
+  /**
+   * Drop nodes for which this returns false. The element string is parsed
+   * and then discarded, so a projection (dialogue records, a handful of ids)
+   * does not retain the rest of the graph.
+   */
+  keepNode?: (node: unknown) => boolean;
+  /** Scan the edges array without retaining it. */
+  skipEdges?: boolean;
+}
+
 /** Flush the accumulated element buffer at this size while scanning. */
 const DEFAULT_CHUNK_BYTES = 8 * 1024 * 1024;
 
@@ -32,7 +43,10 @@ class GraphStoreChunkParser {
   private buffer = "";
   private index = 0;
 
-  constructor(private readonly pull: () => string | null) {}
+  constructor(
+    private readonly pull: () => string | null,
+    private readonly options: ChunkedGraphStoreReadOptions = {}
+  ) {}
 
   private fill(): boolean {
     if (this.index > 0) {
@@ -135,7 +149,7 @@ class GraphStoreChunkParser {
     }
   }
 
-  private readElements(target: unknown[]): void {
+  private readElements(target: unknown[] | null, keep?: (node: unknown) => boolean): void {
     while (true) {
       this.skipWhitespace();
       const ch = this.peek();
@@ -156,7 +170,10 @@ class GraphStoreChunkParser {
       if (!complete) {
         throw new Error("Truncated graph store: incomplete element");
       }
-      target.push(JSON.parse(text));
+      if (target === null) continue;
+      const parsed: unknown = JSON.parse(text);
+      if (keep && !keep(parsed)) continue;
+      target.push(parsed);
     }
   }
 
@@ -195,7 +212,11 @@ class GraphStoreChunkParser {
           throw new Error(`Truncated graph store: expected an array for "${name}"`);
         }
         this.index += 1;
-        this.readElements(name === "nodes" ? store.nodes : store.edges);
+        const discard = name === "edges" && this.options.skipEdges === true;
+        this.readElements(
+          discard ? null : name === "nodes" ? store.nodes : store.edges,
+          name === "nodes" ? this.options.keepNode : undefined
+        );
         continue;
       }
       const { complete } = this.readValue();
@@ -209,14 +230,17 @@ class GraphStoreChunkParser {
 }
 
 /** Parse a graph store document from a sequence of text chunks. */
-export function readGraphStoreFromChunks(pull: () => string | null): ChunkedGraphStore {
-  return new GraphStoreChunkParser(pull).parse();
+export function readGraphStoreFromChunks(
+  pull: () => string | null,
+  options: ChunkedGraphStoreReadOptions = {}
+): ChunkedGraphStore {
+  return new GraphStoreChunkParser(pull, options).parse();
 }
 
 /** Read a graph store file in bounded chunks (used above the single-string cap). */
 export function readGraphStoreFileChunked(
   filePath: string,
-  options: { chunkBytes?: number } = {}
+  options: { chunkBytes?: number } & ChunkedGraphStoreReadOptions = {}
 ): ChunkedGraphStore {
   const chunkBytes = Math.max(64 * 1024, options.chunkBytes ?? DEFAULT_CHUNK_BYTES);
   const fd = openSync(filePath, "r");
@@ -228,7 +252,7 @@ export function readGraphStoreFileChunked(
     return readGraphStoreFromChunks(() => {
       const read = readSync(fd, buffer, 0, chunkBytes, null);
       return read > 0 ? decoder.write(buffer.subarray(0, read)) : null;
-    });
+    }, options);
   } finally {
     closeSync(fd);
   }
