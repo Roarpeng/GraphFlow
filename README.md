@@ -54,6 +54,49 @@ Results are commit-anchored so any number above can be checked out and re-run. S
 
 Shared and synced memory is only useful if it cannot be silently corrupted. Skills merged from external sources (e.g. `skill sync` imports) are **treated as unproven until validated locally**: imported skills carry provenance markers, never enter the `proven` class directly, must pass canary validation on real tasks before promotion, and `anti-pattern` skills are isolated rather than deleted so they can be audited. Promotion is gated by the four-class lifecycle, not by trust in the source. See [docs/team-memory-security.md](docs/team-memory-security.md).
 
+## Install
+
+Three paths. Use one. Package name: `@roarpeng/graphflow`.
+
+### Manual VSIX
+
+Download `graphflow-<version>.vsix` from [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases) (Open VSX id `roarpeng.graphflow`). Replace `<version>` with the file you downloaded.
+
+```bash
+code --install-extension graphflow-<version>.vsix
+cursor --install-extension graphflow-<version>.vsix
+```
+
+Activation registers MCP and copies the runtime to `~/.graphflow/runtime/`. From this repo, `npm run package:extension` writes `artifacts/graphflow-<version>.vsix` (`vscode-extension` runs `npx @vscode/vsce package --no-dependencies`).
+
+### npm
+
+```bash
+npm install -g @roarpeng/graphflow
+```
+
+A global install's postinstall runs `graphflow install`: MCP, skill, and the instruction block on every detected host, plus dangling-entry repair. Check or repeat it with:
+
+```bash
+npx @roarpeng/graphflow@latest doctor
+npx @roarpeng/graphflow@latest install
+npx @roarpeng/graphflow install --host cursor
+```
+
+`install` leaves undetected hosts untouched. `--host` takes a registry id (`cursor`, `claude-code`, `codex`, …).
+
+### Agent prompt
+
+Paste this to Cursor, Claude Code, Codex, or another coding agent. It only uses the installer above:
+
+```text
+Install @roarpeng/graphflow and configure its MCP server for this agent, then verify it.
+
+1. Run `npm install -g @roarpeng/graphflow`. The global postinstall runs `graphflow install`, which registers MCP, the skill, and the instruction block for every host it detects and repairs dangling entries.
+2. Run `npx @roarpeng/graphflow doctor --json`. If this host is missing, run `npx @roarpeng/graphflow install --host <id>` with the id from that report (`cursor`, `claude-code`, or `codex`) and run doctor again.
+3. It is working when doctor reports ok and this host is not missing. Restart the agent or open a new session so it loads the MCP config.
+```
+
 ## Quick start
 
 No API key needed (offline AST indexing + graph compression):
