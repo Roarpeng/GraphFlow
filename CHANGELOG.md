@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — production `npm audit --omit=dev` (GHSA-6qxp-vccf-f47h, GHSA-jqcg-44mw-7w3h)
+
+- Direct `@modelcontextprotocol/sdk` (root and `packages/efficiency-agent`) moved from `^1.30.0` to `^1.32.1`. The advisory range was `<1.31.0` (OAuth client could send credentials to an authorization server chosen by the MCP server).
+- `overrides.proxy-addr` is `^2.0.8`. express still declares `^2.0.7`, which resolved to the vulnerable `2.0.7` (IPv4-mapped IPv6 trust spoofing).
+
+## [Unreleased]
+
 ### Fixed — 第 0 步性能与健壮性(迁移 Rust 前的架构债清偿,复审登记项全闭环)
 
 - **file 传输读路径共享缓存(P2-8)**:`GraphifyFileClient.peekStore()` 静态共享读入口(走进程内 `graphifyFileStoreCache`,stat 校验+delta 已应用,不开句柄不写);`graphStoreNeedsIndexing` 与 `readFileGraphStore`/`resolveGraphStoreAfterIndex` 不再各自 readFileSync+JSON.parse 整个 9.5MB store——每 preview 省 2 次全量读+解析。消费方 mutation 全审计(全只读),peek 结果仍做浅拷贝防御未来调用方。
