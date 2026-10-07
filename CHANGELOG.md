@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — skill markdown graph clients stay open (Windows sqlite EBUSY)
+
+- `importSkillsFromMarkdownRuntime`, `exportSkillsToMarkdownRuntime`, and `extractDialogueKnowledgeRuntime` now `close()` the graph client in `finally`. Default `auto` transport opens better-sqlite3; leaving that handle open makes a later `rmSync` of `graphflow-graph.sqlite` fail with `EBUSY` on Windows.
+
+## [Unreleased]
+
 ### Fixed — 第 0 步性能与健壮性(迁移 Rust 前的架构债清偿,复审登记项全闭环)
 
 - **file 传输读路径共享缓存(P2-8)**:`GraphifyFileClient.peekStore()` 静态共享读入口(走进程内 `graphifyFileStoreCache`,stat 校验+delta 已应用,不开句柄不写);`graphStoreNeedsIndexing` 与 `readFileGraphStore`/`resolveGraphStoreAfterIndex` 不再各自 readFileSync+JSON.parse 整个 9.5MB store——每 preview 省 2 次全量读+解析。消费方 mutation 全审计(全只读),peek 结果仍做浅拷贝防御未来调用方。
