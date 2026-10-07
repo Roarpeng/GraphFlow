@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — production `npm audit --omit=dev` (GHSA-6qxp-vccf-f47h, GHSA-jqcg-44mw-7w3h)
+
+- Direct `@modelcontextprotocol/sdk` (root and `packages/efficiency-agent`) moved from `^1.30.0` to `^1.32.1`. The advisory range was `<1.31.0` (OAuth client could send credentials to an authorization server chosen by the MCP server).
+- `overrides.proxy-addr` is `^2.0.8`. express still declares `^2.0.7`, which resolved to the vulnerable `2.0.7` (IPv4-mapped IPv6 trust spoofing).
+
 ### Fixed — skill markdown graph clients stay open (Windows sqlite EBUSY)
 
 - `importSkillsFromMarkdownRuntime`, `exportSkillsToMarkdownRuntime`, and `extractDialogueKnowledgeRuntime` now `close()` the graph client in `finally`. Default `auto` transport opens better-sqlite3; leaving that handle open makes a later `rmSync` of `graphflow-graph.sqlite` fail with `EBUSY` on Windows.

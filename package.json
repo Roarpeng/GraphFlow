@@ -166,7 +166,7 @@
     "vitest": "^3.2.6"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "gpt-tokenizer": "^3.4.0",
@@ -185,9 +185,10 @@
     "body-parser": "^2.3.0",
     "fast-uri": "^3.1.7",
     "ip-address": "^10.7.2",
-    "qs": "^6.16.0"
+    "qs": "^6.16.0",
+    "proxy-addr": "^2.0.8"
   },
-  "overridesComment": "Pinned past advisories in transitive deps. Six were non-breaking and lifted npm audit to zero: hono (cross-request data disclosure / ReDoS / SSRF-adjacent parser issues), @hono/node-server (Windows path traversal via encoded backslash), body-parser (DoS when an invalid limit silently disables size enforcement), fast-uri (host confusion and SSRF), ip-address (SSRF via octet and IPv6 misclassification), qs (array-limit bypass, DoS). The only remaining route was @huggingface/transformers 3.x -> 4.3.0, which pulls sharp 0.35.5 and clears the libvips/libheif CVEs; verified against the exact API surface used in src/learning/embeddings.ts (pipeline, env.cacheDir, env.remoteHost).",
+  "overridesComment": "Pinned past advisories in transitive deps. Six were non-breaking and lifted an earlier npm audit to zero: hono (cross-request data disclosure / ReDoS / SSRF-adjacent parser issues), @hono/node-server (Windows path traversal via encoded backslash), body-parser (DoS when an invalid limit silently disables size enforcement), fast-uri (host confusion and SSRF), ip-address (SSRF via octet and IPv6 misclassification), qs (array-limit bypass, DoS). @huggingface/transformers 4.3.0 pulls sharp 0.35.5 and clears the libvips/libheif CVEs; verified against the exact API surface used in src/learning/embeddings.ts (pipeline, env.cacheDir, env.remoteHost). proxy-addr ^2.0.8 clears GHSA-jqcg-44mw-7w3h (IPv4-mapped IPv6 trust spoofing) inside express, which still accepts ^2.0.7. @modelcontextprotocol/sdk is a direct dependency pinned to ^1.32.1 (advisory range was <1.31.0, GHSA-6qxp-vccf-f47h).",
   "disclosure": {
     "cloud": true,
     "network": [
