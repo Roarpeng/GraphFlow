@@ -13,6 +13,21 @@ describe("security-audit script", () => {
     }
   });
 
+  it("pins the production advisories that npm audit --omit=dev currently reports", () => {
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+      overrides: Record<string, string>;
+    };
+    const agent = JSON.parse(
+      readFileSync(join(process.cwd(), "packages/efficiency-agent/package.json"), "utf8")
+    ) as { dependencies: Record<string, string> };
+    // GHSA-6qxp-vccf-f47h: @modelcontextprotocol/sdk <1.31.0
+    expect(pkg.dependencies["@modelcontextprotocol/sdk"]).toBe("^1.32.1");
+    expect(agent.dependencies["@modelcontextprotocol/sdk"]).toBe("^1.32.1");
+    // GHSA-jqcg-44mw-7w3h: proxy-addr <2.0.8, still allowed by express's ^2.0.7
+    expect(pkg.overrides["proxy-addr"]).toBe("^2.0.8");
+  });
+
   it("imports join from node:path so the scheduled audit can start", () => {
     const src = readFileSync(join(process.cwd(), "scripts/security-audit.cjs"), "utf8");
     expect(src).toMatch(/require\(["']node:path["']\)/);
