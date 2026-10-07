@@ -12,6 +12,49 @@ GraphFlow 把 **记忆 + hooks + skills** 做成可移植的 MCP 表面（Cursor
 
 **一条命令安装承诺**：`npm i -g @roarpeng/graphflow` = 安装 + 注册 + 检测 + 修复；VSIX 激活同样自动完成注册，并把运行时同步到稳定目录 `~/.graphflow/runtime/`，MCP 条目指向稳定路径——IDE 升级删旧扩展目录不再导致悬空。两种安装方式都是装完即用，三平台一致。
 
+## 安装
+
+三条路径，选一条。包名：`@roarpeng/graphflow`。
+
+### 手动安装 VSIX
+
+从 [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases) 下载 `graphflow-<version>.vsix`（Open VSX 标识 `roarpeng.graphflow`）。把 `<version>` 换成所下载文件的版本。
+
+```bash
+code --install-extension graphflow-<version>.vsix
+cursor --install-extension graphflow-<version>.vsix
+```
+
+激活时扩展会注册 MCP，并把运行时复制到 `~/.graphflow/runtime/`。在本仓库执行 `npm run package:extension` 会生成 `artifacts/graphflow-<version>.vsix`（`vscode-extension` 里实际运行 `npx @vscode/vsce package --no-dependencies`）。
+
+### npm
+
+```bash
+npm install -g @roarpeng/graphflow
+```
+
+全局安装的 postinstall 会执行 `graphflow install`：向每个检测到的宿主注册 MCP、Skill 和指令块，并修复悬空条目。检查或重跑：
+
+```bash
+npx @roarpeng/graphflow@latest doctor
+npx @roarpeng/graphflow@latest install
+npx @roarpeng/graphflow install --host cursor
+```
+
+`install` 不会改写未检测到的宿主。`--host` 接受注册表 id（`cursor`、`claude-code`、`codex` 等）。
+
+### 交给编程 Agent 的提示词
+
+把下面这段贴给 Cursor、Claude Code、Codex 或其他编程 Agent。它只用上面的安装器：
+
+```text
+Install @roarpeng/graphflow and configure its MCP server for this agent, then verify it.
+
+1. Run `npm install -g @roarpeng/graphflow`. The global postinstall runs `graphflow install`, which registers MCP, the skill, and the instruction block for every host it detects and repairs dangling entries.
+2. Run `npx @roarpeng/graphflow doctor --json`. If this host is missing, run `npx @roarpeng/graphflow install --host <id>` with the id from that report (`cursor`, `claude-code`, or `codex`) and run doctor again.
+3. It is working when doctor reports ok and this host is not missing. Restart the agent or open a new session so it loads the MCP config.
+```
+
 ## 快速开始
 
 ```bash
