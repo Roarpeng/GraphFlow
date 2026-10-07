@@ -31,6 +31,17 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * JSON mode holds no SSE stream, so the sweeper treats the gap between
+ * handshake POSTs as idle (`openStreams` stays empty; each request only
+ * refreshes `lastActivityAt` when it arrives). 80ms was shorter than that
+ * gap on a loaded Node 20 runner, and the session was deleted inside
+ * `client.connect`. This override stays far below the 30-minute product
+ * default; after the handshake the test waits past it with no further requests.
+ */
+const HANDSHAKE_SAFE_TTL_MS = 3_000;
+const SWEEP_INTERVAL_MS = 200;
+
+/**
  * Opens one stateful session and abandons it WITHOUT the terminating DELETE
  * (client.close() only aborts local streams in the SDK) — the exact leak the
  * idle TTL addresses.
@@ -70,21 +81,21 @@ describe("HTTP stateful session idle TTL", () => {
       port: 0,
       stateful: true,
       enableJsonResponse: true,
-      sessionTtlMs: 80,
-      sessionSweepIntervalMs: 25,
+      sessionTtlMs: HANDSHAKE_SAFE_TTL_MS,
+      sessionSweepIntervalMs: SWEEP_INTERVAL_MS,
     });
     try {
       const sessionId = await openAbandonedSession(started);
       // Silent wait (polling would REFRESH lastActivityAt and defeat the
-      // sweep by design); one probe at 1s and a final one at 3s give the
-      // TTL-80ms + sweep-25ms machinery a 30x+ margin under full-suite load.
+      // sweep by design). The clock starts at the last handshake request,
+      // so this must land after HANDSHAKE_SAFE_TTL_MS plus a few sweeps.
       const probe = () =>
         postJson(
           started.url,
           { jsonrpc: "2.0", id: "after-ttl", method: "ping" },
           { "Mcp-Session-Id": sessionId }
         );
-      await sleep(1_000);
+      await sleep(HANDSHAKE_SAFE_TTL_MS + SWEEP_INTERVAL_MS * 4);
       let stale = await probe();
       if (stale.status !== 404) {
         await sleep(2_000);
@@ -96,7 +107,7 @@ describe("HTTP stateful session idle TTL", () => {
     } finally {
       await started.close();
     }
-  }, 15_000);
+  }, 20_000);
 
   it("keeps sweeping sessions alive while requests keep arriving (activity refresh)", async () => {
     const started = await startStreamableHttpServer(undefined, {
@@ -165,7 +176,7 @@ describe("HTTP stateful session idle TTL", () => {
 
   it("GRAPHFLOW_HTTP_SESSION_TTL_MS env overrides the default TTL", async () => {
     const previous = process.env.GRAPHFLOW_HTTP_SESSION_TTL_MS;
-    process.env.GRAPHFLOW_HTTP_SESSION_TTL_MS = "80";
+    process.env.GRAPHFLOW_HTTP_SESSION_TTL_MS = String(HANDSHAKE_SAFE_TTL_MS);
     let started: StartedMcpHttpServer | undefined;
     try {
       started = await startStreamableHttpServer(undefined, {
@@ -173,11 +184,13 @@ describe("HTTP stateful session idle TTL", () => {
         port: 0,
         stateful: true,
         enableJsonResponse: true,
-        sessionSweepIntervalMs: 25,
+        sessionSweepIntervalMs: SWEEP_INTERVAL_MS,
       });
       const sessionId = await openAbandonedSession(started);
       // Silent wait then two probes (polling refreshes activity by design).
-      await sleep(1_000);
+      // Same handshake margin as the explicit sessionTtlMs case: the env
+      // value is the idle TTL, and it must not fire between connect's POSTs.
+      await sleep(HANDSHAKE_SAFE_TTL_MS + SWEEP_INTERVAL_MS * 4);
       const probe = () =>
         postJson(
           started.url,
@@ -198,5 +211,5 @@ describe("HTTP stateful session idle TTL", () => {
       }
       await started?.close();
     }
-  }, 15_000);
+  }, 20_000);
 });
