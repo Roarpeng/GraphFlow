@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — production `npm audit --omit=dev` (GHSA-6qxp-vccf-f47h, GHSA-jqcg-44mw-7w3h)
+
+- Direct `@modelcontextprotocol/sdk` (root and `packages/efficiency-agent`) moved from `^1.30.0` to `^1.32.1`. The advisory range was `<1.31.0` (OAuth client could send credentials to an authorization server chosen by the MCP server).
+- `overrides.proxy-addr` is `^2.0.8`. express still declares `^2.0.7`, which resolved to the vulnerable `2.0.7` (IPv4-mapped IPv6 trust spoofing).
+
 ### Fixed — large workspaces no longer have to be fully indexed, and dialogue record no longer materializes a huge file graph
 
 - `graphPolicy.excludeGlobs` and `graphPolicy.maxFileSizeBytes` are honored by workspace index, single-file index, and the pending-index check. `<workspace>/.graphflowignore` uses the same rules (`name/` at any depth, anchored `path/to/dir/`, basename globs, path globs). Negation and nested ignore files are not supported. Markdown stays on the 200KB source cap; the 5MB document cap applies to office/PDF only.
