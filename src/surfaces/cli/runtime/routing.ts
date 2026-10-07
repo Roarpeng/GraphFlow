@@ -181,9 +181,13 @@ export async function runTaskResult(
     const graphClient = createGraphClient(config);
     if (config.graphPolicy.autoIndexOnRun) {
       const root = config.graphPolicy.workspaceRoot ?? process.cwd();
-      const indexOptions = config.graphPolicy.includeExtensions
-        ? { includeExtensions: config.graphPolicy.includeExtensions }
-        : undefined;
+      const indexOptions = {
+        ...(config.graphPolicy.includeExtensions ? { includeExtensions: config.graphPolicy.includeExtensions } : {}),
+        ...(config.graphPolicy.excludeGlobs?.length ? { excludeGlobs: config.graphPolicy.excludeGlobs } : {}),
+        ...(typeof config.graphPolicy.maxFileSizeBytes === "number"
+          ? { maxFileSizeBytes: config.graphPolicy.maxFileSizeBytes }
+          : {}),
+      };
       const storeIncomplete = indexedStoreIsIncomplete(
         root,
         graphClient.indexManifestName,

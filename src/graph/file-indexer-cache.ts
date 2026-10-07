@@ -160,7 +160,7 @@ export function hasPendingGraphIndexWork(
   rootDir: string,
   options?: Pick<
     FileIndexerOptions,
-    "includeExtensions" | "maxFileSizeBytes" | "forceReindex" | "respectGitIgnore"
+    "includeExtensions" | "maxFileSizeBytes" | "forceReindex" | "respectGitIgnore" | "excludeGlobs"
   > & { manifestName?: string | undefined }
 ): boolean {
   const includeExtensions = options?.includeExtensions ?? DEFAULT_EXTENSIONS;
@@ -173,6 +173,7 @@ export function hasPendingGraphIndexWork(
   const cacheState = loadCacheStateCached(indexManifestPath(rootDir, options?.manifestName));
   const scanned = walkScannableFiles(rootDir, includeExtensions, maxFileSizeBytes, {
     ...(options?.respectGitIgnore === false ? { respectGitIgnore: false } : {}),
+    ...(options?.excludeGlobs?.length ? { excludeGlobs: options.excludeGlobs } : {}),
   });
   const currentRelPaths = new Set(scanned.map((file) => file.relPath));
 

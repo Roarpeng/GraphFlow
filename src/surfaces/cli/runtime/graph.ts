@@ -356,6 +356,8 @@ function buildContextPressureBlock(params: {
  */
 function buildIndexOptions(config: GraphFlowConfig): {
   includeExtensions?: string[];
+  excludeGlobs?: string[];
+  maxFileSizeBytes?: number;
   respectGitIgnore?: boolean;
   referenceEdgeMaxDefinitionFiles?: number;
   referenceEdgeMaxPerFile?: number;
@@ -366,6 +368,8 @@ function buildIndexOptions(config: GraphFlowConfig): {
   const embeddingProvider = createEmbeddingProviderFromConfig(config);
   return {
     ...(graphPolicy.includeExtensions ? { includeExtensions: graphPolicy.includeExtensions } : {}),
+    ...(graphPolicy.excludeGlobs?.length ? { excludeGlobs: graphPolicy.excludeGlobs } : {}),
+    ...(typeof graphPolicy.maxFileSizeBytes === "number" ? { maxFileSizeBytes: graphPolicy.maxFileSizeBytes } : {}),
     ...(graphPolicy.respectGitIgnore === false ? { respectGitIgnore: false } : {}),
     ...(typeof graphPolicy.referenceEdgeMaxDefinitionFiles === "number"
       ? { referenceEdgeMaxDefinitionFiles: graphPolicy.referenceEdgeMaxDefinitionFiles }

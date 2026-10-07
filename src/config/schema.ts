@@ -170,6 +170,18 @@ export interface GraphFlowConfig {
     workspaceRoot?: string;
     includeExtensions?: string[];
     /**
+     * Workspace-relative paths and globs the indexer must skip, unioned with
+     * `<workspace>/.graphflowignore`. Syntax: `name/` (any directory of that
+     * name), `path/to/dir/` (anchored), `*.ext` (basename), path globs where
+     * `*` does not cross `/` and a double-star does. No gitignore negation.
+     */
+    excludeGlobs?: string[];
+    /**
+     * Skip source files larger than this many bytes. Office/PDF conversion
+     * still uses its own higher cap. Default 200_000.
+     */
+    maxFileSizeBytes?: number;
+    /**
      * Skip files git ignores when indexing (exact semantics via `git ls-files
      * --exclude-standard`). Default true; ignored outside git checkouts.
      */

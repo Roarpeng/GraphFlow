@@ -15,6 +15,7 @@ import {
   OFFICE_DOCUMENT_EXTENSIONS,
 } from "./document-convert.js";
 import { safeReaddirSync, safeStatSync } from "../utils/safe-fs.js";
+import { loadWorkspaceIgnore } from "./workspace-ignore.js";
 
 import type { EmbeddingProvider } from "../learning/embeddings.js";
 
@@ -53,6 +54,11 @@ export interface FileIndexerOptions {
    * the machine's cores. `GRAPHFLOW_INDEX_WORKERS=0` disables it globally.
    */
   indexWorkers?: number;
+  /**
+   * Extra exclude rules, same syntax as `<workspace>/.graphflowignore`.
+   * The ignore file is always loaded; these rules are unioned with it.
+   */
+  excludeGlobs?: string[];
 }
 
 export interface ScannedFile {
@@ -189,7 +195,7 @@ export function walkScannableFiles(
   rootDir: string,
   includeExtensions: string[],
   maxFileSizeBytes: number,
-  options: { respectGitIgnore?: boolean } = {}
+  options: { respectGitIgnore?: boolean; excludeGlobs?: string[] } = {}
 ): ScannedFile[] {
   const files = walkFiles(rootDir, includeExtensions, options);
   const scanned: ScannedFile[] = [];
@@ -225,11 +231,15 @@ export function walkScannableFiles(
 export function walkFiles(
   rootDir: string,
   includeExtensions: string[],
-  options: { respectGitIgnore?: boolean } = {}
+  options: { respectGitIgnore?: boolean; excludeGlobs?: string[] } = {}
 ): string[] {
   const files: string[] = [];
   const dirStack: string[] = [rootDir];
   const gitVisible = options.respectGitIgnore === false ? undefined : readGitVisibleFiles(rootDir);
+  const ignore = loadWorkspaceIgnore(
+    rootDir,
+    options.excludeGlobs && options.excludeGlobs.length > 0 ? { excludeGlobs: options.excludeGlobs } : undefined
+  );
 
   while (dirStack.length > 0) {
     const current = dirStack.pop()!;
@@ -243,6 +253,10 @@ export function walkFiles(
 
       if (entry.isDirectory()) {
         if (IGNORED_DIRS.has(entry.name)) {
+          continue;
+        }
+        const relDir = normalizePath(relative(rootDir, full));
+        if (ignore?.(relDir, true)) {
           continue;
         }
         // A directory holding only ignored/untracked files cannot contribute.
@@ -259,7 +273,11 @@ export function walkFiles(
       if (isGeneratedOrLockFile(entry.name)) {
         continue;
       }
-      if (gitVisible && !gitVisible.has(normalizePath(relative(rootDir, full)))) {
+      const relFile = normalizePath(relative(rootDir, full));
+      if (ignore?.(relFile, false)) {
+        continue;
+      }
+      if (gitVisible && !gitVisible.has(relFile)) {
         continue;
       }
       files.push(full);

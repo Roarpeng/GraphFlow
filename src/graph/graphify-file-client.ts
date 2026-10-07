@@ -17,6 +17,7 @@ import type { GraphEdge, GraphNode } from "../core/types";
 import { logger } from "../utils/logger";
 import { tokenizeForIndex, nodeSearchableText, nodeRecallText } from "./graph-utils";
 import { readGraphStoreFileChunked } from "./graph-store-json-chunks";
+import { isDialogueRecordNode } from "./dialogue-node-match";
 
 interface GraphStore {
   nodes: GraphNode[];
@@ -238,13 +239,29 @@ const GRAPH_STORE_WRITE_CHUNK_BYTES = 4 * 1024 * 1024;
  */
 export const GRAPH_STORE_MAX_READ_BYTES = 512 * 1024 * 1024;
 
+/**
+ * Stores larger than this are not materialized for a small read or write
+ * (dialogue record, id lookup). Default equals the single-string cap: below
+ * it, `JSON.parse` of the whole file is the historical path. Tests lower it.
+ */
+let hugeStoreMinBytes = GRAPH_STORE_MAX_READ_BYTES;
+
+/** Small batches on a huge store append a delta line instead of rewriting the base. */
+export const GRAPH_STORE_BLIND_DELTA_MAX_ELEMENTS = 256;
+
+/** Test hook: treat stores larger than `bytes` as too big to materialize. */
+export function setGraphStoreHugeReadBytesForTests(bytes?: number): void {
+  hugeStoreMinBytes = bytes ?? GRAPH_STORE_MAX_READ_BYTES;
+}
+
 /** Actionable error for a store too large to read as one string (shared). */
 export function graphStoreTooLargeError(storePath: string, sizeBytes: number): Error {
   const sizeMb = Math.round(sizeBytes / (1024 * 1024));
   const limitMb = Math.round(GRAPH_STORE_MAX_READ_BYTES / (1024 * 1024));
   return new Error(
     `Graph store is too large to read (${sizeMb} MB at ${storePath}, limit ${limitMb} MB). ` +
-      "Remove the file and run a rebuild, or narrow graphPolicy.includeExtensions."
+      "Remove the file and run a rebuild, or narrow what gets indexed " +
+      "(graphPolicy.excludeGlobs, graphPolicy.includeExtensions, or a .graphflowignore file)."
   );
 }
 
@@ -492,7 +509,55 @@ function readStoreCacheEntry(storePath: string): StoreCacheEntry {
   return entry;
 }
 
+function asGraphNode(value: unknown): GraphNode | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const node = value as GraphNode;
+  if (typeof node.id !== "string" || typeof node.type !== "string" || typeof node.content !== "string") {
+    return undefined;
+  }
+  return node;
+}
+
+/** Apply delta upserts/deletes onto an already-projected node list. */
+function overlayDeltaNodes(
+  nodes: GraphNode[],
+  deltaPath: string,
+  deltaStat: FileStat | null,
+  keep: (node: GraphNode) => boolean
+): GraphNode[] {
+  if (deltaStat === null || deltaStat.size === 0) return nodes;
+  let contents: string;
+  try {
+    contents = readFileSync(deltaPath, "utf8");
+  } catch {
+    return nodes;
+  }
+  const map = new Map(nodes.map((node) => [node.id, node]));
+  for (const line of contents.split("\n")) {
+    if (!line.trim()) continue;
+    let op: DeltaOp;
+    try {
+      op = JSON.parse(line) as DeltaOp;
+    } catch {
+      continue;
+    }
+    if (op.op === "upsert") {
+      for (const node of op.nodes ?? []) {
+        if (keep(node)) map.set(node.id, node);
+      }
+    } else if (op.op === "delete") {
+      for (const id of op.nodeIds ?? []) map.delete(id);
+    }
+  }
+  return Array.from(map.values());
+}
+
 export class GraphifyFileClient {
+  /** Edge upserts dedupe on apply / in upsertGraph, so callers need not readSnapshot first. */
+  edgesAreIdempotent(): boolean {
+    return true;
+  }
+
   constructor(
     private readonly storePath: string,
     private readonly options: {
@@ -501,6 +566,51 @@ export class GraphifyFileClient {
       deltaMinBaseBytes?: number;
     } = {}
   ) {}
+
+  private storeAbsPath(): string {
+    return resolve(this.storePath);
+  }
+
+  /** True when the base file is over the materialization cap and not already cached. */
+  private isHugeUncached(): boolean {
+    const absPath = this.storeAbsPath();
+    const current = statIfExists(absPath);
+    if (current === null || current.size <= hugeStoreMinBytes) return false;
+    const cached = graphifyFileStoreCache.get(absPath);
+    if (!cached) return true;
+    const deltaStat = statIfExists(resolve(deltaPathFor(absPath)));
+    return !sameStat(cached.stat, current) || !sameStat(cached.deltaStat, deltaStat);
+  }
+
+  /**
+   * Append one upsert without reading the base. Compacting the delta would
+   * materialize the huge file — the failure mode dialogue record is avoiding —
+   * so an oversized log is left in place for the next full rebuild.
+   */
+  private appendBlindDelta(op: DeltaUpsertOp): void {
+    const absPath = this.storeAbsPath();
+    const deltaPath = resolve(deltaPathFor(absPath));
+    mkdirSync(dirname(deltaPath), { recursive: true });
+    appendFileSync(deltaPath, `${JSON.stringify(op)}\n`, "utf8");
+    graphifyFileStoreCache.delete(absPath);
+  }
+
+  /** Stream the base file, keep `predicate` nodes, then overlay the delta log. */
+  private readProjectedNodes(predicate: (node: GraphNode) => boolean): GraphNode[] {
+    const absPath = this.storeAbsPath();
+    const current = statIfExists(absPath);
+    if (current === null) return [];
+    const chunked = readGraphStoreFileChunked(absPath, {
+      skipEdges: true,
+      keepNode: (value) => {
+        const node = asGraphNode(value);
+        return node !== undefined && predicate(node);
+      },
+    });
+    const nodes = chunked.nodes.map((value) => asGraphNode(value)).filter((node): node is GraphNode => node !== undefined);
+    const deltaPath = resolve(deltaPathFor(absPath));
+    return overlayDeltaNodes(nodes, deltaPath, statIfExists(deltaPath), predicate);
+  }
 
   /**
    * Merge nodes and edges into the store with a SINGLE read + write.
@@ -524,6 +634,18 @@ export class GraphifyFileClient {
     const incomingNodes = batch.nodes ?? [];
     const incomingEdges = batch.edges ?? [];
     if (incomingNodes.length === 0 && incomingEdges.length === 0) {
+      return;
+    }
+
+    if (
+      this.isHugeUncached() &&
+      incomingNodes.length + incomingEdges.length <= GRAPH_STORE_BLIND_DELTA_MAX_ELEMENTS
+    ) {
+      this.appendBlindDelta({
+        op: "upsert",
+        ...(incomingNodes.length > 0 ? { nodes: incomingNodes } : {}),
+        ...(incomingEdges.length > 0 ? { edges: incomingEdges } : {}),
+      });
       return;
     }
 
@@ -689,9 +811,24 @@ export class GraphifyFileClient {
   }
 
   async getNodesByIds(ids: string[]): Promise<GraphNode[]> {
-    const store = this.readStore();
+    if (ids.length === 0) return [];
     const want = new Set(ids);
+    if (this.isHugeUncached()) {
+      return this.readProjectedNodes((node) => want.has(node.id));
+    }
+    const store = this.readStore();
     return store.nodes.filter((n) => want.has(n.id));
+  }
+
+  /**
+   * Dialogue turns and sessions only. On a huge file store this streams the
+   * document and drops every other node instead of building the full graph.
+   */
+  async listDialogueNodes(): Promise<GraphNode[]> {
+    if (this.isHugeUncached()) {
+      return this.readProjectedNodes((node) => isDialogueRecordNode(node));
+    }
+    return this.readStore().nodes.filter((node) => isDialogueRecordNode(node));
   }
 
   async getNeighbors(
