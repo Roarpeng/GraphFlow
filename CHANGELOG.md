@@ -9,6 +9,10 @@ All notable changes to this project are documented in this file.
 - Direct `@modelcontextprotocol/sdk` (root and `packages/efficiency-agent`) moved from `^1.30.0` to `^1.32.1`. The advisory range was `<1.31.0` (OAuth client could send credentials to an authorization server chosen by the MCP server).
 - `overrides.proxy-addr` is `^2.0.8`. express still declares `^2.0.7`, which resolved to the vulnerable `2.0.7` (IPv4-mapped IPv6 trust spoofing).
 
+### Fixed — skill markdown graph clients stay open (Windows sqlite EBUSY)
+
+- `importSkillsFromMarkdownRuntime`, `exportSkillsToMarkdownRuntime`, and `extractDialogueKnowledgeRuntime` now `close()` the graph client in `finally`. Default `auto` transport opens better-sqlite3; leaving that handle open makes a later `rmSync` of `graphflow-graph.sqlite` fail with `EBUSY` on Windows.
+
 ### Fixed — large workspaces no longer have to be fully indexed, and dialogue record no longer materializes a huge file graph
 
 - `graphPolicy.excludeGlobs` and `graphPolicy.maxFileSizeBytes` are honored by workspace index, single-file index, and the pending-index check. `<workspace>/.graphflowignore` uses the same rules (`name/` at any depth, anchored `path/to/dir/`, basename globs, path globs). Negation and nested ignore files are not supported. Markdown stays on the 200KB source cap; the 5MB document cap applies to office/PDF only.
