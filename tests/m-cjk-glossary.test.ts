@@ -39,6 +39,28 @@ describe("M-CJK-glossary deterministic Chinese→English expansion", () => {
     expect(tokenizeForIndex("成本台账栏A")).not.toContain("a");
   });
 
+  it("relevance credits glossary-driven retrieval (T3 delivery stage)", async () => {
+    const { computeAnchorRelevance } = await import("../src/graph/graph-search");
+    const q = "成本台账栏A栏B分别统计什么，落到哪个文件";
+    const truth: GraphNode = {
+      id: "file:src/learning/cost-ledger.ts",
+      type: "File",
+      content: "src/learning/cost-ledger.ts # exports: appendCostEvent, summarizeCost",
+    };
+    // Retrieved via glossary "cost ledger": scores > 0, so the delivery trim
+    // keeps it instead of dropping it as unresponsive.
+    const truthScore = computeAnchorRelevance(truth, q);
+    expect(truthScore).toBeGreaterThan(0);
+    const partial: GraphNode = {
+      id: "file:src/graph/file-indexer.ts",
+      type: "File",
+      content: "src/graph/file-indexer.ts # exports: processFile, indexWorkspace",
+    };
+    // Matches only the generic "file" substring: stays below the truth that
+    // matches the distinctive glossary terms too.
+    expect(computeAnchorRelevance(partial, q)).toBeLessThan(truthScore);
+  });
+
   it("expandSearchQueries gains glossary English for CJK queries", () => {
     const expanded = expandSearchQueries("成本台账栏A栏B分别统计什么", join("tmp", "proj"));
     expect(expanded[0]).toBe("成本台账栏A栏B分别统计什么");

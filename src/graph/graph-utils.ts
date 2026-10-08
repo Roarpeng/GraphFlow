@@ -284,8 +284,8 @@ export function extractPathTokens(workspaceRoot?: string): string[] {
  *
  * Path-hint queries carry PATH_HINT_QUERY_WEIGHT (< 1): directory names are weak
  * evidence - often generic dev-machine segments - and RRF-fused at equal weight
- * they bury the true ranking (T4: users/desktop/tmp/code junk outranked
- * schema.ts). Down-weighted they break ties instead of dominating.
+ * they bury the true ranking (workspace junk outranked the true config
+ * module). Down-weighted they break ties instead of dominating.
  */
 export const PATH_HINT_QUERY_WEIGHT = 0.25;
 
@@ -323,7 +323,7 @@ export function expandSearchQueriesWeighted(
 
   if (containsCJK(trimmed)) {
     // Zero-LLM first aid before agent translation: curated Chinese domain
-    // terms map straight to English code terms (cost-ledger scenario).
+    // terms map straight to English code terms.
     const glossaryTerms = expandCjkGlossaryTerms(trimmed);
     if (glossaryTerms.length > 0) {
       push(glossaryTerms.join(" "), 1);
@@ -610,9 +610,9 @@ const BM25_B = 0.5;
 const BODY_TERM_WEIGHT = 1;
 /**
  * Distinct-term coverage weight (T2): a node matching several different query
- * terms is stronger evidence than one matching a single rare term - without
- * it a one-token sense collision ("handoff" in compaction vs client
- * ownership) outranks the true multi-term owner. Additive only, gated on
+ * terms is stronger evidence than one matching a single rare term — without
+ * it a one-token sense collision outranks the true multi-term owner.
+ * Additive only, gated on
  * >= 3 distinct terms, so single-term queries score exactly as before.
  */
 const COVERAGE_DISTINCT_WEIGHT = 1.5;

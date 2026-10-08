@@ -743,9 +743,19 @@ async function buildPreview(
       packedQuality !== undefined &&
       packedQuality < QUERY_TRANSLATE_LOW_RELEVANCE_THRESHOLD;
     if (lowRelevanceDelegation) {
-      deliveredAnchors = pkg.anchorChannel
-        .filter((item) => typeof item.relevance === "number" && item.relevance > 0)
-        .slice(0, QUERY_TRANSLATE_RELEVANCE_TOP_K_DELIVERED);
+      // Deliver the anchors sharing the MOST wording with the query, not
+      // merely the first packed ones: pack order reflects rank centrality
+      // (which backfill progress churns run to run), while relevance measures
+      // query overlap — the length-weighted relevance above separates
+      // distinctive-term matches (cost+ledger) from bigram coincidence, so
+      // relevance order is the stablest answer set. Stable sort keeps pack
+      // order within ties.
+      const byRelevance = [...pkg.anchorChannel]
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => typeof item.relevance === "number" && item.relevance > 0)
+        .sort((a, b) => b.item.relevance! - a.item.relevance! || a.index - b.index)
+        .map(({ item }) => item);
+      deliveredAnchors = byRelevance.slice(0, QUERY_TRANSLATE_RELEVANCE_TOP_K_DELIVERED);
       const keptPaths = new Set(
         deliveredAnchors.map((item) => {
           const stem = item.id.replace(/^(file|symbol|module):/, "").replace(/:[0-9a-f]{6,}$/, "");

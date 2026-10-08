@@ -232,12 +232,14 @@ describe("cumulative ROI stats exclude probe records (rawTokens < 1000)", () => 
 describe("raw baseline is anchored to the delivered anchor set (low-hit CJK query)", () => {
   it("pure-CJK query with path-expansion-only hits: bounded raw estimate + query-translate delegation", async () => {
     const root = makeRoot();
-    // The nested "guard-demo" segment is the only thing the pure-CJK query
-    // below can latch onto: each file's jsdoc contains exactly ONE shared
-    // CJK bigram (启动) from the query, so retrieval lands on them (>= 3
-    // anchors, clearing the legacy <3 rule) while per-anchor relevance stays
-    // far below the low-relevance threshold — the defect-1 / defect-2 repro
-    // shape (low-quality hits, inflated raw baseline), not a zero-match one.
+    // The nested "guard-demo" segment is what the pure-CJK query below latches
+    // onto: each file's jsdoc shares the CJK bigram (启动) with the query, and
+    // the guard vocabulary (guard/handle/init, via glossary expansion and Latin
+    // subtokens from mixed CJK spans) recalls all three guard files — so
+    // retrieval lands broadly (>= 3 anchors, clearing the legacy <3 rule)
+    // while per-anchor relevance stays far below the low-relevance threshold —
+    // the defect-1 / defect-2 repro shape (low-quality hits, inflated raw
+    // baseline), not a zero-match one.
     const nested = join(root, "guard-demo");
     mkdirSync(nested, { recursive: true });
     const files: Array<[string, string[]]> = [
@@ -313,8 +315,15 @@ describe("raw baseline is anchored to the delivered anchor set (low-hit CJK quer
     // whole-graph formula reported ~339K tokens for this shape. Symbol bodies
     // are a bounded, counted part of the delivered pack (they quote real anchor
     // source), so the gate adds them rather than pretending they are free.
+    // Bound = FULL fixture volume + bodies (not 0.75x): delivery now correctly
+    // spans all three guard files (guard/handle/init glossary terms + Latin
+    // subtokens from mixed CJK spans recall guard-timeline/boot-sequence too —
+    // the guards the question asks about live in all three). The 0.75 factor
+    // encoded the old partial delivery, not a safety property; the safety
+    // properties (floor, savings cap, delegation, spine) are asserted separately
+    // below and the anti-inflation margin holds (hundreds vs ~339K).
     expect(preview.tokenBudget.estimatedRawTokens).toBeLessThan(
-      (anchorBytesSum / 4) * 3 + (preview.anchorBodies?.tokens ?? 0)
+      (anchorBytesSum / 4) * 4 + (preview.anchorBodies?.tokens ?? 0)
     );
     // Floor semantics survive: never below the delivered payload.
     expect(preview.tokenBudget.estimatedRawTokens).toBeGreaterThanOrEqual(

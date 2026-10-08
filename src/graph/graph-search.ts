@@ -2,6 +2,7 @@ import type { GraphClient } from "./client-factory";
 import type { GraphNode } from "../core/types";
 import type { DialogueTurnRecord } from "../learning/dialogue-thread";
 import { composeContextQuery, extractNodeSourcePath, nodeSearchableText, tokenizeForIndex } from "./graph-utils";
+import { expandCjkGlossaryTerms } from "./cjk-glossary";
 
 export interface SymbolMatch {
   symbol: {
@@ -249,6 +250,19 @@ export async function searchGraphNodes(
  * query-translate trigger (`shouldDelegateQueryTranslation`): a pure-Chinese
  * query whose anchors were only reached via workspace-path expansion shares
  * no wording with them and scores ~0 even when the anchor count is high.
+ *
+ * Server-side glossary terms count as query vocabulary too: they drove
+ * retrieval (`expandSearchQueries`), so a node they match is genuinely
+ * responsive to the query — without this, retrieved English-only truth
+ * scores 0 against a CJK query and is trimmed as if unresponsive (T3).
+ *
+ * Length-weighted share: a matched multi-char identifier or glossary term is
+ * stronger evidence than a matched 2-char bigram coincidence (T3: the true
+ * ledger module matches the distinctive translated terms while noise matches
+ * a coincidental bigram). Token-count parity would let bigram noise tie
+ * distinctive matches forever. Single-vocabulary
+ * queries shift only through the phrase/bigram length mix, which applies
+ * equally to every node, so existing English/CJK baselines hold.
  */
 export function computeAnchorRelevance(
   node: GraphNode,
@@ -259,7 +273,10 @@ export function computeAnchorRelevance(
   if (!composed) {
     return 0;
   }
-  const tokens = tokenizeForIndex(composed);
+  const glossaryTerms = expandCjkGlossaryTerms(composed);
+  const tokens = tokenizeForIndex(
+    glossaryTerms.length > 0 ? `${composed} ${glossaryTerms.join(" ")}` : composed
+  );
   if (tokens.length === 0) {
     return 0;
   }
@@ -268,12 +285,15 @@ export function computeAnchorRelevance(
     return 0;
   }
   let matched = 0;
+  let total = 0;
   for (const token of tokens) {
+    const weight = token.length;
+    total += weight;
     if (haystack.includes(token.toLowerCase())) {
-      matched += 1;
+      matched += weight;
     }
   }
-  return matched / tokens.length;
+  return total > 0 ? matched / total : 0;
 }
 
 /** Max dialogue hits returned per search. */
