@@ -234,6 +234,21 @@ describe("M87 ZCode host", () => {
       expect(status?.mcpInstalled).toBe(true);
       expect(status?.skillInstalled).toBe(true);
       expect(status?.rulesInstalled).toBe(true);
+
+      // Launcher-shape agnostic tail assertion (ported from
+      // cursor/zcode-windows-mcp-command-1c71): Unix writes `npx`, Windows
+      // writes `node.exe` + npx-cli.js (see resolveWindowsNpxLaunch), so
+      // assert the package/target tail, not the command.
+      const server = (
+        JSON.parse(readFileSync(join(home, ".zcode", "cli", "config.json"), "utf8")) as {
+          mcp?: { servers?: Record<string, { args?: string[] }> };
+        }
+      ).mcp?.servers?.graphflow;
+      expect(server?.args?.slice(-3)).toEqual([
+        "-y",
+        "--package=@roarpeng/graphflow",
+        "graphflow-mcp",
+      ]);
     });
   });
 
