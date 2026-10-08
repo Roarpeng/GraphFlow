@@ -13,6 +13,7 @@ import {
   cosineSimilarity,
   extractEmbedding,
   filterCompatibleEmbeddingNodes,
+  isHashFingerprint,
   reciprocalRankFusion,
 } from "../learning/embeddings.js";
 import { recordIncompatibleVectorsSkipped } from "../learning/embedding-quality.js";
@@ -276,10 +277,26 @@ export async function fuseVectorRecallIfEnabled(
     const queryEmbedding = await options.embeddingProvider.embed(query);
     const topK = options.vectorTopK ?? 8;
     const minSim = options.vectorMinSimilarity ?? 0.05;
+    // Semantic rescue: keyword recall came back empty (pure-CJK query against
+    // English-only symbols with no glossary/path signal) — vector recall would
+    // otherwise re-rank an empty list and stay empty. Widen candidates to the
+    // full embedded graph for this call only. Gated on a non-hash backend:
+    // FNV vectors carry no meaning and would inject noise. Nodes without any
+    // vector (fresh store, backfill pending) still contribute nothing, so the
+    // failure mode is identical to today, improving as vectors backfill.
+    const providerFingerprint = options.embeddingProvider.fingerprint?.();
+    const semanticRescue =
+      keywordHits.length === 0 &&
+      providerFingerprint !== undefined &&
+      !isHashFingerprint(providerFingerprint);
     const { nodes: vectorCandidates, skipped } = filterCompatibleEmbeddingNodes(
-      collectVectorRecallCandidates(client, keywordHits, options.enableFullGraphVectorRecall === true),
+      collectVectorRecallCandidates(
+        client,
+        keywordHits,
+        options.enableFullGraphVectorRecall === true || semanticRescue
+      ),
       queryEmbedding.length,
-      options.embeddingProvider.fingerprint?.()
+      providerFingerprint
     );
     recordIncompatibleVectorsSkipped(skipped);
     const vectorHits = linearVectorRecall(vectorCandidates, queryEmbedding, topK, minSim);

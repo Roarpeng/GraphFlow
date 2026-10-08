@@ -18,7 +18,14 @@ All notable changes to this project are documented in this file.
 - `graphPolicy.excludeGlobs` and `graphPolicy.maxFileSizeBytes` are honored by workspace index, single-file index, and the pending-index check. `<workspace>/.graphflowignore` uses the same rules (`name/` at any depth, anchored `path/to/dir/`, basename globs, path globs). Negation and nested ignore files are not supported. Markdown stays on the 200KB source cap; the 5MB document cap applies to office/PDF only.
 - `dialogue record` on a file store larger than 512MB streams just the dialogue nodes and appends a delta line. It does not `JSON.parse` the code graph. SQLite `listDialogueNodes()` returns the same rows with a SQL filter instead of `readSnapshot()`.
 
-## [Unreleased]
+### Fixed — 中文查询零召回与多跳排序错位(对照测试复现三故障)
+
+- **混合中英分词丢词**:`tokenizeForIndex` 含 CJK 的整段直接跳过标识符切分——`providerPriority自定义` 中英文词全部消失,混合查询只能靠 CJK bigram 命中。现在切出其中的 Latin runs 正常索引,CJK 短语路径不变;纯中文/纯英文行为零变化(英文 golden 零影响)。
+- **确定性中英术语表**:新增 `src/graph/cjk-glossary.ts` 种子表(约80词,代码实证的高精度词),`expandSearchQueries` 在 CJK 查询上自动追加英文扩展,零 LLM、无 agent 往返;覆盖不到的词仍走 `query-translate-en` 回退(诚实边界)。
+- **通用开发路径 RRF 稀释**:`users/desktop/tmp/code` 等目录名此前等权参与 RRF 融合,9 路垃圾排序淹没真相(T4:framework-routes 压过 schema.ts)。通用段进 stop 表,剩余路径提示降权至 0.25(`expandSearchQueriesWeighted`,原签名兼容)。
+- **覆盖率修正(T2)**:单稀有词(`handoff` 压 sense 碰撞)曾压过多词真相 owner。`rankNodesForContextQuery` 新增 distinct-term 加分(>=3 不同词才触发,1.5/词),纯加法,单 token 查询分数逐字不变。
+- 测试锁定:新增 `m-cjk-glossary`(10 用例:T3/T4/T2 复现+e2e+分词单元+语义兜底 3)。回归:检索/排序/压缩/锚点 19 文件 280 用例绿;全量 300 文件 2800 通过,残余全量负载抖动项孤立重跑全过(见下)。
+- **语义兜底(表外中文通用修复)**:关键词零命中 + 非 hash 后端时,`fuseVectorRecallIfEnabled` 自动放宽到全图向量候选(此前只重排关键词命中,空输入恒空)。hash 后端明确不兜底(FNV 向量无语义,兜底即注噪,测试锁定);无向量节点时行为与此前一致,随 deferred backfill 渐进改善。新增 3 用例(无覆盖声明/hash 不注噪/真召回)。
 
 ### Fixed — 第 0 步性能与健壮性(迁移 Rust 前的架构债清偿,复审登记项全闭环)
 

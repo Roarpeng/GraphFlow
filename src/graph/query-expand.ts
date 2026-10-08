@@ -1,7 +1,7 @@
 import type { GraphNode } from "../core/types.js";
 import type { GraphClient } from "./client-factory.js";
 import { reciprocalRankFusion } from "../learning/embeddings.js";
-import { buildSearchScoreTokens, expandSearchQueries, extractPathTokens } from "./graph-utils.js";
+import { buildSearchScoreTokens, expandSearchQueriesWeighted, extractPathTokens } from "./graph-utils.js";
 import { rankNodesForContextQuery } from "./graph-utils.js";
 
 /**
@@ -14,7 +14,9 @@ export async function collectExpandedKeywordHits(
   workspaceRoot?: string,
   englishQuery?: string
 ): Promise<GraphNode[]> {
-  const queries = expandSearchQueries(query, workspaceRoot, englishQuery);
+  const expanded = expandSearchQueriesWeighted(query, workspaceRoot, englishQuery);
+  const queries = expanded.map((entry) => entry.query);
+  const weights = expanded.map((entry) => entry.weight);
   const baseScoreTokens = buildSearchScoreTokens(query, englishQuery);
   const matchQueries = englishQuery?.trim() ? [query, englishQuery.trim()] : [query];
   const pathHints = extractPathTokens(workspaceRoot);
@@ -37,5 +39,5 @@ export async function collectExpandedKeywordHits(
     return rankings[0] ?? [];
   }
 
-  return reciprocalRankFusion(rankings);
+  return reciprocalRankFusion(rankings, 60, weights);
 }

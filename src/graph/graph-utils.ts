@@ -1,5 +1,6 @@
 import type { GraphEdge, GraphNode } from "../core/types";
 import { ARCHITECTURE_QUERY } from "./context-slicer-types.js";
+import { expandCjkGlossaryTerms, filterGenericPathTokens } from "./cjk-glossary.js";
 
 const TOKEN_SPLIT = /[^a-zA-Z0-9_\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]+/g;
 const CJK_RE = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/;
@@ -185,14 +186,32 @@ export function splitIdentifierTokens(part: string): string[] {
   return [...out];
 }
 
+const CJK_SPLIT = /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]+/g;
+
 export function tokenizeForIndex(text: string): string[] {
   if (!text) return [];
   const out = new Set<string>();
 
   for (const part of text.split(TOKEN_SPLIT)) {
-    if (!part || CJK_RE.test(part)) continue;
-    for (const token of splitIdentifierTokens(part)) {
-      out.add(token);
+    if (!part) continue;
+    if (!CJK_RE.test(part)) {
+      for (const token of splitIdentifierTokens(part)) {
+        out.add(token);
+      }
+      continue;
+    }
+    // Mixed CJK+Latin span with no whitespace between (identifier glued to
+    // Chinese with no separator): Latin runs are identifiers - harvest them
+    // the whole span. Previously any English glued to Chinese vanished from
+    // both the query and the index, so mixed-language queries could only ever
+    // match via CJK bigrams. CJK phrases for the span still come from
+    // tokenizeCJK below; single Latin chars ("A") stay dropped by the
+    // length>=2 rule inside splitIdentifierTokens.
+    for (const run of part.split(CJK_SPLIT)) {
+      if (!run) continue;
+      for (const token of splitIdentifierTokens(run)) {
+        out.add(token);
+      }
     }
   }
 
@@ -261,40 +280,77 @@ export function extractPathTokens(workspaceRoot?: string): string[] {
 
 /**
  * Build search queries for RRF: original query, optional agent-translated English,
- * plus path-derived hints when CJK is present.
+ * deterministic CJK glossary expansion, plus path-derived hints when CJK is present.
+ *
+ * Path-hint queries carry PATH_HINT_QUERY_WEIGHT (< 1): directory names are weak
+ * evidence - often generic dev-machine segments - and RRF-fused at equal weight
+ * they bury the true ranking (T4: users/desktop/tmp/code junk outranked
+ * schema.ts). Down-weighted they break ties instead of dominating.
  */
-export function expandSearchQueries(
+export const PATH_HINT_QUERY_WEIGHT = 0.25;
+
+export interface ExpandedSearchQuery {
+  query: string;
+  weight: number;
+}
+
+export function expandSearchQueriesWeighted(
   query: string,
   workspaceRoot?: string,
   englishQuery?: string
-): string[] {
+): ExpandedSearchQuery[] {
   const trimmed = query.trim();
   if (!trimmed && !englishQuery?.trim()) return [];
 
-  const out = new Set<string>();
-  if (trimmed) out.add(trimmed);
+  const out: ExpandedSearchQuery[] = [];
+  const seen = new Set<string>();
+  const push = (text: string, weight: number): void => {
+    if (seen.has(text)) return;
+    seen.add(text);
+    out.push({ query: text, weight });
+  };
+  if (trimmed) push(trimmed, 1);
 
   const en = englishQuery?.trim();
   if (en) {
-    out.add(en);
+    push(en, 1);
     for (const token of tokenizeForIndex(en)) {
       if (token.length >= 2 && !containsCJK(token)) {
-        out.add(token);
+        push(token, 1);
       }
     }
   }
 
   if (containsCJK(trimmed)) {
-    const pathTokens = extractPathTokens(workspaceRoot);
+    // Zero-LLM first aid before agent translation: curated Chinese domain
+    // terms map straight to English code terms (cost-ledger scenario).
+    const glossaryTerms = expandCjkGlossaryTerms(trimmed);
+    if (glossaryTerms.length > 0) {
+      push(glossaryTerms.join(" "), 1);
+      for (const term of glossaryTerms) {
+        push(term, 1);
+      }
+    }
+    const pathTokens = filterGenericPathTokens(extractPathTokens(workspaceRoot));
     if (pathTokens.length > 0) {
-      out.add(pathTokens.join(" "));
+      push(pathTokens.join(" "), PATH_HINT_QUERY_WEIGHT);
       for (const token of pathTokens.slice(0, 8)) {
-        out.add(token);
+        push(token, PATH_HINT_QUERY_WEIGHT);
       }
     }
   }
 
-  return [...out];
+  return out;
+}
+
+export function expandSearchQueries(
+  query: string,
+  workspaceRoot?: string,
+  englishQuery?: string
+): string[] {
+  return expandSearchQueriesWeighted(query, workspaceRoot, englishQuery).map(
+    (entry) => entry.query
+  );
 }
 
 /** All text used for inverted-index lookup (content, jsdoc, paths, symbol names). */
@@ -552,6 +608,14 @@ function packagingNoisePenalty(path: string, coreIntent: boolean): number {
 const BM25_K1 = 1.2;
 const BM25_B = 0.5;
 const BODY_TERM_WEIGHT = 1;
+/**
+ * Distinct-term coverage weight (T2): a node matching several different query
+ * terms is stronger evidence than one matching a single rare term - without
+ * it a one-token sense collision ("handoff" in compaction vs client
+ * ownership) outranks the true multi-term owner. Additive only, gated on
+ * >= 3 distinct terms, so single-term queries score exactly as before.
+ */
+const COVERAGE_DISTINCT_WEIGHT = 1.5;
 
 function buildQueryTermWeights(
   nodeTokens: readonly string[][],
@@ -757,6 +821,11 @@ export function rankNodesForContextQuery(
 
     if (tokenHits >= 2) {
       score += tokenHits;
+    }
+
+    const distinctTerms = exactTf.size + stemTf.size * 0.5;
+    if (distinctTerms >= 3) {
+      score += distinctTerms * COVERAGE_DISTINCT_WEIGHT;
     }
 
     score += pathFieldBonus(path, queryTokens, baseNameDf);
