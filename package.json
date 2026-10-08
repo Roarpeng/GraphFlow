@@ -228,5 +228,8 @@
       "environment": "read provider API keys from environment variables (disclosure.api_keys); no environment writes"
     },
     "jurisdiction": []
+  },
+  "allowScripts": {
+    "better-sqlite3@12.10.0": true
   }
 }

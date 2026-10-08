@@ -47,3 +47,6 @@ docs/*.html
 # configs relative to it (see the appData resolution fix), so these can appear
 # at the repo root. Install artifacts, not project files.
 .codex/
+# ZCode local tooling (local plans + generated ignore rules, not project content)
+.zcode/
+.zcodeignore
