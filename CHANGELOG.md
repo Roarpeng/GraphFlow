@@ -1491,6 +1491,11 @@ Windows 实战暴露的链路缺陷：postinstall 全局安装时走的是旧的
 - **`wouldDegradeLibrary` 忽略真实成功证据**：它调用 `admitSkillToProven(name)` 时不传 options，`successCount` 恒为 0，永远走不到 "success-evidence" 快路径——有真实成功 episode 的技能会被误判为"会污染库"。现接受可选 `AdmitSkillOptions` 并转发（1 参调用点保持兼容）。审计确认生产晋升路径本就直连 `admitSkillToProven`，故无生产调用点在丢失证据；`admitSkillToProvisional` 已从 `src/index.ts` 导出。
 - **安全审计工作流连续 3 周静默失败**：`scripts/security-audit.cjs` 第 10 行用了 `join` 却未 import `node:path`，`ReferenceError` 使 2026-08-24 / 08-31 / 09-07 三次定时运行在 `npm audit` 运行前即崩溃。修复含 `node:path` 导入、Windows `shell` 处理、报告路径按仓库根解析；新增 `tests/security-audit-script.test.ts`（静态断言 import + 端到端跑假 npm 断言无 ReferenceError），随 `npm test` 进入 CI——坏脚本从此无法隐藏。
 - **OIDC Trusted Publishing 的 `repository.url` 与失败诊断**：`package.json` 的 `repository.url` 从 `git+https://….git` 改为 provenance/OIDC 要求的规范形 `https://github.com/Roarpeng/GraphFlow`。OIDC 换票 404 `package not found` 时，发布脚本打印 Trusted Publisher 应对齐的字段（含 2026-09-03 之后默认只允许 `npm stage publish`）。
+- **npm publish EOTP 不再被 `whoami` 预检漏掉**：`npm whoami` 只证明 token 能读身份；带 2FA 的用户 token 在 `npm publish` 时仍会要 OTP（CI 无法提供）。发布脚本改为先走 GitHub OIDC Trusted Publishing（`npx npm@11.6.2`，去掉 `_authToken` 以免 `setup-node` 的 dummy token 跳过 OIDC），失败再回退 `NODE_AUTH_TOKEN`；EOTP 时打印 Trusted Publisher / 自动化 token 的操作说明。
+
+### Tests
+
+- `tests/npm-publish-idempotent.test.ts`：EOTP / 已发布 / 缺鉴权分类、OIDC 环境剥 token、workflow 不再把 whoami 当成发版证明。
 
 ### Changed
 

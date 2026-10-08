@@ -58,29 +58,25 @@ jobs:
         env:
           GRAPHFLOW_CONFIG_PATH: graphflow-out/ci.config.json
 
-      - name: Install an npm that supports OIDC trusted publishing
-        # Deliberately AFTER install/lint/build/test so those keep using the
-        # runner's known-good npm. A too-old npm cannot complete the OIDC token
-        # exchange and fails confusingly as
-        # "E404 ... PUT https://registry.npmjs.org/@scope%2fname".
+      - name: Verify npm authentication
+        # whoami proves the token can read identity. It does NOT prove write:
+        # a 2FA user token still fails publish with EOTP, and an unauthenticated
+        # PUT is often reported as E404. OIDC Trusted Publishing does not need a token.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.npm_token != '' && secrets.npm_token || secrets.NPM_TOKEN }}
         run: |
-          npm install -g npm@latest
-          npm --version
-
-      - name: Verify OIDC trusted-publishing prerequisites
-        # There is intentionally no NPM_TOKEN here. npm exchanges the GitHub OIDC
-        # token for a short-lived publish credential, so no long-lived secret can
-        # expire and break a release (the previous token expired 2026-09-09).
-        # Auth is configured on npmjs.com: package Settings -> Publishing access ->
-        # Trusted Publisher (repository Roarpeng/GraphFlow, workflow publish-npm.yml).
-        run: |
-          npm config set registry https://registry.npmjs.org
-          echo "registry: $(npm config get registry)"
-          echo "npm:      $(npm --version)"
-
-          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL}" ]; then
-            echo "::error::OIDC is unavailable - this job needs 'permissions: id-token: write'."
+          echo "npm $(npm --version)"
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "GitHub OIDC is available (id-token: write). Publish will try Trusted Publishing first."
+          fi
+          if [ -n "${NODE_AUTH_TOKEN}" ]; then
+            echo "Authenticated as: $(npm whoami --registry=https://registry.npmjs.org)"
+            echo "Note: whoami only proves identity; publish may still fail with EOTP if the token requires 2FA."
+          elif [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "::error::No NODE_AUTH_TOKEN and no GitHub OIDC. Set the npm_token secret or configure npm Trusted Publishing."
             exit 1
+          else
+            echo "No NODE_AUTH_TOKEN; publish will use GitHub OIDC Trusted Publishing."
           fi
 
           # An explicit authToken (even an empty one left behind by a previous
