@@ -1310,6 +1310,9 @@ Windows 实战暴露的链路缺陷：postinstall 全局安装时走的是旧的
 - **基线策略**：默认 git 未提交工作区（agent 会话的天然收尾窗口）；`--since <ref>` 扩大；无 git 降级为纯状态检查。
 - **`graphflow audit` CLI** + **outcome 前置审计**：`report_outcome success` 前自动跑审计——默认温和（findings 附进 episode 证据并提醒）；`GRAPHFLOW_AUDIT_STRICT=1` 严格模式拒绝在有未决项时上报成功。
 - **跨会话提醒**：会话结束未决项写入图上承诺账本（`promise-ledger:<sessionId>`）；下次会话首次 `graphflow_context` 附带"上次会话有 N 项未收尾"；审计清零自动 resolve。
+### Fixed
+
+- **m87 全局安装探测测试（Windows）**：`exists` mock 用 `path.includes("\\")` 猜平台。win32 上 `path.join("/usr/lib/node_modules", …)` 仍含反斜杠，POSIX 用例被当成 Windows 路径比较，导致 `found` 为 undefined、`validate-platforms (windows-latest)` 失败。现按用例传入明确 npm root。
 
 ## [1.19.2] - 2026-09-15
 

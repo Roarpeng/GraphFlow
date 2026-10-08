@@ -171,23 +171,24 @@ describe("M87 ZCode host", () => {
   });
 
   it("resolveGlobalGraphflowInstall tolerates BOM, CRLF and stray banner lines (Windows npm stdout)", () => {
+    const expected = (root: string) =>
+      join(root, "@roarpeng", "graphflow", "dist", "surfaces", "mcp", "server.js");
     // BOM + CRLF (Windows npm), banner line before the path, blank lines.
-    // The expected server path is computed with the SAME join as the
-    // implementation, so the assertion is separator-agnostic (win32 rewrites
-    // forward-slash inputs to backslashes).
-    const cases: Array<[string, string]> = [
-      ["\uFEFFC:\\npm\\node_modules\r\n", "C:\\npm\\node_modules"],
-      ["npm warn config\r\n\r\nC:\\npm\\node_modules\r\n", "C:\\npm\\node_modules"],
-      ["\n\n/usr/lib/node_modules\n\n", "/usr/lib/node_modules"],
-    ];
-    for (const [raw, root] of cases) {
-      const serverPath = join(root, "@roarpeng", "graphflow", "dist", "surfaces", "mcp", "server.js");
+    // Pass the npm root per case 鈥?do not guess from `path.includes("\\")`.
+    // On win32, `path.join("/usr/lib/node_modules", ...)` still contains
+    // backslashes, so that heuristic treats a POSIX root as a Windows path
+    // and the mock `exists` returns false (`found` undefined).
+    for (const { raw, root } of [
+      { raw: "\uFEFFC:\\npm\\node_modules\r\n", root: "C:\\npm\\node_modules" },
+      { raw: "npm warn config\r\n\r\nC:\\npm\\node_modules\r\n", root: "C:\\npm\\node_modules" },
+      { raw: "\n\n/usr/lib/node_modules\n\n", root: "/usr/lib/node_modules" },
+    ]) {
       const found = resolveGlobalGraphflowInstall({
         runNpmRoot: () => raw,
-        exists: (p) => p === serverPath,
+        exists: (p) => p === expected(root),
       });
-      expect(found, `raw=${JSON.stringify(raw)}`).toBeDefined();
-      expect(found?.serverPath).toBe(serverPath);
+      expect(found).toBeDefined();
+      expect(found?.runtimeRoot).toBe(join(root, "@roarpeng", "graphflow"));
     }
   });
 
