@@ -80,7 +80,7 @@ Also expect `summary: string[]` (compressed lines) and, for CJK low-match cases,
 1. Prefer the package over recursive repo scans.
 2. Expand anchors by id when the summary is insufficient.
 3. Report savings to humans when useful (`estimatedSavingsPercent`, raw vs compressed). Do not present savings as body fidelity; expand File for full source.
-4. Pass `englishQuery` for Chinese/CJK queries (code symbols are usually English).
+4. Pass `englishQuery` for Chinese/CJK queries for best results (code symbols are usually English). The server already applies mixed CJK–Latin tokenization, a deterministic domain glossary, and full-graph vector-recall rescue on empty keyword recall before asking — `englishQuery` remains the backstop for terms outside glossary coverage.
 
 ## MCP entry point
 

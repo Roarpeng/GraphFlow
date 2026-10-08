@@ -272,7 +272,7 @@ dsh plugin --profile web add /absolute/path/to/GraphFlow
 4. 改完文件后调 `graphflow_index`（单文件可传 `filePath`）。
 5. 若走了 `graphflow_run`，结束后必须 `graphflow_report_outcome`（`episodeId` + `success`）。
 6. 回答用户后应再调 `graphflow_context({ assistantReply })` 回填原文。
-7. 中文问题请同时传 `englishQuery`（英文文件名 / 符号名），不要只用泛化中文词检索。
+7. 中文问题建议同时传 `englishQuery`（英文文件名 / 符号名）；服务端已有中英混合分词 + 术语表 + 语义兜底，常见词不传也能命中，表外词仍建议传，不要只用泛化中文词检索。
 
 不要在 `cordis.patch.yml` 里写死 `GRAPHFLOW_WORKSPACE_ROOT`。
 
