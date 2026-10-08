@@ -30,6 +30,16 @@ All notable changes to this project are documented in this file.
 - 测试锁定:新增 `m-cjk-glossary`(11 用例)+ `m109` 界限重校。回归:检索/排序/压缩/锚点/向量 20 文件 290 用例绿;全量 **302 文件 / 2816 用例零失败**,tsc/eslint 干净。
 - **语义兜底(表外中文通用修复)**:关键词零命中 + 非 hash 后端时,`fuseVectorRecallIfEnabled` 自动放宽到全图向量候选(此前只重排关键词命中,空输入恒空)。hash 后端明确不兜底(FNV 向量无语义,兜底即注噪,测试锁定);无向量节点时行为与此前一致,随 deferred backfill 渐进改善。新增 3 用例(无覆盖声明/hash 不注噪/真召回)。
 
+### Added — 能力指标与记忆治理 (growth-plan M1-M5, wip/local-v1.18.0-capability 合入)
+
+- **能力指标**：`graphflow_diagnose` 新增 `capability`、`competence`、`metricDefinitions`。维度照抄 SWE-Bench-CL 的持续学习套件（`src/learning/capability-metrics.ts`），token 节省率刻意不进入复合分。任务域由 `deriveTaskDomain` 确定性推导，不交给模型判断；样本口径排除已撤回 / 软隐藏的 episode。样本不足时返回 `insufficientData` 并把能力比率归零，不填演示数据。
+- **技能选择精度**：新增 `skillUse`（有效使用精度 / shadowing 率）。仓库尚无召回遥测，故恒为 `insufficientData` —— 这是诚实状态，不把「未测量」写成 0%。
+- **写入门控与撤回链**：新增 `src/learning/memory-gate.ts`：显著性评分、provenance、软撤回（绝不物理删除）。默认 `advisory`，`GRAPHFLOW_WRITE_GATE=0` 完全关闭，`=enforce` 才真正不落库。diagnose 报出 `memoryGate`。
+- **确定性技能失效**：新增 `src/learning/skill-staleness.ts`：索引重建后校验技能引用的符号是否仍能解析，解析不到即软退役并不可召回。无符号可校验的技能单列，不误判为失效；lookup 抛错按基础设施故障处理。幂等。
+- **对外主指标换轨**：token 节省率从「核心指标」降为「成本约束项」（削减 38.4% 工具输出 token 反而使计费成本 +6.8%，激进压缩把 SWE-bench Go 子集 patch 成功率从 27/40 打到 15/40）。陈旧度机制以确定性符号失效为主，时间衰减为辅。
+- **`docs/growth-plan.md`**：调研驱动的成长计划（10 路主题调研 + 4 路对抗验证）。
+- 测试：`tests/m-capability-metrics.test.ts`、`tests/m-memory-gate.test.ts`、`tests/m-skill-staleness.test.ts`。
+
 ### Fixed — 第 0 步性能与健壮性(迁移 Rust 前的架构债清偿,复审登记项全闭环)
 
 - **file 传输读路径共享缓存(P2-8)**:`GraphifyFileClient.peekStore()` 静态共享读入口(走进程内 `graphifyFileStoreCache`,stat 校验+delta 已应用,不开句柄不写);`graphStoreNeedsIndexing` 与 `readFileGraphStore`/`resolveGraphStoreAfterIndex` 不再各自 readFileSync+JSON.parse 整个 9.5MB store——每 preview 省 2 次全量读+解析。消费方 mutation 全审计(全只读),peek 结果仍做浅拷贝防御未来调用方。

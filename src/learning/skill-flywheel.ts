@@ -1147,6 +1147,11 @@ async function collectTaskSkillCandidates(
   const atomicStates: SkillState[] = [];
   const compositeStates: CompositeSkillState[] = [];
   for (const node of skillNodes) {
+    // M4（growth-plan §2.1）：确定性退役的技能（引用的符号已无法解析）不得进入召回
+    // 候选。原子技能的 hidden 已由下游 `!atomic.hidden` 覆盖；composite 没有 hidden
+    // 字段，因此必须在这里显式排除 metadata.unrecallable 的节点。
+    // 刻意只排除 M4 的退役标记，不动 noise/评分语义，避免改变 avoid 列表的既有行为。
+    if (node.metadata?.unrecallable === true) continue;
     const composite = parseCompositeState(node.content);
     if (composite) {
       compositeStates.push(composite);
@@ -1717,3 +1722,23 @@ export async function pruneLowSkills(client: GraphClient): Promise<{ pruned: num
 
   return { pruned };
 }
+
+// M4 — deterministic skill invalidation (docs/growth-plan.md §2.1) is surfaced
+// through this module so diagnose/recall wiring keeps importing one place.
+// Implementation lives in skill-staleness.ts; time decay above stays a
+// secondary mechanism and is never consulted for staleness judgements.
+export {
+  resolveSkillSymbolStatus,
+  revalidateSkills,
+  isSkillRecallable,
+  symbolLookupFromSet,
+} from "./skill-staleness";
+export type {
+  SkillStaleness,
+  SkillStalenessReason,
+  SkillSymbolSource,
+  SymbolLookup,
+  ResolveSkillSymbolStatusOptions,
+  RevalidateSkillsOptions,
+  RevalidateSkillsResult,
+} from "./skill-staleness";

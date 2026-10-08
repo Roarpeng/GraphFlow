@@ -87,7 +87,7 @@
 
 | 优先级 | 事项 | 状态 | 说明与依据 |
 | --- | --- | --- | --- |
-| **P0** | **飞轮自动闭环**：hook 式 outcome 自动捕获 + 历史 backfill | ✅ | auto-capture；Claude Code hooks API + **install/doctor 接线**；`npm run backfill:episodes`；v1.9.8 diagnose 暴露 flywheel 健康。Dogfood 非零 skill 靠真实使用积累 |
+| **P0** | **飞轮自动闭环**：hook 式 outcome 自动捕获 + 历史 backfill | ✅ | auto-capture；Claude Code hooks API + **install/doctor 接线**；`npm run backfill:episodes`；v1.9.8 diagnose 暴露 flywheel 健康。Dogfood 非零 skill 靠真实使用积累。**v1.18.0 补注**：捕获已闭环，但**巩固不应无条件闭环**——无门控的持续巩固会让记忆效用先升后降到无记忆基线以下（arXiv:2605.12978），见 R6/M12 |
 | **P1** | **独立 benchmark 公开复现** | ✅ | [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md) + `npm run proof:flywheel`（检索 / 飞轮 A/B / 记忆 A/B）；方法学见 [benchmarks/README.md](benchmarks/README.md) |
 | **P1** | **图噪声治理**：Trie 引用预过滤、子图 PageRank 缓存 | ✅ | v1.9.8 落地；Bloom 非必要（Trie 已覆盖预过滤） |
 | **P1** | **团队共享记忆安全门控**：provenance + canary + anti-pattern 隔离 | ✅ | `canary-gate.ts`；见 [docs/team-memory-security.md](docs/team-memory-security.md) |
@@ -129,6 +129,25 @@
 | **P2** | **机制自动研究回路（auto-research）** | ✅ | mechanism-research.ts：proposed → in-trajectory → frozen → held-out → admitted/rejected；准入需合格 held-out，冻结后拒绝 in-trajectory（隔离），终态拒绝新试验；graphflow mechanism CLI + diagnose 汇总 |
 | **P2** | **负面教训 guardrails** | ✅ | docs/efficiency-mechanisms.md §6：不把粗暴简短/早压缩当机制、不在首次插入后才削减输出、不按训练命中泛化剪枝、按生命周期门控观测、上线前关闭休眠机制 |
 | **P2** | **efficiency for efficiency（效率反哺搜索）** | ✅ | `efficiency-reinvest.ts`：合格配对节省（仅 qualifying——无效率收益/能力回退者不得为其验证搜索出资）× ratio（默认 0.5，上限 200k）折算为机制试验预算；收据指纹记账（`graphflow-out/efficiency-reinvest.json`，每条记录只出资一次，损坏 fail-open）；`graphflow mechanism reinvest [--apply]` 输出预算 + 下一步试验建议（frozen→held-out 优先，终态机制不再建议），执行仍归操作者/宿主。**R6 至此全部收口** |
+### R10 · 能力指标与记忆治理（2026-10 合入，源自 growth-plan M1-M5）
+
+> 来源：[docs/growth-plan.md](docs/growth-plan.md)（10 路主题调研 + 4 路对抗验证，约百条来源）。核心判断：**瓶颈不是「记得住」，而是「选得准 + 写得严 + 失效得快」**；四条承重论点经独立红队证伪后**全部降为有条件采纳**（推送式召回、技能库收益、衰减+巩固必要性、token 节省作为北极星）。对外主指标由 token 节省率换成能力指标。
+
+| 优先级 | 事项 | 状态 | 说明与依据 |
+| --- | --- | --- | --- |
+| **P0** | **M1 指标换轨** | ✅ | `capability` 照抄 SWE-Bench-CL 持续学习套件（arXiv:2507.00014）；节省率降为成本约束项且**不进入复合分**（arXiv:2607.12161：削 38.4% token 反而 +6.8% 计费成本） |
+| **P0** | **M2 写入门控 + 撤回链** | 🟡 | `memory-gate.ts` 落地，`memoryGate` 可观测。**默认 `advisory`**（判定并记录但保留证据），`=enforce` 才丢弃。8:1 干扰比的对照实验（arXiv:2603.15994 的 100% vs 13%）尚未在本仓复现 |
+| **P0** | **M3 技能选择精度** | 🟡 | `skillUse` 指标已落地，但仓库无召回遥测 → 恒为 `insufficientData`。下一步：补「召回了哪些 / 实际用了哪个 / 是否有帮助」的 per-run 遥测（shadowing 最多解释 68% 退化，arXiv:2605.24050） |
+| **P0** | **M4 确定性失效替代时间衰减** | ✅ | `skill-staleness.ts` + `indexGraph` 接线；引用符号不可解析即不可召回。无符号技能单列不误判（arXiv:2606.01435） |
+| **P0** | **M5 能力地图（元认知）** | ✅ | `competence` 按域聚合，阈值由 harness 外部强制计算，不用模型自报置信度（校准不等于行动，arXiv:2601.07767） |
+| **P1** | **M6 失败轨迹入库** | ⬜ | ExpeL / SWE-Exp 表明只沉淀成功会丢掉信息量最大的对比信号（arXiv:2507.23361） |
+| **P1** | **M7 禁止有损重写式巩固** | ⬜ | ACE：迭代重写压缩触发 brevity bias 与 context collapse（arXiv:2510.04618）；巩固必须可回溯到原始 episode |
+| **P1** | **M8 可执行验证器替代自报结局** | ⬜ | 自批评缺外部验证器会崩塌（ICLR 2025）；编码域 68–80% 失败是「自信且一致」的语义错误（arXiv:2603.25764） |
+| **P1** | **M9 推送的窄形态** | ⬜ | 只推索引与行为状态、选择性、可沉默；先做真实 A/B（arXiv:2607.27250 注入策略无可测差异；arXiv:2607.08716 选择性推送 +8.3pp） |
+| **P2** | **M10 跨项目抽象** | ⬜ | 证据混杂，**明确允许砍掉**；先做「可迁移 vs 项目约定」判别实验 |
+| **P2** | **M11 反基准** | 🟡 | `metricDefinitions` 已把定义/依据/局限固化进代码；仍需公开 harness、划分、检索种子与 per-case 工件 |
+| **P2** | **M12 巩固自动节律** | ⬜ | **按设计阻塞**：准入条件是 M2/M4/M6/M7 产出正向证据；无证据则保持手动 CLI（arXiv:2605.12978） |
+
 
 ### R0 · 让飞轮真的转起来（P0，决定项目本质）
 
@@ -153,7 +172,7 @@
 | --- | --- | --- | --- |
 | **P1** | MCP 2.0 无状态规范迁移 | ✅ | SDK 已升 1.30；`server/discover`、JSON Schema 2020-12、全量 `structuredContent`、stdio 握手兼容、Streamable HTTP stateless/stateful 均已落地并有端到端矩阵 |
 | **P1** | Skill 节点对齐 SKILL.md 事实标准 | ✅ | `skill markdown export|import` 双向互操作；导入保守标记 import/correctable，不继承本地成功或 canary 证据 |
-| **P2** | 自适应遗忘机制 | ✅ | 陈旧度 × 失败压力 × 成功保持 × proven 保护的有界衰减曲线；只软衰减，不删除证据节点 |
+| **P2** | 自适应遗忘机制 | 🟡 | 陈旧度 × 失败压力 × 成功保持 × proven 保护的有界衰减曲线；只软衰减，不删除证据节点。**v1.18.0 降为辅助机制**：主机制改为 R6/M4 的确定性符号失效——时间衰减与巩固的净收益**未检索到独立对照实验支撑**，而确定性版本/时间戳判定优于 LLM 时效判断（arXiv:2606.01435） |
 
 ### R3 · 从"记录"到"知识"（P1，产品差异化）
 
