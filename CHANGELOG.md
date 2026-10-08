@@ -1380,6 +1380,9 @@ Windows 实战暴露的链路缺陷：postinstall 全局安装时走的是旧的
 - `git ls-files` 扫描加 `-c core.quotepath=false`，避免非 ASCII 路径被 C 风格转义后与真实路径不匹配。
 
 > 说明：v1.18.3 的 npm 包已发布成功，但 Marketplace 发布被 Windows 验证阻塞（`publish-marketplace` 依赖 `validate`，后者失败即跳过），因此以 1.18.4 重新发布；功能改动与 v1.18.3 相同。
+### Fixed
+
+- **M83 Windows validate**：`walkFiles` 返回绝对路径，测试用 `root + "/"` 剥前缀在 Windows 上匹配失败（收到 `C:\\...\\src\\app.ts`）。改为 `normalizePath(relative(root, absPath))`，与 `walkScannableFiles` 一致。
 
 ## [1.18.3] - 2026-09-13
 

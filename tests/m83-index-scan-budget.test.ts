@@ -10,6 +10,7 @@ import {
 } from "../src/graph/file-indexer-edges";
 import {
   isGeneratedOrLockFile,
+  normalizePath,
   walkFiles,
   walkScannableFiles,
 } from "../src/graph/file-indexer-walker";
@@ -31,6 +32,11 @@ function makeTempDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   tempRoots.push(dir);
   return dir;
+}
+
+/** walkFiles returns absolute paths; compare repo-relative POSIX like walkScannableFiles. */
+function repoRel(root: string, absPath: string): string {
+  return normalizePath(relative(root, absPath));
 }
 
 afterEach(() => {
@@ -55,8 +61,6 @@ function parsedFile(relPath: string, content: string, declared: IndexedSymbol[] 
   } as unknown as ParsedFile;
 }
 
-/** Workspace-relative POSIX path (portable across Windows/Linux tests). */
-const rel = (root: string, p: string): string => relative(root, p).replace(/\\/g, "/");
 
 const symbol = (relPath: string, name: string): IndexedSymbol =>
   ({ nodeId: `symbol:${relPath}:${name}`, name, file: relPath }) as unknown as IndexedSymbol;
@@ -149,7 +153,7 @@ describe("M83 walker skip rules", () => {
     writeFileSync(join(root, "package-lock.json"), "{}\n");
     writeFileSync(join(root, "app.min.js"), "var a=1;\n");
 
-    const found = walkFiles(root, [".ts", ".js", ".json"]).map((p) => rel(root, p));
+    const found = walkFiles(root, [".ts", ".js", ".json"]).map((p) => repoRel(root, p));
 
     expect(found).toEqual(["src/app.ts"]);
   });
@@ -168,10 +172,13 @@ describe("M83 walker skip rules", () => {
     writeFileSync(join(root, "src", "secrets.local.ts"), "export const s = 1;\n");
     writeFileSync(join(root, "generated", "client.ts"), "export const c = 1;\n");
 
-    const respected = walkFiles(root, [".ts"]).map((p) => rel(root, p));
+
+    const respected = walkFiles(root, [".ts"]).map((p) => repoRel(root, p));
     expect(respected).toEqual(["src/app.ts"]);
 
-    const disabled = walkFiles(root, [".ts"], { respectGitIgnore: false }).map((p) => rel(root, p)).sort();
+    const disabled = walkFiles(root, [".ts"], { respectGitIgnore: false })
+      .map((p) => repoRel(root, p))
+      .sort();
     expect(disabled).toEqual(["generated/client.ts", "src/app.ts", "src/secrets.local.ts"]);
 
     // walkScannableFiles must scan exactly the same set as walkFiles.
