@@ -188,6 +188,36 @@ describe("P0-P2 governance foundation", () => {
     expect(retained.expired.map((node) => node.id)).toEqual(["expire"]);
   });
 
+  it("honors one-sided graph deletions and reports delete-versus-edit conflicts", () => {
+    const node = (id: string, content: string): GraphNode => ({
+      id,
+      type: "File",
+      content,
+      metadata: {},
+    });
+    const edge = (from: string, to: string): GraphEdge => ({
+      from,
+      to,
+      relation: "references",
+    });
+    const a = node("a", "unchanged");
+    const b = node("b", "base");
+    const c = node("c", "base");
+    const e = node("e", "unchanged");
+
+    const merged = mergeGraphArtifacts(
+      { nodes: [a, b, c, e], edges: [edge("a", "b"), edge("b", "c")] },
+      { nodes: [a, node("b", "local edit"), node("d", "local addition")], edges: [edge("a", "b"), edge("d", "b")] },
+      { nodes: [node("c", "remote edit"), e], edges: [edge("b", "c")] }
+    );
+
+    expect(merged.merged.nodes.map((item) => item.id).sort()).toEqual(["b", "c", "d"]);
+    expect(merged.merged.edges.map((item) => `${item.from}->${item.to}`)).toEqual(["d->b"]);
+    expect(merged.conflicts.map((item) => item.id).sort()).toEqual(["b", "c"]);
+    expect(merged.conflicts.find((item) => item.id === "b")).toMatchObject({ remoteDeleted: true });
+    expect(merged.conflicts.find((item) => item.id === "c")).toMatchObject({ localDeleted: true });
+  });
+
   it("round-trips encrypted governance snapshots and verifies OIDC-compatible JWT claims", async () => {
     const envelope = encryptJson({ nodes: [1, 2, 3] }, "passphrase");
     expect(decryptJson<{ nodes: number[] }>(envelope, "passphrase").nodes).toEqual([1, 2, 3]);
