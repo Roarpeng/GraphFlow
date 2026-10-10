@@ -94,6 +94,34 @@ describe("team memory server product path", () => {
     expect(snapshot.result.nodes).toHaveLength(1);
   });
 
+  it("rejects oversized JSON-RPC bodies before buffering them in full", async () => {
+    const started = await startTeamMemoryServer({
+      host: "127.0.0.1",
+      port: 0,
+      storeRoot: tempDir(),
+      maxBodyBytes: 128,
+    });
+    servers.push(started);
+
+    const response = await fetch(started.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "large",
+        method: "graph.query_subgraph",
+        params: { query: "x".repeat(512) },
+      }),
+    });
+    expect(response.status).toBe(413);
+    expect((await response.json()).error.message).toMatch(/exceeds configured size limit/i);
+  });
+
+  it("rejects invalid request body size configuration", async () => {
+    await expect(startTeamMemoryServer({ host: "127.0.0.1", port: 0, maxBodyBytes: 0 }))
+      .rejects.toThrow(/maxBodyBytes must be a positive safe integer/);
+  });
+
   it("refuses non-loopback binds without auth / allowedHosts", async () => {
     await expect(startTeamMemoryServer({ host: "0.0.0.0", port: 0 })).rejects.toThrow(/non-loopback/i);
     await expect(
