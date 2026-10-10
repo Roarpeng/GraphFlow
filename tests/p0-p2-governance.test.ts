@@ -218,6 +218,24 @@ describe("P0-P2 governance foundation", () => {
     expect(merged.conflicts.find((item) => item.id === "c")).toMatchObject({ localDeleted: true });
   });
 
+  it("does not retain edges that point to nodes deleted by the merge", () => {
+    const a: GraphNode = { id: "a", type: "File", content: "base", metadata: {} };
+    const b: GraphNode = { id: "b", type: "File", content: "keep", metadata: {} };
+    const dangling: GraphEdge = { from: "a", to: "b", relation: "references" };
+
+    const merged = mergeGraphArtifacts(
+      { nodes: [a, b], edges: [] },
+      { nodes: [b], edges: [] },
+      { nodes: [a, b], edges: [dangling] }
+    );
+
+    expect(merged.merged.nodes.map((node) => node.id)).toEqual(["b"]);
+    expect(merged.merged.edges).toEqual([]);
+    expect(merged.conflicts).toContainEqual(
+      expect.objectContaining({ kind: "edge", id: "a -[references]-> b" })
+    );
+  });
+
   it("round-trips encrypted governance snapshots and verifies OIDC-compatible JWT claims", async () => {
     const envelope = encryptJson({ nodes: [1, 2, 3] }, "passphrase");
     expect(decryptJson<{ nodes: number[] }>(envelope, "passphrase").nodes).toEqual([1, 2, 3]);
