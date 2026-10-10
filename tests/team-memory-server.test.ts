@@ -210,6 +210,28 @@ describe("team memory server product path", () => {
     expect(blocked.status).toBe(403);
   });
 
+  it("rejects dot-segment tenant names that could escape the tenant store root", async () => {
+    const started = await startTeamMemoryServer({
+      host: "127.0.0.1",
+      port: 0,
+      storeRoot: tempDir(),
+      requireAuth: true,
+      auth: { bearerRoleMap: { tok: "contributor" } },
+    });
+    servers.push(started);
+
+    for (const tenant of [".", ".."]) {
+      const response = await rpc(
+        started.url,
+        "graph.query_subgraph",
+        { query: "" },
+        { Authorization: "Bearer tok", "X-GraphFlow-Tenant": tenant }
+      );
+      expect(response.status).toBe(403);
+      expect((await response.json()).error.message).toMatch(/tenant is not allowed/i);
+    }
+  });
+
   it("rejects missing/wrong client tokens and does not degrade on 401/403", async () => {
     const started = await startTeamMemoryServer({
       host: "127.0.0.1",
