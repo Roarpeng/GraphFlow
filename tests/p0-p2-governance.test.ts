@@ -16,6 +16,7 @@ import {
   listKnowledgeReviewQueue,
   upsertKnowledgeNode,
 } from "../src/graph/engineering-knowledge";
+import { assertRole } from "../src/graph/team-governance";
 import {
   applyRetentionPolicy,
   mergeGraphArtifacts,
@@ -69,6 +70,14 @@ class MemoryGraphClient implements GraphClient {
 }
 
 describe("P0-P2 governance foundation", () => {
+  it("rejects inherited object-property names as governance roles", () => {
+    expect(() => assertRole("constructor", "viewer")).toThrow(/requires viewer role/);
+    expect(() => assertRole("toString", "admin")).toThrow(/requires admin role/);
+    expect(() => assertRole("__proto__", "viewer")).toThrow(/requires viewer role/);
+    expect(() => assertRole("admin", "admin")).not.toThrow();
+    expect(() => assertRole(undefined, "viewer")).not.toThrow();
+  });
+
   it("normalizes outcome evidence and distinguishes verified from partial evidence", () => {
     const verified = normalizeOutcomeEvidence({
       repository: "example/repo",
