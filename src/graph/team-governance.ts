@@ -46,6 +46,8 @@ export interface ArtifactMergeConflict {
   base?: string;
   local?: string;
   remote?: string;
+  localDeleted?: boolean;
+  remoteDeleted?: boolean;
 }
 
 export interface ArtifactMergeResult {
@@ -90,8 +92,36 @@ export function mergeGraphArtifacts(
       }
       continue;
     }
-    if (l) nodes.set(id, l);
-    else if (r) nodes.set(id, r);
+    if (l && !r) {
+      // A deletion beats an unchanged copy; a deletion against an edit is a conflict.
+      if (b && canonicalNode(l) !== canonicalNode(b)) {
+        conflicts.push({
+          kind: "node",
+          id,
+          base: canonicalNode(b),
+          local: canonicalNode(l),
+          remoteDeleted: true,
+        });
+        nodes.set(id, l);
+      } else if (!b) {
+        nodes.set(id, l);
+      }
+      continue;
+    }
+    if (!l && r) {
+      if (b && canonicalNode(r) !== canonicalNode(b)) {
+        conflicts.push({
+          kind: "node",
+          id,
+          base: canonicalNode(b),
+          localDeleted: true,
+          remote: canonicalNode(r),
+        });
+        nodes.set(id, r);
+      } else if (!b) {
+        nodes.set(id, r);
+      }
+    }
   }
 
   const edgeKey = (edge: GraphEdge) => canonicalEdge(edge);
@@ -101,11 +131,13 @@ export function mergeGraphArtifacts(
   const remoteEdges = byEdge(remote.edges);
   const edges = new Map<string, GraphEdge>();
   for (const key of new Set([...baseEdges.keys(), ...localEdges.keys(), ...remoteEdges.keys()])) {
-    const l = localEdges.get(key)!;
-    const r = remoteEdges.get(key)!;
+    const inBase = baseEdges.has(key);
+    const l = localEdges.get(key);
+    const r = remoteEdges.get(key);
     if (l && r) edges.set(key, r);
-    else if (l) edges.set(key, l);
-    else if (r) edges.set(key, r);
+    else if (l && !inBase) edges.set(key, l);
+    else if (r && !inBase) edges.set(key, r);
+    // If the edge existed in base and either side deleted it, honor that deletion.
   }
 
   return { merged: { nodes: [...nodes.values()], edges: [...edges.values()] }, conflicts };
