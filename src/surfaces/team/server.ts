@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { GraphEdge, GraphNode } from "../../core/types.js";
 import { GraphifyFileClient } from "../../graph/graphify-file-client.js";
@@ -228,15 +229,41 @@ function tenantStorePaths(storeRoot: string, tenant: string): { graph: string; s
     throw new Error("tenant store path escapes the configured store root");
   }
   mkdirSync(root, { recursive: true });
-  return {
-    graph: join(root, "graph.json"),
-    skills: join(root, "skills.json"),
-  };
+  const graph = join(root, "graph.json");
+  const skills = join(root, "skills.json");
+  // Reject symlinks at the tenant directory and data-file boundaries. In
+  // particular, writing skills.json through a symlink could clobber a file
+  // outside the tenant store.
+  if (lstatSync(root).isSymbolicLink()) {
+    throw new Error("tenant store path must not be a symlink");
+  }
+  const canonicalBase = realpathSync(base);
+  const canonicalRoot = realpathSync(root);
+  const canonicalRelative = relative(canonicalBase, canonicalRoot);
+  if (
+    !canonicalRelative ||
+    canonicalRelative === "." ||
+    canonicalRelative === ".." ||
+    canonicalRelative.startsWith(`..${sep}`) ||
+    isAbsolute(canonicalRelative)
+  ) {
+    throw new Error("tenant store path escapes the configured store root");
+  }
+  for (const filePath of [graph, skills]) {
+    try {
+      if (lstatSync(filePath).isSymbolicLink()) {
+        throw new Error("tenant store data files must not be symlinks");
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  return { graph, skills };
 }
 
 function readSkillPack(path: string): SkillPackStore | undefined {
   try {
-    if (!existsSync(path)) return undefined;
+    if (!existsSync(path) || lstatSync(path).isSymbolicLink()) return undefined;
     const parsed = JSON.parse(readFileSync(path, "utf8")) as SkillPackStore;
     if (!parsed || typeof parsed !== "object") return undefined;
     return parsed;
@@ -252,7 +279,16 @@ function writeSkillPack(path: string, pack: unknown): SkillPackStore {
     updatedAt: new Date().toISOString(),
     pack,
   };
-  writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  const tempPath = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+  try {
+    writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\\n`, { encoding: "utf8", flag: "wx" });
+    // Same-directory rename replaces a destination symlink rather than
+    // following it, preventing arbitrary-file writes through skills.json.
+    renameSync(tempPath, path);
+  } catch (error) {
+    rmSync(tempPath, { force: true });
+    throw error;
+  }
   return next;
 }
 

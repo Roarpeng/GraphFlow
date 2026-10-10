@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GraphifyMcpClient, TeamAuthError } from "../src/graph/graphify-mcp-client";
@@ -208,6 +208,33 @@ describe("team memory server product path", () => {
       "X-GraphFlow-Tenant": "evil",
     });
     expect(blocked.status).toBe(403);
+  });
+
+  it("rejects tenant directory symlinks instead of accessing data outside the store root", async () => {
+    const storeRoot = tempDir();
+    const outsideRoot = tempDir();
+    mkdirSync(join(outsideRoot, "acme"), { recursive: true });
+    writeFileSync(join(outsideRoot, "acme", "skills.json"), "do-not-overwrite");
+    symlinkSync(join(outsideRoot, "acme"), join(storeRoot, "acme"), "junction");
+
+    const started = await startTeamMemoryServer({
+      host: "127.0.0.1",
+      port: 0,
+      storeRoot,
+      requireAuth: true,
+      auth: { bearerRoleMap: { tok: "contributor" } },
+    });
+    servers.push(started);
+
+    const response = await rpc(
+      started.url,
+      "skill.sync_push",
+      { pack: { version: "test", skills: [] } },
+      { Authorization: "Bearer tok", "X-GraphFlow-Tenant": "acme" }
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()).error.message).toMatch(/symlink/i);
+    expect(readFileSync(join(outsideRoot, "acme", "skills.json"), "utf8")).toBe("do-not-overwrite");
   });
 
   it("rejects dot-segment tenant names that could escape the tenant store root", async () => {
