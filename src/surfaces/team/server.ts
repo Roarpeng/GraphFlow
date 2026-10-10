@@ -125,7 +125,12 @@ function validateHttpHost(req: IncomingMessage, host: string, allowedHosts: stri
   const header = req.headers.host;
   if (!header) return false;
   if (!allowedHosts?.length) {
-    const hostname = header.split(":", 2)[0] ?? "";
+    const hostname = header.startsWith("[")
+      ? (() => {
+          const closing = header.indexOf("]");
+          return closing > 0 ? header.slice(1, closing) : "";
+        })()
+      : (header.split(":", 1)[0] ?? "");
     return isLoopbackHost(host) && isLoopbackHost(hostname);
   }
   const normalized = header.toLowerCase();

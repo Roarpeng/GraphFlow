@@ -586,6 +586,9 @@ function requestTenant(
   const value = req.headers["x-graphflow-tenant"];
   const raw = Array.isArray(value) ? value[0] : value;
   const tenant = raw?.trim() || "default";
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(tenant) || tenant === "." || tenant === "..") {
+    throw new Error("tenant is not allowed");
+  }
   if (auth?.allowedTenants?.length && !auth.allowedTenants.includes(tenant)) {
     throw new Error("tenant is not allowed");
   }
@@ -604,7 +607,12 @@ function validateHttpHost(req: IncomingMessage, host: string, allowedHosts: stri
   const header = req.headers.host;
   if (!header) return false;
   if (!allowedHosts?.length) {
-    const hostname = header.split(":", 2)[0] ?? "";
+    const hostname = header.startsWith("[")
+      ? (() => {
+          const closing = header.indexOf("]");
+          return closing > 0 ? header.slice(1, closing) : "";
+        })()
+      : (header.split(":", 1)[0] ?? "");
     return isLoopbackHost(host) && isLoopbackHost(hostname);
   }
   const normalized = header.toLowerCase();
