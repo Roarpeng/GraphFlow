@@ -28,6 +28,8 @@ export interface TeamMemoryServerOptions {
   endpoint?: string;
   /** Root directory for per-tenant graph + skill-pack files. */
   storeRoot?: string;
+  /** Maximum accepted JSON-RPC request body size. Defaults to 25 MiB. */
+  maxBodyBytes?: number;
   allowedHosts?: string[];
   allowedOrigins?: string[];
   signal?: AbortSignal;
@@ -147,14 +149,62 @@ function sanitizeTenant(tenant: string): string {
   return tenant.replace(/[^A-Za-z0-9._-]/g, "_");
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+const DEFAULT_MAX_BODY_BYTES = 25 * 1024 * 1024;
+
+class RequestBodyTooLargeError extends Error {
+  constructor() {
+    super("Request body exceeds configured size limit");
+    this.name = "RequestBodyTooLargeError";
   }
-  const raw = Buffer.concat(chunks).toString("utf8").trim();
-  if (!raw) return {};
-  return JSON.parse(raw) as unknown;
+}
+
+function readJsonBody(req: IncomingMessage, maxBytes: number): Promise<unknown> {
+  return new Promise((resolveBody, rejectBody) => {
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    let settled = false;
+
+    const cleanup = (): void => {
+      req.removeListener("data", onData);
+      req.removeListener("end", onEnd);
+      req.removeListener("error", onError);
+    };
+    const onData = (chunk: Buffer | string): void => {
+      if (settled) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buffer.length;
+      if (totalBytes > maxBytes) {
+        settled = true;
+        chunks.length = 0;
+        // Reject promptly, but keep draining the request so the HTTP socket
+        // does not retain an unread body or accumulate additional memory.
+        rejectBody(new RequestBodyTooLargeError());
+        return;
+      }
+      chunks.push(buffer);
+    };
+    const onEnd = (): void => {
+      cleanup();
+      if (settled) return;
+      settled = true;
+      try {
+        const raw = Buffer.concat(chunks).toString("utf8").trim();
+        resolveBody(raw ? JSON.parse(raw) as unknown : {});
+      } catch (error) {
+        rejectBody(error);
+      }
+    };
+    const onError = (error: Error): void => {
+      cleanup();
+      if (settled) return;
+      settled = true;
+      rejectBody(error);
+    };
+
+    req.on("data", onData);
+    req.on("end", onEnd);
+    req.on("error", onError);
+  });
 }
 
 function tenantStorePaths(storeRoot: string, tenant: string): { graph: string; skills: string } {
@@ -293,6 +343,10 @@ export async function startTeamMemoryServer(
   const loopback = isLoopbackHost(host);
   const hasCredentials = credentialsConfigured(options.auth);
   const requireAuth = options.requireAuth ?? (!loopback || hasCredentials);
+  const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+  if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 1) {
+    throw new Error("maxBodyBytes must be a positive safe integer");
+  }
 
   if (!loopback && !options.allowedHosts?.length) {
     throw new Error(`Refusing to bind team memory HTTP to non-loopback ${host} without explicit allowedHosts`);
@@ -397,9 +451,13 @@ export async function startTeamMemoryServer(
 
       let parsed: JsonRpcRequest;
       try {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, maxBodyBytes);
         parsed = (body && typeof body === "object" ? body : {}) as JsonRpcRequest;
-      } catch {
+      } catch (error) {
+        if (error instanceof RequestBodyTooLargeError) {
+          writeJsonRpcError(res, 413, null, error.message);
+          return;
+        }
         writeJsonRpcError(res, 400, null, "Invalid JSON body");
         return;
       }
