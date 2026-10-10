@@ -643,7 +643,7 @@ export class GraphifyFileClient {
     ) {
       this.appendBlindDelta({
         op: "upsert",
-        ...(incomingNodes.length > 0 ? { nodes: incomingNodes } : {}),
+        ...(uniqueNodes.length > 0 ? { nodes: uniqueNodes } : {}),
         ...(incomingEdges.length > 0 ? { edges: incomingEdges } : {}),
       });
       return;
@@ -652,10 +652,14 @@ export class GraphifyFileClient {
     const entry = this.readStoreEntry();
     const store = entry.store;
     const nodeMap = new Map(store.nodes.map((node) => [node.id, node]));
-    const previousById = incomingNodes.length > 0
-      ? new Map(incomingNodes.map((node) => [node.id, nodeMap.get(node.id)]))
+    // A node ID is the store's identity key. Collapse duplicate IDs to their
+    // last supplied value before building the cache index patch; otherwise the
+    // index can retain tokens from an overwritten duplicate node.
+    const uniqueNodes = Array.from(new Map(incomingNodes.map((node) => [node.id, node])).values());
+    const previousById = uniqueNodes.length > 0
+      ? new Map(uniqueNodes.map((node) => [node.id, nodeMap.get(node.id)]))
       : undefined;
-    for (const node of incomingNodes) {
+    for (const node of uniqueNodes) {
       nodeMap.set(node.id, node);
     }
 
@@ -691,10 +695,10 @@ export class GraphifyFileClient {
     if (
       this.tryAppendDelta(entry, upsertOp, next, edgeKeys, previousById
         ? {
-            oldNodes: incomingNodes
+            oldNodes: uniqueNodes
               .map((n) => previousById.get(n.id))
               .filter((n): n is GraphNode => n !== undefined),
-            newNodes: incomingNodes,
+            newNodes: uniqueNodes,
           }
         : undefined)
     ) {

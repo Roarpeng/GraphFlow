@@ -48,6 +48,21 @@ describe("GraphifyFileClient process-wide store cache", () => {
     expect(existsSync(deltaPath)).toBe(true);
   });
 
+  it("keeps the inverted index consistent when an upsert batch repeats a node ID", async () => {
+    const storePath = join(root, `duplicate-id-${Date.now()}.json`);
+    writeStoreJson(storePath, [{ id: "dup", type: "File", content: "original", metadata: {} }]);
+    const client = new GraphifyFileClient(storePath, { deltaMinBaseBytes: 1 });
+
+    expect(await client.queryByKeyword("apple")).toEqual([]);
+    await client.upsertNodes([
+      { id: "dup", type: "File", content: "apple token", metadata: {} },
+      { id: "dup", type: "File", content: "banana token", metadata: {} },
+    ]);
+
+    expect(await client.queryByKeyword("apple")).toEqual([]);
+    expect((await client.queryByKeyword("banana")).map((node) => node.content)).toEqual(["banana token"]);
+  });
+
   it("reuses the parsed store on repeated queries while mtime+size are unchanged", async () => {
     const storePath = join(root, `hit-${Date.now()}.json`);
     writeStoreJson(storePath, sampleNodes);
