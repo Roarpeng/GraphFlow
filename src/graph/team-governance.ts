@@ -140,6 +140,24 @@ export function mergeGraphArtifacts(
     // If the edge existed in base and either side deleted it, honor that deletion.
   }
 
+  // A concurrent edge addition must not reintroduce a reference to a node that
+  // the three-way merge removed. Drop the dangling edge and expose a conflict.
+  const mergedNodeIds = new Set(nodes.keys());
+  for (const [key, edge] of edges) {
+    if (mergedNodeIds.has(edge.from) && mergedNodeIds.has(edge.to)) continue;
+    const baseEdge = baseEdges.get(key);
+    const localEdge = localEdges.get(key);
+    const remoteEdge = remoteEdges.get(key);
+    conflicts.push({
+      kind: "edge",
+      id: `${edge.from} -[${edge.relation}]-> ${edge.to}`,
+      ...(baseEdge ? { base: canonicalEdge(baseEdge) } : {}),
+      ...(localEdge ? { local: canonicalEdge(localEdge) } : baseEdge ? { localDeleted: true } : {}),
+      ...(remoteEdge ? { remote: canonicalEdge(remoteEdge) } : baseEdge ? { remoteDeleted: true } : {}),
+    });
+    edges.delete(key);
+  }
+
   return { merged: { nodes: [...nodes.values()], edges: [...edges.values()] }, conflicts };
 }
 
