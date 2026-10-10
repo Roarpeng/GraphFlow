@@ -75,7 +75,21 @@ describe("graphflow-mcp --http (server entry point)", () => {
       } else {
         child.kill("SIGKILL");
       }
-      rmSync(workspace, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+
+      // Windows may keep the child's cwd / file handles alive briefly after
+      // taskkill returns. Wait for process exit before removing its workspace;
+      // otherwise rmSync can intermittently throw EBUSY and fail an otherwise
+      // successful HTTP integration test.
+      if (child.exitCode === null && child.signalCode === null) {
+        await new Promise<void>((resolveExit) => {
+          const timer = setTimeout(resolveExit, 3_000);
+          child.once("exit", () => {
+            clearTimeout(timer);
+            resolveExit();
+          });
+        });
+      }
+      rmSync(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
     }
   }, 60_000);
 });
