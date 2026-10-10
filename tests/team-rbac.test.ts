@@ -1,4 +1,4 @@
-import { generateKeyPairSync, sign as cryptoSign } from "node:crypto";
+import { generateKeyPairSync, sign as cryptoSign, type KeyObject } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   authorizeMcpTool,
@@ -104,7 +104,7 @@ describe("team RBAC roles and scopes", () => {
     const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
     const makeToken = (
       alg: "RS256" | "ES256",
-      privateKey: ReturnType<typeof generateKeyPairSync>["privateKey"]
+      privateKey: KeyObject
     ) => {
       const data = `${encode({ alg, typ: "JWT" })}.${encode(payload)}`;
       const signature = alg === "ES256"
