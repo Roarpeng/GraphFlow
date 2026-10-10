@@ -134,6 +134,20 @@ describe("team RBAC roles and scopes", () => {
     expect(ecResult).toMatchObject({ authenticated: true, subject: "oidc-user" });
   });
 
+  it("rejects JWTs when the current time equals exp", async () => {
+    const secret = "exp-boundary-secret";
+    const token = issueLocalJwt("ada", secret, { role: "admin" });
+    const [header, payloadPart] = token.split(".");
+    const payload = JSON.parse(Buffer.from(payloadPart!, "base64url").toString("utf8"));
+    payload.exp = Math.floor(Date.now() / 1000);
+    const signed = `${header}.${Buffer.from(JSON.stringify(payload)).toString("base64url")}`;
+    const { createHmac } = await import("node:crypto");
+    const boundaryToken = `${signed}.${createHmac("sha256", secret).update(signed).digest("base64url")}`;
+
+    const rejected = await verifyAccessToken(`Bearer ${boundaryToken}`, { jwtSecret: secret });
+    expect(rejected).toMatchObject({ authenticated: false, reason: "token expired" });
+  });
+
   it("rejects expired JWTs", async () => {
     const secret = "exp-secret";
     const token = issueLocalJwt("ada", secret, { role: "admin", ttlSeconds: 1 });
