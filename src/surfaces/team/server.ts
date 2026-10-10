@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { GraphEdge, GraphNode } from "../../core/types.js";
 import { GraphifyFileClient } from "../../graph/graphify-file-client.js";
 import { approveGraphNode, propagateQuarantine } from "../../graph/team-governance.js";
@@ -136,7 +136,7 @@ function requestTenant(req: IncomingMessage, auth: TeamHttpAuthOptions | undefin
   const value = req.headers["x-graphflow-tenant"];
   const raw = Array.isArray(value) ? value[0] : value;
   const tenant = raw?.trim() || "default";
-  if (!/^[A-Za-z0-9._-]{1,64}$/.test(tenant)) {
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(tenant) || tenant === "." || tenant === "..") {
     throw new Error("tenant is not allowed");
   }
   if (auth?.allowedTenants?.length && !auth.allowedTenants.includes(tenant)) {
@@ -208,7 +208,20 @@ function readJsonBody(req: IncomingMessage, maxBytes: number): Promise<unknown> 
 }
 
 function tenantStorePaths(storeRoot: string, tenant: string): { graph: string; skills: string } {
-  const root = join(storeRoot, sanitizeTenant(tenant));
+  const base = resolve(storeRoot);
+  const root = resolve(base, sanitizeTenant(tenant));
+  const relativeRoot = relative(base, root);
+  // Defense in depth: never allow a tenant key to resolve to the store root or
+  // escape it, even if a future caller bypasses requestTenant validation.
+  if (
+    !relativeRoot ||
+    relativeRoot === "." ||
+    relativeRoot === ".." ||
+    relativeRoot.startsWith(`..${sep}`) ||
+    isAbsolute(relativeRoot)
+  ) {
+    throw new Error("tenant store path escapes the configured store root");
+  }
   mkdirSync(root, { recursive: true });
   return {
     graph: join(root, "graph.json"),
