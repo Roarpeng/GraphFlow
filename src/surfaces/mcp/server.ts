@@ -260,7 +260,7 @@ export interface McpServer {
 }
 
 export interface McpHttpServerOptions {
-  /** Defaults to loopback. Non-loopback binds require explicit allowedHosts. */
+  /** Defaults to loopback. Non-loopback binds require allowedHosts and authentication. */
   host?: string;
   port?: number;
   endpoint?: string;
@@ -729,6 +729,12 @@ export async function startStreamableHttpServer(
 
   if (!isLoopbackHost(host) && !options.allowedHosts?.length) {
     throw new Error(`Refusing to bind MCP HTTP to non-loopback ${host} without explicit allowedHosts`);
+  }
+  // Host allowlists defend against DNS rebinding; they are not authentication
+  // because clients can forge the Host header. Never expose tools on a shared
+  // interface without an actual bearer/JWT credential.
+  if (!isLoopbackHost(host) && !credentialsConfigured(options.auth)) {
+    throw new Error(`Refusing to bind MCP HTTP to non-loopback ${host} without bearer/JWT authentication`);
   }
 
   const httpServer = createServer((req, res) => {

@@ -204,6 +204,13 @@ describe("GraphFlow MCP Streamable HTTP matrix", () => {
     await expect(
       startStreamableHttpServer(undefined, { host: "0.0.0.0", port: 0 })
     ).rejects.toThrow(/non-loopback/i);
+    await expect(
+      startStreamableHttpServer(undefined, {
+        host: "0.0.0.0",
+        port: 0,
+        allowedHosts: ["graphflow.example"],
+      })
+    ).rejects.toThrow(/without bearer\/JWT authentication/i);
     expect(() =>
       readMcpHttpOptionsFromArgv(["--http", "--port", "70000"])
     ).toThrow(/--port/);
