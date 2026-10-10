@@ -1,9 +1,10 @@
-import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import {
   GraphifyFileClient,
+  graphStoreDeltaPath,
   getGraphifyFileStoreParseCount,
   graphifyFileStoreCache,
   resetGraphifyFileStoreCacheForTests,
@@ -32,6 +33,36 @@ const sampleNodes: GraphNode[] = [
 ];
 
 describe("GraphifyFileClient process-wide store cache", () => {
+  it("preserves the delta log when replacing the base store fails", () => {
+    const storePath = join(root, `blocked-${Date.now()}.json`);
+    // A directory at the destination makes the atomic rename fail on every OS.
+    mkdirSync(storePath);
+    const deltaPath = graphStoreDeltaPath(storePath);
+    writeFileSync(deltaPath, `${JSON.stringify({ op: "upsert", nodes: sampleNodes })}\n`, "utf8");
+
+    const client = new GraphifyFileClient(storePath);
+    const internal = client as unknown as {
+      writeStore(store: { nodes: GraphNode[]; edges: GraphEdge[] }): void;
+    };
+    expect(() => internal.writeStore({ nodes: sampleNodes, edges: [] })).toThrow();
+    expect(existsSync(deltaPath)).toBe(true);
+  });
+
+  it("keeps the inverted index consistent when an upsert batch repeats a node ID", async () => {
+    const storePath = join(root, `duplicate-id-${Date.now()}.json`);
+    writeStoreJson(storePath, [{ id: "dup", type: "File", content: "original", metadata: {} }]);
+    const client = new GraphifyFileClient(storePath, { deltaMinBaseBytes: 1 });
+
+    expect(await client.queryByKeyword("apple")).toEqual([]);
+    await client.upsertNodes([
+      { id: "dup", type: "File", content: "apple token", metadata: {} },
+      { id: "dup", type: "File", content: "banana token", metadata: {} },
+    ]);
+
+    expect(await client.queryByKeyword("apple")).toEqual([]);
+    expect((await client.queryByKeyword("banana")).map((node) => node.content)).toEqual(["banana token"]);
+  });
+
   it("reuses the parsed store on repeated queries while mtime+size are unchanged", async () => {
     const storePath = join(root, `hit-${Date.now()}.json`);
     writeStoreJson(storePath, sampleNodes);

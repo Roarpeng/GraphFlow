@@ -632,18 +632,19 @@ export class GraphifyFileClient {
    */
   async upsertGraph(batch: { nodes?: GraphNode[]; edges?: GraphEdge[] }): Promise<void> {
     const incomingNodes = batch.nodes ?? [];
+    const uniqueNodes = Array.from(new Map(incomingNodes.map((node) => [node.id, node])).values());
     const incomingEdges = batch.edges ?? [];
-    if (incomingNodes.length === 0 && incomingEdges.length === 0) {
+    if (uniqueNodes.length === 0 && incomingEdges.length === 0) {
       return;
     }
 
     if (
       this.isHugeUncached() &&
-      incomingNodes.length + incomingEdges.length <= GRAPH_STORE_BLIND_DELTA_MAX_ELEMENTS
+      uniqueNodes.length + incomingEdges.length <= GRAPH_STORE_BLIND_DELTA_MAX_ELEMENTS
     ) {
       this.appendBlindDelta({
         op: "upsert",
-        ...(incomingNodes.length > 0 ? { nodes: incomingNodes } : {}),
+        ...(uniqueNodes.length > 0 ? { nodes: uniqueNodes } : {}),
         ...(incomingEdges.length > 0 ? { edges: incomingEdges } : {}),
       });
       return;
@@ -652,10 +653,13 @@ export class GraphifyFileClient {
     const entry = this.readStoreEntry();
     const store = entry.store;
     const nodeMap = new Map(store.nodes.map((node) => [node.id, node]));
-    const previousById = incomingNodes.length > 0
-      ? new Map(incomingNodes.map((node) => [node.id, nodeMap.get(node.id)]))
+    // A node ID is the store's identity key. Collapse duplicate IDs to their
+    // last supplied value before building the cache index patch; otherwise the
+    // index can retain tokens from an overwritten duplicate node.
+    const previousById = uniqueNodes.length > 0
+      ? new Map(uniqueNodes.map((node) => [node.id, nodeMap.get(node.id)]))
       : undefined;
-    for (const node of incomingNodes) {
+    for (const node of uniqueNodes) {
       nodeMap.set(node.id, node);
     }
 
@@ -683,7 +687,7 @@ export class GraphifyFileClient {
     const addedEdges = next.edges.length - store.edges.length;
     const upsertOp: DeltaUpsertOp = {
       op: "upsert",
-      ...(incomingNodes.length > 0 ? { nodes: incomingNodes } : {}),
+      ...(uniqueNodes.length > 0 ? { nodes: uniqueNodes } : {}),
       ...(incomingEdges.length >  0 && addedEdges > 0
         ? { edges: next.edges.slice(store.edges.length, store.edges.length + addedEdges) }
         : {}),
@@ -691,10 +695,10 @@ export class GraphifyFileClient {
     if (
       this.tryAppendDelta(entry, upsertOp, next, edgeKeys, previousById
         ? {
-            oldNodes: incomingNodes
+            oldNodes: uniqueNodes
               .map((n) => previousById.get(n.id))
               .filter((n): n is GraphNode => n !== undefined),
-            newNodes: incomingNodes,
+            newNodes: uniqueNodes,
           }
         : undefined)
     ) {
@@ -937,21 +941,16 @@ export class GraphifyFileClient {
       rmSync(tempPath, { force: true });
       throw error;
     }
-    // A successful base write supersedes any delta log.
+    // Replace the base store first. Removing the delta before this atomic rename
+    // can lose committed writes if rename fails or the process crashes.
     const deltaPath = deltaPathFor(this.storePath);
-    if (existsSync(deltaPath)) {
-      rmSync(deltaPath, { force: true });
-    }
-    // Windows 上 rename 可能因文件锁定而失败，添加重试机制
     const maxRetries = 5;
+    let renamed = false;
     for (let i = 0; i < maxRetries; i++) {
       try {
         renameSync(tempPath, this.storePath);
-        // Write-through: only after the rename succeeded does the cache move to
-        // the new store. On failure the previous entry (matching the untouched
-        // file on disk) stays valid.
-        this.updateCacheAfterWrite(store, edgeKeys);
-        return;
+        renamed = true;
+        break;
       } catch (error) {
         const nodeError = error as NodeJS.ErrnoException;
         if (nodeError.code === "EPERM" && i < maxRetries - 1) {
@@ -962,6 +961,19 @@ export class GraphifyFileClient {
         throw error;
       }
     }
+    if (!renamed) {
+      rmSync(tempPath, { force: true });
+      throw new Error("Failed to atomically replace graph store");
+    }
+    // If cleanup fails, the new base is already committed. Keep the stale delta
+    // rather than reporting a failed write; replaying upserts/deletes is idempotent.
+    try {
+      if (existsSync(deltaPath)) rmSync(deltaPath, { force: true });
+    } catch (error) {
+      logger.warn({ error, deltaPath }, "Failed to remove compacted graph store delta");
+    }
+    // Write-through only after the base rename succeeds.
+    this.updateCacheAfterWrite(store, edgeKeys);
   }
 
   /** Record the freshly written store (and its on-disk stat) in the cache. */

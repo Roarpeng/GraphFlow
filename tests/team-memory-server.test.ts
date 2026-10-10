@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GraphifyMcpClient, TeamAuthError } from "../src/graph/graphify-mcp-client";
@@ -94,6 +94,34 @@ describe("team memory server product path", () => {
     expect(snapshot.result.nodes).toHaveLength(1);
   });
 
+  it("rejects oversized JSON-RPC bodies before buffering them in full", async () => {
+    const started = await startTeamMemoryServer({
+      host: "127.0.0.1",
+      port: 0,
+      storeRoot: tempDir(),
+      maxBodyBytes: 128,
+    });
+    servers.push(started);
+
+    const response = await fetch(started.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "large",
+        method: "graph.query_subgraph",
+        params: { query: "x".repeat(512) },
+      }),
+    });
+    expect(response.status).toBe(413);
+    expect((await response.json()).error.message).toMatch(/exceeds configured size limit/i);
+  });
+
+  it("rejects invalid request body size configuration", async () => {
+    await expect(startTeamMemoryServer({ host: "127.0.0.1", port: 0, maxBodyBytes: 0 }))
+      .rejects.toThrow(/maxBodyBytes must be a positive safe integer/);
+  });
+
   it("refuses non-loopback binds without auth / allowedHosts", async () => {
     await expect(startTeamMemoryServer({ host: "0.0.0.0", port: 0 })).rejects.toThrow(/non-loopback/i);
     await expect(
@@ -180,6 +208,80 @@ describe("team memory server product path", () => {
       "X-GraphFlow-Tenant": "evil",
     });
     expect(blocked.status).toBe(403);
+  });
+
+  it("rejects malformed graph payloads without partially importing data", async () => {
+    const started = await startTeamMemoryServer({
+      host: "127.0.0.1",
+      port: 0,
+      storeRoot: tempDir(),
+    });
+    servers.push(started);
+
+    const malformedImport = await rpc(started.url, "artifact.import", {
+      nodes: [sampleNode("should-not-commit")],
+      edges: [{ from: "should-not-commit", to: "x", relation: "not-a-relation" }],
+    });
+    expect((await malformedImport.json()).error.message).toMatch(/edges\[0\].*valid GraphFlow edge/i);
+
+    const malformedNode = await rpc(started.url, "graph.upsert_nodes", {
+      nodes: [{ id: "", type: "File", content: "invalid", metadata: {} }],
+    });
+    expect((await malformedNode.json()).error.message).toMatch(/nodes\[0\].*valid GraphFlow node/i);
+
+    const snapshot = await rpc(started.url, "graph.read_snapshot");
+    const snapshotBody = await snapshot.json();
+    expect(snapshotBody.result.nodes).toEqual([]);
+    expect(snapshotBody.result.edges).toEqual([]);
+  });
+
+  it("rejects tenant directory symlinks instead of accessing data outside the store root", async () => {
+    const storeRoot = tempDir();
+    const outsideRoot = tempDir();
+    mkdirSync(join(outsideRoot, "acme"), { recursive: true });
+    writeFileSync(join(outsideRoot, "acme", "skills.json"), "do-not-overwrite");
+    symlinkSync(join(outsideRoot, "acme"), join(storeRoot, "acme"), "junction");
+
+    const started = await startTeamMemoryServer({
+      host: "127.0.0.1",
+      port: 0,
+      storeRoot,
+      requireAuth: true,
+      auth: { bearerRoleMap: { tok: "contributor" } },
+    });
+    servers.push(started);
+
+    const response = await rpc(
+      started.url,
+      "skill.sync_push",
+      { pack: { version: "test", skills: [] } },
+      { Authorization: "Bearer tok", "X-GraphFlow-Tenant": "acme" }
+    );
+    expect(response.status).toBe(500);
+    expect((await response.json()).error.message).toMatch(/unexpected GraphFlow team HTTP error/i);
+    expect(readFileSync(join(outsideRoot, "acme", "skills.json"), "utf8")).toBe("do-not-overwrite");
+  });
+
+  it("rejects dot-segment tenant names that could escape the tenant store root", async () => {
+    const started = await startTeamMemoryServer({
+      host: "127.0.0.1",
+      port: 0,
+      storeRoot: tempDir(),
+      requireAuth: true,
+      auth: { bearerRoleMap: { tok: "contributor" } },
+    });
+    servers.push(started);
+
+    for (const tenant of [".", ".."]) {
+      const response = await rpc(
+        started.url,
+        "graph.query_subgraph",
+        { query: "" },
+        { Authorization: "Bearer tok", "X-GraphFlow-Tenant": tenant }
+      );
+      expect(response.status).toBe(403);
+      expect((await response.json()).error.message).toMatch(/tenant is not allowed/i);
+    }
   });
 
   it("rejects missing/wrong client tokens and does not degrade on 401/403", async () => {

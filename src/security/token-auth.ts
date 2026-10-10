@@ -137,15 +137,28 @@ export async function verifyAccessToken(
   if (jwt.header?.alg === "HS256" && config.jwtSecret) {
     const expected = createHmac("sha256", config.jwtSecret).update(signed).digest();
     verified = expected.length === jwt.signature.length && timingSafeEqual(expected, jwt.signature);
-  } else if (
-    (jwt.header?.alg === "RS256" || jwt.header?.alg === "ES256") &&
-    config.publicKeyPem
-  ) {
+  } else if (jwt.header?.alg === "RS256" && config.publicKeyPem) {
+    // JWT algorithm identifiers (RS256/ES256) are not Node's digest names.
+    // Both algorithms sign with SHA-256; passing "RS256" / "ES256" directly
+    // causes Node crypto.verify to reject otherwise valid OIDC signatures.
     try {
       verified = cryptoVerify(
-        jwt.header.alg,
+        "sha256",
         Buffer.from(signed),
         createPublicKey(config.publicKeyPem),
+        jwt.signature
+      );
+    } catch {
+      verified = false;
+    }
+  } else if (jwt.header?.alg === "ES256" && config.publicKeyPem) {
+    // JWS encodes ECDSA signatures as fixed-width IEEE-P1363 (R || S), while
+    // Node defaults to ASN.1 DER. Select P1363 explicitly for JWT ES256.
+    try {
+      verified = cryptoVerify(
+        "sha256",
+        Buffer.from(signed),
+        { key: createPublicKey(config.publicKeyPem), dsaEncoding: "ieee-p1363" },
         jwt.signature
       );
     } catch {
@@ -155,7 +168,7 @@ export async function verifyAccessToken(
   if (!verified) return { authenticated: false, reason: "signature rejected" };
 
   const now = Math.floor(Date.now() / 1000);
-  if (typeof jwt.payload.exp === "number" && jwt.payload.exp < now) {
+  if (typeof jwt.payload.exp === "number" && jwt.payload.exp <= now) {
     return { authenticated: false, reason: "token expired" };
   }
   if (typeof jwt.payload.nbf === "number" && jwt.payload.nbf > now) {

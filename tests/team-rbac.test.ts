@@ -1,3 +1,4 @@
+import { generateKeyPairSync, sign as cryptoSign, type KeyObject } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   authorizeMcpTool,
@@ -88,6 +89,63 @@ describe("team RBAC roles and scopes", () => {
     expect(parseRoleTaggedBearer("admin:s3cret")).toEqual({ token: "s3cret", role: "admin" });
     expect(parseRoleTaggedBearer("s3cret:viewer")).toEqual({ token: "s3cret", role: "viewer" });
     expect(parseRoleTaggedBearer("bare-token")).toEqual({ token: "bare-token" });
+  });
+
+  it("verifies standards-compliant RS256 and ES256 OIDC JWT signatures", async () => {
+    const issuer = "https://issuer.example";
+    const audience = "graphflow-team";
+    const payload = {
+      sub: "oidc-user",
+      iss: issuer,
+      aud: audience,
+      scope: "memory:read",
+      exp: Math.floor(Date.now() / 1000) + 300,
+    };
+    const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString("base64url");
+    const makeToken = (
+      alg: "RS256" | "ES256",
+      privateKey: KeyObject
+    ) => {
+      const data = `${encode({ alg, typ: "JWT" })}.${encode(payload)}`;
+      const signature = alg === "ES256"
+        ? cryptoSign("sha256", Buffer.from(data), { key: privateKey, dsaEncoding: "ieee-p1363" })
+        : cryptoSign("sha256", Buffer.from(data), privateKey);
+      return `${data}.${signature.toString("base64url")}`;
+    };
+
+    const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const rsaToken = makeToken("RS256", rsa.privateKey);
+    const rsaResult = await verifyAccessToken(`Bearer ${rsaToken}`, {
+      publicKeyPem: rsa.publicKey.export({ type: "spki", format: "pem" }).toString(),
+      issuer,
+      audience,
+      requiredScope: "memory:read",
+    });
+    expect(rsaResult).toMatchObject({ authenticated: true, subject: "oidc-user" });
+
+    const ec = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    const ecToken = makeToken("ES256", ec.privateKey);
+    const ecResult = await verifyAccessToken(`Bearer ${ecToken}`, {
+      publicKeyPem: ec.publicKey.export({ type: "spki", format: "pem" }).toString(),
+      issuer,
+      audience,
+      requiredScope: "memory:read",
+    });
+    expect(ecResult).toMatchObject({ authenticated: true, subject: "oidc-user" });
+  });
+
+  it("rejects JWTs when the current time equals exp", async () => {
+    const secret = "exp-boundary-secret";
+    const token = issueLocalJwt("ada", secret, { role: "admin" });
+    const [header, payloadPart] = token.split(".");
+    const payload = JSON.parse(Buffer.from(payloadPart!, "base64url").toString("utf8"));
+    payload.exp = Math.floor(Date.now() / 1000);
+    const signed = `${header}.${Buffer.from(JSON.stringify(payload)).toString("base64url")}`;
+    const { createHmac } = await import("node:crypto");
+    const boundaryToken = `${signed}.${createHmac("sha256", secret).update(signed).digest("base64url")}`;
+
+    const rejected = await verifyAccessToken(`Bearer ${boundaryToken}`, { jwtSecret: secret });
+    expect(rejected).toMatchObject({ authenticated: false, reason: "token expired" });
   });
 
   it("rejects expired JWTs", async () => {
