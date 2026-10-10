@@ -168,7 +168,7 @@ export async function verifyAccessToken(
   if (!verified) return { authenticated: false, reason: "signature rejected" };
 
   const now = Math.floor(Date.now() / 1000);
-  if (typeof jwt.payload.exp === "number" && jwt.payload.exp < now) {
+  if (typeof jwt.payload.exp === "number" && jwt.payload.exp <= now) {
     return { authenticated: false, reason: "token expired" };
   }
   if (typeof jwt.payload.nbf === "number" && jwt.payload.nbf > now) {
