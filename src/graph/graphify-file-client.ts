@@ -632,14 +632,15 @@ export class GraphifyFileClient {
    */
   async upsertGraph(batch: { nodes?: GraphNode[]; edges?: GraphEdge[] }): Promise<void> {
     const incomingNodes = batch.nodes ?? [];
+    const uniqueNodes = Array.from(new Map(incomingNodes.map((node) => [node.id, node])).values());
     const incomingEdges = batch.edges ?? [];
-    if (incomingNodes.length === 0 && incomingEdges.length === 0) {
+    if (uniqueNodes.length === 0 && incomingEdges.length === 0) {
       return;
     }
 
     if (
       this.isHugeUncached() &&
-      incomingNodes.length + incomingEdges.length <= GRAPH_STORE_BLIND_DELTA_MAX_ELEMENTS
+      uniqueNodes.length + incomingEdges.length <= GRAPH_STORE_BLIND_DELTA_MAX_ELEMENTS
     ) {
       this.appendBlindDelta({
         op: "upsert",
@@ -655,7 +656,6 @@ export class GraphifyFileClient {
     // A node ID is the store's identity key. Collapse duplicate IDs to their
     // last supplied value before building the cache index patch; otherwise the
     // index can retain tokens from an overwritten duplicate node.
-    const uniqueNodes = Array.from(new Map(incomingNodes.map((node) => [node.id, node])).values());
     const previousById = uniqueNodes.length > 0
       ? new Map(uniqueNodes.map((node) => [node.id, nodeMap.get(node.id)]))
       : undefined;
@@ -687,7 +687,7 @@ export class GraphifyFileClient {
     const addedEdges = next.edges.length - store.edges.length;
     const upsertOp: DeltaUpsertOp = {
       op: "upsert",
-      ...(incomingNodes.length > 0 ? { nodes: incomingNodes } : {}),
+      ...(uniqueNodes.length > 0 ? { nodes: uniqueNodes } : {}),
       ...(incomingEdges.length >  0 && addedEdges > 0
         ? { edges: next.edges.slice(store.edges.length, store.edges.length + addedEdges) }
         : {}),
