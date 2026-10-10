@@ -300,6 +300,58 @@ function authModeOf(auth: TeamHttpAuthOptions | undefined): TeamHealthResult["au
   return "none";
 }
 
+const GRAPH_NODE_TYPES = new Set<GraphNode["type"]>([
+  "File", "Symbol", "Module", "Concept", "Requirement", "TaskRun", "Decision",
+  "Skill", "ADR", "Invariant", "APIContract", "Test",
+]);
+
+const GRAPH_EDGE_RELATIONS = new Set<GraphEdge["relation"]>([
+  "defines", "references", "imports", "depends_on", "changes", "validates",
+  "co_occurs", "prerequisite", "improves", "conflicts_with", "calls", "inherits",
+  "part_of", "next_section", "documents", "implements", "derived_from",
+  "supersedes", "same_topic", "governed_by",
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readGraphNodes(value: unknown): GraphNode[] {
+  if (!Array.isArray(value)) throw new Error("nodes must be an array");
+  for (const [index, node] of value.entries()) {
+    if (
+      !isRecord(node) ||
+      typeof node.id !== "string" ||
+      node.id.trim().length === 0 ||
+      typeof node.content !== "string" ||
+      typeof node.type !== "string" ||
+      !GRAPH_NODE_TYPES.has(node.type as GraphNode["type"]) ||
+      (node.metadata !== undefined && !isRecord(node.metadata))
+    ) {
+      throw new Error(`nodes[${index}] is not a valid GraphFlow node`);
+    }
+  }
+  return value as GraphNode[];
+}
+
+function readGraphEdges(value: unknown): GraphEdge[] {
+  if (!Array.isArray(value)) throw new Error("edges must be an array");
+  for (const [index, edge] of value.entries()) {
+    if (
+      !isRecord(edge) ||
+      typeof edge.from !== "string" ||
+      edge.from.trim().length === 0 ||
+      typeof edge.to !== "string" ||
+      edge.to.trim().length === 0 ||
+      typeof edge.relation !== "string" ||
+      !GRAPH_EDGE_RELATIONS.has(edge.relation as GraphEdge["relation"])
+    ) {
+      throw new Error(`edges[${index}] is not a valid GraphFlow edge`);
+    }
+  }
+  return value as GraphEdge[];
+}
+
 async function dispatchTeamMethod(
   method: string,
   params: Record<string, unknown>,
@@ -308,11 +360,11 @@ async function dispatchTeamMethod(
 ): Promise<unknown> {
   switch (method) {
     case "graph.upsert_nodes": {
-      await store.upsertNodes((params.nodes as GraphNode[]) ?? []);
+      await store.upsertNodes(readGraphNodes(params.nodes ?? []));
       return null;
     }
     case "graph.upsert_edges": {
-      await store.upsertEdges((params.edges as GraphEdge[]) ?? []);
+      await store.upsertEdges(readGraphEdges(params.edges ?? []));
       return null;
     }
     case "graph.query_subgraph": {
@@ -358,8 +410,11 @@ async function dispatchTeamMethod(
       return { pack: stored?.pack ?? null, revision: stored?.revision ?? null, updatedAt: stored?.updatedAt ?? null };
     }
     case "artifact.import": {
-      await store.upsertNodes((params.nodes as GraphNode[]) ?? []);
-      await store.upsertEdges((params.edges as GraphEdge[]) ?? []);
+      // Validate both batches before the first write so a malformed edge cannot
+      // leave an otherwise rejected import half-applied.
+      const nodes = readGraphNodes(params.nodes ?? []);
+      const edges = readGraphEdges(params.edges ?? []);
+      await store.upsertGraph({ nodes, edges });
       const snapshot = store.readSnapshot();
       return { nodeCount: snapshot.nodes.length, edgeCount: snapshot.edges.length, imported: true };
     }

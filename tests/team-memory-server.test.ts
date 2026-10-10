@@ -210,6 +210,30 @@ describe("team memory server product path", () => {
     expect(blocked.status).toBe(403);
   });
 
+  it("rejects malformed graph payloads without partially importing data", async () => {
+    const started = await startTeamMemoryServer({
+      host: "127.0.0.1",
+      port: 0,
+      storeRoot: tempDir(),
+    });
+    servers.push(started);
+
+    const malformedImport = await rpc(started.url, "artifact.import", {
+      nodes: [sampleNode("should-not-commit")],
+      edges: [{ from: "should-not-commit", to: "x", relation: "not-a-relation" }],
+    });
+    expect((await malformedImport.json()).error.message).toMatch(/edges\[0\].*valid GraphFlow edge/i);
+
+    const malformedNode = await rpc(started.url, "graph.upsert_nodes", {
+      nodes: [{ id: "", type: "File", content: "invalid", metadata: {} }],
+    });
+    expect((await malformedNode.json()).error.message).toMatch(/nodes\[0\].*valid GraphFlow node/i);
+
+    const snapshot = await rpc(started.url, "graph.read_snapshot");
+    expect((await snapshot.json()).result.nodes).toEqual([]);
+    expect((await snapshot.json()).result.edges).toEqual([]);
+  });
+
   it("rejects tenant directory symlinks instead of accessing data outside the store root", async () => {
     const storeRoot = tempDir();
     const outsideRoot = tempDir();
