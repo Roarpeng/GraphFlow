@@ -281,7 +281,7 @@ function writeSkillPack(path: string, pack: unknown): SkillPackStore {
   };
   const tempPath = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
   try {
-    writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\\n`, { encoding: "utf8", flag: "wx" });
+    writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
     // Same-directory rename replaces a destination symlink rather than
     // following it, preventing arbitrary-file writes through skills.json.
     renameSync(tempPath, path);

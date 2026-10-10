@@ -232,8 +232,8 @@ describe("team memory server product path", () => {
       { pack: { version: "test", skills: [] } },
       { Authorization: "Bearer tok", "X-GraphFlow-Tenant": "acme" }
     );
-    expect(response.status).toBe(200);
-    expect((await response.json()).error.message).toMatch(/symlink/i);
+    expect(response.status).toBe(500);
+    expect((await response.json()).error.message).toMatch(/unexpected GraphFlow team HTTP error/i);
     expect(readFileSync(join(outsideRoot, "acme", "skills.json"), "utf8")).toBe("do-not-overwrite");
   });
 
