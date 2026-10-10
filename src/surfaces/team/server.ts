@@ -414,7 +414,8 @@ async function dispatchTeamMethod(
       // leave an otherwise rejected import half-applied.
       const nodes = readGraphNodes(params.nodes ?? []);
       const edges = readGraphEdges(params.edges ?? []);
-      await store.upsertGraph({ nodes, edges });
+      await store.upsertNodes(nodes);
+      await store.upsertEdges(edges);
       const snapshot = store.readSnapshot();
       return { nodeCount: snapshot.nodes.length, edgeCount: snapshot.edges.length, imported: true };
     }

@@ -230,8 +230,9 @@ describe("team memory server product path", () => {
     expect((await malformedNode.json()).error.message).toMatch(/nodes\[0\].*valid GraphFlow node/i);
 
     const snapshot = await rpc(started.url, "graph.read_snapshot");
-    expect((await snapshot.json()).result.nodes).toEqual([]);
-    expect((await snapshot.json()).result.edges).toEqual([]);
+    const snapshotBody = await snapshot.json();
+    expect(snapshotBody.result.nodes).toEqual([]);
+    expect(snapshotBody.result.edges).toEqual([]);
   });
 
   it("rejects tenant directory symlinks instead of accessing data outside the store root", async () => {
