@@ -15,8 +15,13 @@ export const ROLE_RANK: Record<GovernanceRole, number> = {
 };
 
 export function assertRole(actual: string | undefined, required: GovernanceRole): void {
-  const role = (actual ?? "viewer") as GovernanceRole;
-  if (!(role in ROLE_RANK) || ROLE_RANK[role] < ROLE_RANK[required]) {
+  const role = actual ?? "viewer";
+  // Use an own-property check: `in` also accepts inherited names such as
+  // "constructor" and "toString", which are not valid governance roles.
+  if (
+    !Object.prototype.hasOwnProperty.call(ROLE_RANK, role) ||
+    ROLE_RANK[role as GovernanceRole] < ROLE_RANK[required]
+  ) {
     throw new Error(`requires ${required} role`);
   }
 }
