@@ -937,21 +937,16 @@ export class GraphifyFileClient {
       rmSync(tempPath, { force: true });
       throw error;
     }
-    // A successful base write supersedes any delta log.
+    // Replace the base store first. Removing the delta before this atomic rename
+    // can lose committed writes if rename fails or the process crashes.
     const deltaPath = deltaPathFor(this.storePath);
-    if (existsSync(deltaPath)) {
-      rmSync(deltaPath, { force: true });
-    }
-    // Windows 上 rename 可能因文件锁定而失败，添加重试机制
     const maxRetries = 5;
+    let renamed = false;
     for (let i = 0; i < maxRetries; i++) {
       try {
         renameSync(tempPath, this.storePath);
-        // Write-through: only after the rename succeeded does the cache move to
-        // the new store. On failure the previous entry (matching the untouched
-        // file on disk) stays valid.
-        this.updateCacheAfterWrite(store, edgeKeys);
-        return;
+        renamed = true;
+        break;
       } catch (error) {
         const nodeError = error as NodeJS.ErrnoException;
         if (nodeError.code === "EPERM" && i < maxRetries - 1) {
@@ -962,6 +957,19 @@ export class GraphifyFileClient {
         throw error;
       }
     }
+    if (!renamed) {
+      rmSync(tempPath, { force: true });
+      throw new Error("Failed to atomically replace graph store");
+    }
+    // If cleanup fails, the new base is already committed. Keep the stale delta
+    // rather than reporting a failed write; replaying upserts/deletes is idempotent.
+    try {
+      if (existsSync(deltaPath)) rmSync(deltaPath, { force: true });
+    } catch (error) {
+      logger.warn({ error, deltaPath }, "Failed to remove compacted graph store delta");
+    }
+    // Write-through only after the base rename succeeds.
+    this.updateCacheAfterWrite(store, edgeKeys);
   }
 
   /** Record the freshly written store (and its on-disk stat) in the cache. */
