@@ -467,6 +467,9 @@ export async function startTeamMemoryServer(
         "Pass --http-token <role:token> or --http-jwt-secret, or bind loopback without credentials."
     );
   }
+  if (options.auth?.publicKeyPem && (!options.auth.issuer || !options.auth.audience)) {
+    throw new Error("Team memory server OIDC public-key auth requires both issuer and audience");
+  }
   if (!loopback && hasCredentials) {
     const roles = Object.values(options.auth?.bearerRoleMap ?? {});
     const jwtReady = Boolean(options.auth?.jwtSecret || options.auth?.publicKeyPem);

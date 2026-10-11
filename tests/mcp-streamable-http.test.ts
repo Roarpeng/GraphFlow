@@ -216,6 +216,19 @@ describe("GraphFlow MCP Streamable HTTP matrix", () => {
     ).toThrow(/--port/);
   });
 
+  it("rejects incomplete OIDC public-key configuration before listening", async () => {
+    await expect(startStreamableHttpServer(undefined, {
+      host: "127.0.0.1",
+      port: 0,
+      auth: { publicKeyPem: "unused-test-key", issuer: "https://issuer.example" },
+    })).rejects.toThrow(/OIDC public-key auth requires both issuer and audience/i);
+    await expect(startStreamableHttpServer(undefined, {
+      host: "127.0.0.1",
+      port: 0,
+      auth: { publicKeyPem: "unused-test-key", audience: "graphflow-mcp" },
+    })).rejects.toThrow(/OIDC public-key auth requires both issuer and audience/i);
+  });
+
   it("rejects malformed tenant identifiers even without a tenant allowlist", async () => {
     const started = await startStreamableHttpServer(undefined, {
       host: "127.0.0.1",

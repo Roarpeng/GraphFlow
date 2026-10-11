@@ -129,6 +129,19 @@ describe("team memory server product path", () => {
     ).rejects.toThrow(/requires auth/i);
   });
 
+  it("rejects incomplete OIDC public-key configuration before listening", async () => {
+    await expect(startTeamMemoryServer({
+      host: "127.0.0.1",
+      port: 0,
+      auth: { publicKeyPem: "unused-test-key", issuer: "https://issuer.example" },
+    })).rejects.toThrow(/OIDC public-key auth requires both issuer and audience/i);
+    await expect(startTeamMemoryServer({
+      host: "127.0.0.1",
+      port: 0,
+      auth: { publicKeyPem: "unused-test-key", audience: "graphflow-team" },
+    })).rejects.toThrow(/OIDC public-key auth requires both issuer and audience/i);
+  });
+
   it("allows viewer reads and denies writes / governance", async () => {
     const started = await startTeamMemoryServer({
       host: "127.0.0.1",

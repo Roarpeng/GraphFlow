@@ -736,6 +736,9 @@ export async function startStreamableHttpServer(
   if (!isLoopbackHost(host) && !credentialsConfigured(options.auth)) {
     throw new Error(`Refusing to bind MCP HTTP to non-loopback ${host} without bearer/JWT authentication`);
   }
+  if (options.auth?.publicKeyPem && (!options.auth.issuer || !options.auth.audience)) {
+    throw new Error("MCP HTTP OIDC public-key auth requires both issuer and audience");
+  }
 
   const httpServer = createServer((req, res) => {
     void (async () => {
