@@ -11,6 +11,7 @@ All notable changes to this project are documented in this file.
 ### Docs — benchmark numbers re-measured (2026-10-11, post-merge of #62/#63)
 
 - Token ratio (8 queries): realistic top-K arm **92.2%** (103,135 → 8,092 tokens), naive-grep arm **98.8%**. Previously 95.6% / 98.5%; the repository grew, so the baselines moved.
+- Memory A/B (31 held-out tasks, synthetic): ON 58.1% vs OFF 58.1% (rescued 1, hurt 1); previously 51.6% vs 61.3%. Still no net transfer.
 - Retrieval golden set (132 queries, in-sample): Hit@5 97.7%, MRR 0.735, NDCG@5 0.466 (previously 100% / 0.779 / 0.638). CI gate (≥80% recall / ≥90% top-K) still passes.
 
 ### Fixed — production `npm audit --omit=dev` (GHSA-6qxp-vccf-f47h, GHSA-jqcg-44mw-7w3h)

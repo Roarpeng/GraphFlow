@@ -314,7 +314,7 @@ task's golden target, distractors and a decoy. Arm A additionally learns
 ## Episodic-Memory A/B — Synthetic Mechanism Test (P3)
 
 > Appended by `npm run benchmark:memory` (`benchmarks/run-memory-ab.ts`).
-> Last run: 2026-10-11T14:28:51.151Z
+> Last run: 2026-10-11T14:57:57.772Z
 > Structured JSON: `benchmarks/.cache/memory-ab-results.json`
 
 > **Synthetic mechanism test, not a task-success rate or ROI.** The graph, the
@@ -346,25 +346,25 @@ named a held-out target) through the real learning paths (`applySkillLearning` +
 | Hint injection rate | 51.6% | 0% |
 | Episode recall rate | 100.0% | 0% |
 | Distinct memories that rescued tasks | 1 | — |
-| Mean prompt-token overhead / task | 55.2 | 0 |
-| Total prompt-token overhead | 1710 | 0 |
+| Mean prompt-token overhead / task | 56.1 | 0 |
+| Total prompt-token overhead | 1738 | 0 |
 | Mean package tokens / task | 212.7 | 68.7 |
 | Decoy contamination (Top-5) | 3.2% | 3.2% |
 | Decoy contamination (injection) | 48.4% | 0% |
-| Mean wall-clock / task | 2.5 ms | 4.3 ms |
-| Total wall-clock | 0.3 s | — |
+| Mean wall-clock / task | 6.9 ms | 8.9 ms |
+| Total wall-clock | 0.7 s | — |
 
 ## Memory-contribution summary (top-3 contributing memories)
 
 | Episode id | Episode task | Tasks rescued | Rescued queries | Mean similarity |
 | --- | --- | --- | --- | --- |
-| `episode:59ns3l` | `exporter jsonl dataset writes` | 1 | `atomic skill writes lock the whole store` | 0.200 |
+| `episode:1on4mpx` | `exporter jsonl dataset writes` | 1 | `atomic skill writes lock the whole store` | 0.200 |
 
 ## Attribution chain (rescued tasks: which memory carried the rescue)
 
 | Task | Golden module | Carry channel | Top episode id | Top episode task | Similarity |
 | --- | --- | --- | --- | --- | --- |
-| `atomic skill writes lock the whole store` | `skill-store` | package | `episode:59ns3l` | `exporter jsonl dataset writes` | 0.200 |
+| `atomic skill writes lock the whole store` | `skill-store` | package | `episode:1on4mpx` | `exporter jsonl dataset writes` | 0.200 |
 
 ## Per-task detail
 
@@ -373,34 +373,34 @@ named a held-out target) through the real learning paths (`applySkillLearning` +
 | `dag execution engine` | `dag-engine` | golden | hit | hit | yes | none | 1 | 1 | 24 |
 | `model router provider selection` | `model-router` | golden | hit | hit | yes | none | 3 | 3 | 82 |
 | `graph compression pagerank centrality` | `graph-compression` | golden | hit | hit | yes | none | 3 | 2 | 62 |
-| `skill flywheel hints scoring` | `skill-flywheel` | golden | hit | hit | yes | none | 3 | 3 | 74 |
-| `embedding cosine similarity vector` | `embeddings` | golden | miss | miss | no | none | 0 | 3 | 64 |
+| `skill flywheel hints scoring` | `skill-flywheel` | golden | hit | hit | yes | none | 3 | 3 | 76 |
+| `embedding cosine similarity vector` | `embeddings` | golden | miss | miss | no | none | 0 | 3 | 66 |
 | `sqlite graph storage fts5` | `sqlite-client` | golden | miss | miss | no | none | 3 | 1 | 42 |
-| `token savings statistics` | `tokensavings` | golden | miss | miss | no | none | 0 | 3 | 64 |
+| `token savings statistics` | `tokensavings` | golden | miss | miss | no | none | 0 | 3 | 66 |
 | `cli output json formatting` | `formatcliresult` | golden | miss | miss | no | none | 1 | 1 | 34 |
-| `six hats insight planning` | `brainstormer` | golden | miss | miss | no | none | 0 | 3 | 64 |
+| `six hats insight planning` | `brainstormer` | golden | miss | miss | no | none | 0 | 3 | 66 |
 | `adaptive token budget estimation` | `estimatecontextbudget` | golden | miss | miss | no | none | 0 | 1 | 21 |
-| `nightly learning trainer` | `nightly-trainer` | golden | hit | hit | yes | none | 1 | 3 | 73 |
-| `dag checkpoint recovery taskrun` | `dag-checkpoint` | golden | hit | hit | yes | none | 0 | 3 | 64 |
+| `nightly learning trainer` | `nightly-trainer` | golden | hit | hit | yes | none | 1 | 3 | 75 |
+| `dag checkpoint recovery taskrun` | `dag-checkpoint` | golden | hit | hit | yes | none | 0 | 3 | 66 |
 | `language indexers tree sitter wasm` | `language-indexers` | golden | hit | hit | yes | none | 1 | 1 | 34 |
 | `adding an embedding provider changed graph scores` | `graph-compression` | cross-module | hit | hit | yes | none | 3 | 3 | 89 |
 | `indexer reindex wipes mcp session state` | `mcp-server` | cross-module | hit | hit | yes | none | 2 | 3 | 81 |
-| `sqlite migration loses episodic history` | `episodic-memory` | cross-module | hit | hit | yes | none | 0 | 3 | 64 |
+| `sqlite migration loses episodic history` | `episodic-memory` | cross-module | hit | hit | yes | none | 0 | 3 | 66 |
 | `nightly training corrupts workspace config` | `workspace-root` | cross-module | hit | hit | yes | none | 0 | 1 | 26 |
-| `query expansion returns chinese results` | `query-expand` | cross-module | hit | hit | yes | none | 0 | 3 | 64 |
+| `query expansion returns chinese results` | `query-expand` | cross-module | hit | hit | yes | none | 0 | 3 | 66 |
 | `atomic skill writes lock the whole store` | `skill-store` | cross-module | miss | hit | yes | package | 3 | 2 | 55 |
 | `persistent storage for graph data` | `sqlite-client` | disambiguation | miss | miss | no | none | 3 | 1 | 42 |
-| `which agent gets this task` | `agent-assignment` | disambiguation | hit | hit | yes | none | 0 | 3 | 64 |
-| `simple versus complex task split` | `triage` | disambiguation | miss | miss | no | none | 0 | 3 | 64 |
-| `stop a hung run safely` | `cancellation` | disambiguation | miss | miss | no | none | 0 | 3 | 64 |
-| `find similar past problems` | `embeddings` | disambiguation | miss | miss | no | none | 0 | 3 | 64 |
+| `which agent gets this task` | `agent-assignment` | disambiguation | hit | hit | yes | none | 0 | 3 | 66 |
+| `simple versus complex task split` | `triage` | disambiguation | miss | miss | no | none | 0 | 3 | 66 |
+| `stop a hung run safely` | `cancellation` | disambiguation | miss | miss | no | none | 0 | 3 | 66 |
+| `find similar past problems` | `embeddings` | disambiguation | miss | miss | no | none | 0 | 3 | 66 |
 | `did the run stay on target` | `goal-anchor` | disambiguation | hit | miss | no | none | 3 | 2 | 65 |
 | `what can each role do` | `role-capabilities` | indirect | hit | hit | yes | none | 0 | 1 | 22 |
 | `describe the work before planning` | `task-profile` | indirect | miss | miss | no | none | 1 | 1 | 31 |
 | `break the goal into steps` | `planner` | indirect | hit | hit | yes | none | 1 | 1 | 31 |
 | `peek at the graph state` | `snapshot-view` | indirect | miss | miss | no | none | 3 | 2 | 54 |
-| `bootstrap skills from scratch` | `seed-skills` | indirect | hit | hit | yes | none | 0 | 3 | 64 |
-| `detect app routes automatically` | `framework-routes` | indirect | hit | hit | yes | none | 0 | 3 | 64 |
+| `bootstrap skills from scratch` | `seed-skills` | indirect | hit | hit | yes | none | 0 | 3 | 66 |
+| `detect app routes automatically` | `framework-routes` | indirect | hit | hit | yes | none | 0 | 3 | 66 |
 
 ## Methodology & honest caveats
 
