@@ -15,7 +15,7 @@
 | Token 节省 | `benchmarks/run-token-benchmark.ts` | `npm run benchmark` | `benchmarks/RESULTS.md`（本基准区块） | `benchmarks/.cache/token-bench-results.json` | 现实口径 95.6% / 朴素 grep 98.5%（2026-09-09）；仅 token 数比值，不衡量保真度或回答质量 |
 | Skill A/B（注入/召回/开销） | `benchmarks/run-skill-ab-benchmark.ts` | `npm run benchmark:skills` | `benchmarks/SKILL-AB-RESULTS.md` | — | 注入 100% / 召回 100% / 25.6 tok/任务 |
 | Skill A/B 端到端（P1-2） | `benchmarks/run-skill-ab.ts` | `npm run benchmark:ab` | `benchmarks/RESULTS.md`（P1-2 区块） | `benchmarks/.cache/skill-ab-results.json` | 合成机制测试：ON 61.5% vs OFF 61.5%（13 个 held-out 任务，2026-09-30） |
-| Memory A/B 端到端（P3） | `benchmarks/run-memory-ab.ts` | `npm run benchmark:memory` | `benchmarks/RESULTS.md`（P3 区块） | `benchmarks/.cache/memory-ab-results.json` | 合成机制测试：ON 51.6% vs OFF 61.3%（31 个 held-out 任务，2026-09-30） |
+| Memory A/B 端到端（P3） | `benchmarks/run-memory-ab.ts` | `npm run benchmark:memory` | `benchmarks/RESULTS.md`（P3 区块） | `benchmarks/.cache/memory-ab-results.json` | 合成机制测试：ON 58.1% vs OFF 58.1%（31 个 held-out 任务，2026-10-11） |
 
 四个脚本归属三套基准：Token 节省一套；Skill A/B 两档（P1-2 的"注入率/召回率/开销"与"端到端成功代理"）；Memory A/B（P3）在 Skill A/B 端到端框架上扩展了 HARD 任务集与归因链。
 
@@ -120,7 +120,7 @@ npm run benchmark:memory   # P3：  等价于 tsx benchmarks/run-memory-ab.ts
 - `benchmarks/.cache/skill-ab-results.json`（P1-2）、`benchmarks/.cache/memory-ab-results.json`（P3）：结构化汇总 + 逐任务明细。
 
 ### 4.6 结果解读与边界
-- 自测口径（2026-09-30，held-out）：P1-2 **ON 61.5% vs OFF 61.5%**（13 任务，rescued 0、hurt 0）；P3 **ON 51.6% vs OFF 61.3%**（31 任务，rescued 0、hurt 3）。即对未见任务没有迁移收益，P3 还因历史节点改变包排名而略有退步。
+- 自测口径（2026-09-30，held-out）：P1-2 **ON 61.5% vs OFF 61.5%**（13 任务，rescued 0、hurt 0）；P3 **ON 58.1% vs OFF 58.1%**（31 任务，rescued 1、hurt 1；2026-10-11 复测，此前 2026-09-30 为 51.6% vs 61.3%）。即对未见任务没有净迁移收益。
 - **已撤回**：此前的 P3「ON 100% vs OFF 56.5%」与 P1-2「ON 100% vs OFF 61.5%」——每个被评分任务都配了一条按答案写成的历史，且 Arm A（包或注入）与 Arm B（仅包）判据不同。
 - **这是合成机制测试，≠ LLM 完成率**：图、任务与历史均为手工构造，它机械地验证"golden 目标是否出现在 Top-5 或注入文本"，不是真实任务成功率；真实收益需在 agent 上端到端 A/B。
 

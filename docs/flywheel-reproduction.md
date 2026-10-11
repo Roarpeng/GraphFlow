@@ -70,7 +70,7 @@ run (existing runners rewrite those files in the working tree).
 | Retrieval MRR | **0.779** | same |
 | Retrieval NDCG@5 | **0.638** | same |
 | Skill A/B target-surfaced (synthetic mechanism test, 13 held-out tasks) | **ON 61.5% (8/13) vs OFF 61.5% (8/13)** | `benchmarks/RESULTS.md` P1-2 (2026-09-30) |
-| Memory A/B target-surfaced (synthetic mechanism test, 31 held-out tasks) | **ON 51.6% (16/31) vs OFF 61.3% (19/31)** | `benchmarks/RESULTS.md` P3 (2026-09-30) |
+| Memory A/B target-surfaced (synthetic mechanism test, 31 held-out tasks) | **ON 58.1% (18/31) vs OFF 58.1% (18/31)** | `benchmarks/RESULTS.md` P3 (2026-10-11) |
 | Token ratio (optional; not a fidelity measure) | **95.6%** realistic arm (136,265 → 6,044) / **98.5%** naive-grep arm (410,725 → 6,044) | `benchmarks/RESULTS.md` token block (two baseline arms) |
 
 The catalog's token claim is the realistic arm; `--with-token` compares it with

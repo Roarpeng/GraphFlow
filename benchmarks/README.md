@@ -144,8 +144,8 @@ golden nodes share **zero tokens** with the query, so pure retrieval cannot
 win) with a full attribution chain per rescued task. Same train / held-out
 split and identical criterion as P1-2.
 
-Self-test result (2026-09-30): **ON 51.6% vs OFF 61.3%** target-surfaced on
-31 held-out tasks (rescued=0, hurt=3). Synthetic mechanism test, not a memory
+Self-test result (2026-10-11): **ON 58.1% vs OFF 58.1%** target-surfaced on
+31 held-out tasks (rescued=1, hurt=1). Synthetic mechanism test, not a memory
 ROI. The earlier "ON 100% vs OFF 56.5%" is withdrawn for the same reasons as
 P1-2.
 
