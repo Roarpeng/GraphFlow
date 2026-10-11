@@ -132,20 +132,37 @@ export async function verifyAccessToken(
   if (!jwt || typeof jwt.payload !== "object" || jwt.payload === null) {
     return { authenticated: false, reason: "invalid token" };
   }
+  const isOidcAlgorithm = jwt.header?.alg === "RS256" || jwt.header?.alg === "ES256";
+  if (isOidcAlgorithm && (!config.issuer || !config.audience)) {
+    return { authenticated: false, reason: "OIDC issuer and audience must be configured" };
+  }
   const signed = `${token.split(".")[0]}.${token.split(".")[1]}`;
   let verified = false;
   if (jwt.header?.alg === "HS256" && config.jwtSecret) {
     const expected = createHmac("sha256", config.jwtSecret).update(signed).digest();
     verified = expected.length === jwt.signature.length && timingSafeEqual(expected, jwt.signature);
-  } else if (
-    (jwt.header?.alg === "RS256" || jwt.header?.alg === "ES256") &&
-    config.publicKeyPem
-  ) {
+  } else if (jwt.header?.alg === "RS256" && config.publicKeyPem) {
+    // JWT algorithm identifiers (RS256/ES256) are not Node's digest names.
+    // Both algorithms sign with SHA-256; passing "RS256" / "ES256" directly
+    // causes Node crypto.verify to reject otherwise valid OIDC signatures.
     try {
       verified = cryptoVerify(
-        jwt.header.alg,
+        "sha256",
         Buffer.from(signed),
         createPublicKey(config.publicKeyPem),
+        jwt.signature
+      );
+    } catch {
+      verified = false;
+    }
+  } else if (jwt.header?.alg === "ES256" && config.publicKeyPem) {
+    // JWS encodes ECDSA signatures as fixed-width IEEE-P1363 (R || S), while
+    // Node defaults to ASN.1 DER. Select P1363 explicitly for JWT ES256.
+    try {
+      verified = cryptoVerify(
+        "sha256",
+        Buffer.from(signed),
+        { key: createPublicKey(config.publicKeyPem), dsaEncoding: "ieee-p1363" },
         jwt.signature
       );
     } catch {
@@ -155,8 +172,17 @@ export async function verifyAccessToken(
   if (!verified) return { authenticated: false, reason: "signature rejected" };
 
   const now = Math.floor(Date.now() / 1000);
-  if (typeof jwt.payload.exp === "number" && jwt.payload.exp < now) {
+  // Access tokens must be time-bounded. Do not silently treat missing or
+  // malformed NumericDate claims as non-expiring credentials.
+  if (typeof jwt.payload.exp !== "number" || !Number.isFinite(jwt.payload.exp)) {
+    return { authenticated: false, reason: "invalid token expiration" };
+  }
+  if (jwt.payload.exp <= now) {
     return { authenticated: false, reason: "token expired" };
+  }
+  if (jwt.payload.nbf !== undefined &&
+      (typeof jwt.payload.nbf !== "number" || !Number.isFinite(jwt.payload.nbf))) {
+    return { authenticated: false, reason: "invalid token not-before claim" };
   }
   if (typeof jwt.payload.nbf === "number" && jwt.payload.nbf > now) {
     return { authenticated: false, reason: "token not yet valid" };

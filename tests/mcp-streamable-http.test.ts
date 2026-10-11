@@ -204,9 +204,50 @@ describe("GraphFlow MCP Streamable HTTP matrix", () => {
     await expect(
       startStreamableHttpServer(undefined, { host: "0.0.0.0", port: 0 })
     ).rejects.toThrow(/non-loopback/i);
+    await expect(
+      startStreamableHttpServer(undefined, {
+        host: "0.0.0.0",
+        port: 0,
+        allowedHosts: ["graphflow.example"],
+      })
+    ).rejects.toThrow(/without bearer\/JWT authentication/i);
     expect(() =>
       readMcpHttpOptionsFromArgv(["--http", "--port", "70000"])
     ).toThrow(/--port/);
+  });
+
+  it("rejects incomplete OIDC public-key configuration before listening", async () => {
+    await expect(startStreamableHttpServer(undefined, {
+      host: "127.0.0.1",
+      port: 0,
+      auth: { publicKeyPem: "unused-test-key", issuer: "https://issuer.example" },
+    })).rejects.toThrow(/OIDC public-key auth requires both issuer and audience/i);
+    await expect(startStreamableHttpServer(undefined, {
+      host: "127.0.0.1",
+      port: 0,
+      auth: { publicKeyPem: "unused-test-key", audience: "graphflow-mcp" },
+    })).rejects.toThrow(/OIDC public-key auth requires both issuer and audience/i);
+  });
+
+  it("rejects malformed tenant identifiers even without a tenant allowlist", async () => {
+    const started = await startStreamableHttpServer(undefined, {
+      host: "127.0.0.1",
+      port: 0,
+      enableJsonResponse: true,
+    });
+    try {
+      for (const tenant of ["..", ".", "../outside", "bad tenant", "x".repeat(65)]) {
+        const response = await postJson(
+          started.url,
+          { jsonrpc: "2.0", id: "tenant", method: "ping" },
+          { "X-GraphFlow-Tenant": tenant }
+        );
+        expect(response.status).toBe(403);
+        expect((await response.json()).error.message).toMatch(/tenant is not allowed/i);
+      }
+    } finally {
+      await started.close();
+    }
   });
 
   it("enforces RBAC on tools/call when bearer roles are configured", async () => {

@@ -16,6 +16,7 @@ import {
   listKnowledgeReviewQueue,
   upsertKnowledgeNode,
 } from "../src/graph/engineering-knowledge";
+import { assertRole } from "../src/graph/team-governance";
 import {
   applyRetentionPolicy,
   mergeGraphArtifacts,
@@ -69,6 +70,14 @@ class MemoryGraphClient implements GraphClient {
 }
 
 describe("P0-P2 governance foundation", () => {
+  it("rejects inherited object-property names as governance roles", () => {
+    expect(() => assertRole("constructor", "viewer")).toThrow(/requires viewer role/);
+    expect(() => assertRole("toString", "admin")).toThrow(/requires admin role/);
+    expect(() => assertRole("__proto__", "viewer")).toThrow(/requires viewer role/);
+    expect(() => assertRole("admin", "admin")).not.toThrow();
+    expect(() => assertRole(undefined, "viewer")).not.toThrow();
+  });
+
   it("normalizes outcome evidence and distinguishes verified from partial evidence", () => {
     const verified = normalizeOutcomeEvidence({
       repository: "example/repo",
@@ -177,6 +186,54 @@ describe("P0-P2 governance foundation", () => {
     ], now);
     expect(retained.retained.map((node) => node.id)).toEqual(["keep"]);
     expect(retained.expired.map((node) => node.id)).toEqual(["expire"]);
+  });
+
+  it("honors one-sided graph deletions and reports delete-versus-edit conflicts", () => {
+    const node = (id: string, content: string): GraphNode => ({
+      id,
+      type: "File",
+      content,
+      metadata: {},
+    });
+    const edge = (from: string, to: string): GraphEdge => ({
+      from,
+      to,
+      relation: "references",
+    });
+    const a = node("a", "unchanged");
+    const b = node("b", "base");
+    const c = node("c", "base");
+    const e = node("e", "unchanged");
+
+    const merged = mergeGraphArtifacts(
+      { nodes: [a, b, c, e], edges: [edge("a", "b"), edge("b", "c")] },
+      { nodes: [a, node("b", "local edit"), node("d", "local addition")], edges: [edge("a", "b"), edge("d", "b")] },
+      { nodes: [node("c", "remote edit"), e], edges: [edge("b", "c")] }
+    );
+
+    expect(merged.merged.nodes.map((item) => item.id).sort()).toEqual(["b", "c", "d"]);
+    expect(merged.merged.edges.map((item) => `${item.from}->${item.to}`)).toEqual(["d->b"]);
+    expect(merged.conflicts.map((item) => item.id).sort()).toEqual(["b", "c"]);
+    expect(merged.conflicts.find((item) => item.id === "b")).toMatchObject({ remoteDeleted: true });
+    expect(merged.conflicts.find((item) => item.id === "c")).toMatchObject({ localDeleted: true });
+  });
+
+  it("does not retain edges that point to nodes deleted by the merge", () => {
+    const a: GraphNode = { id: "a", type: "File", content: "base", metadata: {} };
+    const b: GraphNode = { id: "b", type: "File", content: "keep", metadata: {} };
+    const dangling: GraphEdge = { from: "a", to: "b", relation: "references" };
+
+    const merged = mergeGraphArtifacts(
+      { nodes: [a, b], edges: [] },
+      { nodes: [b], edges: [] },
+      { nodes: [a, b], edges: [dangling] }
+    );
+
+    expect(merged.merged.nodes.map((node) => node.id)).toEqual(["b"]);
+    expect(merged.merged.edges).toEqual([]);
+    expect(merged.conflicts).toContainEqual(
+      expect.objectContaining({ kind: "edge", id: "a -[references]-> b" })
+    );
   });
 
   it("round-trips encrypted governance snapshots and verifies OIDC-compatible JWT claims", async () => {
