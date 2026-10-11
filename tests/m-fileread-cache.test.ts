@@ -1,4 +1,4 @@
-import { closeSync, mkdtempSync, openSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
+import { closeSync, ftruncateSync, mkdtempSync, openSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -266,7 +266,7 @@ describe("graphStoreNeedsIndexing semantic locks (review round 2)", () => {
     try {
       const storePath = join(root, "graph.json");
       const fh = openSync(storePath, "w");
-      truncateSync(fh, 512 * 1024 * 1024 + 1); // NTFS sparse: instant
+      ftruncateSync(fh, 512 * 1024 * 1024 + 1); // sparse file: instant on NTFS and ext4
       closeSync(fh);
       const cfg = { ...getDefaultConfig(), graphPolicy: { ...getDefaultConfig().graphPolicy, transport: "file" as const, graphStorePath: storePath, workspaceRoot: root } };
       expect(graphStoreNeedsIndexing(cfg)).toBe(false);
