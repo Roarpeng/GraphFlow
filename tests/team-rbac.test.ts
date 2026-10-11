@@ -123,6 +123,14 @@ describe("team RBAC roles and scopes", () => {
     });
     expect(rsaResult).toMatchObject({ authenticated: true, subject: "oidc-user" });
 
+    const unboundOidc = await verifyAccessToken(`Bearer ${rsaToken}`, {
+      publicKeyPem: rsa.publicKey.export({ type: "spki", format: "pem" }).toString(),
+    });
+    expect(unboundOidc).toMatchObject({
+      authenticated: false,
+      reason: "OIDC issuer and audience must be configured",
+    });
+
     const ec = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
     const ecToken = makeToken("ES256", ec.privateKey);
     const ecResult = await verifyAccessToken(`Bearer ${ecToken}`, {
@@ -146,6 +154,23 @@ describe("team RBAC roles and scopes", () => {
 
     const rejected = await verifyAccessToken(`Bearer ${boundaryToken}`, { jwtSecret: secret });
     expect(rejected).toMatchObject({ authenticated: false, reason: "token expired" });
+  });
+
+  it("rejects JWTs with missing or malformed expiration claims", async () => {
+    const secret = "invalid-exp-secret";
+    const token = issueLocalJwt("ada", secret, { role: "admin" });
+    const [header, payloadPart] = token.split(".");
+    const { createHmac } = await import("node:crypto");
+
+    for (const exp of [undefined, "never"] as const) {
+      const payload = JSON.parse(Buffer.from(payloadPart!, "base64url").toString("utf8")) as Record<string, unknown>;
+      if (exp === undefined) delete payload.exp;
+      else payload.exp = exp;
+      const signed = `${header}.${Buffer.from(JSON.stringify(payload)).toString("base64url")}`;
+      const forged = `${signed}.${createHmac("sha256", secret).update(signed).digest("base64url")}`;
+      const rejected = await verifyAccessToken(`Bearer ${forged}`, { jwtSecret: secret });
+      expect(rejected).toMatchObject({ authenticated: false, reason: "invalid token expiration" });
+    }
   });
 
   it("rejects expired JWTs", async () => {

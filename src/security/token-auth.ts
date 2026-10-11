@@ -132,6 +132,10 @@ export async function verifyAccessToken(
   if (!jwt || typeof jwt.payload !== "object" || jwt.payload === null) {
     return { authenticated: false, reason: "invalid token" };
   }
+  const isOidcAlgorithm = jwt.header?.alg === "RS256" || jwt.header?.alg === "ES256";
+  if (isOidcAlgorithm && (!config.issuer || !config.audience)) {
+    return { authenticated: false, reason: "OIDC issuer and audience must be configured" };
+  }
   const signed = `${token.split(".")[0]}.${token.split(".")[1]}`;
   let verified = false;
   if (jwt.header?.alg === "HS256" && config.jwtSecret) {
@@ -168,8 +172,17 @@ export async function verifyAccessToken(
   if (!verified) return { authenticated: false, reason: "signature rejected" };
 
   const now = Math.floor(Date.now() / 1000);
-  if (typeof jwt.payload.exp === "number" && jwt.payload.exp <= now) {
+  // Access tokens must be time-bounded. Do not silently treat missing or
+  // malformed NumericDate claims as non-expiring credentials.
+  if (typeof jwt.payload.exp !== "number" || !Number.isFinite(jwt.payload.exp)) {
+    return { authenticated: false, reason: "invalid token expiration" };
+  }
+  if (jwt.payload.exp <= now) {
     return { authenticated: false, reason: "token expired" };
+  }
+  if (jwt.payload.nbf !== undefined &&
+      (typeof jwt.payload.nbf !== "number" || !Number.isFinite(jwt.payload.nbf))) {
+    return { authenticated: false, reason: "invalid token not-before claim" };
   }
   if (typeof jwt.payload.nbf === "number" && jwt.payload.nbf > now) {
     return { authenticated: false, reason: "token not yet valid" };
