@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — test portability
+
+- `tests/m-fileread-cache.test.ts`: oversized-store test used `truncateSync` with a file descriptor (TypeError on Linux); now `ftruncateSync`.
+
+### Docs — benchmark numbers re-measured (2026-10-11, post-merge of #62/#63)
+
+- Token ratio (8 queries): realistic top-K arm **92.2%** (103,135 → 8,092 tokens), naive-grep arm **98.8%**. Previously 95.6% / 98.5%; the repository grew, so the baselines moved.
+- Retrieval golden set (132 queries, in-sample): Hit@5 97.7%, MRR 0.735, NDCG@5 0.466 (previously 100% / 0.779 / 0.638). CI gate (≥80% recall / ≥90% top-K) still passes.
+
 ### Fixed — production `npm audit --omit=dev` (GHSA-6qxp-vccf-f47h, GHSA-jqcg-44mw-7w3h)
 
 - Direct `@modelcontextprotocol/sdk` (root and `packages/efficiency-agent`) moved from `^1.30.0` to `^1.32.1`. The advisory range was `<1.31.0` (OAuth client could send credentials to an authorization server chosen by the MCP server).
