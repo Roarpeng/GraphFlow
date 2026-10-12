@@ -1,6 +1,10 @@
 import type { AgentWorkItem } from "../core/agent-delegation.js";
 import { containsCJK, extractPathTokens } from "./graph-utils.js";
 import type { ContextAnchorItem } from "./context-slicer-types.js";
+import type { GraphFlowConfig } from "../config/schema.js";
+import { hasUsableLlmProvider } from "../config/llm-availability.js";
+import { resolveCompressorSelection } from "../routing/model-router.js";
+import { executeRolePrompt } from "../routing/provider-executor.js";
 
 /** Minimum anchors before we skip agent translation delegation. */
 export const QUERY_TRANSLATE_HIT_THRESHOLD = 3;
@@ -34,37 +38,46 @@ export const QUERY_TRANSLATE_RELEVANCE_TOP_K_DELIVERED = 5;
  */
 export const QUERY_TRANSLATE_LOW_RELEVANCE_THRESHOLD = 0.25;
 
-export function buildQueryTranslateWorkItem(query: string, workspaceRoot?: string): AgentWorkItem {
+/**
+ * Translation instructions shared by BOTH execution paths — the bridge work
+ * item answered by the HOST agent (`buildQueryTranslateWorkItem`) and the
+ * local auto-translate LLM call (`autoTranslateQuery`) — so the translation
+ * guidance and the JSON contract can never drift apart.
+ */
+function queryTranslatePromptLines(query: string, workspaceRoot?: string): string[] {
   const pathHints = extractPathTokens(workspaceRoot);
   const pathLine =
     pathHints.length > 0
       ? `Project path hints (use if relevant): ${pathHints.slice(0, 12).join(", ")}`
       : "";
 
+  return [
+    "GraphFlow could not match enough code symbols from a Chinese/CJK search query.",
+    `Original query: ${query}`,
+    pathLine,
+    "",
+    "Using YOUR model, translate the user's intent into English CODE SEARCH terms.",
+    "Prefer exact file/class/function/component names (e.g. PoseDetectionPage, BattlePage, shieldEffect).",
+    "Avoid generic ambiguous words (e.g. use pose/camera/avatar for UI questions, not exercise when the codebase has fitness data modules).",
+    "Include Page/Component/Service file stems when the question is about UI behavior or effects.",
+    "",
+    "Return ONLY a JSON object (no markdown fences):",
+    "{",
+    '  "englishQuery": "space separated english keywords for graph search",',
+    '  "keywords": ["term1", "term2", "term3"]',
+    "}",
+  ].filter(Boolean);
+}
+
+export function buildQueryTranslateWorkItem(query: string, workspaceRoot?: string): AgentWorkItem {
   return {
     id: "query-translate-en",
     kind: "query-translate",
     prompt: [
-      "GraphFlow could not match enough code symbols from a Chinese/CJK search query.",
-      `Original query: ${query}`,
-      pathLine,
-      "",
-      "Using YOUR model, translate the user's intent into English CODE SEARCH terms.",
-      "Prefer exact file/class/function/component names (e.g. PoseDetectionPage, BattlePage, shieldEffect).",
-      "Avoid generic ambiguous words (e.g. use pose/camera/avatar for UI questions, not exercise when the codebase has fitness data modules).",
-      "Include Page/Component/Service file stems when the question is about UI behavior or effects.",
-      "",
-      "Return ONLY a JSON object (no markdown fences):",
-      '{',
-      '  "englishQuery": "space separated english keywords for graph search",',
-      '  "keywords": ["term1", "term2", "term3"]',
-      "}",
-      "",
+      ...queryTranslatePromptLines(query, workspaceRoot),
       "Then call graphflow_preview_context again with the SAME query plus englishQuery:",
       `graphflow_preview_context({ query: ${JSON.stringify(query)}, englishQuery: "<your englishQuery>" })`,
-    ]
-      .filter(Boolean)
-      .join("\n"),
+    ].join("\n"),
     expectedFormat: "json",
     responseSchema: {
       englishQuery: "string — space-separated English search terms",
@@ -134,4 +147,157 @@ export function shouldDelegateQueryTranslation(
   // so the agent can supply real English search terms.
   const quality = anchors ? anchorRelevanceQuality(anchors) : undefined;
   return quality !== undefined && quality < QUERY_TRANSLATE_LOW_RELEVANCE_THRESHOLD;
+}
+
+// ─────────────── Auto-retry translation (local economy-tier LLM) ───────────────
+
+/** Default wall-clock budget for the auto-translation utility call. */
+export const QUERY_TRANSLATE_TIMEOUT_MS = 15_000;
+
+/** Defensive cap: a rogue reply must not flood the context build with text. */
+const MAX_TRANSLATED_QUERY_CHARS = 500;
+
+export interface QueryTranslateResult {
+  englishQuery: string;
+  keywords: string[];
+}
+
+/**
+ * Transparency field riding on the graphflow_context tool result so hosts can
+ * see what the auto-retry loop did: the executed economy-tier translation, or
+ * a machine-readable reason it was skipped.
+ */
+export type QueryTranslationStatus =
+  | { englishQuery: string; keywords: string[]; tier: "economy" }
+  | { skipped: string };
+
+/**
+ * Defensively parse a query-translation reply into `{ englishQuery, keywords }`.
+ * Accepts bare JSON, fenced markdown JSON (```json … ```), and a JSON object
+ * surrounded by prose. Returns null when no usable englishQuery surfaces.
+ */
+export function parseQueryTranslateReply(raw: string): QueryTranslateResult | null {
+  const text = raw.trim();
+  if (!text) {
+    return null;
+  }
+
+  const candidates: string[] = [];
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+  if (fenced?.[1]?.trim()) {
+    candidates.push(fenced[1]);
+  }
+  candidates.push(text);
+  const braceStart = text.indexOf("{");
+  const braceEnd = text.lastIndexOf("}");
+  if (braceStart !== -1 && braceEnd > braceStart) {
+    candidates.push(text.slice(braceStart, braceEnd + 1));
+  }
+
+  for (const candidate of candidates) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(candidate);
+    } catch {
+      continue;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      continue;
+    }
+    const source = parsed as { englishQuery?: unknown; keywords?: unknown };
+    const englishQuery =
+      typeof source.englishQuery === "string" ? source.englishQuery.trim() : "";
+    if (!englishQuery) {
+      continue;
+    }
+    const keywords = (Array.isArray(source.keywords) ? source.keywords : [])
+      .filter((term): term is string => typeof term === "string")
+      .map((term) => term.trim())
+      .filter((term) => term.length > 0);
+    return {
+      englishQuery:
+        englishQuery.length > MAX_TRANSLATED_QUERY_CHARS
+          ? englishQuery.slice(0, MAX_TRANSLATED_QUERY_CHARS)
+          : englishQuery,
+      keywords:
+        keywords.length > 0
+          ? keywords
+          : englishQuery.split(/\s+/).filter((term) => term.length > 0),
+    };
+  }
+  return null;
+}
+
+/**
+ * Translate a CJK query locally via GraphFlow's own LLM provider — the
+ * auto-retry half of the query-translate loop. Builds the SAME prompt the
+ * bridge work item uses (see `queryTranslatePromptLines`), executes it on the
+ * economy-tier (cheap-utility) model — never the smart tier — and parses the
+ * JSON reply defensively.
+ *
+ * Resolves to null on ANY failure (no usable provider, timeout, provider
+ * error, unparseable reply, empty englishQuery). Never throws; the caller
+ * falls back to bridging the `query-translate-en` work item to the host.
+ */
+export async function autoTranslateQuery(
+  task: string,
+  options: { config: GraphFlowConfig; timeoutMs?: number; configPath?: string }
+): Promise<QueryTranslateResult | null> {
+  try {
+    const query = task.trim();
+    if (!query || !options?.config) {
+      return null;
+    }
+    if (!hasUsableLlmProvider(options.config)) {
+      return null;
+    }
+
+    // Economy tier only — this is a cheap utility call and must never occupy
+    // the smart tier. resolveCompressorSelection is the config-object-based
+    // resolver for the configured cheap-utility (compression/economy) model;
+    // it never reads tiers.smart.
+    const selection = resolveCompressorSelection(options.config);
+
+    const prompt = [
+      ...queryTranslatePromptLines(query, options.config.graphPolicy.workspaceRoot),
+      // Direct-call trailer replacing the bridge item's host round-trip lines.
+      "Respond with ONLY the JSON object itself — no explanation, no markdown fences.",
+    ].join("\n");
+
+    const timeoutMs =
+      options.timeoutMs !== undefined && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+        ? Math.floor(options.timeoutMs)
+        : QUERY_TRANSLATE_TIMEOUT_MS;
+    const controller = new AbortController();
+    let raceTimer: ReturnType<typeof setTimeout> | undefined;
+    // Belt-and-braces: executeRolePrompt honors the abort signal and carries
+    // its own per-attempt timeout, but the retry budget (with backoff) can
+    // outlive the outer budget — the race latch enforces it as a hard cap.
+    const timeoutLatch = new Promise<null>((resolve) => {
+      raceTimer = setTimeout(() => {
+        controller.abort();
+        resolve(null);
+      }, timeoutMs);
+      raceTimer.unref?.();
+    });
+
+    let raw: string | null = null;
+    try {
+      raw = await Promise.race([
+        executeRolePrompt("planner", prompt, selection, undefined, controller.signal, {
+          disableTools: true,
+          ...(options.configPath !== undefined ? { configPath: options.configPath } : {}),
+        }),
+        timeoutLatch,
+      ]);
+    } finally {
+      clearTimeout(raceTimer);
+    }
+    if (typeof raw !== "string") {
+      return null;
+    }
+    return parseQueryTranslateReply(raw);
+  } catch {
+    return null; // never throws
+  }
 }

@@ -40,6 +40,16 @@ import {
 } from "../../graph/context-cache";
 import type { ContextPreviewResult } from "../cli/runtime/types";
 import { resolveConfig, resolveEfficiencyPolicy, toObservationPolicy } from "../../config/resolve";
+import { hasUsableLlmProvider } from "../../config/llm-availability";
+import { bindRuntimeWorkspaceRoot } from "../../config/workspace-root";
+import type { GraphFlowConfig } from "../../config/schema";
+import { getContextCache } from "../../graph/context-cache";
+import {
+  autoTranslateQuery,
+  type QueryTranslationStatus,
+} from "../../graph/query-translate";
+import { createGraphClient } from "../../graph/client-factory";
+import { retrieveSimilarEpisodes, type RetrievedEpisode } from "../../agents/episode-retrieval";
 import type { ObservationPolicy } from "../../observations/types";
 
 export interface ToolCall {
@@ -284,50 +294,149 @@ async function executeToolCallInner(
           )
         );
       }
-      if (query && !anchorId) {
-        return await stableContextPreviewResponse(
-          query,
-          readOptionalString(args.rootDir),
-          readOptionalString(args.configPath),
-          await previewContext(
-            query,
-            readOptionalString(args.configPath),
-            readOptionalString(args.rootDir),
-            readOptionalString(args.englishQuery),
-            buildDialogueOptions(args),
-            readObservedContextUsage(args.contextPressure)
-          )
-        );
-      }
-      if (query && anchorId) {
-        // Both provided: default to preview behavior for backward compatibility
-        return await stableContextPreviewResponse(
-          query,
-          readOptionalString(args.rootDir),
-          readOptionalString(args.configPath),
-          await previewContext(
-            query,
-            readOptionalString(args.configPath),
-            readOptionalString(args.rootDir),
-            readOptionalString(args.englishQuery),
-            buildDialogueOptions(args),
-            readObservedContextUsage(args.contextPressure)
-          )
-        );
+      if (query) {
+        // Query-translate auto-retry loop: when the first package bridges the
+        // `query-translate-en` work item back to the host (CJK / low-match)
+        // AND GraphFlow itself has a usable LLM provider, the translation
+        // runs locally on the economy tier and the package is rebuilt ONCE
+        // with the englishQuery attached. The bridge work item is kept only
+        // when auto-translation was unavailable or failed — the host stays
+        // the fallback translator. One retry max, never a loop.
+        const previewWithAutoTranslate = async (): Promise<{
+          result: ContextPreviewResult;
+          queryTranslation?: QueryTranslationStatus;
+        }> => {
+          const configPath = readOptionalString(args.configPath);
+          const rootDir = readOptionalString(args.rootDir);
+          const englishQueryArg = readOptionalString(args.englishQuery);
+          const dialogue = buildDialogueOptions(args);
+          const contextPressure = readObservedContextUsage(args.contextPressure);
+          // Same budget/options for the first build and the rebuild: dialogue
+          // capture and observed-pressure budgeting must not differ between
+          // the two passes of one logical request.
+          const buildOnce = (englishQuery?: string): Promise<ContextPreviewResult> =>
+            previewContext(query, configPath, rootDir, englishQuery, dialogue, contextPressure);
+
+          const first = await buildOnce(englishQueryArg);
+          // Detection: the bridge work item in the built package IS the CJK /
+          // low-match signal (shouldDelegateQueryTranslation decided it during
+          // the build).
+          const needsTranslation =
+            !englishQueryArg &&
+            (first.agentWorkItems?.some((item) => item.id === "query-translate-en") ?? false);
+          if (!needsTranslation) {
+            return { result: first };
+          }
+
+          // Mirror buildPreview's config binding so the provider check and the
+          // cache key below see the same workspace the package was built for.
+          let previewConfig: GraphFlowConfig | undefined;
+          try {
+            const resolved = resolveConfig(configPath, rootDir ? { rootDir } : undefined);
+            previewConfig = bindRuntimeWorkspaceRoot(
+              resolved,
+              rootDir
+                ? { rootDir }
+                : resolved.graphPolicy.workspaceRoot
+                  ? { projectWorkspaceRoot: resolved.graphPolicy.workspaceRoot }
+                  : undefined
+            );
+          } catch {
+            previewConfig = undefined;
+          }
+          if (!previewConfig || !hasUsableLlmProvider(previewConfig)) {
+            return { result: first, queryTranslation: { skipped: "no-llm-provider" } };
+          }
+
+          const translated = await autoTranslateQuery(query, {
+            config: previewConfig,
+            ...(configPath !== undefined ? { configPath } : {}),
+          });
+          if (translated === null) {
+            // Bridge item stays on `first`: the host agent remains the fallback
+            // translator when the local call failed/timed out/unparsed.
+            return { result: first, queryTranslation: { skipped: "auto-translate-failed" } };
+          }
+
+          // The preview cache is keyed by (workspaceRoot, query) WITHOUT
+          // englishQuery: drop the just-cached low-match entry, or the rebuild
+          // would be served the stale package and the retry would silently
+          // no-op. Best-effort — a miss at worst re-serves the bridge item.
+          try {
+            getContextCache().delete(
+              `${previewConfig.graphPolicy.workspaceRoot ?? process.cwd()}:${query}`
+            );
+          } catch {
+            // ignore
+          }
+
+          const rebuilt = await buildOnce(translated.englishQuery);
+          return {
+            result: {
+              ...rebuilt,
+              agentInstructions:
+                `Auto-translated query (economy tier): "${translated.englishQuery}". ` +
+                "The context package was rebuilt with this English query; no agent work item is needed.",
+            },
+            queryTranslation: {
+              englishQuery: translated.englishQuery,
+              keywords: translated.keywords,
+              tier: "economy",
+            },
+          };
+        };
+        const respondWithContextPreview = async (): Promise<
+          ToolCallResponse & { structuredContent: Record<string, unknown> }
+        > => {
+          const rootDir = readOptionalString(args.rootDir);
+          const configPath = readOptionalString(args.configPath);
+          const { result, queryTranslation } = await previewWithAutoTranslate();
+          const response = await stableContextPreviewResponse(query, rootDir, configPath, result);
+          // Transparency: `queryTranslation` is a volatile per-call fact, so
+          // it rides structuredContent only (the stable-face text copy
+          // deliberately projects content-derived blocks and defers volatile
+          // fields).
+          return queryTranslation !== undefined
+            ? { ...response, structuredContent: { ...response.structuredContent, queryTranslation } }
+            : response;
+        };
+        if (!anchorId) {
+          return respondWithContextPreview();
+        }
+        // Both query and anchorId provided: default to preview behavior for
+        // backward compatibility
+        return respondWithContextPreview();
       }
       throw new Error("Either 'query', 'anchorId', or 'assistantReply' must be provided for graphflow_context.");
     }
     case "graphflow_plan": {
       const mode = readOptionalString(args.mode) || "simple";
       const task = readRequiredString(args.task, "task");
-      if (mode === "insight") {
-        return structuredResponse(
-          await planInsightResult(task, readOptionalString(args.configPath))
-        );
+      const configPath = readOptionalString(args.configPath);
+      // Similar past episodes (best-effort, never blocks planning): retrieved
+      // before generation so the payload can surface them (episodeContext) and
+      // the LLM planning path can learn from them.
+      let episodeContext: RetrievedEpisode[] = [];
+      try {
+        const client = createGraphClient(resolveConfig(configPath));
+        try {
+          episodeContext = await retrieveSimilarEpisodes(client, task, { limit: 3 });
+        } finally {
+          await client.close?.();
+        }
+      } catch {
+        // No usable graph client or retrieval failure → plan without episodes.
       }
-      return structuredResponse(
-        await planAndBrainstormResult(task, readOptionalString(args.configPath))
+      if (mode === "insight") {
+        const insight = await planInsightResult(task, configPath);
+        return structuredResponse({ ...insight, episodeContext });
+      }
+      const plan = await planAndBrainstormResult(
+        task,
+        configPath,
+        episodeContext.length > 0 ? { episodes: episodeContext } : undefined
       );
+      return structuredResponse({ ...plan, episodeContext });
     }
     case "graphflow_index": {
       const filePath = readOptionalString(args.filePath);
