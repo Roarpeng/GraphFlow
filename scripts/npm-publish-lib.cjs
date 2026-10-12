@@ -7,7 +7,7 @@
 
 const { writeFileSync } = require("node:fs");
 
-const TRUSTED_PUBLISH_NPM = "11.6.2";
+const TRUSTED_PUBLISH_NPM = "12.2.0";
 const OIDC_REGISTRY_NPMRC = "registry=https://registry.npmjs.org/\n";
 
 function classifyNpmPublishFailure(combined) {

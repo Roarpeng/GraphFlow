@@ -134,7 +134,7 @@ jobs:
           for f in /home/runner/.npm/_logs/*-debug-0.log; do
             [ -f "$f" ] || continue
             echo "--- $f"
-            grep -Ei 'oidc|trusted|provenance|auth|token' "$f" | tail -n 60 || true
+            grep -Ei 'oidc|trusted|provenance|auth|token|eotp|one-time|2fa|otplease' "$f" | tail -n 60 || true
           done
 
       - name: Fail when publish did not succeed

@@ -3,7 +3,7 @@
  * Idempotent npm publish for CI.
  *
  * Auth order (OIDC first — a token can not satisfy 2FA in CI):
- *   1. GitHub OIDC Trusted Publishing (no NODE_AUTH_TOKEN, npx npm@11.6.2,
+ *   1. GitHub OIDC Trusted Publishing (no NODE_AUTH_TOKEN, npx npm@12.2.0,
  *      registry-only temp userconfig with tokens stripped from env)
  *   2. NODE_AUTH_TOKEN / NPM_TOKEN (fails with EOTP if the token requires 2FA;
  *      on EOTP the loop continues to the next auth method instead of dying)
