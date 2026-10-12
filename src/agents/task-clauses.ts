@@ -1,3 +1,5 @@
+import { isResearchAnalysisTask } from "./task-profile";
+
 /** Strong delimiters usually mark independent work items. */
 const STRONG_TASK_SPLIT = /\band\b|;|并且|以及|然后|接着|同时|；|。/i;
 
@@ -54,4 +56,33 @@ export function splitTaskClauses(task: string): string[] {
   }
 
   return [normalized];
+}
+
+/** Bug/defect vocabulary (English + Chinese) for task-profile template routing. */
+const BUGFIX_HINT = /fix|修复|bug|crash|报错|panic|error/i;
+
+/** Which heuristic plan template a task profile maps to. */
+export type TaskTemplateProfile = "research" | "bugfix" | "default";
+
+/**
+ * Profile-based plan-template routing for the heuristic planner:
+ * - research → analysis template (no implementation node)
+ * - bugfix   → reproduce → fix → regression chain
+ * - default  → the standard 4-node build pipeline
+ *
+ * Research is tested first so "分析并修复报错" reads as analysis (the shared
+ * detector is the one insight.ts routes its research short path on).
+ */
+export function classifyTaskTemplate(task: string): TaskTemplateProfile {
+  const text = task.trim();
+  if (!text) {
+    return "default";
+  }
+  if (isResearchAnalysisTask(text)) {
+    return "research";
+  }
+  if (BUGFIX_HINT.test(text)) {
+    return "bugfix";
+  }
+  return "default";
 }

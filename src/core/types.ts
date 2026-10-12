@@ -109,6 +109,20 @@ export interface TaskRunResult {
   };
 }
 
+/**
+ * Machine-checkable acceptance criterion for a plan node.
+ * - kind "test": a suggested verification command (NEVER executed directly —
+ *   it is a suggestion string surfaced to the executing agent/human).
+ * - kind "graph-assertion": a symbol-query string that must hit ≥1 symbol in
+ *   the code graph when a GraphClient is available.
+ */
+export interface TaskAcceptance {
+  kind: "test" | "graph-assertion";
+  command?: string;
+  assertion?: string;
+  description?: string;
+}
+
 export interface TaskNode {
   id: string;
   description: string;
@@ -116,6 +130,8 @@ export interface TaskNode {
   status: TaskStatus;
   contextQuery: string;
   retryCount: number;
+  /** Machine-checkable acceptance criterion for this node (optional, backward compatible). */
+  acceptance?: TaskAcceptance;
   /** 指定执行该节点的 agent 角色（AgentSpecialty），用于多 Agent 协作编排 */
   assignedAgent?: AgentSpecialty;
   /** ATP v1.0: 任务优先级 (1=最高) */

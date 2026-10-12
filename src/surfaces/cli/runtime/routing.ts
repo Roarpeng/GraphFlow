@@ -1,5 +1,6 @@
 import { tryBrainstormTaskLlm } from "../../../agents/brainstormer";
 import { tryPlanTasksLlm } from "../../../agents/planner";
+import type { RetrievedEpisode } from "../../../agents/episode-retrieval";
 import { planInsight, type SixHatsInsight } from "../../../agents/insight";
 import { hasUsableLlmProvider } from "../../../config/llm-availability";
 import {
@@ -827,9 +828,16 @@ export async function probeRoutingConnectivity(
   ]);
 }
 
+/** Options for planAndBrainstormResult; all fields optional and additive. */
+export interface PlanAndBrainstormOptions {
+  /** Similar past episodes injected into the LLM planner prompt (case-based planning). */
+  episodes?: RetrievedEpisode[];
+}
+
 export async function planAndBrainstormResult(
   task: string,
-  configPath?: string
+  configPath?: string,
+  options?: PlanAndBrainstormOptions
 ): Promise<PlanPreviewResult> {
   const config = resolveConfig(configPath);
 
@@ -920,6 +928,9 @@ export async function planAndBrainstormResult(
       tryPlanTasksLlm(task, {
         selection,
         ...(skillCondition?.skillRefs ? { skillHints: skillCondition.skillRefs } : {}),
+        ...(options?.episodes && options.episodes.length > 0
+          ? { episodes: options.episodes }
+          : {}),
       }),
       planLlmTimeoutMs
     ),

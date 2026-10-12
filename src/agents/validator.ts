@@ -1,7 +1,169 @@
 import { logger } from "../utils/logger";
-import type { ValidationResult } from "../core/types";
+import type { TaskNode, ValidationResult } from "../core/types";
+import type { GraphClient } from "../graph/client-factory";
+import { querySymbolGraph } from "../graph/graph-search";
 import type { ModelSelection } from "../routing/model-router";
 import { executeRolePrompt, type PromptContext } from "../routing/provider-executor";
+
+// ───────────────────────── Acceptance criteria ─────────────────────────
+
+/**
+ * Test-runner commands acceptance suggestions may start with. Anything else
+ * (`rm`, `curl`, `sh`…) is rejected as an unsafe runner. "go test" is the one
+ * two-word prefix, handled separately in {@link hasSafeTestRunnerPrefix}.
+ */
+const SAFE_TEST_RUNNER_PREFIXES = ["npm", "npx", "vitest", "jest", "py.test", "pytest"] as const;
+
+/**
+ * Shell metacharacters that must never appear in an acceptance command
+ * (suggestion strings still get hygiene-checked: no chaining, pipes,
+ * redirections or command/variable substitution). Everything else — spaces,
+ * dashes, colons, dots, slashes, quotes — is allowed.
+ */
+const SHELL_METACHAR_PATTERN = /[;&|><$`]/;
+
+function hasSafeTestRunnerPrefix(command: string): boolean {
+  const tokens = command.trim().split(/\s+/);
+  const first = tokens[0] ?? "";
+  if (first === "go") {
+    return (tokens[1] ?? "") === "test";
+  }
+  return (SAFE_TEST_RUNNER_PREFIXES as readonly string[]).includes(first);
+}
+
+export interface AcceptanceValidationResult {
+  ok: boolean;
+  problems: string[];
+}
+
+/**
+ * Validate a node's machine-checkable acceptance criterion.
+ *
+ * - kind "test": command non-empty, starts with a known-safe test-runner
+ *   prefix, and contains no shell metacharacters (`; & | > < $ \``) beyond
+ *   spaces/dashes/colons. These are suggestions, but hygiene is still
+ *   enforced so a poisoned suggestion can never round-trip as "validated".
+ * - kind "graph-assertion": assertion non-empty. When a GraphClient is
+ *   supplied, the assertion is run through querySymbolGraph (read-only) and
+ *   must hit ≥1 symbol; without a client only the structural check applies.
+ * - Absence of `acceptance` is valid (backward compatibility).
+ */
+export async function validateAcceptance(
+  node: TaskNode,
+  client?: GraphClient
+): Promise<AcceptanceValidationResult> {
+  const problems: string[] = [];
+  const acceptance = node.acceptance;
+  if (!acceptance) {
+    return { ok: true, problems };
+  }
+
+  if (acceptance.kind === "test") {
+    const command = typeof acceptance.command === "string" ? acceptance.command.trim() : "";
+    if (!command) {
+      problems.push(`${node.id}: acceptance.kind="test" requires a non-empty command`);
+    } else {
+      if (!hasSafeTestRunnerPrefix(command)) {
+        problems.push(
+          `${node.id}: acceptance command must start with a known-safe test runner (npm/npx/vitest/jest/py.test/pytest/go test): ${command}`
+        );
+      }
+      const metachars = command.match(SHELL_METACHAR_PATTERN);
+      if (metachars) {
+        problems.push(
+          `${node.id}: acceptance command contains shell metacharacter(s) "${metachars.join(
+            ""
+          )}" — only spaces/dashes/colons style hygiene is allowed: ${command}`
+        );
+      }
+    }
+  } else if (acceptance.kind === "graph-assertion") {
+    const assertion = typeof acceptance.assertion === "string" ? acceptance.assertion.trim() : "";
+    if (!assertion) {
+      problems.push(`${node.id}: acceptance.kind="graph-assertion" requires a non-empty assertion`);
+    } else if (client) {
+      try {
+        const result = await querySymbolGraph(client, assertion);
+        if (result.matches.length < 1) {
+          problems.push(`${node.id}: graph assertion matched no symbols (query: ${assertion})`);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        problems.push(`${node.id}: graph assertion query failed (treated as unverified): ${message}`);
+      }
+    }
+    // No client → structural-only check (non-empty), by design.
+  } else {
+    problems.push(
+      `${node.id}: unknown acceptance.kind "${String(acceptance.kind)}" (expected "test" | "graph-assertion")`
+    );
+  }
+
+  return { ok: problems.length === 0, problems };
+}
+
+export interface PlanValidationResult {
+  /** False only for structural plan problems; acceptance issues are warnings. */
+  ok: boolean;
+  /** Structural problems that make the plan invalid. */
+  problems: string[];
+  /** Acceptance-criterion issues: advisory, never fail the plan. */
+  warnings: string[];
+}
+
+/**
+ * Plan-level validation flow for TaskNode[]: structural DAG checks (ids,
+ * descriptions, dependency references) as hard problems, plus per-node
+ * acceptance validation via {@link validateAcceptance} as WARNINGS only —
+ * nodes without an acceptance criterion stay valid for backward compat.
+ * Pass a GraphClient to also resolve graph-assertion queries.
+ */
+export async function validatePlan(
+  plan: TaskNode[],
+  client?: GraphClient
+): Promise<PlanValidationResult> {
+  const problems: string[] = [];
+  const warnings: string[] = [];
+
+  if (!Array.isArray(plan) || plan.length === 0) {
+    problems.push("plan must contain at least one task node");
+    return { ok: false, problems, warnings };
+  }
+
+  const seenIds = new Set<string>();
+  for (const node of plan) {
+    if (!node.id || !node.id.trim()) {
+      problems.push("plan node is missing an id");
+      continue;
+    }
+    if (seenIds.has(node.id)) {
+      problems.push(`duplicate task node id: ${node.id}`);
+    }
+    seenIds.add(node.id);
+    if (!node.description || !node.description.trim()) {
+      problems.push(`node ${node.id} is missing a description`);
+    }
+    for (const dep of node.dependencies ?? []) {
+      if (!plan.some((other) => other.id === dep)) {
+        problems.push(`node ${node.id} depends on unknown id "${dep}"`);
+      }
+    }
+  }
+
+  for (const node of plan) {
+    if (!node.acceptance) {
+      continue; // Absence of acceptance stays valid (backward compat).
+    }
+    const acceptance = await validateAcceptance(node, client);
+    if (!acceptance.ok) {
+      warnings.push(...acceptance.problems);
+    }
+  }
+
+  return { ok: problems.length === 0, problems, warnings };
+}
+
+// ───────────────────────── Worker-result validation ─────────────────────────
 
 export function validateTaskResult(task: string, workerOutput: string): ValidationResult {
   if (!task.trim()) {
