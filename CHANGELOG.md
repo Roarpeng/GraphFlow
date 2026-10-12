@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-10-12
+
 ### Added — retrieval quality (community/paper-informed wave)
 
 - **BM25 hybrid ranking**: `src/graph/bm25.ts` (BM25F field weights symbol×3 / path×2 / summary×1, k1=1.2, b=0.75). `searchGraphNodes` / `querySymbolGraph` / `computeAnchorRelevance` now score with corpus IDF (generic tokens like `utils`/`index` demoted automatically); lexical + vector channels fuse via RRF (`rrfFuse`). Without a corpus index the anchor-relevance scorer is byte-identical to the previous one.
