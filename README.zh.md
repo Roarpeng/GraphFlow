@@ -222,7 +222,7 @@ GraphFlow 本身就是一个 **dsh 插件包**（topic：`dsh-plugin`）。`pack
 | VS Code/Cursor 图谱面板、Settings、Workbench Tree、`@graphflow` chat | **不移植** |
 | Cursor Agent Plugins 发现 / Claude Code Session* **文件** hooks | **不移植**（dsh 用 bundle + glue） |
 
-核心价值：本地 AST 知识图谱（10 种语言走真实 tree-sitter AST（含 C/C++）；TypeScript/JavaScript 走 TypeScript 编译器（可选依赖，缺失时降级正则抽取、符号细节减少）；Markdown 为正则解析）、L1–L3 分层压缩（token 比值**双口径**并列——对整读 top-10 文件少 **92.2%**，对朴素 grep 基线少 98.8%，两者回答不同问题、不可互换，且都不衡量回答质量）、跨会话 Episodic / Skill 飞轮。GraphFlow **不执行代码**，只给宿主 Agent 压缩上下文和计划；对话写入边界默认做密钥脱敏（`GRAPHFLOW_DIALOGUE_REDACT=0` 可关）。Workbench 数据走 MCP `graphflow_context` / `graphflow_diagnose` 即可。
+核心价值：本地 AST 知识图谱（13 种语言走真实 tree-sitter AST（含 C/C++、PHP、C#、Scala）；TypeScript/JavaScript 走 TypeScript 编译器（可选依赖，缺失时降级正则抽取、符号细节减少）；Markdown 为正则解析）、L1–L3 分层压缩（token 比值**双口径**并列——对整读 top-10 文件少 **92.2%**，对朴素 grep 基线少 98.8%，两者回答不同问题、不可互换，且都不衡量回答质量）、跨会话 Episodic / Skill 飞轮。GraphFlow **不执行代码**，只给宿主 Agent 压缩上下文和计划；对话写入边界默认做密钥脱敏（`GRAPHFLOW_DIALOGUE_REDACT=0` 可关）。Workbench 数据走 MCP `graphflow_context` / `graphflow_diagnose` 即可。
 
 ### 安装
 

@@ -12,7 +12,7 @@ The community is converging on an "agent harness" vocabulary: **memory + hooks +
 
 | Harness primitive | GraphFlow implementation |
 | --- | --- |
-| **Memory** | Code graph (10 tree-sitter grammar languages incl. C/C++; TypeScript/JavaScript via the TypeScript compiler — optional dependency, falls back to regex extraction with reduced symbol detail when absent; plus regex-based Markdown) + Episodic / Skill / Decision nodes — project knowledge *and* project experience persist across sessions |
+| **Memory** | Code graph (13 tree-sitter grammar languages incl. C/C++, PHP, C#, Scala; TypeScript/JavaScript via the TypeScript compiler — optional dependency, falls back to regex extraction with reduced symbol detail when absent; plus regex-based Markdown) + Episodic / Skill / Decision nodes — project knowledge *and* project experience persist across sessions |
 | **Hooks** | Outcome auto-capture (on by default) + Claude Code `SessionEnd` / `Stop` and DeepSeek Harness `agent/disposed` glue close the learning loop automatically — no manual outcome reporting required |
 | **Skills** | A four-class flywheel (`proven` / `correctable` / `anti-pattern` / `noise`) with canary validation — skills are promoted by evidence, not by assertion |
 
@@ -37,7 +37,7 @@ All numbers below come from a **public, reproducible benchmark suite** ([benchma
 
 What has been checked and holds up:
 
-- **Real ASTs**: 10 code languages are parsed with real tree-sitter grammars (incl. C/C++); TypeScript/JavaScript go through the TypeScript compiler (optional dependency; falls back to regex extraction with reduced symbol detail when absent); Markdown is regex-based.
+- **Real ASTs**: 13 code languages are parsed with real tree-sitter grammars (incl. C/C++, PHP, C#, Scala); TypeScript/JavaScript go through the TypeScript compiler (optional dependency; falls back to regex extraction with reduced symbol detail when absent); Markdown is regex-based.
 - **Deterministic**: indexing and context packaging produce byte-identical output across repeat runs.
 - **Local-first**: indexing, compression and recall need no API key; the default semantic-embedding backend downloads its model from huggingface.co once (fails down to a fully offline hash backend; set `embeddingProvider: "fnv"` to never touch the network).
 - **Idempotent install**: re-running `install` does not duplicate MCP / skill / rules entries.
@@ -169,7 +169,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 
 | Capability | **GraphFlow** | CodeGraph | Serena | Repomix |
 | --- | --- | --- | --- | --- |
-| Code graph | 10-language tree-sitter AST index + TS/JS via the TypeScript compiler (+ regex Markdown) | more mature | LSP symbols | — |
+| Code graph | 13-language tree-sitter AST index + TS/JS via the TypeScript compiler (+ regex Markdown) | more mature | LSP symbols | — |
 | Context compression | layered + graph compression + vector recall | partial | partial | whole-repo dump |
 | Planning protocol | ATP IR + DAG + agent bridge | — | — | — |
 | **Learning memory** | Episodic / Skill / Decision flywheel | — | — | — |
@@ -184,7 +184,7 @@ Single-purpose tools each do one thing well; GraphFlow combines graph + compress
 | --- | --- |
 | **Planning protocol** | ATP v1.1 (Intent / Requirement / Six Hats / 5-Why / First Principles / Decision Matrix / Planning / Reflection); simple / complex / insight modes; agent-delegated bridge without an LLM; **skill-conditioned DAG** (`skillRefs` / `avoidPatterns` on plan nodes); [ATP/IR public spec v1.1](docs/atp-ir-spec-v1.md) |
 | **Goal alignment** | Goal anchor nodes (intent five-tuple as first-class citizen, original requirement auto-injected); low-confidence clarification gate (no plan below 0.6); runtime alignment-check; deviation classification (misread-requirement / scope-creep / tech-drift); goal version chain + diffs |
-| **Knowledge graph** | AST indexing across 10 tree-sitter grammar languages (incl. C/C++) plus TypeScript/JavaScript via the TypeScript compiler (optional dependency; falls back to regex extraction with reduced symbol detail when absent); Markdown is regex-based; File / Module / Symbol + **Concept / Requirement**; cross-layer edges `documents` / `implements` / `derived_from`; Office/PDF → Markdown via optional **`@firecrawl/anydoc`** (MIT). **CLI/npm**: optionalDependency. **VSIX**: not bundled; on activate the extension **auto-downloads the current-OS binary** into `~/.graphflow/optional-deps` when `graphflow.downloadAnydoc` is true (default). Disable the setting to skip network; source indexing still works. |
+| **Knowledge graph** | AST indexing across 13 tree-sitter grammar languages (incl. C/C++, PHP, C#, Scala) plus TypeScript/JavaScript via the TypeScript compiler (optional dependency; falls back to regex extraction with reduced symbol detail when absent); Markdown is regex-based; File / Module / Symbol + **Concept / Requirement**; cross-layer edges `documents` / `implements` / `derived_from`; Office/PDF → Markdown via optional **`@firecrawl/anydoc`** (MIT). **CLI/npm**: optionalDependency. **VSIX**: not bundled; on activate the extension **auto-downloads the current-OS binary** into `~/.graphflow/optional-deps` when `graphflow.downloadAnydoc` is true (default). Disable the setting to skip network; source indexing still works. |
 | **Context compression** | L1/L2/L3 layered anchors; graph compression (edge weights + PageRank, LRU cache); stem-matching recall (orchestrate ↔ orchestration); vector recall + RRF; RepoMap overview; adaptive budget; **symbol bodies** (the first three L1 symbol anchors quote their declaration — ≤120 tokens each, ≤20% of the pack, and only from budget the anchor stages left behind, so a body never displaces an anchor; quoted only when the file still matches the indexed signature, otherwise it stays a pointer, and `expandAnchor` reports `exact` / `relocated` / `drifted`; `enableSymbolBodies: false` opts out); **post-packaging accounting** (out-of-package payloads are honestly counted: dialogue recall hits and workbench/dialogue **preview echoes** land in `unbudgetedTokens`; `accountedTokens` = compressed + unbudgeted and `estimatedSavingsPercent` is computed on that true delivered total, with `estimatedRawTokens` floored at it; responses are bounded — history echoes are ~160-char message previews with a `truncated` flag, full text stays in the graph and expands via `anchorId` or the VS Code panel; `recordDialogue: false` disables echo and recording entirely) |
 | **Efficiency mechanisms (SoL-Pi borrow)** | **ObservationPack** (oversized outputs → content-addressed handle + exact paged recall), **Evidence-Preserving Reducer** (log → bounded receipt whose retained lines are re-verified verbatim), **Online Context Compact** (observed-pressure budget + economic compaction signal), **Action Fusion** (fused edit+validate steps on the bridge descriptor). **All on by default**, individually switchable in **GraphFlow: Settings**; **dsh automatic projection** rewrites over-budget tool results on the model surface (`GRAPHFLOW_D_DSH_PROJECTION=0` to disable); paired **efficiency/capability floor** (`graphflow-out/efficiency.json` + `governance release-gate` thresholds); **mechanism auto-research loop** (`graphflow mechanism`, held-out isolation). See [docs/efficiency-mechanisms.md](docs/efficiency-mechanisms.md) |
 | **Retrieval & fidelity** | Golden-set CI gate ≥80% recall / ≥90% top-K (132 author-written queries, no held-out split; commit-pinned benchmark: Hit@5=97.7%, MRR=0.735, NDCG@5=0.466 in-sample); separate anchor-recall and normalized body-coverage metrics persisted beside token savings |
@@ -244,7 +244,8 @@ graphflow context preview --reply "original assistant answer"
 ## CLI quick reference
 
 ```bash
-graphflow graph index .                    # build the graph
+graphflow graph index .                    # build the graph (parallel pipeline: graphPolicy.parallelIndex)
+graphflow scip app.scip                    # ingest a SCIP protobuf index (scip-typescript etc.) into precise def/ref edges
 graphflow context preview "orchestrator"   # preview compressed context
 graphflow plan "refactor planner" --json   # plan (also seeds workbench topics)
 graphflow workbench tree --json            # on-demand function DAG + side branches
@@ -288,6 +289,7 @@ Key options:
 | --- | --- |
 | `graphPolicy.transport` | `file` / `memory` / `sqlite` / **`auto` (recommended: sqlite-first, falls back to file)** / `mcp-http` |
 | `graphPolicy.maxContextTokens` | Context budget (default 1500) |
+| `graphPolicy.parallelIndex` | Parallel full-rebuild pipeline: `{ enabled: true, concurrency: 4 }` by default; `enabled: false` restores the sequential path byte-for-byte |
 | `graphPolicy.autoIndexOnSave` | Auto incremental index on save (default true) |
 | `embeddingPolicy.provider` | `transformers` (local default) / `openai` / `hash` |
 | `embeddingPolicy.dtype` | Local model precision: `q8` (default, ~98MB) / `fp16` / `q4` / `fp32` (~400MB); env `GRAPHFLOW_EMBEDDING_DTYPE` wins |

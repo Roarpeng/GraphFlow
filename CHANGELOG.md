@@ -4,6 +4,37 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added — retrieval quality (community/paper-informed wave)
+
+- **BM25 hybrid ranking**: `src/graph/bm25.ts` (BM25F field weights symbol×3 / path×2 / summary×1, k1=1.2, b=0.75). `searchGraphNodes` / `querySymbolGraph` / `computeAnchorRelevance` now score with corpus IDF (generic tokens like `utils`/`index` demoted automatically); lexical + vector channels fuse via RRF (`rrfFuse`). Without a corpus index the anchor-relevance scorer is byte-identical to the previous one.
+- **Personalized PageRank expansion**: `src/graph/pagerank.ts` (power iteration, relation-kind edge weights, LRU cache). `expandSubgraph` accepts `expansionStrategy: "ppr"` to admit neighbors by PPR mass instead of fixed-depth BFS (default `"bfs"` unchanged).
+- **Single-file flood guard**: keyword candidates are diversified per source file (cap 20) before compression, and same-file/import expansion stops adding from a file that already owns ≥50% (or 6) of the L1 anchor channel — one hub file can no longer wall off the true target.
+- **Query-intent routing**: `src/graph/query-router.ts` classifies symbol / module-overview / impact / general (confidence ≥0.6 gates); impact queries auto-select PPR expansion, module-overview raises the L2 quota floor. Explicit caller options always win.
+- **Optional embedding rerank**: `src/graph/rerank.ts` reorders the top-40 fused hits by query/text cosine behind `LayeredPackageOptions.enableRerank` (default off; hash/fnv providers auto-skip).
+- **Refill cost ladder**: `ContextRefillManager` escalates per hint lexical (cost 1) → vector (2) → file node (4), cumulative spend never exceeding the budget; stage choice exposed via `lastStages`.
+
+### Added — indexing (speed + coverage)
+
+- **Parallel full-rebuild pipeline**: `src/graph/index-pipeline.ts` — async sliding-window file pipeline (the previous `Promise.all` over `readFileSync` serialized on the event loop). Measured 1.71× on this repository (1842ms → 1076ms, 315 files); output byte-identical at any concurrency. Config `graphPolicy.parallelIndex = { enabled: true, concurrency: 4 }`; `enabled: false` restores the sequential path exactly. Unreadable files now skip (logged) instead of aborting the run.
+- **Recursive L2 module summaries (RAPTOR-lite)**: modules above 4000 chars / 40 children roll up compactly with per-subdirectory child nodes; deterministic, idempotent, no LLM.
+- **PHP, C#, Scala indexers**: tree-sitter coverage 10 → 13 languages (classes/interfaces/traits/methods/properties/imports/calls/inheritance; verified against live AST dumps). `.php`/`.cs`/`.scala` route automatically.
+- **SCIP ingestion (precise code intelligence)**: `src/graph/scip/` — zero-dependency protobuf reader + `graphflow scip <file.scip> [--limit N] [--json]` CLI. Definition/reference occurrences from any SCIP emitter (scip-typescript, scip-java, …) become exact `defines`/`references` edges (`scip:` symbol nodes, external stubs, per-file caps, per-document failure isolation).
+
+### Added — skill flywheel (evidence-ranked, self-maintaining)
+
+- **Wilson lower-bound ranking**: skills order by the confidence lower bound of their success evidence (46/50 outranks 2/2), existing score as tie-break; composites and atomics compete on the same basis.
+- **Lazy scheduled consolidation**: skill-library maintenance runs when >7 days or >50 new episodes since the last pass (persisted on a `skill-library-meta` node), triggered from the recall read path, fully failure-safe.
+- **Lesson dedup**: episode lessons collapse exact and near-duplicates (token-set Jaccard ≥0.8) at every playbook append point.
+- **Semantic drift detection**: `src/learning/skill-drift.ts` — cosine distance between a skill's text and the centroid of its grounded symbols' current summaries; ≥0.35 flips staleness to the new `semantic-drift` reason (unrecallable). Hash/missing embedding providers skip entirely.
+- **Lexical skill recall**: BM25 over skill name + playbook bullets lets content-matched skills enter hints as low-confidence candidates (`lexicalScore`, floor 0.5) without displacing Wilson-ordered symbolic matches.
+
+### Added — planning (case-based + verifiable)
+
+- **Similar-episode retrieval**: `src/agents/episode-retrieval.ts` — past episodes/dialogue turns ranked by token Jaccard + bigram Dice (pending/superseded excluded); `graphflow_plan` returns `episodeContext` and injects past lessons into the LLM planner prompt.
+- **Task-profile plan templates**: research tasks plan 分析与综合 → 验证与引用核对 (no 实现 node); bugfix tasks plan 复现与定位 → 修复实现 → 回归验证; default keeps the 4-node pipeline.
+- **Acceptance criteria**: `TaskNode.acceptance` (test command or graph-assertion) attached per template; `validateAcceptance`/`validatePlan` enforce safe runner prefixes, reject shell metacharacters, and verify graph assertions against the real symbol graph. Absence stays valid (warnings only).
+- **Query-translate auto-retry**: CJK low-recall queries are translated locally on the economy tier (15s timeout, one retry max) and the context rebuilds with `englishQuery`; the host bridge work item now appears only when no LLM is configured. Result carries a `queryTranslation` receipt.
+
 ### Fixed — test portability
 
 - `tests/m-fileread-cache.test.ts`: oversized-store test used `truncateSync` with a file descriptor (TypeError on Linux); now `ftruncateSync`.
