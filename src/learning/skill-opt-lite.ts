@@ -9,6 +9,7 @@
 
 import type { PlaybookBullet } from "./skill-types";
 import { serializePlaybookGuidance } from "./skill-types";
+import { dedupLessons } from "./skill-rank";
 
 export type SkillOptEditOp = "add" | "delete" | "replace";
 
@@ -232,7 +233,9 @@ export function applyPlaybookDelta(
     existing.length > 0
       ? existing.map((bullet) => ({ ...bullet }))
       : [];
-  const cleanedLessons = lessons.map((lesson) => lesson.trim()).filter((lesson) => lesson.length > 0);
+  // Cross-episode near-dup lessons (word-order changes / added stopwords)
+  // collapse onto their first occurrence before they can become bullets.
+  const cleanedLessons = dedupLessons(lessons);
 
   for (const lesson of cleanedLessons) {
     const key = playbookBulletKey(lesson);

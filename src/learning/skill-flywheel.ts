@@ -1,6 +1,10 @@
 import { hashTextHex as hashText } from "../utils/hash";
+import { logger } from "../utils/logger";
 import type { GraphNode, TaskRunResult } from "../core/types";
 import type { GraphClient } from "../graph/client-factory";
+// Lexical (BM25) recall channel — read-only reuse of the wave-1 graph index.
+import { createBm25Index, search, tokenizeBm25 } from "../graph/bm25";
+import type { Bm25Doc } from "../graph/bm25";
 
 // 导入提取出去的类型与常量
 import type {
@@ -34,6 +38,23 @@ import {
   resolveProvenMinSuccess,
 } from "./skill-admission";
 import { serializePlaybookGuidance } from "./skill-types";
+import {
+  dedupLessons,
+  rankSkillStates,
+  skillStateWilsonLB,
+  wilsonLowerBound,
+} from "./skill-rank";
+import {
+  SKILL_CONSOLIDATION_MIN_INTERVAL_MS,
+  applySkillConsolidation,
+  ensureSkillLibraryMeta,
+  planSkillConsolidation,
+  shouldConsolidateSkillLibrary,
+  writeSkillLibraryMeta,
+  noteEpisodeForSkillConsolidation,
+  type ConsolidateSkillInput,
+  type SkillLibraryMeta,
+} from "./skill-consolidate";
 
 // 兼容性重新导出，确保外部消费者完全兼容
 export type { SkillState, CompositeSkillState } from "./skill-types";
@@ -60,6 +81,17 @@ export {
   planFromRequest,
   toConsolidateResult,
   normalizeSkillNameKey,
+  SKILL_LIBRARY_META_NODE_ID,
+  SKILL_LIBRARY_META_KIND,
+  SKILL_CONSOLIDATION_MIN_INTERVAL_MS,
+  SKILL_CONSOLIDATION_NEW_EPISODE_THRESHOLD,
+  readSkillLibraryMeta,
+  writeSkillLibraryMeta,
+  ensureSkillLibraryMeta,
+  shouldConsolidateSkillLibrary,
+  noteEpisodeForSkillConsolidation,
+  parseSkillLibraryMeta,
+  type SkillLibraryMeta,
   type ConsolidateAction,
   type ConsolidateActionKind,
   type ConsolidateRequest,
@@ -69,6 +101,15 @@ export {
   type PlanSkillConsolidationOptions,
   type ApplySkillConsolidationResult,
 } from "./skill-consolidate";
+export {
+  wilsonLowerBound,
+  rankSkillStates,
+  skillStateWilsonLB,
+  skillSuccessEvidence,
+  dedupLessons,
+  WILSON_DEFAULT_Z,
+  LESSON_NEAR_DUP_JACCARD,
+} from "./skill-rank";
 
 const STOPWORDS = new Set([
   "update", "readme", "add", "fix", "file", "files",
@@ -819,9 +860,10 @@ export async function applySkillLearning(
   lessons?: string[],
   options?: SkillLearningOptions
 ): Promise<number> {
-  const lessonText = (lessons ?? [])
-    .map((lesson) => lesson.trim())
-    .filter((lesson) => lesson.length > 0);
+  // Cross-episode lesson dedup: exact-normalized duplicates and token-set
+  // near-duplicates (Jaccard >= 0.8) collapse onto their first occurrence so
+  // playbook guidance does not accumulate re-worded copies of one lesson.
+  const lessonText = dedupLessons(lessons ?? []);
   // Prefer task atoms; fold reported lessons so bridge report_outcome can seed skills
   // even when the original task string is too short/generic to extract atoms.
   // P0-2: evidence (plan descriptions / key decisions from the episode record)
@@ -1070,6 +1112,10 @@ export async function applySkillLearning(
   await client.upsertNodes(nodes);
   await client.upsertEdges(dedupEdges(edges));
 
+  // Count this episode toward the lazy consolidation schedule (best-effort;
+  // noteEpisodeForSkillConsolidation never throws).
+  await noteEpisodeForSkillConsolidation(client);
+
   if (!passed) {
     await pruneFailedSkills(client);
   }
@@ -1085,16 +1131,43 @@ export interface SkillConditionHints {
   avoidPatterns: string[];
 }
 
-type RankedSkillHint = {
+export type RankedSkillHint = {
   name: string;
   score: number;
   uses: number;
   isComposite: boolean;
   outcomeKind?: SkillOutcomeKind;
   state?: { kind: "composite" } & CompositeSkillState;
+  /**
+   * Wilson lower bound of the hint's (success evidence, uses) binomial —
+   * the PRIMARY ranking key (see skill-rank.ts). Composites score against
+   * max(uses, successCount + failureCount) observed trials. Skills without
+   * evidence carry 0 and fall through to the heuristic tie-break chain.
+   */
+  wilsonLb: number;
+  /**
+   * BM25 lexical score of the skill's text (name + playbook/guidance) against
+   * the task text — a SECONDARY signal: it only breaks ties between hints the
+   * Wilson key could not separate, and promotes lexically-matching skills the
+   * symbolic channel missed (see `lexicalOnly`). Undefined when the skill
+   * shares no query token with the task (score 0).
+   */
+  lexicalScore?: number;
+  /**
+   * True when the skill entered the candidate set ONLY through the lexical
+   * channel (no symbolic/keyword match) — a low-confidence candidate that
+   * must never displace Wilson-ordered symbolic matches.
+   */
+  lexicalOnly?: boolean;
 };
 
 function rankSkillHint(a: RankedSkillHint, b: RankedSkillHint): number {
+  // Evidence confidence first: a 46/50-success skill must outrank 2/2.
+  const lbDiff = b.wilsonLb - a.wilsonLb;
+  if (Math.abs(lbDiff) > 1e-12) {
+    return lbDiff;
+  }
+  // Equal-evidence tie-breaks keep the previous ordering behavior stable.
   if (a.isComposite !== b.isComposite) {
     return a.isComposite ? -1 : 1;
   }
@@ -1104,7 +1177,21 @@ function rankSkillHint(a: RankedSkillHint, b: RankedSkillHint): number {
   if (b.uses !== a.uses) {
     return b.uses - a.uses;
   }
+  // Full heuristic tie: prefer the lexically closer skill before the
+  // deterministic name tie-break. Never reorders Wilson-separated hints.
+  const lexicalDiff = (b.lexicalScore ?? 0) - (a.lexicalScore ?? 0);
+  if (Math.abs(lexicalDiff) > 1e-9) {
+    return lexicalDiff;
+  }
   return a.name.localeCompare(b.name);
+}
+
+/** Wilson LB for a composite: successes out of all observed outcome trials. */
+function compositeWilsonLB(composite: CompositeSkillState): number {
+  return wilsonLowerBound(
+    composite.successCount,
+    Math.max(composite.uses, composite.successCount + composite.failureCount)
+  );
 }
 
 function resolveAtomicOutcomeKind(state: SkillState): SkillOutcomeKind {
@@ -1134,7 +1221,148 @@ function resolveCompositeOutcomeKind(state: CompositeSkillState): SkillOutcomeKi
   return compositeGateMet(state) ? "proven" : "correctable";
 }
 
-async function collectTaskSkillCandidates(
+/** Atomic eligibility for the ranked (non-avoid) candidate list. */
+function isRankableAtomic(state: SkillState): boolean {
+  const kind = resolveAtomicOutcomeKind(state);
+  return kind === "proven" || kind === "correctable" || state.score > 0;
+}
+
+// ── Hybrid lexical (BM25) recall channel ──────────────────────────────────
+
+/**
+ * Promotion floor for the lexical channel. BM25 scores here are O(1) per
+ * matched rare term (k1 = 1.2, canonical field boosts): a term present in
+ * EVERY skill doc saturates to idf ≈ log(1 + 0.5/(N+0.5)) ≈ 0.1, so a doc
+ * matching only corpus-common tokens scores well below 0.5, while a single
+ * distinctive task term (present in a minority of docs) already clears it.
+ * The floor therefore admits "shares a rare, task-relevant term" and rejects
+ * "matches only ubiquitous glue".
+ */
+export const SKILL_LEXICAL_PROMOTION_FLOOR = 0.5;
+
+/** How many playbook bullets feed the lexical doc (top by net helpfulness). */
+const SKILL_LEXICAL_TOP_BULLETS = 3;
+/** Bound on the lexical doc text — keeps BM25 docs small and comparable. */
+const SKILL_LEXICAL_DOC_MAX_CHARS = 1000;
+
+/** One skill in the lexical pool (keyword-matched ∪ snapshot-visible). */
+export interface SkillLexicalPoolEntry {
+  id: string;
+  name: string;
+  isComposite: boolean;
+  atomic?: SkillState;
+  composite?: CompositeSkillState;
+}
+
+/**
+ * Lexical doc text for an atomic skill: top playbook bullets by net
+ * helpfulness (helpful − harmful, id tie-break), falling back to serialized
+ * guidance when no playbook exists — the bullets ARE the distilled lesson
+ * text, so guidance is only used when there is nothing more structured.
+ * Composites carry no playbook; their name (the `symbol` field) is their
+ * whole lexical identity.
+ */
+function skillLexicalSummaryText(atomic: SkillState): string {
+  const bullets = (atomic.playbook ?? [])
+    .slice()
+    .sort((a, b) => {
+      const net = b.helpful - b.harmful - (a.helpful - a.harmful);
+      return net !== 0 ? net : a.id.localeCompare(b.id);
+    })
+    .slice(0, SKILL_LEXICAL_TOP_BULLETS)
+    .map((bullet) => bullet.text);
+  const text = bullets.length > 0 ? bullets.join("\n") : (atomic.guidance ?? "");
+  return text.slice(0, SKILL_LEXICAL_DOC_MAX_CHARS);
+}
+
+/**
+ * Every recallable skill this client can see: the keyword-matched states the
+ * symbolic path already parsed, plus (when a full snapshot is available) the
+ * skills the keyword channel missed — that second half is exactly what the
+ * lexical channel exists to recover. Sorted by id so the BM25 doc order (and
+ * therefore every tie-break) is deterministic regardless of node-map order.
+ */
+function buildSkillLexicalPool(
+  client: GraphClient,
+  atomicStates: SkillState[],
+  compositeStates: CompositeSkillState[]
+): SkillLexicalPoolEntry[] {
+  const entries: SkillLexicalPoolEntry[] = [];
+  for (const atomic of atomicStates) {
+    entries.push({ id: atomic.id, name: atomic.name, isComposite: false, atomic });
+  }
+  for (const composite of compositeStates) {
+    entries.push({ id: composite.id, name: composite.name, isComposite: true, composite });
+  }
+  const seen = new Set(entries.map((entry) => entry.id));
+  if (typeof client.readSnapshot === "function") {
+    for (const node of client.readSnapshot().nodes) {
+      if (node.type !== "Skill" || seen.has(node.id)) {
+        continue;
+      }
+      // Same recallability filters as the symbolic loop above.
+      if (node.metadata?.unrecallable === true) {
+        continue;
+      }
+      const composite = parseCompositeState(node.content);
+      if (composite) {
+        seen.add(node.id);
+        entries.push({ id: composite.id, name: composite.name, isComposite: true, composite });
+        continue;
+      }
+      const atomic = parseSkillState(node.content);
+      if (atomic && !atomic.hidden) {
+        seen.add(node.id);
+        entries.push({ id: atomic.id, name: atomic.name, isComposite: false, atomic });
+      }
+    }
+  }
+  return entries.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/**
+ * BM25-score every pool skill against the task text (`symbol` = skill name,
+ * `summary` = playbook bullets / guidance). Returns skill-id → score, only
+ * entries with at least one matching query token.
+ */
+export function scoreSkillLexicalMatches(
+  entries: readonly SkillLexicalPoolEntry[],
+  task: string
+): Map<string, number> {
+  const scores = new Map<string, number>();
+  const queryTokens = tokenizeBm25(task);
+  if (queryTokens.length === 0 || entries.length === 0) {
+    return scores;
+  }
+  const docs: Bm25Doc[] = entries.map((entry) => ({
+    id: entry.id,
+    symbol: entry.name,
+    summary: entry.atomic !== undefined ? skillLexicalSummaryText(entry.atomic) : "",
+  }));
+  const hits = search(createBm25Index(docs), queryTokens);
+  for (const hit of hits) {
+    scores.set(hit.id, hit.score);
+  }
+  return scores;
+}
+
+/** Same eligibility the symbolic ranked list applies, for lexical promotions. */
+function isLexicallyPromotable(entry: SkillLexicalPoolEntry): boolean {
+  if (entry.atomic !== undefined) {
+    return isRankableAtomic(entry.atomic);
+  }
+  if (entry.composite !== undefined) {
+    return compositeGateMet(entry.composite) && entry.composite.score > 0;
+  }
+  return false;
+}
+
+/**
+ * Hybrid (symbolic + lexical) candidate collection for one task. Exported for
+ * tests/observability: the ranked hints carry `wilsonLb` (primary order) and
+ * `lexicalScore` (secondary tie-break / promotion signal).
+ */
+export async function collectTaskSkillCandidates(
   client: GraphClient,
   task: string
 ): Promise<{ atoms: string[]; ranked: RankedSkillHint[]; avoid: RankedSkillHint[] }> {
@@ -1163,6 +1391,13 @@ async function collectTaskSkillCandidates(
     }
   }
 
+  // Hybrid recall: lexical scores are computed over the FULL recallable pool
+  // (keyword matches + everything the snapshot can see) so they can both
+  // tie-break the symbolic candidates and promote skills the symbolic
+  // channel never surfaced.
+  const lexicalPool = buildSkillLexicalPool(client, atomicStates, compositeStates);
+  const lexicalScores = scoreSkillLexicalMatches(lexicalPool, task);
+
   const atomSet = new Set(atoms);
   const matchingComposites = compositeStates.filter((composite) => {
     const [n1, n2] = composite.name.split("+");
@@ -1181,19 +1416,25 @@ async function collectTaskSkillCandidates(
       isComposite: true as const,
       outcomeKind: resolveCompositeOutcomeKind(c),
       state: { kind: "composite" as const, ...c },
+      wilsonLb: compositeWilsonLB(c),
+      ...(lexicalScores.get(c.id) !== undefined
+        ? { lexicalScore: lexicalScores.get(c.id) as number }
+        : {}),
     })),
-    ...atomicStates
-      .filter((a) => {
-        const kind = resolveAtomicOutcomeKind(a);
-        return kind === "proven" || kind === "correctable" || a.score > 0;
-      })
-      .map((a) => ({
-        name: a.name,
-        score: a.score,
-        uses: a.uses,
-        isComposite: false as const,
-        outcomeKind: resolveAtomicOutcomeKind(a),
-      })),
+    // Atomic recall ordering now comes from rankSkillStates (Wilson LB of
+    // success evidence / uses, then score / updatedAt / id) — the final sort
+    // below re-applies the same Wilson key across composites and atomics.
+    ...rankSkillStates(atomicStates.filter((a) => isRankableAtomic(a))).map((a) => ({
+      name: a.name,
+      score: a.score,
+      uses: a.uses,
+      isComposite: false as const,
+      outcomeKind: resolveAtomicOutcomeKind(a),
+      wilsonLb: skillStateWilsonLB(a),
+      ...(lexicalScores.get(a.id) !== undefined
+        ? { lexicalScore: lexicalScores.get(a.id) as number }
+        : {}),
+    })),
   ];
 
   ranked.sort(rankSkillHint);
@@ -1207,18 +1448,75 @@ async function collectTaskSkillCandidates(
         uses: c.uses,
         isComposite: true as const,
         outcomeKind: resolveCompositeOutcomeKind(c),
+        wilsonLb: compositeWilsonLB(c),
+        ...(lexicalScores.get(c.id) !== undefined
+          ? { lexicalScore: lexicalScores.get(c.id) as number }
+          : {}),
       })),
-    ...atomicStates
-      .filter((a) => resolveAtomicOutcomeKind(a) === "anti-pattern" || a.score < 0)
-      .map((a) => ({
-        name: a.name,
-        score: a.score,
-        uses: a.uses,
-        isComposite: false as const,
-        outcomeKind: resolveAtomicOutcomeKind(a),
-      })),
+    ...rankSkillStates(
+      atomicStates.filter((a) => resolveAtomicOutcomeKind(a) === "anti-pattern" || a.score < 0)
+    ).map((a) => ({
+      name: a.name,
+      score: a.score,
+      uses: a.uses,
+      isComposite: false as const,
+      outcomeKind: resolveAtomicOutcomeKind(a),
+      wilsonLb: skillStateWilsonLB(a),
+      ...(lexicalScores.get(a.id) !== undefined
+        ? { lexicalScore: lexicalScores.get(a.id) as number }
+        : {}),
+    })),
   ];
   avoid.sort(rankSkillHint);
+
+  // Lexical-only promotions: skills the keyword/symbol channel never surfaced
+  // whose text still matches the task above the promotion floor. They are
+  // APPENDED after the Wilson-ordered symbolic candidates (never re-sorted
+  // among them) — a lexical match is a secondary, low-confidence signal and
+  // must not displace evidence-ordered recall. Deterministic order:
+  // lexicalScore desc, then name asc.
+  const rankedNames = new Set(ranked.map((hint) => hint.name));
+  const avoidNames = new Set(avoid.map((hint) => hint.name));
+  const promoted: RankedSkillHint[] = [];
+  for (const entry of lexicalPool) {
+    if (rankedNames.has(entry.name) || avoidNames.has(entry.name)) {
+      continue;
+    }
+    const lexicalScore = lexicalScores.get(entry.id) ?? 0;
+    if (lexicalScore < SKILL_LEXICAL_PROMOTION_FLOOR || !isLexicallyPromotable(entry)) {
+      continue;
+    }
+    if (entry.composite !== undefined) {
+      promoted.push({
+        name: entry.composite.name,
+        score: entry.composite.score,
+        uses: entry.composite.uses,
+        isComposite: true,
+        outcomeKind: resolveCompositeOutcomeKind(entry.composite),
+        state: { kind: "composite", ...entry.composite },
+        wilsonLb: compositeWilsonLB(entry.composite),
+        lexicalScore,
+        lexicalOnly: true,
+      });
+      continue;
+    }
+    if (entry.atomic !== undefined) {
+      promoted.push({
+        name: entry.atomic.name,
+        score: entry.atomic.score,
+        uses: entry.atomic.uses,
+        isComposite: false,
+        outcomeKind: resolveAtomicOutcomeKind(entry.atomic),
+        wilsonLb: skillStateWilsonLB(entry.atomic),
+        lexicalScore,
+        lexicalOnly: true,
+      });
+    }
+  }
+  promoted.sort(
+    (a, b) => (b.lexicalScore ?? 0) - (a.lexicalScore ?? 0) || a.name.localeCompare(b.name)
+  );
+  ranked.push(...promoted);
 
   return { atoms, ranked, avoid };
 }
@@ -1387,8 +1685,9 @@ export async function upsertAntiPatternLessonsFromEpisode(
 ): Promise<number> {
   const now = Date.now();
   const updates: GraphNode[] = [];
-  for (const raw of episode.lessons) {
-    const lesson = raw.trim();
+  // Near-duplicate lessons inside one episode would otherwise create
+  // near-identical anti-pattern-lesson nodes — dedup onto first occurrence.
+  for (const lesson of dedupLessons(episode.lessons)) {
     if (!lesson) continue;
     if (isTaskEchoLesson(episode.task, lesson)) continue;
     const id = antiPatternLessonNodeId(episode.task, lesson);
@@ -1474,6 +1773,76 @@ export function formatAntiPatternLessonAvoid(record: AntiPatternLessonRecord): s
   return `avoid: ${record.lesson.slice(0, 100)}(${record.failCount} 次 episode 实证)`;
 }
 
+/** Outcome of one lazy scheduled-consolidation check (never throws). */
+export interface ScheduledSkillConsolidationResult {
+  ran: boolean;
+  /** Why the run fired (present when ran = true). */
+  reason?: "interval" | "episodes";
+  applied?: number;
+  skipped?: number;
+}
+
+function toConsolidationInput(state: SkillState): ConsolidateSkillInput {
+  return {
+    id: state.id,
+    name: state.name,
+    score: state.score,
+    uses: state.uses,
+    ...(state.outcomeKind ? { outcomeKind: state.outcomeKind } : {}),
+    ...(state.guidance ? { guidance: state.guidance } : {}),
+    ...(state.playbook && state.playbook.length > 0 ? { playbook: state.playbook } : {}),
+    ...(state.seeded === true ? { seeded: true } : {}),
+  };
+}
+
+/**
+ * Lazy scheduled consolidation (AWM-style periodic tidy-up, no background
+ * timers): invoked from the skill READ path (suggestSkillHints). When the
+ * persisted skill-library meta says the last consolidation is older than 7
+ * days — or 50+ new episodes landed since — plan + apply consolidation ONCE
+ * and refresh the meta. Every failure is swallowed: a consolidation problem
+ * must never break recall.
+ */
+export async function maybeRunScheduledSkillConsolidation(
+  client: GraphClient,
+  now: number = Date.now()
+): Promise<ScheduledSkillConsolidationResult> {
+  try {
+    // Lazily create the meta node; a fresh store starts its schedule "now"
+    // instead of consolidating on first use.
+    const meta: SkillLibraryMeta = await ensureSkillLibraryMeta(client, now);
+    if (!shouldConsolidateSkillLibrary(meta, now)) {
+      return { ran: false };
+    }
+    const reason: "interval" | "episodes" =
+      now - meta.lastConsolidatedAt > SKILL_CONSOLIDATION_MIN_INTERVAL_MS ? "interval" : "episodes";
+
+    const inputs = (await listSkillNodes(client))
+      .map((node) => parseSkillState(node.content))
+      .filter((state): state is SkillState => state !== undefined)
+      .map(toConsolidationInput);
+    const actions = planSkillConsolidation(inputs);
+    const applied = await applySkillConsolidation(client, actions);
+
+    await writeSkillLibraryMeta(client, {
+      kind: meta.kind,
+      lastConsolidatedAt: now,
+      episodesSinceConsolidation: 0,
+      updatedAt: now,
+      lastRun: {
+        at: now,
+        reason,
+        applied: applied.applied.length,
+        skipped: applied.skipped.length,
+      },
+    });
+    return { ran: true, reason, applied: applied.applied.length, skipped: applied.skipped.length };
+  } catch (error) {
+    logger.warn({ error }, "Scheduled skill consolidation skipped after failure (read path continues)");
+    return { ran: false };
+  }
+}
+
 /**
  * Skill-conditioned DAG helper: returns proven/correctable refs plus anti-patterns
  * to avoid, without bumping composite use counters (read-only for plan packaging).
@@ -1516,6 +1885,11 @@ export async function suggestSkillHints(
   task: string,
   maxHints: number
 ): Promise<string[]> {
+  // Lazy scheduled consolidation check (weekly / 50-episode tidy-up). This is
+  // the recall read path's only scheduled side effect and it swallows every
+  // failure — recall must never break because consolidation misbehaved.
+  await maybeRunScheduledSkillConsolidation(client);
+
   const { ranked } = await collectTaskSkillCandidates(client, task);
   const chosen = ranked.slice(0, maxHints);
 
@@ -1729,6 +2103,7 @@ export async function pruneLowSkills(client: GraphClient): Promise<{ pruned: num
 // secondary mechanism and is never consulted for staleness judgements.
 export {
   resolveSkillSymbolStatus,
+  resolveSkillStaleness,
   revalidateSkills,
   isSkillRecallable,
   symbolLookupFromSet,
@@ -1739,6 +2114,7 @@ export type {
   SkillSymbolSource,
   SymbolLookup,
   ResolveSkillSymbolStatusOptions,
+  ResolveSkillStalenessOptions,
   RevalidateSkillsOptions,
   RevalidateSkillsResult,
 } from "./skill-staleness";

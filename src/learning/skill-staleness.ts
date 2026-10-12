@@ -1,6 +1,12 @@
 import type { GraphNode } from "../core/types";
 import type { GraphClient } from "../graph/client-factory";
 import { extractProjectSymbols } from "./skill-flywheel";
+import { computeSkillDrift, toComputeSkillDriftOptions } from "./skill-drift";
+import type {
+  DriftEmbeddingProvider,
+  DriftSkillText,
+  SkillDriftSkipReason,
+} from "./skill-drift";
 import { parseCompositeState, parseSkillState, serializeAtomic } from "./skill-store";
 
 /**
@@ -27,13 +33,19 @@ import { parseCompositeState, parseSkillState, serializeAtomic } from "./skill-s
  * Why a skill was judged the way it was. `no-symbols` and `lookup-error` are
  * deliberately distinct from `resolved`: they mean the check could not be
  * performed at all, which is neither evidence of validity nor of staleness.
+ * `semantic-drift` (additive) extends the deterministic symbol check: symbols
+ * still resolve, but the skill's descriptive text no longer matches their
+ * current summaries in embedding space — only reported when a semantic
+ * (non-hash) embedding provider was supplied, so offline/default runs never
+ * see it.
  */
 export type SkillStalenessReason =
   | "resolved"
   | "missing-symbols"
   | "all-symbols-missing"
   | "no-symbols"
-  | "lookup-error";
+  | "lookup-error"
+  | "semantic-drift";
 
 /**
  * Injectable symbol resolver. Callers build it from a deterministic index
@@ -80,6 +92,16 @@ export interface SkillStaleness {
    * anywhere in this module.
    */
   checkedAt: number;
+  /**
+   * Semantic-drift measurement, present only when a non-hash embedding
+   * provider was supplied (additive observability field; `skipped` carries
+   * the reason whenever the drift comparison could not run).
+   */
+  drift?: {
+    distance: number;
+    threshold: number;
+    skipped?: SkillDriftSkipReason;
+  };
 }
 
 /** Build a lookup over a fixed symbol index (e.g. every Symbol/File node id). */
@@ -256,6 +278,199 @@ export function resolveSkillSymbolStatus(
   };
 }
 
+// ── Semantic drift extension (skill-drift.ts) ─────────────────────────────
+//
+// resolveSkillSymbolStatus above stays untouched: the drift check is layered
+// on as a WRAPPER so the deterministic core (and every existing caller)
+// keeps its signature and behavior byte-for-byte.
+
+/**
+ * Every node the client can see, best-effort. `readSnapshot` is the only
+ * complete read; the keyword fallback mirrors listSkillNodes (the in-memory
+ * client matches all nodes for an empty query). Used to (a) build the loose
+ * symbol universe when no lookup was injected and (b) fetch the grounded
+ * symbols' current summaries for the drift comparison.
+ */
+async function listAllNodes(client: GraphClient): Promise<GraphNode[]> {
+  if (typeof client.readSnapshot === "function") {
+    return client.readSnapshot().nodes;
+  }
+  return client.queryByKeyword("");
+}
+
+/**
+ * Loose symbol universe — the same construction the index-rebuild hook uses
+ * (Symbol `metadata.name` + File/Module short content + basename + every node
+ * id). Loose is the safe direction: extra symbols only prevent retirement.
+ */
+function collectUniverseSymbols(nodes: readonly GraphNode[]): Set<string> {
+  const universe = new Set<string>();
+  for (const node of nodes) {
+    const name = typeof node.metadata?.name === "string" ? node.metadata.name.trim() : "";
+    if (node.type === "Symbol" && name) {
+      universe.add(name);
+    }
+    if (node.type === "Symbol" || node.type === "File" || node.type === "Module") {
+      const content = typeof node.content === "string" ? node.content.trim() : "";
+      if (content && content.length <= 200) {
+        universe.add(content);
+        const base = content.split("/").pop();
+        if (base) {
+          universe.add(base);
+        }
+      }
+    }
+    if (node.id) {
+      universe.add(node.id);
+    }
+  }
+  return universe;
+}
+
+/** Summary text of one code node: content (compact signature + jsdoc hint) plus the full jsdoc. */
+function nodeSummaryText(node: GraphNode): string {
+  const parts: string[] = [];
+  if (typeof node.content === "string" && node.content.trim().length > 0) {
+    parts.push(node.content.trim());
+  }
+  const jsdoc = node.metadata?.jsdoc;
+  if (typeof jsdoc === "string" && jsdoc.trim().length > 0) {
+    parts.push(jsdoc.trim());
+  }
+  return parts.join("\n");
+}
+
+/**
+ * Current summaries for the symbols a skill is grounded in, looked up via
+ * the same node content/metadata path the staleness universe is built from.
+ * Deterministic: symbols are visited in `checkedSymbols` order and the first
+ * node that carries a non-empty summary wins.
+ */
+function collectSymbolSummaries(nodes: readonly GraphNode[], symbols: readonly string[]): string[] {
+  const summariesByKey = new Map<string, string>();
+  for (const node of nodes) {
+    if (node.type !== "Symbol" && node.type !== "File" && node.type !== "Module") {
+      continue;
+    }
+    const summary = nodeSummaryText(node);
+    if (summary.length === 0) {
+      continue;
+    }
+    const keys: string[] = [];
+    const name = typeof node.metadata?.name === "string" ? node.metadata.name.trim() : "";
+    if (name) {
+      keys.push(name);
+    }
+    if (node.id) {
+      keys.push(node.id);
+    }
+    const content = typeof node.content === "string" ? node.content.trim() : "";
+    if (content && content.length <= 200) {
+      keys.push(content);
+      const base = content.split("/").pop();
+      if (base) {
+        keys.push(base);
+      }
+    }
+    for (const key of keys) {
+      if (!summariesByKey.has(key)) {
+        summariesByKey.set(key, summary);
+      }
+    }
+  }
+  const summaries: string[] = [];
+  for (const symbol of symbols) {
+    const summary = summariesByKey.get(symbol.trim());
+    if (summary && summary.length > 0) {
+      summaries.push(summary);
+    }
+  }
+  return summaries;
+}
+
+/** Drift text of a skill source, without explicit-undefined option fields. */
+function toDriftSkillText(skill: SkillSymbolSource): DriftSkillText {
+  return {
+    ...(skill.name !== undefined ? { name: skill.name } : {}),
+    ...(skill.guidance !== undefined ? { guidance: skill.guidance } : {}),
+  };
+}
+
+/**
+ * Layer the drift measurement onto an already-computed symbol status. Only a
+ * fully `resolved` status can become `semantic-drift` — missing symbols are
+ * strictly stronger evidence and must keep their precise reason.
+ */
+async function extendStatusWithDrift(
+  status: SkillStaleness,
+  skill: DriftSkillText,
+  nodes: readonly GraphNode[] | undefined,
+  embeddingProvider: DriftEmbeddingProvider | undefined,
+  threshold: number | undefined
+): Promise<SkillStaleness> {
+  if (embeddingProvider === undefined || nodes === undefined || status.reason !== "resolved") {
+    return status;
+  }
+  const summaries = collectSymbolSummaries(nodes, status.checkedSymbols);
+  const drift = await computeSkillDrift(
+    skill,
+    summaries,
+    embeddingProvider,
+    toComputeSkillDriftOptions(threshold)
+  );
+  const driftInfo = {
+    distance: drift.distance,
+    threshold: drift.threshold,
+    ...(drift.skipped !== undefined ? { skipped: drift.skipped } : {}),
+  };
+  if (!drift.drifted) {
+    return { ...status, drift: driftInfo };
+  }
+  return { ...status, stale: true, reason: "semantic-drift", drift: driftInfo };
+}
+
+export interface ResolveSkillStalenessOptions extends ResolveSkillSymbolStatusOptions {
+  /** Deterministic symbol resolver override; defaults to the snapshot-built loose universe. */
+  lookup?: SymbolLookup;
+  /**
+   * Semantic provider for drift detection. Absent (the default) → behavior is
+   * exactly resolveSkillSymbolStatus. Hash/missing fingerprints inside the
+   * provider are detected and skipped by computeSkillDrift.
+   */
+  embeddingProvider?: DriftEmbeddingProvider;
+  /** Cosine-distance drift threshold override (default SKILL_DRIFT_DEFAULT_THRESHOLD). */
+  driftThreshold?: number;
+}
+
+/**
+ * Full staleness resolution: deterministic symbol verification plus, when a
+ * semantic embedding provider is supplied, the drift comparison of the
+ * skill's descriptive text against the grounded symbols' CURRENT summaries
+ * (node content/metadata, same lookup path as the universe above).
+ *
+ * When drift fires, the result carries `stale: true` with reason
+ * "semantic-drift" — retirement wiring (revalidateSkills) then makes
+ * isSkillRecallable false for it like any other staleness reason.
+ */
+export async function resolveSkillStaleness(
+  client: GraphClient,
+  skill: SkillSymbolSource,
+  options?: ResolveSkillStalenessOptions
+): Promise<SkillStaleness> {
+  const nodes = await listAllNodes(client);
+  const lookup = options?.lookup ?? symbolLookupFromSet(collectUniverseSymbols(nodes));
+  const status = resolveSkillSymbolStatus(skill, lookup, {
+    ...(options?.checkedAt !== undefined ? { checkedAt: options.checkedAt } : {}),
+  });
+  return extendStatusWithDrift(
+    status,
+    toDriftSkillText(skill),
+    nodes,
+    options?.embeddingProvider,
+    options?.driftThreshold
+  );
+}
+
 /**
  * Recall-path gate for the wiring: a skill marked stale/unrecallable must not
  * be handed to the agent at all (hard constraint), not merely ranked lower.
@@ -294,6 +509,15 @@ export interface RevalidateSkillsOptions {
   lookup: SymbolLookup;
   /** Test seam for the `checkedAt` metadata only; never affects staleness. */
   now?: () => number;
+  /**
+   * Optional semantic provider enabling the "semantic-drift" extension: a
+   * skill whose symbols resolve but whose descriptive text no longer matches
+   * their current summaries is retired like any other stale skill. Absent
+   * (default) → revalidation is byte-for-byte the symbol-only behavior.
+   */
+  embeddingProvider?: DriftEmbeddingProvider;
+  /** Cosine-distance drift threshold override (default SKILL_DRIFT_DEFAULT_THRESHOLD). */
+  driftThreshold?: number;
 }
 
 export interface RevalidateSkillsResult {
@@ -378,6 +602,11 @@ export async function revalidateSkills(
   const noSymbolsSkillIds: string[] = [];
   let checked = 0;
 
+  // Fetched only when the drift extension is active — no provider means no
+  // extra snapshot read and no behavior change.
+  const allNodes =
+    options.embeddingProvider !== undefined ? await listAllNodes(client) : undefined;
+
   for (const node of nodes) {
     const atomic = parseSkillState(node.content);
     const composite = atomic === undefined ? parseCompositeState(node.content) : undefined;
@@ -386,10 +615,13 @@ export async function revalidateSkills(
     }
     checked += 1;
 
-    const status = resolveSkillSymbolStatus(
-      toSkillSymbolSource(atomic, composite, node.id, node.metadata),
-      options.lookup,
-      { checkedAt }
+    const skillSource = toSkillSymbolSource(atomic, composite, node.id, node.metadata);
+    const status = await extendStatusWithDrift(
+      resolveSkillSymbolStatus(skillSource, options.lookup, { checkedAt }),
+      toDriftSkillText(skillSource),
+      allNodes,
+      options.embeddingProvider,
+      options.driftThreshold
     );
 
     if (status.checkedSymbols.length === 0) {

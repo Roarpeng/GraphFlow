@@ -5,6 +5,7 @@
 
 import type { GraphNode } from "../core/types";
 import type { GraphClient } from "../graph/client-factory";
+import { logger } from "../utils/logger";
 import { shouldHardDeleteAntiPattern } from "./canary-gate";
 import {
   parseSkillState,
@@ -505,4 +506,176 @@ export async function applySkillConsolidation(
 /** Convenience: plan from a ConsolidateRequest. */
 export function planFromRequest(request: ConsolidateRequest): ConsolidateResult {
   return toConsolidateResult(planSkillConsolidation(request.skills, request.options));
+}
+
+// ── Skill-library meta: lazy scheduled consolidation bookkeeping ─────────
+//
+// AWM-style periodic consolidation keeps the library tidy without background
+// timers: a single `skill-library-meta` Decision node records when the last
+// consolidation ran and how many new episodes have landed since. The read
+// path (skill recall) checks it lazily and runs plan+apply at most once per
+// schedule window. A consolidation failure must NEVER break the read path.
+
+/** Fixed node id of the skill-library schedule bookkeeping node. */
+export const SKILL_LIBRARY_META_NODE_ID = "skill-library-meta";
+/** metadata.kind marker for the meta node (also stored in the JSON content). */
+export const SKILL_LIBRARY_META_KIND = "skill-library-meta";
+/** Run scheduled consolidation when the last run is older than 7 days… */
+export const SKILL_CONSOLIDATION_MIN_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+/** …or when this many new episodes landed since the last run. */
+export const SKILL_CONSOLIDATION_NEW_EPISODE_THRESHOLD = 50;
+
+export interface SkillLibraryMeta {
+  kind: typeof SKILL_LIBRARY_META_KIND;
+  /** Epoch ms of the last completed (or initialized) consolidation run. */
+  lastConsolidatedAt: number;
+  /** Episodes applied to the library since lastConsolidatedAt. */
+  episodesSinceConsolidation: number;
+  updatedAt: number;
+  /** Observability: outcome of the most recent scheduled run. */
+  lastRun?: {
+    at: number;
+    reason: "interval" | "episodes";
+    applied: number;
+    skipped: number;
+  };
+}
+
+function isMetaNode(node: GraphNode): boolean {
+  return (
+    node.id === SKILL_LIBRARY_META_NODE_ID &&
+    node.metadata?.kind === SKILL_LIBRARY_META_KIND
+  );
+}
+
+/** Parse the meta node's JSON content; undefined for wrong/invalid nodes. */
+export function parseSkillLibraryMeta(node: GraphNode | undefined): SkillLibraryMeta | undefined {
+  if (!node || !isMetaNode(node)) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(node.content) as Partial<SkillLibraryMeta>;
+    return {
+      kind: SKILL_LIBRARY_META_KIND,
+      lastConsolidatedAt:
+        typeof parsed.lastConsolidatedAt === "number" && Number.isFinite(parsed.lastConsolidatedAt)
+          ? parsed.lastConsolidatedAt
+          : 0,
+      episodesSinceConsolidation:
+        typeof parsed.episodesSinceConsolidation === "number" &&
+        Number.isFinite(parsed.episodesSinceConsolidation)
+          ? Math.max(0, Math.floor(parsed.episodesSinceConsolidation))
+          : 0,
+      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
+      ...(parsed.lastRun &&
+      typeof parsed.lastRun.at === "number" &&
+      (parsed.lastRun.reason === "interval" || parsed.lastRun.reason === "episodes")
+        ? {
+            lastRun: {
+              at: parsed.lastRun.at,
+              reason: parsed.lastRun.reason,
+              applied: Number.isFinite(parsed.lastRun.applied) ? parsed.lastRun.applied : 0,
+              skipped: Number.isFinite(parsed.lastRun.skipped) ? parsed.lastRun.skipped : 0,
+            },
+          }
+        : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function findMetaNode(client: GraphClient): Promise<GraphNode | undefined> {
+  if (client.getNodesByIds) {
+    const nodes = await client.getNodesByIds([SKILL_LIBRARY_META_NODE_ID]);
+    const direct = nodes.find(isMetaNode);
+    if (direct) {
+      return direct;
+    }
+  }
+  if (client.readSnapshot) {
+    return client.readSnapshot().nodes.find(isMetaNode);
+  }
+  const hits = await client.queryByKeyword(SKILL_LIBRARY_META_NODE_ID);
+  return hits.find(isMetaNode);
+}
+
+/** Read the persisted library meta, if the node exists yet. */
+export async function readSkillLibraryMeta(client: GraphClient): Promise<SkillLibraryMeta | undefined> {
+  const node = await findMetaNode(client);
+  return node ? parseSkillLibraryMeta(node) : undefined;
+}
+
+/** Persist (or lazily create) the library meta node. */
+export async function writeSkillLibraryMeta(
+  client: GraphClient,
+  meta: SkillLibraryMeta
+): Promise<void> {
+  await client.upsertNodes([
+    {
+      id: SKILL_LIBRARY_META_NODE_ID,
+      type: "Decision",
+      content: JSON.stringify(meta),
+      metadata: { kind: SKILL_LIBRARY_META_KIND },
+    },
+  ]);
+}
+
+/**
+ * Read the meta node, lazily creating it on first contact. A fresh store has
+ * no schedule yet, so the FIRST creation counts as "just consolidated" —
+ * consolidation then runs no sooner than the interval/threshold. This keeps
+ * lazy initialization off the critical path (no full plan+apply on first use).
+ */
+export async function ensureSkillLibraryMeta(
+  client: GraphClient,
+  now: number
+): Promise<SkillLibraryMeta> {
+  const existing = await readSkillLibraryMeta(client);
+  if (existing) {
+    return existing;
+  }
+  const meta: SkillLibraryMeta = {
+    kind: SKILL_LIBRARY_META_KIND,
+    lastConsolidatedAt: now,
+    episodesSinceConsolidation: 0,
+    updatedAt: now,
+  };
+  await writeSkillLibraryMeta(client, meta);
+  return meta;
+}
+
+/** Schedule gate: interval elapsed OR enough new episodes since the last run. */
+export function shouldConsolidateSkillLibrary(
+  meta: SkillLibraryMeta | undefined,
+  now: number
+): boolean {
+  if (!meta) {
+    return false;
+  }
+  return (
+    now - meta.lastConsolidatedAt > SKILL_CONSOLIDATION_MIN_INTERVAL_MS ||
+    meta.episodesSinceConsolidation > SKILL_CONSOLIDATION_NEW_EPISODE_THRESHOLD
+  );
+}
+
+/**
+ * Best-effort increment of the new-episode counter (called from the skill
+ * learning write path). Never throws; a missing meta node means the schedule
+ * has not started yet — nothing to count.
+ */
+export async function noteEpisodeForSkillConsolidation(client: GraphClient): Promise<void> {
+  try {
+    const meta = await readSkillLibraryMeta(client);
+    if (!meta) {
+      return;
+    }
+    await writeSkillLibraryMeta(client, {
+      ...meta,
+      episodesSinceConsolidation: meta.episodesSinceConsolidation + 1,
+      updatedAt: Date.now(),
+    });
+  } catch (error) {
+    logger.warn({ error }, "Skill-library meta episode counter update failed (ignored)");
+  }
 }
