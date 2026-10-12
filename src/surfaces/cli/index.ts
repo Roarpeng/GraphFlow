@@ -40,6 +40,7 @@ import { buildChallengeList } from "../../graph/diff-challenge";
 import { queryFactsAt } from "../../graph/temporal-facts";
 import { computeWorkingSet } from "../../graph/working-set";
 import { runAudit, formatAuditLegacyText } from "../../audit/audit.js";
+import { ingestScipIndex } from "../../graph/scip/scip-ingest.js";
 
 import {
   diagnoseRouting,
@@ -135,7 +136,8 @@ function buildCliUsageWithSettings(): string {
     usage +
     "\n  settings [--port <port>] [--host <host>] [--no-open]   Launch web settings server in browser (alias: config ui)\n" +
     "                                                        Run 'graphflow settings' to configure in browser" +
-    "\n  llm-check                   Diagnose LLM credentials: winning source per provider, env vars consulted, endpoints"
+    "\n  llm-check                   Diagnose LLM credentials: winning source per provider, env vars consulted, endpoints" +
+    "\n  scip <path-to-.scip> [--limit N]   Ingest a SCIP index: precise file→symbol defines/references edges (--limit caps occurrences per file; 0 disables)"
   );
 }
 
@@ -1408,6 +1410,57 @@ async function executeCommand(command: string, args: string[], configPath?: stri
         `workbench=${data.workbenchOutline?.length ?? 0}`,
       ].join("; "),
     };
+  }
+
+  if (command === "scip") {
+    const pathArg = args.find((arg) => !arg.startsWith("--"))?.trim();
+    if (!pathArg) {
+      // stderr, not stdout: a usage banner is a diagnostic, so --json stdout
+      // stays a single machine-readable document (see cli-stdout-hygiene).
+      console.error("Usage: graphflow scip <path-to-.scip> [--limit N]");
+      process.exitCode = 1;
+      return undefined;
+    }
+    const limitRaw = readCliFlagValue(args, "--limit");
+    const parsedLimit = limitRaw !== undefined ? Number.parseInt(limitRaw, 10) : NaN;
+    const limit = Number.isFinite(parsedLimit) && parsedLimit >= 0 ? parsedLimit : undefined;
+
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(readFileSync(pathArg));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.exitCode = 1;
+      return {
+        command: "scip",
+        data: { error: `cannot read ${pathArg}: ${msg}` },
+        legacyText: `scip ingest failed: cannot read ${pathArg}: ${msg}`,
+      };
+    }
+
+    const config = resolveConfig(configPath);
+    const client = createGraphClient(config);
+    try {
+      const summary = await ingestScipIndex(client, bytes, {
+        ...(limit !== undefined ? { maxOccurrencesPerFile: limit } : {}),
+        root: process.cwd(),
+      });
+      return {
+        command: "scip",
+        data: summary,
+        legacyText: `documents=${summary.documents}; symbols=${summary.symbolsCreated}; edges=${summary.edgesCreated}; skippedDocuments=${summary.skippedDocuments}`,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.exitCode = 1;
+      return {
+        command: "scip",
+        data: { error: msg },
+        legacyText: `scip ingest failed: ${msg}`,
+      };
+    } finally {
+      await client.close?.();
+    }
   }
 
   if (command === "workbench" && (args[0] === "tree" || args[0] === "outline" || !args[0])) {
