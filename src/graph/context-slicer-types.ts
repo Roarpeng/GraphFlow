@@ -2,6 +2,7 @@ import type { GraphEdge, GraphNode } from "../core/types.js";
 import type { ConnectedSubgraphOptions } from "./graph-compression.js";
 import type { TaskMode } from "./adaptive-budget.js";
 import type { EmbeddingProvider } from "../learning/embeddings.js";
+import type { PprOptions } from "./pagerank.js";
 
 export interface ContextSlice {
   items: string[];
@@ -41,6 +42,13 @@ export interface LayeredPackageOptions {
     l3: number;
   };
   enableEdgeExpansion?: boolean;
+  /**
+   * Subgraph-expansion strategy used by neighbor injection when
+   * `enableEdgeExpansion` is on (default `"bfs"`, unchanged legacy walk).
+   * `"ppr"` ranks the seeded neighborhood by Personalized PageRank mass and
+   * admits highest-mass neighbors first — see `SubgraphExpansionStrategy`.
+   */
+  expansionStrategy?: SubgraphExpansionStrategy;
   /** Enable graph-structure compression (edge weights, PageRank, connected subgraph). */
   enableGraphCompression?: boolean;
   graphCompressionOptions?: ConnectedSubgraphOptions;
@@ -72,15 +80,39 @@ export interface LayeredPackageOptions {
    * truncation cannot drop them (Governance Decay). Default false.
    */
   enableAlwaysOnLayers?: boolean;
+  /**
+   * Rerank the fused hit list (top ~40) by embedding cosine similarity AFTER
+   * vector fusion / graph compression and BEFORE hit packaging
+   * (`rerankHitsByEmbedding` in `src/graph/rerank.ts`). Requires a non-hash
+   * `embeddingProvider`; the stage self-skips (returns the list unchanged)
+   * when the provider is missing, fingerprint-less, or hash-like.
+   * Default false — zero behavior change.
+   */
+  enableRerank?: boolean;
 }
 
 /** Governance pin kinds for L3 Decision/goal nodes. */
 export type L3PinKind = "alignment" | "deviation" | "goal";
 
+/**
+ * Subgraph-expansion strategy for `expandSubgraph`:
+ * - `"bfs"` (default): fixed-depth neighborhood walk — the original behavior,
+ *   unchanged when the option is absent.
+ * - `"ppr"`: rank the multi-hop neighborhood by Personalized PageRank mass
+ *   (HippoRAG 2-style) seeded from the anchor ids, admitting neighbors in
+ *   descending mass until the node limit. Under `"ppr"`, `hops` controls the
+ *   radius of the candidate POOL to rank and defaults to 2 (multi-hop reach).
+ */
+export type SubgraphExpansionStrategy = "bfs" | "ppr";
+
 export interface SubgraphExpansionOptions {
   hops?: number;
   maxNodes?: number;
   relations?: GraphEdge["relation"][];
+  /** Expansion strategy. Default `"bfs"` — zero behavior change when omitted. */
+  expansionStrategy?: SubgraphExpansionStrategy;
+  /** Tuning for the `"ppr"` strategy (damping / iterations / tolerance / edge weights). */
+  ppr?: PprOptions;
 }
 
 export interface ContextRefillManager {
@@ -88,6 +120,46 @@ export interface ContextRefillManager {
   /** Mark anchors of an already-built package as seen, without rebuilding it. */
   seed(anchorIds: Iterable<string>): void;
   refill(evidenceHints: string[]): Promise<string[]>;
+  /**
+   * Which ladder stage satisfied each hint of the most recent `refill()` call
+   * (see `RefillStageChoice`). Additive reporting field — consumers that only
+   * call initialPackage/seed/refill are unaffected.
+   */
+  readonly lastStages?: readonly RefillStageChoice[];
+}
+
+/**
+ * Token-cost multipliers of the refill escalation ladder. The charged cost of
+ * an anchor line is `estimateTokens(line) * weight(stage)`: lexical recall is
+ * the unit cost (weight 1 — exactly the legacy accounting), vector recall
+ * models the hint-embedding overhead, and a full File-node read is the most
+ * expensive. Applied against the manager's cumulative refill budget.
+ */
+export interface RefillCostWeights {
+  lexical: number;
+  vector: number;
+  file: number;
+}
+
+/** Which ladder stage satisfied one refill hint (or `"none"` when all stages missed). */
+export interface RefillStageChoice {
+  hint: string;
+  stage: "lexical" | "vector" | "file" | "none";
+  /** Anchor id committed for this hint (absent for stage "none"). */
+  anchorId?: string;
+  /** Charged token cost (estimate * stage weight) actually spent. */
+  tokens: number;
+}
+
+/** Additive options for `createContextRefillManager`'s escalation ladder. */
+export interface ContextRefillManagerOptions {
+  /**
+   * Provider for stage-2 vector recall on a hint. Stage 2 is skipped entirely
+   * (and the ladder falls through to stage 3) when absent or hash-like.
+   */
+  embeddingProvider?: EmbeddingProvider;
+  /** Per-stage cost multipliers (defaults: lexical 1, vector 2, file 4). */
+  costWeights?: Partial<RefillCostWeights>;
 }
 
 export const DEFAULT_EXPANSION_RELATIONS: GraphEdge["relation"][] = [

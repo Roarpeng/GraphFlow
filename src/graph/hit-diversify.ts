@@ -5,6 +5,18 @@ import { extractFileFromSymbolId } from "./context-slicer-utils.js";
 export const DEFAULT_MAX_SYMBOLS_PER_FILE = 2;
 export const DEFAULT_MAX_SIBLING_FILES = 8;
 
+/**
+ * Candidate-stage cap: how many Symbol hits ONE source file may contribute to
+ * the keyword candidate pool (before compression/packing). Derived from the
+ * graph-compression window (`extractConnectedSubgraph` keeps 30 nodes): a
+ * flooding file is capped at two thirds of that window so at least ~10
+ * cross-file candidates always survive into compression, letting the true
+ * target of the query enter the pool a hub file would otherwise wall off.
+ * Floods smaller than the cap pass untouched, and the final package cap
+ * (DEFAULT_MAX_SYMBOLS_PER_FILE = 2) still bounds what actually gets packed.
+ */
+export const CANDIDATE_MAX_SYMBOLS_PER_FILE = 20;
+
 const MODULE_FAMILY_TOKENS = new Set([
   "slice",
   "slices",

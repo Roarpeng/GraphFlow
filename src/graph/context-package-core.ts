@@ -8,7 +8,7 @@
  */
 
 import { logger } from "../utils/logger.js";
-import type { GraphNode } from "../core/types.js";
+import type { GraphEdge, GraphNode } from "../core/types.js";
 import {
   cosineSimilarity,
   extractEmbedding,
@@ -22,7 +22,11 @@ import { createAnchorBodyReader, type AnchorBodyReader, type AnchorBodyStats } f
 import type { GraphClient } from "./client-factory.js";
 import { rankNodesForContextQuery, composeContextQuery, buildSearchScoreTokens } from "./graph-utils.js";
 import { collectExpandedKeywordHits } from "./query-expand.js";
-import { prepareHitsForPackaging } from "./hit-diversify.js";
+import {
+  CANDIDATE_MAX_SYMBOLS_PER_FILE,
+  diversifyHitsBySourceFile,
+  prepareHitsForPackaging,
+} from "./hit-diversify.js";
 import { collectImportRelatedFiles } from "./symbol-extract.js";
 import {
   estimateTokens,
@@ -39,6 +43,7 @@ import type {
   SubgraphExpansionOptions,
 } from "./context-slicer-types.js";
 import { DEFAULT_EXPANSION_RELATIONS, ARCHITECTURE_QUERY } from "./context-slicer-types.js";
+import { computePersonalizedPageRankCached } from "./pagerank.js";
 
 const L3_PIN_HINT = /alignment|deviation|goal/i;
 
@@ -160,7 +165,34 @@ export function toLayeredPackage(state: PackState, budget: PackBudget): LayeredC
   };
 }
 
+/**
+ * Expand a subgraph around `seedIds` (seed nodes themselves are excluded).
+ *
+ * Two strategies (`options.expansionStrategy`):
+ * - `"bfs"` (default, unchanged): fixed-depth neighborhood walk admitting
+ *   neighbors in encounter order until `maxNodes`.
+ * - `"ppr"`: collect a multi-hop candidate pool, rank it with Personalized
+ *   PageRank seeded from the seed ids (HippoRAG 2-style), and admit neighbors
+ *   in descending PPR mass until `maxNodes` — high-mass hubs can displace
+ *   weakly-attached direct peers that plain encounter order would keep.
+ *
+ * Both strategies feed the same downstream budget/quota plumbing: callers
+ * (`injectNeighborExpansion`) iterate the returned list in order until the
+ * pack budget stops them, so ordering IS the admission priority.
+ */
 export async function expandSubgraph(
+  client: GraphClient,
+  seedIds: string[],
+  options?: SubgraphExpansionOptions
+): Promise<GraphNode[]> {
+  if (typeof client.getNeighbors !== "function") return [];
+  if (options?.expansionStrategy === "ppr") {
+    return expandSubgraphByPagerank(client, seedIds, options);
+  }
+  return expandSubgraphByBfs(client, seedIds, options);
+}
+
+async function expandSubgraphByBfs(
   client: GraphClient,
   seedIds: string[],
   options?: SubgraphExpansionOptions
@@ -189,6 +221,102 @@ export async function expandSubgraph(
   }
 
   return Array.from(collected.values());
+}
+
+/** Candidate-pool floor / factor: rank at least a handful more nodes than the limit admits. */
+const PPR_POOL_MIN = 50;
+const PPR_POOL_FACTOR = 5;
+
+/**
+ * PPR expansion strategy: pool = relation-filtered undirected BFS within
+ * `hops` (default 2) around the seeds; the pool is then ranked by cached
+ * Personalized PageRank seeded from the seed ids and truncated to `maxNodes`
+ * in descending mass (ties by node id — deterministic output for identical
+ * graphs). Falls back to the BFS walk when the client exposes no snapshot.
+ */
+async function expandSubgraphByPagerank(
+  client: GraphClient,
+  seedIds: string[],
+  options: SubgraphExpansionOptions
+): Promise<GraphNode[]> {
+  const snapshot = client.readSnapshot?.();
+  if (!snapshot) {
+    logger.debug("expandSubgraph ppr: client has no readSnapshot, falling back to bfs");
+    return expandSubgraphByBfs(client, seedIds, { ...options, expansionStrategy: "bfs" });
+  }
+
+  const hops = options.hops ?? 2;
+  const maxNodes = options.maxNodes ?? 20;
+  const relations = options.relations ?? DEFAULT_EXPANSION_RELATIONS;
+  const relationSet = new Set<GraphEdge["relation"]>(relations);
+  const poolCap = Math.max(PPR_POOL_MIN, maxNodes * PPR_POOL_FACTOR);
+
+  const nodeById = new Map(snapshot.nodes.map((node) => [node.id, node]));
+  const seeds = [...new Set(seedIds)].filter((id) => nodeById.has(id));
+  if (seeds.length === 0) return [];
+
+  // Undirected relation-filtered adjacency over existing endpoints, in
+  // canonical (sorted) order so the pool and PPR output are deterministic.
+  const adjacency = new Map<string, string[]>(snapshot.nodes.map((node) => [node.id, []]));
+  const subEdges: GraphEdge[] = [];
+  for (const edge of snapshot.edges) {
+    if (!relationSet.has(edge.relation)) continue;
+    if (!nodeById.has(edge.from) || !nodeById.has(edge.to)) continue;
+    adjacency.get(edge.from)!.push(edge.to);
+    adjacency.get(edge.to)!.push(edge.from);
+    subEdges.push(edge);
+  }
+  for (const list of adjacency.values()) {
+    list.sort((a, b) => a.localeCompare(b));
+  }
+
+  // Candidate pool: BFS from the seeds, seeds themselves excluded.
+  const excluded = new Set(seeds);
+  const pool = new Set<string>();
+  let frontier = [...seeds].sort();
+  for (let depth = 0; depth < hops && frontier.length > 0; depth += 1) {
+    const nextFrontier: string[] = [];
+    for (const id of frontier) {
+      for (const neighbor of adjacency.get(id) ?? []) {
+        if (excluded.has(neighbor) || pool.has(neighbor)) continue;
+        pool.add(neighbor);
+        nextFrontier.push(neighbor);
+        if (pool.size >= poolCap) break;
+      }
+      if (pool.size >= poolCap) break;
+    }
+    frontier = nextFrontier;
+  }
+  if (pool.size === 0) return [];
+
+  // PPR runs over the pool + seeds (the seeds anchor the walk), with only the
+  // induced edges — the cached variant memoizes per cheap store signature.
+  const subNodeIds = new Set<string>([...pool, ...seeds]);
+  const subNodes = snapshot.nodes.filter((node) => subNodeIds.has(node.id));
+  const inducedEdges = subEdges.filter(
+    (edge) => subNodeIds.has(edge.from) && subNodeIds.has(edge.to)
+  );
+  const ranks = computePersonalizedPageRankCached(
+    { nodes: subNodes, edges: inducedEdges },
+    seeds,
+    {
+      ...options.ppr,
+      cacheSalt: [...relationSet].sort().join(","),
+    }
+  );
+
+  // Descending PPR mass, ties broken by node id — the deterministic admission order.
+  const ranked = [...pool]
+    .map((id) => ({ id, mass: ranks.get(id) ?? 0 }))
+    .sort((a, b) => b.mass - a.mass || a.id.localeCompare(b.id))
+    .slice(0, maxNodes);
+
+  const expanded: GraphNode[] = [];
+  for (const { id } of ranked) {
+    const node = nodeById.get(id);
+    if (node) expanded.push(node);
+  }
+  return expanded;
 }
 
 export function vectorRecall(
@@ -249,12 +377,28 @@ function linearVectorRecall(
   return index.search(queryEmbedding, topK, minSimilarity).map((result) => result.node);
 }
 
+/**
+ * Candidate-stage diversification: one hub file whose symbols match every
+ * query token (e.g. a runtime/routing.ts matching "task"/"routing") can fill
+ * the whole candidate list, so downstream compression and packing never even
+ * SEE the true target. Cap Symbol candidates per file (loosely — the final
+ * package cap stays DEFAULT_MAX_SYMBOLS_PER_FILE) so the candidate pool stays
+ * cross-file. Order of the surviving candidates is unchanged (deterministic).
+ */
 export async function collectKeywordHits(
   client: GraphClient,
   query: string,
   options?: LayeredPackageOptions
 ): Promise<GraphNode[]> {
-  return collectExpandedKeywordHits(client, query, options?.workspaceRoot, options?.englishQuery);
+  const hits = await collectExpandedKeywordHits(
+    client,
+    query,
+    options?.workspaceRoot,
+    options?.englishQuery
+  );
+  return diversifyHitsBySourceFile(hits, {
+    maxSymbolsPerFile: CANDIDATE_MAX_SYMBOLS_PER_FILE,
+  });
 }
 
 /**
@@ -316,11 +460,12 @@ export function preparePackageHits(
   options: LayeredPackageOptions | undefined,
   snapshotNodes: GraphNode[] | undefined
 ): GraphNode[] {
-  return prepareHitsForPackaging(hits, {
+  const prepared = prepareHitsForPackaging(hits, {
     query,
     ...(options?.englishQuery !== undefined ? { englishQuery: options.englishQuery } : {}),
     ...(snapshotNodes !== undefined ? { allNodes: snapshotNodes } : {}),
   });
+  return prepared;
 }
 
 function atAnchorCap(state: PackState): boolean {
@@ -685,6 +830,62 @@ export async function injectDialogueTurns(
  * recall is purely additive and never displaces code context.
  */
 
+/**
+ * Same-file expansion guard: once one source file already owns this share of
+ * the L1 anchor channel (or this many anchors absolutely), adding MORE symbols
+ * from it only entrenches the monopoly — cross-file coverage beats same-file
+ * completeness once a file dominates. The ratio test requires a non-empty
+ * channel, so 0/0 can never read as dominance (failure-safe at pack start).
+ */
+const SAME_FILE_DOMINANCE_RATIO = 0.5;
+const SAME_FILE_DOMINANCE_MAX_ANCHORS = 6;
+
+function normalizeAnchorFilePath(path: string): string {
+  return path.replace(/\\/g, "/");
+}
+
+/** Resolve the source file an L1 anchor belongs to, or undefined. */
+function fileOwnerOfAnchor(anchor: ContextAnchorItem): string | undefined {
+  if (anchor.layer !== "L1") {
+    return undefined;
+  }
+  if (anchor.type === "File" && anchor.id.startsWith("file:")) {
+    return normalizeAnchorFilePath(anchor.id.slice("file:".length));
+  }
+  if (anchor.type === "Symbol") {
+    const fp = extractFileFromSymbolId(anchor.id);
+    return fp ? normalizeAnchorFilePath(fp) : undefined;
+  }
+  return undefined;
+}
+
+/** Live per-file ownership of the L1 anchor channel (updated as anchors land). */
+class AnchorFileOwnership {
+  private readonly perFile = new Map<string, number>();
+  private total = 0;
+
+  constructor(anchorChannel: ReadonlyArray<ContextAnchorItem>) {
+    for (const anchor of anchorChannel) {
+      this.add(anchor);
+    }
+  }
+
+  add(anchor: ContextAnchorItem): void {
+    const file = fileOwnerOfAnchor(anchor);
+    if (!file) return;
+    this.perFile.set(file, (this.perFile.get(file) ?? 0) + 1);
+    this.total += 1;
+  }
+
+  isDominant(file: string): boolean {
+    const count = this.perFile.get(normalizeAnchorFilePath(file)) ?? 0;
+    if (count >= SAME_FILE_DOMINANCE_MAX_ANCHORS) {
+      return true;
+    }
+    return this.total > 0 && count / this.total >= SAME_FILE_DOMINANCE_RATIO;
+  }
+}
+
 export async function injectSameFileAndImportExpansion(
   client: GraphClient,
   snapshotNodes: GraphNode[] | undefined,
@@ -705,6 +906,11 @@ export async function injectSameFileAndImportExpansion(
     }
   }
 
+  // Dominance guard: same-file expansion must not let one file re-flood the
+  // channel after the primary pack diversified it. Without this, a hub file
+  // re-adds its remaining symbols here and crowds out every other file.
+  const ownership = new AnchorFileOwnership(state.anchorChannel);
+
   if (seedFilePaths.length > 0 && snapshotNodes) {
     for (const node of snapshotNodes) {
       if (state.added.has(node.id) || atAnchorCap(state)) continue;
@@ -719,6 +925,7 @@ export async function injectSameFileAndImportExpansion(
             .includes(nodeFile.replace(/\.(ts|tsx|js|jsx|py|go|rs)$/, ""))
       );
       if (!inSeedFile) continue;
+      if (ownership.isDominant(nodeFile)) continue;
       const layer = classifyLayer(node);
       const summary = `${node.type}: ${node.content}`;
       const estimate = estimateTokens(summary);
@@ -726,11 +933,13 @@ export async function injectSameFileAndImportExpansion(
         budget.truncated = true;
         break;
       }
+      const anchor: ContextAnchorItem = { id: node.id, type: node.type, layer };
       state.summaryChannel.push(summary);
-      state.anchorChannel.push({ id: node.id, type: node.type, layer });
+      state.anchorChannel.push(anchor);
       state.added.add(node.id);
       budget.tokens += estimate;
       markLayerUsed(layer, state.used);
+      ownership.add(anchor);
     }
   }
 
@@ -738,6 +947,8 @@ export async function injectSameFileAndImportExpansion(
     const importHits = await collectImportRelatedFiles(client, seedFilePaths, 5);
     for (const node of importHits) {
       if (state.added.has(node.id) || atAnchorCap(state)) continue;
+      const nodeFile = fileOwnerOfAnchor({ id: node.id, type: node.type, layer: "L1" });
+      if (nodeFile && ownership.isDominant(nodeFile)) continue;
       const layer = classifyLayer(node);
       const summary = `${node.type}: ${node.content}`;
       const estimate = estimateTokens(summary);
@@ -745,11 +956,13 @@ export async function injectSameFileAndImportExpansion(
         budget.truncated = true;
         break;
       }
+      const anchor: ContextAnchorItem = { id: node.id, type: node.type, layer };
       state.summaryChannel.push(summary);
-      state.anchorChannel.push({ id: node.id, type: node.type, layer });
+      state.anchorChannel.push(anchor);
       state.added.add(node.id);
       budget.tokens += estimate;
       markLayerUsed(layer, state.used);
+      ownership.add(anchor);
     }
   }
 }
@@ -768,7 +981,14 @@ export async function injectNeighborExpansion(
   if (seedIds.length === 0) {
     return;
   }
-  const expanded = await expandSubgraph(client, seedIds, { hops: 1 });
+  // Default ("bfs") keeps the exact `{ hops: 1 }` call of the legacy walk;
+  // "ppr" drops the explicit hop so its documented multi-hop pool default
+  // (hops 2) applies and neighbors are admitted by descending PPR mass.
+  const expansionOptions =
+    options?.expansionStrategy === "ppr"
+      ? { expansionStrategy: "ppr" as const }
+      : { hops: 1 };
+  const expanded = await expandSubgraph(client, seedIds, expansionOptions);
   for (const node of expanded) {
     if (state.added.has(node.id) || atAnchorCap(state)) continue;
     const layer = classifyLayer(node);

@@ -3,6 +3,8 @@ import type { GraphNode } from "../core/types";
 import type { DialogueTurnRecord } from "../learning/dialogue-thread";
 import { composeContextQuery, extractNodeSourcePath, nodeSearchableText, tokenizeForIndex } from "./graph-utils";
 import { expandCjkGlossaryTerms } from "./cjk-glossary";
+import { bm25Idf, createBm25Index, rrfFuse, search as searchBm25, tokenizeBm25 } from "./bm25";
+import type { Bm25Doc, Bm25Index } from "./bm25";
 
 export interface SymbolMatch {
   symbol: {
@@ -102,11 +104,37 @@ function nodeToCallerInfo(node: GraphNode): { name: string; file: string; line: 
 }
 
 /**
+ * Project a graph node onto the BM25 retrieval fields: symbol name (highest
+ * boost), source path (medium), content + jsdoc as free text (lowest).
+ * File/Module nodes carry no symbol name unless metadata provides one.
+ */
+function nodeToBm25Doc(node: GraphNode): Bm25Doc {
+  const name =
+    typeof node.metadata?.name === "string"
+      ? node.metadata.name
+      : node.type === "Symbol"
+        ? getSymbolName(node)
+        : undefined;
+  const jsdoc = typeof node.metadata?.jsdoc === "string" ? node.metadata.jsdoc : undefined;
+  return {
+    id: node.id,
+    ...(name !== undefined ? { symbol: name } : {}),
+    path: extractNodeSourcePath(node),
+    summary: jsdoc ? `${node.content} ${jsdoc}` : node.content,
+  };
+}
+
+/**
  * Query symbols by name with optional exact matching.
  * For each matched Symbol, resolves:
  *   - defining File node (reverse of "defines")
  *   - caller nodes (reverse of "calls")
  *   - referencer nodes (reverse of "references")
+ *
+ * Ranking (BM25): matches are ordered by field-weighted BM25 relevance of the
+ * symbol name / file against the query tokens — an exact symbol-name match is
+ * forced to the front, remaining ties break by score then id, so identical
+ * inputs always produce identical ordering.
  */
 export async function querySymbolGraph(
   client: GraphClient,
@@ -175,6 +203,32 @@ export async function querySymbolGraph(
     });
   }
 
+  // BM25 ranking over the matched symbol corpus: IDF downweights tokens that
+  // hit every match (index/utils/…), the symbol-name field boost lifts exact
+  // and near-exact name matches above incidental content hits.
+  if (matches.length > 1) {
+    const rankIndex = createBm25Index(
+      matches.map((match) => ({
+        id: match.symbol.id,
+        symbol: match.symbol.name,
+        path: match.symbol.file,
+      }))
+    );
+    const scores = new Map(
+      searchBm25(rankIndex, tokenizeBm25(name)).map(({ id, score }) => [id, score] as const)
+    );
+    const normalizedQueryForRank = name.toLowerCase();
+    matches.sort((a, b) => {
+      const exactDiff =
+        Number(b.symbol.name.toLowerCase() === normalizedQueryForRank) -
+        Number(a.symbol.name.toLowerCase() === normalizedQueryForRank);
+      if (exactDiff !== 0) return exactDiff;
+      const scoreDiff = (scores.get(b.symbol.id) ?? 0) - (scores.get(a.symbol.id) ?? 0);
+      if (scoreDiff !== 0) return scoreDiff;
+      return a.symbol.id.localeCompare(b.symbol.id);
+    });
+  }
+
   return {
     query: name,
     matches,
@@ -182,16 +236,64 @@ export async function querySymbolGraph(
   };
 }
 
+/** Optional extra channels for `searchGraphNodes`. */
+export interface SearchGraphNodesOptions {
+  /**
+   * Node ids ranked best-first by a semantic (vector) channel. When non-empty
+   * they are fused with the lexical BM25 ranking via RRF (see `rrfFuse`).
+   * Ids missing from the keyword result are materialized through
+   * `client.getNodesByIds` when the backend supports it; otherwise they are
+   * skipped, so callers on limited backends lose nothing by passing them.
+   */
+  vectorNodeIds?: readonly string[];
+}
+
 /**
- * Full-text search over the graph using the client's keyword query.
- * Results are ranked by node type priority: Symbol > File > Module.
+ * Full-text search over the graph using the client's keyword query, ranked by
+ * field-weighted BM25 (symbol name > path > content/jsdoc) instead of raw
+ * token overlap:
+ *   - IDF downweights corpus-generic tokens (`utils`, `index`, `test`), so a
+ *     node matching a distinctive query term outranks one matching only
+ *     common ones; the cjk-glossary generic-segment blocklist remains as a
+ *     safety net inside the tokenizer.
+ *   - Term-frequency saturation + per-field length normalization keep a long
+ *     jsdoc from out-scoring a short, precise symbol hit.
+ *   - CJK queries are expanded with the server glossary before scoring.
+ *
+ * Node type priority (Symbol > File > Module) is retained as the deterministic
+ * tie-break, and `relevance` reports the lexical BM25 score. When
+ * `vectorNodeIds` is supplied, final ordering is RRF-fused with the vector
+ * ranking (deterministic, first-seen tie-break).
  */
 export async function searchGraphNodes(
   client: GraphClient,
   query: string,
-  limit = 20
+  limit = 20,
+  options?: SearchGraphNodesOptions
 ): Promise<SearchGraphResult> {
-  const nodes = await client.queryByKeyword(query);
+  const lexicalNodes = await client.queryByKeyword(query);
+  const nodesById = new Map(lexicalNodes.map((node) => [node.id, node] as const));
+
+  let vectorRanking: string[] = [];
+  const requestedVectorIds = options?.vectorNodeIds;
+  if (requestedVectorIds && requestedVectorIds.length > 0) {
+    const missing = requestedVectorIds.filter((id) => !nodesById.has(id));
+    if (missing.length > 0 && client.getNodesByIds) {
+      const fetched = await client.getNodesByIds(missing);
+      for (const node of fetched) {
+        if (!nodesById.has(node.id)) {
+          nodesById.set(node.id, node);
+        }
+      }
+    }
+    vectorRanking = requestedVectorIds.filter((id) => nodesById.has(id));
+  }
+
+  const nodes = [...nodesById.values()];
+
+  const glossaryTerms = expandCjkGlossaryTerms(query);
+  const queryText = glossaryTerms.length > 0 ? `${query} ${glossaryTerms.join(" ")}` : query;
+  const queryTokens = tokenizeBm25(queryText);
 
   const typePriority: Record<string, number> = {
     Symbol: 0,
@@ -199,37 +301,43 @@ export async function searchGraphNodes(
     Module: 2,
   };
 
-  const sorted = nodes
-    .map((node) => {
-      const priority = typePriority[node.type] ?? 3;
-      const relevance =
-        node.type === "Symbol"
-          ? 100
-          : node.type === "File"
-            ? 50
-            : node.type === "Module"
-              ? 25
-              : 10;
-      return { node, priority, relevance };
-    })
-    .sort((a, b) => {
-      if (a.priority !== b.priority) {
-        return a.priority - b.priority;
-      }
-      return b.relevance - a.relevance || a.node.id.localeCompare(b.node.id);
-    });
+  const rankIndex = createBm25Index(nodes.map(nodeToBm25Doc));
+  const scores = new Map(
+    searchBm25(rankIndex, queryTokens).map(({ id, score }) => [id, score] as const)
+  );
+
+  const ranked = nodes
+    .map((node) => ({
+      node,
+      priority: typePriority[node.type] ?? 3,
+      score: scores.get(node.id) ?? 0,
+    }))
+    .sort(
+      (a, b) =>
+        b.score - a.score || a.priority - b.priority || a.node.id.localeCompare(b.node.id)
+    );
+
+  if (vectorRanking.length > 0) {
+    // Both lists are node-id rankings; every lexical node appears in list 1,
+    // so the fused order is a total order over `ranked` (deterministic).
+    const fused = rrfFuse([ranked.map((entry) => entry.node.id), vectorRanking]);
+    const fusedRank = new Map(fused.map((id, position) => [id, position] as const));
+    ranked.sort(
+      (a, b) => (fusedRank.get(a.node.id) ?? 0) - (fusedRank.get(b.node.id) ?? 0)
+    );
+  }
 
   const boundedLimit = Math.max(1, limit);
-  const limited = sorted.slice(0, boundedLimit);
+  const limited = ranked.slice(0, boundedLimit);
 
   return {
     query,
-    results: limited.map(({ node, relevance }) => ({
+    results: limited.map(({ node, score }) => ({
       id: node.id,
       type: node.type,
       content: node.content,
       sourcePath: extractNodeSourcePath(node),
-      relevance,
+      relevance: score,
     })),
     totalCount: nodes.length,
   };
@@ -237,13 +345,26 @@ export async function searchGraphNodes(
 
 // ───────────────── Conversation Graph W2b: dialogue turn recall ─────────────────
 
+/** Optional tuning inputs for `computeAnchorRelevance`. */
+export interface AnchorRelevanceOptions {
+  /**
+   * BM25 index over the anchor candidate corpus. When supplied, each query
+   * token's weight is `idf(token) * token.length` — corpus-generic tokens
+   * (`utils`, `index`, `test`, …) are strongly downweighted by IDF while
+   * distinctive ones keep their full weight. Without an index the legacy
+   * length-only weights apply and results are bit-identical to the pre-BM25
+   * scorer, so existing consumers keep their calibrated thresholds.
+   */
+  index?: Bm25Index;
+}
+
 /**
  * Normalized 0..1 query relevance for one node: the share of query term
  * tokens (original query + agent-translated English, with CJK phrases and
  * overlapping bigrams) that occur in the node's searchable text.
  *
  * Substring containment rather than exact-token equality, so a query bigram
- * matches inside a longer Chinese run in jsdoc/content — mirroring how
+ * matches inside a longer Chinese run in jsdoc/content—mirroring how
  * `tokenizeCJK` builds overlapping bigrams on both sides.
  *
  * This is the per-anchor quality signal behind the CJK low-relevance
@@ -256,18 +377,20 @@ export async function searchGraphNodes(
  * responsive to the query — without this, retrieved English-only truth
  * scores 0 against a CJK query and is trimmed as if unresponsive (T3).
  *
- * Length-weighted share: a matched multi-char identifier or glossary term is
+ * Weighted share (BM25): a matched multi-char identifier or glossary term is
  * stronger evidence than a matched 2-char bigram coincidence (T3: the true
  * ledger module matches the distinctive translated terms while noise matches
- * a coincidental bigram). Token-count parity would let bigram noise tie
- * distinctive matches forever. Single-vocabulary
+ * a coincidental bigram), and when `options.index` carries the candidate
+ * corpus, IDF scaling additionally demotes corpus-generic tokens so the
+ * manual blocklist is belt-and-suspenders only. Single-vocabulary
  * queries shift only through the phrase/bigram length mix, which applies
  * equally to every node, so existing English/CJK baselines hold.
  */
 export function computeAnchorRelevance(
   node: GraphNode,
   query: string,
-  englishQuery?: string
+  englishQuery?: string,
+  options?: AnchorRelevanceOptions
 ): number {
   const composed = composeContextQuery(query, englishQuery).trim();
   if (!composed) {
@@ -287,7 +410,10 @@ export function computeAnchorRelevance(
   let matched = 0;
   let total = 0;
   for (const token of tokens) {
-    const weight = token.length;
+    // idf == 1 without a corpus index (legacy weights, byte-for-byte the old
+    // scorer); with one, rare tokens keep their length weight while tokens
+    // present in most candidates shrink toward irrelevance.
+    const weight = token.length * (options?.index ? bm25Idf(options.index, token) : 1);
     total += weight;
     if (haystack.includes(token.toLowerCase())) {
       matched += weight;
