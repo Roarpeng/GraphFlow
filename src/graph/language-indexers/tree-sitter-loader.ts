@@ -110,6 +110,7 @@ export function walkTreeSitterAstWithState<T>(
  * Now all four use tree-sitter for consistent AST-level extraction.
  * Phase 2: added java/ruby to broaden language coverage (toward codebase-memory-mcp's 158 languages).
  * Phase 3: kotlin/swift; Phase 4: dart (requires web-tree-sitter >=0.25 for ABI 15).
+ * Phase 5: php/c-sharp/scala (grammar file names may differ from the id, see WASM_FILE_NAME_OVERRIDES).
  */
 export type TreeSitterLanguage =
   | "python"
@@ -121,15 +122,28 @@ export type TreeSitterLanguage =
   | "ruby"
   | "kotlin"
   | "swift"
-  | "dart";
+  | "dart"
+  | "php"
+  | "c-sharp"
+  | "scala";
+
+/**
+ * Grammars whose upstream file name differs from the language id.
+ * tree-sitter-wasms ships the C# grammar as tree-sitter-c_sharp.wasm (underscore).
+ */
+const WASM_FILE_NAME_OVERRIDES: Partial<Record<TreeSitterLanguage, string>> = {
+  "c-sharp": "c_sharp",
+};
+
+/** Canonical wasm file name for a language (e.g. "c-sharp" -> "tree-sitter-c_sharp.wasm"). */
+export function treeSitterWasmFileName(language: TreeSitterLanguage): string {
+  const base = WASM_FILE_NAME_OVERRIDES[language] ?? language;
+  return `tree-sitter-${base}.wasm`;
+}
 
 const WASM_CACHE_DIR = join(process.cwd(), ".graphflow-cache", "wasm");
 const languageLoadPromises = new Map<TreeSitterLanguage, Promise<unknown>>();
 const parserPool = new Map<TreeSitterLanguage, Promise<TreeSitterParser>>();
-
-function wasmFileName(language: TreeSitterLanguage): string {
-  return `tree-sitter-${language}.wasm`;
-}
 
 function uniquePaths(paths: Array<string | null | undefined>): string[] {
   const seen = new Set<string>();
@@ -149,7 +163,7 @@ function uniquePaths(paths: Array<string | null | undefined>): string[] {
  * No network access — grammars must ship in wasm/ or tree-sitter-wasms dependency.
  */
 export function resolveBundledWasmPath(language: TreeSitterLanguage): string | null {
-  const fileName = wasmFileName(language);
+  const fileName = treeSitterWasmFileName(language);
   const candidates = uniquePaths([
     join(__dirname, "..", "..", "..", "wasm", fileName),
     resolvePackageWasmPath(fileName),

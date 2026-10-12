@@ -16,10 +16,17 @@ const { join } = require("node:path");
 const { createRequire } = require("node:module");
 
 const requireFn = createRequire(__filename);
-const GRAMMARS = ["python", "go", "rust", "c", "cpp", "java", "ruby", "kotlin", "swift", "dart"];
+const GRAMMARS = ["python", "go", "rust", "c", "cpp", "java", "ruby", "kotlin", "swift", "dart", "php", "c-sharp", "scala"];
+// Grammars whose upstream file name differs from the language id (C# ships as tree-sitter-c_sharp.wasm).
+const WASM_FILE_NAME_OVERRIDES = { "c-sharp": "c_sharp" };
 const VERSION = "0.1.13";
 const OUTPUT_DIR = join(__dirname, "..", "wasm");
 const MARKER_FILE = ".grammar-version";
+
+function wasmFileName(lang) {
+  const base = WASM_FILE_NAME_OVERRIDES[lang] ?? lang;
+  return `tree-sitter-${base}.wasm`;
+}
 
 function resolveTreeSitterWasmsOutDir() {
   try {
@@ -40,18 +47,18 @@ function readBundledVersion(outputDir) {
 }
 
 function copyFromPackage(outDir, lang, outputPath) {
-  const sourcePath = join(outDir, `tree-sitter-${lang}.wasm`);
+  const sourcePath = join(outDir, wasmFileName(lang));
   if (!existsSync(sourcePath)) {
     return false;
   }
   copyFileSync(sourcePath, outputPath);
   const sizeKb = (statSync(outputPath).size / 1024).toFixed(1);
-  console.log(`[copy] tree-sitter-${lang}.wasm (${sizeKb} KB)`);
+  console.log(`[copy] ${wasmFileName(lang)} (${sizeKb} KB)`);
   return true;
 }
 
 async function downloadFromUnpkg(lang, outputPath, version = VERSION) {
-  const fileName = `tree-sitter-${lang}.wasm`;
+  const fileName = wasmFileName(lang);
   const url = `https://unpkg.com/tree-sitter-wasms@${version}/out/${fileName}`;
   console.log(`[download] ${url}`);
   const res = await fetch(url);
@@ -80,7 +87,7 @@ async function main(options = {}) {
   let failures = 0;
 
   for (const lang of GRAMMARS) {
-    const fileName = `tree-sitter-${lang}.wasm`;
+    const fileName = wasmFileName(lang);
     const outputPath = join(outputDir, fileName);
 
     if (!forceRebundle && existsSync(outputPath)) {

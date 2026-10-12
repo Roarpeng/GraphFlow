@@ -380,12 +380,14 @@ function buildIndexOptions(config: GraphFlowConfig): {
   referenceEdgeMaxDefinitionFiles?: number;
   referenceEdgeMaxPerFile?: number;
   indexWorkers?: number;
+  parallelIndex?: { enabled?: boolean; concurrency?: number };
   embeddingProvider?: import("../../../learning/embeddings").EmbeddingProvider;
 } {
   const graphPolicy = config.graphPolicy;
   const embeddingProvider = createEmbeddingProviderFromConfig(config);
   return {
     ...(graphPolicy.includeExtensions ? { includeExtensions: graphPolicy.includeExtensions } : {}),
+    ...(graphPolicy.parallelIndex ? { parallelIndex: graphPolicy.parallelIndex } : {}),
     ...(graphPolicy.excludeGlobs?.length ? { excludeGlobs: graphPolicy.excludeGlobs } : {}),
     ...(typeof graphPolicy.maxFileSizeBytes === "number" ? { maxFileSizeBytes: graphPolicy.maxFileSizeBytes } : {}),
     ...(graphPolicy.respectGitIgnore === false ? { respectGitIgnore: false } : {}),

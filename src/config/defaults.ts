@@ -57,6 +57,9 @@ export function getDefaultConfig(): GraphFlowConfig {
       respectGitIgnore: true,
       referenceEdgeMaxDefinitionFiles: DEFAULT_REFERENCE_MAX_DEFINITION_FILES,
       referenceEdgeMaxPerFile: DEFAULT_REFERENCE_MAX_EDGES_PER_FILE,
+      // 并行全量索引管道：默认开启，并发 4；enabled:false 退回严格串行（逐文件、
+      // 按 walk 顺序），输出与并行路径完全一致（collect-then-write）。
+      parallelIndex: { enabled: true, concurrency: 4 },
       // 默认使用 auto 后端：sqlite 优先（FTS5 索引，避免大仓库下整文件读写放大），
       // better-sqlite3 可选依赖缺失时透明降级为 file JSON 存储（见 client-factory）。
       // 用户配置中显式声明的 transport（包括 "file"）保持不变，不做迁移。

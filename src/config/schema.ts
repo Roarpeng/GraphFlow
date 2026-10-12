@@ -200,6 +200,19 @@ export interface GraphFlowConfig {
      * (cores - 1, capped). `GRAPHFLOW_INDEX_WORKERS=0` disables it globally.
      */
     indexWorkers?: number;
+    /**
+     * Parallel full-rebuild indexing pipeline: overlap file reads and parse
+     * dispatch with bounded concurrency, merging results in deterministic walk
+     * order (node/edge output is identical at any concurrency).
+     * Default enabled with concurrency 4. `enabled: false` reproduces the exact
+     * serial behavior (one file at a time, in walk order).
+     */
+    parallelIndex?: {
+      /** Default true. */
+      enabled?: boolean;
+      /** Max files in flight. Default 4. */
+      concurrency?: number;
+    };
     transport: "memory" | "mcp-http" | "file" | "sqlite" | "auto";
     /**
      * Graphify team-backend endpoint (transport: "mcp-http" only). Must be an

@@ -8,6 +8,9 @@ import { rubyIndexer } from "./ruby";
 import { kotlinIndexer } from "./kotlin";
 import { swiftIndexer } from "./swift";
 import { dartIndexer } from "./dart";
+import { phpIndexer } from "./php";
+import { csharpIndexer } from "./c-sharp";
+import { scalaIndexer } from "./scala";
 import { markdownIndexer } from "./markdown";
 import { plcopenIndexer } from "./plcopen-xml";
 
@@ -76,6 +79,9 @@ const INDEXERS: LanguageIndexer[] = [
   kotlinIndexer,
   swiftIndexer,
   dartIndexer,
+  phpIndexer,
+  csharpIndexer,
+  scalaIndexer,
   markdownIndexer,
   plcopenIndexer,
 ];

@@ -26,6 +26,13 @@ export interface FileIndexerOptions {
   forceReindex?: boolean;
   /** 并行索引文件时的并发数，默认 10。仅 indexWorkspaceFiles 使用。 */
   concurrency?: number;
+  /**
+   * Parallel full-rebuild pipeline policy (mirrors `graphPolicy.parallelIndex`).
+   * `enabled: false` pins concurrency to 1 — the exact serial behavior (files
+   * processed strictly one at a time in walk order). Default enabled with
+   * concurrency 4. Only indexWorkspaceFiles uses it.
+   */
+  parallelIndex?: { enabled?: boolean; concurrency?: number };
   /** Optional embedding provider for attaching vector embeddings to nodes. */
   embeddingProvider?: EmbeddingProvider;
   /** Optional per-batch progress callback, invoked with files processed so far and total scanned files. */

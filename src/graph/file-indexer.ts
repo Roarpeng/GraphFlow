@@ -7,6 +7,7 @@
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { createHash } from "node:crypto";
 import { logger } from "../utils/logger.js";
@@ -71,6 +72,12 @@ import {
   shouldUseWorkerPool,
   type FileParsePool,
 } from "./file-parse-pool.js";
+import { resolveIndexConcurrency, runIndexPipeline } from "./index-pipeline.js";
+import {
+  buildDirectoryModuleSummaries,
+  findStaleModuleSummaryNodeIds,
+  type ModuleSummaryFileFact,
+} from "./module-summary.js";
 
 // ── Batch workspace indexing ─────────────────────────────────────────
 
@@ -161,13 +168,25 @@ async function processFile(
   let isChanged = forceReindex;
   let bytes: Buffer | undefined;
 
+  // Reads are async (fs/promises) so several files can be read concurrently by
+  // the bounded-concurrency pipeline. A file that cannot be read (deleted after
+  // the walk, permissions, EISDIR races, …) is logged and skipped — one bad
+  // file must not abort the whole workspace index.
   if (!prev || prev.mtimeMs !== mtimeMs) {
-    if (officeDoc) {
-      bytes = readFileSync(file.absPath);
-      currentHash = createHash("md5").update(bytes).digest("hex");
-    } else {
-      content = readFileSync(file.absPath, "utf8");
-      currentHash = createHash("md5").update(content).digest("hex");
+    try {
+      if (officeDoc) {
+        bytes = await readFile(file.absPath);
+        currentHash = createHash("md5").update(bytes).digest("hex");
+      } else {
+        content = await readFile(file.absPath, "utf8");
+        currentHash = createHash("md5").update(content).digest("hex");
+      }
+    } catch (error) {
+      logger.warn(
+        { relPath, error: error instanceof Error ? error.message : String(error) },
+        "skipping unreadable file during workspace index"
+      );
+      return null;
     }
     if (!prev || prev.hash !== currentHash) {
       isChanged = true;
@@ -182,8 +201,16 @@ async function processFile(
 
   if (officeDoc) {
     if (!bytes) {
-      bytes = readFileSync(file.absPath);
-      currentHash = createHash("md5").update(bytes).digest("hex");
+      try {
+        bytes = await readFile(file.absPath);
+        currentHash = createHash("md5").update(bytes).digest("hex");
+      } catch (error) {
+        logger.warn(
+          { relPath, error: error instanceof Error ? error.message : String(error) },
+          "skipping unreadable office/PDF document during workspace index"
+        );
+        return null;
+      }
     }
     const converted = await convertDocumentToMarkdown(file.absPath, bytes);
     if (!converted.markdown) {
@@ -202,8 +229,16 @@ async function processFile(
       excerpt: content.slice(0, 6000),
     };
   } else if (!content) {
-    content = readFileSync(file.absPath, "utf8");
-    currentHash = createHash("md5").update(content).digest("hex");
+    try {
+      content = await readFile(file.absPath, "utf8");
+      currentHash = createHash("md5").update(content).digest("hex");
+    } catch (error) {
+      logger.warn(
+        { relPath, error: error instanceof Error ? error.message : String(error) },
+        "skipping unreadable file during workspace index"
+      );
+      return null;
+    }
   }
 
   // 旧节点在图存储中的清理：批量索引时交给调用方一次性执行（每个文件单独
@@ -250,7 +285,9 @@ export async function indexWorkspaceFiles(
   const includeExtensions = options?.includeExtensions ?? DEFAULT_EXTENSIONS;
   const maxFileSizeBytes = options?.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE;
   const forceReindex = options?.forceReindex ?? false;
-  const concurrency = Math.max(1, options?.concurrency ?? 10);
+  // parallelIndex.enabled === false pins 1 (exact serial behavior); default is
+  // the bounded-concurrency pipeline (see index-pipeline.ts).
+  const concurrency = resolveIndexConcurrency(options?.parallelIndex, options?.concurrency);
   const signal = options?.signal;
 
   const cachePath = indexManifestPath(rootDir, client.indexManifestName);
@@ -266,6 +303,8 @@ export async function indexWorkspaceFiles(
     ...(options?.excludeGlobs?.length ? { excludeGlobs: options.excludeGlobs } : {}),
   });
   const currentRelPaths = new Set(scanned.map((file) => file.relPath));
+  const startedWithEmptyCache = Object.keys(cacheState).length === 0;
+  let prunedStaleFiles = 0;
 
   if (client.deleteNode ?? client.deleteNodes) {
     const stale = Object.keys(cacheState).filter((relPath) => !currentRelPaths.has(relPath));
@@ -281,6 +320,7 @@ export async function indexWorkspaceFiles(
     if (stale.length > 0) {
       // 批量清理：单次快照读取 + 单次批量删除，避免逐文件全量读写图文件
       await pruneFileFromGraph(client, stale);
+      prunedStaleFiles = stale.length;
       for (const relPath of stale) {
         delete cacheState[relPath];
       }
@@ -315,54 +355,81 @@ export async function indexWorkspaceFiles(
 
   let processedCount = 0;
   try {
-  for (let i = 0; i < scanned.length; i += concurrency) {
-    if (signal?.aborted) {
-      logger.info({ processed: processedCount, total: scanned.length }, "工作区索引已取消");
-      return {
-        indexedFiles: nodes.filter((node) => node.type === "File").length,
-        indexedSymbols: nodes.filter((node) => node.type === "Symbol").length,
-        indexedReferences: 0,
-        cancelled: true,
-      };
-    }
-
-    const batch = scanned.slice(i, i + concurrency);
-    const batchResults = await Promise.all(
-      batch.map((file) => {
-        if (signal?.aborted) {
-          return Promise.resolve<FileProcessResult | null>(null);
+    // Bounded-concurrency pipeline: up to `concurrency` files are read/parsed
+    // in flight (async reads overlap; worker pool offloads parsing on compiled
+    // builds), while results are merged STRICTLY in walk order — the collected
+    // nodes/edges/cache writes are identical at any concurrency level.
+    // concurrency === 1 (parallelIndex.enabled === false) runs the sequential
+    // path: each file is fully processed before the next one starts.
+    await runIndexPipeline(
+      scanned,
+      (file) => processFile(file, cacheState, forceReindex, client, pool, pruneIndex),
+      (_file, _index, result: FileProcessResult | null) => {
+        if (result) {
+          if (result.pruneIds) {
+            for (const id of result.pruneIds) deletedNodeIds.add(id);
+          }
+          nodes.push(...result.fileNodes);
+          edges.push(...result.fileEdges);
+          parsed.push(result.parsedEntry);
+          cacheState[result.relPath] = result.cacheEntry;
+          if (result.documentSemantic) {
+            documentTargets.push(result.documentSemantic);
+          }
         }
-        return processFile(file, cacheState, forceReindex, client, pool, pruneIndex);
-      })
+        processedCount += 1;
+        options?.onProgress?.(processedCount, scanned.length);
+        if (processedCount > 0 && processedCount % 100 === 0) {
+          logger.info(
+            { processed: processedCount, total: scanned.length, percent: `${((processedCount / scanned.length) * 100).toFixed(1)}%` },
+            "工作区索引进度",
+          );
+        }
+      },
+      { concurrency, signal }
     );
-
-    for (const result of batchResults) {
-      if (result) {
-        if (result.pruneIds) {
-          for (const id of result.pruneIds) deletedNodeIds.add(id);
-        }
-        nodes.push(...result.fileNodes);
-        edges.push(...result.fileEdges);
-        parsed.push(result.parsedEntry);
-        cacheState[result.relPath] = result.cacheEntry;
-        if (result.documentSemantic) {
-          documentTargets.push(result.documentSemantic);
-        }
-      }
-      processedCount += 1;
-      options?.onProgress?.(processedCount, scanned.length);
-      if (processedCount > 0 && processedCount % 100 === 0) {
-        logger.info(
-          { processed: processedCount, total: scanned.length, percent: `${((processedCount / scanned.length) * 100).toFixed(1)}%` },
-          "工作区索引进度",
-        );
-      }
-    }
-  }
-
   } finally {
     // Parsing is done: release the workers before the write phase.
     pool?.close();
+  }
+
+  // Abort semantics preserved from the batch loop: a signal that fires while
+  // files remain unprocessed returns the partial (cancelled) result; a signal
+  // arriving after the last file still lets the run complete and persist.
+  if (signal?.aborted && processedCount < scanned.length) {
+    logger.info({ processed: processedCount, total: scanned.length }, "工作区索引已取消");
+    return {
+      indexedFiles: nodes.filter((node) => node.type === "File").length,
+      indexedSymbols: nodes.filter((node) => node.type === "Symbol").length,
+      indexedReferences: 0,
+      cancelled: true,
+    };
+  }
+
+  // ── L2 directory module summaries (RAPTOR-lite) ──────────────────────
+  // Rebuilt whenever this run changed the effective file set (files re-parsed
+  // or stale files pruned). The input view merges this run's fresh parses over
+  // the pre-run snapshot's File nodes, filtered to the current scan — so an
+  // incremental run (one changed file of sixty) still produces the FULL
+  // directory view, never a partial one. Without any full view available
+  // (no snapshot, incremental, cache warm) the summaries are left untouched.
+  if (parsed.length > 0 || prunedStaleFiles > 0) {
+    const fullViewAvailable = snapshot !== undefined || forceReindex || startedWithEmptyCache;
+    if (fullViewAvailable) {
+      const fileFacts = collectModuleSummaryFileFacts({
+        snapshotNodes: snapshot?.nodes,
+        parsed,
+        currentRelPaths,
+      });
+      const summaries = buildDirectoryModuleSummaries(fileFacts);
+      const liveIds = new Set(summaries.map((summary) => summary.node.id));
+      for (const staleId of findStaleModuleSummaryNodeIds(snapshot?.nodes, liveIds)) {
+        deletedNodeIds.add(staleId);
+      }
+      for (const summary of summaries) {
+        nodes.push(summary.node);
+      }
+    }
   }
 
   const symbolIndex = new Map<string, IndexedSymbol[]>();
@@ -724,6 +791,38 @@ export async function indexSingleFile(
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────
+
+/**
+ * Effective per-file export view for the L2 directory module summaries:
+ * the pre-run snapshot's File nodes (for unchanged files) overlaid with this
+ * run's fresh parses, filtered to the current scan set.
+ */
+function collectModuleSummaryFileFacts(args: {
+  snapshotNodes: readonly GraphNode[] | undefined;
+  parsed: ParsedFile[];
+  currentRelPaths: ReadonlySet<string>;
+}): ModuleSummaryFileFact[] {
+  const facts = new Map<string, ModuleSummaryFileFact>();
+  if (args.snapshotNodes) {
+    for (const node of args.snapshotNodes) {
+      if (node.type !== "File" || !node.id.startsWith("file:")) continue;
+      const relPath = node.id.slice("file:".length);
+      if (!args.currentRelPaths.has(relPath)) continue;
+      const exports = Array.isArray(node.metadata?.exports)
+        ? node.metadata.exports.map(String)
+        : [];
+      facts.set(relPath, { relPath, exports });
+    }
+  }
+  for (const file of args.parsed) {
+    // Fresh parse wins over the (older) snapshot entry.
+    facts.set(file.relPath, {
+      relPath: file.relPath,
+      exports: file.declared.filter((symbol) => symbol.exported).map((symbol) => symbol.name),
+    });
+  }
+  return [...facts.values()];
+}
 
 /**
  * Map every file's node ids by relPath in ONE pass over the snapshot, so a
