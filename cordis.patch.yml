@@ -6,19 +6,18 @@
 #   或已有 ~/.dsh 时: npx @roarpeng/graphflow install
 #
 # 能力:
-#   1) MCP 10 工具挂到 ctx.tools（cwd = 会话/工作区 process.cwd()）。
-#      模型侧名称: mcp__graphflow__graphflow_context / _plan / _run /
-#      _report_outcome / _insight / _index / _skill_insights /
-#      _diagnose / _artifact / _skill_guide
+#   1) MCP 4 工具挂到 ctx.tools（cwd = 会话/工作区 process.cwd()）。
+#      模型侧名称: mcp__graphflow__gf_read / _gf_edit / _gf_exec / _gf_macro
+#      （env GRAPHFLOW_MCP_PROFILE=v3；删掉该行即回退 10 工具 legacy 面）。
 #   2) ESM glue `@roarpeng/graphflow/dsh`：ctx.skills.register(graphflow)
 #      （dsh plugin add 即可用 skill，不必先 graphflow install）；
 #      agent/disposed 时不默认把 pending episode 标成成功（等同 Claude Code
 #      SessionEnd 空 $2 保持 pending）。显式 GRAPHFLOW_HOOK_SUCCESS=true|false
 #      才调用 graphflow outcome report。不监听 live session/flush。
-#   3) 首轮 agent/pre-step 注入一句短 hint：先调 graphflow_context（rootDir=cwd）。
+#   3) 首轮 agent/pre-step 注入一句短 hint：先调 gf_read（rootDir=cwd）。
 #
-# 调用约定: 先 context（传 rootDir），复杂任务再 plan；改完代码后 index；
-#   若走了 run，结束后必须 report_outcome。不要写死 GRAPHFLOW_WORKSPACE_ROOT。
+# 调用约定: 先 gf_read（传 rootDir）拿精准切片，同回合 gf_edit 改调用点，
+#   gf_exec 验证；重复模式交给 gf_macro。不要写死 GRAPHFLOW_WORKSPACE_ROOT。
 #
 # graphflow install（无 profile 包时）只写 MCP 行到 $DSH_HOME/cordis.patch.yml；
 # 已 `dsh plugin add` / profile 有包时会清空 home overlay，由 bundle 独占 MCP+glue
@@ -39,6 +38,7 @@
         env:
           GRAPHFLOW_MCP_STDIO: '1'
           GRAPHFLOW_LOG_JSON: '1'
+          GRAPHFLOW_MCP_PROFILE: 'v3'
         cwd: !!js process.cwd()
         failOnStartupError: false
     - id: graphflow-dsh

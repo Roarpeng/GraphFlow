@@ -64,6 +64,19 @@ describe("team RBAC roles and scopes", () => {
     expect(authorizeMcpTool("admin", "graphflow_report_outcome").ok).toBe(true);
   });
 
+  it("registers the 4 v3 surgical tools (fail-closed previously 403'd them)", () => {
+    expect(authorizeMcpTool("viewer", "gf_read").ok).toBe(true);
+    expect(authorizeMcpTool("viewer", "gf_edit").ok).toBe(false);
+    expect(authorizeMcpTool("viewer", "gf_exec").ok).toBe(false);
+    expect(authorizeMcpTool("viewer", "gf_macro").ok).toBe(false);
+    expect(authorizeMcpTool("contributor", "gf_edit").ok).toBe(true);
+    expect(authorizeMcpTool("contributor", "gf_exec").ok).toBe(true);
+    expect(authorizeMcpTool("contributor", "gf_macro").ok).toBe(true);
+    expect(authorizeMcpTool("admin", "gf_read").ok).toBe(true);
+    expect(authorizeMcpTool("viewer", "gf_unknown").ok).toBe(false);
+    expect(authorizeMcpTool("viewer", "gf_unknown").reason).toMatch(/unknown tool/);
+  });
+
   it("resolves JWT role claim and default scopes from issueLocalJwt", async () => {
     const secret = "unit-jwt-secret";
     const token = issueLocalJwt("ada", secret, { role: "viewer", issuer: "graphflow-team", audience: "graphflow-team" });

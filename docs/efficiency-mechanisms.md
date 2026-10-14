@@ -1,5 +1,9 @@
 # Efficiency mechanisms (SoL-Pi borrow)
 
+> **Scope note (3.1)**: these mechanisms ride the *legacy-profile*
+> `graphflow_*` tool surface (internal engine / extension / explicit calls).
+> The default agent-facing surface is the 4 `gf_*` surgical tools.
+
 > Status: P0/P1/P2 of the SoL-Pi adoption are implemented. Every mechanism is
 > ON by default (`efficiencyPolicy` is the "best config"); switch any of them
 > off from the **GraphFlow: Settings** page or by setting its section to `false`.

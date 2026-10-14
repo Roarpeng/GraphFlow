@@ -17,9 +17,9 @@ describe("GraphFlow + Serena compose docs", () => {
     const zh = read("docs/graphflow-serena.zh.md");
     const toolNames = new Set(getToolDefinitions().map((t) => t.name));
     for (const body of [en, zh]) {
-      expect(body).toContain("graphflow_context");
-      expect(body).toContain("graphflow_plan");
-      expect(body).toContain("graphflow_report_outcome");
+      expect(body).toContain("gf_read");
+      expect(body).toContain("gf_edit");
+      expect(body).toContain("gf_exec");
       expect(body).toContain("graphflow-serena.mcp.json");
       expect(body).toMatch(/Pitfall|坑/);
       for (const raw of new Set(body.match(/graphflow_[a-z_]+/g) ?? [])) {

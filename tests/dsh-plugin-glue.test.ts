@@ -244,7 +244,7 @@ describe("dsh ESM glue plugin", () => {
     const messages = (decision as { messages: Array<{ content?: Array<{ text?: string }>; source?: unknown }> }).messages;
     expect(messages).toHaveLength(2);
     expect(messages[0]).toBe(userMessage);
-    expect(messages[1]?.content?.[0]?.text).toContain("mcp__graphflow__graphflow_context");
+    expect(messages[1]?.content?.[0]?.text).toContain("mcp__graphflow__gf_read");
     expect(messages[1]?.content?.[0]?.text).toContain(`rootDir=${workspace}`);
     expect(messages[1]?.content?.[0]?.text?.length).toBeLessThan(240);
     expect(messages[1]?.source).toEqual({ kind: "plugin:graphflow-dsh", plugin: "graphflow-dsh", form: "instructions" });
@@ -502,7 +502,7 @@ describe("workspace cwd resolution (unsafe rootDir guard)", () => {
 
     const unsafeHint = buildContextHint(home);
     expect(unsafeHint).not.toContain("rootDir=");
-    expect(unsafeHint).toContain("graphflow_context");
+    expect(unsafeHint).toContain("gf_read");
     expect(unsafeHint).toContain("omit rootDir");
 
     const unsafeMessage = buildHintMessage(home);

@@ -1575,7 +1575,9 @@ function removeFileIfExists(filePath: string): boolean {
 
 /** True when content looks like a GraphFlow-owned install (not a lightly annotated user file). */
 export function looksLikeGraphFlowOwnedContent(content: string): boolean {
-  if (!content.includes("graphflow_context")) return false;
+  // v2 blocks name graphflow_context; the 3.0 instruction block teaches the
+  // gf_* surgical tools instead. Either marker admits a GraphFlow install.
+  if (!content.includes("graphflow_context") && !content.includes("gf_read")) return false;
   return (
     content.includes(INSTRUCTION_BEGIN) ||
     content.includes("Token-First Rule") ||

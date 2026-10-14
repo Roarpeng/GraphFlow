@@ -59,9 +59,9 @@ npm install -g @roarpeng/graphflow
 ```bash
 npx @roarpeng/graphflow install
 ```
-Automatically registers MCP, rules, skills, and `PreToolUse`/`PostToolUse` hooks for Cursor, Claude Code, DeepSeek Harness (DSH), Trae, Kimi Code, VS Code, and 15+ coding agents.
+Automatically registers MCP, rules, skills, and `PreToolUse`/`PostToolUse` hooks for Cursor, Claude Code, DeepSeek Harness (DSH), Trae, Kimi Code, VS Code, and 15+ coding agents. Registered configs set `GRAPHFLOW_MCP_PROFILE=v3` so agents get the 4 surgical tools out of the box (remove that env line to restore the 10-tool legacy surface).
 
-### 3. Launch MCP Server
+### 3. Launch MCP Server (manual)
 ```bash
 GRAPHFLOW_MCP_PROFILE=v3 npx @roarpeng/graphflow-mcp
 ```

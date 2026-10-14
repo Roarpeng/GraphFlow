@@ -100,6 +100,45 @@ function readObservedContextUsage(value: unknown): ObservedContextUsage | undefi
   return Object.keys(usage).length > 0 ? usage : undefined;
 }
 
+/** Dispatch a gf_* surgical tool to the v3 engine (shared tail of the switch). */
+function dispatchV3Tool(
+  name: string,
+  args: Record<string, unknown>
+): ToolCallResponse & { structuredContent: Record<string, unknown> } {
+  const rootDir = readOptionalString(args.rootDir) ?? discoverWorkspaceRoot() ?? process.cwd();
+  const v3Res = executeV3ToolCall(name, args, rootDir);
+  return {
+    ...v3Res,
+    structuredContent: { tool: name, ok: !v3Res.content[0]?.text.startsWith("ERR ") && !v3Res.content[0]?.text.startsWith("FAIL ") },
+  };
+}
+
+/**
+ * gf_read workbench/dialogue memory bridge. `topicId` / `resumeFromTurnId`
+ * (plus `q`) resume graph-memory context through the legacy preview path so
+ * the 4-tool v3 surface stays self-sufficient for workspace-memory recall.
+ * Returns undefined when the call is a plain surgical read.
+ */
+async function maybeBridgeGfReadToMemory(
+  args: Record<string, unknown>
+): Promise<(ToolCallResponse & { structuredContent: Record<string, unknown> }) | undefined> {
+  const topicId = readOptionalString(args.topicId);
+  const resumeFromTurnId = readOptionalString(args.resumeFromTurnId);
+  if (!topicId && !resumeFromTurnId) return undefined;
+  if (Array.isArray(args.targets) && args.targets.length > 0) return undefined;
+  const query = readOptionalString(args.q);
+  if (!query) {
+    throw new Error(
+      "gf_read with topicId/resumeFromTurnId requires 'q' — the question to resume the topic with."
+    );
+  }
+  const dialogue = buildDialogueOptions(args);
+  const rootDir = readOptionalString(args.rootDir);
+  const configPath = readOptionalString(args.configPath);
+  const result = await previewContext(query, configPath, rootDir, undefined, dialogue, undefined);
+  return stableContextPreviewResponse(query, rootDir, configPath, result);
+}
+
 export async function executeToolCall(
   call: ToolCall,
   server?: McpServer,
@@ -158,17 +197,19 @@ async function executeToolCallInner(
   applyTextCopyConfig(readOptionalString(args.configPath));
 
   switch (call.name) {
-    case "gf_read":
+    case "gf_read": {
+      // Workbench/dialogue memory bridge: topicId/resumeFromTurnId (with q)
+      // resumes graph-memory context via the legacy preview path instead of
+      // AST slicing — keeps the 4-tool v3 surface self-sufficient for
+      // workspace-memory recall.
+      const bridged = await maybeBridgeGfReadToMemory(args);
+      if (bridged) return bridged;
+      return dispatchV3Tool(call.name, args);
+    }
     case "gf_edit":
     case "gf_exec":
-    case "gf_macro": {
-      const rootDir = readOptionalString(args.rootDir) ?? discoverWorkspaceRoot() ?? process.cwd();
-      const v3Res = executeV3ToolCall(call.name, args, rootDir);
-      return {
-        ...v3Res,
-        structuredContent: { tool: call.name, ok: !v3Res.content[0]?.text.startsWith("ERR ") && !v3Res.content[0]?.text.startsWith("FAIL ") },
-      };
-    }
+    case "gf_macro":
+      return dispatchV3Tool(call.name, args);
     case "graphflow_run":
       return structuredResponse(
         await runTaskResult(

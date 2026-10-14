@@ -1091,7 +1091,7 @@ function formatGraphSnapshotMarkdown(snapshot: GraphSnapshotResult): string {
 
 function formatWorkbenchOutlineMarkdown(outlines: GraphSnapshotResult["workbenchOutline"]): string {
   if (!outlines || outlines.length === 0) {
-    return ["Workbench tree:", "- empty — call graphflow_plan to seed the function DAG."].join("\n");
+    return ["Workbench tree:", "- empty — the workbench seeds from a plan; run a plan from the GraphFlow panel."].join("\n");
   }
   const lines = ["Workbench tree:"];
   for (const outline of outlines) {
@@ -1102,7 +1102,7 @@ function formatWorkbenchOutlineMarkdown(outlines: GraphSnapshotResult["workbench
         lines.push(`    - 旁支${child.active ? " [active]" : ""}: ${child.title} (\`${child.id}\`)`);
       }
     }
-    lines.push(`- resume: graphflow_context({ topicId: "${outline.activeTopicId}" })`);
+    lines.push(`- resume: gf_read({ q: "<your question>", topicId: "${outline.activeTopicId}" })`);
   }
   return lines.join("\n");
 }
@@ -1110,7 +1110,7 @@ function formatWorkbenchOutlineMarkdown(outlines: GraphSnapshotResult["workbench
 async function copyWorkbenchResumePrompt(topicId: string, label?: string, preview?: string): Promise<void> {
   const prompt = [
     `请回到工作台节点继续细化，不要带着旁支上下文。`,
-    `调用 graphflow_context 时传入 topicId: "${topicId}"`,
+    `调用 gf_read 时传入 topicId: "${topicId}"（q 填你的问题）`,
     label ? `节点: ${label}` : "",
     preview ? `概要: ${preview}` : "",
   ]
@@ -1684,7 +1684,7 @@ function wireGraphSnapshotPanel(
       const prompt = topicId
         ? [
             `请回到工作台节点继续细化，不要带着旁支上下文。`,
-            `调用 graphflow_context 时传入 topicId: "${topicId}"`,
+            `调用 gf_read 时传入 topicId: "${topicId}"（q 填你的问题）`,
             message.label ? `节点: ${message.label}` : "",
             message.preview ? `概要: ${message.preview}` : "",
           ]
@@ -1692,7 +1692,7 @@ function wireGraphSnapshotPanel(
             .join("\n")
         : [
             `请从这次对话继续深挖，不要脱离主线。`,
-            `调用 graphflow_context 时传入 resumeFromTurnId: "${turnId}"`,
+            `调用 gf_read 时传入 resumeFromTurnId: "${turnId}"（q 填你的问题）`,
             message.label ? `节点: ${message.label}` : "",
             message.preview ? `上下文: ${message.preview}` : "",
           ]

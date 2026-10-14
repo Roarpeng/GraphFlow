@@ -58,9 +58,9 @@ npm install -g @roarpeng/graphflow
 ```bash
 npx @roarpeng/graphflow install
 ```
-支持自动检测并接入 Cursor、Claude Code、DeepSeek Harness (DSH)、Trae、Kimi Code、VS Code 等 20+ 款编程工具。
+支持自动检测并接入 Cursor、Claude Code、DeepSeek Harness (DSH)、Trae、Kimi Code、VS Code 等 20+ 款编程工具。注册配置自动写入 `GRAPHFLOW_MCP_PROFILE=v3`，Agent 开箱即得 4 个外科手术工具（删除该 env 行即可回退 10 工具 legacy 面）。
 
-### 3. 本地启动 MCP 服务
+### 3. 本地启动 MCP 服务（手动）
 ```bash
 GRAPHFLOW_MCP_PROFILE=v3 npx @roarpeng/graphflow-mcp
 ```

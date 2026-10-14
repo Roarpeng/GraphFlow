@@ -213,7 +213,7 @@ function renderWorkbenchOutlineHtml(outlines: WorkbenchOutline[] | undefined): s
     return `<section class="panel panel-body">
       <details class="workbench-outline">
         <summary>工作台脉络（按需展开）</summary>
-        <p class="empty">尚无功能节点。复杂任务先 graphflow_plan，主线 DAG 会出现在这里；日常对话保持收起。</p>
+        <p class="empty">尚无功能节点。复杂任务先在 GraphFlow 面板发起规划，主线 DAG 会出现在这里；日常对话保持收起。</p>
       </details>
     </section>`;
   }

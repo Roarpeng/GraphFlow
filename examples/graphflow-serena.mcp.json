@@ -2,7 +2,10 @@
   "mcpServers": {
     "graphflow": {
       "command": "npx",
-      "args": ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"]
+      "args": ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
+      "env": {
+        "GRAPHFLOW_MCP_PROFILE": "v3"
+      }
     },
     "serena": {
       "command": "serena",

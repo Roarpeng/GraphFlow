@@ -47,7 +47,7 @@ const REPLY_FILL_TIMEOUT_MS = 20_000;
 /** One bounded retry when the fill finds no pending turn yet (record race). */
 const REPLY_RETRY_DELAY_MS = 1_500;
 const DEFAULT_SKILL_DESCRIPTION =
-  "图谱上下文压缩、任务规划与知识图谱编排（10 个 MCP 工具）。任何读代码、改代码、排错、中文问题之前必须先调 graphflow_context。DeepSeek Harness 下工具名为 mcp__graphflow__graphflow_*。";
+  "Token-First 外科手术级代码引擎（4 个 MCP 工具：gf_read, gf_edit, gf_exec, gf_macro）。任何读代码、改代码、排错之前先调 gf_read。DeepSeek Harness 下工具名为 mcp__graphflow__gf_*。";
 
 /** Static-panel data channel: Connection generic RPC channel for the panel. */
 const NODES_CHANNEL = "/gf";
@@ -161,7 +161,7 @@ export function latestPendingEpisodeId(journalPath) {
  * The MCP-side guard (`assertSafeWorkspaceRoot` → `isUnsafeWorkspaceFallback` in
  * `src/config/discover-workspace.ts`) refuses an explicit tool `rootDir` that
  * resolves to one of these, so the glue must never put such a path in the hint:
- * a bad hint makes every `graphflow_context` call fail with an opaque MCP error.
+ * a bad hint makes every gf_read / context-preview call fail with an opaque MCP error.
  * Kept inline (no import of the CJS dist) because this glue is a synchronous,
  * dependency-free ESM entry; `dsh-plugin-glue.test.ts` cross-checks the two
  * implementations so they cannot drift apart silently.
@@ -214,7 +214,7 @@ function safeWorkspaceRoot(value) {
  *
  * The hint must carry a root the MCP guards accept. dsh is frequently launched
  * from `$HOME`, so the *host process* cwd is often `/home/<user>` — an unsafe
- * root that `graphflow_context` rejects outright (`Refusing to use unsafe
+ * root that the context preview rejects outright (`Refusing to use unsafe
  * workspace root from rootDir`, surfaced as MCP -32603). When no safe root is
  * known, omit `rootDir` entirely: the MCP server then falls back to its
  * configured `GRAPHFLOW_WORKSPACE_ROOT` / discovery instead of failing.
@@ -223,9 +223,9 @@ function safeWorkspaceRoot(value) {
 export function buildContextHint(cwd = process.cwd()) {
   const rootDir = safeWorkspaceRoot(cwd);
   if (!rootDir) {
-    return "GraphFlow: before large code reads, call mcp__graphflow__graphflow_context (omit rootDir — the server resolves the session workspace). Do not dump SKILL.md.";
+    return "GraphFlow: before large code reads, call mcp__graphflow__gf_read (omit rootDir — the server resolves the session workspace). Do not dump SKILL.md.";
   }
-  return `GraphFlow: before large code reads, call mcp__graphflow__graphflow_context with rootDir=${rootDir}. Do not dump SKILL.md.`;
+  return `GraphFlow: before large code reads, call mcp__graphflow__gf_read with rootDir=${rootDir}. Do not dump SKILL.md.`;
 }
 
 /**
@@ -1508,7 +1508,7 @@ export function buildObservationProjection(tool, packed) {
     packed.head,
     "...",
     packed.tail,
-    "(recall exact bytes with graphflow_context handle=" + packed.handle + ")",
+    "(recall exact bytes with gf_read handle=" + packed.handle + ")",
   ].join("\n");
 }
 

@@ -4,6 +4,33 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed — the v3 surface is now what installed agents actually get
+
+- **Installer injects `GRAPHFLOW_MCP_PROFILE=v3`** into every registered MCP
+  config (IDE registrations, `mcp.json`, the DSH cordis patch row, the
+  Serena compose example). Before this, the rule files taught the 4 `gf_*`
+  surgical tools while the default server surface served the 10 legacy
+  `graphflow_*` tools — agents saw "Tool gf_read not found" and paid the full
+  5,897-token schema tax. Remove the env line from a registered config to
+  restore the legacy surface.
+- **RBAC registered the `gf_*` tools** (`gf_read`→graph.read,
+  `gf_edit`/`gf_exec`/`gf_macro`→graph.write). `authorizeMcpTool` is
+  fail-closed, so team HTTP mode previously 403'd every v3 tool call with
+  "unknown tool".
+- **`gf_read` bridges workbench/dialogue memory**: `gf_read({ q, topicId })`
+  and `gf_read({ q, resumeFromTurnId })` resume graph-memory context through
+  the legacy preview pipeline, keeping the 4-tool surface self-sufficient
+  for workspace-memory recall (VS Code workbench prompts updated to match).
+- Synced remaining legacy copy to `gf_*`: DSH plugin/client hints, the web
+  knowledge-panel prompts, cordis.patch.yml headers, VS Code extension
+  empty-state texts. `looksLikeGraphFlowOwnedContent` now also recognizes
+  v3 blocks (uninstall previously could leave v3 rule installs behind).
+- **Docs**: `docs/graphflow-serena.{md,zh.md}` rewritten around the v3
+  narrative (GraphFlow = the 4 surgical tools on six native language
+  families, Serena = the LSP long tail); `comparison.md` joint table
+  updated; `context-contract.md` / `efficiency-mechanisms.md` carry a
+  legacy-profile scope note.
+
 ## [3.0.0] — 2026-10-13
 
 ### Major — Token-First Surgical Engine (Pillars 1–4)

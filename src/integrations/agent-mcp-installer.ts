@@ -1091,6 +1091,10 @@ function findExactDanglingInfo(configPath: string, serverName: string): Dangling
 const MCP_STDIO_ENV: Record<string, string> = {
   GRAPHFLOW_MCP_STDIO: "1",
   GRAPHFLOW_LOG_JSON: "1",
+  // Installed agents get the 4-tool v3 surgical surface so the MCP tools
+  // match the gf_* rule files written by the same install. Remove this env
+  // line from the registered config to restore the 10-tool legacy surface.
+  GRAPHFLOW_MCP_PROFILE: "v3",
 };
 
 const EPHEMERAL_NODE_PATH_MARKERS = ["/fnm_multishells/", "\\fnm_multishells\\"];

@@ -1,5 +1,11 @@
 # Context Engineering Contract
 
+> **Scope note (3.1)**: this contract specifies the *legacy-profile* context
+> pipeline (`graphflow_context` preview / anchor refill) that powers the
+> internal engine, the VS Code extension, and `GRAPHFLOW_MCP_PROFILE=legacy`
+> deployments. The default agent-facing surface is the 4 surgical tools; the
+> bridge `gf_read({ q, topicId })` reaches the same memory recall.
+
 > GraphFlow is not “just another code graph.” It is a **Context Engineering**
 > service: retrieve what the current decision needs, compress it under an
 > explicit token budget, and expose expandable anchors so agents refill only

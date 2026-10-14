@@ -176,6 +176,7 @@ export function buildGraphFlowDshInsertPatch(options: BuildDshInsertPatchOptions
     "        env:",
     "          GRAPHFLOW_MCP_STDIO: '1'",
     "          GRAPHFLOW_LOG_JSON: '1'",
+    "          GRAPHFLOW_MCP_PROFILE: 'v3'",
     "        cwd: !!js process.cwd()",
     "        failOnStartupError: false",
   ];

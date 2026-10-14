@@ -31,8 +31,8 @@ export class WorkbenchTreeProvider implements vscode.TreeDataProvider<WorkbenchT
     if (!element) {
       this.outlines = await this.loadOutlines();
       if (this.outlines.length === 0) {
-        const empty = new WorkbenchTreeItem("尚无工作台 — 先 graphflow_plan", vscode.TreeItemCollapsibleState.None);
-        empty.tooltip = "复杂任务先调用 graphflow_plan，功能节点会出现在这里。";
+        const empty = new WorkbenchTreeItem("尚无工作台 — 先发起一次规划", vscode.TreeItemCollapsibleState.None);
+        empty.tooltip = "复杂任务先在 GraphFlow 面板发起规划，功能节点会出现在这里。";
         return [empty];
       }
       return this.outlines.map((outline) => {

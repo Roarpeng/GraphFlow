@@ -36,7 +36,7 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
   {
     name: "gf_read",
     description:
-      "Surgical read: `targets` (['file#sym', 'file:L1-L2', 'file']) or `q`. Returns code + types + callers.",
+      "Surgical read: `targets` (['file#sym', 'file:L1-L2', 'file']) or `q`. Returns code + types + callers. `q` + `topicId`/`resumeFromTurnId` resumes workbench/dialogue memory context.",
     inputSchema: {
       type: "object",
       properties: {
@@ -44,6 +44,8 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
         q: { type: "string" },
         topK: { type: "number" },
         skeleton: { type: "boolean" },
+        topicId: { type: "string", description: "Workbench topic to resume (requires q)." },
+        resumeFromTurnId: { type: "string", description: "Dialogue turn to resume from (requires q)." },
         rootDir: { type: "string" },
       },
       additionalProperties: false,

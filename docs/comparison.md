@@ -66,13 +66,14 @@ GraphFlow 不是"又一个代码图谱"，而是把 **本地知识图谱 + 三�
 
 ## GraphFlow + Serena: better together（联合方案）
 
-前文的对比框架是"二选一"，但两者实际是**补集关系**：Serena 管**符号级精确编辑**（LSP 定位、改名、重构），GraphFlow 管**喂给 agent 之前的上下文预算**（压缩上下文 + 规划）与**跨会话记忆**（Episodic / Skill / Decision 飞轮）。
+前文的对比框架是"二选一"，但两者实际是**补集关系**：GraphFlow 3.0 用 4 个外科手术工具（`gf_read` / `gf_edit` / `gf_exec` / `gf_macro`）管 **Token-First 的读、改、验证与习惯记忆**（六族原生语言：TS/JS、Python、Go、Rust、C/C++、C#），Serena 管**这六族之外长尾语言的 LSP 符号级编辑**（40+ 语言）。
 
 | 阶段 | 负责方 | 做什么 |
 |---|---|---|
-| 看清 / 规划 | **GraphFlow** | `graphflow_context` → `graphflow_plan`（可选 `graphflow_run`） |
-| 定位与修改 | **Serena** | LSP 符号级定位、精确编辑 / 重构（40+ 语言） |
-| 收尾沉淀 | **GraphFlow** | `graphflow_index` + `graphflow_report_outcome`（或 auto-capture hooks） |
+| 看清 | **GraphFlow** | `gf_read` — AST 骨骼 / 符号体 + 类型 + `[Blast Radius]` 调用点 |
+| 定位与修改 | **优先 GraphFlow** | `gf_edit` — 同回合改定义与调用点、零 LLM 跨仓改名；六族之外交给 **Serena**（LSP，40+ 语言） |
+| 验证 | **GraphFlow** | `gf_exec` — `cmd: "affected-tests"`，通过只回一行 `PASS` |
+| 收尾沉淀 | **GraphFlow** | `gf_macro` 自动编译重复模式；工作台记忆经 `gf_read({ q, topicId })` 恢复；outcome 由 auto-capture hooks 闭环 |
 
 完整安装、并列 MCP 配置、工作流与坑见独立指南（本页不再维护 Serena 启动命令）：
 

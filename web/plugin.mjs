@@ -22,7 +22,7 @@
  *       * click-to-resume: submits a continuation instruction through the
  *         session binding's `prompt('queue')` channel (the same pipe the
  *         composer uses), so the agent restores context via
- *         graphflow_context({ topicId | resumeFromTurnId }) and continues.
+ *         gf_read({ q, topicId | resumeFromTurnId }) and continues.
  *
  * Plain JavaScript only: no TS/JSX/import. React arrives as a closure symbol.
  */
@@ -140,7 +140,7 @@ export function clientHalf() {
 function buildResumeInstruction(kind, id, cwd, title) {
   const arg = kind === "topic" ? `topicId: "${id}"` : `resumeFromTurnId: "${id}"`;
   return (
-    `继续对话：请先调用 mcp__graphflow__graphflow_context({ rootDir: "${cwd}", ${arg} })` +
+    `继续对话：请先调用 mcp__graphflow__gf_read({ q: "<你的问题>", rootDir: "${cwd}", ${arg} })` +
     `，读取该知识节点记录的历史问答与上下文，然后基于它继续当前任务。` +
     `节点: ${title || id}`
   );
@@ -257,7 +257,7 @@ function KnowledgePanel(props) {
         React.createElement(
           "div",
           { className: "gf-empty" },
-          "暂无知识节点 — 使用 graphflow_plan / graphflow_context 后，这里会出现主题与对话记录"
+          "暂无知识节点 — 使用工作台规划 / gf_read 后，这里会出现主题与对话记录"
         )
       );
     }
