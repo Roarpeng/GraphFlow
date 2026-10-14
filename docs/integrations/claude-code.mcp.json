@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "graphflow": {
-      "command": "npx",
-      "args": ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"]
-    }
-  }
-}

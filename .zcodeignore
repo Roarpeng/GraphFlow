@@ -1,0 +1,78 @@
+node_modules/
+dist/
+.env
+.DS_Store
+*.log
+coverage/
+tests/**/*.d.ts
+tests/**/*.d.ts.map
+tests/**/*.js.map
+tmp/
+artifacts/
+*.tgz
+temp.js
+temp_spec.md
+patch.ts
+patch-adapters.ts
+graphflow.config.json
+.graphflow-cache/
+# GraphFlow runtime data (contains episodic/learning data - do not commit to VCS)
+graphflow-out/
+wasm/
+stdout.txt
+stderr.txt
+runs.json
+.graphflow/
+.cursor/mcp.json
+.vscode/mcp.json
+vscode-extension/vendor/
+.joycode/
+# Local agent/harness scratch (not project content)
+.omo/
+PearAI/
+tsc_output.txt
+.gemini/
+.codex/
+Cursor/
+.mcp.json
+benchmarks/.cache/
+graphify-out/
+# Generated HTML reports/visualisations (design docs live as .md in docs/;
+# these are local renderings, not source). Untracked html is not project
+# content, so keep it out of the index without ignoring docs/ itself.
+docs/*.html
+*.html
+# Machine-local agent configs. Tests whose CWD is the checkout write host
+# configs relative to it (see the appData resolution fix), so these can appear
+# at the repo root. Install artifacts, not project files.
+.codex/
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+bower_components/
+jspm_packages/
+__pycache__/
+site-packages/
+venv/
+htmlcov/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）

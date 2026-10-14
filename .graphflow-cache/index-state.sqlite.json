@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "state": {
+    "src/macro-engine.ts": {
+      "mtimeMs": 1791951164000,
+      "hash": "16ecb3b4de334d9732ba719810c2a75e",
+      "numNodes": 35
+    },
+    "package-lock.json": {
+      "mtimeMs": 1791983231661.1892,
+      "hash": "beb62670e7205d5ed82619dca705e08b",
+      "numNodes": 2
+    },
+    ".mimosa/hook-state/sess_9848f72a-e1c0-4ec0-a366-100398f82417.json": {
+      "mtimeMs": 1791983303092.0962,
+      "hash": "b45e29e7554e60ba0e7c0e3b9f96a29b",
+      "numNodes": 2
+    },
+    "src/mcp-server.ts": {
+      "mtimeMs": 1791983278468.1233,
+      "hash": "5c431874802726da3204e4dd704542be",
+      "numNodes": 24
+    },
+    "src/git-miner.ts": {
+      "mtimeMs": 1791983392775.0378,
+      "hash": "af96b59ad423dd053b2c8c63dbfef8d6",
+      "numNodes": 13
+    }
+  }
+}
