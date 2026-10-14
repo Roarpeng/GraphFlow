@@ -31,7 +31,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "tsx src/cli.ts",
     "start:mcp": "tsx src/mcp-server.ts",
-    "test": "tsx tests/graphflow.test.ts"
+    "test": "tsx tests/graphflow.test.ts",
+    "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {
     "@babel/parser": "^7.26.0",
