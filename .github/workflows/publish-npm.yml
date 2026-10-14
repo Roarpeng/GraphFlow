@@ -1,0 +1,109 @@
+name: Publish npm
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # Deliberately NO `registry-url` here so setup-node does not write an empty
+          # `_authToken` into .npmrc that would block GitHub OIDC Trusted Publishing.
+
+      - name: Install dependencies
+        run: npm install --no-audit
+
+      - name: Build and test
+        run: npm run build && npm test
+
+      - name: Publish @roarpeng/graphflow to npm (Idempotent OIDC + Token Fallback)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.npm_token != '' && secrets.npm_token || secrets.NPM_TOKEN }}
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          PUBLISHED=$(npm view "${NAME}" version 2>/dev/null || true)
+          if [ "${PUBLISHED}" = "${VERSION}" ]; then
+            echo "${NAME}@${VERSION} is already published on npm. Skipping (idempotent)."
+            exit 0
+          fi
+
+          # 1. Try GitHub OIDC Trusted Publishing first (when ACTIONS_ID_TOKEN_REQUEST_URL is present)
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "Attempting GitHub OIDC Trusted Publishing for ${NAME}@${VERSION}..."
+            TMP_NPMRC=$(mktemp)
+            echo "registry=https://registry.npmjs.org/" > "${TMP_NPMRC}"
+            set +e
+            env -u NODE_AUTH_TOKEN -u NPM_TOKEN NPM_CONFIG_USERCONFIG="${TMP_NPMRC}" \
+              npx --yes npm@11 publish --access public --provenance
+            CODE=$?
+            set -e
+            rm -f "${TMP_NPMRC}"
+            if [ $CODE -eq 0 ]; then
+              echo "Successfully published ${NAME}@${VERSION} via GitHub OIDC."
+              exit 0
+            fi
+            echo "::warning::OIDC publish exited with ${CODE}; checking fallback token..."
+          fi
+
+          # 2. Fallback to NODE_AUTH_TOKEN / NPM_TOKEN
+          if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "Attempting token-based publish for ${NAME}@${VERSION}..."
+            TMP_NPMRC=$(mktemp)
+            printf "registry=https://registry.npmjs.org/\n//registry.npmjs.org/:_authToken=%s\n" "${NODE_AUTH_TOKEN}" > "${TMP_NPMRC}"
+            set +e
+            NPM_CONFIG_USERCONFIG="${TMP_NPMRC}" npm publish --access public
+            CODE=$?
+            set -e
+            rm -f "${TMP_NPMRC}"
+            if [ $CODE -eq 0 ]; then
+              echo "Successfully published ${NAME}@${VERSION} via NODE_AUTH_TOKEN."
+              exit 0
+            fi
+            exit $CODE
+          fi
+
+          echo "::error::npm publish failed: neither GitHub OIDC nor NODE_AUTH_TOKEN succeeded."
+          exit 1
+
+      - name: Verify the version landed on the registry
+        if: success()
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            LANDED="$(npm view "${NAME}@${VERSION}" version 2>/dev/null || true)"
+            if [ "${LANDED}" = "${VERSION}" ]; then
+              echo "PASS: ${NAME}@${VERSION} is live on registry.npmjs.org"
+              exit 0
+            fi
+            echo "attempt ${i}: not visible yet, retrying in 15s"
+            sleep 15
+          done
+          echo "::error::publish reported success but ${NAME}@${VERSION} never appeared on the registry"
+          exit 1
+
+      - name: Publish failure diagnostics
+        if: failure()
+        run: |
+          echo "=== OIDC / auth environment (presence only) ==="
+          echo "GITHUB_WORKFLOW='${GITHUB_WORKFLOW}' (Trusted Publisher expects the workflow filename publish-npm.yml)"
+          for v in ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN NODE_AUTH_TOKEN; do
+            if [ -n "${!v:-}" ]; then echo "${v}: present"; else echo "${v}: absent"; fi
+          done
+          echo "=== npm debug log tail ==="
+          tail -n 40 "$HOME/.npm/_logs/$(ls -t "$HOME/.npm/_logs" | head -1)" 2>/dev/null || echo "(no npm debug log)"

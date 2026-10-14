@@ -1,0 +1,42 @@
+{
+  "name": "graphflow",
+  "publisher": "roarpeng",
+  "displayName": "GraphFlow Token-First Surgical Engine",
+  "description": "Token-First Surgical Code Engine for AI Coding Agents: 6-Language AST Slicer (93% fewer tokens), Blast-Radius Guard, Output Dehydrator (99% fewer test log tokens), Git Co-Change Miner & Habit Macros.",
+  "icon": "media/graphflow.png",
+  "version": "3.1.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Roarpeng/GraphFlow.git"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:graphflow.installMcp",
+    "onCommand:graphflow.mineGit",
+    "onCommand:graphflow.status",
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "graphflow.installMcp",
+        "title": "GraphFlow: Install MCP, Skills & Hooks to Agents"
+      },
+      {
+        "command": "graphflow.mineGit",
+        "title": "GraphFlow: Mine Git Co-Change History"
+      },
+      {
+        "command": "graphflow.status",
+        "title": "GraphFlow: Show Detected Agents Status"
+      }
+    ]
+  }
+}

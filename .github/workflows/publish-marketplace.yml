@@ -1,0 +1,152 @@
+name: Publish to VS Code Marketplace & Open VSX
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  publish-marketplace:
+    name: Publish to VS Code Marketplace
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve Marketplace auth mode
+        id: creds
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        run: |
+          if [ -n "${VSCE_PAT}" ]; then
+            echo "mode=pat" >> "$GITHUB_OUTPUT"
+          elif [ -n "${AZURE_CLIENT_ID}" ]; then
+            echo "mode=azure" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip when no Marketplace credentials on manual dispatch
+        if: steps.creds.outputs.mode == 'none' && github.event_name == 'workflow_dispatch'
+        run: echo "::warning::Skipping VS Code Marketplace publish (neither VSCE_PAT nor AZURE_CLIENT_ID configured)."
+
+      - name: Setup Node.js
+        if: steps.creds.outputs.mode != 'none'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install vsce
+        if: steps.creds.outputs.mode != 'none'
+        run: npm install -g @vscode/vsce
+
+      - name: Publish to VS Code Marketplace (PAT mode)
+        if: steps.creds.outputs.mode == 'pat'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          cd vscode-extension
+          set +e
+          out=$(vsce publish --no-dependencies --no-git-tag-version --pat "$VSCE_PAT" 2>&1); code=$?
+          set -e
+          echo "$out"
+          if [ $code -ne 0 ]; then
+            if echo "$out" | grep -qi "already exists"; then
+              echo "Version already exists on VS Code Marketplace; skipping (idempotent)."
+              exit 0
+            fi
+            exit $code
+          fi
+
+      - name: Azure Login (Entra ID mode)
+        if: steps.creds.outputs.mode == 'azure'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Publish to VS Code Marketplace (Entra ID mode)
+        if: steps.creds.outputs.mode == 'azure'
+        run: |
+          cd vscode-extension
+          set +e
+          out=$(vsce publish --no-dependencies --no-git-tag-version --azure-credential 2>&1); code=$?
+          set -e
+          echo "$out"
+          if [ $code -ne 0 ]; then
+            if echo "$out" | grep -qi "already exists"; then
+              echo "Version already exists on VS Code Marketplace; skipping (idempotent)."
+              exit 0
+            fi
+            exit $code
+          fi
+
+  publish-openvsx:
+    name: Publish to Open VSX
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve Open VSX token
+        id: ovsx
+        env:
+          OPEN_VSX_TOKEN: ${{ secrets.open_vsx_token != '' && secrets.open_vsx_token || secrets.OPEN_VSX_TOKEN || secrets.OVSX_PAT }}
+        run: |
+          if [ -n "${OPEN_VSX_TOKEN}" ]; then
+            echo "mode=pat" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip Open VSX publish without token
+        if: steps.ovsx.outputs.mode == 'none'
+        run: echo "::warning::Skipping Open VSX publish (secret open_vsx_token / OPEN_VSX_TOKEN is not configured)."
+
+      - name: Setup Node.js
+        if: steps.ovsx.outputs.mode == 'pat'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Package VSIX and publish to Open VSX (Idempotent)
+        if: steps.ovsx.outputs.mode == 'pat'
+        env:
+          OPEN_VSX_TOKEN: ${{ secrets.open_vsx_token != '' && secrets.open_vsx_token || secrets.OPEN_VSX_TOKEN || secrets.OVSX_PAT }}
+          OVSX_NAMESPACE: roarpeng
+        run: |
+          cd vscode-extension
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          NS="${OVSX_NAMESPACE:-roarpeng}"
+
+          EXISTING_VER=$(node -e "
+            fetch('https://open-vsx.org/api/' + process.env.OVSX_NAMESPACE + '/' + '$NAME')
+              .then(r => r.ok ? r.json() : {})
+              .then(d => console.log(d.version || ''))
+              .catch(() => console.log(''));
+          ")
+          if [ "${EXISTING_VER}" = "${VERSION}" ]; then
+            echo "${NS}.${NAME}@${VERSION} is already published on Open VSX. Skipping (idempotent)."
+            exit 0
+          fi
+
+          npx --yes @vscode/vsce package --no-dependencies -o "graphflow-${VERSION}.vsix"
+          set +e
+          out=$(npx --yes ovsx publish "graphflow-${VERSION}.vsix" --pat "${OPEN_VSX_TOKEN}" 2>&1); code=$?
+          set -e
+          echo "$out"
+          rm -f "graphflow-${VERSION}.vsix"
+          if [ $code -ne 0 ]; then
+            if echo "$out" | grep -qi "already published\|already exists"; then
+              echo "${NS}.${NAME}@${VERSION} already exists on Open VSX; skipping (idempotent)."
+              exit 0
+            fi
+            exit $code
+          fi
