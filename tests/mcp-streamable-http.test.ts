@@ -72,10 +72,20 @@ describe("graphflow-mcp --http (server entry point)", () => {
     } finally {
       if (process.platform === "win32" && child.pid) {
         spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+        // taskkill /F returns before the OS releases the killed tree's handles
+        // (the server's cwd is the temp workspace) — rmdir then hits EBUSY even
+        // with retries. Wait for the exit event, then give the OS a beat.
+        await new Promise<void>((done) => {
+          const giveUp = setTimeout(done, 5_000);
+          child.once("exit", () => {
+            clearTimeout(giveUp);
+            setTimeout(done, 250);
+          });
+        });
       } else {
         child.kill("SIGKILL");
       }
-      rmSync(workspace, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      rmSync(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
     }
   }, 60_000);
 });
