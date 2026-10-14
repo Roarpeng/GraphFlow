@@ -10,6 +10,36 @@ permissions:
   actions: write
 
 jobs:
+  github-release:
+    name: GitHub Release with VSIX asset
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Package VSIX
+        run: |
+          cd vscode-extension
+          VERSION=$(node -p "require('./package.json').version")
+          npx --yes @vscode/vsce package --no-dependencies -o "graphflow-${VERSION}.vsix"
+
+      - name: Create GitHub Release and upload VSIX
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          TAG="v${VERSION}"
+          VSIX="vscode-extension/graphflow-${VERSION}.vsix"
+          # Idempotent: if the release exists, upload may 422 on duplicate asset — tolerate.
+          gh release create "${TAG}" "${VSIX}" \
+            --title "GraphFlow v${VERSION}" \
+            --notes "Token-First surgical engine + 21-agent installer. VSIX: graphflow-${VERSION}.vsix" \
+            || echo "release ${TAG} already exists (idempotent)."
+
   publish-marketplace:
     name: Publish to VS Code Marketplace
     runs-on: ubuntu-latest
