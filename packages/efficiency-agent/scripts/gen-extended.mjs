@@ -30,7 +30,9 @@ const EXTENDED_FILE = join(BENCH_DIR, "golden-extended-v1.jsonl");
 const LONG_HORIZON_FILE = join(BENCH_DIR, "long-horizon-v1.jsonl");
 const CALIBRATION_FILE = join(BENCH_DIR, "calibration", "extended-calibration-v1.json");
 
-export const BASE = "e5f05b17d47cf03fa5fcceef9dae6500684083a7";
+// The 3.0.0 release snapshot (v3 surgical engine tree). Regenerating against a
+// different repo lineage requires repinning this to a commit that exists there.
+export const BASE = "757750fa332bb0b6d9292f0d0cfc9733985214bf";
 const TSC = "npx tsc --noEmit -p tsconfig.json";
 const GOLDEN_CORE_COMMITS = new Set([
   "17fa91c", "fd86770", "a130de3", "14b591c", "43c24b5", "bbff25f", "2b38bcb", "81f06d2",
@@ -251,7 +253,10 @@ async function calibrate(jobs) {
         const steps = [];
         for (const step of item.steps) {
           git(["-C", dir, "checkout", "-f", "--detach", step.rev]);
-          git(["-C", dir, "clean", "-fdq"]);
+          // -e node_modules: the symlinked node_modules is untracked, and a plain
+          // `clean -fdq` deletes it — every subsequent `npx vitest` then resolves
+          // vitest from the network (or fails) instead of the workspace deps.
+          git(["-C", dir, "clean", "-fdqe", "node_modules"]);
           if (step.overlay) git(["-C", dir, "checkout", step.overlay.commit, "--", ...step.overlay.paths]);
           const r = await runIn(dir, step.command);
           steps.push({ rev: step.rev, overlay: Boolean(step.overlay), command: step.command, exitCode: r.exitCode, ms: r.ms, tail: r.tail });
@@ -609,7 +614,12 @@ function build(repo, calibration) {
     failure({ text: `Fix the intermittent crash in ${p}; it throws on startup.`, notes: `${p} does not exist at baseCommit`, absentRefs: [{ path: p }] });
   }
   const realFiles = stableSort(repo.src.filter((f) => !f.endsWith("/index.ts") && repo.content.get(f).length > 2000), (f) => `fail-file:${f}`).slice(0, 4);
-  ["computeQuantumAffinity", "rebalanceShardWeights", "flushTelemetryRingBuffer", "deriveOracleConsensus"].forEach((sym, i) => {
+  // Fabricated probe identifiers are assembled from fragments on purpose:
+  // check-golden scans every text file at BASE, and the literal strings in
+  // this script's own source would falsify the "referenced nowhere"
+  // absentRef probes (ext-fail-006..012 failed exactly this way).
+  const fakeSymbols = ["computeQuantum" + "Affinity", "rebalanceShard" + "Weights", "flushTelemetry" + "RingBuffer", "deriveOracle" + "Consensus"];
+  fakeSymbols.forEach((sym, i) => {
     failure({
       text: `What does the exported function \`${sym}\` in ${realFiles[i]} return, and who calls it?`,
       notes: `${realFiles[i]} exists but ${sym} is referenced nowhere in the repository`,
@@ -617,7 +627,7 @@ function build(repo, calibration) {
       absentRefs: [{ text: sym }],
     });
   });
-  for (const env of ["GRAPHFLOW_TURBO_MODE", "GRAPHFLOW_MAX_GPU_SHARDS", "GRAPHFLOW_LEGACY_VECTOR_DB"]) {
+  for (const env of ["GRAPHFLOW_TURBO" + "_MODE", "GRAPHFLOW_MAX_GPU" + "_SHARDS", "GRAPHFLOW_LEGACY" + "_VECTOR_DB"]) {
     failure({ text: `What is the default value of the ${env} environment variable, and where is it read?`, notes: `${env} is referenced nowhere in the repository`, absentRefs: [{ text: env }] });
   }
   for (const script of ["bench:gpu", "test:e2e-cloud", "release:canary"]) {

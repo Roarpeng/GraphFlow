@@ -1,23 +1,6 @@
 /**
- * cursor-hooks.ts — Cursor native hooks installer (`.cursor/hooks.json`, schema v1).
- *
- * Cursor's hook schema is FLAT (event -> array of `{ command, matcher, ... }`),
- * unlike Claude Code's nested `settings.json` matcher groups. This module mirrors
- * `claude-code-hooks.ts`: it generates ONE portable bash session script and
- * MERGES GraphFlow-owned entries into `~/.cursor/hooks.json` without touching the
- * user's other hooks (idempotent, never overwrite).
- *
- * Flywheel parity: Cursor `sessionStart` / `sessionEnd` / `stop` close the
- * learning loop exactly like Claude Code's SessionStart/SessionEnd/Stop hooks —
- * only an explicit success argument backfills a pending episode (never default
- * success).
- *
- * Cursor event names are camelCase and automatically map from Claude Code's
- * (PreToolUse -> preToolUse, ...). We register only the three lifecycle events
- * that carry the outcome-capture semantics.
- *
- * Safety: all embedded paths are shell-escaped; a malformed existing hooks.json
- * is refused (never overwritten); any failure is silent to the agent loop.
+ * cursor-hooks.ts — Cursor native hooks installer (`.cursor/hooks.json`, schema v1)
+ * with GraphFlow 3.0 `preToolUse` / `postToolUse` token-guard interceptors.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -33,10 +16,13 @@ export const CURSOR_HOOKS_HOME_ENV = "GRAPHFLOW_CURSOR_HOME";
 export const CURSOR_HOOKS_FILE = "hooks.json";
 export const CURSOR_HOOK_SCRIPT = "session.sh";
 
-/** Lifecycle events we install. Cursor also supports preToolUse/postToolUse/etc. */
-export type CursorHookEvent = "sessionStart" | "sessionEnd" | "stop";
+export type CursorHookEvent =
+  | "sessionStart"
+  | "sessionEnd"
+  | "stop"
+  | "preToolUse"
+  | "postToolUse";
 
-/** Flat Cursor hook entry (one object per handler; `matcher` filters the event). */
 export interface CursorHookEntry {
   command: string;
   matcher?: string;
@@ -51,18 +37,14 @@ export interface CursorHooksConfig {
 }
 
 export interface CursorHooksOptions {
-  /** graphflow CLI executable (default "graphflow", must be on PATH). */
   graphflowBin?: string;
-  /** --config argument forwarded to `graphflow outcome report` (default none). */
   configPath?: string;
-  /** Session journal path used by the generated script (default cwd-relative). */
   journalPath?: string;
-  /** Directory for the generated script (default <cursorHome>/graphflow-hooks). */
   hooksDir?: string;
-  /** Target hooks.json (default <cursorHome>/hooks.json). */
   hooksPath?: string;
-  /** Hook timeout seconds (default 30). */
   timeoutSec?: number;
+  /** Enable GraphFlow 3.0 preToolUse / postToolUse token-saving interceptors. */
+  enableToolInterceptors?: boolean;
 }
 
 export interface CursorHooksStatusOptions {
@@ -87,7 +69,6 @@ export interface CursorHooksResult {
   message?: string;
 }
 
-/** Resolve Cursor home (`~/.cursor`), honoring GRAPHFLOW_CURSOR_HOME for tests. */
 export function resolveCursorHooksHome(env: NodeJS.ProcessEnv = process.env): string {
   const override = env[CURSOR_HOOKS_HOME_ENV]?.trim();
   return override || join(homedir(), ".cursor");
@@ -101,16 +82,14 @@ function defaultHooksPath(home: string): string {
   return join(home, CURSOR_HOOKS_FILE);
 }
 
-/**
- * Build the Cursor hooks.json payload. Commands are shell-escaped and use the
- * same `session.sh start|end` script the Claude Code installer generates.
- */
 export function buildCursorHooksConfig(options: CursorHooksOptions = {}): CursorHooksConfig {
   const hooksDir = options.hooksDir ?? defaultHooksDir(resolveCursorHooksHome());
   const scriptPath = join(hooksDir, CURSOR_HOOK_SCRIPT);
   const quotedScript = shellQuote(scriptPath);
   const startCommand = `bash ${quotedScript} start`;
   const endCommand = `bash ${quotedScript} end`;
+  const preToolCommand = `bash ${quotedScript} pre-tool`;
+  const postToolCommand = `bash ${quotedScript} post-tool`;
   const timeout = options.timeoutSec ?? 30;
   return {
     version: 1,
@@ -118,11 +97,16 @@ export function buildCursorHooksConfig(options: CursorHooksOptions = {}): Cursor
       sessionStart: [{ command: startCommand, timeout }],
       sessionEnd: [{ command: endCommand, timeout }],
       stop: [{ command: endCommand, timeout }],
+      ...(options.enableToolInterceptors
+        ? {
+            preToolUse: [{ command: preToolCommand, timeout }],
+            postToolUse: [{ command: postToolCommand, timeout }],
+          }
+        : {}),
     },
   };
 }
 
-/** Merge GraphFlow hook entries into hooks.json (preserve user hooks, append 幂等). */
 function mergeCursorHooks(hooksPath: string, config: CursorHooksConfig): CursorHooksResult {
   const existed = existsSync(hooksPath);
   let json: Record<string, unknown>;
@@ -172,11 +156,6 @@ function mergeCursorHooks(hooksPath: string, config: CursorHooksConfig): CursorH
   };
 }
 
-/**
- * Doctor/install status for Cursor flywheel hooks. Detected when Cursor home
- * exists; installed when hooks.json references our session script AND the script
- * file is on disk.
- */
 export function getCursorHooksStatus(options: CursorHooksStatusOptions = {}): CursorHooksStatus {
   const home = options.cursorHome ?? resolveCursorHooksHome();
   const hooksPath = options.hooksPath ?? defaultHooksPath(home);
@@ -202,14 +181,12 @@ export function getCursorHooksStatus(options: CursorHooksStatusOptions = {}): Cu
   };
 }
 
-/** Install the session script + merge Cursor hook entries. Safe to re-run. */
 export function installCursorHooks(options: CursorHooksOptions = {}): CursorHooksResult {
   const home = resolveCursorHooksHome();
   const hooksDir = options.hooksDir ?? defaultHooksDir(home);
   const hooksPath = options.hooksPath ?? defaultHooksPath(home);
   const scriptPath = join(hooksDir, CURSOR_HOOK_SCRIPT);
 
-  // 1) Install the session script (content-compared).
   try {
     mkdirSync(hooksDir, { recursive: true });
     const script = buildSessionHookScript({
@@ -218,6 +195,9 @@ export function installCursorHooks(options: CursorHooksOptions = {}): CursorHook
       journalPath:
         options.journalPath ?? "${CURSOR_PROJECT_DIR:-.}/.graphflow/session-journal.jsonl",
       ...(options.timeoutSec !== undefined ? { timeoutSec: options.timeoutSec } : {}),
+      ...(options.enableToolInterceptors !== undefined
+        ? { enableToolInterceptors: options.enableToolInterceptors }
+        : {}),
     });
     if (!existsSync(scriptPath) || readFileSync(scriptPath, "utf8") !== script) {
       writeFileSync(scriptPath, script, { mode: 0o755 });
@@ -230,7 +210,6 @@ export function installCursorHooks(options: CursorHooksOptions = {}): CursorHook
     };
   }
 
-  // 2) Merge hooks.json (never overwrites the user's other entries).
   try {
     const config = buildCursorHooksConfig({ ...options, hooksDir });
     return mergeCursorHooks(hooksPath, config);
@@ -243,7 +222,6 @@ export function installCursorHooks(options: CursorHooksOptions = {}): CursorHook
   }
 }
 
-/** Remove GraphFlow hook entries from hooks.json and delete the session script. */
 export function uninstallCursorHooks(
   hooksPathOverride?: string,
   hooksDirOverride?: string
@@ -268,7 +246,7 @@ export function uninstallCursorHooks(
       : {};
   const ourScript = shellQuote(scriptPath);
   let removedAny = false;
-  for (const event of ["sessionStart", "sessionEnd", "stop"] as const) {
+  for (const event of ["sessionStart", "sessionEnd", "stop", "preToolUse", "postToolUse"] as const) {
     const entries = Array.isArray(hooks[event]) ? (hooks[event] as CursorHookEntry[]) : [];
     const kept = entries.filter((entry) => !entry.command.includes(ourScript));
     if (kept.length !== entries.length) {
@@ -282,14 +260,13 @@ export function uninstallCursorHooks(
   }
 
   if (removedAny) {
-    // `version` is the schema marker GraphFlow writes into a hooks.json it creates.
     writeJsonOrRemove(hooksPath, { ...json, hooks }, ["version"]);
   }
   if (existsSync(scriptPath)) {
     try {
       rmSync(scriptPath, { force: true });
     } catch {
-      // Deleting the script must not block uninstall.
+      // ignore
     }
   }
   removeDirIfEmpty(dirname(scriptPath));

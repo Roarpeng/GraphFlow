@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [3.0.0] — 2026-10-13
+
+### Major — Token-First Surgical Engine (Pillars 1–4)
+
+- **Pillar 1: Precise Context Slicer & AST Skeleton Folding (`gf_read`)**:
+  - `src/v3/slicer.ts` & `ast-engine.ts`: Folds non-target function bodies (`/* ... N lines folded ... */`) while preserving 100% of imports, types, interfaces, and exact 1-based line numbers.
+  - Type-Closed Symbol Slicing: Automatically extracts target symbols + referenced `interface`/`type`/`enum` definitions from local or imported files into a compact, zero-noise plain-text block.
+- **Pillar 2: Blast-Radius Call-Site Slicing & Instant Static Guard (`gf_edit`)**:
+  - `src/v3/blast-radius.ts`: Automatically attaches cross-repo 3-line call-site micro-snippets (`[Blast Radius]`) around target symbols so callers can be updated in a single turn.
+  - `src/v3/surgical-edit.ts`: In-place symbol or line-range replacement with instant zero-LLM AST syntax checking (automatic rollback on syntax error) and caller arity verification.
+- **Pillar 3: Deterministic Execution & Stdout Dehydration (`gf_exec`)**:
+  - `src/v3/dehydrator.ts`: Fast 2-hop reverse import Diff-to-Test Impact Router locates affected test files from git diff in <15ms.
+  - Output Dehydrator: Compresses passing builds/test suites to a 1-line `PASS` receipt (-99% tokens) and extracts focused assertion failures + inlined 5-line failure source context for failing runs.
+- **Pillar 4: Auto-Compiled Executable Trajectory Macros (`gf_macro`)**:
+  - `src/v3/macro-engine.ts`: Records tool trajectories; automatically compiles recurring multi-target reads (`context-bundle`) and verification command sequences (`command-pipeline`) into standalone `.graphflow/macros/*.mjs` scripts and 1-step executable macros.
+- **MCP Schema Overhead Slashed by 92%**:
+  - Replaced 10 bulky legacy MCP tool definitions (5,897 tokens/turn) with 4 surgical tools (444 tokens/turn).
+  - Slimmed down all 10 agent surface rules and `SKILL.md` by 82%–91% and removed toxic `assistantReply` echo loops.
+
 ## [2.3.0] — 2026-10-12
 
 ### Added — retrieval quality (community/paper-informed wave)

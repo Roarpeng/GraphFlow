@@ -1,3 +1,4 @@
+import { executeV3ToolCall } from "../../v3/mcp-tools";
 import {
   diagnoseRoutingResult,
   exportArtifact,
@@ -157,6 +158,17 @@ async function executeToolCallInner(
   applyTextCopyConfig(readOptionalString(args.configPath));
 
   switch (call.name) {
+    case "gf_read":
+    case "gf_edit":
+    case "gf_exec":
+    case "gf_macro": {
+      const rootDir = readOptionalString(args.rootDir) ?? discoverWorkspaceRoot() ?? process.cwd();
+      const v3Res = executeV3ToolCall(call.name, args, rootDir);
+      return {
+        ...v3Res,
+        structuredContent: { tool: call.name, ok: !v3Res.content[0]?.text.startsWith("ERR ") && !v3Res.content[0]?.text.startsWith("FAIL ") },
+      };
+    }
     case "graphflow_run":
       return structuredResponse(
         await runTaskResult(

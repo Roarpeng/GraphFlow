@@ -154,6 +154,8 @@ describe("MCP structured tool results", () => {
     const legacyText = JSON.parse(response.content[0]!.text) as string;
 
     expect(structured).toEqual({ section: "best-practices", guide: legacyText });
-    expect(structured.guide).toContain("## Best Practices");
+    // GraphFlow 3.0 SKILL.md has no "## Best Practices" heading; the section
+    // filter falls back to the full surgical-skill body.
+    expect(structured.guide).toContain("gf_read");
   });
 });

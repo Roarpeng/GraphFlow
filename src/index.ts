@@ -1,122 +1,14 @@
-export { orchestrate, type OrchestrateOptions } from "./core/orchestrator";
+/**
+ * @roarpeng/graphflow public API.
+ *
+ * GraphFlow 3.0 — the package surface is the Token-First Surgical Engine
+ * (`./v3/index`). The legacy v2 graph/context/agent modules are internal
+ * implementation details consumed via deep imports; their former barrel
+ * exports were removed with the 3.0 refactor when the underlying modules
+ * were reorganized.
+ */
+
 export {
-  runTask,
-  runTaskResult,
-  reportOutcome,
-  submitAgentInsightResult,
-  mergeAgentInsightResult,
-  previewContext,
-  expandAnchor,
-  getGraphFlowSettings,
-  getSettingsPanelStatus,
-  testRoutingAndIndexGraph,
-  indexGraphFromSettings,
-  validateSettingsForGraphIndex,
-  validateSettingsForRouting,
-  saveGraphFlowSettings,
-  indexGraph,
-  inspectGraph,
-  getSkillInsights,
-  resolveConfig,
-  diagnoseRouting,
-  diagnoseRoutingResult,
-  planAndBrainstorm,
-  planAndBrainstormResult,
-  assertGraphFlowRuntime,
-  detectInstalledAgents,
-  formatModelConfigGuide,
-  installMcpToDetectedAgents,
-  repairUnsafeWindowsMcpCommands,
-  repairStaleGraphFlowMcpLaunchers,
-  runLearningNightly,
-  runLearningNightlyResult,
-  startFileWatcherIfEnabled,
-} from "./surfaces/cli/runtime";
-export type { GraphFlowRuntime, GraphFlowRuntimeModule, LearningNightlyResult } from "./surfaces/cli/runtime";
-export { parseCliOptions, formatCliResult, type CliCommandResult } from "./surfaces/cli/output";
-export {
-  createMcpServer,
-  executeToolCall,
-  getToolDefinitions,
-  startStdioServer,
-} from "./surfaces/mcp/server";
-export type { TaskRunResult } from "./core/types";
-export { hasUsableLlmProvider } from "./config/llm-availability";
-export {
-  buildAgentDelegatedPlanInsight,
-  buildAgentDelegatedSimplePlan,
-  buildAgentInsightWorkItems,
-  attachSkillConditionToPlanNodes,
-  summarizeInsightForContext,
-  SIMPLE_PLAN_BRIDGE_REQUIRED_IDS,
-  type AgentDelegatedPlanInsight,
-  type AgentDelegationMode,
-  type AgentWorkItem,
-  type SimplePlanNode,
-  type SkillConditionOptions,
-} from "./core/agent-delegation";
-export {
-  suggestSkillConditionHints,
-  admitSkillToProven,
-  admitSkillToProvisional,
-  isSymbolicSkillName,
-  wouldDegradeLibrary,
-  type SkillConditionHints,
-} from "./learning/skill-flywheel";
-export type { PlaybookBullet } from "./learning/skill-types";
-export type { SkillAdmissionResult } from "./learning/skill-admission";
-export {
-  optimizeSkillLite,
-  defaultSkillOptScore,
-  applyPlaybookDelta,
-  seedPlaybookFromGuidance,
-  type SkillOptEdit,
-  type SkillOptEditOp,
-  type SkillOptInput,
-  type SkillOptResult,
-} from "./learning/skill-opt-lite";
-export {
-  planSkillConsolidation,
-  applySkillConsolidation,
-  planFromRequest,
-  toConsolidateResult,
-  type ConsolidateAction,
-  type ConsolidateRequest,
-  type ConsolidateResult,
-} from "./learning/skill-consolidate";
-export {
-  distillWorkflowFromEpisode,
-  quarantineSkillsFromEpisode,
-  workflowSkillId,
-} from "./learning/workflow-skill";
-export { forgetEpisode as forgetEpisodeRecord } from "./learning/episodic-memory";
-export {
-  ATP_MINIMAL_PRODUCER_PROTOCOL,
-  buildMinimalSimplePlanWorkItems,
-  buildRequiredSimplePlanWorkItems,
-  buildOptionalMemoryWorkItems,
-} from "./agents/atp-example-producer";
-export {
-  linkEpisodeToEngineeringNodes,
-  type EngineeringLinkHints,
-  type LinkEpisodeResult,
-} from "./graph/episode-engineering-links";
-export { planInsightResult, type PlanInsightResult } from "./surfaces/cli/runtime/routing";
-export {
-  createGraphClient,
-  type GraphClient,
-} from "./graph/client-factory";
-export { startTeamMemoryServer, type StartedTeamMemoryServer, type TeamMemoryServerOptions } from "./surfaces/team/server";
-export {
-  authorizeTeamMethod,
-  authorizeMcpTool,
-  type TeamRole,
-  type TeamPermission,
-} from "./security/rbac";
-export { issueLocalJwt, verifyAccessToken, parseRoleTaggedBearer } from "./security/token-auth";
-export { validateConfig, loadConfig, loadConfigSafe, type LoadConfigResult, validateConfigDetailed, type ConfigValidationResult, type ValidationIssue } from "./config/loader";
-export {
-  graphflowSkills,
   invokeSkill,
   listSkills,
   type GraphFlowSkillName,
@@ -137,3 +29,74 @@ export {
   type RunTaskInput,
   type RunTaskOutput,
 } from "./skills";
+
+// ── GraphFlow 3.0: Token-First Surgical Engine (4 Pillars + 6 Languages + Host Hook Interceptor) ──
+export {
+  SUPPORTED_SOURCE_EXTS,
+  analyzeSourceFile,
+  parseCCpp,
+  parseCSharp,
+  parseGo,
+  parsePython,
+  parseRust,
+  parseWithStructuralScanner,
+  resolveRelativeImportPath,
+  executeSurgicalRead,
+  foldFileSkeleton,
+  formatNumberedLines,
+  getWorkspaceAstIndex,
+  computeBlastRadius,
+  formatBlastRadiusText,
+  executeSurgicalEdit,
+  buildAffectedTestCommand,
+  dehydrateCommandOutput,
+  execAndDehydrate,
+  recallArchivedOutput,
+  resolveAffectedTests,
+  stripAnsi,
+  evaluatePostEditHabits,
+  executeMacro,
+  extractCommandTemplate,
+  findMatchingMacroHint,
+  loadMacroStore,
+  loadMacros,
+  loadTrajectoryEvents,
+  loadUserHabits,
+  mineAndCompileMacros,
+  recordTrajectoryAndMine,
+  registerCustomMacro,
+  saveMacros,
+  V3_TOOL_DEFINITIONS,
+  executeV3ToolCall,
+  interceptPostToolUse,
+  interceptPreToolUse,
+  type AstBackend,
+  type AstCallSite,
+  type AstImport,
+  type AstSymbol,
+  type FileAstAnalysis,
+  type SymbolKind,
+  type ReadOptions,
+  type SliceResult,
+  type CallSiteSnippet,
+  type ImporterSite,
+  type SymbolBlastRadius,
+  type SingleEditSpec,
+  type StaticGuardDiagnostic,
+  type SurgicalEditInput,
+  type SurgicalEditResult,
+  type DehydratedExecResult,
+  type CoEditHabit,
+  type CompiledMacro,
+  type DirectoryVerifyHabit,
+  type MacroKind,
+  type TrajectoryActionKind,
+  type TrajectoryEvent,
+  type UserHabitProfile,
+  type V3ToolCallResponse,
+  type V3ToolDefinition,
+  type HostToolUsePayload,
+  type PostToolInterceptResult,
+  type PreToolInterceptOptions,
+  type PreToolInterceptResult,
+} from "./v3/index";

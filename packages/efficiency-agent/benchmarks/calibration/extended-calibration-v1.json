@@ -1,142 +1,598 @@
 {
   "schema": "eff-agent-extended-calibration/v1",
-  "base": "e5f05b17d47cf03fa5fcceef9dae6500684083a7",
-  "calibratedAt": "2026-10-01T06:00:44.105Z",
+  "base": "757750fa332bb0b6d9292f0d0cfc9733985214bf",
+  "calibratedAt": "2026-10-14T08:19:06.083Z",
   "environment": {
-    "node": "v22.23.2",
-    "platform": "win32-x64",
+    "node": "v22.20.0",
+    "platform": "linux-x64",
     "note": "tests ran with the repository's current node_modules linked into each worktree, not the historical lockfile"
   },
   "tscAtBase": {
     "passed": true,
-    "ms": 27531
+    "ms": 4183
   },
   "baseTests": {
     "tests/auto-transport-fallback.test.ts": {
       "passedAtBase": true,
-      "ms": 10941
+      "ms": 2208
     },
     "tests/document-ingest.test.ts": {
       "passedAtBase": true,
-      "ms": 7258
+      "ms": 2213
     },
     "tests/efficiency-evidence.test.ts": {
       "passedAtBase": true,
-      "ms": 4871
+      "ms": 1269
     },
     "tests/efficiency-fused-descriptor.test.ts": {
       "passedAtBase": true,
-      "ms": 22893
+      "ms": 2907
     },
     "tests/episode-engineering-links.test.ts": {
       "passedAtBase": true,
-      "ms": 7056
+      "ms": 1581
     },
     "tests/m-bridge-cli-loop.test.ts": {
       "passedAtBase": true,
-      "ms": 63484
+      "ms": 4260
     },
-    "tests/m-context-fidelity.test.ts": {
+    "tests/m-configpath-threading.test.ts": {
       "passedAtBase": true,
-      "ms": 55527
+      "ms": 3614
     },
     "tests/m-plan-provenance.test.ts": {
       "passedAtBase": true,
-      "ms": 34373
+      "ms": 3312
+    },
+    "tests/m-provider-priority-open.test.ts": {
+      "passedAtBase": true,
+      "ms": 1748
     },
     "tests/m-skill-admission-provisional.test.ts": {
       "passedAtBase": true,
-      "ms": 5277
+      "ms": 1383
     },
     "tests/m-workflow-skill.test.ts": {
       "passedAtBase": true,
-      "ms": 6850
+      "ms": 1521
     },
     "tests/m18-ast-indexer.test.ts": {
       "passedAtBase": true,
-      "ms": 17304
+      "ms": 2021
     },
     "tests/m22-node-compression.test.ts": {
       "passedAtBase": true,
-      "ms": 20801
+      "ms": 2537
     },
     "tests/m35-learning-graph-fixes.test.ts": {
       "passedAtBase": true,
-      "ms": 7188
+      "ms": 1733
     },
     "tests/m40-routing-connectivity.test.ts": {
       "passedAtBase": true,
-      "ms": 57152
+      "ms": 4070
     },
     "tests/m41-optimization-hardening.test.ts": {
       "passedAtBase": true,
-      "ms": 55673
+      "ms": 3681
     },
     "tests/m45-compression-benchmark.test.ts": {
       "passedAtBase": true,
-      "ms": 88858
+      "ms": 10551
     },
     "tests/m49-call-graph-extraction.test.ts": {
       "passedAtBase": true,
-      "ms": 25701
+      "ms": 2357
     },
     "tests/m52-skill-layer.test.ts": {
-      "passedAtBase": false,
-      "ms": 127524
+      "passedAtBase": true,
+      "ms": 17363
     },
     "tests/m53-include-extensions.test.ts": {
       "passedAtBase": true,
-      "ms": 5573
+      "ms": 1651
     },
     "tests/m56-agent-delegation.test.ts": {
       "passedAtBase": true,
-      "ms": 31234
+      "ms": 3586
     },
     "tests/m60-safe-fs-workspace.test.ts": {
       "passedAtBase": true,
-      "ms": 5808
-    },
-    "tests/m79-plan-clause-split.test.ts": {
-      "passedAtBase": true,
-      "ms": 14718
+      "ms": 1377
     },
     "tests/m81-bridge-dag-execution.test.ts": {
       "passedAtBase": true,
-      "ms": 28862
+      "ms": 2742
     },
     "tests/m9-orchestrator-near-lossless.test.ts": {
       "passedAtBase": true,
-      "ms": 42857
+      "ms": 3007
     },
     "tests/mcp-v12-release.test.ts": {
       "passedAtBase": true,
-      "ms": 56582
+      "ms": 4496
     },
     "tests/privacy-audit.test.ts": {
       "passedAtBase": true,
-      "ms": 16097
+      "ms": 1722
     },
     "tests/skill-o1-read.test.ts": {
       "passedAtBase": true,
-      "ms": 4629
+      "ms": 1185
     },
     "tests/tree-sitter-iterative-walk.test.ts": {
       "passedAtBase": true,
-      "ms": 17876
+      "ms": 1885
     },
     "tests/uninstall-skills-mcp.test.ts": {
       "passedAtBase": true,
-      "ms": 13743
+      "ms": 1970
     },
     "tests/vendored-source-resolution.test.ts": {
       "passedAtBase": true,
-      "ms": 7354
+      "ms": 1679
     }
   },
   "fixCommits": {
-    "7839524": {
-      "commit": "78395244d054b8eb2739cda91b63c599fbdb4bc6",
-      "parent": "c16686c014bb60b29fc4a14aa3531841de5dd5d1",
+    "2668514": {
+      "commit": "26685149f0ffec3775602c776c5a0c18fd8b9661",
+      "parent": "ab184ca61964c43594329fa3811fb0cc478c250d",
+      "subject": "fix(config): stop LLM availability sniffing from feeding on config-exported env",
+      "kind": "regular",
+      "src": [
+        "src/config/llm-availability.ts",
+        "src/config/provider-env.ts",
+        "src/config/resolve.ts"
+      ],
+      "tests": [
+        "tests/bridge-fallback-guarantee.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  1 passed (1) |       Tests  12 passed (12)",
+      "baseTail": "AssertionError: expected false to be true // Object.is equality | TypeError: (0 , providerHasCredentials) is not a function |  Test Files  1 failed (1) |       Tests  5 failed | 7 passed (12)"
+    },
+    "5807902": {
+      "commit": "5807902d5ad3e74d2c98c684e442f9618d871844",
+      "parent": "e5b576c8d4ff584d4595762968afc08cbcb93ab1",
+      "subject": "fix: write Trae-safe space-free MCP command paths at install time",
+      "kind": "regular",
+      "src": [
+        "src/integrations/agent-mcp-installer.ts"
+      ],
+      "tests": [
+        "tests/m63-agents-install.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": false,
+      "fixTail": " Test Files  1 passed (1) |       Tests  7 passed (7)",
+      "baseTail": " Test Files  1 passed (1) |       Tests  7 passed (7)"
+    },
+    "8845428": {
+      "commit": "8845428db1149d35b8df92edbbda2022a573bce5",
+      "parent": "f6ec7e90cdf690589938763f2f6bb066530ae3c3",
+      "subject": "fix: merge DAG abort signals and wait on pause before batches",
+      "kind": "regular",
+      "src": [
+        "src/core/dag-engine.ts"
+      ],
+      "tests": [
+        "tests/m71-runtime-controller.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  1 passed (1) |       Tests  3 passed (3)",
+      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected false to be true // Object.is equality |  Test Files  1 failed (1) |       Tests  1 failed | 2 passed (3)"
+    },
+    "c238491": {
+      "commit": "c238491279158ff7aa7cb6bf3053edfdb9651d64",
+      "parent": "808e1da1724e0d14d83f23e3eccb0376a1390930",
+      "subject": "fix(settings): config ui save refused by the unsafe-root assertion",
+      "kind": "complex",
+      "src": [
+        "src/config/resolve.ts",
+        "src/surfaces/cli/runtime/settings.ts"
+      ],
+      "tests": [
+        "tests/settings-unsafe-root-save.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  1 passed (1) |       Tests  3 passed (3)",
+      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | Error: Refusing to use unsafe workspace root from projectWorkspaceRoot: /tmp/gf-settings-home-SpXWeQ. Set GRAPHFLOW_WORKSPACE_ROOT to your project directory (not home/AppData). |  Test Files  1 failed (1) |       Tests  1 failed | 2 passed (3)"
+    },
+    "808e1da": {
+      "commit": "808e1da1724e0d14d83f23e3eccb0376a1390930",
+      "parent": "167ba66553e65134586a5f5b92905336a2be81ff",
+      "subject": "fix(typesafe): wire Jev to the REAL System One API + graphflow llm-check",
+      "kind": "complex",
+      "src": [
+        "src/config/defaults.ts",
+        "src/config/llm-availability.ts",
+        "src/routing/typesafe-systemone.ts",
+        "src/surfaces/cli/index.ts",
+        "src/surfaces/cli/runtime/routing.ts"
+      ],
+      "tests": [
+        "tests/real-worker-benchmark.test.ts",
+        "tests/typesafe-systemone.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  2 passed (2) |       Tests  14 passed (14)",
+      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected 13 to be 225 // Object.is equality |  Test Files  2 failed (2) |       Tests  1 failed | 4 passed (5)"
+    },
+    "12b94bd": {
+      "commit": "12b94bdf07a4525b61db1b6563c58567b9824d9a",
+      "parent": "241cad0ccadf9b302feafb57ad9e8cd25627e5b8",
+      "subject": "fix(tests): CI-first exposure — release sqlite handles and reconcile-window order",
+      "kind": "regular",
+      "src": [
+        "src/graph/client-factory.ts"
+      ],
+      "tests": [
+        "tests/context-prefix-stability.test.ts",
+        "tests/outcome-reconciler.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  2 passed (2) |       Tests  12 passed (12)",
+      "baseTail": "TypeError: (0 , closeAllGraphClients) is not a function |  Test Files  1 failed | 1 passed (2) |       Tests  12 passed (12)"
+    },
+    "2785c91": {
+      "commit": "2785c91f4f836670937bd21525bb939b29607543",
+      "parent": "aa0d9f9d83cc19668a6a8b581fb0b23ed420ae4c",
+      "subject": "fix(memory): scope dialogue and workbench recall to the owning workspace",
+      "kind": "complex",
+      "src": [
+        "src/graph/graph-search.ts",
+        "src/learning/dialogue-thread.ts",
+        "src/learning/workbench-topic.ts",
+        "src/surfaces/cli/runtime/dialogue.ts",
+        "src/surfaces/cli/runtime/graph.ts"
+      ],
+      "tests": [
+        "tests/cross-project-recall-isolation.test.ts",
+        "tests/turn-distillation.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  2 passed (2) |       Tests  17 passed (17)",
+      "baseTail": "AssertionError: expected [] to have a length of 2 but got +0 | AssertionError: expected { updated: +0, unchanged: +0, …(1) } to deeply equal { updated: 1, unchanged: +0, total: 1 } |  Test Files  2 failed (2) |       Tests  5 failed | 12 passed (17)"
+    },
+    "aa0d9f9": {
+      "commit": "aa0d9f9d83cc19668a6a8b581fb0b23ed420ae4c",
+      "parent": "2d7ad7352c6030b821f90799ee45d8cc3e4686c3",
+      "subject": "fix(anchors): count the body being attached against the body budget",
+      "kind": "regular",
+      "src": [
+        "src/graph/anchor-bodies.ts"
+      ],
+      "tests": [
+        "tests/anchor-bodies.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": false,
+      "fixTail": " Test Files  1 passed (1) |       Tests  7 passed (7)",
+      "baseTail": " Test Files  1 passed (1) |       Tests  7 passed (7)"
+    },
+    "2d7ad73": {
+      "commit": "2d7ad7352c6030b821f90799ee45d8cc3e4686c3",
+      "parent": "e0fb8d50e2480133f2c25c7fd0f9d4d765da9ee8",
+      "subject": "fix(context): make two identical calls produce identical bytes",
+      "kind": "complex",
+      "src": [
+        "src/graph/context-economics.ts",
+        "src/graph/context-package-core.ts",
+        "src/graph/graph-search.ts",
+        "src/graph/snapshot-view.ts",
+        "src/graph/sqlite-client.ts",
+        "src/learning/dialogue-thread.ts",
+        "src/surfaces/cli/runtime/graph.ts",
+        "src/surfaces/cli/runtime/response-budget.ts"
+      ],
+      "tests": [
+        "tests/context-prefix-stability.test.ts",
+        "tests/dialogue-thread.test.ts",
+        "tests/m107-dialoguehits-slim.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  3 passed (3) |       Tests  24 passed (24)",
+      "baseTail": "AssertionError: expected 2000 to be 1000 // Object.is equality | AssertionError: expected true to be false // Object.is equality |  Test Files  3 failed (3) |       Tests  4 failed | 20 passed (24)"
+    },
+    "e0fb8d5": {
+      "commit": "e0fb8d50e2480133f2c25c7fd0f9d4d765da9ee8",
+      "parent": "bcec8b5a42b5b3516b8972d9986a9d4e8f116615",
+      "subject": "fix(memory): loadAllEpisodes stopped at 200 episodes",
+      "kind": "regular",
+      "src": [
+        "src/learning/episodic-memory.ts"
+      ],
+      "tests": [
+        "tests/outcome-reconciler.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  1 passed (1) |       Tests  9 passed (9)",
+      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected 200 to be 201 // Object.is equality |  Test Files  1 failed (1) |       Tests  1 failed | 8 passed (9)"
+    },
+    "05cea54": {
+      "commit": "05cea546c28734f8312d377f7cb8ad8816d7b63c",
+      "parent": "cdfdb6e5a6a3398caad044b39668dbc2fbbec199",
+      "subject": "fix(embeddings): wire the semantic recall arm into indexing",
+      "kind": "complex",
+      "src": [
+        "src/graph/file-indexer.ts",
+        "src/learning/embedding-quality.ts",
+        "src/learning/embedding-refresh.ts",
+        "src/learning/embeddings.ts",
+        "src/learning/episodic-memory.ts",
+        "src/surfaces/cli/index.ts",
+        "src/surfaces/cli/runtime/graph.ts",
+        "src/surfaces/cli/runtime/learning.ts",
+        "src/surfaces/cli/runtime/types.ts"
+      ],
+      "tests": [
+        "tests/m-learning-enhancements.test.ts",
+        "tests/m128-runtime-deps-memory-unify.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  2 passed (2) |       Tests  28 passed (28)",
+      "baseTail": "TypeError: (0 , ensureEmbeddings) is not a function | TypeError: (0 , ensureEmbeddings) is not a function |  Test Files  2 failed (2) |       Tests  4 failed | 24 passed (28)"
+    },
+    "82639cf": {
+      "commit": "82639cf7bf25e93cbc79d320fcb4866d647e23f5",
+      "parent": "7b35ea369ab9fccd9a5e3bdd47917c67418ac22d",
+      "subject": "fix(install): vendored source resolution was off by one directory level",
+      "kind": "regular",
+      "src": [
+        "src/integrations/skill-installer.ts"
+      ],
+      "tests": [
+        "tests/vendored-source-resolution.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  1 passed (1) |       Tests  4 passed (4)",
+      "baseTail": "TypeError: .toMatch() expects to receive a string, but got undefined | TypeError: .toMatch() expects to receive a string, but got undefined |  Test Files  1 failed (1) |       Tests  4 failed (4)"
+    },
+    "7b35ea3": {
+      "commit": "7b35ea369ab9fccd9a5e3bdd47917c67418ac22d",
+      "parent": "578454db1cca9451c831c29bbc1e3a7a853a17a4",
+      "subject": "fix(install): refuse to scatter project files into the home directory",
+      "kind": "regular",
+      "src": [
+        "src/integrations/skill-installer.ts"
+      ],
+      "tests": [
+        "tests/project-rules-unsafe-root.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  1 passed (1) |       Tests  6 passed (6)",
+      "baseTail": "AssertionError: expected '# GraphFlow for Claude Code\\n\\nUse Gr…' to be '# mine\\n<!-- GRAPHFLOW:BEGIN managed …' // Object.is equality | AssertionError: expected 'created' to be 'skipped' // Object.is equality |  Test Files  1 failed (1) |       Tests  3 failed | 3 passed (6)"
+    },
+    "484e41e": {
+      "commit": "484e41ebf918cba1d74233079f7174a22527e6fe",
+      "parent": "02ae28e56fd6716d441883e1ae527cc7af55c70b",
+      "subject": "fix(cli): keep help text off stdout, and clear the repo's test artifacts",
+      "kind": "regular",
+      "src": [
+        "src/surfaces/cli/index.ts"
+      ],
+      "tests": [
+        "tests/cli-stdout-hygiene.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  1 passed (1) |       Tests  3 passed (3)",
+      "baseTail": "AssertionError: expected 'Usage: graphflow <command> [options]\\…' to be '' // Object.is equality | AssertionError: expected 'Usage: graphflow <command> [options]\\…' to be '' // Object.is equality |  Test Files  1 failed (1) |       Tests  2 failed | 1 passed (3)"
+    },
+    "3c4a6aa": {
+      "commit": "3c4a6aabef01b5f7327f4c6296d496fed54fd476",
+      "parent": "99e763d21379ac1fd0d50c26fb99eae63eec1bff",
+      "subject": "fix(search): stop AND-ing English FTS tokens, which zeroed multi-word recall",
+      "kind": "regular",
+      "src": [
+        "src/graph/sqlite-client.ts"
+      ],
+      "tests": [
+        "tests/m24-sqlite-backend.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  1 passed (1) |       Tests  7 passed (7)",
+      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected [ 'n1' ] to deeply equal ArrayContaining [\"n1\", \"n2\", \"n3\"] |  Test Files  1 failed (1) |       Tests  1 failed | 6 passed (7)"
+    },
+    "d243b22": {
+      "commit": "d243b224176e81bd90d7c7135a57c351d7851b38",
+      "parent": "d8f3a4e320c9cf43604ae2d1721e6016f8169395",
+      "subject": "fix: two install-level defects the user's own test surfaced",
+      "kind": "regular",
+      "src": [
+        "src/integrations/agent-mcp-installer.ts"
+      ],
+      "tests": [
+        "tests/workspace-build.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  1 passed (1) |       Tests  14 passed (14)",
+      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected [ …(2) ] to deeply equal [] |  Test Files  1 failed (1) |       Tests  1 failed | 13 passed (14)"
+    },
+    "7c6341e": {
+      "commit": "7c6341ea47a98a547d49d9204b980f9436bab7c3",
+      "parent": "9871f54a7964770b67a101afa753946a94900b04",
+      "subject": "fix(opencode): the plugin has no mcp hook; point opencode at the workspace build instead",
+      "kind": "complex",
+      "src": [
+        "src/integrations/agent-mcp-installer.ts",
+        "src/integrations/opencode-plugin.ts",
+        "src/surfaces/cli/index.ts",
+        "src/surfaces/cli/init.ts"
+      ],
+      "tests": [
+        "tests/m-doctor-json-report.test.ts",
+        "tests/opencode-mcp-plugin-registration.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  2 passed (2) |       Tests  16 passed (16)",
+      "baseTail": "AssertionError: expected 'updated' to be 'error' // Object.is equality | AssertionError: expected undefined to be '/tmp/gf-oc-ws-R7yals/dist/surfaces/mc…' // Object.is equality |  Test Files  2 failed (2) |       Tests  6 failed | 10 passed (16)"
+    },
+    "0b19141": {
+      "commit": "0b1914117f0fa40ca2e2cf5deb874d586d501f00",
+      "parent": "df9223e5f1e6925151198bb63117b0d72834934e",
+      "subject": "fix(opencode): make the plugin's MCP opt-in durable, and stop install from undoing it",
+      "kind": "complex",
+      "src": [
+        "src/integrations/agent-mcp-installer.ts",
+        "src/integrations/opencode-plugin.ts",
+        "src/surfaces/cli/index.ts",
+        "src/surfaces/cli/output.ts"
+      ],
+      "tests": [
+        "tests/opencode-mcp-plugin-registration.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  1 passed (1) |       Tests  6 passed (6)",
+      "baseTail": "TypeError: plugin.getOpenCodeMcpRegistration is not a function | TypeError: plugin.setOpenCodeMcpRegistration is not a function |  Test Files  1 failed (1) |       Tests  5 failed | 1 passed (6)"
+    },
+    "df9223e": {
+      "commit": "df9223e5f1e6925151198bb63117b0d72834934e",
+      "parent": "26ce0af88c080179e0c9779d37260c54a375ff65",
+      "subject": "fix: doctor must not call the only correct setup broken",
+      "kind": "regular",
+      "src": [
+        "src/surfaces/cli/init.ts"
+      ],
+      "tests": [
+        "tests/m-doctor-json-report.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  1 passed (1) |       Tests  7 passed (7)",
+      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: the given combination of arguments (undefined and string) is invalid for this assertion. You can use an array, a map, an object, a set, a string, or a weakset instead of a string |  Test Files  1 failed (1) |       Tests  1 failed | 6 passed (7)"
+    },
+    "26ce0af": {
+      "commit": "26ce0af88c080179e0c9779d37260c54a375ff65",
+      "parent": "e081c268ce00b95c2d4a462079e0e03e2a4acb8c",
+      "subject": "fix: doctor reported healthy while the host ran the wrong build",
+      "kind": "complex",
+      "src": [
+        "src/integrations/agent-mcp-installer.ts",
+        "src/surfaces/cli/init.ts"
+      ],
+      "tests": [
+        "tests/m-doctor-json-report.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  1 passed (1) |       Tests  6 passed (6)",
+      "baseTail": "TypeError: (0 , probeMcpEntryPoint) is not a function | TypeError: (0 , probeMcpEntryPoint) is not a function |  Test Files  1 failed (1) |       Tests  4 failed | 2 passed (6)"
+    },
+    "323a2da": {
+      "commit": "323a2dad99780d3af0bd00bc5b5d223188788130",
+      "parent": "3f9fc405345c4d3902cf429ee66f1f29cf493614",
+      "subject": "fix: stop cross-project graph pollution and clean the polluted nodes",
+      "kind": "complex",
+      "src": [
+        "src/graph/file-indexer-nodes.ts",
+        "src/graph/file-indexer.ts",
+        "src/graph/graph-prune.ts",
+        "src/graph/language-indexers/markdown.ts",
+        "src/graph/workspace-containment.ts",
+        "src/surfaces/cli/index.ts"
+      ],
+      "tests": [
+        "tests/graph-prune.test.ts",
+        "tests/retrieval-golden.test.ts",
+        "tests/workspace-containment.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  3 passed (3) |       Tests  165 passed (165)",
+      "baseTail": "Error: Cannot find module '../src/graph/workspace-containment' imported from '/tmp/eff-calibration/wt-2/tests/workspace-containment.test.ts' | Caused by: Error: Failed to load url ../src/graph/workspace-containment (resolved id: ../src/graph/workspace-containment) in /tmp/eff-calibration/wt-2/tests/workspace-containment.test.ts. Does the file exist? |  Test Files  2 failed | 1 passed (3) |       Tests  148 passed (148)"
+    },
+    "d684600": {
+      "commit": "d684600333ce8ea8402e4f2314976d2a526ff94f",
+      "parent": "9625e1869afa3ffe098f1ab881aec5c854a61b72",
+      "subject": "fix: price the host's tail — our churn was costing 10x what compression saved",
+      "kind": "complex",
+      "src": [
+        "src/graph/context-economics.ts",
+        "src/surfaces/cli/runtime/graph.ts"
+      ],
+      "tests": [
+        "tests/context-economics.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  1 passed (1) |       Tests  14 passed (14)",
+      "baseTail": "TypeError: Cannot read properties of undefined (reading 'rewrittenTokens') | TypeError: (0 , resolveSuffixTokens) is not a function |  Test Files  1 failed (1) |       Tests  4 failed | 10 passed (14)"
+    },
+    "2f91497": {
+      "commit": "2f9149728955c839d8f23d6c411b5ecda0f4fefd",
+      "parent": "486ca43021da320fa4dce75c849318c2354e1db9",
+      "subject": "fix: correct the prefix model after live verification (economics + freshness)",
+      "kind": "complex",
+      "src": [
+        "src/graph/context-economics.ts",
+        "src/learning/memory-freshness.ts",
+        "src/surfaces/cli/runtime/graph.ts"
+      ],
+      "tests": [
+        "tests/context-economics.test.ts",
+        "tests/memory-freshness.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  2 passed (2) |       Tests  19 passed (19)",
+      "baseTail": "TypeError: (0 , resolveStaticPrefixTokens) is not a function | AssertionError: expected [ 'bridgeDagExecution', …(2) ] to include 'src/graph/context-pressure.ts' |  Test Files  2 failed (2) |       Tests  4 failed | 15 passed (19)"
+    },
+    "6a068b9": {
+      "commit": "6a068b97f1e0a19b7f310a26cea362c5c65e59a0",
+      "parent": "9fc7e5af60fcea607d8b91fd09a8737f5413833d",
+      "subject": "fix(skills,perf): task echoes never become skills + delta merge 394x faster",
+      "kind": "complex",
+      "src": [
+        "src/graph/graphify-file-client.ts",
+        "src/learning/skill-flywheel.ts"
+      ],
+      "tests": [
+        "tests/flywheel-report.test.ts",
+        "tests/m-task-echo-skill.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  2 passed (2) |       Tests  7 passed (7)",
+      "baseTail": "AssertionError: expected 1 to be +0 // Object.is equality | AssertionError: expected +0 to be 1 // Object.is equality |  Test Files  1 failed | 1 passed (2) |       Tests  2 failed | 5 passed (7)"
+    },
+    "9fc7e5a": {
+      "commit": "9fc7e5af60fcea607d8b91fd09a8737f5413833d",
+      "parent": "40bed636c1b60368bd261fd846f32f0da7fdf8ac",
+      "subject": "fix(config,evidence): deep-dive round 2 — fail fast on broken explicit config, minimal configs valid, auto-index not fooled by dialogue nodes, evidence graded not discarded",
+      "kind": "complex",
+      "src": [
+        "src/config/loader.ts",
+        "src/config/resolve.ts",
+        "src/learning/evidence.ts",
+        "src/surfaces/cli/runtime/graph.ts"
+      ],
+      "tests": [
+        "tests/m-config-evidence-honesty.test.ts"
+      ],
+      "passAtFix": true,
+      "failAtBaseWithOverlay": true,
+      "fixTail": " Test Files  1 passed (1) |       Tests  6 passed (6)",
+      "baseTail": "Error: Invalid config: graphPolicy.graphStorePath is required for file transport. | AssertionError: expected undefined to be defined |  Test Files  1 failed (1) |       Tests  4 failed | 2 passed (6)"
+    },
+    "40bed63": {
+      "commit": "40bed636c1b60368bd261fd846f32f0da7fdf8ac",
+      "parent": "08f6f64fbae7a75b7951b479494ce71439295cbb",
       "subject": "fix(honesty): plan provenance fields + real provider errors in probes/diagnose + zero-evidence memory hits filtered + read-only doctor",
       "kind": "complex",
       "src": [
@@ -157,297 +613,11 @@
       "passAtFix": true,
       "failAtBaseWithOverlay": true,
       "fixTail": " Test Files  1 passed (1) |       Tests  5 passed (5)",
-      "baseTail": "Error: Cannot find module '../src/routing/provider-errors' imported from 'C:/Users/roarp/AppData/Local/Temp/eff-calibration/wt-0/tests/m-plan-provenance.test.ts' | Caused by: Error: Failed to load url ../src/routing/provider-errors (resolved id: ../src/routing/provider-errors) in C:/Users/roarp/AppData/Local/Temp/eff-calibration/wt-0/tests/m-plan-provenance.test.ts. Does the file exist? |  Test Files  1 failed (1) |       Tests  no tests"
+      "baseTail": "Error: Cannot find module '../src/routing/provider-errors' imported from '/tmp/eff-calibration/wt-3/tests/m-plan-provenance.test.ts' | Caused by: Error: Failed to load url ../src/routing/provider-errors (resolved id: ../src/routing/provider-errors) in /tmp/eff-calibration/wt-3/tests/m-plan-provenance.test.ts. Does the file exist? |  Test Files  1 failed (1) |       Tests  no tests"
     },
-    "e5f05b1": {
-      "commit": "e5f05b17d47cf03fa5fcceef9dae6500684083a7",
-      "parent": "75e56691670002fb9e331003efbe934da6619dbe",
-      "subject": "fix: stop MCP memory/thread leaks, orphaned servers, and config layer drift",
-      "kind": "complex",
-      "src": [
-        "src/config/embedding-factory.ts",
-        "src/config/loader.ts",
-        "src/config/merge.ts",
-        "src/config/resolve.ts",
-        "src/config/schema.ts",
-        "src/graph/client-factory.ts",
-        "src/integrations/skill-installer.ts",
-        "src/surfaces/cli/init.ts",
-        "src/surfaces/mcp/server.ts",
-        "src/surfaces/mcp/tool-handlers.ts"
-      ],
-      "tests": [
-        "tests/embedding-backend.test.ts",
-        "tests/m153-config-layer-discovery.test.ts",
-        "tests/vendored-source-resolution.test.ts"
-      ],
-      "passAtFix": true,
-      "failAtBaseWithOverlay": true,
-      "fixTail": " Test Files  3 passed (3) |       Tests  22 passed (22)",
-      "baseTail": "AssertionError: expected [Function] to throw an error | AssertionError: expected true to be false // Object.is equality |  Test Files  3 failed (3) |       Tests  9 failed | 13 passed (22)"
-    },
-    "33c7dd6": {
-      "commit": "33c7dd60524e6426f8c9a2abfa904f444416c0a1",
-      "parent": "a9d0268b570e2594996a1cd3973784cbfe45408e",
-      "subject": "fix(settings): config ui save refused by the unsafe-root assertion",
-      "kind": "complex",
-      "src": [
-        "src/config/resolve.ts",
-        "src/surfaces/cli/runtime/settings.ts"
-      ],
-      "tests": [
-        "tests/settings-unsafe-root-save.test.ts"
-      ],
-      "passAtFix": false,
-      "failAtBaseWithOverlay": true,
-      "fixTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected 'C:\\Users\\roarp\\AppData\\Local\\Temp\\gf-…' to be undefined |  Test Files  1 failed (1) |       Tests  1 failed | 2 passed (3)",
-      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected 'C:\\Users\\roarp\\AppData\\Local\\Temp\\gf-…' to be undefined |  Test Files  1 failed (1) |       Tests  1 failed | 2 passed (3)"
-    },
-    "a9d0268": {
-      "commit": "a9d0268b570e2594996a1cd3973784cbfe45408e",
-      "parent": "a1bb59bc81de7b6cf96eac77afc665eed7712c17",
-      "subject": "fix(typesafe): wire Jev to the REAL System One API + graphflow llm-check",
-      "kind": "complex",
-      "src": [
-        "src/config/defaults.ts",
-        "src/config/llm-availability.ts",
-        "src/routing/typesafe-systemone.ts",
-        "src/surfaces/cli/index.ts",
-        "src/surfaces/cli/runtime/routing.ts"
-      ],
-      "tests": [
-        "tests/real-worker-benchmark.test.ts",
-        "tests/typesafe-systemone.test.ts"
-      ],
-      "passAtFix": false,
-      "failAtBaseWithOverlay": true,
-      "fixTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | Error: Test timed out in 60000ms. |  Test Files  1 failed | 1 passed (2) |       Tests  1 failed | 13 passed (14)",
-      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected 13 to be 225 // Object.is equality |  Test Files  2 failed (2) |       Tests  1 failed | 4 passed (5)"
-    },
-    "3d6eef7": {
-      "commit": "3d6eef7a8d5fd3af59c97dc80a45e0ed8d7c6edd",
-      "parent": "9e364772627a2eb17c3eb0d158f72219885aad95",
-      "subject": "fix(tests): CI-first exposure — release sqlite handles and reconcile-window order",
-      "kind": "regular",
-      "src": [
-        "src/graph/client-factory.ts"
-      ],
-      "tests": [
-        "tests/context-prefix-stability.test.ts",
-        "tests/outcome-reconciler.test.ts"
-      ],
-      "passAtFix": false,
-      "failAtBaseWithOverlay": true,
-      "fixTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected +0 to be 1 // Object.is equality |  Test Files  1 failed | 1 passed (2) |       Tests  1 failed | 11 passed (12)",
-      "baseTail": "TypeError: (0 , closeAllGraphClients) is not a function |  Test Files  1 failed | 1 passed (2) |       Tests  12 passed (12)"
-    },
-    "5c56663": {
-      "commit": "5c566636c0786a5a8ef200f2bacc001b437be411",
-      "parent": "5b09b14e01127f729331b344f8408b015702e90c",
-      "subject": "fix(config): stop LLM availability sniffing from feeding on config-exported env",
-      "kind": "regular",
-      "src": [
-        "src/config/llm-availability.ts",
-        "src/config/provider-env.ts",
-        "src/config/resolve.ts"
-      ],
-      "tests": [
-        "tests/bridge-fallback-guarantee.test.ts"
-      ],
-      "passAtFix": false,
-      "failAtBaseWithOverlay": true,
-      "fixTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | Error: Test timed out in 60000ms. |  Test Files  1 failed (1) |       Tests  1 failed | 11 passed (12)",
-      "baseTail": "AssertionError: expected false to be true // Object.is equality | TypeError: (0 , providerHasCredentials) is not a function |  Test Files  1 failed (1) |       Tests  5 failed | 7 passed (12)"
-    },
-    "ee8142c": {
-      "commit": "ee8142cbdd517c4363170b75c89a0e2fd66843e8",
-      "parent": "a130de3031b7501203878ab9e507f1d5ea83e2a1",
-      "subject": "fix(memory): scope dialogue and workbench recall to the owning workspace",
-      "kind": "complex",
-      "src": [
-        "src/graph/graph-search.ts",
-        "src/learning/dialogue-thread.ts",
-        "src/learning/workbench-topic.ts",
-        "src/surfaces/cli/runtime/dialogue.ts",
-        "src/surfaces/cli/runtime/graph.ts"
-      ],
-      "tests": [
-        "tests/cross-project-recall-isolation.test.ts",
-        "tests/turn-distillation.test.ts"
-      ],
-      "passAtFix": true,
-      "failAtBaseWithOverlay": true,
-      "fixTail": " Test Files  2 passed (2) |       Tests  17 passed (17)",
-      "baseTail": "AssertionError: expected [] to have a length of 2 but got +0 | AssertionError: expected { updated: +0, unchanged: +0, …(1) } to deeply equal { updated: 1, unchanged: +0, total: 1 } |  Test Files  2 failed (2) |       Tests  5 failed | 12 passed (17)"
-    },
-    "e57430a": {
-      "commit": "e57430a5f97ba5a9c4e54421e9a9f4957dbca9b2",
-      "parent": "ee4fe0259827d10d756a9b20906241336ee4efa4",
-      "subject": "fix: two install-level defects the user's own test surfaced",
-      "kind": "regular",
-      "src": [
-        "src/integrations/agent-mcp-installer.ts"
-      ],
-      "tests": [
-        "tests/workspace-build.test.ts"
-      ],
-      "passAtFix": true,
-      "failAtBaseWithOverlay": false,
-      "fixTail": " Test Files  1 passed (1) |       Tests  14 passed (14)",
-      "baseTail": " Test Files  1 passed (1) |       Tests  14 passed (14)"
-    },
-    "c9ceec1": {
-      "commit": "c9ceec116d1f6d76a94189e44e26858eef538b64",
-      "parent": "71e8be112d472011ea62a729321ae046b98234b7",
-      "subject": "fix(opencode): the plugin has no mcp hook; point opencode at the workspace build instead",
-      "kind": "complex",
-      "src": [
-        "src/integrations/agent-mcp-installer.ts",
-        "src/integrations/opencode-plugin.ts",
-        "src/surfaces/cli/index.ts",
-        "src/surfaces/cli/init.ts"
-      ],
-      "tests": [
-        "tests/m-doctor-json-report.test.ts",
-        "tests/opencode-mcp-plugin-registration.test.ts"
-      ],
-      "passAtFix": false,
-      "failAtBaseWithOverlay": true,
-      "fixTail": "AssertionError: expected 'unchanged' to be 'error' // Object.is equality | AssertionError: expected 'C:\\Users\\roarp\\.config\\opencode' to be 'C:\\Users\\roarp\\AppData\\Local\\Temp\\gf-…' // Object.is equality |  Test Files  1 failed | 1 passed (2) |       Tests  5 failed | 11 passed (16)",
-      "baseTail": "AssertionError: expected 'unchanged' to be 'error' // Object.is equality | AssertionError: expected 'C:\\Users\\roarp\\.config\\opencode' to be 'C:\\Users\\roarp\\AppData\\Local\\Temp\\gf-…' // Object.is equality |  Test Files  2 failed (2) |       Tests  9 failed | 7 passed (16)"
-    },
-    "2398ce9": {
-      "commit": "2398ce9018524781c147957347ff022fc752c208",
-      "parent": "5e7e71f7c609f6d667e1ec5dfe9eb5a098baf3e3",
-      "subject": "fix: doctor must not call the only correct setup broken",
-      "kind": "regular",
-      "src": [
-        "src/surfaces/cli/init.ts"
-      ],
-      "tests": [
-        "tests/m-doctor-json-report.test.ts"
-      ],
-      "passAtFix": true,
-      "failAtBaseWithOverlay": true,
-      "fixTail": " Test Files  1 passed (1) |       Tests  7 passed (7)",
-      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected 'missing' to be 'installed' // Object.is equality |  Test Files  1 failed (1) |       Tests  1 failed | 6 passed (7)"
-    },
-    "5e7e71f": {
-      "commit": "5e7e71f7c609f6d667e1ec5dfe9eb5a098baf3e3",
-      "parent": "6269ddab8678046932d77c18aad51e8400ae83d9",
-      "subject": "fix: doctor reported healthy while the host ran the wrong build",
-      "kind": "complex",
-      "src": [
-        "src/integrations/agent-mcp-installer.ts",
-        "src/surfaces/cli/init.ts"
-      ],
-      "tests": [
-        "tests/m-doctor-json-report.test.ts"
-      ],
-      "passAtFix": true,
-      "failAtBaseWithOverlay": true,
-      "fixTail": " Test Files  1 passed (1) |       Tests  6 passed (6)",
-      "baseTail": "TypeError: (0 , probeMcpEntryPoint) is not a function | TypeError: (0 , probeMcpEntryPoint) is not a function |  Test Files  1 failed (1) |       Tests  4 failed | 2 passed (6)"
-    },
-    "d882f5b": {
-      "commit": "d882f5bb91b4ea24374fdbfeb6415f9f4b07a573",
-      "parent": "4db92aae104219223b67db9bdf8d0c3fc01b586c",
-      "subject": "fix: stop cross-project graph pollution and clean the polluted nodes",
-      "kind": "complex",
-      "src": [
-        "src/graph/file-indexer-nodes.ts",
-        "src/graph/file-indexer.ts",
-        "src/graph/graph-prune.ts",
-        "src/graph/language-indexers/markdown.ts",
-        "src/graph/workspace-containment.ts",
-        "src/surfaces/cli/index.ts"
-      ],
-      "tests": [
-        "tests/graph-prune.test.ts",
-        "tests/retrieval-golden.test.ts",
-        "tests/workspace-containment.test.ts"
-      ],
-      "passAtFix": false,
-      "failAtBaseWithOverlay": true,
-      "fixTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | Error: EPERM: operation not permitted, symlink 'C:\\Users\\roarp\\AppData\\Local\\Temp\\containment-Xq4W8d\\other-project\\src\\b.ts' -> 'C:\\Users\\roarp\\AppData\\Local\\Temp\\containment-Xq4W8d\\project\\src\\looks-local.ts' |  Test Files  1 failed | 2 passed (3) |       Tests  1 failed | 164 passed (165)",
-      "baseTail": "Error: Cannot find module '../src/graph/workspace-containment' imported from 'C:/Users/roarp/AppData/Local/Temp/eff-calibration/wt-2/tests/workspace-containment.test.ts' | Caused by: Error: Failed to load url ../src/graph/workspace-containment (resolved id: ../src/graph/workspace-containment) in C:/Users/roarp/AppData/Local/Temp/eff-calibration/wt-2/tests/workspace-containment.test.ts. Does the file exist? |  Test Files  2 failed | 1 passed (3) |       Tests  148 passed (148)"
-    },
-    "660dea9": {
-      "commit": "660dea9745c877559b4a3b82299ab4c2a83a6e48",
-      "parent": "61261ef6953f29c5589ba0c169162120a0657dfd",
-      "subject": "fix: price the host's tail — our churn was costing 10x what compression saved",
-      "kind": "complex",
-      "src": [
-        "src/graph/context-economics.ts",
-        "src/surfaces/cli/runtime/graph.ts"
-      ],
-      "tests": [
-        "tests/context-economics.test.ts"
-      ],
-      "passAtFix": true,
-      "failAtBaseWithOverlay": true,
-      "fixTail": " Test Files  1 passed (1) |       Tests  14 passed (14)",
-      "baseTail": "TypeError: Cannot read properties of undefined (reading 'rewrittenTokens') | TypeError: (0 , resolveSuffixTokens) is not a function |  Test Files  1 failed (1) |       Tests  4 failed | 10 passed (14)"
-    },
-    "b4f10af": {
-      "commit": "b4f10affddba6983af06e565ab12114b6ea9d945",
-      "parent": "e22402045b2a9b8710ce17dc0c255ecf2955d15a",
-      "subject": "fix: correct the prefix model after live verification (economics + freshness)",
-      "kind": "complex",
-      "src": [
-        "src/graph/context-economics.ts",
-        "src/learning/memory-freshness.ts",
-        "src/surfaces/cli/runtime/graph.ts"
-      ],
-      "tests": [
-        "tests/context-economics.test.ts",
-        "tests/memory-freshness.test.ts"
-      ],
-      "passAtFix": true,
-      "failAtBaseWithOverlay": true,
-      "fixTail": " Test Files  2 passed (2) |       Tests  19 passed (19)",
-      "baseTail": "TypeError: (0 , resolveStaticPrefixTokens) is not a function | AssertionError: expected [ 'bridgeDagExecution', …(2) ] to include 'src/graph/context-pressure.ts' |  Test Files  2 failed (2) |       Tests  4 failed | 15 passed (19)"
-    },
-    "24b53fd": {
-      "commit": "24b53fd4340ce9b98780d20a3f9cb5f78c539fff",
-      "parent": "d55e256bbe5008e703250a576bd3af0a7bd267f7",
-      "subject": "fix(skills,perf): task echoes never become skills + delta merge 394x faster",
-      "kind": "complex",
-      "src": [
-        "src/graph/graphify-file-client.ts",
-        "src/learning/skill-flywheel.ts"
-      ],
-      "tests": [
-        "tests/flywheel-report.test.ts",
-        "tests/m-task-echo-skill.test.ts"
-      ],
-      "passAtFix": true,
-      "failAtBaseWithOverlay": true,
-      "fixTail": " Test Files  2 passed (2) |       Tests  7 passed (7)",
-      "baseTail": "AssertionError: expected 1 to be +0 // Object.is equality | AssertionError: expected +0 to be 1 // Object.is equality |  Test Files  1 failed | 1 passed (2) |       Tests  2 failed | 5 passed (7)"
-    },
-    "d55e256": {
-      "commit": "d55e256bbe5008e703250a576bd3af0a7bd267f7",
-      "parent": "78395244d054b8eb2739cda91b63c599fbdb4bc6",
-      "subject": "fix(config,evidence): deep-dive round 2 — fail fast on broken explicit config, minimal configs valid, auto-index not fooled by dialogue nodes, evidence graded not discarded",
-      "kind": "complex",
-      "src": [
-        "src/config/loader.ts",
-        "src/config/resolve.ts",
-        "src/learning/evidence.ts",
-        "src/surfaces/cli/runtime/graph.ts"
-      ],
-      "tests": [
-        "tests/m-config-evidence-honesty.test.ts"
-      ],
-      "passAtFix": true,
-      "failAtBaseWithOverlay": true,
-      "fixTail": " Test Files  1 passed (1) |       Tests  6 passed (6)",
-      "baseTail": "Error: Invalid config: graphPolicy.graphStorePath is required for file transport. | AssertionError: expected undefined to be defined |  Test Files  1 failed (1) |       Tests  4 failed | 2 passed (6)"
-    },
-    "98adfeb": {
-      "commit": "98adfebb4e242c8bac1b6f633ca2a2def7696e2a",
-      "parent": "b1760cc3a64d485acc787f84e169eb7e4c03195c",
+    "3ba8ab5": {
+      "commit": "3ba8ab552e7712fd70e96dc0e9aef10471162d43",
+      "parent": "9ba2dd8e23a6120d9c0fa492733085264f3621ad",
       "subject": "fix(robustness): v1.23.2 — file-lock stale-lock deadlock + corrupted JSONL crash + provider coverage",
       "kind": "complex",
       "src": [
@@ -466,9 +636,9 @@
       "fixTail": " Test Files  4 passed (4) |       Tests  45 passed (45)",
       "baseTail": "SyntaxError: Unexpected token 'x', \"xxxxxxxxxx\"... is not valid JSON | AssertionError: expected '[role:implementer]\\nGoal anchor (orig…' to contain 'Skills to apply: fail-open, budget-fi…' |  Test Files  3 failed | 1 passed (4) |       Tests  5 failed | 40 passed (45)"
     },
-    "4133b20": {
-      "commit": "4133b206c760682deda435fd4c7f5aae3bb868d0",
-      "parent": "14bb099a319585febc5ca1e0b507280fbee8b730",
+    "f04b2e9": {
+      "commit": "f04b2e94c7596414fc253f35945e8862bdac3ecc",
+      "parent": "e332c240bb311ca367adb5e3d44623329cf0731c",
       "subject": "fix(install): v1.21.0 — one-command promise: global install = register + check + repair",
       "kind": "complex",
       "src": [
@@ -485,9 +655,9 @@
       "fixTail": " Test Files  1 passed (1) |       Tests  4 passed (4)",
       "baseTail": "AssertionError: expected undefined to be true // Object.is equality | TypeError: (0 , repairDanglingGraphflowMcpEntries) is not a function |  Test Files  1 failed (1) |       Tests  3 failed | 1 passed (4)"
     },
-    "431a190": {
-      "commit": "431a1906292b1408a5a5cc47be3f537916207cc9",
-      "parent": "b96ae11d487c5227ae92c71e9b54905a9d40cbb8",
+    "7cae0c9": {
+      "commit": "7cae0c979268f33c242c0c964a98b1066f3f1dd1",
+      "parent": "a05a42736e2b768c7be1d3128e0708191180b5f0",
       "subject": "fix(mcp): suppress pre-handshake notifications + stop tests rewriting real homes",
       "kind": "regular",
       "src": [
@@ -498,14 +668,14 @@
         "tests/m-install-hooks-wiring.test.ts",
         "tests/m-install-json-report.test.ts"
       ],
-      "passAtFix": false,
-      "failAtBaseWithOverlay": true,
-      "fixTail": "Error: [vitest-worker]: Timeout calling \"onTaskUpdate\" | Error: [vitest-worker]: Timeout calling \"onTaskUpdate\" |  Test Files  1 failed | 2 passed (3) |       Tests  1 failed | 22 passed (23)",
-      "baseTail": "Error: [vitest-worker]: Timeout calling \"onTaskUpdate\" | Error: [vitest-worker]: Timeout calling \"onTaskUpdate\" |  Test Files  3 passed (3) |       Tests  23 passed (23)"
+      "passAtFix": true,
+      "failAtBaseWithOverlay": false,
+      "fixTail": " Test Files  3 passed (3) |       Tests  23 passed (23)",
+      "baseTail": " Test Files  3 passed (3) |       Tests  23 passed (23)"
     },
-    "b96ae11": {
-      "commit": "b96ae11d487c5227ae92c71e9b54905a9d40cbb8",
-      "parent": "97c29f81a1023a7af990f53e1a2f38dc534fc6e8",
+    "a05a427": {
+      "commit": "a05a42736e2b768c7be1d3128e0708191180b5f0",
+      "parent": "0a8ee46f879de34722bfdb82732a5d58adaf1296",
       "subject": "fix(zcode): harden injected MCP entry for ZCode's strict stdio runtime",
       "kind": "regular",
       "src": [
@@ -519,9 +689,9 @@
       "fixTail": " Test Files  1 passed (1) |       Tests  3 passed (3)",
       "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected '${workspaceFolder}' to be undefined |  Test Files  1 failed (1) |       Tests  1 failed | 2 passed (3)"
     },
-    "ed64166": {
-      "commit": "ed64166ae1f0f9100246eb9e0dc90ec88c0bce40",
-      "parent": "8ec9c6da71bc077c88d756f27d29a7b4e193a9b4",
+    "ad43d1a": {
+      "commit": "ad43d1ab34bbdc60f141673c816dd8d1b447ebd5",
+      "parent": "704bb135e1f7401464fbdc1f59cd98627390e066",
       "subject": "fix(dsh): prevent duplicate GraphFlow loader entries",
       "kind": "regular",
       "src": [
@@ -533,11 +703,11 @@
       "passAtFix": true,
       "failAtBaseWithOverlay": true,
       "fixTail": " Test Files  1 passed (1) |       Tests  12 passed (12)",
-      "baseTail": "AssertionError: expected '# Never append a literal \\n' to be '# Never append a literal # GRAPHFLOW-…' // Object.is equality | AssertionError: expected 'MCP overlay only; glue omitted until …' to match /cleared home overlay.*duplicate load…/i |  Test Files  1 failed (1) |       Tests  2 failed | 10 passed (12)"
+      "baseTail": "      Tests  2 failed | 10 passed (12) | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected '# Never append a literal \\n' to be '# Never append a literal # GRAPHFLOW-…' // Object.is equality | AssertionError: expected 'MCP overlay only; glue omitted until …' to match /cleared home overlay.*duplicate load…/i"
     },
-    "373d53a": {
-      "commit": "373d53a36a44e56ce88e453c8bb51802c04759d6",
-      "parent": "0af579c7a1d9b9862212fde45f7ba642a06cbdac",
+    "c2b6b8c": {
+      "commit": "c2b6b8c2cddb29fa346445643978caea665a9450",
+      "parent": "adaf3879a6e55aa159d5202fbf33b8848336b513",
       "subject": "fix(dsh): keep harness bootable when GraphFlow package is missing",
       "kind": "regular",
       "src": [
@@ -551,12 +721,12 @@
       ],
       "passAtFix": false,
       "failAtBaseWithOverlay": true,
-      "fixTail": "AssertionError: expected 'npx' to be 'C:\\Program Files\\nodejs\\node.exe' // Object.is equality | AssertionError: expected 'npx' to be 'C:\\Program Files\\nodejs\\node.exe' // Object.is equality |  Test Files  1 failed | 2 passed (3) |       Tests  3 failed | 49 passed (52)",
-      "baseTail": "AssertionError: expected 'npx' to be 'C:\\Program Files\\nodejs\\node.exe' // Object.is equality | TypeError: .toMatch() expects to receive a string, but got undefined |  Test Files  3 failed (3) |       Tests  8 failed | 44 passed (52)"
+      "fixTail": "AssertionError: expected 'npx' to be '/home/bosch/.local/share/fnm/node-ver…' // Object.is equality | AssertionError: expected 'npx' to be '/home/bosch/.local/share/fnm/node-ver…' // Object.is equality |  Test Files  1 failed | 2 passed (3) |       Tests  2 failed | 50 passed (52)",
+      "baseTail": "AssertionError: expected 'npx' to be '/home/bosch/.local/share/fnm/node-ver…' // Object.is equality | TypeError: .toMatch() expects to receive a string, but got undefined |  Test Files  3 failed (3) |       Tests  7 failed | 45 passed (52)"
     },
-    "d150873": {
-      "commit": "d150873cb460eae75da2c5540b46c158682c99b4",
-      "parent": "58a7926bbda70fbb2101ecacc50bb16db69e84fd",
+    "8b924fd": {
+      "commit": "8b924fdaddd579682e4102aa7271c59e614ec698",
+      "parent": "6e706fe57303e7a25c6d1c77900916d9cf187912",
       "subject": "fix(team): rename team CLI helper so retrieval keeps surfaces/cli",
       "kind": "regular",
       "src": [
@@ -570,11 +740,11 @@
       "passAtFix": true,
       "failAtBaseWithOverlay": true,
       "fixTail": " Test Files  1 passed (1) |       Tests  9 passed (9)",
-      "baseTail": "Error: Cannot find module '../src/surfaces/team/ops' imported from 'C:/Users/roarp/AppData/Local/Temp/eff-calibration/wt-3/tests/team-memory-server.test.ts' | Caused by: Error: Failed to load url ../src/surfaces/team/ops (resolved id: ../src/surfaces/team/ops) in C:/Users/roarp/AppData/Local/Temp/eff-calibration/wt-3/tests/team-memory-server.test.ts. Does the file exist? |  Test Files  1 failed (1) |       Tests  no tests"
+      "baseTail": "Error: Cannot find module '../src/surfaces/team/ops' imported from '/tmp/eff-calibration/wt-0/tests/team-memory-server.test.ts' | Caused by: Error: Failed to load url ../src/surfaces/team/ops (resolved id: ../src/surfaces/team/ops) in /tmp/eff-calibration/wt-0/tests/team-memory-server.test.ts. Does the file exist? |  Test Files  1 failed (1) |       Tests  no tests"
     },
-    "ef398d8": {
-      "commit": "ef398d852fbd6d0826cd29c95c45a9f107fcfce4",
-      "parent": "f5ce7bcc92e3ba1cd80178f78544f151a44378be",
+    "de693c9": {
+      "commit": "de693c9dadd787d950d3e0e51c79435cc3ea3c8b",
+      "parent": "66078650a7d7c57d5083559840cf8d1d53c4a7b5",
       "subject": "fix(dsh): same-step first-turn hint, /gf RPC wait, HostAdapter DSH slice",
       "kind": "complex",
       "src": [
@@ -590,12 +760,12 @@
       ],
       "passAtFix": false,
       "failAtBaseWithOverlay": true,
-      "fixTail": "AssertionError: expected 'npx' to be 'C:\\Program Files\\nodejs\\node.exe' // Object.is equality | AssertionError: expected 'npx' to be 'C:\\Program Files\\nodejs\\node.exe' // Object.is equality |  Test Files  1 failed | 1 passed (2) |       Tests  3 failed | 34 passed (37)",
-      "baseTail": "AssertionError: expected false to be true // Object.is equality | AssertionError: expected false to be true // Object.is equality |  Test Files  2 failed (2) |       Tests  9 failed | 24 passed (33)"
+      "fixTail": "AssertionError: expected 'npx' to be '/home/bosch/.local/share/fnm/node-ver…' // Object.is equality | AssertionError: expected 'npx' to be '/home/bosch/.local/share/fnm/node-ver…' // Object.is equality |  Test Files  1 failed | 1 passed (2) |       Tests  2 failed | 35 passed (37)",
+      "baseTail": "AssertionError: expected false to be true // Object.is equality | AssertionError: expected false to be true // Object.is equality |  Test Files  2 failed (2) |       Tests  8 failed | 25 passed (33)"
     },
-    "e14ce6c": {
-      "commit": "e14ce6c5e9665cb86737837f684728e5c1e95b0f",
-      "parent": "a115156bf04b61495bb2aa598e558883e9adea20",
+    "44107cd": {
+      "commit": "44107cdfde561f2070543eb0c84bc108ad382803",
+      "parent": "733c36d08a7171b92a9ada19d92c0f514abfa4ea",
       "subject": "fix(extension): auto-repair stale mcp-launcher paths on activate",
       "kind": "complex",
       "src": [
@@ -607,14 +777,14 @@
       "tests": [
         "tests/m-stale-mcp-launcher-repair.test.ts"
       ],
-      "passAtFix": false,
+      "passAtFix": true,
       "failAtBaseWithOverlay": true,
-      "fixTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected 'node' to be '/usr/bin/node' // Object.is equality |  Test Files  1 failed (1) |       Tests  1 failed | 3 passed (4)",
+      "fixTail": " Test Files  1 passed (1) |       Tests  4 passed (4)",
       "baseTail": "TypeError: (0 , repairStaleGraphFlowMcpLaunchers) is not a function | TypeError: (0 , repairStaleGraphFlowMcpLaunchers) is not a function |  Test Files  1 failed (1) |       Tests  4 failed (4)"
     },
-    "f0baa51": {
-      "commit": "f0baa513ed98373f989ed4adb8c8a1cab993cdc6",
-      "parent": "9dcd1d0fa5a81e5664f086f0596055b19a199200",
+    "4d6ddaa": {
+      "commit": "4d6ddaa01c6f8f3f93050c5f68a277bfb711f0a6",
+      "parent": "a4988a337544753166139b5e6f4625b7ba8856f6",
       "subject": "fix: uninstall clears MCP, skills, rules, and hooks together",
       "kind": "complex",
       "src": [
@@ -632,9 +802,9 @@
       "fixTail": " Test Files  1 passed (1) |       Tests  5 passed (5)",
       "baseTail": "TypeError: (0 , removeGraphFlowOwnedFile) is not a function | TypeError: (0 , uninstallAllSkillsAndRules) is not a function |  Test Files  1 failed (1) |       Tests  3 failed | 2 passed (5)"
     },
-    "5146dc2": {
-      "commit": "5146dc2cb015878788b8cd91bdba7dec9abb4213",
-      "parent": "721f354cdbe3bbdd55c76d01939e5513511d2956",
+    "9f6947f": {
+      "commit": "9f6947f76022a8f35a0308a440aae3fc5fd1b294",
+      "parent": "7be8b09b421c25145a28429ab3070f5a48cd6a8e",
       "subject": "fix(ci): cross-platform test fixes (shallow clone + Windows paths + close passthrough)",
       "kind": "regular",
       "src": [
@@ -648,9 +818,9 @@
       "fixTail": " Test Files  1 passed (1) |       Tests  12 passed (12)",
       "baseTail": " Test Files  1 passed (1) |       Tests  12 passed (12)"
     },
-    "478962d": {
-      "commit": "478962d7f601105461b8f5eea7a01ecb9a1d32ac",
-      "parent": "7206775ad7c97e51e2651e0d37226cf5519aa235",
+    "bcddb1e": {
+      "commit": "bcddb1e5f6d4855273d2b5d22022e5a3d867f79a",
+      "parent": "fd7cace5c79116b9563c6c48cc54ac4127af83c0",
       "subject": "fix(plan): keep analytical colon-lists as one intent",
       "kind": "regular",
       "src": [
@@ -664,11 +834,11 @@
       "passAtFix": true,
       "failAtBaseWithOverlay": true,
       "fixTail": " Test Files  1 passed (1) |       Tests  4 passed (4)",
-      "baseTail": " Test Files  1 failed (1) |       Tests  1 failed | 3 passed (4) | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected [ { id: 'task-1', …(5) }, …(4) ] to have a length of 3 but got 5"
+      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected [ { id: 'task-1', …(5) }, …(4) ] to have a length of 3 but got 5 |  Test Files  1 failed (1) |       Tests  1 failed | 3 passed (4)"
     },
-    "f9cc7eb": {
-      "commit": "f9cc7ebc51bda6f54203a38f2ea1918c608282d4",
-      "parent": "5bc11cf5ea5a2f40851e5b10fa748612369d2914",
+    "c4cc659": {
+      "commit": "c4cc6590ed9bc00f9187c642ab2eb796d59a70de",
+      "parent": "c6a27a79a9e145246af96b8fbfb182885d9d8d18",
       "subject": "fix(mcp): stop treating home as workspace after install",
       "kind": "complex",
       "src": [
@@ -683,11 +853,11 @@
       "passAtFix": true,
       "failAtBaseWithOverlay": true,
       "fixTail": " Test Files  2 passed (2) |       Tests  14 passed (14)",
-      "baseTail": "AssertionError: expected undefined to be 'C:\\Users\\roarp\\AppData\\Local\\Temp\\eff…' // Object.is equality | AssertionError: expected undefined to be '${workspaceFolder}' // Object.is equality |  Test Files  2 failed (2) |       Tests  5 failed | 9 passed (14)"
+      "baseTail": "AssertionError: expected undefined to be '/tmp/eff-calibration/wt-2/tmp/m75-mul…' // Object.is equality | AssertionError: expected undefined to be '${workspaceFolder}' // Object.is equality |  Test Files  2 failed (2) |       Tests  6 failed | 8 passed (14)"
     },
-    "5bc11cf": {
-      "commit": "5bc11cf5ea5a2f40851e5b10fa748612369d2914",
-      "parent": "b5bdb534cc41674f097bcef597abc2aff3006356",
+    "c6a27a7": {
+      "commit": "c6a27a79a9e145246af96b8fbfb182885d9d8d18",
+      "parent": "749cdc3038bf7aa187610053f45a87ea5535df12",
       "subject": "fix(cli): make install --json emit structured self-check report",
       "kind": "regular",
       "src": [
@@ -703,9 +873,9 @@
       "fixTail": " Test Files  1 passed (1) |       Tests  3 passed (3)",
       "baseTail": "TypeError: (0 , buildInstallReport) is not a function | TypeError: (0 , buildInstallReport) is not a function |  Test Files  1 failed (1) |       Tests  3 failed (3)"
     },
-    "aab39a3": {
-      "commit": "aab39a351dbd66356799782191818e03f5d3513e",
-      "parent": "2023c2a52ca5aafbc15055297115276ac1dce20c",
+    "031a71a": {
+      "commit": "031a71ad1fa9fe18784fa0f4cadde0fffeac1eef",
+      "parent": "659a94b22a8ca6756760820874c54bf1def8c353",
       "subject": "fix(cli): make doctor --json emit install self-check report",
       "kind": "regular",
       "src": [
@@ -720,9 +890,9 @@
       "fixTail": " Test Files  1 passed (1) |       Tests  3 passed (3)",
       "baseTail": "TypeError: (0 , buildDoctorReport) is not a function | TypeError: (0 , buildDoctorReport) is not a function |  Test Files  1 failed (1) |       Tests  2 failed | 1 passed (3)"
     },
-    "db34e82": {
-      "commit": "db34e82efc5c3b907db19be248047f77e7cd560b",
-      "parent": "da000fe39f8858baac0ee584a7668ba7c905a475",
+    "116604e": {
+      "commit": "116604ebf26b335eaa255a75e50ac71a0f99bebe",
+      "parent": "21f243b83dc5d40703c1f886d8b77e8bc9bed30f",
       "subject": "fix: avoid diversify collapsing pathless synthetic symbols",
       "kind": "regular",
       "src": [
@@ -736,9 +906,9 @@
       "fixTail": " Test Files  1 passed (1) |       Tests  5 passed (5)",
       "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected 2 to be 10 // Object.is equality |  Test Files  1 failed (1) |       Tests  1 failed | 4 passed (5)"
     },
-    "fc6430b": {
-      "commit": "fc6430b8b3437fd21530a507ad8bab3e8662bf3d",
-      "parent": "68c67dc6df65b1217ef0df98c723507d062c2be2",
+    "3fad035": {
+      "commit": "3fad035c9042926abfb2e303ead30336101079f0",
+      "parent": "5ca974232f2abdecefa4149eaeac14dc80bc2351",
       "subject": "fix: painless Windows MCP path repair on activate and unblock CI",
       "kind": "complex",
       "src": [
@@ -752,45 +922,13 @@
         "tests/m63-agents-install.test.ts"
       ],
       "passAtFix": true,
-      "failAtBaseWithOverlay": true,
+      "failAtBaseWithOverlay": false,
       "fixTail": " Test Files  1 passed (1) |       Tests  8 passed (8)",
-      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | TypeError: repairUnsafeWindowsMcpCommands is not a function |  Test Files  1 failed (1) |       Tests  1 failed | 7 passed (8)"
+      "baseTail": " Test Files  1 passed (1) |       Tests  8 passed (8)"
     },
-    "4261a24": {
-      "commit": "4261a24d04e2e0b9eb79cd16a6a14bed34adc3e5",
-      "parent": "94035de82b8c767f5d129f2925596d0ee6ce42e5",
-      "subject": "fix: write Trae-safe space-free MCP command paths at install time",
-      "kind": "regular",
-      "src": [
-        "src/integrations/agent-mcp-installer.ts"
-      ],
-      "tests": [
-        "tests/m63-agents-install.test.ts"
-      ],
-      "passAtFix": true,
-      "failAtBaseWithOverlay": true,
-      "fixTail": " Test Files  1 passed (1) |       Tests  7 passed (7)",
-      "baseTail": "AssertionError: expected 'C:\\Program Files\\nodejs\\node.exe' not to match /\\s/ | TypeError: sanitizeMcpServerNodeForWindowsClients is not a function |  Test Files  1 failed (1) |       Tests  2 failed | 5 passed (7)"
-    },
-    "cd7778f": {
-      "commit": "cd7778fbc7ae097d981f88bd5dad12b153f48c5d",
-      "parent": "e9362753dce571198c09ef720a1e99692b1e37c2",
-      "subject": "fix: merge DAG abort signals and wait on pause before batches",
-      "kind": "regular",
-      "src": [
-        "src/core/dag-engine.ts"
-      ],
-      "tests": [
-        "tests/m71-runtime-controller.test.ts"
-      ],
-      "passAtFix": true,
-      "failAtBaseWithOverlay": true,
-      "fixTail": " Test Files  1 passed (1) |       Tests  3 passed (3)",
-      "baseTail": " Test Files  1 failed (1) |       Tests  1 failed | 2 passed (3) | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected false to be true // Object.is equality"
-    },
-    "32cd008": {
-      "commit": "32cd0081f8852a22acfa8f4a8fd793aee581ddc9",
-      "parent": "1f917bf2936a3f0ccee86ee368b8501d3c5fce31",
+    "65728fb": {
+      "commit": "65728fb8632d0a71f7c76be9d94275f7b2dd3b3a",
+      "parent": "fa8697afecc8b1018e1322046471b32c5f011820",
       "subject": "fix: harden MCP workspace safety and agent-bridge insight protocol",
       "kind": "complex",
       "src": [
@@ -810,9 +948,9 @@
       "fixTail": " Test Files  1 passed (1) |       Tests  4 passed (4)",
       "baseTail": "AssertionError: expected undefined to be true // Object.is equality | AssertionError: expected undefined to be true // Object.is equality |  Test Files  1 failed (1) |       Tests  2 failed | 2 passed (4)"
     },
-    "e04b1db": {
-      "commit": "e04b1dbfe11eb26be4f9b5247ca9531b50c01216",
-      "parent": "23602f7c5e260524d54f4aac5e48711601a3bb68",
+    "e7e7e9c": {
+      "commit": "e7e7e9ce2fd0bf69d7a25bdfd3c33de38bbc60ac",
+      "parent": "48c5dd935673d6b0772099faecdaff2dda791d7f",
       "subject": "fix(ci): unblock v1.3.4 publish on Linux runners",
       "kind": "regular",
       "src": [
@@ -826,11 +964,11 @@
       "passAtFix": true,
       "failAtBaseWithOverlay": true,
       "fixTail": " Test Files  3 passed (3) |       Tests  19 passed (19)",
-      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected 'C:\\Users\\roarp\\AppData\\Local\\Temp\\eff…' to be 'C:\\Users\\roarp\\AppData\\Local\\Temp\\gra…' // Object.is equality |  Test Files  1 failed | 2 passed (3) |       Tests  1 failed | 18 passed (19)"
+      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected '/tmp/eff-calibration/wt-5/graphflow-o…' to be '/tmp/graphflow-m49-project-b-17919659…' // Object.is equality |  Test Files  1 failed | 2 passed (3) |       Tests  1 failed | 18 passed (19)"
     },
-    "23602f7": {
-      "commit": "23602f7c5e260524d54f4aac5e48711601a3bb68",
-      "parent": "da4327042e9e559d2667bf29cf1ccd3cea47cfca",
+    "48c5dd9": {
+      "commit": "48c5dd935673d6b0772099faecdaff2dda791d7f",
+      "parent": "8b7cdfbc99ee2dbd6ae1e242734ce93b1e8cee96",
       "subject": "fix(mcp): prevent EPERM when workspace resolves to AppData Local on Windows",
       "kind": "complex",
       "src": [
@@ -844,14 +982,14 @@
         "tests/m50-discover-workspace.test.ts",
         "tests/m60-safe-fs-workspace.test.ts"
       ],
-      "passAtFix": true,
+      "passAtFix": false,
       "failAtBaseWithOverlay": true,
-      "fixTail": " Test Files  2 passed (2) |       Tests  16 passed (16)",
-      "baseTail": "Error: Cannot find module '../src/utils/safe-fs' imported from 'C:/Users/roarp/AppData/Local/Temp/eff-calibration/wt-1/tests/m60-safe-fs-workspace.test.ts' | Caused by: Error: Failed to load url ../src/utils/safe-fs (resolved id: ../src/utils/safe-fs) in C:/Users/roarp/AppData/Local/Temp/eff-calibration/wt-1/tests/m60-safe-fs-workspace.test.ts. Does the file exist? | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | TypeError: (0 , isUnsafeWorkspaceFallback) is not a function"
+      "fixTail": "AssertionError: expected undefined to be truthy | AssertionError: expected undefined to be truthy |  Test Files  2 failed (2) |       Tests  5 failed | 11 passed (16)",
+      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected undefined to be truthy |  Test Files  2 failed (2) |       Tests  1 failed | 6 passed (7)"
     },
-    "72a3b58": {
-      "commit": "72a3b58796a621dde38ba04484b546487fa57659",
-      "parent": "d67492b188cb764cb099c8f4361bd36e3fac6363",
+    "93663ed": {
+      "commit": "93663ed7c77cacb8ebe9127f23c8f30d15e93fe0",
+      "parent": "79ec4125add700bd50d1612af3908d4c4cbc757e",
       "subject": "fix: MCP installer Windows path bug and workspace root fallback",
       "kind": "complex",
       "src": [
@@ -861,14 +999,14 @@
       "tests": [
         "tests/m17-agent-mcp-installer.test.ts"
       ],
-      "passAtFix": false,
+      "passAtFix": true,
       "failAtBaseWithOverlay": true,
-      "fixTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | Error: ENOENT: no such file or directory, open 'C:\\Users\\roarp\\AppData\\Local\\Temp\\graphflow-trae-cn-home-1790834383030-ada101d1e6153\\.config\\Trae CN\\User\\mcp.json' |  Test Files  1 failed (1) |       Tests  1 failed | 7 passed (8)",
-      "baseTail": "AssertionError: expected '${workspaceFolder}' to be undefined | Error: ENOENT: no such file or directory, open 'C:\\Users\\roarp\\AppData\\Local\\Temp\\graphflow-trae-cn-home-1790834401735-d55c40f9c30f1\\.config\\Trae CN\\User\\mcp.json' |  Test Files  1 failed (1) |       Tests  2 failed | 6 passed (8)"
+      "fixTail": " Test Files  1 passed (1) |       Tests  8 passed (8)",
+      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected '${workspaceFolder}' to be undefined |  Test Files  1 failed (1) |       Tests  1 failed | 7 passed (8)"
     },
-    "4421b02": {
-      "commit": "4421b02dea22b12023b5c4391e03599789a0a7ae",
-      "parent": "552c26af9b2c9cd7c74754a0e10fa2a3b0d64ed0",
+    "755731f": {
+      "commit": "755731f9b79277e87d28ea566131dcfcd47c6d4e",
+      "parent": "d494fe682c2b4efab354dfa89a0905a441ff586b",
       "subject": "fix(mcp): repair auto-registration failure after plugin install (v1.0.4)",
       "kind": "regular",
       "src": [
@@ -877,14 +1015,14 @@
       "tests": [
         "tests/m17-agent-mcp-installer.test.ts"
       ],
-      "passAtFix": false,
+      "passAtFix": true,
       "failAtBaseWithOverlay": true,
-      "fixTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | Error: ENOENT: no such file or directory, open 'C:\\Users\\roarp\\AppData\\Local\\Temp\\graphflow-trae-cn-home-1790834400747-fcb6f9e950596\\.config\\Trae CN\\User\\mcp.json' |  Test Files  1 failed (1) |       Tests  1 failed | 7 passed (8)",
-      "baseTail": "AssertionError: expected '1' to be undefined | Error: ENOENT: no such file or directory, open 'C:\\Users\\roarp\\AppData\\Local\\Temp\\graphflow-trae-cn-home-1790834411061-614851e759989\\.config\\Trae CN\\User\\mcp.json' |  Test Files  1 failed (1) |       Tests  2 failed | 6 passed (8)"
+      "fixTail": " Test Files  1 passed (1) |       Tests  8 passed (8)",
+      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected '/home/bosch/.local/share/fnm/node-ver…' to be '/usr/bin/node' // Object.is equality |  Test Files  1 failed (1) |       Tests  1 failed | 7 passed (8)"
     },
-    "976ce2a": {
-      "commit": "976ce2a171fa34c3085c408712007a0a2b4c95e3",
-      "parent": "eff7777931622b86493f4e5b18e9f4bada6a7b01",
+    "9afb17f": {
+      "commit": "9afb17fdd2ec53177f29eda09bae2315d2c82546",
+      "parent": "14ad35ca4d3ac3fb48b6d06dd3338e2af1f83b92",
       "subject": "fix(ci): repair v1.0.2 build and harden graph context pipeline (v1.0.3)",
       "kind": "complex",
       "src": [
@@ -898,14 +1036,14 @@
         "tests/m17-agent-mcp-installer.test.ts",
         "tests/m51-graph-store-ranking.test.ts"
       ],
-      "passAtFix": false,
+      "passAtFix": true,
       "failAtBaseWithOverlay": true,
-      "fixTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | Error: ENOENT: no such file or directory, open 'C:\\Users\\roarp\\AppData\\Local\\Temp\\graphflow-trae-cn-home-1790834399412-5e127cfd105e5\\.config\\Trae CN\\User\\mcp.json' |  Test Files  1 failed | 1 passed (2) |       Tests  1 failed | 10 passed (11)",
-      "baseTail": "SyntaxError: Expected double-quoted property name in JSON at position 19 (line 3 column 3) | TypeError: (0 , rankNodesForContextQuery) is not a function |  Test Files  2 failed (2) |       Tests  3 failed | 8 passed (11)"
+      "fixTail": " Test Files  2 passed (2) |       Tests  11 passed (11)",
+      "baseTail": "SyntaxError: Expected double-quoted property name in JSON at position 19 (line 3 column 3) | TypeError: (0 , rankNodesForContextQuery) is not a function |  Test Files  1 failed | 1 passed (2) |       Tests  2 failed | 9 passed (11)"
     },
-    "eff7777": {
-      "commit": "eff7777931622b86493f4e5b18e9f4bada6a7b01",
-      "parent": "8ad7683bb41aa977c31c595984b7f26356fa3cda",
+    "14ad35c": {
+      "commit": "14ad35ca4d3ac3fb48b6d06dd3338e2af1f83b92",
+      "parent": "b24ba0e47a3e0e9e41410aa68de768dc8c10b8eb",
       "subject": "fix(mcp): avoid stale fnm node paths and support Trae CN (v1.0.2)",
       "kind": "regular",
       "src": [
@@ -914,14 +1052,14 @@
       "tests": [
         "tests/m17-agent-mcp-installer.test.ts"
       ],
-      "passAtFix": false,
+      "passAtFix": true,
       "failAtBaseWithOverlay": true,
-      "fixTail": "AssertionError: expected 'C:\\Program Files\\nodejs\\node.exe' to be '/usr/bin/node' // Object.is equality | Error: ENOENT: no such file or directory, open 'C:\\Users\\roarp\\AppData\\Local\\Temp\\graphflow-trae-cn-home-1790834412500-116126b0f0c5\\.config\\Trae CN\\User\\mcp.json' |  Test Files  1 failed (1) |       Tests  2 failed | 6 passed (8)",
-      "baseTail": "AssertionError: expected '/run/user/1000/fnm_multishells/202671…' to be 'C:\\Program Files\\nodejs\\node.exe' // Object.is equality | TypeError: .toMatch() expects to receive a string, but got undefined |  Test Files  1 failed (1) |       Tests  2 failed | 6 passed (8)"
+      "fixTail": " Test Files  1 passed (1) |       Tests  8 passed (8)",
+      "baseTail": "AssertionError: expected '/run/user/1000/fnm_multishells/202671…' to be '/home/bosch/.local/share/fnm/node-ver…' // Object.is equality | TypeError: .toMatch() expects to receive a string, but got undefined |  Test Files  1 failed (1) |       Tests  2 failed | 6 passed (8)"
     },
-    "8ad7683": {
-      "commit": "8ad7683bb41aa977c31c595984b7f26356fa3cda",
-      "parent": "6e023c002923f7fe499016fa6d74b2d8922e8cfd",
+    "b24ba0e": {
+      "commit": "b24ba0e47a3e0e9e41410aa68de768dc8c10b8eb",
+      "parent": "24bed1c2bff2a887244203010330d51ec3d0955b",
       "subject": "fix(mcp): auto-discover workspace for extension and npm users (v1.0.1)",
       "kind": "complex",
       "src": [
@@ -940,9 +1078,9 @@
       "fixTail": " Test Files  2 passed (2) |       Tests  12 passed (12)",
       "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected { GRAPHFLOW_MCP_STDIO: '1', …(1) } to match object { …(3) } |  Test Files  2 failed (2) |       Tests  1 failed | 5 passed (6)"
     },
-    "64e54e5": {
-      "commit": "64e54e5436598bacb2ce9fdd2a6648bc851ee963",
-      "parent": "64dc643813863a60cd52cdb8e5ad974cd7a62486",
+    "7d951aa": {
+      "commit": "7d951aac058610dcbe676e7bb859e3745141ae62",
+      "parent": "1f6bf2092acdc6be4b421cc5ac4eba9bee614807",
       "subject": "fix(config): isolate graph store per project workspace",
       "kind": "complex",
       "src": [
@@ -959,7 +1097,7 @@
       "passAtFix": true,
       "failAtBaseWithOverlay": true,
       "fixTail": " Test Files  1 passed (1) |       Tests  3 passed (3)",
-      "baseTail": "AssertionError: expected 'C:\\Users\\roarp\\AppData\\Local\\Temp\\gra…' to be undefined | AssertionError: expected 'C:\\Users\\roarp\\AppData\\Local\\Temp\\gra…' to be 'C:\\Users\\roarp\\AppData\\Local\\Temp\\gra…' // Object.is equality |  Test Files  1 failed (1) |       Tests  3 failed (3)"
+      "baseTail": "AssertionError: expected '/tmp/graphflow-m49-save-workspace-179…' to be undefined | AssertionError: expected '/tmp/graphflow-m49-env-other-17919659…' to be '/tmp/graphflow-m49-env-project-179196…' // Object.is equality |  Test Files  1 failed (1) |       Tests  3 failed (3)"
     },
     "789ebda": {
       "commit": "789ebda22752c3f288480eaeb5d47f908683bb7c",
@@ -973,10 +1111,10 @@
       "tests": [
         "tests/m17-agent-mcp-installer.test.ts"
       ],
-      "passAtFix": true,
+      "passAtFix": false,
       "failAtBaseWithOverlay": true,
-      "fixTail": " Test Files  1 passed (1) |       Tests  3 passed (3)",
-      "baseTail": " Test Files  1 failed (1) |       Tests  1 failed | 2 passed (3) | ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected '/usr/bin/node' to be 'C:\\ext\\mcp-launcher.cmd' // Object.is equality"
+      "fixTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected '/usr/bin/node' to be 'C:\\ext\\mcp-launcher.cmd' // Object.is equality |  Test Files  1 failed (1) |       Tests  1 failed | 2 passed (3)",
+      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected '/usr/bin/node' to be 'C:\\ext\\mcp-launcher.cmd' // Object.is equality |  Test Files  1 failed (1) |       Tests  1 failed | 2 passed (3)"
     },
     "4bde0e7": {
       "commit": "4bde0e7fe033aeac925569e9ad62138990286b61",
@@ -998,7 +1136,7 @@
       "passAtFix": true,
       "failAtBaseWithOverlay": true,
       "fixTail": " Test Files  2 passed (2) |       Tests  5 passed (5)",
-      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected 'C:\\Program Files\\nodejs\\node.exe' to be '/usr/bin/node' // Object.is equality |  Test Files  2 failed (2) |       Tests  1 failed | 2 passed (3)"
+      "baseTail": "⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯ | AssertionError: expected '/home/bosch/.local/share/fnm/node-ver…' to be '/usr/bin/node' // Object.is equality |  Test Files  2 failed (2) |       Tests  1 failed | 2 passed (3)"
     },
     "886a5c4": {
       "commit": "886a5c4ce3c88529caf938d7aab69095fd16b5bc",

@@ -1,3 +1,4 @@
+import { V3_TOOL_DEFINITIONS } from "../../v3/mcp-tools";
 /** MCP ToolAnnotations (spec 2025-06-18+). Hints only — clients must not treat them as enforcement. */
 export interface ToolAnnotations {
   title: string;
@@ -208,7 +209,18 @@ const TOOL_GOVERNANCE: Record<string, ToolGovernance> = {
   },
 };
 
-export function getToolDefinitions(): ToolDefinition[] {
+export function getV3ToolDefinitions(): ToolDefinition[] {
+  return V3_TOOL_DEFINITIONS.map((t) => ({
+    ...t,
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+  }));
+}
+
+export function getToolDefinitions(options?: { profile?: "v3" | "legacy" | "all" }): ToolDefinition[] {
+  const profile = options?.profile ?? (process.env.GRAPHFLOW_MCP_PROFILE === "v3" ? "v3" : undefined);
+  if (profile === "v3") {
+    return getV3ToolDefinitions();
+  }
   const tools: Array<Omit<ToolDefinition, "$schema">> = [
     {
       name: "graphflow_run",
@@ -474,7 +486,7 @@ export function getToolDefinitions(): ToolDefinition[] {
       },
     },
   ];
-  return tools.map((tool) => {
+  const mapped = tools.map((tool) => {
     const governance = TOOL_GOVERNANCE[tool.name];
     return {
       ...tool,
@@ -494,4 +506,8 @@ export function getToolDefinitions(): ToolDefinition[] {
         : {}),
     };
   });
+  if (profile === "all") {
+    return [...getV3ToolDefinitions(), ...mapped];
+  }
+  return mapped;
 }

@@ -6,505 +6,74 @@ English | [中文](README.zh.md)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-dsh--plugin-4D6BFE?labelColor=1f2430)](https://github.com/topics/dsh-plugin)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-6E56CF)](https://modelcontextprotocol.io)
 
-> **The memory & context harness for coding agents.** Local-first code knowledge graph · bounded context compression (truly bounded responses: the package plus history echoes, which ship as short previews only; 92.2% fewer tokens than reading the top-10 files in full — a token ratio, not an answer-quality measure, see [both baseline arms](benchmarks/RESULTS.md)) · cross-session learning flywheel.
+> **The Token-First Surgical Code Engine for AI Coding Agents.**
+> First-class AST slicing across **TypeScript/JS, Python, C/C++, C#, Rust, and Go** · AST Skeleton Folding (93% fewer tokens than raw file reads) · Cross-repo Blast-Radius call-site micro-snippets, batch atomic edits & zero-LLM symbol rename · Terminal output dehydrator (99% fewer test log tokens) · Host `PreToolUse` / `PostToolUse` transparent token-guard interceptor · Habit memory & trajectory auto-macros.
 
-The community is converging on an "agent harness" vocabulary: **memory + hooks + skills** are the harness primitives that turn a stateless model into a reliable long-running agent. GraphFlow implements all three for coding agents and ships them through a portable MCP surface (Cursor, Claude Code, 15+ agents):
+GraphFlow is designed around **Four Token-First Principles**:
 
-| Harness primitive | GraphFlow implementation |
-| --- | --- |
-| **Memory** | Code graph (13 tree-sitter grammar languages incl. C/C++, PHP, C#, Scala; TypeScript/JavaScript via the TypeScript compiler — optional dependency, falls back to regex extraction with reduced symbol detail when absent; plus regex-based Markdown) + Episodic / Skill / Decision nodes — project knowledge *and* project experience persist across sessions |
-| **Hooks** | Outcome auto-capture (on by default) + Claude Code `SessionEnd` / `Stop` and DeepSeek Harness `agent/disposed` glue close the learning loop automatically — no manual outcome reporting required |
-| **Skills** | A four-class flywheel (`proven` / `correctable` / `anti-pattern` / `noise`) with canary validation — skills are promoted by evidence, not by assertion |
+1. **Precise Context Feeding (`gf_read`)**: First-class AST skeleton folding across **TS/JS, Python, C/C++, C#, Rust, and Go** (collapses non-target function bodies with exact 1-based line numbers) + verbatim target symbol declaration + automatic cross-file Type Closure + Co-Edit habit hints.
+2. **Surgical Modification (`gf_edit`)**: Automatically attaches 3-line cross-repo call-site micro-snippets (`[Blast Radius]`) so agents can update definitions and callers in 1 turn; supports single or **batch atomic edits** (`edits: [...]` applied bottom-up with zero line drift), **zero-LLM cross-repo symbol rename** (`renameTo`), and instant AST syntax & caller-arity verification.
+3. **Deterministic Tool Execution (`gf_exec`)**: Multi-language 2-hop Diff-to-Test router detects affected test files from `git diff` in <15ms (`vitest`, `pytest`, `go test`, `cargo test`, `dotnet test`); output dehydrator compresses passing suites to a 1-line `PASS` receipt (28 tokens) and isolates exact assertion failures with inlined source context.
+4. **Habit Memory & Auto-Macros (`gf_macro` + Host Interceptor)**: Records action trajectories to learn **parameterized command templates** (`{{arg1}}`), **co-edit file pairs**, **directory auto-verify hooks**, and standalone `.graphflow/macros/*.mjs` scripts. Includes `PreToolUse` / `PostToolUse` host hooks that automatically fold raw `Read` calls on large files (>250 lines) and dehydrate verbose `Bash` outputs.
 
-Pure TypeScript/Node. CLI + MCP + VS Code extension. Local-first: indexing, compression and recall need no API key; the default semantic-embedding backend downloads its model from huggingface.co once (on failure it degrades to a fully offline hash backend; set `embeddingProvider: "fnv"` to never touch the network).
+## Real Repository Benchmark Results
 
-## Why a harness, not another RAG
+Measured across 5 real engineering tasks on this repository (see `benchmarks/run-v3-token-comparison.ts`):
 
-Most "memory" products are either **static injection** (load `CLAUDE.md` / rules files in full on every session) or **plain RAG** (retrieve chunks, no learning). Both fail in long-lived projects:
+| Metric | Legacy / Raw Approach | GraphFlow 3.0 | Tokens Saved | Reduction |
+| :--- | ---: | ---: | ---: | ---: |
+| **Per-Turn MCP Tool Schema Tax** | 5,897 Tokens / turn (10 tools) | **444 Tokens** / turn (4 surgical tools) | -5,453 Tokens | **-92%** |
+| **Cursor Rule / Instruction Prefix** | 1,899 Tokens (152 lines) | **349 Tokens** (22 lines) | -1,550 Tokens | **-82%** |
+| **SKILL.md Documentation** | 7,470 Tokens (717 lines) | **671 Tokens** (42 lines) | -6,799 Tokens | **-91%** |
+| **5 Real Task Code Contexts** | 132,294 Tokens (raw file reads) | **9,474 Tokens** (`gf_read` surgical slices) | -122,820 Tokens | **-93%** |
+| **Full Test Suite Passing Output** | 2,114 Tokens (8.8KB log) | **28 Tokens** (1-line `PASS` receipt) | -2,086 Tokens | **-99%** |
 
-- Static injection pays the same token cost every session regardless of the task, and grows until it is truncated or ignored.
-- Plain RAG retrieves text but never accumulates *experience* — the thousandth task pays the same cost as the first.
+## Supported Languages (First-Class AST Slicing & Static Guard)
 
-GraphFlow is a harness: **memory is dynamic and typed**. Each request retrieves only what the current decision needs — graph anchors, compressed summaries, similar past episodes, applicable skills — under an explicit token budget (L0–L3 layered compression; measured against a realistic top-K-files read, see [benchmarks/RESULTS.md](benchmarks/RESULTS.md)). What the agent learns (outcomes, lessons, skills) is written back through hooks, so the harness gets better with use.
+| Language | Extensions | AST Capabilities |
+| :--- | :--- | :--- |
+| **TypeScript / JavaScript** | `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs` | `@babel/parser` AST, interfaces/types/enums, imports, call sites, syntax & arity guard |
+| **Python** | `.py`, `.pyi` | Indentation-scoped `def`/`async def`/`class`, `@dataclass`/`TypedDict` closure, `# [lines X-Y folded]` |
+| **C / C++** | `.c`, `.h`, `.cc`, `.cpp`, `.hpp`, `.cxx`, `.hxx` | Functions, `class`/`struct`/`enum`, `#include` header type closure, call sites, brace balance guard |
+| **C#** | `.cs` | `namespace`, `class`/`interface`/`struct`/`record`/`enum`, methods, `using`, call sites |
+| **Rust** | `.rs` | `pub fn`, `impl` methods, `struct`/`enum`/`trait`, `use crate::...` type closure, call sites |
+| **Go** | `.go` | `func` & receiver methods, `type ... struct/interface`, same-package & imported type closure |
 
-It is also **local-first and portable**: everything runs with no API key (the default semantic-embedding backend downloads its model from huggingface.co once and degrades to a fully offline hash backend on failure), and the whole surface is exposed over MCP, so the same memory travels across agents instead of being locked into one vendor's format.
+## Four Surgical MCP Tools
 
-## Proof, not promises
+| Tool | Purpose | Key Arguments | Example |
+| :--- | :--- | :--- | :--- |
+| `gf_read` | Surgical code reading, AST skeleton view, or symbol search | `targets?: string[]`, `q?: string`, `topK?: number`, `skeleton?: boolean` | `gf_read({ targets: ["src/config/resolve.ts#resolveEfficiencyPolicy"] })` |
+| `gf_edit` | Single/batch symbol or line edit, or cross-repo rename | `file: string`, `symbol?: string`, `newCode?: string`, `edits?: [...]`, `renameTo?: string` | `gf_edit({ file: "src/foo.ts", symbol: "oldFn", renameTo: "newFn" })` |
+| `gf_exec` | Run affected tests or commands with output dehydration | `cmd?: string`, `changedFiles?: string[]`, `handle?: string` | `gf_exec({ cmd: "affected-tests" })` |
+| `gf_macro` | List, run, save, or mine auto-compiled macros & habits | `action: "list" \| "run" \| "save" \| "mine"`, `id?: string`, `args?: string[]` | `gf_macro({ action: "run", id: "tpl_91ab2c", args: ["src/foo.ts"] })` |
 
-**Third-party reproduction entry:** `npm run proof:flywheel` — one command, offline, no API key. Guide: [docs/flywheel-reproduction.md](docs/flywheel-reproduction.md). Independent runs are welcome; open a GitHub issue titled `[benchmark] Independent reproduction — <commit>`.
+## Quick Start
 
-All numbers below come from a **public, reproducible benchmark suite** ([benchmarks/README.md](benchmarks/README.md)) with published methodology ([docs/benchmark-standards.md](docs/benchmark-standards.md)) and machine-readable JSON dumps pinned to commits. They are **author-run self-tests on this repository**, not independent evaluations; the caveats next to each number are part of the claim.
-
-What has been checked and holds up:
-
-- **Real ASTs**: 13 code languages are parsed with real tree-sitter grammars (incl. C/C++, PHP, C#, Scala); TypeScript/JavaScript go through the TypeScript compiler (optional dependency; falls back to regex extraction with reduced symbol detail when absent); Markdown is regex-based.
-- **Deterministic**: indexing and context packaging produce byte-identical output across repeat runs.
-- **Local-first**: indexing, compression and recall need no API key; the default semantic-embedding backend downloads its model from huggingface.co once (fails down to a fully offline hash backend; set `embeddingProvider: "fnv"` to never touch the network).
-- **Idempotent install**: re-running `install` does not duplicate MCP / skill / rules entries.
-
-Measured, with limits:
-
-- **Token ratio, two arms — quote them separately** (8 queries, re-counted with `gpt-tokenizer`): the compressed package is **92.2%** smaller than reading the same ranker's top-10 anchor files in full (103,135 → 8,092 tokens) and **98.8%** smaller than a naive term-frequency grep of the top-10 files (upper bound by construction). These are **token-count ratios only — not a fidelity or answer-quality measure**; they do not check that the package still contains what is needed to answer. Details and a cheap fidelity proxy: [benchmarks/RESULTS.md](benchmarks/RESULTS.md)
-- **132-query golden retrieval set** gates CI at ≥80% recall / ≥90% top-K; the commit-pinned benchmark (`npm run bench:retrieval`) currently measures Hit@5 = 97.7%, MRR = 0.735, NDCG@5 = 0.466. **Caveat:** the queries were written by the author who also tunes the ranker and there is no held-out split, so this is an in-sample regression gate, not evidence of generalization. Chinese queries mostly need the agent-supplied `englishQuery` (the commit-pinned v2.0.3 held-out audit measured 2/5 Hit@5 on Chinese queries — see `benchmarks/flywheel-proof-claims.json`). Open dataset: [`benchmarks/datasets/retrieval-golden-v1.json`](benchmarks/datasets/retrieval-golden-v1.json) — run `npm run bench:retrieval`
-- **Skill / memory A/B** are **synthetic mechanism tests** on hand-built graphs, not task-success rates. With a held-out split and one identical criterion for both arms, the flywheel shows **no transfer** to unseen tasks (skill: 61.5% on vs 61.5% off, 13 tasks; memory: 58.1% on vs 58.1% off, 31 tasks). The earlier "100% vs 61.5%" and "100% vs 56.5%" figures seeded experience from the answer key and scored the arms differently; they are withdrawn. See [benchmarks/RESULTS.md](benchmarks/RESULTS.md).
-
-Results are commit-anchored so any number above can be checked out and re-run. See [ROADMAP.md](ROADMAP.md) for the open invitation.
-
-## Memory poisoning protection
-
-Shared and synced memory is only useful if it cannot be silently corrupted. Skills merged from external sources (e.g. `skill sync` imports) are **treated as unproven until validated locally**: imported skills carry provenance markers, never enter the `proven` class directly, must pass canary validation on real tasks before promotion, and `anti-pattern` skills are isolated rather than deleted so they can be audited. Promotion is gated by the four-class lifecycle, not by trust in the source. See [docs/team-memory-security.md](docs/team-memory-security.md).
-
-## Install
-
-Three paths. Use one. Package name: `@roarpeng/graphflow`.
-
-### Manual VSIX
-
-Download `graphflow-<version>.vsix` from [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases) (Open VSX id `roarpeng.graphflow`). Replace `<version>` with the file you downloaded.
-
-```bash
-code --install-extension graphflow-<version>.vsix
-cursor --install-extension graphflow-<version>.vsix
-```
-
-Activation registers MCP and copies the runtime to `~/.graphflow/runtime/`. From this repo, `npm run package:extension` writes `artifacts/graphflow-<version>.vsix` (`vscode-extension` runs `npx @vscode/vsce package --no-dependencies`).
-
-### npm
-
+### 1. Global Installation
 ```bash
 npm install -g @roarpeng/graphflow
 ```
 
-A global install's postinstall runs `graphflow install`: MCP, skill, and the instruction block on every detected host, plus dangling-entry repair. Check or repeat it with:
-
-```bash
-npx @roarpeng/graphflow@latest doctor
-npx @roarpeng/graphflow@latest install
-npx @roarpeng/graphflow install --host cursor
-```
-
-`install` leaves undetected hosts untouched. `--host` takes a registry id (`cursor`, `claude-code`, `codex`, …).
-
-### Agent prompt
-
-Paste this to Cursor, Claude Code, Codex, or another coding agent. It only uses the installer above:
-
-```text
-Install @roarpeng/graphflow and configure its MCP server for this agent, then verify it.
-
-1. Run `npm install -g @roarpeng/graphflow`. The global postinstall runs `graphflow install`, which registers MCP, the skill, and the instruction block for every host it detects and repairs dangling entries.
-2. Run `npx @roarpeng/graphflow doctor --json`. If this host is missing, run `npx @roarpeng/graphflow install --host <id>` with the id from that report (`cursor`, `claude-code`, or `codex`) and run doctor again.
-3. It is working when doctor reports ok and this host is not missing. Restart the agent or open a new session so it loads the MCP config.
-```
-
-## Quick start
-
-No API key needed (offline AST indexing + graph compression):
-
-```bash
-# 1. Build the graph offline (AST indexing, no LLM)
-npx @roarpeng/graphflow graph index .
-
-# 2. Preview compressed context (anchors + summaries)
-npx @roarpeng/graphflow context preview "orchestrator" --json
-```
-
-Connect via MCP (Cursor / Claude Code / …):
-
-```json
-{
-  "mcpServers": {
-    "graphflow": {
-      "command": "npx",
-      "args": ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"]
-    }
-  }
-}
-```
-
-The agent calls `graphflow_context` for compressed context, then `graphflow_plan` to plan; without a provider API key GraphFlow automatically bridges the ATP thinking protocol to the host agent (agent-delegated mode). For symbol-precise edits, compose Serena as a second MCP server — [GraphFlow + Serena](docs/graphflow-serena.md) (`examples/graphflow-serena.mcp.json`).
-
-### Web Settings UI (Local Lightweight Service)
-
-In addition to the VS Code extension settings panel, NPM CLI users can launch a local dark-themed configuration dashboard in their browser at any time:
-
-```bash
-graphflow settings      # or: npx graphflow config ui
-```
-
-Quick credential diagnosis from any directory:
-
-```bash
-graphflow llm-check      # winning credential source per provider, env vars consulted, endpoints
-```
-
-* **Universal Protocol Support**: Native `openai-compatible` and `anthropic-compatible` drivers. Configure only `baseUrl` and `model`.
-* **Password-Free Local Deployment**: Automatically recognizes `localhost` / `127.0.0.1` endpoints (Ollama, vLLM, local JEV) without requiring placeholder API keys.
-* **Cascade Env-Key Sniffing**: Automatically matches public domain endpoints to corresponding environment variables (`DEEPSEEK_API_KEY`, `TYPESAFE_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.). Seamlessly falls back to Bridge mode if no credentials are configured.
-
-### GraphFlow 2.x: Agent Efficiency Agent (`eff-agent`)
-
-Elevates token reduction to an independent **Compute Avoidance** decision layer. The package (`packages/efficiency-agent`) is **not published to npm** — `npx eff-agent` will not work. Run it from a clone of this repository (after `npm install`):
-
-```bash
-# Show usage
-npx tsx packages/efficiency-agent/bin/eff-agent.ts --help
-
-# Execute a task through an agent CLI, judged by your own validation command
-npx tsx packages/efficiency-agent/bin/eff-agent.ts run "fix type errors in this module" --worker external --cli-command claude --cli-args "-p" --validation "npm run typecheck"
-
-# Run the 50-task golden corpus on two arms (per-task git worktree, oracle-judged)
-npx tsx packages/efficiency-agent/bin/eff-agent.ts bench run packages/efficiency-agent/benchmarks/golden-v1.jsonl --cli-command claude --cli-args "-p" --arm baseline --output runs/baseline.jsonl
-npx tsx packages/efficiency-agent/bin/eff-agent.ts bench run packages/efficiency-agent/benchmarks/golden-v1.jsonl --cli-command claude --cli-args "-p" --arm adaptive --output runs/adaptive.jsonl
-
-# Provenance-gated A/B comparison; --gate fails unless every §28 acceptance gate passes
-npx tsx packages/efficiency-agent/bin/eff-agent.ts bench compare runs/baseline.jsonl runs/adaptive.jsonl --gate
-```
-
-The first real-provider A/B ([benchmarks/REAL-AB-RESULTS.md](benchmarks/REAL-AB-RESULTS.md)) measured ~47% fewer input tokens on 50 tasks (rerun 2026-10-02 after fixing the baseline retrieval: −54%, paired 95% CI −56.5% to −52.0%), one run per arm, with **answer quality not measured** (success = non-empty reply); treat it as a token-volume observation, not a quality-preserving saving.
-
-## Why GraphFlow
-
-Single-purpose tools each do one thing well; GraphFlow combines graph + compression + planning protocol + learning memory in one place:
-
-| Capability | **GraphFlow** | CodeGraph | Serena | Repomix |
-| --- | --- | --- | --- | --- |
-| Code graph | 13-language tree-sitter AST index + TS/JS via the TypeScript compiler (+ regex Markdown) | more mature | LSP symbols | — |
-| Context compression | layered + graph compression + vector recall | partial | partial | whole-repo dump |
-| Planning protocol | ATP IR + DAG + agent bridge | — | — | — |
-| **Learning memory** | Episodic / Skill / Decision flywheel | — | — | — |
-| Local-first | ✅ | ✅ | ✅ | ✅ |
-| Open protocol | [ATP/IR public spec](docs/atp-ir-spec-v1.md) | — | — | — |
-
-> The differentiator is the **learning flywheel**: graph indexing and token compression are replicable; project-private experience (skills, lessons, decisions) accumulated across sessions is not — it compounds with use. Serena is a complement, not a competitor — see [GraphFlow + Serena: better together](docs/graphflow-serena.md) ([中文](docs/graphflow-serena.zh.md); [comparison](docs/comparison.md)).
-
-## Core capabilities
-
-| Module | Capability |
-| --- | --- |
-| **Planning protocol** | ATP v1.1 (Intent / Requirement / Six Hats / 5-Why / First Principles / Decision Matrix / Planning / Reflection); simple / complex / insight modes; agent-delegated bridge without an LLM; **skill-conditioned DAG** (`skillRefs` / `avoidPatterns` on plan nodes); [ATP/IR public spec v1.1](docs/atp-ir-spec-v1.md) |
-| **Goal alignment** | Goal anchor nodes (intent five-tuple as first-class citizen, original requirement auto-injected); low-confidence clarification gate (no plan below 0.6); runtime alignment-check; deviation classification (misread-requirement / scope-creep / tech-drift); goal version chain + diffs |
-| **Knowledge graph** | AST indexing across 13 tree-sitter grammar languages (incl. C/C++, PHP, C#, Scala) plus TypeScript/JavaScript via the TypeScript compiler (optional dependency; falls back to regex extraction with reduced symbol detail when absent); Markdown is regex-based; File / Module / Symbol + **Concept / Requirement**; cross-layer edges `documents` / `implements` / `derived_from`; Office/PDF → Markdown via optional **`@firecrawl/anydoc`** (MIT). **CLI/npm**: optionalDependency. **VSIX**: not bundled; on activate the extension **auto-downloads the current-OS binary** into `~/.graphflow/optional-deps` when `graphflow.downloadAnydoc` is true (default). Disable the setting to skip network; source indexing still works. |
-| **Context compression** | L1/L2/L3 layered anchors; graph compression (edge weights + PageRank, LRU cache); stem-matching recall (orchestrate ↔ orchestration); vector recall + RRF; RepoMap overview; adaptive budget; **symbol bodies** (the first three L1 symbol anchors quote their declaration — ≤120 tokens each, ≤20% of the pack, and only from budget the anchor stages left behind, so a body never displaces an anchor; quoted only when the file still matches the indexed signature, otherwise it stays a pointer, and `expandAnchor` reports `exact` / `relocated` / `drifted`; `enableSymbolBodies: false` opts out); **post-packaging accounting** (out-of-package payloads are honestly counted: dialogue recall hits and workbench/dialogue **preview echoes** land in `unbudgetedTokens`; `accountedTokens` = compressed + unbudgeted and `estimatedSavingsPercent` is computed on that true delivered total, with `estimatedRawTokens` floored at it; responses are bounded — history echoes are ~160-char message previews with a `truncated` flag, full text stays in the graph and expands via `anchorId` or the VS Code panel; `recordDialogue: false` disables echo and recording entirely) |
-| **Efficiency mechanisms (SoL-Pi borrow)** | **ObservationPack** (oversized outputs → content-addressed handle + exact paged recall), **Evidence-Preserving Reducer** (log → bounded receipt whose retained lines are re-verified verbatim), **Online Context Compact** (observed-pressure budget + economic compaction signal), **Action Fusion** (fused edit+validate steps on the bridge descriptor). **All on by default**, individually switchable in **GraphFlow: Settings**; **dsh automatic projection** rewrites over-budget tool results on the model surface (`GRAPHFLOW_D_DSH_PROJECTION=0` to disable); paired **efficiency/capability floor** (`graphflow-out/efficiency.json` + `governance release-gate` thresholds); **mechanism auto-research loop** (`graphflow mechanism`, held-out isolation). See [docs/efficiency-mechanisms.md](docs/efficiency-mechanisms.md) |
-| **Retrieval & fidelity** | Golden-set CI gate ≥80% recall / ≥90% top-K (132 author-written queries, no held-out split; commit-pinned benchmark: Hit@5=97.7%, MRR=0.735, NDCG@5=0.466 in-sample); separate anchor-recall and normalized body-coverage metrics persisted beside token savings |
-| **Vector index** | In-process memoization + disk persistence (fingerprint-checked, seconds to restore after MCP restart) |
-| **Storage backends** | `file` / `memory` / `sqlite` (FTS5, tokenizer-enhanced `searchtext`, camelCase searchable) / **`auto` (sqlite-first with fallback)** / `mcp-http` |
-| **Learning flywheel** | Episodic memory, reflection, skill nodes (score ±1, bounded [-20,20]), nightly training, adaptive evidence-aware forgetting, **auto-capture + Claude Code hooks (on by default)**, **SkillOpt-lite** bounded guidance edits, four-class lifecycle + **canary gate for synced skills**, portable SKILL.md import/export (agentskills.io spec layout: one dir per skill + progressive-disclosure `references/`), auditable efficiency evidence (`graphflow efficiency export` → `graphflow-out/efficiency-evidence.json`), `npm run backfill:episodes`, contribution reports (`skill report` / `graphflow_diagnose` / `route diagnose`) |
-| **Team sharing** | `graphflow team serve` (tenant + RBAC) + `skill sync export/import/push/pull`; imports/pulls are a **bidirectional MERGE**; golden queries via `.graphflow/team-golden.json`; [security model + ops runbook](docs/team-memory-security.md) |
-| **Benchmarks** | Self-graded internal checks ([comprehensive](benchmarks/COMPREHENSIVE-RESULTS.md), [multi-domain](benchmarks/INDEPENDENT-RESULTS.md)) · [context-readiness eval](benchmarks/SWE-BENCH-RESULTS.md) · token ratio with **two baseline arms** — [92.2% realistic / 98.8% naive grep](benchmarks/RESULTS.md) (token counts only, not answer quality) |
-| **Capability metrics** | `graphflow_diagnose.capability` — the SWE-Bench-CL continual-learning suite (average accuracy, forgetting, forward transfer, tool-use efficiency, composite; memory-on/off pairing) plus **effective skill-use precision**. Token savings is demoted to a cost constraint and is deliberately **excluded** from the composite. Sample basis excludes retracted / soft-hidden episodes. Rationale and citations: [docs/growth-plan.md](docs/growth-plan.md) |
-| **Competence map & memory governance** | `competence` (per-domain n / pass-rate / last-verified with **harness-computed** thresholds — never model self-reported confidence) · `memoryGate` (write-time salience gate + provenance + soft retraction; `GRAPHFLOW_WRITE_GATE=enforce` to drop rejects) · `symbolRetiredSkills` (**deterministic symbol revalidation** replaces time decay as the staleness mechanism) |
-| **Model routing** | Smart / Economy tiers; multi-provider health probes and fallback (DeepSeek, OpenAI, Anthropic, Bailian, Doubao) |
-| **2.x Efficiency Layer** | In-repo package `@roarpeng/graphflow-efficiency-agent` (unpublished; run from source) + `eff-agent` CLI: four-track fingerprinting, 3-tier caching, Layer B hybrid Meta-Agent decision, Dynamic Temporary Harness, TypeSafe-JEV Worker, External CLI Worker, R1-R6 provenance A/B benchmarks. See [packages/efficiency-agent/README.md](packages/efficiency-agent/README.md) |
-| **Workbench** | Plan DAG seeds function-topic containers; collapsed outline; click `topicId` to resume; drift forks a side branch; original Q/A stored via `assistantReply` |
-| **Conversation graph** | Dialogue turns are typed graph nodes with temporal validity (`supersedes` / `same_topic` edges, `validAt` / `invalidAt`) — corrected conclusions are detected offline and rendered as correction chains, and current-truth filtering hides superseded turns. Historical Q&A is searchable: `dialogue search "<query>"` (add `--include-superseded` to look back), plus additive `dialogueHits` in every `graphflow_context` preview that never displace code anchors. Explicit forks (`dialogue fork --from <turnId>`), replay paths (`dialogue list --path <turnId>`), multi-agent traces (`dialogue traces`), and a session-grouped export with correction chains + traces in the memory pack (`artifact export-memory` → `dialogues.md`) |
-| **Observability** | `graphflow_diagnose` / `route diagnose`: provider health + graph stats + **capability metrics** (pass rate, forgetting, forward transfer, skill-use precision) + **flywheel health** (auto-capture, episodes, skills by class, session journal) + **memory governance** (write-gate decisions, retractions, symbol-retired skills) + competence map + workbench outline. Token savings is reported as a cost constraint, not as the headline |
-| **Agent surfaces** | CLI `--json`; MCP stdio and Streamable HTTP (stateless JSON or stateful SSE, 10 tools); auto-install into 15+ agents (incl. **Codex Windows NODE/NPX_CLI short-path MCP**). **HostAdapter** registry owns install · uninstall · doctor for **every** registered host: 4 hand-written slices (Cursor / Claude Code / DeepSeek Harness / Kimi Code) + a generic profile-backed slice for the rest |
-| **Evidence & governance** | Outcome evidence packages (commit/diff/tests), evidence backfill, tamper-evident audit chains, ADR/Invariant/APIContract/Test review states, artifact three-way merge/signing/encryption, retention/quarantine, release gates |
-| **Closing audit / promise ledger (R9)** | Cures "干着干着就忘了": obligations derived from observable side effects — dependency-lock consistency (npm v1/v3, pip+poetry/Pipfile), orphan files with zero graph wiring, declarative `graphflow.audit.json` rules (driver loading / container injection: `filePattern` + `mustBeReferencedBy` globs), doc drift (CLI vs README, version badge). Baseline = uncommitted git working tree (`--since <ref>` to widen). Touchpoints: `graphflow audit` CLI; automatic pre-check before `report_outcome success` (advisory, or refusing via `GRAPHFLOW_AUDIT_STRICT=1`); **cross-session reminder** — the first `graphflow_context` of a session surfaces "上次会话有 N 项未收尾" from the on-graph promise ledger. See [docs/closing-audit.md](docs/closing-audit.md) |
-| **Savings & reliability duo (R8)** | `working-set` prefetch (kill exploration turns — each turn re-pays the whole history), `challenge` graph-diff questions (the graph knows every caller the agent does not), `spawn-receipt` (subagents inherit anchors, not copied context), `facts ask` temporal lookup (effective vs superseded at a point in time), `quote` honest task budget from paired-efficiency history |
-| **Engineering quality** | TypeScript strict; vitest suite; `npm run ci` includes extension packaging and smoke tests |
-
-### Positioning
-
-> GraphFlow is **not an orchestrating executor** — it is the **memory & context harness** for coding agents. Task execution is delegated to the host coding agent via bridge mode (honest semantics, no faked COMPLETED); GraphFlow's job is to make the agent see clearly and remember.
-
-## MCP tools (10)
-
-| Tool | Function |
-| --- | --- |
-| `graphflow_context` | Compressed context package (query → anchors + summaries; `topicId` / `assistantReply` to resume a workbench node or fill the pending answer; anchorId → expand) |
-| `graphflow_plan` | Task planning (mode='simple' or 'insight'; seeds `workbench.topics` + `workbench.outline`; agent-delegated without an LLM) |
-| `graphflow_run` | Orchestration + bridge execution descriptor |
-| `graphflow_report_outcome` | Outcome backfill (incl. deviation classification), closes the learning flywheel |
-| `graphflow_insight` | ATP insight submit / merge (agent bridge protocol) |
-| `graphflow_index` | Incremental / full indexing; optional `knowledgeExtract: true` distills dialogue turns into Concept / Requirement nodes with provenance edges |
-| `graphflow_skill_insights` | Skill insights |
-| `graphflow_diagnose` | Diagnostics (provider + graph + token savings + flywheel + `graph.workbenchOutline`) |
-| `graphflow_artifact` | Graph artifact import / export |
-| `graphflow_skill_guide` | GraphFlow skill usage guide |
-
-**MCP workspace resolution**: the workspace is discovered automatically from the MCP client `cwd`; override with `GRAPHFLOW_WORKSPACE_ROOT`.
-
-## Workbench navigation
-
-Everyday chat stays a single thread. Complex work seeds a **workbench of function-topic containers** from `graphflow_plan` — one canvas node per plan step, not one node per turn. Click a node and pass `topicId` to `graphflow_context` to refine that function or return to the mainline. Drift auto-forks an isolated side branch (`co_occurs`); the trunk is not overwritten. After answering, call `graphflow_context({ assistantReply })` so the original reply is stored. Outline titles are display labels only; next-turn context is Goal + ancestor titles + the node's original Q/A.
-
-Wake the collapsed outline when you need it (still 10 MCP tools):
-
-```bash
-graphflow workbench tree --json            # CLI
-# VS Code / Cursor: GraphFlow: Workbench Tree (Activity Bar, default collapsed) or chat /tree
-# MCP: graphflow_diagnose → graph.workbenchOutline
-graphflow context preview --topic-id "<topic:...>" "continue from this node"
-graphflow context preview --reply "original assistant answer"
-```
-
-## CLI quick reference
-
-```bash
-graphflow graph index .                    # build the graph (parallel pipeline: graphPolicy.parallelIndex)
-graphflow scip app.scip                    # ingest a SCIP protobuf index (scip-typescript etc.) into precise def/ref edges
-graphflow context preview "orchestrator"   # preview compressed context
-graphflow plan "refactor planner" --json   # plan (also seeds workbench topics)
-graphflow workbench tree --json            # on-demand function DAG + side branches
-graphflow run "update readme"              # orchestrate (bridge)
-graphflow skill insights                   # skill insights
-graphflow skill report                     # flywheel contribution report
-graphflow mcp serve --http                 # stateless MCP Streamable HTTP (add --stateful for SSE sessions)
-graphflow team serve                       # team graph JSON-RPC (tenant + RBAC; non-loopback requires auth)
-graphflow outcome backfill --evidence evidence.jsonl  # close pending episodes with evidence packages
-graphflow governance release-gate         # enforce proven-skill/fidelity/pending gates
-graphflow skill sync export                # export team skill pack + golden queries (share via git)
-graphflow skill sync import                # import team skill pack (MERGE; --force to overwrite) + golden merge into .graphflow/team-golden.json
-graphflow challenge --files a.ts,b.ts      # R8-2: graph-diff challenge list after edits (callers / requirements / deleted symbols)
-graphflow audit                            # R9: closing audit — dangling deps / unwired files / unreferenced configs / doc drift
-graphflow route diagnose                   # routing diagnostics (real planner/worker round-trip probes, not config presence)
-graphflow learn nightly                    # nightly learning
-graphflow doctor                           # install self-check
-graphflow selfcheck                        # health red/green list: config / graph store / delta log / LLM reachability / judgment tier / cost ledger / flywheel / redaction
-```
-
-### When the LLM is unavailable, plan and run bridge to the agent
-
-Both entry points pre-flight a real apikey+baseUrl+model greeting round-trip. A dead or mis-credentialed provider is treated **exactly like no provider**: `graphflow_plan` returns `planSource: "probe-failed-bridge"` (+ `degradeReason`), `graphflow_run` switches to bridge mode (`DELEGATED`, `attempts: 0`, `executionDescriptor` + `bridgeReason` with the underlying error). No retry budget is burned on echo placeholders, and no bridged plan ever reads like a model-produced final DAG.
-
-### Cost economics (2.2): ledger, cacheable prefix, challenge gate, judgment tier
-
-- **Cost ledger** — every own LLM call's real usage (prompt/completion tokens, **prompt-cache hits**) lands in `graphflow-out/cost-ledger.jsonl`, priced via a table you can override with `GRAPHFLOW_PRICE_*` env vars (localhost endpoints price at zero — local models are free by definition); every MCP response's text-copy bytes are recorded as your attributable contribution to the host's bill (host-side billing itself is not meterable from GraphFlow — attribution, not invoicing). `graphflow selfcheck` reports estCost and cache-hit ratio; closed episodes carry a `costSummary` snapshot.
-- **Host-prefix cacheability** — anchor ordering is score-for-selection, id-for-order, so the same query yields byte-identical context blocks across turns; volatile metrics (tokenBudget numbers etc.) live in structuredContent only, never in the text copy. Stable GraphFlow blocks keep the host agent's prompt cache hitting (cache reads price at ~1/10).
-- **Plan challenge gate (rules, zero LLM)** — merged bridge plans and model plans are questioned by graph facts (external callers of the symbols you plan to touch, deleted symbols, requirement links): `challenges[]` rides the `graphflow_insight` merge response and plan results; answer them before executing. `GRAPHFLOW_PLAN_GATE=enforce` downgrades unanswered plans to `suggested`.
-- **Negative knowledge** — a failure reported with lessons becomes an `anti-pattern-lesson` node; after the **same** failure is evidenced by ≥2 distinct episodes it enters the next plan's avoid-list ("N episodes verified"). A later pass resolves it and re-arms the evidence cycle from zero.
-- **Judgment tier** — cheap-verification roles (plan challenges, distillation) upgrade automatically along the ladder `rules-only → Jev (TypeSafe System One typed judgments, `TYPESAFE_API_KEY`, localhost = free) → cloud economy`; `selfcheck` shows which tier you are on. Zero-config users stay rules-only forever.
-- **ObservationPack by default** — oversized MCP text copies are packed into a content-addressed handle + head/tail preview (recallable via `content/handle`), **before** stubbing, so big responses stop flooding the conversation history.
-
-## Configuration
-
-One config is enough: the global `~/.graphflow.config.json` (the file the settings page edits) applies to every project and host. Optional per-project overrides go in the project's `graphflow.config.json`, then `.graphflow/config.json`; they are found from the served workspace root (`rootDir` / `GRAPHFLOW_WORKSPACE_ROOT`), not the process cwd, and need only the fields they change — e.g. `{ "graphPolicy": { "transport": "file" } }`. Copy [graphflow.config.example.json](graphflow.config.example.json) to get started.
-
-Key options:
-
-| Option | Description |
-| --- | --- |
-| `graphPolicy.transport` | `file` / `memory` / `sqlite` / **`auto` (recommended: sqlite-first, falls back to file)** / `mcp-http` |
-| `graphPolicy.maxContextTokens` | Context budget (default 1500) |
-| `graphPolicy.parallelIndex` | Parallel full-rebuild pipeline: `{ enabled: true, concurrency: 4 }` by default; `enabled: false` restores the sequential path byte-for-byte |
-| `graphPolicy.autoIndexOnSave` | Auto incremental index on save (default true) |
-| `embeddingPolicy.provider` | `transformers` (local default) / `openai` / `hash` |
-| `embeddingPolicy.dtype` | Local model precision: `q8` (default, ~98MB) / `fp16` / `q4` / `fp32` (~400MB); env `GRAPHFLOW_EMBEDDING_DTYPE` wins |
-| `skillPolicy.enableSkillFlywheel` | Learning flywheel switch |
-| `reconcilePolicy.verifyCommand` | Command whose exit code closes pending episodes (`graphflow reconcile outcomes --apply`); unset means report-only — a commit is never treated as a pass |
-
-### Switching agents on one project
-
-Cursor, ZCode, Cline, Claude Code and DSH working on the same project share **one** graph and memory: every host reads and writes `graphflow-out/graphflow-graph.sqlite` and its incremental index manifest (`.graphflow-cache/index-state.sqlite.json`), so switching tools never rebuilds the graph and dialogue turns, workbench topics, episodes and skills carry over.
-
-- **Runtime deps on demand.** The VSIX / shared MCP runtime does not bundle `better-sqlite3` or `@huggingface/transformers`; they are installed in the background into `~/.graphflow/optional-deps` on first start (better-sqlite3 per node / Electron ABI). Manual: `graphflow deps status`, `graphflow deps install [--with-model]`. Opt out: `GRAPHFLOW_OPTIONAL_DEPS_AUTO=0` or the extension setting `graphflow.downloadRuntimeDeps`.
-- **Legacy JSON stores are merged.** Older hosts without better-sqlite3 fell back to `graphflow-graph.json`, splitting memory across two stores. When the SQLite store opens next to a JSON store, its memory is merged in (newer `updatedAt` wins; colliding dialogue turn ids are renumbered), the JSON is renamed to `*.merged-bak`, and stats land in `*.merge-log.json` and in `graphflow diagnose` → `graphStore`.
-- **Embedding fingerprints.** Each vector records its model (`Xenova/bge-base-zh-v1.5@q8`, `fnv1a-384`, …). Recall only compares vectors from the active model; index runs re-embed stale vectors in batches, and a transient fallback to hash never overwrites semantic vectors. The model is cached once in `~/.graphflow/models` for all hosts.
-- **`graph index --full` keeps memory.** The memory subgraph is captured before the store is cleared and restored after re-indexing.
-
-## Team backend pilot
-
-Set `graphPolicy.transport` to `mcp-http` to host the graph on a remote Graphify service (shared by the team); requires `graphPolicy.mcpEndpoint` (http(s) URL, optional `mcpApiKey` bearer token):
-
-```json
-{ "graphPolicy": { "transport": "mcp-http", "mcpEndpoint": "http://graphify.team.internal:8080" } }
-```
-
-A missing/malformed endpoint fails at config validation; connection or runtime request failures degrade transparently to local JSON storage (`graphPolicy.graphStorePath`, default `graphflow-out/graphflow-graph.json`) with a `logger.warn`, consistent with the sqlite→file fallback, never interrupting the agent. HTTP 401/403 (auth / RBAC deny) do **not** degrade — they throw. `graphflow team serve` implements `graph.read_snapshot` and `team.health`; third-party Graphify servers without those methods still fall back to the local mirror. See [docs/team-memory-security.md](docs/team-memory-security.md).
-
-## Benchmarks
-
-- **Comprehensive** (self-graded internal checks): [COMPREHENSIVE-RESULTS.md](benchmarks/COMPREHENSIVE-RESULTS.md) — P1–P6 checks whose thresholds, weights and pass/fail criteria are chosen by the author (a 100% sub-score means the author's own checks passed). Useful for regression tracking; not a product score.
-- **Multi-domain** (self-graded internal check): [INDEPENDENT-RESULTS.md](benchmarks/INDEPENDENT-RESULTS.md) — 5 domains of this repo with author-written queries; rank-based Hit@k / MRR (earlier versions ignored rank). Not independent and not comparable with other tools.
-- **SWE-bench-style**: [SWE-BENCH-RESULTS.md](benchmarks/SWE-BENCH-RESULTS.md) — self-built 12-instance context-readiness eval; [SWE-BENCH-REAL-RESULTS.md](benchmarks/SWE-BENCH-REAL-RESULTS.md) — Flask real-project 10-instance file-recall eval (48.3%)
-- **Token ratio**: [RESULTS.md](benchmarks/RESULTS.md) — 8 representative queries, **92.2% realistic / 98.8% naive-grep** (two baseline arms — quote them separately), re-counted with independent gpt-tokenizer. Token ratio vs reading the top-10 files in full; not a fidelity/answer-quality measure. Live `context preview` responses report their own `estimatedSavingsPercent` with a different denominator; no specific live percentage is promised.
-- **Retrieval quality**: [RETRIEVAL-EVAL-RESULTS.md](benchmarks/RETRIEVAL-EVAL-RESULTS.md) — 132 author-written queries, no held-out split: Hit@5=97.7%, MRR=0.735, NDCG@5=0.466 (in-sample)
-- **Skill flywheel injection**: [SKILL-AB-RESULTS.md](benchmarks/SKILL-AB-RESULTS.md) — after the noise gate: 0% hint injection, 100% episode recall, ~15 tok/task overhead
-- **Skill / memory A/B** (synthetic mechanism tests, held-out split, same criterion both arms): [RESULTS.md](benchmarks/RESULTS.md) — no transfer to unseen tasks (skill 61.5% vs 61.5%; memory 58.1% vs 58.1%); not task-success rates
-
-## VS Code / Cursor extension
-
-Download `graphflow-<version>.vsix` from [GitHub Releases](https://github.com/Roarpeng/GraphFlow/releases) (or Open VSX: `roarpeng.graphflow`).
-
-Commands: Settings / Show Graph (graph visualization) / Preview Context / Plan & Brainstorm / Run Task / Skill Insights / Install MCP; chat agent `@graphflow` (`/run` `/plan` `/graph` `/skills` `/diagnose` `/learn` `/history`).
-
-## Agent Plugins 1.0
-
-**Primary install path** for hosts that support [Agent Plugins](https://agent-plugins.org). GraphFlow ships as a portable package at the repository root:
-
-```text
-plugin.json              # Agent Plugins 1.0 manifest
-mcp.json                 # stdio MCP (type required by the spec)
-skills/graphflow/SKILL.md
-```
-
-**Install in Cursor (local):**
-
-```bash
-mkdir -p ~/.cursor/plugins/local
-ln -s /absolute/path/to/GraphFlow ~/.cursor/plugins/local/graphflow
-# then Restart Cursor / Developer: Reload Window
-```
-
-**Install via Team Marketplace / Git:** import this repository; clients discover `plugin.json`, then load `skills/` and `mcp.json`.
-
-Docs: [Context Engineering contract](docs/context-contract.md) · [Experience memory](docs/experience-memory.md)
-
-**Uninstall:** Removing the Agent Plugin in Cursor only drops the plugin package. Skills/Rules/MCP written by `graphflow install` remain and will keep steering the agent — run:
-
-```bash
-npx @roarpeng/graphflow uninstall
-```
-
-That removes user + workspace MCP entries, `skills/graphflow` folders, GraphFlow rules/instruction blocks, Claude Code hooks, and the DeepSeek Harness `cordis.patch.yml` overlay. Also delete any local symlink under `~/.cursor/plugins/local/graphflow` if you used one.
-
-## DeepSeek Harness 插件（用法与能力）
-
-GraphFlow 是 [DeepSeek Harness](https://www.deepseek.com/harness/en/) 的 [`dsh-plugin`](https://github.com/topics/dsh-plugin)。包内 `dsh.bundle` + `cordis.patch.yml` 会把 GraphFlow MCP 挂到内置 `@deepseek-ai/dsh-mcp-client`，并把 `@roarpeng/graphflow/dsh` glue 插入插件树。模型看到的工具名是 `mcp__graphflow__graphflow_*`。中文说明见 [README.zh.md](README.zh.md)。
-
-**在 dsh 上能工作 vs 不能工作：**
-
-| 能力 | dsh |
-| --- | --- |
-| 10 个 MCP 工具（`mcp__graphflow__graphflow_*`），stdio `cwd` = 会话工作区 | 是 |
-| Skill（on-demand `skill({name:"graphflow"})`；bundle glue 注册，不必先 `graphflow install`） | 是 |
-| 会话结束飞轮：仅 `agent/disposed` 关闭 pending episode（不是 live `session/flush`；`GRAPHFLOW_AUTO_CAPTURE=0` 可关） | 是 |
-| 首轮短 hint：先调 `graphflow_context`（`rootDir` = cwd）；兼容会话格式 v4（`source.kind = plugin:graphflow-dsh`） | 是 |
-| 对话自动入图：只记录真人提问（`source.kind = user`），v3 `plugin` / v4 宿主生产者 kind / `plugin:*` 注入一律排除 | 是 |
-| Workbench 数据（`topicId` / outline）经 MCP `graphflow_context` / `graphflow_diagnose` | 是 |
-| dsh web「知识节点」面板（`POST /api/gf/nodes`，经 `connection.fetch.register`；旧宿主回退 `/gf` RPC；web 半边依赖 `dsh-api-session-controller` / `dsh-client-connection` / `dsh-client-ui-renderer`） | 是 |
-| VS Code/Cursor 图谱面板、Settings webview、Workbench Tree、`@graphflow` chat | **否**（宿主 UI，不移植） |
-| Cursor Agent Plugins 1.0 发现 | **否**（dsh 用 `dsh.bundle`） |
-| Claude Code `SessionStart/End/Stop` **文件** hooks | **否**（dsh analog 是上面的 glue） |
-
-**装进某个 profile（推荐）：**
-
-```bash
-dsh plugin --profile web add @roarpeng/graphflow
-npx @deepseek-ai/dsh web
-```
-
-**从插件市场安装（一键）：** GraphFlow 已按 [`dsh-plugin` 收录规范](https://github.com/topics/dsh-plugin) 打标（`dsh-plugin` / `cordis-plugin` / `deepseek-harness`），市场每 2 小时自动扫描该 topic，可在 [DSH 插件市场](https://github.com/dsh-market/dsh-market) 或 [DSH-Plugins-Marketplace](https://github.com/bradeGithub/DSH-Plugins-Marketplace) 里搜 `GraphFlow` 一键安装。
-
-**从 GitHub 安装（跟随 main 分支）：**
-
-```bash
-dsh plugin --profile web add github:Roarpeng/GraphFlow
-```
-
-> ⚠️ **只选一条注册路径**：市场 / `dsh plugin … add` 会自动把 `dsh.bundle` 的 `cordis.patch.yml` 注册进 profile；此时**不要**再跑 `npx @roarpeng/graphflow install`（它会写 `$DSH_HOME/cordis.patch.yml` 这层 overlay），两条注册叠加会导致重复加载。反之，用了 home overlay 就不必再 add。
-
-**市场收录类型：** `cordis-plugin`（`package.json` 的 `dsh.bundle.patch` → `cordis.patch.yml`）。仓库不提交 `dist/`（源码型），市场安装时会先询问「安装依赖并执行构建」，确认后执行 `npm install` + `npm run build`（构建离线可用）。
-
-**披露（disclosure，[STANDARD §9](https://github.com/bradeGithub/DSH-Plugins-Marketplace/blob/main/STANDARD.md)）：** 本地优先——索引、压缩、召回、图存储全部离线（默认 resilient local 语义向量：优先本地 `Xenova/bge-base-zh-v1.5`，失败降级 FNV-1a hash，可用 `embeddingProvider: "fnv"` 强制纯离线），`cloud: false` 场景可用；仅当你为 `graphflow_plan` / `graphflow_run` 配置了 LLM provider 时才访问云端端点（`api.deepseek.com` / `api.openai.com` / `api.anthropic.com` / `dashscope.aliyuncs.com` / `ark.cn-beijing.volces.com`）。API Key 只从环境变量或全局配置读取，全局配置 `~/.graphflow.config.json` 以 **0600** 权限写入，日志中脱敏。可执行核验：`graphflow audit --privacy`（见 `docs/threat-model.md`）。完整字段见 `package.json` 的 `disclosure`。
-
-**或在已有 `~/.dsh` 时写 home 级 overlay（对所有 profile 生效）：**
-
+### 2. Auto-Register with Connected Agents
 ```bash
 npx @roarpeng/graphflow install
 ```
+Automatically registers MCP, rules, skills, and `PreToolUse`/`PostToolUse` hooks for Cursor, Claude Code, DeepSeek Harness (DSH), Trae, Kimi Code, VS Code, and 15+ coding agents.
 
-会写入 `$DSH_HOME/cordis.patch.yml`（MCP + glue）与 `$DSH_HOME/skills/graphflow/SKILL.md`。卸载：`npx @roarpeng/graphflow uninstall`，或 `dsh plugin --profile web remove @roarpeng/graphflow`。`graphflow doctor` 会检查 overlay、glue、skill。
-
-**用法：** 第一轮先 `mcp__graphflow__graphflow_context`（传入 `rootDir` = 仓库绝对路径），复杂任务再 `graphflow_plan`；改完代码后 `graphflow_index`；若走了 `graphflow_run`，结束后必须 `graphflow_report_outcome`。不要在 patch 里写死 `GRAPHFLOW_WORKSPACE_ROOT`。
-
-## Agent integrations
-
-### Register Skill + MCP on your machine (one command)
-
+### 3. Launch MCP Server
 ```bash
-npm install -g @roarpeng/graphflow   # one command including the install: global postinstall registers, checks, and repairs automatically
+GRAPHFLOW_MCP_PROFILE=v3 npx @roarpeng/graphflow-mcp
 ```
 
+### 4. Run Test Suite and Token Benchmark
 ```bash
-npx @roarpeng/graphflow@latest doctor     # self-check: list agents detected on this machine
-npx @roarpeng/graphflow@latest install    # register into every detected agent (idempotent, safe to re-run)
-npx @roarpeng/graphflow@latest uninstall  # remove the registration from every agent
+npm run test:v3        # Run 9-part automated test suite (4 pillars + 6 languages + host hooks)
+npm run benchmark:v3   # Run real-repository token comparison benchmark
 ```
 
-`install` scans the detection markers of all 20 hosts (`~/.zcode`, `~/.cursor`, `~/.claude`, `~/.codex`, `~/.config/opencode`, …) and writes a three-piece set into every host it finds (paths shown for ZCode; every host is owned by the HostAdapter registry):
+## Documentation
 
-| Registered | Location | Content |
-| --- | --- | --- |
-| MCP server | `~/.zcode/cli/config.json` → `mcp.servers.graphflow` | stdio launch of `graphflow-mcp` (10 tools) |
-| Skill | `~/.zcode/skills/graphflow/SKILL.md` | on-demand graph-context skill |
-| Global instructions | `~/.zcode/AGENTS.md` (managed block) | GraphFlow context-first rule (append-with-markers, user content untouched) |
-
-Notes:
-
-- **Restart the agent (or open a new session) after installing** — running processes never hot-reload MCP config or skills.
-- **Windows first launch stuck on "starting"**: the npx entry downloads the full package plus native deps (`onnxruntime-node`, hundreds of MB on Windows) on first run and can exceed the connect timeout. Fix: `npm install -g @roarpeng/graphflow`, then re-run `install` — when a global install is detected the injector writes a **direct node + server.js entry** (sub-second launch, no network dependency); without one it falls back to the npx entry.
-- For daily use, install globally to skip the per-run npx resolution: `npm install -g @roarpeng/graphflow`, then plain `graphflow install` / `graphflow doctor`.
-- DSH (DeepSeek Harness) uses the plugin path `dsh plugin --profile web add @roarpeng/graphflow` — pick **one** registration path, never both (double loading).
-
-Use **`npx @roarpeng/graphflow install` as the fallback** when you need Rules, multi-agent wiring, or a host that does not load Agent Plugins:
-
-```bash
-npx @roarpeng/graphflow doctor     # detect installed agents
-npx @roarpeng/graphflow install    # auto-install MCP + Skill + Rules
-npx @roarpeng/graphflow uninstall  # remove MCP + Skill + Rules + hooks
-npx @roarpeng/graphflow init       # write a minimal project config
-```
-
-Supported: Cursor, VS Code, Trae (incl. CN), Claude Code, Windsurf, Cline, Roo Code, Kilo Code, Gemini CLI, Codex, Antigravity, Opencode, Qoder, Amazon Q, Zed, Continue, DeepSeek Harness (`dsh`), Kimi Code CLI, ZCode, and more (15+). **Every** registered host goes through the HostAdapter registry (`installViaHostAdapter`); the legacy installers now only cover host-scoped extras (Trae user Skills, project-level rules).
-
-| Path | When to use |
-| --- | --- |
-| **Agent Plugins** | Preferred single-host Skill + MCP discovery |
-| **`graphflow install`** | Rules / multi-agent / non-plugin hosts |
-| **`graphflow uninstall`** | After removing a plugin (or anytime) — clears leftover Skill/MCP/Rules |
-
-## Protocol
-
-[ATP/IR — Agent Thinking Protocol public specification v1.0](docs/atp-ir-spec-v1.md): work-item registry, submit/merge contract, compatibility rules. Third-party tools can implement compatible producers / consumers. Minimal Producer example: [`examples/atp-minimal-producer/`](examples/atp-minimal-producer/). Dual-MCP compose snippet (GraphFlow + Serena, config only): [`examples/graphflow-serena.mcp.json`](examples/graphflow-serena.mcp.json).
-
-## Community
-
-GraphFlow is a single-maintainer project (bus factor = 1); community collaboration is the key to reducing single-point risk. Contributions welcome:
-
-- [Contributing guide](CONTRIBUTING.md): dev environment, code style, test requirements and PR checklist
-- [Roadmap](ROADMAP.md): completed milestones and next steps (P0–P2)
-- [Issues](https://github.com/Roarpeng/GraphFlow/issues): bug reports and feature requests (please use the built-in templates)
-- [Discussions](https://github.com/Roarpeng/GraphFlow/discussions): questions and ideas
-
-## Development
-
-```bash
-npm install
-npm run ci        # lint + build + tests + extension packaging + smoke
-```
-
-Requires Node.js ≥ 20, npm ≥ 10. Expected: lint clean, build succeeds, full vitest suite green.
-
-## Project structure
-
-```text
-GraphFlow/
-├── plugin.json         # Agent Plugins 1.0 manifest
-├── mcp.json            # Agent Plugins MCP (stdio)
-├── cordis.patch.yml    # DeepSeek Harness (dsh) bundle layer (MCP + glue)
-├── dsh/plugin.mjs      # dsh ESM glue: skill register + session-end capture
-├── skills/graphflow/   # portable Agent Skill (canonical SKILL.md)
-├── src/
-│   ├── core/           # orchestration core: orchestrator, triage, dag-engine, agent-delegation
-│   ├── graph/          # indexing, context slicing, graph compression, sqlite/auto storage, snapshot
-│   ├── routing/        # model routing and health probes (5 providers)
-│   ├── learning/       # embeddings, episodic, skill-flywheel, vector-index, nightly
-│   ├── agents/         # ATP schema, planner, insight, brainstormer
-│   └── surfaces/
-│       ├── cli/        # CLI + runtime
-│       └── mcp/        # MCP server (10 tools)
-├── tests/              # vitest suite (unit + governance + MCP HTTP/stdio matrix)
-├── benchmarks/         # comprehensive + independent + SWE-bench + token savings + skill A/B (reproducible)
-├── docs/               # ATP spec + context contract + experience memory + flywheel reproduction + GraphFlow/Serena
-├── examples/           # ATP producer + team-memory config + GraphFlow/Serena dual-MCP snippet
-├── vscode-extension/   # VS Code panel and commands
-└── CHANGELOG.md
-```
-
-## Changelog
-
-Full history in [CHANGELOG.md](CHANGELOG.md). License: Apache-2.0.
+* [Token-First Architecture & Design Principles (docs/v3-architecture.md)](docs/v3-architecture.md)
+* [GraphFlow + Serena: better together (docs/graphflow-serena.md)](docs/graphflow-serena.md)
+* [Changelog & Release Notes (CHANGELOG.md)](CHANGELOG.md)

@@ -191,7 +191,8 @@ describe("dsh ESM glue plugin", () => {
     const skill = registered[0] as { name: string; description: string; content: string };
     expect(skill.name).toBe("graphflow");
     expect(skill.description.length).toBeGreaterThan(10);
-    expect(skill.content).toContain("graphflow_context");
+    // GraphFlow 3.0 skill body teaches the 4 surgical gf_* tools.
+    expect(skill.content).toContain("gf_read");
   });
 
   it("extends the enter decision with a same-step hint and closes pending episode on agent/disposed", async () => {

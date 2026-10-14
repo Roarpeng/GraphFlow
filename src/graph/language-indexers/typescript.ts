@@ -2,6 +2,7 @@ import { logger } from "../../utils/logger";
 import { createRequire } from "node:module";
 import type * as TsNs from "typescript";
 import type { CallRelation, DeclaredSymbol, ExtractionResult, ImportTarget, InheritRelation, LanguageIndexer } from "./index";
+import { analyzeSourceFile } from "../../v3/ast-engine";
 
 const requireFn = createRequire(__filename);
 
@@ -23,7 +24,7 @@ function loadTs(): typeof TsNs | null {
  * can surface the silent degradation instead of leaving it in stderr logs:
  * "compiler" once the optional `typescript` package has resolved successfully
  * (module-level memo — the require is attempted at most once), "regex" when it
- * did not and extraction falls back to regex (calls/inherits/jsdoc degraded).
+ * did not and extraction falls back to AST/structural engine.
  */
 export function getTypescriptBackendStatus(): "compiler" | "regex" {
   return loadTs() !== null ? "compiler" : "regex";
@@ -188,7 +189,6 @@ function extractFromAst(relPath: string, content: string, ts: typeof TsNs): Extr
   const extractCalleeName = (expr: TsNs.Expression): string | undefined => {
     if (ts.isIdentifier(expr)) return expr.text;
     if (ts.isPropertyAccessExpression(expr)) {
-      // e.g. obj.method() → "method"
       return expr.name.text;
     }
     if (ts.isElementAccessExpression(expr)) {
@@ -200,7 +200,6 @@ function extractFromAst(relPath: string, content: string, ts: typeof TsNs): Extr
   const visit = (node: TsNs.Node, caller?: string): void => {
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
-      // require() calls are already captured as imports
       if (!(ts.isIdentifier(callee) && callee.text === "require")) {
         const calleeName = extractCalleeName(callee);
         if (calleeName) {
@@ -214,14 +213,11 @@ function extractFromAst(relPath: string, content: string, ts: typeof TsNs): Extr
         }
       }
     }
-    // Track enclosing function/method for call attribution
     let nextCaller = caller;
     if (ts.isFunctionDeclaration(node) && node.name && ts.isIdentifier(node.name)) {
       nextCaller = node.name.text;
     } else if (ts.isMethodDeclaration(node) && node.name && ts.isIdentifier(node.name)) {
       nextCaller = node.name.text;
-    } else if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
-      // Anonymous — keep parent caller context
     }
     ts.forEachChild(node, (child) => visit(child, nextCaller));
   };
@@ -230,30 +226,33 @@ function extractFromAst(relPath: string, content: string, ts: typeof TsNs): Extr
   return { symbols, imports, calls, inherits };
 }
 
+/**
+ * Upgraded v3 fallback: uses `@babel/parser` / structural AST engine instead of
+ * naive single-line regex, preserving `endLine`, `signature`, `calls`, and `imports`.
+ */
 function fallbackExtract(relPath: string, content: string): ExtractionResult {
-  const lines = content.split(/\r?\n/);
-  const symbols: DeclaredSymbol[] = [];
-  for (let i = 0; i < lines.length && symbols.length < 80; i += 1) {
-    const trimmed = lines[i]?.trim() ?? "";
-    if (trimmed.startsWith("export ") || trimmed.startsWith("function ")) {
-      const summary = trimmed.slice(0, 200);
-      symbols.push({
-        name: summary,
-        kind: "raw",
-        exported: trimmed.startsWith("export "),
-        line: i + 1,
-        file: relPath,
-      });
-    }
-  }
-  const imports: ImportTarget[] = [];
-  const matches = content.matchAll(/(?:import\s+[^"']+from\s+|require\()\s*["']([^"']+)["']/g);
-  for (const match of matches) {
-    const target = match[1]?.trim();
-    if (target) imports.push({ module: target, raw: target });
-    if (imports.length >= 120) break;
-  }
-  return { symbols, imports };
+  const analysis = analyzeSourceFile(relPath, content);
+  const symbols: DeclaredSymbol[] = analysis.symbols.map((sym) => ({
+    name: sym.name,
+    kind: sym.kind,
+    exported: sym.exported,
+    line: sym.line,
+    endLine: sym.endLine,
+    file: relPath,
+    signature: sym.signature,
+    ...(sym.paramsCount !== undefined ? { paramsCount: sym.paramsCount } : {}),
+    ...(sym.returnType ? { returnType: sym.returnType } : {}),
+  }));
+  const imports: ImportTarget[] = analysis.imports.map((imp) => ({
+    module: imp.module,
+    raw: imp.raw,
+  }));
+  const calls: CallRelation[] = analysis.calls.map((c) => ({
+    callee: c.callee,
+    ...(c.caller ? { caller: c.caller } : {}),
+    line: c.line,
+  }));
+  return { symbols, imports, calls };
 }
 
 export const typescriptIndexer: LanguageIndexer = {
@@ -265,7 +264,7 @@ export const typescriptIndexer: LanguageIndexer = {
     try {
       return extractFromAst(filePath, content, ts);
     } catch (error) {
-    logger.error({ error }, "Caught error");
+      logger.error({ error }, "Caught error");
       return fallbackExtract(filePath, content);
     }
   },

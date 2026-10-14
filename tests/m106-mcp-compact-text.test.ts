@@ -101,7 +101,10 @@ describe("MCP tool response text is compact JSON (m106)", () => {
     // structuredContent 的形状与语义未随紧凑化改变。
     // structuredContent keeps its shape and semantics unchanged.
     expect(typeof structured.guide).toBe("string");
-    expect(structured.guide).toContain("Best Practices");
+    // The shipped SKILL.md is the GraphFlow 3.0 surgical skill; the
+    // "## Best Practices" heading of the v2 guide no longer exists, so the
+    // section filter falls back to the full body.
+    expect(structured.guide).toContain("gf_read");
   });
 });
 

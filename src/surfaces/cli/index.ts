@@ -2150,6 +2150,7 @@ const FIRST_USE_EXEMPT_COMMANDS = new Set([
   "help", "--help", "-h", "version", "--version", "-v",
   "doctor", "diagnose", "audit", "llm-check", "selfcheck",
   "install", "uninstall", "init", "config", "deps", "mcp", "settings",
+  "hook", "gf-read", "gf-edit", "gf-exec", "gf-macro",
 ]);
 
 async function runFirstUseBootstrap(command: string): Promise<void> {
@@ -2217,6 +2218,37 @@ async function main(): Promise<void> {
 
   if (command === "version" || command === "--version" || command === "-v") {
     console.log(getCliVersion());
+    return;
+  }
+
+  // GraphFlow 3.0 Host PreToolUse / PostToolUse Hook CLI Handler (`graphflow hook pre-tool|post-tool`)
+  if (command === "hook") {
+    const sub = options.args[0]?.trim() ?? "pre-tool";
+    let rawStdin = "";
+    try {
+      rawStdin = readFileSync(0, "utf8");
+    } catch {
+      rawStdin = "{}";
+    }
+    let payload: Record<string, unknown> = {};
+    try {
+      payload = JSON.parse(rawStdin || "{}") as Record<string, unknown>;
+    } catch {
+      payload = {};
+    }
+    const { interceptPreToolUse, interceptPostToolUse } = await import("../../v3/index.js");
+    const rootDir = (typeof payload.cwd === "string" && payload.cwd) ? payload.cwd : process.cwd();
+    if (sub === "pre-tool" || sub === "PreToolUse" || sub === "preToolUse") {
+      const res = interceptPreToolUse(payload as unknown as Parameters<typeof interceptPreToolUse>[0], { rootDir });
+      process.stdout.write(`${JSON.stringify(res.hookProtocolOutput)}\n`);
+      return;
+    }
+    if (sub === "post-tool" || sub === "PostToolUse" || sub === "postToolUse") {
+      const res = interceptPostToolUse(payload as unknown as Parameters<typeof interceptPostToolUse>[0], { rootDir });
+      process.stdout.write(`${JSON.stringify(res.hookProtocolOutput)}\n`);
+      return;
+    }
+    process.stdout.write("{}\n");
     return;
   }
 

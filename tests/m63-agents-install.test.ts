@@ -187,7 +187,8 @@ describe("M63 Antigravity / Gemini / Copilot install", () => {
     expect(gemini).toContain("CallMcpTool");
 
     const copilot = readFileSync(join(dir, ".github", "copilot-instructions.md"), "utf8");
-    expect(copilot).toContain("graphflow_context");
+    // GraphFlow 3.0 copilot instructions teach the surgical gf_* tools.
+    expect(copilot).toContain("gf_read");
     expect(copilot).not.toContain("GraphFlow for Claude Code");
 
     const antigravityStatus = getAntigravityInstallStatus(dir);

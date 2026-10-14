@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "2.3.0",
+  "version": "3.0.0",
   "publishConfig": {
     "access": "public"
   },
@@ -100,7 +100,9 @@
     "test:coverage": "vitest run --coverage",
     "prepare": "node scripts/prepare-hook.cjs",
     "benchmark:eff": "tsx benchmarks/run-eff-bench.ts",
-    "benchmark:real": "tsx benchmarks/run-real-ab.ts"
+    "benchmark:real": "tsx benchmarks/run-real-ab.ts",
+    "test:v3": "tsx tests/v3-surgical-engine.test.ts",
+    "benchmark:v3": "tsx benchmarks/run-v3-token-comparison.ts"
   },
   "lint-staged": {
     "*.ts": "eslint --fix"

@@ -10,6 +10,9 @@ export default defineConfig({
       '**/dist/**',
       '**/vscode-extension/**',
       '**/.claude/worktrees/**',
+      // Standalone self-contained script with its own runner (npm run test:v3);
+      // it has no describe/it blocks, so vitest would report "No test suite found".
+      'tests/v3-surgical-engine.test.ts',
     ],
     // Integration tests may wait on provider health (~10s); keep a hard ceiling
     // so a hung network call cannot stall CI for 30+ minutes.

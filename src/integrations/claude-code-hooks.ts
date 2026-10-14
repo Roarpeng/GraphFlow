@@ -4,48 +4,32 @@ import { dirname, join } from "node:path";
 import { removeDirIfEmpty, writeJsonOrRemove } from "./config-file-cleanup";
 
 /**
- * claude-code-hooks.ts — Claude Code hooks 配置生成器（P0-2）
+ * claude-code-hooks.ts — Claude Code hooks 配置生成器（P0-2 + GraphFlow 3.0 PreToolUse/PostToolUse 省流拦截器）
  *
- * 生成 ~/.claude/settings.json 风格的 hooks 片段（SessionStart / SessionEnd / Stop），
- * 自动调用 graphflow CLI 记录 outcome/episode，让学习飞轮无需宿主 agent 主动调用
- * graphflow_report_outcome 也能自动闭环（配套的 auto-capture 默认开启，
- * 可通过 GRAPHFLOW_AUTO_CAPTURE=0 显式关闭）：
- *
- * 1. SessionStart → 初始化会话日志目录（不写图）。
- * 2. SessionEnd / Stop → 读取 src/hooks/auto-capture.ts 写入的最新 pending episode
- *    日志条目；仅当成功值作为显式参数传入时才调用
- *    `graphflow outcome report <episodeId> <success>` 回填真实结局
- *    （回填后触发 updateEpisodeOutcome + applySkillLearning，与手动 report_outcome 等价）。
- *    缺省成功值时不回填，episode 保持 pending（绝不默认 success）。
- *
- * 安全：所有嵌入脚本的路径/命令均做 shell 转义（单引号包裹 + 双引号内 fallback 转义），
- * 由 installClaudeCodeHooks 写盘；合并 settings.json 时绝不覆盖用户已有 hooks 配置。
+ * 生成 ~/.claude/settings.json 风格的 hooks 片段：
+ *   - SessionStart / SessionEnd / Stop：自动记录与回填 episode outcome
+ *   - PreToolUse / PostToolUse（当 enableToolInterceptors 开启时）：
+ *       * PreToolUse 拦截对 >250 行大文件的无边界原生 Read，自动折叠为 AST Skeleton 视图（省 75-93% Token）
+ *       * PostToolUse 拦截冗余 Bash 测试/构建输出，自动脱水压缩并录制到习惯轨迹库
  */
 
 export const SESSION_HOOK_SCRIPT = "session.sh";
 const JOURNAL_RELATIVE = ".graphflow/session-journal.jsonl";
-/** Test/override: when set, treat this directory as Claude Code home (`~/.claude`). */
 export const CLAUDE_HOME_ENV = "GRAPHFLOW_CLAUDE_HOME";
 
 export interface ClaudeCodeHooksOptions {
-  /** graphflow CLI 可执行命令（默认 "graphflow"，须在 PATH 中，如 `npm i -g @roarpeng/graphflow`）。 */
   graphflowBin?: string;
-  /** 传给 `graphflow outcome report` 的 --config 参数（默认不传）。 */
   configPath?: string;
-  /** 会话日志路径（默认 <项目目录>/.graphflow/session-journal.jsonl）。 */
   journalPath?: string;
-  /** 生成的脚本目录（默认 ~/.claude/graphflow-hooks）。 */
   hooksDir?: string;
-  /** 目标 settings.json 路径（默认 ~/.claude/settings.json）。 */
   settingsPath?: string;
-  /** 会话结束默认成功值（默认 false）。false/缺省时 $2 为空则不回填，episode 保持 pending。 */
   defaultSuccess?: boolean;
-  /** hook 超时秒数（默认 30）。 */
   timeoutSec?: number;
+  /** 开启 GraphFlow 3.0 PreToolUse / PostToolUse 透明省流拦截器。 */
+  enableToolInterceptors?: boolean;
 }
 
 export interface ClaudeCodeHooksStatusOptions {
-  /** Override Claude Code home (default: GRAPHFLOW_CLAUDE_HOME or ~/.claude). */
   claudeHome?: string;
   settingsPath?: string;
   hooksDir?: string;
@@ -73,39 +57,35 @@ export interface ClaudeCodeHookEntry {
   timeout?: number;
 }
 
+export type ClaudeCodeHookEventName =
+  | "SessionStart"
+  | "SessionEnd"
+  | "Stop"
+  | "PreToolUse"
+  | "PostToolUse";
+
 export interface ClaudeCodeHooksConfig {
-  hooks: Partial<
-    Record<"SessionStart" | "SessionEnd" | "Stop", ClaudeCodeHookEntry[]>
-  >;
+  hooks: Partial<Record<ClaudeCodeHookEventName, ClaudeCodeHookEntry[]>>;
 }
 
-/** 单引号包裹的 shell 安全参数：路径/命令可含空格、单引号等字符。 */
 export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-/** 双引号赋值内 fallback 值的转义：\\ $ ` " 需反斜杠转义。 */
 function shellFallback(value: string): string {
   return value.replace(/([\\$`"])/g, "\\$1");
 }
 
-/** Resolve Claude Code home (`~/.claude`), honoring GRAPHFLOW_CLAUDE_HOME for tests. */
 export function resolveClaudeHome(env: NodeJS.ProcessEnv = process.env): string {
   const override = env[CLAUDE_HOME_ENV]?.trim();
   if (override) return override;
   return join(homedir(), ".claude");
 }
 
-/** Normalize path separators for cross-platform substring checks. */
 function normalizePathForMatch(value: string): string {
   return value.replace(/\\/g, "/").toLowerCase();
 }
 
-/**
- * True when settings.json references our session hook script.
- * Parses JSON when possible so Windows paths survive JSON backslash escaping
- * (`C:\\Users\\...` in file vs `C:\Users\...` in path.join).
- */
 export function settingsReferenceHookScript(raw: string, scriptPath: string): boolean {
   const needle = normalizePathForMatch(scriptPath);
   if (!needle) return false;
@@ -127,7 +107,7 @@ export function settingsReferenceHookScript(raw: string, scriptPath: string): bo
       }
     }
   } catch {
-    // Fall through to raw substring checks for partially written files.
+    // Fall through
   }
   const quoted = shellQuote(scriptPath);
   const jsonEscaped = scriptPath.replace(/\\/g, "\\\\");
@@ -148,11 +128,6 @@ function defaultSettingsPath(claudeHome?: string): string {
   return join(claudeHome ?? resolveClaudeHome(), "settings.json");
 }
 
-/**
- * Doctor/install status for Claude Code flywheel hooks.
- * Detected when Claude Code home exists; installed when settings.json references
- * our session script and the script file is on disk.
- */
 export function getClaudeCodeHooksStatus(
   options: ClaudeCodeHooksStatusOptions = {}
 ): ClaudeCodeHooksStatus {
@@ -181,12 +156,6 @@ export function getClaudeCodeHooksStatus(
   };
 }
 
-/**
- * 生成会话 hook 脚本内容（bash）。`start` 仅准备目录；`end` 解析会话日志中
- * 最新一条 pending episode。成功值不默认 true：`$2` 为空则跳过回填（episode 保持
- * pending）；显式 true/false 才调用 graphflow CLI 回填。
- * 所有嵌入路径均做 shell 转义；失败静默（exit 0），绝不阻塞 Claude Code 会话。
- */
 export function buildSessionHookScript(options: ClaudeCodeHooksOptions = {}): string {
   const journal = options.journalPath ?? `\${CLAUDE_PROJECT_DIR:-.}/${JOURNAL_RELATIVE}`;
   const bin = options.graphflowBin ?? "graphflow";
@@ -195,11 +164,12 @@ export function buildSessionHookScript(options: ClaudeCodeHooksOptions = {}): st
   const successFallback = defaultSuccess ? "true" : "";
   const lines = [
     "#!/usr/bin/env bash",
-    "# GraphFlow auto-capture session hook (generated by graphflow, do not edit).",
+    "# GraphFlow auto-capture & V3 Token-First interceptor hook (generated by graphflow, do not edit).",
     "# Resolves the most recent pending episode (src/hooks/auto-capture.ts) at",
     "# SessionEnd/Stop. Does not default pending episodes to success.",
     "# Missing $2 skips outcome report (episode stays pending).",
     "# Explicit $2 true/false calls: graphflow outcome report <episodeId> <success>",
+    "# PreToolUse / PostToolUse actions delegate to GraphFlow V3 host-interceptor.",
     "# Runtime overrides: GRAPHFLOW_HOOK_JOURNAL / GRAPHFLOW_HOOK_BIN / GRAPHFLOW_HOOK_CONFIG.",
     "set -u",
     'ACTION="${1:-end}"',
@@ -211,6 +181,10 @@ export function buildSessionHookScript(options: ClaudeCodeHooksOptions = {}): st
     'case "$ACTION" in',
     "  start)",
     '    mkdir -p "$(dirname "$JOURNAL")" 2>/dev/null || true',
+    "    exit 0",
+    "    ;;",
+    "  pre-tool|post-tool)",
+    '    "$GF_BIN" hook "$ACTION" 2>/dev/null || true',
     "    exit 0",
     "    ;;",
     "esac",
@@ -237,10 +211,6 @@ export function buildSessionHookScript(options: ClaudeCodeHooksOptions = {}): st
   return lines.join("\n");
 }
 
-/**
- * 生成 settings.json 风格 hooks 配置片段。命令参数均经 shellQuote 转义，
- * 可直接合并进 ~/.claude/settings.json 的 "hooks" 字段。
- */
 export function buildClaudeCodeHooksConfig(
   options: ClaudeCodeHooksOptions = {}
 ): ClaudeCodeHooksConfig {
@@ -249,17 +219,24 @@ export function buildClaudeCodeHooksConfig(
   const quotedScript = shellQuote(scriptPath);
   const startCommand = `bash ${quotedScript} start`;
   const endCommand = `bash ${quotedScript} end`;
+  const preToolCommand = `bash ${quotedScript} pre-tool`;
+  const postToolCommand = `bash ${quotedScript} post-tool`;
   const timeout = options.timeoutSec ?? 30;
   return {
     hooks: {
       SessionStart: [{ type: "command", command: startCommand, timeout }],
       SessionEnd: [{ type: "command", command: endCommand, timeout }],
       Stop: [{ type: "command", command: endCommand, timeout }],
+      ...(options.enableToolInterceptors
+        ? {
+            PreToolUse: [{ type: "command", command: preToolCommand, timeout }],
+            PostToolUse: [{ type: "command", command: postToolCommand, timeout }],
+          }
+        : {}),
     },
   };
 }
 
-/** 合并 hooks 配置到 settings.json（保留用户已有 hooks，append 幂等）。 */
 export function installClaudeCodeHooks(
   options: ClaudeCodeHooksOptions = {}
 ): ClaudeCodeHooksResult {
@@ -268,7 +245,6 @@ export function installClaudeCodeHooks(
   const settingsPath = options.settingsPath ?? defaultSettingsPath(claudeHome);
   const scriptPath = join(hooksDir, SESSION_HOOK_SCRIPT);
 
-  // 1) 安装会话脚本（内容一致则跳过）
   try {
     mkdirSync(hooksDir, { recursive: true });
     const script = buildSessionHookScript(options);
@@ -283,7 +259,6 @@ export function installClaudeCodeHooks(
     };
   }
 
-  // 2) 合并 settings.json
   try {
     return mergeSettingsHooks(settingsPath, buildClaudeCodeHooksConfig(options));
   } catch (error) {
@@ -295,10 +270,6 @@ export function installClaudeCodeHooks(
   }
 }
 
-/**
- * 合并 hooks 片段进 settings.json。文件不存在 → created；已存在且 JSON 损坏 → error
- * （绝不覆盖用户配置）；内容无变化 → skipped。
- */
 function mergeSettingsHooks(
   settingsPath: string,
   config: ClaudeCodeHooksConfig
@@ -348,7 +319,6 @@ function mergeSettingsHooks(
   };
 }
 
-/** 卸载：从 settings.json 移除本生成器写入的 hook 条目并删除会话脚本。 */
 export function uninstallClaudeCodeHooks(
   settingsPath?: string,
   hooksDir?: string
@@ -373,7 +343,7 @@ export function uninstallClaudeCodeHooks(
       : {};
   const ourScript = shellQuote(scriptPath);
   let removedAny = false;
-  for (const event of ["SessionStart", "SessionEnd", "Stop"] as const) {
+  for (const event of ["SessionStart", "SessionEnd", "Stop", "PreToolUse", "PostToolUse"] as const) {
     const entries = Array.isArray(hooks[event]) ? (hooks[event] as ClaudeCodeHookEntry[]) : [];
     const kept = entries.filter((entry) => !entry.command.includes(ourScript));
     if (kept.length !== entries.length) {
@@ -393,7 +363,7 @@ export function uninstallClaudeCodeHooks(
     try {
       rmSync(scriptPath, { force: true });
     } catch {
-      // 删除脚本失败不阻断
+      // ignore
     }
   }
   removeDirIfEmpty(dirname(scriptPath));

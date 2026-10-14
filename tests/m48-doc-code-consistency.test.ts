@@ -81,9 +81,12 @@ describe("Doc/code consistency", () => {
     }
   });
 
-  it("AGENTS.md lists the core context/plan/run tools (agent entrypoints)", () => {
+  it("AGENTS.md lists the four surgical v3 tools (agent entrypoints)", () => {
     const agents = read("AGENTS.md");
-    for (const required of ["graphflow_context", "graphflow_plan", "graphflow_run"]) {
+    // GraphFlow 3.0 surfaces the gf_* surgical tools as the agent entrypoints;
+    // the legacy graphflow_* tools remain MCP-side but are no longer the
+    // documented first-call workflow.
+    for (const required of ["gf_read", "gf_edit", "gf_exec", "gf_macro"]) {
       expect(agents, `AGENTS.md must document ${required}`).toContain(required);
     }
   });

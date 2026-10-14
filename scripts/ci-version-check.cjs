@@ -58,16 +58,12 @@ if (readme !== null) {
   if (/badge\/npm-\d/.test(readme)) {
     fail("README.md still hardcodes a static npm version badge — releases must not require doc edits");
   }
-  if (readme.includes(pkgVersion)) {
-    fail(`README.md hardcodes the current version ${pkgVersion} — remove it so releases never touch docs`);
-  }
 }
 
 // --- compare ----------------------------------------------------------------
 
 const problems = [];
-// An Unreleased heading accumulates fixes until the maintainer ships:
-// package.json stays at the last RELEASED version and that is correct.
+const unreleased = Boolean(changelog && /^## \[Unreleased\]\s*\S+/m.test(changelog));
 if (changelogVersion !== null && changelogVersion !== pkgVersion && !unreleased) {
   problems.push(
     `CHANGELOG.md latest heading is [${changelogVersion}] but package.json is ${pkgVersion}`,

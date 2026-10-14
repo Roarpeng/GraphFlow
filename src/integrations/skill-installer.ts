@@ -16,6 +16,7 @@ import {
   GRAPHFLOW_BLOCK_END,
   isManagedContentInstalled,
   removeManagedBlockFile,
+  stripManagedBlockText,
   wrapManagedBlock,
   writeManagedBlockFile,
 } from "./managed-block";
@@ -371,7 +372,12 @@ export function installManagedTemplateFile(
   if (template === undefined) {
     return { status: "skipped", message: "Source file not found" };
   }
-  return writeManagedBlockFile(filePath, wrapManagedBlock(template), {
+  // Instruction sources may already ship inside the managed markers (the
+  // synced CLAUDE.md / AGENTS.md mirrors). Unwrap before re-wrapping so a
+  // refresh never nests marker pairs — nested markers break the idempotent
+  // skip comparison and make every install report "updated".
+  const inner = stripManagedBlockText(template) ?? template;
+  return writeManagedBlockFile(filePath, wrapManagedBlock(inner), {
     legacyWholeFile: legacyInstructionTemplates(vendorRuntimeRoot),
   });
 }

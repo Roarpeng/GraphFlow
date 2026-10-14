@@ -31,8 +31,9 @@ describe("M62 Trae CN project install", () => {
     expect(existsSync(join(dir, ".trae", "skills", "graphflow", "SKILL.md"))).toBe(true);
 
     const rule = readFileSync(join(dir, ".trae", "rules", "graphflow.md"), "utf8");
-    expect(rule).toContain("alwaysApply: true");
-    expect(rule).toContain("graphflow_context");
+    // GraphFlow 3.0 Trae rule: no `alwaysApply` frontmatter, teaches the 4 gf_* tools.
+    expect(rule).toContain("GraphFlow 3.0");
+    expect(rule).toContain("gf_read");
 
     // User-level Trae directories are process-global and other installation
     // suites may create/remove them concurrently. Assert only the project
