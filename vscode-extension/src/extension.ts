@@ -1,0 +1,1736 @@
+import * as vscode from "vscode";
+import { existsSync, readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { resolveRuntimeCwd, requireWorkspaceFolder } from "./workspace";
+import {
+  buildAgentWorkItemsHtml,
+  buildContextPreviewHtml,
+  buildGraphSnapshotHtml,
+  buildSettingsHtml,
+  buildSkillInsightsHtml,
+  type AgentDelegationPanelResult,
+  type AgentWorkItemView,
+  type ContextPreviewResult,
+  type GraphSnapshotResult,
+  type GraphFlowSettings,
+  type SettingsPanelStatus,
+  type SkillInsightsResult,
+  type WorkbenchOutlineNode,
+} from "./panels";
+import { WorkbenchTreeProvider, type WorkbenchTreeItem } from "./workbench-tree";
+import type { GraphFlowRuntime } from "./runtime-types";
+
+interface RunRecord {
+  task: string;
+  status: string;
+  attempts: number;
+  feedback: string;
+  timestamp: number;
+}
+
+const runs: RunRecord[] = [];
+function resolveChatParticipantId(): string {
+  try {
+    const pkgPath = join(__dirname, "..", "package.json");
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { publisher?: string; name?: string };
+    const publisher = pkg.publisher || "roarpeng";
+    const name = pkg.name || "graphflow";
+    return `${publisher}.${name}.graphflowAgent`;
+  } catch {
+    return "roarpeng.graphflow.graphflowAgent";
+  }
+}
+const CHAT_PARTICIPANT_ID = resolveChatParticipantId();
+let runtimePromise: Promise<GraphFlowRuntime> | undefined;
+
+const MCP_INSTALL_VERSION_KEY = "graphflow.mcpInstallVersion";
+
+export function activate(context: vscode.ExtensionContext): void {
+  const workspaceRoot = getWorkspaceRoot();
+  const output = vscode.window.createOutputChannel("GraphFlow");
+  context.subscriptions.push(output);
+
+  // Ensure anydoc (if enabled) before MCP bootstrap / auto-index so Office/PDF indexing works.
+  void (async () => {
+    await ensureAnydocForExtension(context, output);
+    void ensureRuntimeDepsForExtension(context, output);
+    await bootstrapExtension(context, workspaceRoot, output);
+    if (workspaceRoot) {
+      try {
+        await runGraphFlow(workspaceRoot, (runtime) => runtime.indexGraph(workspaceRoot));
+      } catch (err) {
+        console.error("GraphFlow auto-index on activate failed:", err);
+      }
+    }
+  })();
+
+  if (workspaceRoot) {
+    registerDebouncedIndexOnSave(context, workspaceRoot);
+  }
+
+  const runTask = vscode.commands.registerCommand("graphflow.runTask", async () => {
+    const task = await vscode.window.showInputBox({
+      title: "GraphFlow Run Task",
+      prompt: "Enter task description",
+      placeHolder: "update readme and add tests",
+    });
+
+    if (!task) {
+      return;
+    }
+
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+      vscode.window.showInformationMessage("GraphFlow: 请先打开一个项目文件夹。", "打开文件夹").then((choice) => {
+        if (choice === "打开文件夹") {
+          void vscode.commands.executeCommand("workbench.action.files.openFolder");
+        }
+      });
+      return;
+    }
+
+    const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(task));
+    const result = await runGraphFlow(workspaceRoot, (runtime) => runtime.runTaskResult(task));
+
+    const record: RunRecord = {
+      task,
+      status: result.status,
+      attempts: result.attempts,
+      feedback: result.feedback,
+      timestamp: Date.now(),
+    };
+
+    runs.push(record);
+
+    if (shouldShowAgentWorkItemsPanel(result)) {
+      showAgentWorkItemsPanel(context, buildPanelResultFromRun(task, result, preview));
+      return;
+    }
+
+    vscode.window.showInformationMessage(
+      `GraphFlow finished: ${record.status}; saved≈${preview.tokenBudget.estimatedSavingsPercent}% tokens`
+    );
+  });
+
+  const planInsightCommand = vscode.commands.registerCommand("graphflow.planInsight", async () => {
+    const task = await vscode.window.showInputBox({
+      title: "GraphFlow Plan Insight (Six Hats)",
+      prompt: "Enter task description for agent-delegated plan insight",
+      placeHolder: "refactor architecture and add tests",
+    });
+
+    if (!task) {
+      return;
+    }
+
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+      vscode.window.showInformationMessage("GraphFlow: 请先打开一个项目文件夹。", "打开文件夹").then((choice) => {
+        if (choice === "打开文件夹") {
+          void vscode.commands.executeCommand("workbench.action.files.openFolder");
+        }
+      });
+      return;
+    }
+
+    const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(task));
+    const result = await runGraphFlow(workspaceRoot, (runtime) => runtime.planInsightResult(task));
+
+    if (shouldShowAgentWorkItemsPanel(result)) {
+      showAgentWorkItemsPanel(context, {
+        task,
+        mode: result.mode,
+        agentInstructions: result.agentInstructions,
+        agentWorkItems: (result.agentWorkItems ?? []) as AgentWorkItemView[],
+        plan: result.plan,
+        tokenBudget: preview.tokenBudget,
+      });
+      return;
+    }
+
+    vscode.window.showInformationMessage(
+      `GraphFlow plan insight (${result.mode}): ${result.plan.length} tasks; saved≈${preview.tokenBudget.estimatedSavingsPercent}% tokens`
+    );
+  });
+
+  const showRuns = vscode.commands.registerCommand("graphflow.showRuns", async () => {
+    if (runs.length === 0) {
+      vscode.window.showInformationMessage("No GraphFlow runs yet.");
+      return;
+    }
+
+    const items = runs
+      .slice()
+      .reverse()
+      .map((run) => `${run.status} | ${run.task} | attempts=${run.attempts}`);
+
+    await vscode.window.showQuickPick(items, {
+      title: "GraphFlow Run History",
+    });
+  });
+
+  const planTask = vscode.commands.registerCommand("graphflow.planTask", async () => {
+    const task = await vscode.window.showInputBox({
+      title: "GraphFlow Plan & Brainstorm",
+      prompt: "Enter task description",
+      placeHolder: "refactor architecture and add tests",
+    });
+
+    if (!task) {
+      return;
+    }
+
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+      vscode.window.showInformationMessage("GraphFlow: 请先打开一个项目文件夹。", "打开文件夹").then((choice) => {
+        if (choice === "打开文件夹") {
+          void vscode.commands.executeCommand("workbench.action.files.openFolder");
+        }
+      });
+      return;
+    }
+
+    const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(task));
+    const output = await runGraphFlow(workspaceRoot, (runtime) => Promise.resolve(runtime.planAndBrainstorm(task)));
+    await vscode.window.showQuickPick(output.split("; "), {
+      title: `GraphFlow Plan & Brainstorm (saved≈${preview.tokenBudget.estimatedSavingsPercent}% tokens)`,
+    });
+  });
+
+  const previewContextCommand = vscode.commands.registerCommand("graphflow.previewContext", async () => {
+    const query = await vscode.window.showInputBox({
+      title: "GraphFlow Context Preview",
+      prompt: "Enter query or task description",
+      placeHolder: "refactor planner and reduce token usage",
+    });
+
+    if (!query) {
+      return;
+    }
+
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+      vscode.window.showInformationMessage("GraphFlow: 请先打开一个项目文件夹。", "打开文件夹").then((choice) => {
+        if (choice === "打开文件夹") {
+          void vscode.commands.executeCommand("workbench.action.files.openFolder");
+        }
+      });
+      return;
+    }
+
+    const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(query));
+    showContextPreviewPanel(context, preview);
+  });
+
+  const showSettings = vscode.commands.registerCommand("graphflow.showSettings", async () => {
+    await openGraphFlowSettings(context, output);
+  });
+
+  const showGraph = vscode.commands.registerCommand("graphflow.showGraph", async () => {
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+      vscode.window.showInformationMessage("GraphFlow: 请先打开一个项目文件夹。", "打开文件夹").then((choice) => {
+        if (choice === "打开文件夹") {
+          void vscode.commands.executeCommand("workbench.action.files.openFolder");
+        }
+      });
+      return;
+    }
+
+    const snapshot = await runGraphFlow(workspaceRoot, (runtime) =>
+      runtime.inspectGraph(undefined, { nodeLimit: 120, edgeLimit: 200 })
+    );
+    showGraphSnapshotPanel(context, snapshot);
+    workbenchTree.refresh();
+  });
+
+  const workbenchTree = new WorkbenchTreeProvider(async () => {
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) return [];
+    const snapshot = await runGraphFlow(workspaceRoot, (runtime) =>
+      runtime.inspectGraph(undefined, { nodeLimit: 8, edgeLimit: 8 })
+    );
+    return snapshot.workbenchOutline ?? [];
+  });
+  const workbenchView = vscode.window.createTreeView("graphflow.workbench", {
+    treeDataProvider: workbenchTree,
+    showCollapseAll: true,
+  });
+  const showWorkbench = vscode.commands.registerCommand("graphflow.showWorkbench", async () => {
+    workbenchTree.refresh();
+    await vscode.commands.executeCommand("graphflow.workbench.focus");
+  });
+  const resumeWorkbenchTopic = vscode.commands.registerCommand(
+    "graphflow.resumeWorkbenchTopic",
+    async (node?: WorkbenchOutlineNode | WorkbenchTreeItem) => {
+      const topic = node && "kind" in node ? node : node && "outlineNode" in node ? node.outlineNode : undefined;
+      if (!topic?.id) return;
+      await copyWorkbenchResumePrompt(topic.id, topic.title, topic.lastUserPreview);
+    }
+  );
+
+  const showSkills = vscode.commands.registerCommand("graphflow.showSkills", async () => {
+    const workspaceRoot = getWorkspaceRoot();
+    if (!workspaceRoot) {
+      vscode.window.showInformationMessage("GraphFlow: 请先打开一个项目文件夹。", "打开文件夹").then((choice) => {
+        if (choice === "打开文件夹") {
+          void vscode.commands.executeCommand("workbench.action.files.openFolder");
+        }
+      });
+      return;
+    }
+
+    const insights = await runGraphFlow(workspaceRoot, (runtime) => runtime.getSkillInsights(undefined, 24));
+    const flywheel = await runGraphFlow(workspaceRoot, (runtime) =>
+      Promise.resolve(runtime.getFlywheelReport())
+    );
+    showSkillInsightsPanel(context, { ...insights, flywheel });
+  });
+
+  const installMcp = vscode.commands.registerCommand("graphflow.installMcp", async () => {
+    const root = getWorkspaceRoot();
+    await runConfigBootstrap(root, output);
+    await runMcpBootstrap(context, root, output, { forceNotify: true, installScope: "all" });
+    await installSkillsFromExtension(context, root, output, { includeProjectLevel: true });
+  });
+
+  const participant = vscode.chat.createChatParticipant(
+    CHAT_PARTICIPANT_ID,
+    async (request, _context, stream) => {
+      const workspaceRoot = getWorkspaceRoot();
+      if (!workspaceRoot) {
+        stream.markdown("GraphFlow: 请先打开一个项目文件夹后再使用。");
+        return;
+      }
+
+      const normalizedPrompt = request.prompt.trim();
+      const command = request.command ?? detectInlineCommand(normalizedPrompt);
+      const payload = stripInlineCommand(normalizedPrompt);
+
+      if (command === "history") {
+        if (runs.length === 0) {
+          stream.markdown("No GraphFlow runs yet.");
+          return;
+        }
+
+        const lines = runs
+          .slice()
+          .reverse()
+          .slice(0, 10)
+          .map(
+            (run) =>
+              `- ${run.status} | ${run.task} | attempts=${run.attempts} | ${new Date(run.timestamp).toLocaleString()}`
+          );
+        stream.markdown(`Recent runs:\n${lines.join("\n")}`);
+        return;
+      }
+
+      if (command === "settings") {
+        const settings = await runGraphFlow(workspaceRoot, (runtime) =>
+          Promise.resolve(runtime.getGraphFlowSettings())
+        );
+        stream.markdown(formatSettingsMarkdown(settings));
+        return;
+      }
+
+      if (command === "diagnose") {
+        const output = await runGraphFlow(workspaceRoot, (runtime) =>
+          Promise.resolve(runtime.diagnoseRouting())
+        );
+        stream.markdown(`Routing diagnostics:\n${formatAsBullet(output)}`);
+        return;
+      }
+
+      if (command === "learn") {
+        const output = await runGraphFlow(workspaceRoot, (runtime) =>
+          Promise.resolve(runtime.runLearningNightly())
+        );
+        stream.markdown(`Nightly learning:\n${formatAsBullet(output)}`);
+        return;
+      }
+
+      if (command === "graph") {
+        const snapshot = await runGraphFlow(workspaceRoot, (runtime) =>
+          runtime.inspectGraph(undefined, { nodeLimit: 24, edgeLimit: 36 })
+        );
+        stream.markdown(formatGraphSnapshotMarkdown(snapshot));
+        return;
+      }
+
+      if (command === "tree") {
+        const snapshot = await runGraphFlow(workspaceRoot, (runtime) =>
+          runtime.inspectGraph(undefined, { nodeLimit: 8, edgeLimit: 8 })
+        );
+        workbenchTree.refresh();
+        stream.markdown(formatWorkbenchOutlineMarkdown(snapshot.workbenchOutline));
+        return;
+      }
+
+      if (command === "context") {
+        if (!payload) {
+          stream.markdown("Please provide a context query. Example: `/context refactor planner`");
+          return;
+        }
+
+        const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(payload));
+        stream.markdown(formatContextPreviewMarkdown(preview));
+        return;
+      }
+
+      if (command === "skills") {
+        const insights = await runGraphFlow(workspaceRoot, (runtime) => runtime.getSkillInsights(undefined, 12));
+        stream.markdown(formatSkillInsightsMarkdown(insights));
+        return;
+      }
+
+      if (!payload) {
+        stream.markdown("Please provide a task description. Example: `/run update readme and add tests`");
+        return;
+      }
+
+      if (command === "plan") {
+        const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(payload));
+        const output = await runGraphFlow(
+          workspaceRoot,
+          (runtime) => Promise.resolve(runtime.planAndBrainstorm(payload))
+        );
+        stream.markdown(`Token budget:\n${formatContextBudgetBullets(preview)}\n\nPlan result:\n\n${formatAsBullet(output)}`);
+        return;
+      }
+
+      if (command === "plan-insight") {
+        const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(payload));
+        const result = await runGraphFlow(workspaceRoot, (runtime) => runtime.planInsightResult(payload));
+
+        if (shouldShowAgentWorkItemsPanel(result)) {
+          showAgentWorkItemsPanel(context, {
+            task: payload,
+            mode: result.mode,
+            agentInstructions: result.agentInstructions,
+            agentWorkItems: (result.agentWorkItems ?? []) as AgentWorkItemView[],
+            plan: result.plan,
+            tokenBudget: preview.tokenBudget,
+          });
+          stream.markdown(formatAgentDelegationChatMarkdown(payload, preview, result));
+          return;
+        }
+
+        const planLines = result.plan.map((node) => `- ${node.id}: ${node.description}`);
+        stream.markdown(
+          [
+            `Plan insight (${result.mode}):`,
+            formatContextBudgetBullets(preview),
+            "",
+            `Plan (${result.plan.length} tasks):`,
+            ...(planLines.length > 0 ? planLines : ["- empty"]),
+          ].join("\n")
+        );
+        return;
+      }
+
+      const preview = await runGraphFlow(workspaceRoot, (runtime) => runtime.previewContext(payload));
+      const result = await runGraphFlow(workspaceRoot, (runtime) => runtime.runTaskResult(payload));
+      runs.push({
+        task: payload,
+        status: result.status,
+        attempts: result.attempts,
+        feedback: result.feedback,
+        timestamp: Date.now(),
+      });
+
+      if (shouldShowAgentWorkItemsPanel(result)) {
+        showAgentWorkItemsPanel(context, buildPanelResultFromRun(payload, result, preview));
+        stream.markdown(formatAgentDelegationChatMarkdown(payload, preview, result));
+        return;
+      }
+
+      stream.markdown(
+        `Token budget:\n${formatContextBudgetBullets(preview)}\n\nRun result:\n- status: ${result.status}\n- attempts: ${result.attempts}\n- feedback: ${result.feedback}`
+      );
+    }
+  );
+
+  context.subscriptions.push(
+    runTask,
+    planInsightCommand,
+    showRuns,
+    planTask,
+    previewContextCommand,
+    showSettings,
+    showGraph,
+    showWorkbench,
+    resumeWorkbenchTopic,
+    workbenchView,
+    showSkills,
+    installMcp,
+    participant
+  );
+}
+
+async function loadEnsureAnydocModule(context: vscode.ExtensionContext): Promise<{
+  ensureAnydocInstalled: (options?: {
+    enabled?: boolean;
+    logger?: (message: string) => void;
+  }) => Promise<{ status: string; message: string; nodeModules?: string; version?: string }>;
+  applyAnydocRequireEnv: (nodeModules?: string) => boolean;
+  resolveAnydocNodeModules: () => string;
+  inspectAnydocStatus?: () => { ready: boolean; version?: string; nodeModules: string };
+  resetDocumentConverterCache?: () => void;
+}> {
+  const ensurePath = join(
+    context.extensionPath,
+    "vendor",
+    "graphflow",
+    "dist",
+    "integrations",
+    "ensure-anydoc.js"
+  );
+  return (await import(pathToFileURL(ensurePath).href)) as Awaited<ReturnType<typeof loadEnsureAnydocModule>>;
+}
+
+/**
+ * The extension host runs on Electron, so better-sqlite3 needs an Electron-ABI
+ * build separate from the node build the MCP server installs for itself.
+ */
+async function ensureRuntimeDepsForExtension(
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel
+): Promise<void> {
+  if (!vscode.workspace.getConfiguration("graphflow").get<boolean>("downloadRuntimeDeps", true)) {
+    return;
+  }
+  try {
+    const modulePath = join(context.extensionPath, "vendor", "graphflow", "dist", "integrations", "ensure-runtime-deps.js");
+    const mod = (await import(pathToFileURL(modulePath).href)) as {
+      ensureRuntimeDepsInstalled: (options?: {
+        respectBackoff?: boolean;
+        logger?: (message: string) => void;
+      }) => Promise<{ status: string; message: string }>;
+    };
+    const result = await mod.ensureRuntimeDepsInstalled({
+      respectBackoff: true,
+      logger: (message) => output.appendLine(message),
+    });
+    output.appendLine(`[GraphFlow] runtime deps: ${result.status} — ${result.message}`);
+  } catch (err) {
+    output.appendLine(`[GraphFlow] runtime deps check failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+async function inspectAnydocForExtension(
+  context: vscode.ExtensionContext
+): Promise<{ ready: boolean; version?: string }> {
+  try {
+    const mod = await loadEnsureAnydocModule(context);
+    if (typeof mod.inspectAnydocStatus === "function") {
+      return mod.inspectAnydocStatus();
+    }
+    return { ready: false };
+  } catch {
+    return { ready: false };
+  }
+}
+
+async function persistDownloadAnydoc(enabled: boolean): Promise<void> {
+  await vscode.workspace.getConfiguration("graphflow").update(
+    "downloadAnydoc",
+    enabled,
+    vscode.ConfigurationTarget.Global
+  );
+}
+
+async function ensureAnydocForExtension(
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel,
+  enabled = vscode.workspace.getConfiguration("graphflow").get<boolean>("downloadAnydoc", true)
+): Promise<{ ready: boolean; version?: string; message: string }> {
+  try {
+    const mod = await loadEnsureAnydocModule(context);
+    const result = await mod.ensureAnydocInstalled({
+      enabled,
+      logger: (message) => output.appendLine(message),
+    });
+    if (result.nodeModules) {
+      mod.applyAnydocRequireEnv(result.nodeModules);
+    } else {
+      mod.applyAnydocRequireEnv(mod.resolveAnydocNodeModules());
+    }
+    try {
+      const convertPath = join(
+        context.extensionPath,
+        "vendor",
+        "graphflow",
+        "dist",
+        "graph",
+        "document-convert.js"
+      );
+      const convertMod = (await import(pathToFileURL(convertPath).href)) as {
+        resetDocumentConverterCache?: () => void;
+      };
+      convertMod.resetDocumentConverterCache?.();
+    } catch {
+      // ignore
+    }
+    output.appendLine(`[GraphFlow] anydoc: ${result.status} — ${result.message}`);
+    const ready = result.status === "already" || result.status === "installed";
+    return { ready, ...(result.version ? { version: result.version } : {}), message: result.message };
+  } catch (err) {
+    const text = err instanceof Error ? err.message : String(err);
+    output.appendLine(`[GraphFlow] anydoc ensure skipped: ${text}`);
+    return { ready: false, message: text };
+  }
+}
+
+async function bootstrapExtension(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string | undefined,
+  output: vscode.OutputChannel
+): Promise<void> {
+  await runConfigBootstrap(workspaceRoot, output);
+
+  const extensionVersion = context.extension.packageJSON.version as string;
+  const lastInstalledVersion = context.globalState.get<string>(MCP_INSTALL_VERSION_KEY);
+  const isFreshInstall = lastInstalledVersion !== extensionVersion;
+
+  // Painless Windows migrate: rewrite any existing spaced Program Files commands
+  // before (re)install, so Trae Solo works without a manual "Install MCP" click.
+  await runMcpWindowsSpaceRepair(workspaceRoot, output);
+
+  // After VSIX upgrades, rewrite missing mcp-launcher paths (old extension folder)
+  // so Cursor Agents Window / project .cursor/mcp.json keep working.
+  await runMcpStaleLauncherRepair(context, workspaceRoot, output);
+
+  await runMcpBootstrap(context, workspaceRoot, output, { forceNotify: isFreshInstall, isFreshInstall });
+
+  // MCP 安装成功后，安装用户级 Skill / Rules（项目级文件仅在显式 "Install MCP" 时写入）
+  await installSkillsFromExtension(context, workspaceRoot, output);
+
+  if (isFreshInstall) {
+    await context.globalState.update(MCP_INSTALL_VERSION_KEY, extensionVersion);
+  }
+}
+
+async function runConfigBootstrap(
+  workspaceRoot: string | undefined,
+  output: vscode.OutputChannel
+): Promise<void> {
+  const cwdRoot = workspaceRoot ?? process.cwd();
+
+  try {
+    const globalResult = await runGraphFlow(cwdRoot, (runtime) =>
+      Promise.resolve(runtime.ensureGlobalGraphFlowConfig())
+    );
+    output.appendLine(
+      `[GraphFlow] Global config ${globalResult.status}: ${globalResult.path}`
+    );
+  } catch (err) {
+    const text = err instanceof Error ? err.message : String(err);
+    output.appendLine(`[GraphFlow] Config scaffold failed: ${text}`);
+  }
+}
+
+async function runMcpWindowsSpaceRepair(
+  workspaceRoot: string | undefined,
+  output: vscode.OutputChannel
+): Promise<void> {
+  if (process.platform !== "win32") {
+    return;
+  }
+  const cwdRoot = workspaceRoot ?? process.cwd();
+  try {
+    const repairs = await runGraphFlow(cwdRoot, (runtime) =>
+      Promise.resolve(runtime.repairUnsafeWindowsMcpCommands())
+    );
+    const fixed = repairs.filter((r) => r.repaired);
+    if (fixed.length === 0) {
+      return;
+    }
+    output.appendLine("[GraphFlow] Auto-repaired Windows MCP spaced paths:");
+    for (const item of fixed) {
+      output.appendLine(
+        `- ${item.agentName}: ${item.beforeCommand} → ${item.afterCommand} (${item.configPath})`
+      );
+    }
+  } catch (err) {
+    const text = err instanceof Error ? err.message : String(err);
+    output.appendLine(`[GraphFlow] MCP path auto-repair skipped: ${text}`);
+  }
+}
+
+async function runMcpStaleLauncherRepair(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string | undefined,
+  output: vscode.OutputChannel
+): Promise<void> {
+  const cwdRoot = workspaceRoot ?? process.cwd();
+  const extensionPath = context.extensionPath;
+  const launcherPath =
+    process.platform === "win32"
+      ? join(extensionPath, "mcp-launcher.cmd")
+      : join(extensionPath, "mcp-launcher.cjs");
+  if (!existsSync(launcherPath)) {
+    output.appendLine(`[GraphFlow] Stale MCP launcher repair skipped: missing ${launcherPath}`);
+    return;
+  }
+
+  try {
+    const repairs = await runGraphFlow(cwdRoot, (runtime) => {
+      const repair = runtime.repairStaleGraphFlowMcpLaunchers;
+      if (typeof repair !== "function") {
+        return Promise.resolve([]);
+      }
+      return Promise.resolve(
+        repair({
+          launcherPath,
+          ...(workspaceRoot ? { workspaceRoot } : {}),
+        })
+      );
+    });
+    const fixed = repairs.filter((r) => r.repaired);
+    if (fixed.length === 0) {
+      return;
+    }
+    output.appendLine("[GraphFlow] Auto-repaired stale MCP launcher paths:");
+    for (const item of fixed) {
+      output.appendLine(
+        `- ${item.agentName}: ${item.beforeLauncher} → ${item.afterLauncher} (${item.configPath})`
+      );
+    }
+  } catch (err) {
+    const text = err instanceof Error ? err.message : String(err);
+    output.appendLine(`[GraphFlow] Stale MCP launcher auto-repair skipped: ${text}`);
+  }
+}
+
+async function runMcpBootstrap(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string | undefined,
+  output: vscode.OutputChannel,
+  options: { forceNotify: boolean; isFreshInstall?: boolean; installScope?: "user" | "all" }
+): Promise<{
+  results: Awaited<ReturnType<GraphFlowRuntime["installMcpToDetectedAgents"]>>;
+  mcpAgents: Awaited<ReturnType<GraphFlowRuntime["getSettingsPanelStatus"]>>["mcpAgents"];
+} | undefined> {
+  const extensionPath = context.extensionPath;
+  const stableRoot = join(homedir(), ".graphflow", "runtime");
+  // One-command + never-dangling contract: sync the bundled runtime + launcher
+  // into the STABLE home (outside any versioned extension directory) and point
+  // every MCP entry there. IDE upgrades delete old extension directories —
+  // entries pointing at them were the recurring "Cannot find module
+  // mcp-launcher.cjs" field reports. Sync failure falls back to the extension
+  // copy for THIS install; the next activation retries the sync.
+  let launchRoot = extensionPath;
+  try {
+    const { cpSync, mkdirSync } = await import("node:fs");
+    mkdirSync(stableRoot, { recursive: true });
+    // Mirror the extension layout (vendor/graphflow) so the launcher's
+    // __dirname/vendor/graphflow resolution works unchanged from the stable
+    // home; the launcher itself also accepts a flat dist/ layout.
+    cpSync(join(extensionPath, "vendor"), join(stableRoot, "vendor"), { recursive: true, force: true });
+    for (const launcher of ["mcp-launcher.cjs", "mcp-launcher.cmd"]) {
+      const source = join(extensionPath, launcher);
+      if (existsSync(source)) {
+        cpSync(source, join(stableRoot, launcher), { force: true });
+      }
+    }
+    if (
+      existsSync(join(stableRoot, "vendor", "graphflow", "dist", "surfaces", "mcp", "server.js")) ||
+      existsSync(join(stableRoot, "dist", "surfaces", "mcp", "server.js"))
+    ) {
+      launchRoot = stableRoot;
+      output.appendLine(`[GraphFlow] Stable runtime synced: ${stableRoot}`);
+    } else {
+      output.appendLine(`[GraphFlow] Stable runtime sync incomplete; using extension copy this run.`);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    output.appendLine(`[GraphFlow] Stable runtime sync failed (${message}); using extension copy this run.`);
+  }
+  const bundledRuntimeRoot =
+    launchRoot === stableRoot ? join(stableRoot, "vendor", "graphflow") : join(extensionPath, "vendor", "graphflow");
+  const bundledServerPath = join(bundledRuntimeRoot, "dist", "surfaces", "mcp", "server.js");
+  const launcherPath =
+    process.platform === "win32"
+      ? join(launchRoot, "mcp-launcher.cmd")
+      : join(launchRoot, "mcp-launcher.cjs");
+  const cwdRoot = workspaceRoot ?? process.cwd();
+  // The four runtime calls below are independent: an MCP install that succeeded
+  // must not be reported as failed because a status/diagnose call threw (e.g. a
+  // graph store that is too large to read). Only the install call itself can
+  // fail the bootstrap; the rest degrade to an output-channel line.
+  const logStepFailure = (step: string, err: unknown): void => {
+    const message = err instanceof Error ? err.message : String(err);
+    output.appendLine(`[GraphFlow] ${step} failed: ${message}`);
+    if (err instanceof Error && err.stack) {
+      output.appendLine(err.stack);
+    }
+  };
+  const runOptionalStep = async <T>(step: string, run: () => Promise<T>): Promise<T | undefined> => {
+    try {
+      return await run();
+    } catch (err) {
+      logStepFailure(step, err);
+      return undefined;
+    }
+  };
+
+  try {
+    const results = await runGraphFlow(cwdRoot, (runtime) =>
+      Promise.resolve(
+        runtime.installMcpToDetectedAgents({
+          strategy: "node-bundled",
+          // Default user-scope only (matches CLI init). Workspace .cursor/mcp.json is opt-in via Install MCP.
+          installScope: options.installScope ?? "user",
+          ...(workspaceRoot ? { workspaceRoot } : {}),
+          bundledServerPath,
+          bundledRuntimeRoot,
+          launcherPath,
+          ...(process.platform === "win32" ? { electronExecPath: process.execPath } : {}),
+        })
+      )
+    );
+
+    const successes = results.filter((result) => result.status === "injected" || result.status === "created");
+    const updated = results.filter((result) => result.status === "updated");
+    const detected =
+      (await runOptionalStep("agent detection", () =>
+        runGraphFlow(cwdRoot, (runtime) => Promise.resolve(runtime.detectInstalledAgents()))
+      )) ?? [];
+    const guide =
+      (await runOptionalStep("model config guide", () =>
+        runGraphFlow(cwdRoot, (runtime) => Promise.resolve(runtime.formatModelConfigGuide(workspaceRoot)))
+      )) ?? "";
+    const panelStatus = await runOptionalStep("settings panel status", () =>
+      runGraphFlow(cwdRoot, (runtime) => runtime.getSettingsPanelStatus())
+    );
+
+    output.appendLine("[GraphFlow] MCP auto-install results:");
+    for (const result of results) {
+      output.appendLine(`- ${result.agentName} (${result.scope}) ${result.status}: ${result.configPath}${result.message ? ` (${result.message})` : ""}`);
+    }
+    output.appendLine("");
+    output.appendLine(guide);
+
+    if (options.isFreshInstall) {
+      if (workspaceRoot) {
+        void vscode.commands.executeCommand("graphflow.showSettings");
+      } else {
+        vscode.window.showInformationMessage("GraphFlow 安装成功！请打开一个项目文件夹以开始使用。", "打开项目").then((choice) => {
+          if (choice === "打开项目") {
+            void vscode.commands.executeCommand("workbench.action.files.openFolder");
+          }
+        });
+      }
+    }
+
+    if (!options.forceNotify && successes.length === 0) {
+      return { results, mcpAgents: panelStatus?.mcpAgents ?? [] };
+    }
+
+    const agentNames = detected.map((agent) => agent.name).join(", ") || "未检测到";
+    if (successes.length === 0 && updated.length === 0) {
+      vscode.window.showWarningMessage(
+        `GraphFlow 未写入 MCP（嗅探到: ${agentNames}）。可运行 "GraphFlow: Install MCP to Agents" 重试。`,
+        "打开设置"
+      ).then((choice) => {
+        if (choice === "打开设置") {
+          void vscode.commands.executeCommand("graphflow.showSettings");
+        }
+      });
+      return { results, mcpAgents: panelStatus?.mcpAgents ?? [] };
+    }
+
+    const allNotified = [...successes, ...updated];
+    const installedNames = [...new Set(allNotified.map((result) => result.agentName))].join(", ");
+    
+    const message = workspaceRoot
+      ? `GraphFlow MCP 已安装到: ${installedNames}。请配置模型 API Key 后重启对应 Agent 工具。`
+      : `GraphFlow MCP 已安装到: ${installedNames}。请打开一个项目文件夹以使用 GraphFlow 的全部功能。`;
+    
+    const buttons = workspaceRoot ? ["配置模型"] : ["打开项目"];
+    
+    vscode.window
+      .showInformationMessage(message, ...buttons)
+      .then((choice) => {
+        if (choice === "配置模型") {
+          void vscode.commands.executeCommand("graphflow.showSettings");
+        } else if (choice === "打开项目") {
+          void vscode.commands.executeCommand("workbench.action.files.openFolder");
+        }
+      });
+    return { results, mcpAgents: panelStatus?.mcpAgents ?? [] };
+  } catch (err) {
+    const text = err instanceof Error ? err.message : String(err);
+    output.appendLine(`[GraphFlow] MCP auto-install failed: ${text}`);
+    if (err instanceof Error && err.stack) {
+      // The stack is the only way to localise an opaque message such as
+      // "Invalid string length"; the notification keeps the short message.
+      output.appendLine(err.stack);
+    }
+    if (options.forceNotify) {
+      vscode.window.showErrorMessage(`GraphFlow MCP 自动安装失败: ${text}`);
+    }
+    return undefined;
+  }
+}
+
+/**
+ * 在 VS Code 扩展激活时安装 Trae Skill / Cursor Rules / Claude Code CLAUDE.md。
+ * 通过 vendor 运行时动态加载 skill-installer 模块，所有失败静默处理。
+ */
+async function installSkillsFromExtension(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string | undefined,
+  output: vscode.OutputChannel,
+  options?: { includeProjectLevel?: boolean }
+): Promise<void> {
+  try {
+    const extensionPath = context.extensionPath;
+    const bundledRuntimeRoot = join(extensionPath, "vendor", "graphflow");
+
+    // 动态加载 vendor 中的 skill-installer 模块（slim 核心中已移除，加载失败即优雅跳过）
+    const installerPath = join(bundledRuntimeRoot, "dist", "integrations", "skill-installer.js");
+    type SkillInstallerModule = {
+      installAllSkills: (
+        runtimeRoot: string | undefined,
+        log?: (message: string) => void,
+        workspaceRoot?: string
+      ) => { traeSkills?: Array<{ status: string }>; claudeMd?: Array<{ status: string }> } & Record<string, unknown>;
+    };
+    let installer: SkillInstallerModule | undefined;
+
+    try {
+      const loaded = await import(pathToFileURL(installerPath).toString());
+      installer = loaded as typeof installer;
+    } catch {
+      // vendor 中没有 skill-installer（构建尚未包含），跳过
+      output.appendLine("[GraphFlow] Skill installer module not found in vendor, skipping skill installation.");
+      return;
+    }
+
+    if (typeof installer?.installAllSkills !== "function") {
+      output.appendLine("[GraphFlow] installAllSkills function not found in skill-installer module.");
+      return;
+    }
+
+    const projectRoot = options?.includeProjectLevel ? workspaceRoot : undefined;
+    const summary = installer.installAllSkills(bundledRuntimeRoot, (msg) => {
+      output.appendLine(`[GraphFlow] ${msg}`);
+    }, projectRoot);
+
+    // 汇总日志
+    const changed = (list?: Array<{ status: string }>): number =>
+      (list ?? []).filter((r) => r.status === "created" || r.status === "updated").length;
+    const totalCount =
+      changed(summary.traeSkills) +
+      changed(summary.cursorRules) +
+      changed(summary.claudeMd) +
+      changed(summary.agentInstructions) +
+      changed(summary.agentSkills);
+
+    if (totalCount > 0) {
+      output.appendLine(`[GraphFlow] Skill/Rules 安装完成：${totalCount} 个文件已创建或更新。`);
+    }
+  } catch (err) {
+    // 静默处理所有异常，不影响扩展正常使用
+    const text = err instanceof Error ? err.message : String(err);
+    output.appendLine(`[GraphFlow] Skill installation skipped: ${text}`);
+  }
+}
+
+export function deactivate(): void {
+  // no-op
+}
+
+async function runGraphFlow<T>(
+  workspaceRoot: string | undefined,
+  execute: (runtime: GraphFlowRuntime) => Promise<T>
+): Promise<T> {
+  const runtime = await loadRuntime();
+  return withWorkspaceCwd(resolveRuntimeCwd(workspaceRoot), () => execute(runtime));
+}
+
+async function loadRuntime(): Promise<GraphFlowRuntime> {
+  if (!runtimePromise) {
+    runtimePromise = (async () => {
+      process.env.GRAPHFLOW_LOG_JSON = process.env.GRAPHFLOW_LOG_JSON ?? "1";
+      const runtimePath = join(__dirname, "..", "vendor", "graphflow", "dist", "runtime.js");
+      const loaded = (await import(pathToFileURL(runtimePath).toString())) as {
+        assertGraphFlowRuntime?: (module: unknown) => GraphFlowRuntime;
+      };
+      if (typeof loaded.assertGraphFlowRuntime === "function") {
+        return loaded.assertGraphFlowRuntime(loaded);
+      }
+
+      throw new Error("Bundled GraphFlow runtime is missing assertGraphFlowRuntime export.");
+    })();
+  }
+
+  return runtimePromise;
+}
+
+async function withWorkspaceCwd<T>(workspaceRoot: string, action: () => Promise<T>): Promise<T> {
+  const current = process.cwd();
+  process.chdir(workspaceRoot);
+  try {
+    return await action();
+  } finally {
+    process.chdir(current);
+  }
+}
+
+function detectInlineCommand(
+  prompt: string
+): "run" | "plan" | "plan-insight" | "history" | "context" | "settings" | "diagnose" | "learn" | "graph" | "tree" | "skills" {
+  if (prompt.startsWith("/plan-insight") || prompt.startsWith("/insight")) {
+    return "plan-insight";
+  }
+
+  if (prompt.startsWith("/plan")) {
+    return "plan";
+  }
+
+  if (prompt.startsWith("/history")) {
+    return "history";
+  }
+
+  if (prompt.startsWith("/context")) {
+    return "context";
+  }
+
+  if (prompt.startsWith("/settings")) {
+    return "settings";
+  }
+
+  if (prompt.startsWith("/diagnose")) {
+    return "diagnose";
+  }
+
+  if (prompt.startsWith("/learn")) {
+    return "learn";
+  }
+
+  if (prompt.startsWith("/tree") || prompt.startsWith("/workbench")) {
+    return "tree";
+  }
+
+  if (prompt.startsWith("/graph")) {
+    return "graph";
+  }
+
+  if (prompt.startsWith("/skills")) {
+    return "skills";
+  }
+
+  return "run";
+}
+
+function stripInlineCommand(prompt: string): string {
+  return prompt
+    .replace(/^\/plan-insight\s*/i, "")
+    .replace(/^\/insight\s*/i, "")
+    .replace(/^\/(run|plan|history|context|settings|diagnose|learn|graph|tree|workbench|skills)\s*/i, "")
+    .trim();
+}
+
+function formatAsBullet(output: string): string {
+  return output
+    .split("; ")
+    .map((line) => `- ${line}`)
+    .join("\n");
+}
+
+function getWorkspaceRoot(): string | undefined {
+  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+async function openGraphFlowSettings(
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel
+): Promise<void> {
+  const workspaceRoot = getWorkspaceRoot();
+  const [settings, panelStatus] = await runGraphFlow(workspaceRoot, async (runtime) => {
+    const loaded = runtime.getGraphFlowSettings();
+    const status = await runtime.getSettingsPanelStatus();
+    return [loaded, status] as const;
+  });
+  const downloadAnydoc = vscode.workspace.getConfiguration("graphflow").get<boolean>("downloadAnydoc", true);
+  const anydoc = await inspectAnydocForExtension(context);
+  const extensionVersion = context.extension.packageJSON.version?.toString() ?? "unknown";
+  showSettingsPanel(
+    context,
+    {
+      ...settings,
+      downloadAnydoc,
+    },
+    {
+      ...panelStatus,
+      extensionVersion,
+      anydocReady: anydoc.ready,
+      ...(anydoc.version ? { anydocVersion: anydoc.version } : {}),
+    },
+    workspaceRoot,
+    output
+  );
+}
+
+function formatGraphSnapshotMarkdown(snapshot: GraphSnapshotResult): string {
+  const typeLine = Object.entries(snapshot.nodeTypeCount)
+    .map(([type, count]) => `${type}:${count}`)
+    .join(", ");
+  const relationLine = snapshot.topRelations.length
+    ? snapshot.topRelations.map((item) => `${item.relation}:${item.count}`).join(", ")
+    : "none";
+
+  return [
+    "Graph snapshot:",
+    `- transport: ${snapshot.transport}`,
+    `- nodes: ${snapshot.nodeCount}`,
+    `- edges: ${snapshot.edgeCount}`,
+    `- nodeTypes: ${typeLine}`,
+    `- topRelations: ${relationLine}`,
+    ...(snapshot.storePath ? [`- store: ${snapshot.storePath}`] : []),
+    ...formatWorkbenchOutlineMarkdown(snapshot.workbenchOutline).split("\n"),
+  ].join("\n");
+}
+
+function formatWorkbenchOutlineMarkdown(outlines: GraphSnapshotResult["workbenchOutline"]): string {
+  if (!outlines || outlines.length === 0) {
+    return ["Workbench tree:", "- empty — the workbench seeds from a plan; run a plan from the GraphFlow panel."].join("\n");
+  }
+  const lines = ["Workbench tree:"];
+  for (const outline of outlines) {
+    lines.push(`- ${outline.task}`);
+    for (const node of outline.nodes) {
+      lines.push(`  - ${node.kind === "side" ? "旁支" : "主线"}${node.active ? " [active]" : ""}: ${node.title} (\`${node.id}\`)`);
+      for (const child of node.children) {
+        lines.push(`    - 旁支${child.active ? " [active]" : ""}: ${child.title} (\`${child.id}\`)`);
+      }
+    }
+    lines.push(`- resume: gf_read({ q: "<your question>", topicId: "${outline.activeTopicId}" })`);
+  }
+  return lines.join("\n");
+}
+
+async function copyWorkbenchResumePrompt(topicId: string, label?: string, preview?: string): Promise<void> {
+  const prompt = [
+    `请回到工作台节点继续细化，不要带着旁支上下文。`,
+    `调用 gf_read 时传入 topicId: "${topicId}"（q 填你的问题）`,
+    label ? `节点: ${label}` : "",
+    preview ? `概要: ${preview}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  await vscode.env.clipboard.writeText(prompt);
+  void vscode.window.showInformationMessage("已复制「在此节点继续」提示词，粘贴后会回到该功能节点。");
+}
+
+function formatSkillInsightsMarkdown(insights: SkillInsightsResult): string {
+  if (insights.skills.length === 0) {
+    return [
+      "Skill insights:",
+      `- source: ${insights.source}`,
+      `- transport: ${insights.transport}`,
+      "- skills: empty",
+    ].join("\n");
+  }
+
+  const lines = insights.skills
+    .slice(0, 10)
+    .map((skill) => `- ${skill.name} | score=${skill.score} | uses=${skill.uses} | last=${skill.lastOutcome}`);
+
+  return [
+    "Skill insights:",
+    `- source: ${insights.source}`,
+    `- transport: ${insights.transport}`,
+    ...(insights.storePath ? [`- store: ${insights.storePath}`] : []),
+    ...lines,
+  ].join("\n");
+}
+
+function formatContextBudgetBullets(preview: ContextPreviewResult): string {
+  return [
+    `- raw≈${preview.tokenBudget.estimatedRawTokens}`,
+    `- compressed=${preview.tokenBudget.compressedTokens}/${preview.tokenBudget.maxContextTokens}`,
+    `- saved≈${preview.tokenBudget.estimatedSavingsPercent}%`,
+    `- anchors=${preview.anchorCount} (L1=${preview.anchorsByLayer.l1}, L2=${preview.anchorsByLayer.l2}, L3=${preview.anchorsByLayer.l3})`,
+  ].join("\n");
+}
+
+function formatContextPreviewMarkdown(preview: ContextPreviewResult): string {
+  const summary = preview.summary.slice(0, 8).map((item) => `- ${item}`);
+  return [
+    "Context preview:",
+    formatContextBudgetBullets(preview),
+    "Summary:",
+    ...(summary.length > 0 ? summary : ["- empty"]),
+  ].join("\n");
+}
+
+function formatSettingsMarkdown(settings: GraphFlowSettings): string {
+  return [
+    "GraphFlow settings:",
+    `- config: ${settings.configPath}`,
+    `- provider: ${settings.provider}`,
+    `- smart: ${settings.smartModel}`,
+    `- economy: ${settings.economyModel}`,
+    `- apiKeyEnvVar: ${settings.apiKeyEnvVar ?? "n/a"}`,
+    `- maxContextTokens: ${settings.maxContextTokens}`,
+    `- layerQuota: L1=${settings.layerQuota.l1}, L2=${settings.layerQuota.l2}, L3=${settings.layerQuota.l3}`,
+    `- nearLossless: ${settings.enableNearLosslessMode}`,
+  ].join("\n");
+}
+
+function formatAgentDelegationChatMarkdown(
+  task: string,
+  preview: ContextPreviewResult,
+  result: {
+    mode?: string;
+    episodeId?: string;
+    agentWorkItems?: unknown[];
+    executionDescriptor?: {
+      agentMode?: string;
+      agentWorkItems?: unknown[];
+      context?: string;
+    };
+    plan?: Array<{ id: string; description: string; dependencies: string[] }>;
+  }
+): string {
+  const workItems = (result.agentWorkItems ??
+    result.executionDescriptor?.agentWorkItems ??
+    []) as AgentWorkItemView[];
+  const episodeSuffix = result.episodeId ? `, \`episodeId\`=\`${result.episodeId}\`` : "";
+  const plan =
+    result.plan ?? parsePlanFromExecutionContext(result.executionDescriptor?.context) ?? [];
+
+  const lines = [
+    "Agent-delegated mode (connected agent supplies LLM):",
+    `- task: ${task}`,
+    ...(result.mode ? [`- mode: ${result.mode}`] : []),
+    ...(result.episodeId ? [`- episodeId: \`${result.episodeId}\``] : []),
+    `- agentWorkItems: ${workItems.length}`,
+    "",
+    "Token budget:",
+    formatContextBudgetBullets(preview),
+  ];
+
+  if (workItems.length > 0) {
+    lines.push("", "Work items:");
+    for (const item of workItems) {
+      const previewText =
+        item.prompt.length > 100 ? `${item.prompt.slice(0, 100)}…` : item.prompt;
+      lines.push(`- **${item.id}** (${item.kind}): ${previewText}`);
+    }
+  }
+
+  lines.push(
+    "",
+    "Close the loop:",
+    "1. Answer each work-item prompt with your model.",
+    `2. Call \`graphflow_insight\` with mode=\`submit\` per item (\`task\`, \`workItemId\`, \`response\`${episodeSuffix}).`,
+    "3. When all required items are submitted, call `graphflow_insight` with mode=`merge` to produce the real insight + plan.",
+    "4. Execute the plan / `executionDescriptor`.",
+    `5. Call \`graphflow_report_outcome\` with \`success\`${result.episodeId ? ` and \`episodeId\`=\`${result.episodeId}\`` : ""}.`
+  );
+
+  if (plan.length > 0) {
+    lines.push("", `Plan preview (${plan.length} tasks):`);
+    for (const node of plan) {
+      lines.push(`- ${node.id}: ${node.description}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function showContextPreviewPanel(context: vscode.ExtensionContext, preview: ContextPreviewResult): void {
+  const panel = vscode.window.createWebviewPanel(
+    "graphflow.contextPreview",
+    "GraphFlow Context Preview",
+    vscode.ViewColumn.Active,
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [context.extensionUri],
+    }
+  );
+
+  const scriptUri = panel.webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, "media", "context-preview.js")
+  );
+  panel.webview.html = buildContextPreviewHtml(preview, scriptUri.toString());
+  context.subscriptions.push(panel);
+}
+
+function showAgentWorkItemsPanel(
+  context: vscode.ExtensionContext,
+  result: AgentDelegationPanelResult
+): void {
+  const panel = vscode.window.createWebviewPanel(
+    "graphflow.agentWorkItems",
+    "GraphFlow Agent Work Items",
+    vscode.ViewColumn.Active,
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [context.extensionUri],
+    }
+  );
+
+  const scriptUri = panel.webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, "media", "agent-work-items.js")
+  );
+  panel.webview.html = buildAgentWorkItemsHtml(result, scriptUri.toString());
+  context.subscriptions.push(panel);
+}
+
+function shouldShowAgentWorkItemsPanel(result: {
+  mode?: string;
+  executionDescriptor?: { action?: string; agentMode?: string; agentWorkItems?: unknown[] };
+  agentWorkItems?: unknown[];
+}): boolean {
+  if (result.mode === "agent-delegated") {
+    return true;
+  }
+  if ((result.agentWorkItems?.length ?? 0) > 0) {
+    return true;
+  }
+  if (result.executionDescriptor?.agentMode === "delegated-llm") {
+    return true;
+  }
+  return (result.executionDescriptor?.agentWorkItems?.length ?? 0) > 0;
+}
+
+function buildPanelResultFromRun(
+  task: string,
+  result: {
+    episodeId?: string;
+    executionDescriptor?: AgentDelegationPanelResult["executionDescriptor"];
+  },
+  preview?: ContextPreviewResult
+): AgentDelegationPanelResult {
+  const executionDescriptor = result.executionDescriptor;
+  const agentWorkItems = (executionDescriptor?.agentWorkItems ?? []) as AgentWorkItemView[];
+
+  return {
+    task,
+    mode:
+      executionDescriptor?.agentMode === "delegated-llm" || agentWorkItems.length > 0
+        ? "agent-delegated"
+        : "llm",
+    agentWorkItems,
+    plan: parsePlanFromExecutionContext(executionDescriptor?.context),
+    executionDescriptor,
+    episodeId: result.episodeId,
+    tokenBudget: preview?.tokenBudget,
+  };
+}
+
+function parsePlanFromExecutionContext(
+  context?: string
+): AgentDelegationPanelResult["plan"] | undefined {
+  if (!context) {
+    return undefined;
+  }
+
+  const match = context.match(/plan=(\[[\s\S]*?\])(?:;|$)/);
+  if (!match) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(match[1]) as Array<{
+      id: string;
+      description: string;
+      dependencies: string[];
+    }>;
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function registerDebouncedIndexOnSave(context: vscode.ExtensionContext, workspaceRoot: string): void {
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const scheduleIndex = (): void => {
+    void runGraphFlow(workspaceRoot, async (runtime) => {
+      const settings = runtime.getGraphFlowSettings();
+      if (!settings.autoIndexOnSave) {
+        return;
+      }
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      debounceTimer = setTimeout(() => {
+        void runGraphFlow(workspaceRoot, (activeRuntime) =>
+          activeRuntime.indexGraph(workspaceRoot)
+        ).catch((err) => {
+          console.error("GraphFlow debounced index on save failed:", err);
+        });
+      }, 3000);
+    }).catch((err) => {
+      console.error("GraphFlow save-index settings lookup failed:", err);
+    });
+  };
+
+  const watcher = vscode.workspace.createFileSystemWatcher(
+    "**/*.{ts,tsx,js,jsx,md,json,pdf,doc,docx,ppt,pptx,xls,xlsx,odt,ods,odp,rtf,epub,csv}"
+  );
+  watcher.onDidChange(scheduleIndex);
+  watcher.onDidCreate(scheduleIndex);
+  watcher.onDidDelete(scheduleIndex);
+  context.subscriptions.push(watcher);
+}
+
+function showSettingsPanel(
+  context: vscode.ExtensionContext,
+  settings: GraphFlowSettings,
+  status: SettingsPanelStatus,
+  workspaceRoot: string | undefined,
+  output: vscode.OutputChannel
+): void {
+  const panel = vscode.window.createWebviewPanel(
+    "graphflow.settings",
+    "GraphFlow Settings",
+    vscode.ViewColumn.Active,
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [context.extensionUri],
+    }
+  );
+
+  const scriptUri = panel.webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, "media", "settings.js")
+  );
+  panel.webview.html = buildSettingsHtml(settings, scriptUri.toString(), status);
+  panel.webview.onDidReceiveMessage(async (message) => {
+    if (message?.type === "openCommand") {
+      const command = String(message.command ?? "");
+      if (command.startsWith("graphflow.")) {
+        await vscode.commands.executeCommand(command);
+      }
+      return;
+    }
+
+    if (message?.type === "ensureAnydoc") {
+      try {
+        await persistDownloadAnydoc(true);
+        const result = await ensureAnydocForExtension(context, output, true);
+        panel.webview.postMessage({
+          type: "anydocStatus",
+          payload: result,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : String(err);
+        panel.webview.postMessage({
+          type: "anydocStatus",
+          payload: { ready: false, message: text },
+        });
+      }
+      return;
+    }
+
+    if (message?.type === "installMcp") {
+      try {
+        const bootstrap = await runMcpBootstrap(context, workspaceRoot, output, { forceNotify: false });
+        const panelStatus = await runGraphFlow(workspaceRoot, (runtime) => runtime.getSettingsPanelStatus());
+        const successes =
+          bootstrap?.results.filter((result) => result.status === "injected" || result.status === "created" || result.status === "updated") ??
+          [];
+        const installedNames = [...new Set(successes.map((result) => result.agentName))].join(", ");
+        panel.webview.postMessage({
+          type: "mcpInstallResult",
+          payload: {
+            ok: successes.length > 0,
+            mcpAgents: panelStatus.mcpAgents,
+            message:
+              successes.length > 0
+                ? `MCP 已写入: ${installedNames}。请重启对应 Agent / IDE 以加载 graphflow 工具。`
+                : "未写入 MCP。请确认本机已安装 Cursor / VS Code / Claude Code 等工具后重试。",
+          },
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : String(err);
+        panel.webview.postMessage({
+          type: "mcpInstallResult",
+          payload: { ok: false, message: `MCP 安装失败: ${text}` },
+        });
+      }
+      return;
+    }
+
+    if (message?.type === "indexGraphOnly") {
+      if (!requireWorkspaceFolder(workspaceRoot)) {
+        vscode.window.showWarningMessage("请先打开一个项目文件夹后再建立或索引知识图谱。");
+        return;
+      }
+      const payload = message.payload as Omit<GraphFlowSettings, "configPath">;
+      try {
+        await persistDownloadAnydoc(Boolean(payload.downloadAnydoc ?? payload.indexOfficeDocs ?? true));
+        output.appendLine("[GraphFlow] Building knowledge graph (structural index, LLM optional)...");
+        output.show(true);
+
+        const result = await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: "GraphFlow 建立知识图谱",
+            cancellable: false,
+          },
+          async () =>
+            runGraphFlow(workspaceRoot, (runtime) => runtime.indexGraphFromSettings(payload, workspaceRoot))
+        );
+
+        if (result.ok && result.graphIndex) {
+          output.appendLine(
+            `[GraphFlow] Graph indexed: files=${result.graphIndex.indexedFiles}; symbols=${result.graphIndex.indexedSymbols}`
+          );
+          void vscode.commands.executeCommand("graphflow.showGraph");
+          vscode.window.showInformationMessage(
+            `知识图谱已建立：${result.graphIndex.indexedFiles} 个文件（结构索引，无需 LLM）。`
+          );
+        } else if (!result.ok) {
+          const reason =
+            result.validationIssues?.map((issue) => issue.message).join("; ") || "索引失败";
+          vscode.window.showWarningMessage(`GraphFlow 建立图谱未成功：${reason}`);
+        }
+
+        panel.webview.postMessage({
+          type: "graphIndexResult",
+          payload: result,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : String(err);
+        panel.webview.postMessage({ type: "settingsError", payload: text });
+        vscode.window.showErrorMessage(`GraphFlow 建立图谱失败: ${text}`);
+      }
+      return;
+    }
+
+    if (message?.type === "testRoutingAndIndex") {
+      if (!requireWorkspaceFolder(workspaceRoot)) {
+        vscode.window.showWarningMessage("请先打开一个项目文件夹后再建立或索引知识图谱。");
+        return;
+      }
+      const payload = message.payload as Omit<GraphFlowSettings, "configPath">;
+      try {
+        await persistDownloadAnydoc(Boolean(payload.downloadAnydoc ?? payload.indexOfficeDocs ?? true));
+        output.appendLine("[GraphFlow] Testing routing connectivity (planner + worker)...");
+        output.show(true);
+
+        const result = await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: "GraphFlow 路由连通性测试",
+            cancellable: false,
+          },
+          async () =>
+            runGraphFlow(workspaceRoot, (runtime) => runtime.testRoutingAndIndexGraph(payload, workspaceRoot))
+        );
+
+        const diagnoseSummary = await runGraphFlow(workspaceRoot, (runtime) =>
+          Promise.resolve(runtime.diagnoseRouting())
+        );
+
+        for (const probe of result.probes) {
+          output.appendLine(
+            `[GraphFlow][Route] ${probe.role} ${probe.provider}/${probe.model}: ${
+              probe.ok ? `OK (${probe.latencyMs}ms)` : probe.error ?? "failed"
+            }`
+          );
+        }
+
+        if (result.ok && result.graphIndex) {
+          output.appendLine(
+            `[GraphFlow] Graph indexed: files=${result.graphIndex.indexedFiles}; symbols=${result.graphIndex.indexedSymbols}`
+          );
+          void vscode.commands.executeCommand("graphflow.showGraph");
+          vscode.window.showInformationMessage(
+            `GraphFlow 路由测试通过，已索引 ${result.graphIndex.indexedFiles} 个文件。`
+          );
+        } else if (!result.ok) {
+          vscode.window.showWarningMessage("GraphFlow 路由测试未通过，请检查 API Key 与 Base URL。");
+        }
+
+        panel.webview.postMessage({
+          type: "routingTestResult",
+          payload: {
+            ...result,
+            diagnosisSummary: diagnoseSummary,
+          },
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : String(err);
+        panel.webview.postMessage({ type: "settingsError", payload: text });
+        vscode.window.showErrorMessage(`GraphFlow 路由测试失败: ${text}`);
+      }
+      return;
+    }
+
+    if (message?.type !== "saveSettings") {
+      return;
+    }
+
+    try {
+      const payload = message.payload as Omit<GraphFlowSettings, "configPath">;
+      const downloadAnydoc = payload.downloadAnydoc ?? payload.indexOfficeDocs ?? true;
+      await persistDownloadAnydoc(Boolean(downloadAnydoc));
+      if (downloadAnydoc) {
+        const anydoc = await ensureAnydocForExtension(context, output, true);
+        panel.webview.postMessage({ type: "anydocStatus", payload: anydoc });
+      }
+
+      const saved = await runGraphFlow(workspaceRoot, (runtime) =>
+        Promise.resolve(runtime.saveGraphFlowSettings(payload))
+      );
+      panel.webview.postMessage({ type: "settingsSaved", payload: saved });
+      vscode.window.showInformationMessage("GraphFlow settings saved.");
+    } catch (err) {
+      const text = err instanceof Error ? err.message : String(err);
+      panel.webview.postMessage({ type: "settingsError", payload: text });
+      vscode.window.showErrorMessage(`Failed to save GraphFlow settings: ${text}`);
+    }
+  });
+  context.subscriptions.push(panel);
+}
+
+function showGraphSnapshotPanel(context: vscode.ExtensionContext, snapshot: GraphSnapshotResult): void {
+  const panel = vscode.window.createWebviewPanel(
+    "graphflow.graphSnapshot",
+    "GraphFlow 知识图谱",
+    vscode.ViewColumn.Active,
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [context.extensionUri],
+    }
+  );
+
+  const scriptUri = panel.webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, "media", "graph-snapshot.js")
+  );
+  panel.webview.html = buildGraphSnapshotHtml(snapshot, scriptUri.toString());
+  wireGraphSnapshotPanel(panel, snapshot);
+  context.subscriptions.push(panel);
+}
+
+function showSkillInsightsPanel(context: vscode.ExtensionContext, insights: SkillInsightsResult): void {
+  const panel = vscode.window.createWebviewPanel(
+    "graphflow.skillInsights",
+    "GraphFlow Skill Insights",
+    vscode.ViewColumn.Active,
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+      localResourceRoots: [context.extensionUri],
+    }
+  );
+
+  const scriptUri = panel.webview.asWebviewUri(
+    vscode.Uri.joinPath(context.extensionUri, "media", "skill-insights.js")
+  );
+  panel.webview.html = buildSkillInsightsHtml(insights, scriptUri.toString());
+  wireSkillInsightsPanel(panel, insights);
+  context.subscriptions.push(panel);
+}
+
+function wireGraphSnapshotPanel(
+  panel: vscode.WebviewPanel,
+  snapshot: GraphSnapshotResult
+): void {
+  const payload = {
+    nodes: snapshot.sampleNodes,
+    edges: snapshot.sampleEdges,
+    meta: {
+      nodeCount: snapshot.nodeCount,
+      edgeCount: snapshot.edgeCount,
+      nodeTypeCount: snapshot.nodeTypeCount,
+      topRelations: snapshot.topRelations,
+      storePath: snapshot.storePath,
+    },
+  };
+
+  const postSnapshot = (): void => {
+    void panel.webview.postMessage({ type: "snapshot", payload });
+  };
+
+  panel.webview.onDidReceiveMessage(async (message) => {
+    if (message?.type === "ready") {
+      postSnapshot();
+      return;
+    }
+    if (message?.type === "openSource" && typeof message.path === "string" && message.path.length > 0) {
+      const folder = vscode.workspace.workspaceFolders?.[0];
+      if (!folder) {
+        void vscode.window.showWarningMessage("请先打开工作区文件夹后再跳转源文件。");
+        return;
+      }
+      const uri = vscode.Uri.joinPath(folder.uri, message.path);
+      try {
+        const doc = await vscode.workspace.openTextDocument(uri);
+        const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+        const line = typeof message.line === "number" && message.line > 0 ? message.line - 1 : 0;
+        const position = new vscode.Position(line, 0);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        void vscode.window.showErrorMessage(`无法打开源文件 ${message.path}: ${text}`);
+      }
+      return;
+    }
+    if (message?.type === "resumeDialogue") {
+      const topicId = typeof message.topicId === "string" ? message.topicId : "";
+      const turnId = typeof message.turnId === "string" ? message.turnId : "";
+      if (!topicId && !turnId) {
+        return;
+      }
+      const prompt = topicId
+        ? [
+            `请回到工作台节点继续细化，不要带着旁支上下文。`,
+            `调用 gf_read 时传入 topicId: "${topicId}"（q 填你的问题）`,
+            message.label ? `节点: ${message.label}` : "",
+            message.preview ? `概要: ${message.preview}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n")
+        : [
+            `请从这次对话继续深挖，不要脱离主线。`,
+            `调用 gf_read 时传入 resumeFromTurnId: "${turnId}"（q 填你的问题）`,
+            message.label ? `节点: ${message.label}` : "",
+            message.preview ? `上下文: ${message.preview}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n");
+      await vscode.env.clipboard.writeText(prompt);
+      void vscode.window.showInformationMessage(
+        topicId ? "已复制「在此节点继续」提示词，粘贴后会回到该功能节点。" : "已复制「从此处继续」提示词，粘贴到对话即可沿这条主线深挖。"
+      );
+    }
+  });
+
+  postSnapshot();
+}
+
+function wireSkillInsightsPanel(
+  panel: vscode.WebviewPanel,
+  insights: SkillInsightsResult
+): void {
+  const postSkills = (): void => {
+    void panel.webview.postMessage({
+      type: "skills",
+      payload: { skills: insights.skills },
+    });
+  };
+
+  panel.webview.onDidReceiveMessage((message) => {
+    if (message?.type === "ready") {
+      postSkills();
+    }
+  });
+
+  postSkills();
+}

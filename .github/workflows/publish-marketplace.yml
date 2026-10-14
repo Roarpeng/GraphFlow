@@ -1,0 +1,184 @@
+name: Publish to VS Code Marketplace & Open VSX
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            vscode-extension/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit && npm ci --prefix vscode-extension --no-audit
+
+      - name: Build and test core
+        run: npm run build && npm test
+
+      - name: Build and test extension
+        run: npm run build:extension && npm run test:extension
+
+  publish-marketplace:
+    needs: validate
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            vscode-extension/package-lock.json
+
+      - name: Resolve marketplace auth mode
+        id: creds
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        run: |
+          if [ -n "${VSCE_PAT}" ]; then
+            echo "mode=pat" >> "$GITHUB_OUTPUT"
+            echo "Auth mode: VSCE_PAT"
+          elif [ -n "${AZURE_CLIENT_ID}" ]; then
+            echo "mode=azure" >> "$GITHUB_OUTPUT"
+            echo "Auth mode: Azure Entra ID"
+          else
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+            echo "Auth mode: none — Marketplace publish skipped (set VSCE_PAT or AZURE_* secrets)."
+          fi
+
+      - name: Install dependencies and package VSIX
+        if: steps.creds.outputs.mode != 'none'
+        run: |
+          npm ci --no-audit
+          npm ci --prefix vscode-extension --no-audit
+          npm run build
+          npm run build:extension
+          npm run package:extension
+
+      - name: Install vsce
+        if: steps.creds.outputs.mode != 'none'
+        run: npm install -g @vscode/vsce
+
+      - name: Publish to Marketplace (PAT mode)
+        id: publish-pat
+        if: steps.creds.outputs.mode == 'pat'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          echo "Publishing GraphFlow v${VERSION} to VS Code Marketplace (PAT)..."
+          cd vscode-extension
+          set +e
+          out=$(vsce publish --no-git-tag-version --pat "$VSCE_PAT" 2>&1); code=$?
+          set -e
+          echo "$out"
+          if [ $code -ne 0 ]; then
+            if echo "$out" | grep -qi "already exists"; then echo "v${VERSION} already on the Marketplace; skipping (idempotent)."; exit 0; fi
+            exit $code
+          fi
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to Marketplace (Entra ID mode)
+        id: publish-azure
+        if: steps.creds.outputs.mode == 'azure'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: vsce publish (Entra ID)
+        if: steps.creds.outputs.mode == 'azure'
+        run: |
+          VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          cd vscode-extension
+          set +e
+          out=$(vsce publish --no-git-tag-version --azure-credential 2>&1); code=$?
+          set -e
+          echo "$out"
+          if [ $code -ne 0 ]; then
+            if echo "$out" | grep -qi "already exists"; then echo "v${VERSION} already on the Marketplace; skipping (idempotent)."; exit 0; fi
+            exit $code
+          fi
+
+  publish-openvsx:
+    needs: validate
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            vscode-extension/package-lock.json
+
+      - name: Resolve Open VSX credentials
+        id: ovsx
+        env:
+          OPENVSX_PAT: ${{ secrets.OPENVSX_PAT }}
+        run: |
+          if [ -n "${OPENVSX_PAT}" ]; then
+            echo "mode=pat" >> "$GITHUB_OUTPUT"
+            echo "Open VSX: OPENVSX_PAT present."
+          else
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+            echo "Open VSX: OPENVSX_PAT secret not set — publish skipped."
+          fi
+
+      - name: Install dependencies and package VSIX
+        if: steps.ovsx.outputs.mode == 'pat'
+        run: |
+          npm ci --no-audit
+          npm ci --prefix vscode-extension --no-audit
+          npm run build
+          npm run build:extension
+          npm run package:extension
+
+      - name: Publish to Open VSX
+        if: steps.ovsx.outputs.mode == 'pat'
+        env:
+          OPENVSX_PAT: ${{ secrets.OPENVSX_PAT }}
+        run: |
+          npm install -g ovsx
+          VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          VSIX=$(ls artifacts/graphflow-*.vsix | head -1)
+          echo "Publishing ${VSIX} (v${VERSION}) to Open VSX..."
+          set +e
+          out=$(ovsx publish "${VSIX}" --pat "$OPENVSX_PAT" 2>&1); code=$?
+          set -e
+          echo "$out"
+          if [ $code -ne 0 ]; then
+            if echo "$out" | grep -qi "already exists"; then echo "v${VERSION} already on Open VSX; skipping (idempotent)."; exit 0; fi
+            exit $code
+          fi
+          echo "Published ${VSIX} to Open VSX."

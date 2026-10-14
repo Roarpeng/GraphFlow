@@ -1,0 +1,520 @@
+(function () {
+  const vscode = typeof acquireVsCodeApi === "function" ? acquireVsCodeApi() : undefined;
+  const form = document.getElementById("settings-form");
+  const status = document.getElementById("settings-status");
+  const tierReadinessList = document.getElementById("settings-tier-readiness-list");
+  const diagnoseList = document.getElementById("settings-diagnose-list");
+  const routeTestList = document.getElementById("settings-route-test-list");
+  const testRoutingButton = document.getElementById("settings-test-routing");
+  const graphIndexList = document.getElementById("settings-graph-index-list");
+  const indexGraphButton = document.getElementById("settings-index-graph");
+  const advancedToggle = document.getElementById("settings-advanced-toggle");
+  const advancedPanel = document.getElementById("settings-advanced-panel");
+  const installMcpButton = document.getElementById("settings-install-mcp");
+  const mcpStatusList = document.getElementById("settings-mcp-status-list");
+  const mcpActionStatus = document.getElementById("settings-mcp-action-status");
+  const ensureAnydocButton = document.getElementById("settings-ensure-anydoc");
+  const anydocPill = document.getElementById("settings-anydoc-pill");
+  const anydocMetric = document.getElementById("settings-anydoc-metric");
+
+  function getNumber(id) {
+    const value = Number(document.getElementById(id).value);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function getString(id) {
+    const element = document.getElementById(id);
+    if (!element) {
+      return "";
+    }
+    return String(element.value || "").trim();
+  }
+
+  function getChecked(id) {
+    const element = document.getElementById(id);
+    return element ? Boolean(element.checked) : false;
+  }
+
+  function collectPayload() {
+    const smartProvider = getString("settings-smart-provider");
+    const economyProvider = getString("settings-economy-provider");
+    const smartApiKey = getString("settings-smart-api-key");
+    const economyApiKey = getString("settings-economy-api-key");
+    const smartModel = getString("settings-smart-model");
+    const economyModel = getString("settings-economy-model");
+    const smartBaseUrl = getString("settings-smart-base-url");
+    const economyBaseUrl = getString("settings-economy-base-url");
+    const workerType = getString("settings-worker-type") || "local-command";
+    const workerBaseUrl = getString("settings-worker-base-url");
+    const workerModel = getString("settings-worker-model");
+    const workerApiKey = getString("settings-worker-api-key");
+
+    return {
+      smartProvider,
+      smartApiKey,
+      smartModel,
+      smartBaseUrl,
+      economyProvider,
+      economyApiKey,
+      economyModel,
+      economyBaseUrl,
+      workerType,
+      workerBaseUrl,
+      workerModel,
+      workerApiKey,
+      provider: smartProvider,
+      apiKeyEnvVar: smartApiKey,
+      baseUrl: smartBaseUrl,
+      maxContextTokens: getNumber("settings-max-context-tokens"),
+      layerQuota: {
+        l1: getNumber("settings-layer-l1"),
+        l2: getNumber("settings-layer-l2"),
+        l3: getNumber("settings-layer-l3"),
+      },
+      enableNearLosslessMode: getChecked("settings-enable-near-lossless"),
+      autoIndexOnPreview: getChecked("settings-auto-index-preview"),
+      autoIndexOnRun: getChecked("settings-auto-index-run"),
+      autoIndexOnSave: getChecked("settings-auto-index-save"),
+      autoRunOnIndex: getChecked("settings-auto-run-on-index"),
+      transport: getString("settings-transport"),
+      graphStorePath: getString("settings-graph-store-path"),
+      indexMarkdown: getChecked("settings-index-markdown"),
+      indexOfficeDocs: getChecked("settings-index-office"),
+      embeddingProvider: getString("settings-embedding-provider") || "transformers",
+      downloadAnydoc: getChecked("settings-index-office"),
+      observationsEnabled: getChecked("settings-observations-enabled"),
+      observationReduceEnabled: getChecked("settings-observation-reduce"),
+      contextPressureEnabled: getChecked("settings-context-pressure"),
+      actionFusionEnabled: getChecked("settings-action-fusion"),
+    };
+  }
+
+  // Literal keys come in many vendor formats and env references in several
+  // spellings (NAME, ${NAME}, %NAME%, $NAME); whether it actually resolves
+  // is decided by the runtime on save.
+  function hasResolvableApiKey(value) {
+    return Boolean(value && value.trim() && !/\s/.test(value.trim()));
+  }
+
+  function tierSnapshot(tier) {
+    const prefix = tier === "smart" ? "smart" : "economy";
+    return {
+      provider: getString(`settings-${prefix}-provider`),
+      apiKey: getString(`settings-${prefix}-api-key`),
+      model: getString(`settings-${prefix}-model`),
+      baseUrl: getString(`settings-${prefix}-base-url`),
+      label: tier === "smart" ? "Smart" : "Economy",
+    };
+  }
+
+  function tierIsConfigured(tier) {
+    return Boolean(tier.provider && tier.model);
+  }
+
+  function collectGraphIndexIssues(payload) {
+    const issues = [];
+    if (!payload.graphStorePath) {
+      issues.push({ field: "graphStorePath", message: "请填写图谱存储路径" });
+    }
+    return issues;
+  }
+
+  function collectTierIssues(tier, payload) {
+    const issues = [];
+    const prefix = tier === "smart" ? "smart" : "economy";
+    const snapshot = tierSnapshot(tier);
+    const label = snapshot.label;
+
+    if (!snapshot.provider) {
+      if (snapshot.apiKey || snapshot.model) {
+        issues.push({ field: `${prefix}Provider`, message: `请为 ${label} 层选择 Provider` });
+      }
+      return issues;
+    }
+
+    if (!snapshot.model) {
+      if (snapshot.provider || snapshot.apiKey) {
+        issues.push({ field: `${prefix}Model`, message: `请填写 ${label} 层模型` });
+      }
+      return issues;
+    }
+
+    if (!hasResolvableApiKey(snapshot.apiKey)) {
+      issues.push({ field: `${prefix}ApiKey`, message: `请为 ${label} 层填写可用的 API Key 或环境变量名` });
+    }
+
+    if (snapshot.provider === "openai" && !snapshot.baseUrl) {
+      const looksLikeEnvOnly = false;
+      issues.push({
+        field: `${prefix}BaseUrl`,
+        message: `${label} 层 openai 兼容第三方接口需填写 Base URL（官方 OpenAI 可填 https://api.openai.com/v1）`,
+      });
+      void looksLikeEnvOnly;
+    }
+
+    if (snapshot.provider === "deepseek" && snapshot.baseUrl && !/deepseek\.com/i.test(snapshot.baseUrl)) {
+      issues.push({
+        field: `${prefix}BaseUrl`,
+        message: `${label} 层 deepseek 的 Base URL 建议为 https://api.deepseek.com`,
+      });
+    }
+
+    return issues;
+  }
+
+  function collectValidationIssues(payload) {
+    const issues = [
+      ...collectTierIssues("smart", payload),
+      ...collectTierIssues("economy", payload),
+    ];
+
+    if (!tierIsConfigured(tierSnapshot("smart")) && !tierIsConfigured(tierSnapshot("economy"))) {
+      issues.push({
+        field: "smartProvider",
+        message: "请至少完整配置 Smart 或 Economy 一层（Provider、API Key、Model）",
+      });
+    }
+
+    if (!payload.graphStorePath) {
+      issues.push({ field: "graphStorePath", message: "请填写图谱存储路径" });
+    }
+    if (!payload.enableNearLosslessMode) {
+      issues.push({ field: "enableNearLosslessMode", message: "请开启 near-lossless 上下文压缩" });
+    }
+    if (!payload.autoIndexOnPreview) {
+      issues.push({ field: "autoIndexOnPreview", message: "请开启 Auto index on preview" });
+    }
+    if (!payload.autoIndexOnRun) {
+      issues.push({ field: "autoIndexOnRun", message: "请开启 Auto index on run" });
+    }
+    if (!payload.autoIndexOnSave) {
+      issues.push({ field: "autoIndexOnSave", message: "请开启 Auto index on file save" });
+    }
+
+    return issues;
+  }
+
+  function renderTierReadiness() {
+    if (!tierReadinessList) {
+      return;
+    }
+
+    const payload = collectPayload();
+    const lines = [];
+    for (const tier of ["smart", "economy"]) {
+      const snapshot = tierSnapshot(tier);
+      if (tierIsConfigured(snapshot) && hasResolvableApiKey(snapshot.apiKey)) {
+        lines.push(`<li style="color: #047857;">✓ ${snapshot.label} 层：${snapshot.provider} / ${snapshot.model}</li>`);
+      } else if (snapshot.provider || snapshot.model || snapshot.apiKey) {
+        lines.push(`<li style="color: #b45309;">○ ${snapshot.label} 层：未完成配置</li>`);
+      } else {
+        lines.push(`<li>○ ${snapshot.label} 层：未配置</li>`);
+      }
+    }
+
+    if (payload.graphStorePath) {
+      lines.push('<li style="color: #047857;">✓ 图谱路径：已填写</li>');
+    } else {
+      lines.push('<li style="color: #b45309;">○ 图谱路径：未填写</li>');
+    }
+
+    if (payload.workerType === "typesafe-jev") {
+      const modelStr = payload.workerModel || "typesafe-jev";
+      const urlStr = payload.workerBaseUrl || "http://localhost:8000/v1";
+      lines.push(`<li style="color: #047857;">✓ Worker：TypeSafe-JEV (${modelStr} @ ${urlStr})</li>`);
+    } else {
+      lines.push('<li>✓ Worker：本地命令（local-command）</li>');
+    }
+
+    tierReadinessList.innerHTML = lines.join("");
+  }
+
+  function renderReadiness() {
+    renderTierReadiness();
+
+    if (!testRoutingButton) {
+      return;
+    }
+
+    const issues = collectValidationIssues(collectPayload());
+    testRoutingButton.disabled = issues.length > 0;
+
+    if (indexGraphButton) {
+      const graphIssues = collectGraphIndexIssues(collectPayload());
+      indexGraphButton.disabled = graphIssues.length > 0;
+    }
+  }
+
+  advancedToggle?.addEventListener("click", () => {
+    if (!advancedPanel || !advancedToggle) {
+      return;
+    }
+    const open = advancedPanel.classList.toggle("open");
+    advancedToggle.textContent = open ? "▾ 存储与召回" : "▸ 存储与召回";
+  });
+
+  function renderMcpStatus(agents) {
+    if (!mcpStatusList) {
+      return;
+    }
+    if (!Array.isArray(agents) || agents.length === 0) {
+      mcpStatusList.innerHTML =
+        '<li style="color: #b45309;">未检测到本机 AI Agent / IDE。点下方按钮重试。</li>';
+      return;
+    }
+    mcpStatusList.innerHTML = agents
+      .map((agent) => {
+        const state = agent.installed
+          ? '<span style="color: #047857;">已安装</span>'
+          : '<span style="color: #b45309;">未安装</span>';
+        return `<li>${state} · ${agent.agentName} · <code>${agent.configPath}</code></li>`;
+      })
+      .join("");
+  }
+
+  function renderAnydocStatus(ready, version, message) {
+    const label = ready ? `就绪${version ? ` ${version}` : ""}` : "未安装";
+    if (anydocPill) {
+      anydocPill.textContent = `解析器 ${label}`;
+      anydocPill.className = `status-pill ${ready ? "ok" : "warn"}`;
+    }
+    if (anydocMetric) {
+      anydocMetric.textContent = label;
+    }
+    if (message && status) {
+      status.textContent = message;
+    }
+  }
+
+  document.getElementById("settings-feature-chips")?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const command = target.getAttribute("data-command");
+    if (!command) {
+      return;
+    }
+    vscode?.postMessage({ type: "openCommand", command });
+  });
+
+  ensureAnydocButton?.addEventListener("click", () => {
+    const office = document.getElementById("settings-index-office");
+    if (office) {
+      office.checked = true;
+    }
+    if (ensureAnydocButton) {
+      ensureAnydocButton.disabled = true;
+    }
+    if (status) {
+      status.textContent = "正在安装 Office/PDF 解析器…";
+    }
+    vscode?.postMessage({ type: "ensureAnydoc", payload: collectPayload() });
+  });
+
+  installMcpButton?.addEventListener("click", () => {
+    if (mcpActionStatus) {
+      mcpActionStatus.textContent = "正在安装 MCP...";
+    }
+    installMcpButton.disabled = true;
+    vscode?.postMessage({ type: "installMcp" });
+  });
+
+  form?.addEventListener("input", renderReadiness);
+  form?.addEventListener("change", renderReadiness);
+  renderReadiness();
+
+  indexGraphButton?.addEventListener("click", () => {
+    if (!vscode) {
+      status.textContent = "VS Code API unavailable.";
+      return;
+    }
+
+    const issues = collectGraphIndexIssues(collectPayload());
+    if (issues.length > 0) {
+      status.textContent = "请先填写图谱存储路径。";
+      renderReadiness();
+      return;
+    }
+
+    status.textContent = "正在建立知识图谱（结构索引，无需 LLM）...";
+    indexGraphButton.disabled = true;
+    if (graphIndexList) {
+      graphIndexList.style.display = "none";
+      graphIndexList.innerHTML = "";
+    }
+    vscode.postMessage({ type: "indexGraphOnly", payload: collectPayload() });
+  });
+
+  testRoutingButton?.addEventListener("click", () => {
+    if (!vscode) {
+      status.textContent = "VS Code API unavailable.";
+      return;
+    }
+
+    const issues = collectValidationIssues(collectPayload());
+    if (issues.length > 0) {
+      status.textContent = "请先完成必填配置。";
+      renderReadiness();
+      return;
+    }
+
+    status.textContent = "正在测试路由连通性并建立图谱...";
+    testRoutingButton.disabled = true;
+    if (routeTestList) {
+      routeTestList.style.display = "none";
+      routeTestList.innerHTML = "";
+    }
+    vscode.postMessage({ type: "testRoutingAndIndex", payload: collectPayload() });
+  });
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!vscode) {
+      status.textContent = "VS Code API unavailable.";
+      return;
+    }
+
+    status.textContent = "Saving...";
+    vscode.postMessage({
+      type: "saveSettings",
+      payload: collectPayload(),
+    });
+  });
+
+  window.addEventListener("message", (event) => {
+    const message = event.data;
+
+    if (message?.type === "graphIndexResult") {
+      const result = message.payload || {};
+      indexGraphButton.disabled = false;
+      renderReadiness();
+
+      if (graphIndexList) {
+        graphIndexList.style.display = "block";
+        const lines = [];
+        if (result.graphIndex) {
+          lines.push(
+            "<li>✓ 结构图谱索引完成：files=" +
+              result.graphIndex.indexedFiles +
+              "; symbols=" +
+              result.graphIndex.indexedSymbols +
+              "</li>"
+          );
+        }
+        if (result.graphSnapshot) {
+          lines.push(
+            "<li>✓ 图谱规模：" +
+              result.graphSnapshot.nodeCount +
+              " 节点 / " +
+              result.graphSnapshot.edgeCount +
+              " 边</li>"
+          );
+        }
+        if (lines.length === 0 && result.validationIssues?.length) {
+          for (const issue of result.validationIssues) {
+            lines.push("<li>✗ " + issue.message + "</li>");
+          }
+        }
+        graphIndexList.innerHTML = lines.join("");
+      }
+
+      status.textContent = result.ok
+        ? "知识图谱已建立（结构索引）。配置 LLM 后可启用语义提取以增强效果。"
+        : "建立图谱失败，请检查图谱存储路径与写入权限。";
+    }
+
+    if (message?.type === "routingTestResult") {
+      const result = message.payload || {};
+      testRoutingButton.disabled = false;
+      renderReadiness();
+
+      if (result.diagnosisSummary && diagnoseList) {
+        diagnoseList.innerHTML = String(result.diagnosisSummary)
+          .split("; ")
+          .map((line) => "<li>" + line + "</li>")
+          .join("");
+      }
+
+      if (routeTestList) {
+        routeTestList.style.display = "block";
+        const lines = [];
+        for (const probe of result.probes || []) {
+          const mark = probe.ok ? "✓" : "✗";
+          const latency = probe.latencyMs !== undefined ? probe.latencyMs + "ms" : "";
+          const detail = probe.ok ? probe.sample || "ok" : probe.error || "failed";
+          lines.push(
+            "<li>" +
+              mark +
+              " " +
+              probe.role +
+              " " +
+              probe.provider +
+              "/" +
+              probe.model +
+              " " +
+              latency +
+              " — " +
+              detail +
+              "</li>"
+          );
+        }
+        if (result.graphIndex) {
+          lines.push(
+            "<li>✓ 图谱索引完成：files=" +
+              result.graphIndex.indexedFiles +
+              "; symbols=" +
+              result.graphIndex.indexedSymbols +
+              "</li>"
+          );
+        }
+        if (result.graphSnapshot) {
+          lines.push(
+            "<li>✓ 图谱规模：" +
+              result.graphSnapshot.nodeCount +
+              " 节点 / " +
+              result.graphSnapshot.edgeCount +
+              " 边</li>"
+          );
+        }
+        routeTestList.innerHTML = lines.join("");
+      }
+
+      status.textContent = result.ok
+        ? "路由连通性 OK，知识图谱已建立。"
+        : "路由测试未通过，请检查配置与 API Key。";
+    }
+
+    if (message?.type === "mcpInstallResult") {
+      const result = message.payload || {};
+      if (installMcpButton) {
+        installMcpButton.disabled = false;
+      }
+      if (Array.isArray(result.mcpAgents)) {
+        renderMcpStatus(result.mcpAgents);
+      }
+      if (mcpActionStatus) {
+        mcpActionStatus.textContent = result.message || (result.ok ? "MCP 安装完成。" : "MCP 安装失败。");
+      }
+    }
+
+    if (message?.type === "anydocStatus") {
+      const result = message.payload || {};
+      if (ensureAnydocButton) {
+        ensureAnydocButton.disabled = false;
+      }
+      renderAnydocStatus(Boolean(result.ready), result.version, result.message);
+    }
+
+    if (message?.type === "settingsSaved") {
+      status.textContent = "已保存。";
+      renderReadiness();
+    }
+    if (message?.type === "settingsError") {
+      status.textContent = "Error: " + message.payload;
+      testRoutingButton.disabled = false;
+      indexGraphButton.disabled = false;
+      renderReadiness();
+    }
+  });
+})();
