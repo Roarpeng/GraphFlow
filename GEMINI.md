@@ -1,30 +1,16 @@
 <!-- GRAPHFLOW:BEGIN managed block — edit outside these markers only -->
-## GraphFlow Context-First Rule
+# GraphFlow 3.0 for Gemini CLI (Token-First Surgical Mode)
 
-GraphFlow is a local code knowledge-graph + context compression MCP server (10 tools).
-Before broad code exploration, implementation, debugging, review, or architecture
-questions in this project:
+Use GraphFlow 3.0's 4 surgical MCP tools to minimize token spend and round-trips:
 
-1. Call `graphflow_context` with the task/query first.
-2. Use the returned `summary`, `anchors`, and `tokenBudget` as the primary context.
-3. Read full files only when anchors point there or compressed context is insufficient.
-4. For multi-step or ambiguous work, call `graphflow_plan` before implementing.
-5. After project changes, call `graphflow_index` to keep the graph fresh.
-6. The flywheel auto-closes: pending episodes are backfilled by Claude Code
-   hooks (or `graphflow_report_outcome`) by default; set GRAPHFLOW_AUTO_CAPTURE=0 to opt out.
+1. **`gf_read` (Precise Context)**:
+   - Never read large files raw. Pass `targets: ["path/file.ts"]` for an AST skeleton folded view, `targets: ["path/file.ts#symbolName"]` for the symbol body + referenced types + cross-repo `[Blast Radius]` call sites, or `q: "keyword"` to locate and slice.
+2. **`gf_edit` (Surgical Edit + Instant Static Guard)**:
+   - Update symbols in-place with `gf_edit({ file, symbol, newCode })` (or `startLine`/`endLine`) and update any affected call sites listed in `[Blast Radius]` in the same turn.
+3. **`gf_exec` (Dehydrated Execution & Affected Tests)**:
+   - Run `gf_exec({ cmd: "affected-tests" })` or `gf_exec({ cmd: "..." })`. Passing commands return 1 line (`PASS`); failures extract only the error assertion and inline 5 lines of workspace source context.
+4. **`gf_macro` (Auto-Recorded Tools)**:
+   - Repeated reads and command pipelines auto-compile into `.graphflow/macros/*.mjs` after 2 occurrences. Run them in 1 step via `gf_macro({ action: "run", id })`.
 
-Pass `rootDir` = this project's absolute path. Never pass your home directory, AppData,
-or an unexpanded `${workspaceFolder}` placeholder — GraphFlow refuses unsafe workspace
-roots. If a call answers `unsafe workspace root`, retry it without `rootDir`.
-
-When using Cursor `CallMcpTool`, always pass `server` + `toolName` + `arguments`
-(e.g. server `"graphflow"` / `"user-graphflow"`, toolName `"graphflow_context"`).
-
-Tools: graphflow_context, graphflow_plan, graphflow_run, graphflow_report_outcome,
-graphflow_insight, graphflow_index, graphflow_artifact, graphflow_skill_insights,
-graphflow_skill_guide, graphflow_diagnose.
-
-Do not scan the whole repository or read many large files before trying GraphFlow
-context. Treat GraphFlow output as structured, token-saving context.
+Do NOT call any tool to echo `assistantReply` after answering the user.
 <!-- GRAPHFLOW:END -->
-

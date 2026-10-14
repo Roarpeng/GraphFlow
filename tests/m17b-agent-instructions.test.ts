@@ -7,34 +7,18 @@ import {
   installProjectGeminiInstructions,
 } from "../src/integrations/skill-installer";
 
-const AUTHORITATIVE_10 = [
-  "graphflow_context",
-  "graphflow_plan",
-  "graphflow_run",
-  "graphflow_report_outcome",
-  "graphflow_insight",
-  "graphflow_index",
-  "graphflow_artifact",
-  "graphflow_skill_insights",
-  "graphflow_skill_guide",
-  "graphflow_diagnose",
-] as const;
+const SURGICAL_4 = ["gf_read", "gf_edit", "gf_exec", "gf_macro"] as const;
 
-describe("M17b agent instruction block (10 MCP tools)", () => {
-  it("buildInstructionBlock uses graphflow_context and lists the 10 tools", () => {
+describe("M17b agent instruction block (4 surgical v3 tools)", () => {
+  it("buildInstructionBlock teaches the 4 gf_* surgical tools", () => {
     const block = buildInstructionBlock();
 
-    expect(block).toContain("graphflow_context");
-    expect(block).not.toContain("graphflow_preview_context");
-    expect(block).not.toContain("graphflow_expand_anchor");
-    expect(block).toContain("CallMcpTool");
-    expect(block).toContain("server");
-    expect(block).toContain("toolName");
-    expect(block).toContain("arguments");
-
-    for (const tool of AUTHORITATIVE_10) {
+    for (const tool of SURGICAL_4) {
       expect(block).toContain(tool);
     }
+    expect(block).not.toContain("graphflow_preview_context");
+    expect(block).not.toContain("graphflow_expand_anchor");
+    expect(block).not.toContain("graphflow_context");
   });
 
   it("install overwrites a stale managed block that still names graphflow_preview_context", () => {
@@ -58,9 +42,8 @@ describe("M17b agent instruction block (10 MCP tools)", () => {
       expect(results[0]?.status).toBe("updated");
 
       const content = readFileSync(geminiPath, "utf8");
-      expect(content).toContain("graphflow_context");
+      expect(content).toContain("gf_read");
       expect(content).not.toContain("graphflow_preview_context");
-      expect(content).toContain("CallMcpTool");
       expect(content).toBe(buildInstructionBlock());
     } finally {
       rmSync(dir, { recursive: true, force: true });

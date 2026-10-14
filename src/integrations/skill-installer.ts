@@ -388,40 +388,32 @@ export function isManagedTemplateInstalled(filePath: string, vendorRuntimeRoot?:
 }
 
 /**
- * GraphFlow 的精简 token-first 指令块（受 Windsurf 6000 字符全局规则上限约束，保持简短）。
- * 写入各 agent 的全局规则/记忆文件，告诉模型优先调用 GraphFlow 压缩上下文。
- * 工具面为权威 10 工具集；首调必须是 `graphflow_context`（勿再用已弃用的 graphflow_preview_context）。
+ * GraphFlow 3.0 的精简 token-first 指令块（受 Windsurf 6000 字符全局规则上限约束，保持简短）。
+ * 写入各 agent 的全局规则/记忆文件，引导模型优先使用 4 个外科手术级 gf_* 工具，
+ * 与 CLAUDE.md/AGENTS.md/.windsurfrules 等 v3 规则面保持同一口径。
  */
 export function buildInstructionBlock(): string {
   return [
     INSTRUCTION_BEGIN,
-    "## GraphFlow Context-First Rule",
+    "# GraphFlow 3.0 (Token-First Surgical Mode)",
     "",
-    "GraphFlow is a local code knowledge-graph + context compression MCP server (10 tools).",
-    "Before broad code exploration, implementation, debugging, review, or architecture",
-    "questions in this project:",
+    "Use GraphFlow 3.0's 4 surgical MCP tools (gf_read, gf_edit, gf_exec, gf_macro) to cut token spend:",
     "",
-    "1. Call `graphflow_context` with the task/query first.",
-    "2. Use the returned `summary`, `anchors`, and `tokenBudget` as the primary context.",
-    "3. Read full files only when anchors point there or compressed context is insufficient.",
-    "4. For multi-step or ambiguous work, call `graphflow_plan` before implementing.",
-    "5. After project changes, call `graphflow_index` to keep the graph fresh.",
-    "6. The flywheel auto-closes: pending episodes are backfilled by Claude Code",
-    "   hooks (or `graphflow_report_outcome`) by default; set GRAPHFLOW_AUTO_CAPTURE=0 to opt out.",
+    "1. `gf_read`: AST skeleton folded views (`targets: [\"path/file.ts\"]`), symbol bodies +",
+    "   referenced types + cross-repo `[Blast Radius]` call sites (`targets: [\"file#symbol\"]`),",
+    "   or `q: \"keyword\"` search. Never read large files raw.",
+    "2. `gf_edit`: in-place symbol/line edits with an instant AST syntax + caller-arity guard;",
+    "   update affected `[Blast Radius]` call sites in the same turn.",
+    "3. `gf_exec`: `cmd: \"affected-tests\"` or any command. Passing runs return one `PASS` line;",
+    "   failures show the assertion plus a 5-line source window.",
+    "4. `gf_macro`: repeated reads and command pipelines auto-compile into",
+    "   `.graphflow/macros/*.mjs`; run them via `gf_macro({ action: \"run\", id })`.",
     "",
     "Pass `rootDir` = this project's absolute path. Never pass your home directory, AppData,",
-    "or an unexpanded `${workspaceFolder}` placeholder — GraphFlow refuses unsafe workspace",
-    "roots. If a call answers `unsafe workspace root`, retry it without `rootDir`.",
+    "or an unexpanded `${workspaceFolder}` placeholder — if a call reports an unsafe workspace",
+    "root, retry it without `rootDir`.",
     "",
-    "When using Cursor `CallMcpTool`, always pass `server` + `toolName` + `arguments`",
-    "(e.g. server `\"graphflow\"` / `\"user-graphflow\"`, toolName `\"graphflow_context\"`).",
-    "",
-    "Tools: graphflow_context, graphflow_plan, graphflow_run, graphflow_report_outcome,",
-    "graphflow_insight, graphflow_index, graphflow_artifact, graphflow_skill_insights,",
-    "graphflow_skill_guide, graphflow_diagnose.",
-    "",
-    "Do not scan the whole repository or read many large files before trying GraphFlow",
-    "context. Treat GraphFlow output as structured, token-saving context.",
+    "Do NOT call any tool to echo `assistantReply` after answering the user.",
     INSTRUCTION_END,
     "",
   ].join("\n");
