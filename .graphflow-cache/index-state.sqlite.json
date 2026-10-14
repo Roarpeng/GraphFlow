@@ -22,14 +22,19 @@
       "numNodes": 27
     },
     ".mimosa/hook-status/sess_9848f72a-e1c0-4ec0-a366-100398f82417-04ecaccc96.json": {
-      "mtimeMs": 1791986717672.3967,
-      "hash": "f5adf3435bfa935cbc4631b242163721",
+      "mtimeMs": 1791987430843.9265,
+      "hash": "89f1e51294ae488a4e9fca097f0bcefe",
       "numNodes": 2
     },
     "package-lock.json": {
       "mtimeMs": 1791986677280.4521,
       "hash": "cd647f37f0c6acabc892dc391f03b8a4",
       "numNodes": 2
+    },
+    "vscode-extension/README.md": {
+      "mtimeMs": 1791987409307.26,
+      "hash": "b939f79bb806c5513747630ae4a32087",
+      "numNodes": 6
     }
   }
 }

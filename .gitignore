@@ -1,5 +1,10 @@
 node_modules/
-dist/
+/dist/
 .graphflow/
+.graphflow-cache/
+graphflow-out/
+artifacts/
+tmp/
+coverage/
 *.log
 .DS_Store
