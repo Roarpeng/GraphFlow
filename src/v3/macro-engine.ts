@@ -27,7 +27,9 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { execAndDehydrate } from "./dehydrator.js";
-import { executeSurgicalRead } from "./slicer.js";
+import { mineGitCoChangeHistory, type GitMineOptions } from "./git-miner.js";
+import { executeSurgicalRead, getWorkspaceAstIndex } from "./slicer.js";
+import { executeSurgicalEdit } from "./surgical-edit.js";
 
 export type TrajectoryActionKind = "read" | "edit" | "exec";
 
@@ -42,7 +44,7 @@ export interface TrajectoryEvent {
   tokensSaved?: number;
 }
 
-export type MacroKind = "context-bundle" | "command-pipeline" | "command-template";
+export type MacroKind = "context-bundle" | "command-pipeline" | "command-template" | "edit-codemod";
 
 export interface CompiledMacro {
   id: string;
@@ -80,9 +82,10 @@ export interface UserHabitProfile {
 }
 
 interface MacroStoreFile {
-  version: "3.0";
+  version: "3.0" | "3.1";
   macros: CompiledMacro[];
   habits?: UserHabitProfile;
+  gitMinedAt?: string;
 }
 
 function trajectoryFilePath(rootDir: string): string {
@@ -197,6 +200,24 @@ function writeStandaloneMacroScript(rootDir: string, macro: CompiledMacro): stri
       `  process.exit(res.status ?? 1);`,
       `}`,
       `console.log(\`PASS [template ${macro.id}] \${cmd}\`);`,
+    ].join("\n");
+  } else if (macro.kind === "edit-codemod") {
+    scriptContent = [
+      `#!/usr/bin/env node`,
+      `// Auto-compiled AST Codemod (${macro.id}: ${macro.description})`,
+      `import { readFileSync, writeFileSync } from "node:fs";`,
+      `const oldCode = ${JSON.stringify(macro.steps[0] ?? "")};`,
+      `const newCode = ${JSON.stringify(macro.steps[1] ?? "")};`,
+      `const files = process.argv.slice(2);`,
+      `let count = 0;`,
+      `for (const f of files) {`,
+      `  const raw = readFileSync(f, "utf8");`,
+      `  if (raw.includes(oldCode)) {`,
+      `    writeFileSync(f, raw.replaceAll(oldCode, newCode), "utf8");`,
+      `    count += 1;`,
+      `  }`,
+      `}`,
+      `console.log(\`PASS [codemod ${macro.id}] updated \${count}/\${files.length} file(s)\`);`,
     ].join("\n");
   } else {
     scriptContent = [
@@ -579,6 +600,41 @@ export function executeMacro(
     };
   }
 
+  if (macro.kind === "edit-codemod") {
+    const oldSnippet = macro.steps[0] ?? "";
+    const newSnippet = macro.steps[1] ?? "";
+    const index = getWorkspaceAstIndex(rootDir);
+    const targetFiles =
+      templateArgs.length > 0
+        ? templateArgs
+        : index.getFiles().filter((rel) => {
+            const raw = index.getRawFile(rel);
+            return Boolean(raw && raw.content.includes(oldSnippet));
+          });
+    if (targetFiles.length === 0) {
+      return {
+        ok: true,
+        macroId: macro.id,
+        text: `PASS [codemod ${macro.id}] 0 files needed replacement.`,
+      };
+    }
+    const edits = targetFiles.map((file) => ({
+      file,
+      oldCode: oldSnippet,
+      newCode: newSnippet,
+    }));
+    const editRes = executeSurgicalEdit({
+      rootDir,
+      file: targetFiles[0]!,
+      edits,
+    });
+    return {
+      ok: editRes.ok,
+      macroId: macro.id,
+      text: `PASS [codemod ${macro.id}: applied across ${editRes.touchedFiles.length} file(s) with 0 LLM tokens] -> ${editRes.text}`,
+    };
+  }
+
   if (macro.kind === "command-template") {
     const rawTemplate = macro.steps[0] ?? "";
     const resolvedCmd = rawTemplate
@@ -695,4 +751,110 @@ export function findMatchingMacroHint(rootDir: string, keys: string[]): string |
   }
 
   return hints.length > 0 ? hints.slice(0, 2).join("\n") : undefined;
+}
+
+
+/**
+ * Zero-Cold-Start Git History Miner integration:
+ * Scans `git log` for temporal co-change file pairs and merges them into `habits.coEdits`.
+ */
+export function syncGitCoChangeHabits(
+  rootDir: string,
+  options: GitMineOptions = {}
+): { commitsScanned: number; addedCoEdits: number; totalCoEdits: number } {
+  const gitRes = mineGitCoChangeHistory(rootDir, options);
+  const { macros, habits } = loadMacroStore(rootDir);
+  const byKey = new Map<string, CoEditHabit>();
+
+  for (const ce of habits.coEdits) {
+    const [first, second] = [ce.fileA, ce.fileB].sort() as [string, string];
+    byKey.set(`${first}||${second}`, { fileA: first, fileB: second, coEditCount: ce.coEditCount });
+  }
+
+  let addedCoEdits = 0;
+  for (const pair of gitRes.coChangePairs) {
+    const [first, second] = [pair.fileA, pair.fileB].sort() as [string, string];
+    const key = `${first}||${second}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, { fileA: first, fileB: second, coEditCount: pair.coCommitCount });
+      addedCoEdits += 1;
+    } else if (pair.coCommitCount > existing.coEditCount) {
+      existing.coEditCount = pair.coCommitCount;
+    }
+  }
+
+  const mergedCoEdits = Array.from(byKey.values()).sort((a, b) => b.coEditCount - a.coEditCount);
+  saveMacros(rootDir, macros, {
+    coEdits: mergedCoEdits,
+    dirVerifyCommands: habits.dirVerifyCommands,
+  });
+  return {
+    commitsScanned: gitRes.commitsScanned,
+    addedCoEdits,
+    totalCoEdits: mergedCoEdits.length,
+  };
+}
+
+interface EditPatternEntry {
+  oldSnippet: string;
+  newSnippet: string;
+  files: string[];
+  count: number;
+}
+
+function editPatternsFilePath(rootDir: string): string {
+  return join(rootDir, ".graphflow", "edit-patterns.json");
+}
+
+/**
+ * Detect isomorphic code modifications across >= 2 files/calls and auto-compile an `edit-codemod` macro!
+ */
+export function recordEditPatternAndMine(
+  rootDir: string,
+  file: string,
+  oldSnippet: string,
+  newSnippet: string,
+  minOccurrences = 2
+): CompiledMacro | undefined {
+  const cleanOld = oldSnippet.trim();
+  const cleanNew = newSnippet.trim();
+  if (!cleanOld || !cleanNew || cleanOld === cleanNew || cleanOld.length > 600 || cleanNew.length > 600) {
+    return undefined;
+  }
+
+  mkdirSync(join(rootDir, ".graphflow"), { recursive: true });
+  const pPath = editPatternsFilePath(rootDir);
+  let entries: EditPatternEntry[] = [];
+  if (existsSync(pPath)) {
+    try {
+      entries = JSON.parse(readFileSync(pPath, "utf8")) as EditPatternEntry[];
+    } catch {
+      entries = [];
+    }
+  }
+
+  const normFile = file.replace(/\\/g, "/").replace(/^\.\//, "");
+  let matched = entries.find((e) => e.oldSnippet === cleanOld && e.newSnippet === cleanNew);
+  if (!matched) {
+    matched = { oldSnippet: cleanOld, newSnippet: cleanNew, files: [normFile], count: 1 };
+    entries.push(matched);
+  } else {
+    matched.count += 1;
+    if (!matched.files.includes(normFile)) matched.files.push(normFile);
+  }
+
+  writeFileSync(pPath, JSON.stringify(entries.slice(-100), null, 2), "utf8");
+
+  if (matched.count >= minOccurrences) {
+    return registerCustomMacro(rootDir, {
+      id: `codemod_${shortHash(`${cleanOld}=>${cleanNew}`)}`,
+      name: `Auto-Codemod (${cleanOld.slice(0, 24)} -> ${cleanNew.slice(0, 24)})`,
+      kind: "edit-codemod",
+      description: `Batch replace '${cleanOld.replace(/\s+/g, " ").slice(0, 40)}' -> '${cleanNew.replace(/\s+/g, " ").slice(0, 40)}' across target files`,
+      steps: [cleanOld, cleanNew],
+      triggers: matched.files,
+    });
+  }
+  return undefined;
 }

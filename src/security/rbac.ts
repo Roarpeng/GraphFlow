@@ -69,6 +69,14 @@ const TEAM_METHOD_PERMISSION: Record<string, TeamPermission> = {
 
 /** GraphFlow MCP tool names on the shared HTTP surface. */
 const MCP_TOOL_PERMISSION: Record<string, TeamPermission> = {
+  // GraphFlow 3.0 surgical surface (installed agents default to it via
+  // GRAPHFLOW_MCP_PROFILE=v3). authorizeMcpTool is fail-closed on unknown
+  // tools, so leaving these unregistered 403'd every gf_* call in team
+  // HTTP mode.
+  gf_read: "graph.read",
+  gf_edit: "graph.write",
+  gf_exec: "graph.write",
+  gf_macro: "graph.write",
   graphflow_context: "graph.read",
   graphflow_diagnose: "diagnose.read",
   graphflow_skill_insights: "skill.read",
@@ -79,14 +87,6 @@ const MCP_TOOL_PERMISSION: Record<string, TeamPermission> = {
   graphflow_insight: "graph.write",
   graphflow_report_outcome: "graph.write",
   graphflow_artifact: "artifact.import",
-  // GraphFlow 3.0 surgical surface (installed agents default to it via
-  // GRAPHFLOW_MCP_PROFILE=v3). authorizeMcpTool is fail-closed on unknown
-  // tools, so leaving these unregistered 403'd every gf_* call in team
-  // HTTP mode.
-  gf_read: "graph.read",
-  gf_edit: "graph.write",
-  gf_exec: "graph.write",
-  gf_macro: "graph.write",
 };
 
 export interface AuthorizationDecision {

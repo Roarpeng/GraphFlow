@@ -61,6 +61,62 @@ interface ToolGovernance {
 }
 
 const TOOL_GOVERNANCE: Record<string, ToolGovernance> = {
+  gf_read: {
+    annotations: {
+      title: "GraphFlow Surgical Read (AST Skeleton & Symbol Slice)",
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    _meta: {
+      "graphflow/risk": "R0",
+      "graphflow/capabilities": ["filesystem.read"],
+      "graphflow/writeScope": "none",
+    },
+  },
+  gf_edit: {
+    annotations: {
+      title: "GraphFlow Surgical Edit (In-Place Symbol/Line Edit & Rename)",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    _meta: {
+      "graphflow/risk": "R1",
+      "graphflow/capabilities": ["filesystem.read", "filesystem.write"],
+      "graphflow/writeScope": "caller-path",
+    },
+  },
+  gf_exec: {
+    annotations: {
+      title: "GraphFlow Dehydrated Command & Affected-Test Runner",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    _meta: {
+      "graphflow/risk": "R1",
+      "graphflow/capabilities": ["filesystem.read", "process.exec"],
+      "graphflow/writeScope": "graphflow-state",
+    },
+  },
+  gf_macro: {
+    annotations: {
+      title: "GraphFlow Habit Macro & Git Co-Change Engine",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    _meta: {
+      "graphflow/risk": "R1",
+      "graphflow/capabilities": ["filesystem.read", "filesystem.write", "process.exec"],
+      "graphflow/writeScope": "graphflow-state",
+    },
+  },
   graphflow_run: {
     annotations: {
       title: "GraphFlow Run (plan + context package)",
@@ -210,14 +266,30 @@ const TOOL_GOVERNANCE: Record<string, ToolGovernance> = {
 };
 
 export function getV3ToolDefinitions(): ToolDefinition[] {
-  return V3_TOOL_DEFINITIONS.map((t) => ({
-    ...t,
-    $schema: "https://json-schema.org/draft/2020-12/schema",
-  }));
+  return V3_TOOL_DEFINITIONS.map((t) => {
+    const governance = TOOL_GOVERNANCE[t.name];
+    return {
+      ...t,
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      ...(governance
+        ? {
+            title: governance.annotations.title,
+            annotations: { ...governance.annotations },
+            _meta: {
+              ...governance._meta,
+              "graphflow/capabilities": [...governance._meta["graphflow/capabilities"]],
+            },
+          }
+        : {}),
+    };
+  });
 }
 
 export function getToolDefinitions(options?: { profile?: "v3" | "legacy" | "all" }): ToolDefinition[] {
-  const profile = options?.profile ?? (process.env.GRAPHFLOW_MCP_PROFILE === "v3" ? "v3" : undefined);
+  const envProf = process.env.GRAPHFLOW_MCP_PROFILE?.trim().toLowerCase();
+  const profile =
+    options?.profile ??
+    (envProf === "v3" ? "v3" : envProf === "all" ? "all" : envProf === "legacy" ? "legacy" : undefined);
   if (profile === "v3") {
     return getV3ToolDefinitions();
   }

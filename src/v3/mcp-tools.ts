@@ -1,7 +1,13 @@
 /**
- * GraphFlow 3.0 — Ultra-Lean MCP Tool Surface (`src/v3/mcp-tools.ts`)
+ * GraphFlow 3.1 — Ultra-Lean MCP Tool Surface (`src/v3/mcp-tools.ts`)
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  checkAndRecordSessionRead,
+  recordTestAndCheckCircuitBreaker,
+} from "./circuit-breaker.js";
 import {
   buildAffectedTestCommand,
   execAndDehydrate,
@@ -14,8 +20,10 @@ import {
   findMatchingMacroHint,
   loadMacroStore,
   mineAndCompileMacros,
+  recordEditPatternAndMine,
   recordTrajectoryAndMine,
   registerCustomMacro,
+  syncGitCoChangeHabits,
   type MacroKind,
 } from "./macro-engine.js";
 import { executeSurgicalRead } from "./slicer.js";
@@ -36,7 +44,7 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
   {
     name: "gf_read",
     description:
-      "Surgical read: `targets` (['file#sym', 'file:L1-L2', 'file']) or `q`. Returns code + types + callers. `q` + `topicId`/`resumeFromTurnId` resumes workbench/dialogue memory context.",
+      "Surgical read: targets (['f#sym','f:L1-L2','f']) or q; q+topicId/resumeFromTurnId resumes memory.",
     inputSchema: {
       type: "object",
       properties: {
@@ -44,8 +52,9 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
         q: { type: "string" },
         topK: { type: "number" },
         skeleton: { type: "boolean" },
-        topicId: { type: "string", description: "Workbench topic to resume (requires q)." },
-        resumeFromTurnId: { type: "string", description: "Dialogue turn to resume from (requires q)." },
+        dedup: { type: "boolean" },
+        topicId: { type: "string" },
+        resumeFromTurnId: { type: "string" },
         rootDir: { type: "string" },
       },
       additionalProperties: false,
@@ -54,7 +63,7 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
   {
     name: "gf_edit",
     description:
-      "Surgical edit by `symbol`, `startLine`+`endLine`, `oldCode`, `edits`, or `renameTo` with AST guard.",
+      "Edit by symbol, startLine+endLine, oldCode, edits, or renameTo.",
     inputSchema: {
       type: "object",
       properties: {
@@ -74,7 +83,7 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
   {
     name: "gf_exec",
     description:
-      "Run `cmd` (or 'affected-tests') with dehydrated output, or `handle` to recall raw log.",
+      "Run cmd (or 'affected-tests') with dehydrated output, or recall handle.",
     inputSchema: {
       type: "object",
       properties: {
@@ -91,13 +100,13 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
   {
     name: "gf_macro",
     description:
-      "Manage or run auto-compiled macros & habits ('list'|'run'|'save'|'mine').",
+      "Manage or run macros & git habits (see action enum).",
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["list", "run", "save", "mine"] },
+        action: { type: "string", enum: ["list", "run", "save", "mine", "mine-git"] },
         id: { type: "string" },
-        kind: { type: "string", enum: ["context-bundle", "command-pipeline", "command-template"] },
+        kind: { type: "string", enum: ["context-bundle", "command-pipeline", "command-template", "edit-codemod"] },
         steps: { type: "array", items: { type: "string" } },
         args: { type: "array", items: { type: "string" } },
         rootDir: { type: "string" },
@@ -138,6 +147,25 @@ export function executeV3ToolCall(
       const query = typeof args.q === "string" && args.q.trim() ? args.q.trim() : undefined;
       const topK = typeof args.topK === "number" ? args.topK : 3;
       const includeSkeleton = args.skeleton === true;
+      const topicId =
+        typeof args.topicId === "string" && args.topicId.trim()
+          ? args.topicId.trim()
+          : typeof args.resumeFromTurnId === "string" && args.resumeFromTurnId.trim()
+            ? args.resumeFromTurnId.trim()
+            : undefined;
+
+      let topicPrefix = "";
+      if (topicId) {
+        const journalPath = join(rootDir, ".graphflow", "session-journal.jsonl");
+        if (existsSync(journalPath)) {
+          const lines = readFileSync(journalPath, "utf8").split(/\r?\n/).filter(Boolean);
+          const hit = [...lines].reverse().find((l) => l.includes(topicId));
+          if (hit) topicPrefix = `// [Topic Resume: ${topicId}] ${hit.slice(0, 240)}\n\n`;
+        }
+        if (!topicPrefix) {
+          topicPrefix = `// [Topic Resume: ${topicId}] Active workbench topic restored.\n\n`;
+        }
+      }
 
       const slice = executeSurgicalRead({
         rootDir,
@@ -148,6 +176,20 @@ export function executeV3ToolCall(
         includeSkeleton,
         macroHintLookup: (keys) => findMatchingMacroHint(rootDir, keys),
       });
+
+      if (args.dedup === true && slice.resolvedKeys.length > 0) {
+        const key = slice.resolvedKeys.join("|");
+        const dedupRes = checkAndRecordSessionRead(
+          rootDir,
+          sessionId,
+          key,
+          slice.text,
+          slice.estimatedTokens
+        );
+        if (dedupRes.isDuplicate && dedupRes.dedupNotice) {
+          return plainTextResponse(topicPrefix + dedupRes.dedupNotice);
+        }
+      }
 
       let promoNote = "";
       if (slice.resolvedKeys.length > 0) {
@@ -165,7 +207,7 @@ export function executeV3ToolCall(
         }
       }
 
-      return plainTextResponse(slice.text + promoNote);
+      return plainTextResponse((topicPrefix + slice.text + promoNote).trim());
     }
 
     case "gf_edit": {
@@ -202,7 +244,15 @@ export function executeV3ToolCall(
         });
       }
 
-      return plainTextResponse(editRes.text);
+      let codemodNote = "";
+      if (editRes.ok && oldCode && newCode) {
+        const cm = recordEditPatternAndMine(rootDir, file, oldCode, newCode);
+        if (cm) {
+          codemodNote = `\n// [Auto-Compiled Codemod] Isomorphic edit promoted to '${cm.id}': call gf_macro(action="run", id="${cm.id}", args=["file1", "file2"]) to batch-apply with 0 LLM tokens!`;
+        }
+      }
+
+      return plainTextResponse(editRes.text + codemodNote);
     }
 
     case "gf_exec": {
@@ -252,12 +302,14 @@ export function executeV3ToolCall(
         ok: execRes.ok,
       });
 
+      const cb = recordTestAndCheckCircuitBreaker(rootDir, sessionId, cmd, execRes.ok);
+      const cbNote = cb.tripped && cb.rescuePacket ? `\n\n${cb.rescuePacket}` : "";
       const promoNote =
         newlyCompiled.length > 0
           ? `\n// [Auto-Recorded Tool] Pattern compiled into macro '${newlyCompiled[0]!.id}' (${newlyCompiled[0]!.kind}: ${newlyCompiled[0]!.scriptPath})`
           : "";
 
-      return plainTextResponse(execRes.text + promoNote);
+      return plainTextResponse(execRes.text + cbNote + promoNote);
     }
 
     case "gf_macro": {
@@ -297,6 +349,13 @@ export function executeV3ToolCall(
         );
       }
 
+      if (action === "mine-git") {
+        const gitRes = syncGitCoChangeHabits(rootDir);
+        return plainTextResponse(
+          `PASS [mine-git] Scanned ${gitRes.commitsScanned} git commit(s): added ${gitRes.addedCoEdits} temporal co-change habit(s) (${gitRes.totalCoEdits} total coEdits).`
+        );
+      }
+
       if (action === "save") {
         const id = typeof args.id === "string" ? args.id.trim() : undefined;
         const kind: MacroKind =
@@ -304,7 +363,9 @@ export function executeV3ToolCall(
             ? "command-pipeline"
             : args.kind === "command-template"
               ? "command-template"
-              : "context-bundle";
+              : args.kind === "edit-codemod"
+                ? "edit-codemod"
+                : "context-bundle";
         const steps = Array.isArray(args.steps)
           ? args.steps.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
           : [];
@@ -334,7 +395,7 @@ export function executeV3ToolCall(
         return plainTextResponse(res.text);
       }
 
-      return plainTextResponse(`ERR [unknown-action] '${action}'. Use 'list', 'run', 'save', or 'mine'.`);
+      return plainTextResponse(`ERR [unknown-action] '${action}'. Use 'list', 'run', 'save', 'mine', or 'mine-git'.`);
     }
 
     default:

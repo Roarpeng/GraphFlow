@@ -1,10 +1,11 @@
 /**
- * GraphFlow 3.0 — Token-First Surgical Engine Public Barrel (`src/v3/index.ts`)
+ * GraphFlow 3.1 — Token-First Surgical Engine Public Barrel (`src/v3/index.ts`)
  */
 
 export {
   SUPPORTED_SOURCE_EXTS,
   analyzeSourceFile,
+  extractStructFields,
   parseCCpp,
   parseCSharp,
   parseGo,
@@ -65,9 +66,11 @@ export {
   loadTrajectoryEvents,
   loadUserHabits,
   mineAndCompileMacros,
+  recordEditPatternAndMine,
   recordTrajectoryAndMine,
   registerCustomMacro,
   saveMacros,
+  syncGitCoChangeHabits,
   type CoEditHabit,
   type CompiledMacro,
   type DirectoryVerifyHabit,
@@ -92,3 +95,25 @@ export {
   type PreToolInterceptOptions,
   type PreToolInterceptResult,
 } from "./host-interceptor.js";
+
+export {
+  computeTemporalCouplingFromCommits,
+  getRecentFileGitDiff,
+  mineGitCoChangeHistory,
+  parseGitLogCommitFiles,
+  type GitCoChangePair,
+  type GitHotspot,
+  type GitMineOptions,
+  type GitMiningResult,
+} from "./git-miner.js";
+
+export {
+  checkAndRecordSessionRead,
+  computeContentSha256,
+  loadSessionGuardState,
+  markSessionFilesEdited,
+  recordTestAndCheckCircuitBreaker,
+  saveSessionGuardState,
+  type SessionGuardState,
+  type SessionReadRecord,
+} from "./circuit-breaker.js";

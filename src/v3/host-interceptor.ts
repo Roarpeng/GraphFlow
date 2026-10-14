@@ -21,6 +21,11 @@
 
 import { extname, isAbsolute, relative } from "node:path";
 import { SUPPORTED_SOURCE_EXTS } from "./ast-engine.js";
+import {
+  checkAndRecordSessionRead,
+  markSessionFilesEdited,
+  recordTestAndCheckCircuitBreaker,
+} from "./circuit-breaker.js";
 import { dehydrateCommandOutput, resolveAffectedTests } from "./dehydrator.js";
 import {
   evaluatePostEditHabits,
@@ -48,11 +53,13 @@ export interface PreToolInterceptOptions {
   /** Minimum line count before an unscoped Read is automatically folded into an AST Skeleton (default: 250). */
   maxRawLines?: number;
   sessionId?: string;
+  /** Enable session-level SHA-256 duplicate read interception (default: false unless sessionId is explicitly provided or enableDedup=true). */
+  enableDedup?: boolean;
 }
 
 export interface PreToolInterceptResult {
   intercepted: boolean;
-  action: "allow" | "fold-skeleton" | "suggest-affected-tests";
+  action: "allow" | "fold-skeleton" | "session-dedup-hit" | "suggest-affected-tests";
   reason?: string;
   replacementContent?: string;
   rawLines?: number;
@@ -136,7 +143,40 @@ export function interceptPreToolUse(
 
     const index = getWorkspaceAstIndex(rootDir);
     const fileData = index.getFileAnalysis(relPath);
-    if (!fileData || fileData.ast.totalLines <= maxRawLines) {
+    if (!fileData) {
+      return { intercepted: false, action: "allow", hookProtocolOutput: { decision: "allow" } };
+    }
+
+    if (options.enableDedup) {
+      const dedup = checkAndRecordSessionRead(
+        rootDir,
+        options.sessionId ?? payload.session_id ?? "host-hook",
+        relPath,
+        fileData.content,
+        Math.ceil(fileData.size / 4)
+      );
+      if (dedup.isDuplicate && dedup.dedupNotice) {
+        return {
+          intercepted: true,
+          action: "session-dedup-hit",
+          reason: dedup.dedupNotice,
+          replacementContent: dedup.dedupNotice,
+          rawLines: fileData.ast.totalLines,
+          tokensSaved: dedup.tokensSaved,
+          hookProtocolOutput: {
+            decision: "block",
+            reason: dedup.dedupNotice,
+            hookSpecificOutput: {
+              hookEventName: "PreToolUse",
+              permissionDecision: "deny",
+              permissionDecisionReason: dedup.dedupNotice,
+            },
+          },
+        };
+      }
+    }
+
+    if (fileData.ast.totalLines <= maxRawLines) {
       return { intercepted: false, action: "allow", hookProtocolOutput: { decision: "allow" } };
     }
 
@@ -268,20 +308,25 @@ export function interceptPostToolUse(
       tokensSaved,
     });
 
-    const shouldReplace = dehydrated.rawEstimatedTokens > dehydrated.dehydratedTokens + 25;
+    const cb = recordTestAndCheckCircuitBreaker(rootDir, sessionId, command, exitCode === 0);
+    const finalDehydratedText = cb.tripped && cb.rescuePacket
+      ? `${dehydrated.text}\n\n${cb.rescuePacket}`
+      : dehydrated.text;
+
+    const shouldReplace = cb.tripped || dehydrated.rawEstimatedTokens > dehydrated.dehydratedTokens + 25;
     return {
       intercepted: shouldReplace,
       action: "dehydrate-bash",
-      dehydratedText: dehydrated.text,
+      dehydratedText: finalDehydratedText,
       rawEstimatedTokens: dehydrated.rawEstimatedTokens,
       dehydratedTokens: dehydrated.dehydratedTokens,
       tokensSaved,
       hookProtocolOutput: shouldReplace
         ? {
-            additionalContext: dehydrated.text,
+            additionalContext: finalDehydratedText,
             hookSpecificOutput: {
               hookEventName: "PostToolUse",
-              additionalContext: dehydrated.text,
+              additionalContext: finalDehydratedText,
             },
           }
         : {},
@@ -302,6 +347,7 @@ export function interceptPostToolUse(
     const relPath = normalizeRelPath(rootDir, rawFile);
     const index = getWorkspaceAstIndex(rootDir);
     index.invalidateFile(relPath);
+    markSessionFilesEdited(rootDir, sessionId, [relPath]);
     const fileData = index.getFileAnalysis(relPath);
     const syntaxErrors =
       fileData?.ast.syntaxErrors.map((e) => ({ line: e.line, message: e.message })) ?? [];

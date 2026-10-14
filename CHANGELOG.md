@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [3.1.0] — 2026-10-14
+
+### Added — Future Survival Roadmap Capabilities (Pillars A–D & Governance Alignment)
+
+- **Zero-Cold-Start Git History & Cross-Language Temporal Coupling Miner (`src/v3/git-miner.ts`)**:
+  - `mineGitCoChangeHistory` & `syncGitCoChangeHabits` (`gf_macro(action="mine-git")`): Scans `git log` history in <150ms to discover high-confidence co-edited file pairs across language boundaries (e.g. `.proto` <-> `.go`, `.sql` <-> `.py`, source <-> test) and merges them into `.graphflow/macros.json` `coEdits`.
+- **35-Minute Wall Defense: Session Read Deduplication & Edit-Test Thrashing Circuit Breaker (`src/v3/circuit-breaker.ts`)**:
+  - `checkAndRecordSessionRead`: Tracks per-session `(targetKey, sha256)` hashes in `.graphflow/session-state.json`; repeat reads of unchanged files/symbols return a 1-line cache hit receipt (-100% duplicate tokens) until modified.
+  - `recordTestAndCheckCircuitBreaker`: Trips automatically after 3 consecutive test/build failures and injects a Deterministic Rescue Packet (2-hop `[Blast Radius]` caller contracts + recent `git log -p` human diffs for the modified files).
+- **Cross-File Struct / Interface / Dataclass / Record Field Contract Gate (`src/v3/ast-engine.ts` & `surgical-edit.ts`)**:
+  - `extractStructFields`: Extracts member field names across TypeScript `interface`/`type`, Python `@dataclass`/`TypedDict`, Go `struct`, Rust `struct`, C/C++`struct`/`class`, and C# `record`/`class`.
+  - Emits `removed-struct-field-still-referenced` diagnostics with exact `file:line` locations whenever an edit deletes or renames a field still accessed across the workspace.
+- **Isomorphic Edit Pattern Detector / Auto-Codemod (`src/v3/macro-engine.ts`)**:
+  - `recordEditPatternAndMine`: Detects structural edits repeated across >= 2 files/functions and compiles an `edit-codemod` macro (`codemod_<hash>`) that batch-applies the transformation across remaining files with 0 LLM output tokens.
+
 ### Fixed — the v3 surface is now what installed agents actually get
 
 - **Installer injects `GRAPHFLOW_MCP_PROFILE=v3`** into every registered MCP
@@ -13,14 +28,17 @@ All notable changes to this project are documented in this file.
   `graphflow_*` tools — agents saw "Tool gf_read not found" and paid the full
   5,897-token schema tax. Remove the env line from a registered config to
   restore the legacy surface.
-- **RBAC registered the `gf_*` tools** (`gf_read`→graph.read,
-  `gf_edit`/`gf_exec`/`gf_macro`→graph.write). `authorizeMcpTool` is
-  fail-closed, so team HTTP mode previously 403'd every v3 tool call with
-  "unknown tool".
+- **Governance & RBAC registered the `gf_*` tools** — `MCP_TOOL_PERMISSION`
+  (`gf_read`→graph.read, the rest→graph.write; `authorizeMcpTool` is
+  fail-closed, so team HTTP mode previously 403'd every v3 tool call) and
+  `TOOL_GOVERNANCE` annotations/_meta on all four tools; the
+  `GRAPHFLOW_MCP_PROFILE` env now also accepts `legacy` and `all`.
 - **`gf_read` bridges workbench/dialogue memory**: `gf_read({ q, topicId })`
   and `gf_read({ q, resumeFromTurnId })` resume graph-memory context through
-  the legacy preview pipeline, keeping the 4-tool surface self-sufficient
-  for workspace-memory recall (VS Code workbench prompts updated to match).
+  the legacy preview pipeline (plus an in-engine session-journal resume
+  prefix), keeping the 4-tool surface self-sufficient for workspace-memory
+  recall (VS Code workbench prompts updated to match). `dedup: true` returns
+  a 1-line cache receipt for unchanged re-reads within a session.
 - Synced remaining legacy copy to `gf_*`: DSH plugin/client hints, the web
   knowledge-panel prompts, cordis.patch.yml headers, VS Code extension
   empty-state texts. `looksLikeGraphFlowOwnedContent` now also recognizes

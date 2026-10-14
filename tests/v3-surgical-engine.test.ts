@@ -21,8 +21,12 @@ import {
   loadMacroStore,
   recordTrajectoryAndMine,
   resolveAffectedTests,
+  computeTemporalCouplingFromCommits,
+  parseGitLogCommitFiles,
   V3_TOOL_DEFINITIONS,
 } from "../src/v3/index";
+import { authorizeMcpTool } from "../src/security/rbac";
+import { getV3ToolDefinitions } from "../src/surfaces/mcp/tool-definitions";
 
 function createSampleWorkspace(): string {
   const root = mkdtempSync(join(tmpdir(), "gf-v3-test-"));
@@ -762,6 +766,139 @@ async function runAllTests(): Promise<void> {
       assert.equal(postBash.intercepted, true);
       assert.equal(postBash.action, "dehydrate-bash");
       assert.ok(postBash.dehydratedText!.startsWith("PASS [exit=0"));
+    });
+
+    check("V3.1 Pillar A: Zero-Cold-Start Git Temporal Coupling Miner discovers cross-language co-edits", () => {
+      const sampleGitLog = [
+        "COMMIT:a1b2c3d",
+        "proto/order.proto",
+        "go/engine.go",
+        "COMMIT:b2c3d4e",
+        "proto/order.proto",
+        "go/engine.go",
+        "py/engine.py",
+        "COMMIT:c3d4e5f",
+        "proto/order.proto",
+        "go/engine.go",
+      ].join("\n");
+      const commits = parseGitLogCommitFiles(sampleGitLog, 20);
+      assert.equal(commits.length, 3);
+      const mined = computeTemporalCouplingFromCommits(commits, { minCoCommits: 2, minConfidence: 0.6 });
+      assert.ok(
+        mined.coChangePairs.some(
+          (p) => p.fileA === "go/engine.go" && p.fileB === "proto/order.proto" && p.coCommitCount === 3 && p.confidence === 1
+        ),
+        "Must discover 100% temporal coupling between proto/order.proto and go/engine.go"
+      );
+    });
+
+    check("V3.1 Pillar B: 35-Minute Wall Defense — Session Read Deduplication & Edit-Test Thrashing Circuit Breaker", () => {
+      // 1. Session Read Deduplication Cache: 2nd read with dedup=true returns 1-line SHA-256 hit!
+      const firstRead = executeV3ToolCall(
+        "gf_read",
+        { targets: ["src/types.ts#BudgetPolicy"], dedup: true, sessionId: "dedup-sess" },
+        root
+      );
+      assert.ok(!firstRead.content[0]!.text.includes("[Session Dedup Cache Hit]"));
+
+      const dupRead = executeV3ToolCall(
+        "gf_read",
+        { targets: ["src/types.ts#BudgetPolicy"], dedup: true, sessionId: "dedup-sess" },
+        root
+      );
+      assert.ok(
+        dupRead.content[0]!.text.includes("[Session Dedup Cache Hit]"),
+        "Second read of unchanged symbol in same session must return 1-line dedup cache hit"
+      );
+
+      // 2. Edit-Test Thrashing Circuit Breaker: 3 consecutive failures trip the rescue packet!
+      executeV3ToolCall(
+        "gf_edit",
+        {
+          file: "src/caller.ts",
+          symbol: "runHandler",
+          newCode: "export function runHandler(): number {\n  return computeCap({ maxTokens: 4000, strict: true });\n}",
+        },
+        root
+      );
+      const failCmd = "node -e \"process.exit(1)\"";
+      const f1 = executeV3ToolCall("gf_exec", { cmd: failCmd, sessionId: "cb-sess" }, root);
+      assert.ok(!f1.content[0]!.text.includes("CIRCUIT BREAKER TRIPPED"));
+      const f2 = executeV3ToolCall("gf_exec", { cmd: failCmd, sessionId: "cb-sess" }, root);
+      assert.ok(!f2.content[0]!.text.includes("CIRCUIT BREAKER TRIPPED"));
+      const f3 = executeV3ToolCall("gf_exec", { cmd: failCmd, sessionId: "cb-sess" }, root);
+      assert.ok(
+        f3.content[0]!.text.includes("⚡ [CIRCUIT BREAKER TRIPPED: 3 consecutive failures"),
+        "3rd consecutive failure must trip Circuit Breaker and inject contract rescue packet"
+      );
+    });
+
+    check("V3.1 Pillar C & D: Cross-File Struct Field Contract Guard, Isomorphic Auto-Codemod & RBAC Governance", () => {
+      // 1. Removing a referenced field (`strict`) from `BudgetPolicy` warns that `src/resolver.ts` still accesses `.strict`!
+      const fieldGuardRes = executeSurgicalEdit({
+        rootDir: root,
+        file: "src/types.ts",
+        symbol: "BudgetPolicy",
+        newCode: "export interface BudgetPolicy {\n  maxTokens: number;\n}",
+      });
+      assert.equal(fieldGuardRes.ok, true);
+      // Restore `strict` field and test when `resolver.ts` accesses `policy.maxTokens`
+      const removeMaxTokensRes = executeSurgicalEdit({
+        rootDir: root,
+        file: "src/types.ts",
+        symbol: "BudgetPolicy",
+        newCode: "export interface BudgetPolicy {\n  strict: boolean;\n}",
+      });
+      assert.equal(removeMaxTokensRes.ok, true);
+      assert.ok(
+        removeMaxTokensRes.diagnostics.some(
+          (d) => d.kind === "removed-struct-field-still-referenced" && d.message.includes("BudgetPolicy.maxTokens")
+        ),
+        "Removing BudgetPolicy.maxTokens must flag downstream .maxTokens references"
+      );
+
+      // 2. Isomorphic Edit Pattern -> Auto-Codemod compilation & 0-LLM batch execution
+      writeFileSync(join(root, "src", "svc1.ts"), "export const timeoutMs = 3000;\n", "utf8");
+      writeFileSync(join(root, "src", "svc2.ts"), "export const timeoutMs = 3000;\n", "utf8");
+      writeFileSync(join(root, "src", "svc3.ts"), "export const timeoutMs = 3000;\n", "utf8");
+
+      executeV3ToolCall(
+        "gf_edit",
+        { file: "src/svc1.ts", oldCode: "timeoutMs = 3000;", newCode: "timeoutMs = 10000;" },
+        root
+      );
+      const secondIsoEdit = executeV3ToolCall(
+        "gf_edit",
+        { file: "src/svc2.ts", oldCode: "timeoutMs = 3000;", newCode: "timeoutMs = 10000;" },
+        root
+      );
+      assert.ok(
+        secondIsoEdit.content[0]!.text.includes("[Auto-Compiled Codemod]"),
+        "Repeating the same structural edit twice must auto-compile an edit-codemod macro"
+      );
+      const codemodIdMatch = secondIsoEdit.content[0]!.text.match(/promoted to '(codemod_[a-f0-9]+)'/);
+      assert.ok(codemodIdMatch, "Must extract codemod macro id");
+
+      const applyCodemod = executeV3ToolCall(
+        "gf_macro",
+        { action: "run", id: codemodIdMatch[1]!, args: ["src/svc3.ts"] },
+        root
+      );
+      assert.ok(applyCodemod.content[0]!.text.includes("PASS [codemod"));
+      assert.ok(readFileSync(join(root, "src", "svc3.ts"), "utf8").includes("timeoutMs = 10000;"));
+
+      // 3. RBAC & Tool Governance verification for all 4 gf_* tools
+      assert.equal(authorizeMcpTool("viewer", "gf_read").ok, true);
+      assert.equal(authorizeMcpTool("viewer", "gf_edit").ok, false);
+      assert.equal(authorizeMcpTool("contributor", "gf_edit").ok, true);
+      assert.equal(authorizeMcpTool("contributor", "gf_exec").ok, true);
+      assert.equal(authorizeMcpTool("contributor", "gf_macro").ok, true);
+      const v3Defs = getV3ToolDefinitions();
+      assert.equal(v3Defs.length, 4);
+      for (const d of v3Defs) {
+        assert.ok(d.annotations, `${d.name} must have MCP ToolAnnotations`);
+        assert.ok(d._meta, `${d.name} must have ToolGovernanceMeta`);
+      }
     });
 
     check("MCP Surface: 4 surgical tool definitions use <460 tokens total (>92% reduction vs v2.3.0)", () => {

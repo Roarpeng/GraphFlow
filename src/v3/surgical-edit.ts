@@ -18,6 +18,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { analyzeSourceFile, resolveRelativeImportPath } from "./ast-engine.js";
 import { computeBlastRadius } from "./blast-radius.js";
+import { markSessionFilesEdited } from "./circuit-breaker.js";
 import { formatNumberedLines, getWorkspaceAstIndex } from "./slicer.js";
 
 export interface SingleEditSpec {
@@ -48,6 +49,7 @@ export interface StaticGuardDiagnostic {
     | "broken-import"
     | "caller-arity-mismatch"
     | "removed-export-still-imported"
+    | "removed-struct-field-still-referenced"
     | "co-edit-habit";
   location: string;
   message: string;
@@ -486,8 +488,41 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
           }
         }
       }
+
+      // Check Removed Struct / Interface / Dataclass / Record Fields across workspace (v3.1 Contract Gate)
+      if (newSym && Array.isArray(oldSym.fields) && oldSym.fields.length > 0) {
+        const newFieldSet = new Set(newSym.fields ?? []);
+        const removedFields = oldSym.fields.filter((fld) => !newFieldSet.has(fld));
+        for (const fld of removedFields) {
+          const fldAccessRe = new RegExp(`(?:\\.|->)\\b${escapeRegExp(fld)}\\b`);
+          const fldRefs: string[] = [];
+          for (const candidateRel of index.getFiles()) {
+            if (stagedFiles.has(candidateRel)) continue;
+            const raw = index.getRawFile(candidateRel);
+            if (!raw || !fldAccessRe.test(raw.content)) continue;
+            const cLines = raw.content.split(/\r?\n/);
+            for (let ln = 0; ln < cLines.length; ln++) {
+              if (fldAccessRe.test(cLines[ln] ?? "")) {
+                fldRefs.push(`${candidateRel}:${ln + 1}`);
+                if (fldRefs.length >= 4) break;
+              }
+            }
+            if (fldRefs.length >= 4) break;
+          }
+          if (fldRefs.length > 0) {
+            diagnostics.push({
+              severity: "warn",
+              kind: "removed-struct-field-still-referenced",
+              location: `${relPath}:${newSym.line}`,
+              message: `Field '${oldSym.name}.${fld}' was removed/renamed but is still accessed at: ${fldRefs.join(", ")}`,
+            });
+          }
+        }
+      }
     }
   }
+
+  markSessionFilesEdited(input.rootDir, "main", touchedFiles);
 
   // Check learned user habits (Co-Edit Partner Warnings + Auto-Verify Hook)
   let autoVerifyLine: string | undefined;
