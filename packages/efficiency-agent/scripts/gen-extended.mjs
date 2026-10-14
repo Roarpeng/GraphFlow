@@ -32,7 +32,7 @@ const CALIBRATION_FILE = join(BENCH_DIR, "calibration", "extended-calibration-v1
 
 // The 3.0.0 release snapshot (v3 surgical engine tree). Regenerating against a
 // different repo lineage requires repinning this to a commit that exists there.
-export const BASE = "757750fa332bb0b6d9292f0d0cfc9733985214bf";
+export const BASE = "e5f05b17d47cf03fa5fcceef9dae6500684083a7";
 const TSC = "npx tsc --noEmit -p tsconfig.json";
 const GOLDEN_CORE_COMMITS = new Set([
   "17fa91c", "fd86770", "a130de3", "14b591c", "43c24b5", "bbff25f", "2b38bcb", "81f06d2",
