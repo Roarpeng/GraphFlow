@@ -103,20 +103,6 @@ describe("MCP structured tool results", () => {
     ]);
   });
 
-  it("returns structuredContent for skill insights", async () => {
-    const configPath = createIsolatedConfig();
-    const response = await executeToolCall({
-      name: "graphflow_skill_insights",
-      arguments: { configPath },
-    });
-
-    expect(response.structuredContent).toEqual(parseText(response));
-    expect(response.structuredContent).toMatchObject({
-      source: "graph-store",
-      skills: [],
-    });
-  });
-
   it("keeps export failures as thrown tool errors", async () => {
     const configPath = createIsolatedConfig();
     const promise = executeToolCall({
@@ -145,17 +131,4 @@ describe("MCP structured tool results", () => {
     }
   });
 
-  it("wraps the skill guide while retaining its string-shaped JSON text", async () => {
-    const response = await executeToolCall({
-      name: "graphflow_skill_guide",
-      arguments: { section: "best-practices" },
-    });
-    const structured = response.structuredContent as { section: string; guide: string };
-    const legacyText = JSON.parse(response.content[0]!.text) as string;
-
-    expect(structured).toEqual({ section: "best-practices", guide: legacyText });
-    // GraphFlow 3.0 SKILL.md has no "## Best Practices" heading; the section
-    // filter falls back to the full surgical-skill body.
-    expect(structured.guide).toContain("gf_read");
-  });
 });

@@ -117,36 +117,8 @@ const TOOL_GOVERNANCE: Record<string, ToolGovernance> = {
       "graphflow/writeScope": "graphflow-state",
     },
   },
-  graphflow_run: {
-    annotations: {
-      title: "GraphFlow Run (plan + context package)",
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: false,
-      openWorldHint: true,
-    },
-    _meta: {
-      "graphflow/risk": "R1",
-      "graphflow/capabilities": ["filesystem.read", "filesystem.write", "process.exec"],
-      "graphflow/writeScope": "graphflow-state",
-      "graphflow/conditionalCapabilities": ["network.connect"],
-      "graphflow/conditionalRisk": "R2",
-    },
-  },
-  graphflow_report_outcome: {
-    annotations: {
-      title: "GraphFlow Report Outcome",
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: false,
-      openWorldHint: false,
-    },
-    _meta: {
-      "graphflow/risk": "R1",
-      "graphflow/capabilities": ["filesystem.read", "filesystem.write"],
-      "graphflow/writeScope": "graphflow-state",
-    },
-  },
+
+
   graphflow_context: {
     annotations: {
       title: "GraphFlow Context (preview / expand)",
@@ -191,34 +163,8 @@ const TOOL_GOVERNANCE: Record<string, ToolGovernance> = {
       "graphflow/writeScope": "graphflow-state",
     },
   },
-  graphflow_insight: {
-    annotations: {
-      title: "GraphFlow Insight (submit / merge)",
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: false,
-      openWorldHint: false,
-    },
-    _meta: {
-      "graphflow/risk": "R1",
-      "graphflow/capabilities": ["filesystem.read", "filesystem.write"],
-      "graphflow/writeScope": "graphflow-state",
-    },
-  },
-  graphflow_skill_insights: {
-    annotations: {
-      title: "GraphFlow Skill Insights",
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-    _meta: {
-      "graphflow/risk": "R0",
-      "graphflow/capabilities": ["filesystem.read"],
-      "graphflow/writeScope": "none",
-    },
-  },
+
+
   graphflow_diagnose: {
     annotations: {
       title: "GraphFlow Diagnose",
@@ -249,20 +195,7 @@ const TOOL_GOVERNANCE: Record<string, ToolGovernance> = {
       "graphflow/writeScope": "caller-path",
     },
   },
-  graphflow_skill_guide: {
-    annotations: {
-      title: "GraphFlow Skill Guide",
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-    _meta: {
-      "graphflow/risk": "R0",
-      "graphflow/capabilities": [],
-      "graphflow/writeScope": "none",
-    },
-  },
+
 };
 
 export function getV3ToolDefinitions(): ToolDefinition[] {
@@ -294,71 +227,8 @@ export function getToolDefinitions(options?: { profile?: "v3" | "legacy" | "all"
     return getV3ToolDefinitions();
   }
   const tools: Array<Omit<ToolDefinition, "$schema">> = [
-    {
-      name: "graphflow_run",
-      description: "[Core] Plan and package a task with compressed context, returning a structured execution descriptor for external coding agents (Cursor, Claude Code) to execute. Bridge mode by default. The response carries an `advisory` block (Shadow mode, deterministic, zero LLM cost): a reuse verdict (REUSE/ADAPT/FRESH), suggested model tier, execution mode and validation gates — advisory only, never binding. CALL graphflow_report_outcome AFTER executing the plan to close the learning loop.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          task: { type: "string", description: "Task description to plan and package." },
-          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-          rootDir: { type: "string", description: "Optional workspace root override." },
-        },
-        required: ["task"],
-        additionalProperties: false,
-      },
-    },
-    {
-      name: "graphflow_report_outcome",
-      description: "[Core] Report the real execution outcome of a bridge-mode task back to GraphFlow. After an external coding agent executes the executionDescriptor returned by graphflow_run, it calls this tool to close the learning loop: updates the episode record (pass/fail). Skill score updates require quality lessons; a pass without lessons records the episode but does not apply skill learning. SessionEnd auto-capture does not call this unless success is an explicit argument (pending stays pending).",
-      inputSchema: {
-        type: "object",
-        properties: {
-          episodeId: { type: "string", description: "The episodeId returned by graphflow_run." },
-          success: { type: "boolean", description: "Whether the external agent completed the task successfully." },
-          lessons: {
-            type: "array",
-            items: { type: "string" },
-            description: "Optional lessons learned (max 4).",
-          },
-          deviation: {
-            type: "string",
-            enum: ["none", "misread-requirement", "scope-creep", "tech-drift"],
-            description:
-              "Optional drift classification vs the original goal anchor: did the work deviate because the requirement was misread, the scope crept, or the technical approach drifted? Use 'none' when it stayed aligned.",
-          },
-          requirementIds: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Optional Engineering KG Requirement node ids to link from this episode via derived_from (experience↔eng provenance).",
-          },
-          conceptIds: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Optional Engineering KG Concept node ids to link from this episode via derived_from.",
-          },
-          codeHints: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Optional file paths, symbol names, or file:/symbol: ids resolved against the graph and linked from this episode via derived_from.",
-          },
-          commit: { type: "string", description: "Repository commit that produced the outcome." },
-          diff: { type: "string", description: "Unified diff or concise changed-file summary." },
-          testCommand: { type: "string", description: "Command used to validate the outcome." },
-          testResult: { type: "string", enum: ["pass", "fail", "unknown"], description: "Actual test command result." },
-          artifacts: { type: "array", items: { type: "string" }, description: "Logs, reports, or artifact paths supporting the outcome." },
-          userConfirmed: { type: "boolean", description: "Whether a human explicitly confirmed the result." },
-          evidenceSource: { type: "string", enum: ["manual", "ci", "agent", "hook"], description: "Origin of the evidence package." },
-          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-          rootDir: { type: "string", description: "Optional workspace root override; pass the same rootDir given to graphflow_run." },
-        },
-        required: ["episodeId", "success"],
-        additionalProperties: false,
-      },
-    },
+
+
     {
       name: "graphflow_context",
       description:
@@ -479,37 +349,8 @@ export function getToolDefinitions(options?: { profile?: "v3" | "legacy" | "all"
         additionalProperties: false,
       },
     },
-    {
-      name: "graphflow_insight",
-      description: "[Advanced] Submit or merge agent insights. Mode 'submit' for individual work items, 'merge' to consolidate all submitted insights.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          task: { type: "string", description: "The task associated with the insight operation." },
-          mode: { type: "string", enum: ["submit", "merge"], description: "Operation mode: 'submit' to submit an agent response, 'merge' to merge all submitted insights." },
-          workItemId: { type: "string", description: "Required for mode='submit'. The agentWorkItems id (e.g. hat-1-white, plan-refinement)." },
-          response: { type: "string", description: "Required for mode='submit'. JSON response string from the agent (fenced code blocks accepted)." },
-          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-          rootDir: { type: "string", description: "Optional workspace root override." },
-          episodeId: { type: "string", description: "Optional episodeId from graphflow_run for traceability." },
-        },
-        required: ["task", "mode"],
-        additionalProperties: false,
-      },
-    },
-    {
-      name: "graphflow_skill_insights",
-      description: "[Advanced] Return top learned skill insights from the graph store.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          configPath: { type: "string", description: "Optional path to graphflow.config.json." },
-          limit: { type: "number", description: "Maximum skills to return." },
-          rootDir: { type: "string", description: "Optional workspace root override." },
-        },
-        additionalProperties: false,
-      },
-    },
+
+
     {
       name: "graphflow_diagnose",
       description:
@@ -546,17 +387,7 @@ export function getToolDefinitions(options?: { profile?: "v3" | "legacy" | "all"
         additionalProperties: false,
       },
     },
-    {
-      name: "graphflow_skill_guide",
-      description: "[Core] Return the full GraphFlow Skill guide, including tool inventory, standard workflows, and best practices. This guide helps you understand WHEN and HOW to use each GraphFlow tool. Call this when you need guidance on using GraphFlow effectively, especially when the SKILL.md file cannot be installed to your C: drive. ALWAYS call graphflow_context BEFORE multi-step edits, large refactors, or codebase-wide questions.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          section: { type: "string", description: "Optional section filter: 'workflows', 'tools', 'best-practices', 'decision-tree', or 'all' (default)." },
-        },
-        additionalProperties: false,
-      },
-    },
+
   ];
   const mapped = tools.map((tool) => {
     const governance = TOOL_GOVERNANCE[tool.name];

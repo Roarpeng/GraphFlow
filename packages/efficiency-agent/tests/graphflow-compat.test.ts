@@ -34,17 +34,15 @@ afterAll(() => {
 
 describe("S1 MCP tool surface", () => {
   it("exposes every tool the compatibility doc names", () => {
+    // The flywheel tools (run / report_outcome / insight / skill_insights /
+    // skill_guide) were removed with the flywheel; the legacy surface keeps
+    // the five graph/dialogue/diagnostics tools.
     for (const name of [
       "graphflow_context",
-      "graphflow_run",
-      "graphflow_report_outcome",
       "graphflow_plan",
       "graphflow_index",
-      "graphflow_insight",
-      "graphflow_skill_insights",
       "graphflow_diagnose",
       "graphflow_artifact",
-      "graphflow_skill_guide",
     ]) {
       expect(byName.has(name), name).toBe(true);
     }
@@ -61,18 +59,6 @@ describe("S1 MCP tool surface", () => {
     for (const required of schema.required ?? []) {
       expect(["query", "rootDir", "recordDialogue"]).toContain(required);
     }
-  });
-
-  it("graphflow_run / graphflow_report_outcome keep their bridge-mode arguments", () => {
-    const run = byName.get("graphflow_run")!.inputSchema;
-    expect(run.required).toEqual(["task"]);
-    expect((run.properties as Record<string, { type?: string }>).task?.type).toBe("string");
-    const outcome = byName.get("graphflow_report_outcome")!.inputSchema;
-    expect(outcome.required).toEqual(["episodeId", "success"]);
-    const props = outcome.properties as Record<string, { type?: string }>;
-    expect(props.episodeId?.type).toBe("string");
-    expect(props.success?.type).toBe("boolean");
-    expect(props.lessons?.type).toBe("array");
   });
 
   it("declares governance annotations in this package's risk + capability vocabulary (§21)", () => {
@@ -110,7 +96,7 @@ describe("S2 graphflow_context response parsing (agent side)", () => {
   });
 });
 
-describe("S3 graphflow_run advisory = Execution Contract v1 subset", () => {
+describe("S3 efficiency advisory = Execution Contract v1 subset", () => {
   it("a minimal substrate advisory passes assertAdvisoryCompatible", () => {
     const advisory = buildEfficiencyAdvisory({
       task: "fix login",

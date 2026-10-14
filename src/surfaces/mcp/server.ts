@@ -25,7 +25,6 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import {
   diagnoseRoutingResult,
-  getFlywheelReport,
   getTokenSavingsStats,
   inspectGraph,
 } from "../cli/runtime";
@@ -101,7 +100,6 @@ const initializedServers = new WeakSet<McpServer>();
 
 const DIAGNOSE_RESOURCE_URI = "graphflow://diagnose";
 const STATS_RESOURCE_URI = "graphflow://stats";
-const FLYWHEEL_RESOURCE_URI = "graphflow://flywheel";
 const ATP_IR_RESOURCE_URI = "graphflow://atp-ir";
 /**
  * SDK 1.30 ships the draft stateless spec types while its runtime still
@@ -111,8 +109,8 @@ const ATP_IR_RESOURCE_URI = "graphflow://atp-ir";
 const STATELESS_DISCOVERY_PROTOCOL_VERSION = "DRAFT-2026-v1";
 
 /**
- * 资源面注册表（P2-1）：在 graphflow://diagnose 基础上新增 stats / flywheel /
- * atp-ir 三个只读资源。资源面与工具面相互独立，10 个工具定义保持零改动；
+ * 资源面注册表（P2-1）：在 graphflow://diagnose 基础上新增 stats /
+ * atp-ir 两个只读资源。资源面与工具面相互独立；
  * resources/list 的 name/description/mimeType 与 resources/read 返回保持一致。
  */
 const GRAPHFLOW_RESOURCES = [
@@ -120,7 +118,7 @@ const GRAPHFLOW_RESOURCES = [
     uri: DIAGNOSE_RESOURCE_URI,
     name: "GraphFlow Diagnose",
     description:
-      "Provider health, graph statistics, token savings, and flywheel report for the bound workspace.",
+      "Provider health, graph statistics, and token savings for the bound workspace.",
     mimeType: "application/json",
   },
   {
@@ -128,13 +126,6 @@ const GRAPHFLOW_RESOURCES = [
     name: "GraphFlow Stats",
     description:
       "Graph statistics, cumulative run and token-savings statistics for the bound workspace.",
-    mimeType: "application/json",
-  },
-  {
-    uri: FLYWHEEL_RESOURCE_URI,
-    name: "GraphFlow Flywheel Report",
-    description:
-      "Skill flywheel report: skill distribution, episode outcomes, and memory attribution for the bound workspace.",
     mimeType: "application/json",
   },
   {
@@ -190,12 +181,10 @@ async function readDiagnoseResource(): Promise<unknown> {
   health.team = await probeTeamDiagnosis(undefined);
   const graph = await inspectGraph(undefined);
   const stats = getTokenSavingsStats(undefined, undefined);
-  const flywheel = getFlywheelReport(undefined, undefined);
   return {
     health,
     graph,
     stats,
-    flywheel,
     runtimeTimeline: getRuntimeTimelineSummary(),
   };
 }
@@ -225,9 +214,6 @@ async function readResource(uri: string): Promise<ReadResourceResult> {
   }
   if (uri === STATS_RESOURCE_URI) {
     return toResourceResult(uri, resource.mimeType, await readStatsResource());
-  }
-  if (uri === FLYWHEEL_RESOURCE_URI) {
-    return toResourceResult(uri, resource.mimeType, getFlywheelReport(undefined, undefined));
   }
   return toResourceResult(uri, resource.mimeType, ATP_IR_RESOURCE_TEXT);
 }

@@ -4,8 +4,6 @@ import {
   exportArtifact,
   expandAnchor,
   captureAssistantReply,
-  getSkillInsights,
-  getFlywheelReport,
   getTokenSavingsStats,
   importArtifact,
   indexFile,
@@ -16,17 +14,10 @@ import {
   previewContext,
   extractDialogueKnowledgeRuntime,
   rebuildGraph,
-  reportOutcome,
-  runTaskResult,
-  submitAgentInsightResult,
-  mergeAgentInsightResult,
   type PreviewDialogueOptions,
 } from "../cli/runtime";
 import { getRuntimeTimelineSummary } from "../../core/cancellation";
-import { isDeviationKind } from "../../learning/episodic-memory";
 import type { McpServer } from "./server.js";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   packObservation,
   recallObservation,
@@ -49,8 +40,6 @@ import {
   autoTranslateQuery,
   type QueryTranslationStatus,
 } from "../../graph/query-translate";
-import { createGraphClient } from "../../graph/client-factory";
-import { retrieveSimilarEpisodes, type RetrievedEpisode } from "../../agents/episode-retrieval";
 import type { ObservationPolicy } from "../../observations/types";
 
 export interface ToolCall {
@@ -210,64 +199,8 @@ async function executeToolCallInner(
     case "gf_exec":
     case "gf_macro":
       return dispatchV3Tool(call.name, args);
-    case "graphflow_run":
-      return structuredResponse(
-        await runTaskResult(
-          readRequiredString(args.task, "task"),
-          readOptionalString(args.configPath),
-          readOptionalString(args.rootDir)
-        )
-      );
-    case "graphflow_report_outcome": {
-      const lessonsRaw = args.lessons;
-      const lessons = Array.isArray(lessonsRaw)
-        ? lessonsRaw.filter((l): l is string => typeof l === "string")
-        : [];
-      const deviationRaw = readOptionalString(args.deviation);
-      const deviation = isDeviationKind(deviationRaw) ? deviationRaw : undefined;
-      const requirementIds = readOptionalStringArray(args.requirementIds);
-      const conceptIds = readOptionalStringArray(args.conceptIds);
-      const codeHints = readOptionalStringArray(args.codeHints);
-      const artifacts = readOptionalStringArray(args.artifacts) ?? [];
-      const testResultRaw = readOptionalString(args.testResult);
-      const commit = readOptionalString(args.commit);
-      const diff = readOptionalString(args.diff);
-      const testCommand = readOptionalString(args.testCommand);
-      const evidenceSource = readOptionalString(args.evidenceSource);
-      const repository = readOptionalString(args.repository);
-      const engineeringHints = {
-        ...(requirementIds ? { requirementIds } : {}),
-        ...(conceptIds ? { conceptIds } : {}),
-        ...(codeHints ? { codeHints } : {}),
-      };
-      const hasEngHints = Boolean(requirementIds || conceptIds || codeHints);
-      const evidence = commit || diff || testCommand ? {
-        ...(repository ? { repository } : {}),
-        ...(commit ? { commit } : {}),
-        ...(diff ? { diff } : {}),
-        ...(testCommand ? { testCommand } : {}),
-        testResult: testResultRaw === "pass" || testResultRaw === "fail" || testResultRaw === "unknown"
-          ? testResultRaw
-          : ("unknown" as const),
-        artifacts,
-        userConfirmed: args.userConfirmed === true,
-        source: evidenceSource === "ci" || evidenceSource === "agent" || evidenceSource === "hook"
-          ? evidenceSource
-          : ("manual" as const),
-      } as const : undefined;
-      return structuredResponse(
-        await reportOutcome(
-          readRequiredString(args.episodeId, "episodeId"),
-          typeof args.success === "boolean" ? args.success : false,
-          lessons,
-          readOptionalString(args.configPath),
-          deviation,
-          hasEngHints ? engineeringHints : undefined,
-          evidence,
-          readOptionalString(args.rootDir)
-        )
-      );
-    }
+
+
     case "graphflow_context": {
       const query = readOptionalString(args.query);
       const anchorId = readOptionalString(args.anchorId);
@@ -466,30 +399,12 @@ async function executeToolCallInner(
       const mode = readOptionalString(args.mode) || "simple";
       const task = readRequiredString(args.task, "task");
       const configPath = readOptionalString(args.configPath);
-      // Similar past episodes (best-effort, never blocks planning): retrieved
-      // before generation so the payload can surface them (episodeContext) and
-      // the LLM planning path can learn from them.
-      let episodeContext: RetrievedEpisode[] = [];
-      try {
-        const client = createGraphClient(resolveConfig(configPath));
-        try {
-          episodeContext = await retrieveSimilarEpisodes(client, task, { limit: 3 });
-        } finally {
-          await client.close?.();
-        }
-      } catch {
-        // No usable graph client or retrieval failure → plan without episodes.
-      }
       if (mode === "insight") {
         const insight = await planInsightResult(task, configPath);
-        return structuredResponse({ ...insight, episodeContext });
+        return structuredResponse(insight);
       }
-      const plan = await planAndBrainstormResult(
-        task,
-        configPath,
-        episodeContext.length > 0 ? { episodes: episodeContext } : undefined
-      );
-      return structuredResponse({ ...plan, episodeContext });
+      const plan = await planAndBrainstormResult(task, configPath);
+      return structuredResponse(plan);
     }
     case "graphflow_index": {
       const filePath = readOptionalString(args.filePath);
@@ -533,40 +448,8 @@ async function executeToolCallInner(
         }),
       });
     }
-    case "graphflow_insight": {
-      const mode = readRequiredString(args.mode, "mode");
-      const task = readRequiredString(args.task, "task");
-      if (mode === "submit") {
-        return structuredResponse(
-          await submitAgentInsightResult(
-            task,
-            readRequiredString(args.workItemId, "workItemId"),
-            readRequiredString(args.response, "response"),
-            readOptionalString(args.configPath),
-            readOptionalString(args.episodeId),
-            readOptionalString(args.rootDir)
-          )
-        );
-      }
-      if (mode === "merge") {
-        return structuredResponse(
-          await mergeAgentInsightResult(
-            task,
-            readOptionalString(args.configPath),
-            readOptionalString(args.rootDir)
-          )
-        );
-      }
-      throw new Error(`Invalid mode '${mode}' for graphflow_insight. Use 'submit' or 'merge'.`);
-    }
-    case "graphflow_skill_insights":
-      return structuredResponse(
-        await getSkillInsights(
-          readOptionalString(args.configPath),
-          readOptionalNumber(args.limit),
-          readOptionalString(args.rootDir)
-        )
-      );
+
+
     case "graphflow_diagnose": {
       const configPath = readOptionalString(args.configPath);
       const health = diagnoseRoutingResult(configPath);
@@ -574,12 +457,10 @@ async function executeToolCallInner(
       health.team = await probeTeamDiagnosis(configPath);
       const graph = await inspectGraph(configPath, buildInspectOptions(args));
       const stats = getTokenSavingsStats(configPath, readOptionalString(args.rootDir));
-      const flywheel = getFlywheelReport(configPath, readOptionalString(args.rootDir));
       return structuredResponse({
         health,
         graph,
         stats,
-        flywheel,
         runtimeTimeline: getRuntimeTimelineSummary(),
       });
     }
@@ -606,24 +487,6 @@ async function executeToolCallInner(
       }
       throw new Error(`Invalid mode '${mode}' for graphflow_artifact. Use 'export' or 'import'.`);
     }
-    case "graphflow_skill_guide": {
-      const section = readOptionalString(args.section) || "all";
-      const skillGuide = getSkillGuide(section);
-      return {
-        content: [
-          {
-            type: "text",
-            // Preserve the pre-structuredContent wire shape for clients that
-            // JSON.parse this field as a guide string. 紧凑序列化：缩进只是
-            // 传输开销，guide 字符串本身的换行会被转义，不影响 parse 语义。
-            // Compact serialization: the guide string's own newlines are
-            // escaped, so indentation here is pure transport overhead.
-            text: JSON.stringify(skillGuide),
-          },
-        ],
-        structuredContent: { section, guide: skillGuide },
-      };
-    }
     default:
       throw new Error(`Unknown tool: ${call.name}`);
   }
@@ -639,108 +502,6 @@ function makeProgressCallback(
   return (processed: number, total: number): void => {
     server.sendProgress(progressToken, processed, total);
   };
-}
-
-function getSkillGuide(section: string): string {
-  const skillPath = resolveSkillPath();
-  if (!skillPath) {
-    return JSON.stringify({
-      error: "SKILL.md not found",
-      message: "The GraphFlow SKILL.md file could not be located. This is bundled at skills/graphflow/ (Agent Plugins) or dist/surfaces/trae-skill/graphflow/.",
-      guide: getBuiltInSkillGuide(),
-    }, null, 2);
-  }
-
-  try {
-    const content = readFileSync(skillPath, "utf8");
-    return filterSkillSection(content, section);
-  } catch {
-    return JSON.stringify({
-      error: "Failed to read SKILL.md",
-      guide: getBuiltInSkillGuide(),
-    }, null, 2);
-  }
-}
-
-function resolveSkillPath(): string | undefined {
-  const candidates = [
-    join(__dirname, "..", "..", "..", "skills", "graphflow", "SKILL.md"),
-    join(__dirname, "..", "..", "surfaces", "trae-skill", "graphflow", "SKILL.md"),
-    join(__dirname, "..", "..", "..", "src", "surfaces", "trae-skill", "graphflow", "SKILL.md"),
-  ];
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-  return undefined;
-}
-
-function filterSkillSection(content: string, section: string): string {
-  if (section === "all") {
-    return content;
-  }
-
-  const sections: Record<string, { start: string; end?: string }> = {
-    "workflows": { start: "## Standard Workflows", end: "## Tool Selection" },
-    "tools": { start: "## Tool Inventory", end: "## Standard Workflows" },
-    "best-practices": { start: "## Best Practices", end: "## Troubleshooting" },
-    "decision-tree": { start: "## Tool Selection Decision Tree", end: "## Output Interpretation" },
-  };
-
-  const config = sections[section];
-  if (!config) {
-    return content;
-  }
-
-  const startIdx = content.indexOf(config.start);
-  if (startIdx === -1) {
-    return content;
-  }
-
-  if (config.end) {
-    const endIdx = content.indexOf(config.end, startIdx);
-    if (endIdx !== -1) {
-      return content.substring(startIdx, endIdx).trim();
-    }
-  }
-
-  return content.substring(startIdx).trim();
-}
-
-function getBuiltInSkillGuide(): string {
-  return `## GraphFlow Quick Skill Guide
-
-### Core Workflow: Context First
-ALWAYS call \`graphflow_context(query)\` BEFORE:
-- Multi-step edits, refactors, or architecture changes
-- Large codebase-wide questions or exploration
-- Debugging across multiple files
-- Any task where you would otherwise read many files
-
-### Key Tools
-| Tool | Purpose |
-|------|---------|
-| \`graphflow_context\` | Preview compressed context or expand an anchor |
-| \`graphflow_plan\` | Multi-step task decomposition & DAG |
-| \`graphflow_index\` | Incremental workspace re-index or full rebuild |
-| \`graphflow_diagnose\` | Check provider health, graph stats, and token savings |
-
-### Best Practices
-1. Start EVERY task with \`graphflow_context\`
-2. Only read full files when compressed context is insufficient
-3. Use \`graphflow_plan\` for tasks beyond 2-3 files
-4. Call \`graphflow_index\` after significant changes
-5. Always report token savings to the user
-
-### Tool Selection Decision Tree
-- Code question/exploration? -> \`graphflow_context\`
-- Need more detail? -> \`graphflow_context\` with anchorId
-- Multi-step coding task? -> \`graphflow_context\` -> \`graphflow_plan\` -> implement
-- File changes made? -> \`graphflow_index\` (single file via filePath, or incremental)
-- Graph giving bad results? -> \`graphflow_diagnose\` -> \`graphflow_index\` with mode='full'
-
-Call \`graphflow_skill_guide(section: "all")\` for the complete guide.`;
 }
 
 function dialogueKnowledgeOptions(args: Record<string, unknown>) {
@@ -1018,17 +779,6 @@ export function readRequiredString(value: unknown, field: string): string {
 
 function readOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
-}
-
-function readOptionalStringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-  const items = value
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
-  return items.length > 0 ? items : undefined;
 }
 
 function readOptionalNumber(value: unknown): number | undefined {

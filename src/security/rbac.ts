@@ -79,13 +79,8 @@ const MCP_TOOL_PERMISSION: Record<string, TeamPermission> = {
   gf_macro: "graph.write",
   graphflow_context: "graph.read",
   graphflow_diagnose: "diagnose.read",
-  graphflow_skill_insights: "skill.read",
-  graphflow_skill_guide: "diagnose.read",
-  graphflow_run: "graph.write",
   graphflow_plan: "graph.write",
   graphflow_index: "graph.write",
-  graphflow_insight: "graph.write",
-  graphflow_report_outcome: "graph.write",
   graphflow_artifact: "artifact.import",
 };
 

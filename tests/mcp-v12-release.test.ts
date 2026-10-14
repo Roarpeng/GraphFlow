@@ -5,7 +5,7 @@ import { getToolDefinitions } from "../src/surfaces/mcp/tool-definitions";
 describe("v1.12 MCP release surface", () => {
   it("keeps the ten-tool contract while declaring JSON Schema 2020-12", () => {
     const tools = getToolDefinitions();
-    expect(tools).toHaveLength(10);
+    expect(tools).toHaveLength(5);
     for (const tool of tools) {
       expect(tool.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
     }

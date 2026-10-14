@@ -63,7 +63,7 @@ describe("MCP tool response text is compact JSON (m106)", () => {
   it("structuredResponse emits indent-free text that parses to structuredContent", async () => {
     const configPath = createIsolatedConfig();
     const response = await executeToolCall({
-      name: "graphflow_skill_insights",
+      name: "graphflow_diagnose",
       arguments: { configPath },
     });
     const text = textOf(response);
@@ -82,30 +82,6 @@ describe("MCP tool response text is compact JSON (m106)", () => {
     expect(JSON.parse(text)).toEqual(response.structuredContent);
   });
 
-  it("skill_guide emits compact text for the legacy guide string copy", async () => {
-    const response = await executeToolCall({
-      name: "graphflow_skill_guide",
-      arguments: { section: "best-practices" },
-    });
-    const text = textOf(response);
-    const structured = response.structuredContent as { section: string; guide: string };
-
-    // 外层序列化必须紧凑；guide 字符串自身的换行被转义为 \n 两字符序列，
-    // 不会在 text 里产生字面换行或缩进。
-    // The outer serialization must be compact; the guide string's own
-    // newlines are escaped as two-character \n sequences, never literal
-    // newlines or indentation in the text.
-    expect(text).not.toContain("\n  ");
-    expect(text).toBe(JSON.stringify(JSON.parse(text)));
-    expect(structured).toEqual({ section: "best-practices", guide: JSON.parse(text) });
-    // structuredContent 的形状与语义未随紧凑化改变。
-    // structuredContent keeps its shape and semantics unchanged.
-    expect(typeof structured.guide).toBe("string");
-    // The shipped SKILL.md is the GraphFlow 3.0 surgical skill; the
-    // "## Best Practices" heading of the v2 guide no longer exists, so the
-    // section filter falls back to the full body.
-    expect(structured.guide).toContain("gf_read");
-  });
 });
 
 describe("MCP oversized text copy stubs beyond the threshold (m106 follow-up)", () => {

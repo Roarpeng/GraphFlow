@@ -61,7 +61,6 @@ describe("team RBAC roles and scopes", () => {
     expect(authorizeMcpTool("contributor", "graphflow_index").ok).toBe(true);
     expect(authorizeMcpTool("contributor", "graphflow_artifact").ok).toBe(true);
     expect(authorizeMcpTool("viewer", "graphflow_artifact").ok).toBe(false);
-    expect(authorizeMcpTool("admin", "graphflow_report_outcome").ok).toBe(true);
   });
 
   it("registers the 4 v3 surgical tools (fail-closed previously 403'd them)", () => {

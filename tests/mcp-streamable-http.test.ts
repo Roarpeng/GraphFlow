@@ -66,8 +66,8 @@ describe("graphflow-mcp --http (server entry point)", () => {
       expect(await client.ping()).toEqual({});
       const tools = await client.listTools();
       expect(tools.tools.map((tool) => tool.name)).toContain("graphflow_context");
-      const guide = await client.callTool({ name: "graphflow_skill_guide", arguments: { section: "tools" } });
-      expect(guide.isError).not.toBe(true);
+      const diag = await client.callTool({ name: "graphflow_diagnose", arguments: {} });
+      expect(diag.isError).not.toBe(true);
       await client.close();
     } finally {
       if (process.platform === "win32" && child.pid) {
@@ -138,10 +138,10 @@ describe("GraphFlow MCP Streamable HTTP matrix", () => {
       expect(resource.contents[0]?.text).toContain("ATP/IR");
 
       const toolResult = await client.callTool({
-        name: "graphflow_skill_guide",
-        arguments: { section: "tools" },
+        name: "graphflow_diagnose",
+        arguments: {},
       });
-      expect(toolResult.structuredContent).toMatchObject({ section: "tools" });
+      expect(toolResult.structuredContent).toHaveProperty("health");
 
       await transport.terminateSession();
       await client.close();
@@ -166,12 +166,12 @@ describe("GraphFlow MCP Streamable HTTP matrix", () => {
       expect(sessionId).toBeTruthy();
 
       const tools = await client.listTools();
-      expect(tools.tools).toHaveLength(10);
-      const guide = await client.callTool({
-        name: "graphflow_skill_guide",
-        arguments: { section: "workflows" },
+      expect(tools.tools).toHaveLength(5);
+      const diag = await client.callTool({
+        name: "graphflow_diagnose",
+        arguments: {},
       });
-      expect(guide.structuredContent).toMatchObject({ section: "workflows" });
+      expect(diag.structuredContent).toHaveProperty("health");
 
       await transport.terminateSession();
       await client.close();
@@ -291,7 +291,7 @@ describe("GraphFlow MCP Streamable HTTP matrix", () => {
           jsonrpc: "2.0",
           id: "guide",
           method: "tools/call",
-          params: { name: "graphflow_skill_guide", arguments: { section: "tools" } },
+          params: { name: "graphflow_diagnose", arguments: {} },
         },
         { Authorization: "Bearer view" }
       );

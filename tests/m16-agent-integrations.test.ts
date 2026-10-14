@@ -41,16 +41,11 @@ describe("M16 agent integrations", () => {
     const toolNames = getToolDefinitions().map((tool) => tool.name);
 
     expect(toolNames).toEqual([
-      "graphflow_run",
-      "graphflow_report_outcome",
       "graphflow_context",
       "graphflow_plan",
       "graphflow_index",
-      "graphflow_insight",
-      "graphflow_skill_insights",
       "graphflow_diagnose",
       "graphflow_artifact",
-      "graphflow_skill_guide",
     ]);
     const contextTool = getToolDefinitions().find((tool) => tool.name === "graphflow_context");
     expect(contextTool?.inputSchema.properties).toMatchObject({

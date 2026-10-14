@@ -3,7 +3,7 @@ import { createMcpServer, type JsonRpcRequest, type JsonRpcResponse } from "../s
 
 /**
  * P2-1 MCP resources 扩展测试：
- * - resources/list 包含新增 URI（diagnose / stats / flywheel / atp-ir）
+ * - resources/list 包含新增 URI（diagnose / stats / atp-ir）
  * - resources/read 返回正确的 mimeType 与内容
  * - 未知 URI 返回标准错误码 -32602（ErrorCode.InvalidParams）
  * - 工具面保持零改动（tools/list 仍为 10 个工具）
@@ -12,7 +12,6 @@ import { createMcpServer, type JsonRpcRequest, type JsonRpcResponse } from "../s
 const EXPECTED_RESOURCE_URIS = [
   "graphflow://diagnose",
   "graphflow://stats",
-  "graphflow://flywheel",
   "graphflow://atp-ir",
 ];
 
@@ -51,7 +50,7 @@ function readText(result: ReadResult): string {
 }
 
 describe("P2-1 MCP resources extension", () => {
-  it("resources/list exposes diagnose plus the new stats/flywheel/atp-ir URIs", async () => {
+  it("resources/list exposes diagnose plus the new stats/atp-ir URIs", async () => {
     const server = createMcpServer();
     const resources = await listResources(server);
 
@@ -73,7 +72,7 @@ describe("P2-1 MCP resources extension", () => {
     const response = (await server.handleRequest(request("tools/list"))) as JsonRpcResponse;
     expect(response.error).toBeUndefined();
     const tools = (response.result as { tools: unknown[] }).tools;
-    expect(tools).toHaveLength(10);
+    expect(tools).toHaveLength(5);
   });
 
   it("resources/read mimeType matches resources/list for every resource", async () => {
@@ -109,45 +108,6 @@ describe("P2-1 MCP resources extension", () => {
     expect(Array.isArray(payload.runs.recentRecords)).toBe(true);
   });
 
-  it("graphflow://flywheel returns skill distribution and memory attribution", async () => {
-    const server = createMcpServer();
-    const response = await readResource(server, "graphflow://flywheel");
-    expect(response.error).toBeUndefined();
-
-    const result = response.result as ReadResult;
-    expect(result.contents[0].mimeType).toBe("application/json");
-    const payload = JSON.parse(readText(result)) as {
-      skills: {
-        total: number;
-        positive: number;
-        neutral: number;
-        negative: number;
-        byOutcomeKind: Record<string, number>;
-      };
-      episodes: { total: number; pass: number; fail: number; pending: number };
-      autoCaptureEnabled: boolean;
-      sessionJournal: { path: string; exists: boolean; pendingCount: number };
-      memoryAttribution: { memoryHits: number; staleEpisodes: number };
-    };
-    expect(typeof payload.skills.total).toBe("number");
-    expect(typeof payload.skills.positive).toBe("number");
-    expect(typeof payload.episodes.total).toBe("number");
-    expect(typeof payload.autoCaptureEnabled).toBe("boolean");
-    expect(typeof payload.sessionJournal.path).toBe("string");
-    expect(typeof payload.sessionJournal.exists).toBe("boolean");
-    expect(typeof payload.sessionJournal.pendingCount).toBe("number");
-    expect(payload.skills.byOutcomeKind).toEqual(
-      expect.objectContaining({
-        proven: expect.any(Number),
-        correctable: expect.any(Number),
-        "anti-pattern": expect.any(Number),
-        noise: expect.any(Number),
-      })
-    );
-    expect(typeof payload.memoryAttribution.memoryHits).toBe("number");
-    expect(typeof payload.memoryAttribution.staleEpisodes).toBe("number");
-  });
-
   it("graphflow://atp-ir returns static markdown with spec version and anchors", async () => {
     const server = createMcpServer();
     const response = await readResource(server, "graphflow://atp-ir");
@@ -172,7 +132,7 @@ describe("P2-1 MCP resources extension", () => {
     const result = response.result as ReadResult;
     expect(result.contents[0].mimeType).toBe("application/json");
     const payload = JSON.parse(readText(result)) as Record<string, unknown>;
-    for (const key of ["health", "graph", "stats", "flywheel", "runtimeTimeline"]) {
+    for (const key of ["health", "graph", "stats", "runtimeTimeline"]) {
       expect(payload[key]).toBeDefined();
     }
   });

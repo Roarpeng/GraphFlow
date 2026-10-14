@@ -5,16 +5,16 @@ import { describe, expect, it } from "vitest";
 import { createMcpServer } from "../src/surfaces/mcp/server";
 import { getToolDefinitions } from "../src/surfaces/mcp/tool-definitions";
 
-const READ_ONLY_TOOLS = ["graphflow_skill_insights", "graphflow_diagnose", "graphflow_skill_guide"];
+const READ_ONLY_TOOLS = ["graphflow_diagnose"];
 const DESTRUCTIVE_TOOLS = ["graphflow_artifact"];
-const OPEN_WORLD_TOOLS = ["graphflow_run", "graphflow_plan"];
+const OPEN_WORLD_TOOLS = ["graphflow_plan"];
 const RISKS = ["R0", "R1", "R2", "R3", "R4", "R5"];
 
 describe("MCP tool annotations (efficiency-agent spec §21)", () => {
   const tools = getToolDefinitions();
 
   it("declares title + all four behaviour hints as booleans on every tool", () => {
-    expect(tools).toHaveLength(10);
+    expect(tools).toHaveLength(5);
     for (const tool of tools) {
       const a = tool.annotations;
       expect(a, tool.name).toBeDefined();
@@ -88,7 +88,7 @@ describe("MCP tool annotations (efficiency-agent spec §21)", () => {
     const server = createMcpServer();
     const listed = await server.handleRequest({ jsonrpc: "2.0", id: 1, method: "tools/list" });
     const result = ListToolsResultSchema.parse(listed?.result);
-    expect(result.tools).toHaveLength(10);
+    expect(result.tools).toHaveLength(5);
     for (const tool of result.tools) {
       expect(tool.annotations?.readOnlyHint, tool.name).toBe(READ_ONLY_TOOLS.includes(tool.name));
     }
