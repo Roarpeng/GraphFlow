@@ -5,7 +5,7 @@
 [![CI](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml)
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-roarpeng.graphflow-blue)](https://marketplace.visualstudio.com/items?itemName=roarpeng.graphflow)
 
-> **面向 AI 编程 Agent 的省 Token 外科手术级代码引擎（v3.2.0）**
+> **面向 AI 编程 Agent 的省 Token 外科手术级代码引擎（v3.2.1）**
 > 只暴露 4 个外科手术工具的 MCP 服务器 —— `gf_read`、`gf_edit`、`gf_exec`、`gf_macro` —— 对 **TS/JS、Python、Go、Rust、C/C++、C#** 提供一等公民 AST 支持，运行时依赖仅 `@babel/parser` + `@modelcontextprotocol/sdk` 两个。
 
 ---
@@ -34,7 +34,8 @@
 | 3.0.0 | 大刀阔斧的重写 —— 破坏性变更，4 个手术工具 |
 | 3.1.0 | 21-Agent 安装器、三振熔断、git 共变挖掘、结构体字段契约守卫 |
 | 3.1.1 | 轻量预编译 VS Code 扩展、GitHub Releases 提供 VSIX |
-| **3.2.0** | **文档图谱（跨 Agent 交接简报、文档↔代码链接、HTML 知识图）+ 中英双语分词器** |
+| 3.2.0 | 文档图谱（跨 Agent 交接简报、文档↔代码链接、HTML 知识图）+ 中英双语分词器 |
+| **3.2.1** | **修复包：affected-tests 感知 `package.json` `scripts.test`、`gf_exec` `run:true` 执行/预览门控、简报 hub 入度匹配带扩展名 import** |
 
 ## 四个外科手术工具
 
@@ -94,7 +95,7 @@
 
 ```bash
 # 1) 全局安装（Node 18+）
-npm install -g @roarpeng/graphflow@3.2.0
+npm install -g @roarpeng/graphflow@3.2.1
 
 # 2) 一键注册到检测到的 Agent（MCP + Skill + Rules + Hooks）
 graphflow install            # 等价写法：npx @roarpeng/graphflow install
