@@ -1,5 +1,7 @@
 # GraphFlow
 
+[English](./README.md) | **简体中文**
+
 [![npm](https://img.shields.io/npm/v/@roarpeng/graphflow)](https://www.npmjs.com/package/@roarpeng/graphflow)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 [![CI](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml)
