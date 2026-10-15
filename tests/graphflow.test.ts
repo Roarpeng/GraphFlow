@@ -27,6 +27,9 @@ import {
   installAllAgents,
   uninstallAllAgents,
   detectInstalledAgents,
+  segmentChinese,
+  tokenizeEnglish,
+  tokenizeBilingualQuery,
 } from "../src/index.js";
 import { getV3ToolDefinitions } from "../src/mcp-server.js";
 
@@ -945,6 +948,296 @@ async function runAllTests(): Promise<void> {
       } finally {
         rmSync(fakeHome, { recursive: true, force: true });
       }
+    });
+
+
+    check("Bilingual Tokenizer (src/tokenizer.ts): Segmentation, Pinyin, Synonyms & Homophone/Spelling Typos", () => {
+      // 1. Verify Chinese word segmentation (Bi-MM + V8 Intl.Segmenter) strips stop words and avoids garbage bigrams
+      const zhSeg = segmentChinese("如何处理微信支付回调验签失败与订单超时自动取消");
+      assert.deepEqual(
+        zhSeg.words,
+        ["微信", "支付", "回调", "验签", "失败", "订单", "超时", "自动", "取消"],
+        "segmentChinese must segment domain words cleanly without cross-boundary garbage bigrams"
+      );
+
+      // 2. Verify English tokenizer + morphological stemmer
+      const enTok = tokenizeEnglish("canceling expiring orders in resolveEfficiencyPolicy");
+      assert.ok(enTok.stems.includes("cancel") && enTok.stems.includes("expir") && enTok.stems.includes("order"));
+
+      writeFileSync(
+        join(root, "src", "order-service.ts"),
+        [
+          "/** 处理微信支付回调验签与订单状态流转 */",
+          "export function handleWebhookV2(payload: string, sig: string): boolean {",
+          "  if (!payload || !sig) throw new Error(\"签名校验失败：参数为空\");",
+          "  return sig.startsWith(\"wx_\");",
+          "}",
+          "",
+          "export function cancelExpiredOrder(orderId: string, timeoutMs: number): boolean {",
+          "  return timeoutMs > 30000 && orderId.length > 0;",
+          "}",
+          "",
+          "export function processDingDanZhiFu(orderId: string): string {",
+          "  return `paid:${orderId}`;",
+          "}",
+        ].join("\n"),
+        "utf8"
+      );
+
+      // 3. ZH -> EN: Conversational Chinese query hits English symbol (cancelExpiredOrder)
+      const qZhToEn = executeSurgicalRead({ rootDir: root, query: "请问如何处理订单超时自动取消？", topK: 2 });
+      assert.ok(qZhToEn.matchedSymbols.some((s) => s.name === "cancelExpiredOrder"));
+
+      // 4. EN (inflected) -> EN: English morphological query ("canceling expiring orders") hits cancelExpiredOrder
+      const qEnStem = executeSurgicalRead({ rootDir: root, query: "canceling expiring orders", topK: 2 });
+      assert.ok(qEnStem.matchedSymbols.some((s) => s.name === "cancelExpiredOrder"));
+
+      // 5. EN -> ZH: English query ("wechat payment signature") reverse-expands to CJK and hits handleWebhookV2
+      const qEnToZh = executeSurgicalRead({ rootDir: root, query: "wechat payment signature", topK: 2 });
+      assert.ok(qEnToZh.matchedSymbols.some((s) => s.name === "handleWebhookV2"));
+
+      // 6. Pinyin Query -> EN/ZH Code ("dingdan chaoshi quxiao" & "weixin zhifu")
+      const qPinyin = executeSurgicalRead({ rootDir: root, query: "dingdan chaoshi quxiao", topK: 2 });
+      assert.ok(
+        qPinyin.matchedSymbols.some((s) => s.name === "cancelExpiredOrder"),
+        "Pinyin query (dingdan chaoshi quxiao) must resolve to 订单/超时/取消 and match cancelExpiredOrder"
+      );
+
+      // 7. Chinese Query -> Pinyin-Named Function ("订单支付" -> processDingDanZhiFu)
+      const qZhToPinyinCode = executeSurgicalRead({ rootDir: root, query: "订单支付", topK: 3 });
+      assert.ok(
+        qZhToPinyinCode.matchedSymbols.some((s) => s.name === "processDingDanZhiFu"),
+        "Chinese query (订单支付) must emit Pinyin tokens (dingdan/zhifu) and match processDingDanZhiFu"
+      );
+
+      // 8. Chinese Synonyms Query ("微信付款核对" where "付款"=synonym of "支付" and "核对"=synonym of "验签")
+      const qSynonym = executeSurgicalRead({ rootDir: root, query: "微信付款核对", topK: 2 });
+      assert.ok(
+        qSynonym.matchedSymbols.some((s) => s.name === "handleWebhookV2"),
+        "Chinese synonym query (微信付款核对) must expand to 支付/验签 and match handleWebhookV2"
+      );
+
+      // 9. Chinese Homophone Typos ("定单钞时取销" / "威信知付回掉验千") & English Typos ("cancle expried ordrs")
+      const qZhTypo = executeSurgicalRead({ rootDir: root, query: "定单钞时取销", topK: 2 });
+      assert.ok(
+        qZhTypo.matchedSymbols.some((s) => s.name === "cancelExpiredOrder"),
+        "Chinese homophone typo query (定单钞时取销) must auto-correct to 订单超时取消 and match cancelExpiredOrder"
+      );
+      const qZhPhoneticTypo = executeSurgicalRead({ rootDir: root, query: "威信知付回掉验千", topK: 2 });
+      assert.ok(
+        qZhPhoneticTypo.matchedSymbols.some((s) => s.name === "handleWebhookV2"),
+        "Phonetic homophone typo (威信知付回掉验千) must map via Pinyin hash to 微信支付回调验签 and match handleWebhookV2"
+      );
+      const qEnTypo = executeSurgicalRead({ rootDir: root, query: "cancle expried ordrs", topK: 2 });
+      assert.ok(
+        qEnTypo.matchedSymbols.some((s) => s.name === "cancelExpiredOrder"),
+        "English 1-char typo query (cancle expried ordrs) must match cancelExpiredOrder via edit-distance-1 tolerance"
+      );
+    });
+
+    check("Production Engineering Hardening: CRLF Preservation, Absolute Paths, Path-Traversal Guard, Unexpanded Placeholders & ClassName.method Disambiguation", () => {
+      // 1. Absolute path inside workspace works seamlessly in gf_read & gf_edit
+      const absTarget = `${join(root, "src", "types.ts")}#BudgetPolicy`;
+      const absRead = executeV3ToolCall("gf_read", { targets: [absTarget], rootDir: "$" + "{workspaceFolder}" }, root);
+      assert.ok(
+        absRead.content[0]!.text.includes("interface BudgetPolicy"),
+        "Absolute path target + unexpanded workspaceFolder fallback must succeed"
+      );
+
+      // 2. Path-traversal outside workspace is blocked
+      const traversalEdit = executeSurgicalEdit({
+        rootDir: root,
+        file: "../../etc/passwd",
+        oldCode: "root",
+        newCode: "hacked",
+      });
+      assert.equal(traversalEdit.ok, false);
+      assert.ok(traversalEdit.text.includes("ERR [path-outside-workspace]"));
+
+      // 3. Windows CRLF (\r\n) preservation + LF oldCode with different leading indentation
+      const crlfFile = join(root, "src", "crlf-win.ts");
+      writeFileSync(
+        crlfFile,
+        "export function calcWinTax(a: number): number {\r\n    const rate = 0.15;\r\n    return a * rate;\r\n}\r\n",
+        "utf8"
+      );
+      const crlfEdit = executeSurgicalEdit({
+        rootDir: root,
+        file: "src/crlf-win.ts",
+        oldCode: "  const rate = 0.15;\n  return a * rate;",
+        newCode: "    const rate = 0.20;\n    return a * rate;",
+      });
+      assert.equal(crlfEdit.ok, true, "LF oldCode with slight indent diff must match CRLF file");
+      const crlfSaved = readFileSync(crlfFile, "utf8");
+      assert.ok(crlfSaved.includes("\r\n") && crlfSaved.includes("0.20"), "Saved CRLF file must preserve \r\n line endings");
+
+      // 4. Same-name methods across multiple classes: ambiguity guard & ClassName.methodName disambiguation
+      writeFileSync(
+        join(root, "src", "runners.ts"),
+        [
+          "export class OrderRunner {",
+          "  run(id: string): string {",
+          "    return 'order:' + id;",
+          "  }",
+          "}",
+          "",
+          "export class PaymentRunner {",
+          "  run(id: string): string {",
+          "    return 'pay:' + id;",
+          "  }",
+          "}",
+        ].join("\n"),
+        "utf8"
+      );
+
+      const ambigEdit = executeSurgicalEdit({
+        rootDir: root,
+        file: "src/runners.ts",
+        symbol: "run",
+        newCode: "  run(id: string): string { return id; }",
+      });
+      assert.equal(ambigEdit.ok, false, "Unqualified duplicate method name must trigger ERR [ambiguous-symbol]");
+      assert.ok(
+        ambigEdit.text.includes("ERR [ambiguous-symbol]") &&
+          ambigEdit.text.includes("OrderRunner.run") &&
+          ambigEdit.text.includes("PaymentRunner.run")
+      );
+
+      const scopedEdit = executeSurgicalEdit({
+        rootDir: root,
+        file: "src/runners.ts",
+        symbol: "PaymentRunner.run",
+        newCode: [
+          "  run(id: string): string {",
+          "    return 'pay_v2:' + id;",
+          "  }",
+        ].join("\n"),
+      });
+      assert.equal(scopedEdit.ok, true, "Scoped ClassName.methodName edit must succeed");
+      const runnersAfter = readFileSync(join(root, "src", "runners.ts"), "utf8");
+      assert.ok(
+        runnersAfter.includes("'order:' + id") && runnersAfter.includes("'pay_v2:' + id"),
+        "OrderRunner.run must remain untouched while PaymentRunner.run is updated"
+      );
+    });
+
+    check("Cross-Agent Onboarding Brief, Multi-Format Doc<->Code Graph (.docx/.pdf/.xml/.html/.md), HTML Visualizer & 6-Lang Struct Guard Parity", () => {
+      const { deflateRawSync, deflateSync } = require("node:zlib");
+      mkdirSync(join(root, "docs"), { recursive: true });
+
+      // 1. Create a real .docx (ZIP containing word/document.xml) with zero external deps
+      const wordXml = Buffer.from(
+        '<?xml version="1.0" encoding="UTF-8"?>' +
+          '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+          '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>订单超时规则 (Order Timeout Spec)</w:t></w:r></w:p>' +
+          '<w:p><w:r><w:t>当订单超过30秒未支付时，调用 `cancelExpiredOrder` 执行自动撤单与库存释放。</w:t></w:r></w:p>' +
+          "</w:body></w:document>",
+        "utf8"
+      );
+      const deflatedXml = deflateRawSync(wordXml);
+      const fileNameBuf = Buffer.from("word/document.xml", "utf8");
+      const localHeader = Buffer.alloc(30);
+      localHeader.writeUInt32LE(0x04034b50, 0); // PK\x03\x04
+      localHeader.writeUInt16LE(20, 4);
+      localHeader.writeUInt16LE(0, 6);
+      localHeader.writeUInt16LE(8, 8); // deflate
+      localHeader.writeUInt32LE(deflatedXml.length, 18);
+      localHeader.writeUInt32LE(wordXml.length, 22);
+      localHeader.writeUInt16LE(fileNameBuf.length, 26);
+      localHeader.writeUInt16LE(0, 28);
+      const docxBuf = Buffer.concat([localHeader, fileNameBuf, deflatedXml]);
+      writeFileSync(join(root, "docs", "order-spec.docx"), docxBuf);
+
+      // 2. Create a real FlateDecode .pdf, .xml, .html, and .md
+      const pdfStreamContent = Buffer.from("BT (Wechat Pay Webhook Spec: call handleWebhookV2 to verify signature) Tj ET", "utf8");
+      const pdfCompressed = deflateSync(pdfStreamContent);
+      const pdfBuf = Buffer.concat([
+        Buffer.from("%PDF-1.4\n1 0 obj\n<< /Filter /FlateDecode >>\nstream\n", "latin1"),
+        pdfCompressed,
+        Buffer.from("\nendstream\nendobj\n%%EOF", "latin1"),
+      ]);
+      writeFileSync(join(root, "docs", "payment-protocol.pdf"), pdfBuf);
+      writeFileSync(
+        join(root, "docs", "workflow.xml"),
+        '<workflow name="OrderCancelFlow"><step symbol="cancelExpiredOrder">订单超时自动取消流程</step></workflow>',
+        "utf8"
+      );
+      writeFileSync(
+        join(root, "docs", "architecture.html"),
+        "<html><body><h2>Payment Webhook Gateway</h2><p>Entrypoint function `handleWebhookV2` validates wx signatures.</p></body></html>",
+        "utf8"
+      );
+
+      // Verify reading code symbol automatically attaches [Linked Spec Doc] from .docx/.xml/.html/.pdf!
+      const readCodeWithDocs = executeV3ToolCall(
+        "gf_read",
+        { targets: ["src/order-service.ts#cancelExpiredOrder"], sessionId: "cursor-agent" },
+        root
+      );
+      const readText = readCodeWithDocs.content[0]!.text;
+      assert.ok(
+        readText.includes("[Linked Spec Doc]") && readText.includes("docs/order-spec.docx"),
+        "Reading cancelExpiredOrder must automatically surface linked .docx spec section"
+      );
+
+      // Verify reading .docx directly slices sections and shows linked code symbols!
+      const readDocxDirect = executeV3ToolCall("gf_read", { targets: ["docs/order-spec.docx"] }, root);
+      assert.ok(
+        readDocxDirect.content[0]!.text.includes("订单超时规则") &&
+          readDocxDirect.content[0]!.text.includes("src/order-service.ts#cancelExpiredOrder"),
+        "Direct gf_read on .docx must extract headings and show linked code symbols"
+      );
+
+      // 3. Verify Cross-Agent Onboarding & Handoff Brief when switching from Cursor -> Claude Code
+      const handoffBrief = executeV3ToolCall("gf_read", { sessionId: "claude-code-agent" }, root);
+      const briefText = handoffBrief.content[0]!.text;
+      assert.ok(
+        briefText.includes("[Cross-Agent Project Onboarding & Handoff Brief]") &&
+          briefText.includes("Core Architecture Hubs") &&
+          briefText.includes("cursor-agent") &&
+          briefText.includes("Linked Development Docs <-> Code Symbols"),
+        "Calling gf_read({}) from a new agent must return the Cross-Agent Onboarding & Handoff Brief"
+      );
+
+      // 4. Verify Interactive HTML Knowledge Graph generation
+      const vizRes = executeV3ToolCall("gf_macro", { action: "visualize" }, root);
+      assert.ok(vizRes.content[0]!.text.includes("OK [knowledge-graph]"));
+      const htmlContent = readFileSync(join(root, ".graphflow", "knowledge-graph.html"), "utf8");
+      assert.ok(htmlContent.includes("GraphFlow 3.1 Knowledge Graph") && htmlContent.includes("doc-links-code"));
+
+      // 5. Verify 6-Language Struct Field Deletion Guard Parity (Python @dataclass, Go struct, Rust struct)
+      const pyFieldDel = executeSurgicalEdit({
+        rootDir: multiRoot,
+        file: "py/types.py",
+        symbol: "PyBudgetConfig",
+        newCode: ["@dataclass", "class PyBudgetConfig:", "    strict: bool"].join("\n"),
+      });
+      assert.ok(
+        pyFieldDel.diagnostics.some((d) => d.kind === "removed-struct-field-still-referenced" && d.message.includes("max_tokens")),
+        "Python @dataclass field deletion must trigger removed-struct-field-still-referenced across files"
+      );
+
+      const goFieldDel = executeSurgicalEdit({
+        rootDir: multiRoot,
+        file: "go/types.go",
+        symbol: "GoBudgetSpec",
+        newCode: ["type GoBudgetSpec struct {", "    Strict bool", "}"].join("\n"),
+      });
+      assert.ok(
+        goFieldDel.diagnostics.some((d) => d.kind === "removed-struct-field-still-referenced" && d.message.includes("MaxTokens")),
+        "Go struct field deletion must trigger removed-struct-field-still-referenced across files"
+      );
+
+      const rsFieldDel = executeSurgicalEdit({
+        rootDir: multiRoot,
+        file: "rs/types.rs",
+        symbol: "RustBudgetEnvelope",
+        newCode: ["pub struct RustBudgetEnvelope {", "    pub hard: bool,", "}"].join("\n"),
+      });
+      assert.ok(
+        rsFieldDel.diagnostics.some((d) => d.kind === "removed-struct-field-still-referenced" && d.message.includes("limit")),
+        "Rust struct field deletion must trigger removed-struct-field-still-referenced across files"
+      );
     });
 
     console.log(`\nALL ${passed} GRAPHFLOW 3.1 TESTS PASSED!`);

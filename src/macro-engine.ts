@@ -68,6 +68,8 @@ export interface CoEditHabit {
   fileA: string;
   fileB: string;
   coEditCount: number;
+  /** Coupling confidence 0..1 (coEdits / total commits touching either side). */
+  confidence?: number;
 }
 
 export interface DirectoryVerifyHabit {

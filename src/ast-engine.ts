@@ -31,7 +31,8 @@ export type SymbolKind =
   | "interface"
   | "type"
   | "enum"
-  | "variable";
+  | "variable"
+  | "struct";
 
 export type AstBackend =
   | "typescript"
@@ -139,9 +140,23 @@ function extractPascalCaseTypes(text: string, selfName?: string): string[] {
 
 
 export function extractStructFields(rawBlock: string, ext: string): string[] {
-  const lines = rawBlock.split(/\r?\n/).slice(1); // skip header line
+  const allLines = rawBlock.split(/\r?\n/);
+  const headerLine = allLines[0] ?? "";
+  const lines = allLines.slice(1);
   const fields = new Set<string>();
   const cleanExt = ext.toLowerCase();
+
+  // C# record primary constructor parameters: `public record UserDto(string Id, int MaxTokens)`
+  if (cleanExt === ".cs" && /\brecord\b/.test(headerLine) && headerLine.includes("(")) {
+    const parenMatch = headerLine.match(/\(([^)]+)\)/);
+    if (parenMatch) {
+      for (const part of parenMatch[1]!.split(",")) {
+        const tokens = part.trim().split(/\s+/);
+        const name = tokens[tokens.length - 1]?.replace(/[^a-zA-Z0-9_]/g, "");
+        if (name && /^[a-zA-Z_]/.test(name)) fields.add(name);
+      }
+    }
+  }
 
   for (const rawLine of lines) {
     const trimmed = rawLine.trim();
@@ -149,26 +164,37 @@ export function extractStructFields(rawBlock: string, ext: string): string[] {
     if (trimmed === "}" || trimmed === "};") continue;
 
     if (cleanExt === ".py" || cleanExt === ".pyi") {
-      if (trimmed.startsWith("def ") || trimmed.startsWith("async def ") || trimmed.startsWith("@")) break;
-      const m = rawLine.match(/^\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*:/);
-      if (m && m[1] !== "self" && m[1] !== "cls") fields.add(m[1]!);
+      // 1. Class-level type annotations (`@dataclass`, `TypedDict`, `BaseModel`)
+      const annMatch = rawLine.match(/^\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*:/);
+      if (annMatch && !["self", "cls", "def", "class", "return"].includes(annMatch[1]!)) {
+        fields.add(annMatch[1]!);
+      }
+      // 2. Instance attributes in __init__ (`self.field_name = ...`)
+      const selfMatch = trimmed.match(/^self\.([a-zA-Z_][a-zA-Z0-9_]*)\s*(?::[^=]+)?=/);
+      if (selfMatch) {
+        fields.add(selfMatch[1]!);
+      }
     } else if (cleanExt === ".go") {
-      const m = rawLine.match(/^\s+([A-Z][a-zA-Z0-9_]*)\s+[a-zA-Z0-9_*[\].]+/);
-      if (m) fields.add(m[1]!);
+      const m = rawLine.match(/^\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+[a-zA-Z0-9_*[\].]+/);
+      if (m && !["func", "type", "return", "var", "const"].includes(m[1]!)) {
+        fields.add(m[1]!);
+      }
     } else if (cleanExt === ".rs") {
       const m = rawLine.match(/^\s+(?:pub(?:\([^)]*\))?\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\s*:/);
-      if (m) fields.add(m[1]!);
+      if (m && m[1] !== "fn") fields.add(m[1]!);
     } else if (cleanExt === ".cs") {
-      const m = rawLine.match(/^\s+(?:public|internal)\s+[^\s()]+\s+([A-Z][a-zA-Z0-9_]*)\s*\{\s*get;/);
-      if (m) fields.add(m[1]!);
+      // Auto-properties (`public int MaxTokens { get; set; }`) OR public/internal fields (`public int MaxTokens;`)
+      const propMatch = rawLine.match(/^\s+(?:public|internal|protected|readonly|required|\s)+[^\s()]+\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:\{|;|=)/);
+      if (propMatch && !["class", "struct", "interface", "record", "void", "return"].includes(propMatch[1]!)) {
+        fields.add(propMatch[1]!);
+      }
     } else if ([".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hxx"].includes(cleanExt)) {
       if (trimmed.includes("(")) continue;
-      const m = trimmed.match(/^(?:const\s+)?[a-zA-Z_][a-zA-Z0-9_:<>,*&\s]*\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:=\s*[^;]+)?;/);
-      if (m && !["public", "private", "protected", "return", "using", "typedef"].includes(m[1]!)) {
+      const m = trimmed.match(/^(?:const\s+|mutable\s+)*[a-zA-Z_][a-zA-Z0-9_:<>,*&\s]*\s+\*?([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:=\s*[^;]+)?;/);
+      if (m && !["public", "private", "protected", "return", "using", "typedef", "friend"].includes(m[1]!)) {
         fields.add(m[1]!);
       }
     } else {
-      // TS/JS interface/type/class property
       if (trimmed.includes("(") && !trimmed.includes(":")) continue;
       const m = trimmed.match(/^(?:readonly\s+|public\s+|private\s+|protected\s+)*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\??\s*:/);
       if (m) fields.add(m[1]!);
@@ -846,6 +872,7 @@ export function parsePython(relPath: string, content: string): FileAstAnalysis {
         rawBlock.includes("@dataclass");
       const kind: SymbolKind = isDataType ? "interface" : "class";
 
+      const pyFields = extractStructFields(rawBlock, ".py");
       symbols.push({
         name,
         kind,
@@ -855,6 +882,7 @@ export function parsePython(relPath: string, content: string): FileAstAnalysis {
         bodyStartLine: headerEnd,
         signature: lines[i]!.trim(),
         referencedTypes: extractPascalCaseTypes(rawBlock, name),
+        ...(pyFields.length > 0 ? { fields: pyFields } : {}),
       });
       activeClassStack.push({ name, indent: ind, endLine });
       continue;
@@ -1075,6 +1103,7 @@ export function parseGo(relPath: string, content: string): FileAstAnalysis {
       const rawBlock = lines.slice(i, endLine).join("\n");
       const kind: SymbolKind =
         kindKw === "interface" || kindKw === "struct" ? "interface" : "type";
+      const goFields = extractStructFields(rawBlock, ".go");
       symbols.push({
         name,
         kind,
@@ -1084,6 +1113,7 @@ export function parseGo(relPath: string, content: string): FileAstAnalysis {
         ...(bodyStartLine ? { bodyStartLine } : {}),
         signature: cleanSignatureHeader(lines, i + 1, bodyStartLine ?? endLine),
         referencedTypes: extractPascalCaseTypes(rawBlock, name),
+        ...(goFields.length > 0 ? { fields: goFields } : {}),
       });
     }
   }
@@ -1201,6 +1231,7 @@ export function parseRust(relPath: string, content: string): FileAstAnalysis {
       const rawBlock = lines.slice(i, endLine).join("\n");
       const kind: SymbolKind =
         kw === "enum" ? "enum" : kw === "trait" || kw === "struct" ? "interface" : "type";
+      const rsFields = extractStructFields(rawBlock, ".rs");
       symbols.push({
         name,
         kind,
@@ -1210,6 +1241,7 @@ export function parseRust(relPath: string, content: string): FileAstAnalysis {
         ...(bodyStartLine ? { bodyStartLine } : {}),
         signature: cleanSignatureHeader(lines, i + 1, bodyStartLine ?? endLine),
         referencedTypes: extractPascalCaseTypes(rawBlock, name),
+        ...(rsFields.length > 0 ? { fields: rsFields } : {}),
       });
     }
   }
@@ -1272,6 +1304,7 @@ export function parseCCpp(relPath: string, content: string): FileAstAnalysis {
         : kw === "struct"
           ? "interface"
           : "class";
+      const cppFields = extractStructFields(rawBlock, ".cpp");
       symbols.push({
         name,
         kind,
@@ -1281,6 +1314,7 @@ export function parseCCpp(relPath: string, content: string): FileAstAnalysis {
         ...(bodyStartLine ? { bodyStartLine } : {}),
         signature: cleanSignatureHeader(lines, i + 1, bodyStartLine ?? endLine),
         referencedTypes: extractPascalCaseTypes(rawBlock, name),
+        ...(cppFields.length > 0 ? { fields: cppFields } : {}),
       });
       continue;
     }
@@ -1394,6 +1428,7 @@ export function parseCSharp(relPath: string, content: string): FileAstAnalysis {
           : kw === "interface" || kw === "struct" || kw === "record"
             ? "interface"
             : "class";
+      const csFields = extractStructFields(rawBlock, ".cs");
       symbols.push({
         name,
         kind,
@@ -1403,6 +1438,7 @@ export function parseCSharp(relPath: string, content: string): FileAstAnalysis {
         ...(bodyStartLine ? { bodyStartLine } : {}),
         signature: cleanSignatureHeader(lines, i + 1, bodyStartLine ?? endLine),
         referencedTypes: extractPascalCaseTypes(rawBlock, name),
+        ...(csFields.length > 0 ? { fields: csFields } : {}),
       });
       if (kw === "class" || kw === "struct" || kw === "record") {
         activeClassStack.push({ name, endLine });

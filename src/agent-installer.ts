@@ -1,21 +1,11 @@
 /**
  * GraphFlow 3.1 — Multi-Agent MCP, Skill, Rules & Hook Auto-Installer (`src/agent-installer.ts`)
  *
- * Zero-bloat, table-driven installer supporting 20+ mainstream AI coding agents:
+ * Zero-bloat, table-driven installer supporting 21 mainstream AI coding agents:
  * Cursor, Claude Code, Claude Desktop, VS Code (GitHub Copilot), Windsurf,
- * Trae / Trae CN, Cline, Roo Code, Kilo Code, OpenAI Codex, Gemini CLI,
- * Antigravity, Kimi Code, DeepSeek Harness (DSH), Qoder / Qoder CN,
+ * Trae / Trae CN / TRAE SOLO CN, Cline, Roo Code, Kilo Code, OpenAI Codex,
+ * Gemini CLI, Antigravity, Kimi Code, DeepSeek Harness (DSH), Qoder / Qoder CN,
  * OpenCode, ZCode, Zed, Continue, PearAI, and Amazon Q.
- *
- * Capabilities:
- *  1. Auto-detects installed coding agents on macOS, Linux, Windows, and WSL.
- *  2. Registers GraphFlow MCP server across JSON (`mcpServers`, `servers`,
- *     `context_servers`), OpenCode (`mcp`), ZCode (`mcp.servers`), and Codex (`config.toml`).
- *  3. Installs `skills/graphflow/SKILL.md` into every detected skill-capable agent.
- *  4. Injects non-destructive `<!-- GRAPHFLOW:BEGIN -->` instruction blocks into
- *     `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `global_rules.md`, and `.cursor/rules/graphflow.mdc`.
- *  5. Registers `PreToolUse` / `PostToolUse` host hooks for Claude Code, Cursor, Gemini, and Codex.
- *  6. Cleanly uninstalls all GraphFlow MCP entries, Skills, Rules, and Hooks on `graphflow uninstall`.
  */
 
 import { execFileSync } from "node:child_process";
@@ -45,7 +35,7 @@ export interface AgentProfile {
   skillsDirs?: string[];
   rulesFiles?: Array<{
     filePath: string;
-    kind: "cursor-mdc" | "managed-md" | " dedicated-md";
+    kind: "cursor-mdc" | "managed-md" | "dedicated-md";
   }>;
   hookKind?: "claude" | "cursor" | "gemini" | "codex";
   hookConfigPath?: string;
@@ -81,22 +71,22 @@ export const GRAPHFLOW_BLOCK_END = "<!-- GRAPHFLOW:END -->";
 export const SKILL_MD_CONTENT = [
   "---",
   "name: graphflow",
-  "description: Token-First Surgical Code Engine (gf_read, gf_edit, gf_exec, gf_macro) across TS/JS, Python, Go, Rust, C/C++, and C#.",
+  "description: Token-First Surgical Code Engine (gf_read, gf_edit, gf_exec, gf_macro) across TS/JS, Python, Go, Rust, C/C++, and C#. 外科手术级代码切片、跨文件类型闭合、爆炸半径守卫、测试日志脱水与习惯宏编译引擎。",
   "---",
   "",
-  "# GraphFlow 3.1 — Token-First Surgical Engine",
+  "# GraphFlow 3.1 — Token-First Surgical Engine (外科手术级省 Token 引擎)",
   "",
-  "Always prefer the 4 surgical `gf_*` MCP tools over raw full-file reads or verbose test runs:",
+  "Always prefer the 4 surgical `gf_*` MCP tools over raw full-file reads or verbose test runs (请优先使用以下 4 个 `gf_*` 工具代替整文件读取与全量测试):",
   "",
   "1. **`gf_read`** (`targets`, `q`, `skeleton`, `dedup`):",
-  "   - Read exact symbols (`\"src/file.ts#symbol\"`) with automatic **Cross-File Type Closure** and 3-line **`[Blast Radius]`** caller micro-snippets.",
-  "   - Fold large files into AST skeletons (`\"src/file.ts\"`, `skeleton: true`) cutting token cost by 93%.",
-  "   - Pass `dedup: true` in long sessions to skip re-reading unchanged files (SHA-256 cache).",
+  "   - Read exact symbols (`\"src/file.ts#symbol\"`) with automatic **Cross-File Type Closure** and 3-line **`[Blast Radius]`** caller micro-snippets (精准读取目标函数/类，自动附带跨文件类型定义与 3 行调用点爆炸半径).",
+  "   - Supports bilingual keyword search (`q: \"keyword / 中文关键词\"`) across symbol names, JSDoc/docstrings, and comments.",
+  "   - Fold large files into AST skeletons (`\"src/file.ts\"`, `skeleton: true`) cutting token cost by 93%, and pass `dedup: true` to skip unchanged files.",
   "2. **`gf_edit`** (`file`, `symbol`, `newCode`, `edits`, `renameTo`):",
   "   - Edit symbols or line ranges in-place, apply multi-file atomic batch `edits` bottom-up with zero line drift, or run zero-LLM cross-repo symbol rename (`renameTo`).",
-  "   - Enforces instant AST syntax rollback, caller-arity checks, and struct/interface field deletion guards.",
+  "   - Enforces instant AST syntax rollback, caller-arity checks, and struct/interface field deletion guards (语法错误自动回滚、调用方参数个数校验、结构体字段删除引用守卫).",
   "3. **`gf_exec`** (`cmd`, `changedFiles`, `handle`, `run`):",
-  "   - Run `cmd: \"affected-tests\"` (2-hop reverse import router) or any command with output dehydration (passing runs = 1-line `PASS` receipt; failures inline exact 5-line source context; 3 consecutive failures trigger the loop circuit breaker).",
+  "   - Run `cmd: \"affected-tests\"` (2-hop reverse import router) or any command with output dehydration (测试通过仅回 1 行 `PASS`；报错内联 5 行源码上下文；连续 3 次失败触发死循环熔断急救包).",
   "4. **`gf_macro`** (`action: \"list\" | \"run\" | \"save\" | \"mine\" | \"mine-git\"`):",
   "   - Mine git history co-change coupling (`action: \"mine-git\"`) or run auto-compiled `.graphflow/macros/*.mjs` scripts and isomorphic codemods with zero LLM turns.",
   "",
@@ -109,9 +99,9 @@ export const CURSOR_RULE_MDC_CONTENT = [
   "alwaysApply: true",
   "---",
   "",
-  "# GraphFlow 3.1 Surgical Mode",
+  "# GraphFlow 3.1 Surgical Mode (外科手术省 Token 模式)",
   "",
-  "- Prefer `gf_read` (`targets: [\"path/file#symbol\"]` or `q: \"keyword\"`) over reading entire large files (>250 lines).",
+  "- Prefer `gf_read` (`targets: [\"path/file#symbol\"]` or `q: \"keyword / 中文关键词\"`) over reading entire large files (>250 lines).",
   "- Prefer `gf_edit` for symbol/line edits, multi-site batch `edits`, and cross-repo `renameTo`; update `[Blast Radius]` callers in the same turn.",
   "- Prefer `gf_exec({ cmd: \"affected-tests\", run: true })` to run affected tests with dehydrated output.",
   "- Prefer `gf_macro({ action: \"mine-git\" })` on new repos to load git co-change coupling hints, and `gf_macro({ action: \"run\", id })` for repeated workflows.",
@@ -120,11 +110,11 @@ export const CURSOR_RULE_MDC_CONTENT = [
 
 export const MANAGED_INSTRUCTION_BLOCK = [
   GRAPHFLOW_BLOCK_BEGIN,
-  "# GraphFlow 3.1 (Token-First Surgical Mode)",
+  "# GraphFlow 3.1 (Token-First Surgical Mode / 外科手术省 Token 模式)",
   "",
   "Use GraphFlow's 4 surgical MCP tools (`gf_read`, `gf_edit`, `gf_exec`, `gf_macro`) to minimize token usage and prevent context rot:",
   "",
-  "1. `gf_read`: Slice specific symbols (`targets: [\"file#symbol\"]`) with automatic cross-file type closure and `[Blast Radius]` call sites, or fold large files (`skeleton: true`).",
+  "1. `gf_read`: Slice specific symbols (`targets: [\"file#symbol\"]`) or search by English/Chinese keywords (`q: \"keyword / 中文词\"`) with automatic cross-file type closure and `[Blast Radius]` call sites.",
   "2. `gf_edit`: Perform in-place symbol/line edits, bottom-up batch `edits`, or cross-repo `renameTo` with instant AST syntax, caller-arity, and struct-field contract guards.",
   "3. `gf_exec`: Run `cmd: \"affected-tests\"` or shell commands with dehydrated output (1-line `PASS` receipt; 5-line source window on failure; 3-strike loop circuit breaker).",
   "4. `gf_macro`: Run `action: \"mine-git\"` for zero-cold-start git co-change hints, or `action: \"run\"` to execute auto-compiled `.graphflow/macros/*.mjs` scripts.",
@@ -175,7 +165,7 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
       skillsDirs: [join(home, ".claude", "skills")],
       rulesFiles: [
         { filePath: join(home, ".claude", "CLAUDE.md"), kind: "managed-md" },
-        { filePath: join(home, ".claude", "rules", "graphflow.md"), kind: " dedicated-md" },
+        { filePath: join(home, ".claude", "rules", "graphflow.md"), kind: "dedicated-md" },
       ],
       hookKind: "claude",
       hookConfigPath: join(home, ".claude", "settings.json"),
@@ -234,7 +224,7 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
     },
     {
       id: "trae",
-      name: "Trae",
+      name: "Trae / Trae CN",
       markerPaths: [
         join(home, ".trae"),
         join(home, ".trae-cn"),
@@ -255,11 +245,19 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
             : join(home, ".config", "Trae CN", "User", "mcp.json"),
           serversKey: "mcpServers",
         },
+        {
+          configPath: isWin
+            ? join(appData, "TRAE SOLO CN", "User", "mcp.json")
+            : join(home, ".config", "TRAE SOLO CN", "User", "mcp.json"),
+          serversKey: "mcpServers",
+        },
       ],
       skillsDirs: [
         join(home, ".trae", "skills"),
+        join(home, ".trae-cn", "skills"),
         isWin ? join(appData, "Trae", "User", "skills") : join(home, ".config", "Trae", "User", "skills"),
         isWin ? join(appData, "Trae CN", "User", "skills") : join(home, ".config", "Trae CN", "User", "skills"),
+        isWin ? join(appData, "TRAE SOLO CN", "User", "skills") : join(home, ".config", "TRAE SOLO CN", "User", "skills"),
       ],
     },
     {
@@ -413,11 +411,14 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
       id: "kimi-code",
       name: "Kimi Code",
       markerPaths: [kimiHome, join(home, ".kimi-code")],
-      mcpTargets: [{ configPath: join(kimiHome, "mcp.json"), serversKey: "mcpServers" }],
+      mcpTargets: [
+        { configPath: join(kimiHome, "mcp.json"), serversKey: "mcpServers" },
+        { configPath: join(home, ".kimi-code", "mcp.json"), serversKey: "mcpServers" },
+      ],
       workspaceMcpTargets: [
         { relativePath: join(".kimi-code", "mcp.json"), serversKey: "mcpServers" },
       ],
-      skillsDirs: [join(kimiHome, "skills")],
+      skillsDirs: [join(kimiHome, "skills"), join(home, ".kimi-code", "skills")],
       rulesFiles: [{ filePath: join(kimiHome, "AGENTS.md"), kind: "managed-md" }],
     },
     {
@@ -429,14 +430,29 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
     },
     {
       id: "qoder",
-      name: "Qoder",
+      name: "Qoder / Qoder CN",
       markerPaths: [
         join(home, ".qoder"),
         join(home, ".qoder-cn"),
         join(appData, "Qoder"),
         join(appData, "QoderCN"),
       ],
-      mcpTargets: [{ configPath: join(home, ".qoder", "mcp.json"), serversKey: "mcpServers" }],
+      mcpTargets: [
+        { configPath: join(home, ".qoder", "mcp.json"), serversKey: "mcpServers" },
+        { configPath: join(home, ".qoder-cn", "mcp.json"), serversKey: "mcpServers" },
+        {
+          configPath: isWin
+            ? join(appData, "Qoder", "SharedClientCache", "mcp.json")
+            : join(home, ".config", "Qoder", "SharedClientCache", "mcp.json"),
+          serversKey: "mcpServers",
+        },
+        {
+          configPath: isWin
+            ? join(appData, "QoderCN", "SharedClientCache", "mcp.json")
+            : join(home, ".config", "QoderCN", "SharedClientCache", "mcp.json"),
+          serversKey: "mcpServers",
+        },
+      ],
       workspaceMcpTargets: [{ relativePath: join(".qoder", "mcp.json"), serversKey: "mcpServers" }],
       skillsDirs: [join(home, ".qoder", "skills"), join(home, ".qoder-cn", "skills")],
     },
@@ -682,7 +698,7 @@ function removeMcpTarget(target: AgentMcpTarget, serverName: string): boolean {
 
 function writeManagedFile(
   filePath: string,
-  kind: "cursor-mdc" | "managed-md" | " dedicated-md"
+  kind: "cursor-mdc" | "managed-md" | "dedicated-md"
 ): "installed" | "updated" | "skipped" {
   const existed = existsSync(filePath);
   mkdirSync(dirname(filePath), { recursive: true });
@@ -695,7 +711,7 @@ function writeManagedFile(
     return existed ? "updated" : "installed";
   }
 
-  if (kind === " dedicated-md") {
+  if (kind === "dedicated-md") {
     const content = `${MANAGED_INSTRUCTION_BLOCK}\n`;
     if (existed && readFileSync(filePath, "utf8") === content) {
       return "skipped";
@@ -729,10 +745,10 @@ function writeManagedFile(
 
 function removeManagedFile(
   filePath: string,
-  kind: "cursor-mdc" | "managed-md" | " dedicated-md"
+  kind: "cursor-mdc" | "managed-md" | "dedicated-md"
 ): boolean {
   if (!existsSync(filePath)) return false;
-  if (kind === "cursor-mdc" || kind === " dedicated-md") {
+  if (kind === "cursor-mdc" || kind === "dedicated-md") {
     rmSync(filePath, { force: true });
     return true;
   }

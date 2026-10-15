@@ -19,7 +19,13 @@ import { join } from "node:path";
 import { analyzeSourceFile, resolveRelativeImportPath } from "./ast-engine.js";
 import { computeBlastRadius } from "./blast-radius.js";
 import { markSessionFilesEdited } from "./circuit-breaker.js";
-import { formatNumberedLines, getWorkspaceAstIndex } from "./slicer.js";
+import {
+  findMatchingSymbolsInAst,
+  formatNumberedLines,
+  getWorkspaceAstIndex,
+  normalizeWorkspaceRelPath,
+  resolveSafeWorkspaceRoot,
+} from "./slicer.js";
 
 export interface SingleEditSpec {
   file: string;
@@ -80,7 +86,20 @@ function executeCrossRepoRename(
   oldName: string,
   newName: string
 ): SurgicalEditResult {
-  const relDecl = declFile.replace(/\\/g, "/").replace(/^\.\//, "");
+  const safeRoot = resolveSafeWorkspaceRoot(rootDir);
+  const relDecl = normalizeWorkspaceRelPath(safeRoot, declFile);
+  if (!relDecl) {
+    return {
+      ok: false,
+      file: declFile,
+      touchedFiles: [],
+      mode: "rename",
+      replacedSpan: [0, 0],
+      newSpan: [0, 0],
+      diagnostics: [],
+      text: `ERR [path-outside-workspace] '${declFile}' is outside workspace root.`,
+    };
+  }
   if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(newName)) {
     return {
       ok: false,
@@ -131,7 +150,7 @@ function executeCrossRepoRename(
     ...blast.callSites.map((c) => c.file),
   ]);
   const typeCheckRe = new RegExp(`\\b${escapeRegExp(oldName)}\\b`);
-  for (const relPath of index.getFiles()) {
+  for (const relPath of index.getFiles(true)) {
     if (candidateFiles.has(relPath)) continue;
     const raw = index.getRawFile(relPath);
     if (!raw || !typeCheckRe.test(raw.content)) continue;
@@ -194,6 +213,7 @@ function executeCrossRepoRename(
     touchedFiles.push(relPath);
     totalOccurrences += item.replacements;
   }
+  markSessionFilesEdited(safeRoot, "main", touchedFiles);
 
   return {
     ok: true,
@@ -227,14 +247,27 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
           },
         ];
 
-  const index = getWorkspaceAstIndex(input.rootDir);
+  const safeRoot = resolveSafeWorkspaceRoot(input.rootDir);
+  const index = getWorkspaceAstIndex(safeRoot);
 
   // Group edits by normalized file path so multiple edits to the same file
   // are resolved against the original AST and applied bottom-up (no line drift!)
   const byFile = new Map<string, SingleEditSpec[]>();
   for (const spec of specs) {
-    const rel = (spec.file || input.file || "").replace(/\\/g, "/").replace(/^\.\//, "");
-    if (!rel) continue;
+    const rawFile = spec.file || input.file || "";
+    const rel = normalizeWorkspaceRelPath(safeRoot, rawFile);
+    if (!rel) {
+      return {
+        ok: false,
+        file: rawFile,
+        touchedFiles: [],
+        mode: specs.length > 1 ? "batch" : "symbol",
+        replacedSpan: [0, 0],
+        newSpan: [0, 0],
+        diagnostics: [],
+        text: `ERR [path-outside-workspace] '${rawFile}' resolves outside workspace root.`,
+      };
+    }
     const list = byFile.get(rel) ?? [];
     list.push({ ...spec, file: rel });
     byFile.set(rel, list);
@@ -262,7 +295,7 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
   const diagnostics: StaticGuardDiagnostic[] = [];
 
   for (const [relPath, fileSpecs] of byFile) {
-    const absPath = join(input.rootDir, relPath);
+    const absPath = join(safeRoot, relPath);
     if (!existsSync(absPath)) {
       return {
         ok: false,
@@ -277,17 +310,18 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
     }
 
     const originalContent = readFileSync(absPath, "utf8");
+    const fileEol = originalContent.includes("\r\n") ? "\r\n" : "\n";
     const originalLines = originalContent.split(/\r?\n/);
     const beforeAst = analyzeSourceFile(relPath, originalContent);
 
     const patches: ResolvedPatch[] = [];
-    let currentContent = originalContent;
+    const normalizedContentLf = originalLines.join("\n");
 
     for (const spec of fileSpecs) {
       const replacement = spec.newCode ?? "";
       if (spec.symbol) {
-        const sym = beforeAst.symbols.find((s) => s.name === spec.symbol);
-        if (!sym) {
+        const matchedSyms = findMatchingSymbolsInAst(beforeAst, spec.symbol);
+        if (matchedSyms.length === 0) {
           const available = beforeAst.symbols.map((s) => `${s.name}(L${s.line}-${s.endLine})`).join(", ");
           return {
             ok: false,
@@ -300,6 +334,33 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
             text: `ERR [symbol-not-found] '${spec.symbol}' in ${relPath}. Available: ${available || "none"}`,
           };
         }
+        if (matchedSyms.length > 1) {
+          const candidatesDesc = matchedSyms
+            .map((m) => {
+              const parent = beforeAst.symbols.find(
+                (p) =>
+                  p !== m &&
+                  (p.kind === "class" || p.kind === "struct" || p.kind === "interface") &&
+                  m.line >= p.line &&
+                  m.endLine <= p.endLine
+              );
+              return parent
+                ? `${parent.name}.${m.name}(L${m.line}-${m.endLine})`
+                : `${m.name}(L${m.line}-${m.endLine})`;
+            })
+            .join(", ");
+          return {
+            ok: false,
+            file: relPath,
+            touchedFiles: [],
+            mode: "symbol",
+            replacedSpan: [0, 0],
+            newSpan: [0, 0],
+            diagnostics: [],
+            text: `ERR [ambiguous-symbol] Multiple symbols named '${spec.symbol}' in ${relPath}: ${candidatesDesc}. Disambiguate with 'ClassName.${spec.symbol}' or startLine/endLine.`,
+          };
+        }
+        const sym = matchedSyms[0]!;
         patches.push({
           startLine: sym.line,
           endLine: sym.endLine,
@@ -316,8 +377,34 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
           mode: "line-range",
         });
       } else if (typeof spec.oldCode === "string" && spec.oldCode.length > 0) {
-        const idx = currentContent.indexOf(spec.oldCode);
-        if (idx === -1) {
+        const normalizedOldLf = spec.oldCode.split(/\r?\n/).join("\n");
+        const idx = normalizedContentLf.indexOf(normalizedOldLf);
+        let sLine = -1;
+        let eLine = -1;
+        if (idx !== -1) {
+          const prefix = normalizedContentLf.slice(0, idx);
+          sLine = prefix.split("\n").length;
+          eLine = sLine + normalizedOldLf.split("\n").length - 1;
+        } else {
+          const oldTrimmed = normalizedOldLf.split("\n").map((l) => l.trim());
+          if (oldTrimmed.length > 0 && oldTrimmed.some((l) => l.length > 0)) {
+            for (let i = 0; i <= originalLines.length - oldTrimmed.length; i++) {
+              let allMatch = true;
+              for (let j = 0; j < oldTrimmed.length; j++) {
+                if (originalLines[i + j]!.trim() !== oldTrimmed[j]) {
+                  allMatch = false;
+                  break;
+                }
+              }
+              if (allMatch) {
+                sLine = i + 1;
+                eLine = i + oldTrimmed.length;
+                break;
+              }
+            }
+          }
+        }
+        if (sLine === -1 || eLine === -1) {
           return {
             ok: false,
             file: relPath,
@@ -329,9 +416,6 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
             text: `ERR [oldCode-not-found] Exact match not found in ${relPath}. Call gf_read(targets=["${relPath}"]) to inspect current line numbers.`,
           };
         }
-        const prefix = currentContent.slice(0, idx);
-        const sLine = prefix.split(/\r?\n/).length;
-        const eLine = sLine + spec.oldCode.split(/\r?\n/).length - 1;
         patches.push({
           startLine: sLine,
           endLine: eLine,
@@ -359,7 +443,7 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
       workingLines.splice(p.startLine - 1, p.endLine - p.startLine + 1, ...p.newLines);
     }
 
-    const updatedContent = workingLines.join("\n");
+    const updatedContent = workingLines.join(fileEol);
     const afterAst = analyzeSourceFile(relPath, updatedContent);
 
     for (const synErr of afterAst.syntaxErrors) {

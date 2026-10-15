@@ -4,8 +4,9 @@
  * Supports TypeScript/JavaScript, Python, Go, Rust, C/C++, and C#.
  */
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, extname, join, relative } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   SUPPORTED_SOURCE_EXTS,
   analyzeSourceFile,
@@ -14,6 +15,40 @@ import {
   type FileAstAnalysis,
 } from "./ast-engine.js";
 import { computeBlastRadius, formatBlastRadiusText } from "./blast-radius.js";
+import {
+  SUPPORTED_DOC_EXTS,
+  buildDocCodeLinks,
+  findLinkedDocsForSymbol,
+  generateCrossAgentBrief,
+  parseProjectDocument,
+} from "./doc-graph.js";
+import {
+  CHINESE_TYPO_NORMALIZATION,
+  CJK_ENGINEERING_GLOSSARY,
+  CJK_SYNONYM_CLUSTERS,
+  isFuzzyTokenMatch,
+  normalizeChineseTypos,
+  segmentChinese,
+  stemEnglishWord,
+  toPinyin,
+  tokenizeBilingualQuery,
+  tokenizeEnglish,
+  type BilingualQueryPlan,
+} from "./tokenizer.js";
+
+export {
+  CHINESE_TYPO_NORMALIZATION,
+  CJK_ENGINEERING_GLOSSARY,
+  CJK_SYNONYM_CLUSTERS,
+  isFuzzyTokenMatch,
+  normalizeChineseTypos,
+  segmentChinese,
+  stemEnglishWord,
+  toPinyin,
+  tokenizeBilingualQuery,
+  tokenizeEnglish,
+  type BilingualQueryPlan,
+};
 
 export interface ReadOptions {
   rootDir: string;
@@ -33,7 +68,89 @@ export interface SliceResult {
   matchedSymbols: Array<{ file: string; name: string; kind: string; line: number; endLine: number }>;
 }
 
+
+const MAX_SCAN_FILES = 5000;
+const MAX_SCAN_DEPTH = 12;
+
+/**
+ * Resolves a safe workspace root directory, guarding against unexpanded IDE
+ * placeholders (`${workspaceFolder}`), file paths passed as rootDir, or bare `$HOME`.
+ */
+export function resolveSafeWorkspaceRoot(rawRootDir?: string, fallbackRootDir: string = process.cwd()): string {
+  const candidate = (rawRootDir ?? "").trim();
+  if (
+    !candidate ||
+    candidate.includes("${") ||
+    candidate === "~" ||
+    candidate === "."
+  ) {
+    return resolve(fallbackRootDir);
+  }
+  const resolved = resolve(candidate);
+  try {
+    if (existsSync(resolved) && statSync(resolved).isFile()) {
+      return dirname(resolved);
+    }
+  } catch {
+    // ignore
+  }
+  return resolved;
+}
+
+/**
+ * Normalizes a caller-supplied file path (relative, Windows backslash, or absolute inside rootDir)
+ * into a safe workspace-relative POSIX path. Returns `undefined` if the path escapes `rootDir` (`..`).
+ */
+export function normalizeWorkspaceRelPath(rootDir: string, inputPath: string): string | undefined {
+  const raw = inputPath.trim();
+  if (!raw) return undefined;
+  const safeRoot = resolve(rootDir);
+  const normalizedRaw = raw.replace(/\\/g, "/");
+  const absTarget = isAbsolute(normalizedRaw)
+    ? resolve(normalizedRaw)
+    : resolve(safeRoot, normalizedRaw);
+  const rel = relative(safeRoot, absTarget).replace(/\\/g, "/");
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+    return undefined;
+  }
+  return rel;
+}
+
+/**
+ * Resolves symbol(s) in a file AST supporting both bare `methodName` (returns all matches)
+ * and scoped `ClassName.methodName` or `ClassName::methodName` disambiguation.
+ */
+export function findMatchingSymbolsInAst(ast: FileAstAnalysis, symQuery: string): AstSymbol[] {
+  const cleaned = symQuery.trim().replace("::", ".");
+  if (cleaned.includes(".")) {
+    const [containerName, memberName] = cleaned.split(".", 2);
+    // 1. Check explicit parentClass (Go receiver, Rust impl, C++ Class::method, Python/C# class)
+    const byParent = ast.symbols.filter(
+      (s) => s.name === memberName && s.parentClass === containerName
+    );
+    if (byParent.length > 0) return byParent;
+
+    // 2. Check line containment inside class/struct/interface block (TS/JS/Python/C#/C++)
+    const container = ast.symbols.find(
+      (s) =>
+        s.name === containerName &&
+        (s.kind === "class" || s.kind === "interface" || s.kind === "struct" || s.kind === "type")
+    );
+    if (container) {
+      const scoped = ast.symbols.filter(
+        (s) =>
+          s.name === memberName &&
+          s.line >= container.line &&
+          s.endLine <= container.endLine
+      );
+      if (scoped.length > 0) return scoped;
+    }
+  }
+  return ast.symbols.filter((s) => s.name === cleaned || s.name === symQuery.trim());
+}
+
 const IGNORED_DIRS = new Set([
+  "vendor", "third_party", ".turbo", ".nuxt", ".svelte-kit", ".cache", "cmake-build-debug",
   "node_modules", ".git", "dist", "build", "coverage", ".graphflow",
   ".graphflow-cache", "graphflow-out", "wasm", ".next", "out",
   "__pycache__", ".venv", "venv", "target", "bin", "obj",
@@ -58,7 +175,12 @@ class WorkspaceAstIndex {
       return this.scannedFiles;
     }
     const out: string[] = [];
-    const walk = (dir: string) => {
+    const isBareHome = resolve(this.rootDir) === resolve(homedir());
+    if (isBareHome) {
+      return out;
+    }
+    const walk = (dir: string, depth: number) => {
+      if (depth > MAX_SCAN_DEPTH || out.length >= MAX_SCAN_FILES) return;
       let entries;
       try {
         entries = readdirSync(dir, { withFileTypes: true });
@@ -66,17 +188,18 @@ class WorkspaceAstIndex {
         return;
       }
       for (const entry of entries) {
+        if (out.length >= MAX_SCAN_FILES) break;
         if (entry.name.startsWith(".") && entry.name !== ".trae") continue;
         if (IGNORED_DIRS.has(entry.name)) continue;
         const full = join(dir, entry.name);
         if (entry.isDirectory()) {
-          walk(full);
+          walk(full, depth + 1);
         } else if (entry.isFile() && SUPPORTED_SOURCE_EXTS.has(extname(entry.name).toLowerCase())) {
           out.push(relative(this.rootDir, full).replace(/\\/g, "/"));
         }
       }
     };
-    walk(this.rootDir);
+    walk(this.rootDir, 0);
     out.sort();
     this.scannedFiles = out;
     this.scannedFileSet = new Set(out);
@@ -90,7 +213,8 @@ class WorkspaceAstIndex {
   }
 
   getRawFile(relPath: string): { content: string; size: number; mtimeMs: number } | undefined {
-    const normalized = relPath.replace(/\\/g, "/").replace(/^\.\//, "");
+    const normalized = normalizeWorkspaceRelPath(this.rootDir, relPath);
+    if (!normalized) return undefined;
     const now = Date.now();
     const cached = this.rawCache.get(normalized);
     if (cached && now - cached.checkedAt < 5_000) {
@@ -116,7 +240,8 @@ class WorkspaceAstIndex {
   }
 
   getFileAnalysis(relPath: string): { content: string; ast: FileAstAnalysis; size: number } | undefined {
-    const normalized = relPath.replace(/\\/g, "/").replace(/^\.\//, "");
+    const normalized = normalizeWorkspaceRelPath(this.rootDir, relPath);
+    if (!normalized) return undefined;
     const raw = this.getRawFile(normalized);
     if (!raw) return undefined;
     const cachedAst = this.astCache.get(normalized);
@@ -129,7 +254,7 @@ class WorkspaceAstIndex {
   }
 
   invalidateFile(relPath: string): void {
-    const normalized = relPath.replace(/\\/g, "/").replace(/^\.\//, "");
+    const normalized = normalizeWorkspaceRelPath(this.rootDir, relPath) ?? relPath.replace(/\\/g, "/").replace(/^\.\//, "");
     this.rawCache.delete(normalized);
     this.astCache.delete(normalized);
     this.lastScanMs = 0;
@@ -139,10 +264,11 @@ class WorkspaceAstIndex {
 const indexByRoot = new Map<string, WorkspaceAstIndex>();
 
 export function getWorkspaceAstIndex(rootDir: string): WorkspaceAstIndex {
-  let idx = indexByRoot.get(rootDir);
+  const safeRoot = resolveSafeWorkspaceRoot(rootDir);
+  let idx = indexByRoot.get(safeRoot);
   if (!idx) {
-    idx = new WorkspaceAstIndex(rootDir);
-    indexByRoot.set(rootDir, idx);
+    idx = new WorkspaceAstIndex(safeRoot);
+    indexByRoot.set(safeRoot, idx);
   }
   return idx;
 }
@@ -322,44 +448,17 @@ function resolveTypeClosure(
   return blocks;
 }
 
-function tokenizeQuery(query: string): { exactIdentifiers: string[]; subTokens: string[] } {
-  const exactIdentifiers: string[] = [];
-  const subTokens = new Set<string>();
-
-  for (const m of query.matchAll(/[a-zA-Z_$][a-zA-Z0-9_$/.:-]{2,}/g)) {
-    const raw = m[0];
-    exactIdentifiers.push(raw);
-    const parts = raw
-      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-      .split(/[^a-zA-Z0-9]+/)
-      .map((s) => s.toLowerCase())
-      .filter((s) => s.length >= 2);
-    for (const p of parts) subTokens.add(p);
-  }
-
-  const cjkMap: Record<string, string[]> = {
-    "配置": ["config", "resolve", "schema", "defaults"],
-    "索引": ["index", "indexer", "ast", "parse"],
-    "检索": ["search", "query", "recall", "bm25", "slicer"],
-    "缓存": ["cache", "prefix", "store"],
-    "预算": ["budget", "token", "pressure", "limit"],
-    "测试": ["test", "affected", "vitest", "bench"],
-    "压缩": ["compress", "slice", "skeleton", "dehydrate", "reduce"],
-    "工具": ["tool", "mcp", "handler", "exec"],
-    "宏": ["macro", "trajectory", "workflow"],
-    "修改": ["edit", "patch", "surgical", "blast"],
-    "路由": ["route", "router", "provider", "model"],
-    "权限": ["rbac", "security", "auth", "policy"],
-    "观察": ["observation", "handle", "reduce", "pack"],
-    "审计": ["audit", "checker", "orphan", "dependency"],
+export function tokenizeQuery(query: string): {
+  exactIdentifiers: string[];
+  subTokens: string[];
+  cjkTokens: string[];
+} {
+  const plan = tokenizeBilingualQuery(query);
+  return {
+    exactIdentifiers: plan.exactIdentifiers,
+    subTokens: plan.englishWords,
+    cjkTokens: plan.chineseWords,
   };
-  for (const [cn, enList] of Object.entries(cjkMap)) {
-    if (query.includes(cn)) {
-      for (const en of enList) subTokens.add(en);
-    }
-  }
-
-  return { exactIdentifiers, subTokens: Array.from(subTokens) };
 }
 
 export function executeSurgicalRead(options: ReadOptions): SliceResult {
@@ -383,6 +482,31 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
     for (const rawTarget of options.targets) {
       const target = rawTarget.trim();
       if (!target) continue;
+      if (target === "@brief" || target === "brief") {
+        sections.push(generateCrossAgentBrief(index));
+        resolvedKeys.push("@brief");
+        continue;
+      }
+      const targetExt = extname(target.split("#")[0]!.split(":")[0]!).toLowerCase();
+      if (SUPPORTED_DOC_EXTS.has(targetExt)) {
+        const relDoc = normalizeWorkspaceRelPath(index.rootDir, target.split("#")[0]!);
+        if (relDoc && existsSync(join(index.rootDir, relDoc))) {
+          const docSecs = parseProjectDocument(relDoc, join(index.rootDir, relDoc));
+          const allLinks = buildDocCodeLinks(index, docSecs);
+          const docLines = [`### [Development Spec Document] ${relDoc} (${docSecs.length} section(s))`];
+          for (const sec of docSecs) {
+            docLines.push(`#### ${sec.title} (L${sec.startLine}-${sec.endLine})`);
+            docLines.push(sec.summary);
+            const secLinks = allLinks.filter((l) => l.docPath === relDoc && l.sectionTitle === sec.title);
+            for (const sl of secLinks.slice(0, 3)) {
+              docLines.push(`  -> [Linked Code] ${sl.codeFile}#${sl.symbolName} (${sl.reason})`);
+            }
+          }
+          sections.push(docLines.join("\n"));
+          resolvedKeys.push(relDoc);
+          continue;
+        }
+      }
 
       if (target.includes("#")) {
         const [filePart, symPart] = target.split("#", 2);
@@ -392,49 +516,59 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
           continue;
         }
         accountRawFile(fileData.ast.relPath, fileData.size);
-        const sym = fileData.ast.symbols.find((s) => s.name === symPart);
-        if (!sym) {
+        const matchedList = findMatchingSymbolsInAst(fileData.ast, symPart!);
+        if (matchedList.length === 0) {
           const available = fileData.ast.symbols.map((s) => `${s.name}(L${s.line})`).join(", ");
           sections.push(
             `# [SYMBOL NOT FOUND] ${symPart} in ${fileData.ast.relPath}\nAvailable symbols: ${available || "none"}`
           );
           continue;
         }
-        const key = `${fileData.ast.relPath}#${sym.name}`;
-        resolvedKeys.push(key);
-        matchedSymbols.push({
-          file: fileData.ast.relPath,
-          name: sym.name,
-          kind: sym.kind,
-          line: sym.line,
-          endLine: sym.endLine,
-        });
 
         const lines = fileData.content.split(/\r?\n/);
-        const blockLines: string[] = [
-          `### ${fileData.ast.relPath}:${sym.line}-${sym.endLine} [${sym.exported ? "export " : ""}${sym.kind} ${sym.name}]`,
-          formatNumberedLines(lines, sym.line, sym.endLine),
-        ];
+        for (const sym of matchedList) {
+          const key = `${fileData.ast.relPath}#${sym.name}`;
+          if (!resolvedKeys.includes(key)) resolvedKeys.push(key);
+          matchedSymbols.push({
+            file: fileData.ast.relPath,
+            name: sym.name,
+            kind: sym.kind,
+            line: sym.line,
+            endLine: sym.endLine,
+          });
 
-        const typeClosure = resolveTypeClosure(index, fileData.ast, fileData.content, [sym]);
-        if (typeClosure.length > 0) {
-          blockLines.push(...typeClosure);
+          const blockLines: string[] = [
+            `### ${fileData.ast.relPath}:${sym.line}-${sym.endLine} [${sym.exported ? "export " : ""}${sym.kind} ${sym.name}]`,
+            formatNumberedLines(lines, sym.line, sym.endLine),
+          ];
+
+          const typeClosure = resolveTypeClosure(index, fileData.ast, fileData.content, [sym]);
+          if (typeClosure.length > 0) {
+            blockLines.push(...typeClosure);
+          }
+
+          if (includeCallers) {
+            const blast = computeBlastRadius(index, fileData.ast.relPath, sym.name);
+            const blastText = formatBlastRadiusText(blast);
+            if (blastText) blockLines.push(blastText);
+          }
+
+          const linkedDocs = findLinkedDocsForSymbol(index, fileData.ast.relPath, sym.name, 2);
+          for (const ld of linkedDocs) {
+            blockLines.push(
+              `// [Linked Spec Doc] ${ld.docPath}#${ld.sectionTitle} (${ld.reason}): ${ld.summary}`
+            );
+          }
+
+          if (options.includeSkeleton) {
+            blockLines.push(
+              `// --- Rest of ${fileData.ast.relPath} (AST Skeleton Folded) ---`,
+              foldFileSkeleton(fileData.content, fileData.ast, new Set([sym.name]))
+            );
+          }
+
+          sections.push(blockLines.join("\n"));
         }
-
-        if (includeCallers) {
-          const blast = computeBlastRadius(index, fileData.ast.relPath, sym.name);
-          const blastText = formatBlastRadiusText(blast);
-          if (blastText) blockLines.push(blastText);
-        }
-
-        if (options.includeSkeleton) {
-          blockLines.push(
-            `// --- Rest of ${fileData.ast.relPath} (AST Skeleton Folded) ---`,
-            foldFileSkeleton(fileData.content, fileData.ast, new Set([sym.name]))
-          );
-        }
-
-        sections.push(blockLines.join("\n"));
         continue;
       }
 
@@ -481,9 +615,13 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
     }
   } else if (options.query) {
     const topK = options.topK ?? 3;
-    const { exactIdentifiers, subTokens } = tokenizeQuery(options.query);
-    const exactLower = new Set(exactIdentifiers.map((s) => s.toLowerCase()));
-    const queryWantsTest = /test|bench|spec/i.test(options.query);
+    // Step 1: Segment & tokenize the user query (Chinese Bi-MM + ICU Segmenter & English camelCase + Stemmer)
+    const plan = tokenizeBilingualQuery(options.query);
+    const exactLower = new Set(plan.exactIdentifiers.map((s) => s.toLowerCase()));
+    const queryWords = plan.englishWords;
+    const queryStems = new Set(plan.englishStems);
+    const cjkWords = plan.chineseWords;
+    const cjkPhrases = plan.chinesePhrases;
 
     interface ScoredCandidate {
       relPath: string;
@@ -495,9 +633,12 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
     }
 
     const candidates: ScoredCandidate[] = [];
-    for (const relPath of index.getFiles()) {
-      const isTestFile = relPath.startsWith("tests/") || relPath.startsWith("benchmarks/") || relPath.includes(".test.");
-      if (isTestFile && !queryWantsTest) continue;
+    for (const relPath of index.getFiles(true)) {
+      const isTestFile =
+        relPath.startsWith("tests/") ||
+        relPath.startsWith("benchmarks/") ||
+        relPath.includes(".test.");
+      if (isTestFile && !plan.wantsTests) continue;
 
       const raw = index.getRawFile(relPath);
       if (!raw) continue;
@@ -505,25 +646,35 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
       const pathLower = relPath.toLowerCase();
 
       const hasAnyToken =
-        subTokens.some((tok) => pathLower.includes(tok) || contentLower.includes(tok)) ||
+        queryWords.some((tok) => pathLower.includes(tok) || contentLower.includes(tok)) ||
+        Array.from(queryStems).some((st) => pathLower.includes(st) || contentLower.includes(st)) ||
+        cjkWords.some((cjk) => raw.content.includes(cjk) || relPath.includes(cjk)) ||
         Array.from(exactLower).some((id) => contentLower.includes(id));
       if (!hasAnyToken) continue;
 
       const fileData = index.getFileAnalysis(relPath);
       if (!fileData) continue;
+      const fileLines = fileData.content.split(/\r?\n/);
 
       let pathScore = 0;
       for (const id of exactLower) {
         if (pathLower.includes(id)) pathScore += 12;
       }
-      for (const tok of subTokens) {
+      for (const tok of queryWords) {
         if (pathLower.includes(tok)) pathScore += 3;
+      }
+      for (const cjk of cjkWords) {
+        if (relPath.includes(cjk)) pathScore += 8;
       }
 
       for (const sym of fileData.ast.symbols) {
         let score = pathScore;
         const symLower = sym.name.toLowerCase();
         const sigLower = sym.signature.toLowerCase();
+        // Tokenize & stem the symbol identifier itself for morphological stem matching
+        const symTokenized = tokenizeEnglish(sym.name);
+        const symWordSet = new Set(symTokenized.words);
+        const symStemSet = new Set(symTokenized.stems);
 
         if (exactLower.has(symLower)) {
           score += 50;
@@ -533,10 +684,44 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
           }
         }
 
-        for (const tok of subTokens) {
-          if (symLower === tok) score += 15;
-          else if (symLower.includes(tok)) score += 6;
+        for (const tok of queryWords) {
+          if (symLower === tok || symWordSet.has(tok)) score += 15;
+          else if (symLower.includes(tok)) score += tok.length >= 5 ? 14 : 6;
           else if (sigLower.includes(tok)) score += 2;
+        }
+
+        // Morphological stem match (e.g. query "canceling expiring orders" -> stems ["cancel", "expir", "order"] matches cancelExpiredOrder)
+        for (const st of queryStems) {
+          if (symStemSet.has(st)) score += 10;
+          else if (st.length >= 4 && symTokenized.stems.some((ss) => isFuzzyTokenMatch(st, ss))) {
+            score += 8;
+          }
+        }
+
+        // Segmented Chinese word & phrase match across symbol name, JSDoc/docstring window, and symbol body
+        if (cjkWords.length > 0 || cjkPhrases.length > 0) {
+          const docStart = Math.max(0, sym.line - 7);
+          const docWindow = fileLines
+            .slice(docStart, Math.min(fileLines.length, sym.line + 4))
+            .join("\n");
+          const bodyWindow = fileLines
+            .slice(Math.max(0, sym.line - 1), Math.min(fileLines.length, sym.endLine))
+            .join("\n");
+
+          for (const phrase of cjkPhrases) {
+            if (docWindow.includes(phrase) || bodyWindow.includes(phrase)) {
+              score += 20;
+            }
+          }
+          for (const cjk of cjkWords) {
+            if (sym.name.includes(cjk)) {
+              score += 25;
+            } else if (docWindow.includes(cjk)) {
+              score += 12;
+            } else if (bodyWindow.includes(cjk)) {
+              score += 6;
+            }
+          }
         }
 
         if (sym.exported) score += 2;
@@ -561,7 +746,7 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
     for (const c of candidates) {
       if (picked.length >= topK) break;
       const cnt = perFileCount.get(c.relPath) ?? 0;
-      if (cnt >= 2) continue;
+      if (cnt >= Math.max(2, topK)) continue;
       perFileCount.set(c.relPath, cnt + 1);
       picked.push(c);
     }
@@ -616,6 +801,9 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
         sections.push(block.join("\n"));
       }
     }
+  } else {
+    sections.push(generateCrossAgentBrief(index));
+    resolvedKeys.push("@brief");
   }
 
   if (options.macroHintLookup && resolvedKeys.length > 0) {

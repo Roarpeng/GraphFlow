@@ -26,7 +26,12 @@ import {
   syncGitCoChangeHabits,
   type MacroKind,
 } from "./macro-engine.js";
-import { executeSurgicalRead } from "./slicer.js";
+import {
+  generateCrossAgentBrief,
+  generateKnowledgeGraphHtml,
+  recordCrossAgentActivity,
+} from "./doc-graph.js";
+import { executeSurgicalRead, getWorkspaceAstIndex, resolveSafeWorkspaceRoot } from "./slicer.js";
 import { executeSurgicalEdit, type SingleEditSpec } from "./surgical-edit.js";
 
 export interface V3ToolDefinition {
@@ -103,7 +108,7 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["list", "run", "save", "mine", "mine-git"] },
+        action: { type: "string", enum: ["list", "run", "save", "mine", "mine-git", "visualize", "brief"] },
         id: { type: "string" },
         kind: { type: "string", enum: ["context-bundle", "command-pipeline", "command-template", "edit-codemod"] },
         steps: { type: "array", items: { type: "string" } },
@@ -131,10 +136,10 @@ export function executeV3ToolCall(
   args: Record<string, unknown> = {},
   defaultRootDir: string = process.cwd()
 ): V3ToolCallResponse {
-  const rootDir =
-    typeof args.rootDir === "string" && args.rootDir.trim()
-      ? args.rootDir.trim()
-      : defaultRootDir;
+  const rootDir = resolveSafeWorkspaceRoot(
+    typeof args.rootDir === "string" ? args.rootDir : undefined,
+    defaultRootDir
+  );
   const sessionId =
     typeof args.sessionId === "string" && args.sessionId.trim() ? args.sessionId.trim() : "main";
 
@@ -191,7 +196,14 @@ export function executeV3ToolCall(
       }
 
       let promoNote = "";
-      if (slice.resolvedKeys.length > 0) {
+      if (slice.resolvedKeys.length > 0 && !slice.resolvedKeys.includes("@brief")) {
+        recordCrossAgentActivity(rootDir, {
+          agentHint: sessionId,
+          action: "read",
+          summary: `Read ${slice.resolvedKeys.slice(0, 3).join(", ")}`,
+          files: slice.resolvedKeys,
+          ok: true,
+        });
         const { newlyCompiled } = recordTrajectoryAndMine(rootDir, {
           sessionId,
           kind: "read",
@@ -232,6 +244,13 @@ export function executeV3ToolCall(
         habitHook: (touchedFiles) => evaluatePostEditHabits(rootDir, touchedFiles, true),
       });
 
+      recordCrossAgentActivity(rootDir, {
+        agentHint: sessionId,
+        action: "edit",
+        summary: `${editRes.mode} on ${(editRes.touchedFiles.length > 0 ? editRes.touchedFiles : [editRes.file]).join(", ")}${symbol ? "#" + symbol : ""}`,
+        files: editRes.touchedFiles.length > 0 ? editRes.touchedFiles : [editRes.file],
+        ok: editRes.ok,
+      });
       for (const tf of editRes.touchedFiles.length > 0 ? editRes.touchedFiles : [editRes.file]) {
         const targetKey = symbol && tf === editRes.file ? `${tf}#${symbol}` : tf;
         recordTrajectoryAndMine(rootDir, {
@@ -301,6 +320,16 @@ export function executeV3ToolCall(
         ok: execRes.ok,
       });
 
+      recordCrossAgentActivity(rootDir, {
+        agentHint: sessionId,
+        action: "exec",
+        summary: `Ran '${cmd}' (exit=${execRes.exitCode})`,
+        files: [],
+        ok: execRes.ok,
+        lastTestCommand: cmd,
+        lastTestOk: execRes.ok,
+        lastTestSummary: execRes.text.split("\n")[0] ?? "",
+      });
       const cb = recordTestAndCheckCircuitBreaker(rootDir, sessionId, cmd, execRes.ok);
       const cbNote = cb.tripped && cb.rescuePacket ? `\n\n${cb.rescuePacket}` : "";
       const promoNote =
@@ -348,6 +377,15 @@ export function executeV3ToolCall(
         );
       }
 
+      if (action === "visualize") {
+        const viz = generateKnowledgeGraphHtml(getWorkspaceAstIndex(rootDir));
+        return plainTextResponse(
+          `OK [knowledge-graph] Generated interactive HTML graph (${viz.nodeCount} nodes, ${viz.edgeCount} edges) -> ${viz.htmlPath}`
+        );
+      }
+      if (action === "brief") {
+        return plainTextResponse(generateCrossAgentBrief(getWorkspaceAstIndex(rootDir)));
+      }
       if (action === "mine-git") {
         const gitRes = syncGitCoChangeHabits(rootDir);
         return plainTextResponse(

@@ -192,6 +192,18 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (cmd === "graph" || cmd === "visualize") {
+    const res = executeV3ToolCall("gf_macro", { action: "visualize", rootDir }, rootDir);
+    console.log(res.content[0]?.text ?? "");
+    return;
+  }
+
+  if (cmd === "brief") {
+    const res = executeV3ToolCall("gf_macro", { action: "brief", rootDir }, rootDir);
+    console.log(res.content[0]?.text ?? "");
+    return;
+  }
+
   if (cmd === "macro" || cmd === "gf-macro") {
     const action = rest[0] ?? "list";
     const id = rest[1];

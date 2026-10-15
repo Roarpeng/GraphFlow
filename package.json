@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "3.1.1",
+  "version": "3.2.0",
   "publishConfig": {
     "access": "public"
   },
@@ -9,7 +9,9 @@
     "skills",
     "mcp.json",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "README.zh.md",
+    "VSIX-INSTALL.md"
   ],
   "engines": {
     "node": ">=18"

@@ -1,57 +1,163 @@
 # GraphFlow
 
-> **The Token-First Surgical Code Engine for AI Coding Agents (v3.1.0)**
-> First-class AST slicing across **TypeScript/JS, Python, C/C++, C#, Rust, and Go** · AST Skeleton Folding (93% fewer tokens than raw file reads) · Cross-repo Blast-Radius call-site micro-snippets, batch atomic edits, zero-LLM symbol rename & struct-field contract guard · Terminal output dehydrator (99% fewer test log tokens) · Zero-cold-start Git history co-change miner · Session read dedup & 3-strike thrashing circuit breaker · Habit memory & auto-compiled `.mjs` macros.
+[![npm](https://img.shields.io/npm/v/@roarpeng/graphflow)](https://www.npmjs.com/package/@roarpeng/graphflow)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
+[![CI](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml)
+[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-roarpeng.graphflow-blue)](https://marketplace.visualstudio.com/items?itemName=roarpeng.graphflow)
 
-## Project Structure
+> **The Token-First Surgical Code Engine for AI Coding Agents (v3.2.0)**
+> An MCP server exposing exactly 4 surgical tools — `gf_read`, `gf_edit`, `gf_exec`, `gf_macro` — with first-class AST support for **TS/JS, Python, Go, Rust, C/C++, C#** and only two runtime dependencies (`@babel/parser` + `@modelcontextprotocol/sdk`).
 
-```text
-graphflow/
-├── src/
-│   ├── ast-engine.ts        # 6-Language AST parser (TS/JS, Python, Go, Rust, C/C++, C#) & struct field extractor
-│   ├── slicer.ts            # gf_read: AST skeleton folding, symbol slicing & cross-file type closure
-│   ├── blast-radius.ts      # Cross-repo 3-line call-site micro-snippets ([Blast Radius])
-│   ├── surgical-edit.ts     # gf_edit: Bottom-up atomic batch edit, zero-LLM rename & static/struct guard
-│   ├── dehydrator.ts        # gf_exec: Multi-language diff-to-test router & terminal output dehydrator
-│   ├── macro-engine.ts      # gf_macro: Trajectory recorder, .mjs macro compiler & isomorphic auto-codemod
-│   ├── git-miner.ts         # Zero-cold-start git log temporal coupling & cross-language co-change miner
-│   ├── circuit-breaker.ts   # Session SHA-256 read dedup cache & 3-strike edit-test loop circuit breaker
-│   ├── host-interceptor.ts  # PreToolUse & PostToolUse host hook interceptor
-│   ├── agent-installer.ts   # Auto-detect & register MCP, SKILL.md, Rules & Hooks across 21 mainstream agents
-│   ├── mcp-tools.ts         # 4 surgical MCP tool schemas (452 tokens total) & tool dispatcher
-│   ├── mcp-server.ts        # MCP stdio/JSON-RPC server entry point (graphflow-mcp)
-│   ├── cli.ts               # CLI entry point (graphflow)
-│   └── index.ts             # Public library entry point
-├── skills/
-│   └── graphflow/
-│       └── SKILL.md         # Standard Skill definition (also compatible with `npx skills add`)
-├── tests/
-│   └── graphflow.test.ts    # End-to-end automated test suite (14 suites)
-├── mcp.json
-├── package.json
-└── tsconfig.json
-```
+---
 
-## Four Surgical MCP Tools
+## GraphFlow 3.0 — The Radical Rewrite
 
-| Tool | Purpose | Key Arguments | Example |
+Version 3.0 **replaced the entire 2.x architecture**. The 10-tool knowledge-graph / context-compression MCP surface (`graphflow_context`, `graphflow_plan`, `graphflow_run`, `graphflow_index`, `graphflow_insight`, `graphflow_skill_*`, `graphflow_diagnose`, `graphflow_artifact`), the episodic-skill flywheel, the VS Code graph-memory extension, and LLM routing were **all removed**. In their place: 4 deterministic surgical tools over a plain AST pipeline. MCP schema tax dropped **92%** (5897 → ~460 tokens per turn).
+
+| 2.x (removed) | 3.x replacement |
+| :--- | :--- |
+| `graphflow_context(...)` | `gf_read({ targets, q, skeleton: true })` |
+| `graphflow_plan` / `graphflow_run` | Removed — deterministic pipeline, no LLM routing |
+| `graphflow_index` | Removed — AST index is built on demand |
+| `graphflow_insight` / `graphflow_skill_*` | `gf_macro({ action: "mine" \| "mine-git" })` |
+| `graphflow_diagnose` | `graphflow status` (CLI) |
+| `graphflow_artifact` | `gf_macro({ action: "visualize" })` → `.graphflow/knowledge-graph.html` |
+| `GRAPHFLOW_MCP_PROFILE` env | Removed — the 4 `gf_*` tools are the only surface |
+| VS Code graph-memory extension | Thin prebuilt launcher (see [VSIX-INSTALL.md](./VSIX-INSTALL.md)) |
+| Dialogue / workbench memory features | Removed with the flywheel; `gf_read({ targets: ["@brief"] })` covers cross-session handoff |
+
+**2.x users must switch tool calls `graphflow_*` → `gf_*`.** There is no compatibility layer.
+
+| Version | Notes |
+| :--- | :--- |
+| 2.3.0 | Last legacy release (10-tool knowledge-graph MCP) |
+| 3.0.0 | Radical rewrite — breaking, 4 surgical tools |
+| 3.1.0 | 21-agent installer, 3-strike circuit breaker, git co-change miner, struct-field contract guard |
+| 3.1.1 | Thin prebuilt VS Code extension, VSIX on GitHub Releases |
+| **3.2.0** | **Doc-graph (cross-agent brief, doc↔code linking, HTML knowledge graph) + bilingual tokenizer** |
+
+## The Four Surgical Tools
+
+| Tool | Purpose | Key arguments |
+| :--- | :--- | :--- |
+| `gf_read` | Symbol slices with cross-file type closure + `[Blast Radius]` call sites, AST skeleton folding, bilingual search, `@brief` cross-agent handoff | `targets`, `q`, `topK`, `skeleton`, `dedup` |
+| `gf_edit` | In-place / batch atomic edits, zero-LLM cross-repo rename, struct-field contract guard | `file`, `symbol`, `newCode`, `edits`, `renameTo` |
+| `gf_exec` | Diff-to-test routing + output dehydrator: passing suites → 1-line `PASS` | `cmd`, `changedFiles`, `handle`, `run` |
+| `gf_macro` | Habit macros, git co-change mining, knowledge-graph HTML export | `action: "list" \| "run" \| "save" \| "mine" \| "mine-git" \| "visualize" \| "brief"` |
+
+Session read dedup skips unchanged files; 3 consecutive edit-test failures trigger a deterministic rescue packet (blast-radius contracts + recent git diffs).
+
+## What's New in 3.2.0
+
+### Doc-Graph (`src/doc-graph.ts`)
+
+- **Cross-agent onboarding brief** — persisted in `.graphflow/cross-agent-brief.json`, served as a ~300-token `@brief` target:
+  - `gf_read({})` in a fresh session automatically includes architecture hubs, the last agent's modified symbols and test status.
+  - `gf_read({ targets: ["@brief"] })` returns the full handoff brief: hubs + modified symbols + test status + linked design docs + compiled macros.
+- **Multi-format doc↔code linking** — `.md`, `.html`, `.xml`, `.docx`, `.pdf`, with zero-dependency native zlib parsers:
+  - `.docx` parsed via native ZIP Central Directory + `zlib.inflateRawSync` on `word/document.xml` — link a Word design spec section to the symbols it names.
+  - `.pdf` parsed via `zlib.inflateSync` on `/FlateDecode` streams + `BT..ET` text extraction — link a PDF interface protocol to the implementing function.
+  - PLCopen / config XML sections link to the parser symbols they describe.
+- **Interactive knowledge graph** — `graphflow graph` exports `.graphflow/knowledge-graph.html`, a single-file force-directed canvas with search, node filtering, and a click inspector (files, symbols, docs, macros).
+
+### Bilingual Tokenizer (`src/tokenizer.ts`)
+
+One query engine for Chinese and English code search:
+
+- **Pinyin bidirectional index** — `gf_read({ q: "dingdan chaoshi" })` resolves to `订单超时`; `q: "订单支付"` also emits `dingdan`/`zhifu` to match legacy pinyin-named identifiers such as `handleDingDanZhiFu`.
+- **Chinese synonym clusters** — `q: "取消订单"` also matches `作废/撤单/撤销`; `支付 ↔ 付款/收款/结账`, `用户 ↔ 客户/买家/会员/账号`, `校验 ↔ 验证/验签/核对/检查`.
+- **Homophone typo correction** — IME typos auto-corrected: `定单钞时取销 → 订单超时取消`, `回掉验千 → 回调验签`, `事物回滚 → 事务回滚`, `登陆帐号 → 登录账号`.
+- **English fuzzy matching** — camelCase/snake_case splitting (`resolveEfficiencyPolicy → resolve/efficiency/policy`), stemming, and edit-distance-1 tolerance (`cancle → cancel`, `expried → expired`).
+
+## Benchmarks
+
+| Metric | Baseline | GraphFlow 3.x | Saving |
 | :--- | :--- | :--- | :--- |
-| `gf_read` | Surgical code reading, AST skeleton view, symbol search & session dedup | `targets?: string[]`, `q?: string`, `topK?: number`, `skeleton?: boolean`, `dedup?: boolean` | `gf_read({ targets: ["src/slicer.ts#executeSurgicalRead"] })` |
-| `gf_edit` | Single/batch symbol or line edit, cross-repo rename & struct-field guard | `file: string`, `symbol?: string`, `newCode?: string`, `edits?: [...]`, `renameTo?: string` | `gf_edit({ file: "src/foo.ts", symbol: "oldFn", renameTo: "newFn" })` |
-| `gf_exec` | Run affected tests or commands with output dehydration & loop circuit breaker | `cmd?: string`, `changedFiles?: string[]`, `handle?: string`, `run?: boolean` | `gf_exec({ cmd: "affected-tests", run: true })` |
-| `gf_macro` | List, run, save, or mine auto-compiled macros, codemods & Git co-changes | `action: "list" \| "run" \| "save" \| "mine" \| "mine-git"`, `id?: string`, `args?: string[]` | `gf_macro({ action: "mine-git" })` |
+| MCP tool schema tax / turn | 5897 tokens (2.x, 10 tools) | 444 tokens (4 tools) | **−92%** |
+| Large-file read | raw file read | AST skeleton folding | **−93%** |
+| Passing test suite output | full log | 1-line `PASS` receipt | **−99%** |
 
-## One-Click Multi-Agent Auto-Registration
+## Supported Languages
+
+| Language | First-class AST |
+| :--- | :--- |
+| TypeScript / JavaScript | Yes (`@babel/parser`) |
+| Python | Yes |
+| Go | Yes |
+| Rust | Yes |
+| C / C++ | Yes |
+| C# | Yes |
+
+Runtime dependencies: `@babel/parser` + `@modelcontextprotocol/sdk`. Nothing else.
+
+## Quick Start
 
 ```bash
-# Auto-detects installed coding agents and registers MCP + SKILL.md + Rules + PreToolUse/PostToolUse Hooks
-npx @roarpeng/graphflow install
+# 1) Install globally (Node 18+)
+npm install -g @roarpeng/graphflow@3.2.0
 
-# Check detected coding agents
-npx @roarpeng/graphflow status
+# 2) One-click registration into detected agents (MCP + Skill + Rules + Hooks)
+graphflow install            # equivalent: npx @roarpeng/graphflow install
 
-# Cleanly remove all GraphFlow MCP, Skills, Rules & Hooks
-npx @roarpeng/graphflow uninstall
+# 3) Launch the MCP server (stdio)
+graphflow-mcp
 ```
 
-Supported coding agents (21 hosts auto-detected): **Cursor**, **Claude Code**, **Claude Desktop**, **VS Code (GitHub Copilot)**, **Windsurf**, **Trae / Trae CN**, **OpenAI Codex**, **Gemini CLI**, **Antigravity**, **Cline**, **Roo Code**, **Kilo Code**, **Kimi Code**, **DeepSeek Harness (DSH)**, **Qoder / Qoder CN**, **OpenCode**, **ZCode**, **Zed**, **Continue**, **PearAI**, and **Amazon Q**.
+Manual MCP registration (any agent):
+
+```json
+{ "mcpServers": { "graphflow": { "command": "graphflow-mcp" } } }
+```
+
+Run the test suite from source:
+
+```bash
+git clone https://github.com/Roarpeng/GraphFlow && cd GraphFlow
+npm install && npm test      # tsx tests/graphflow.test.ts
+```
+
+## VS Code Extension
+
+A thin prebuilt launcher (`roarpeng.graphflow`) with three commands: **Install MCP, Skills & Hooks to Agents**, **Mine Git Co-Change History**, **Show Detected Agents Status**.
+
+- Marketplace: search "GraphFlow" — https://marketplace.visualstudio.com/items?itemName=roarpeng.graphflow
+- Open VSX: https://open-vsx.org/extension/roarpeng/graphflow
+- Manual VSIX: download `graphflow-<version>.vsix` from https://github.com/Roarpeng/GraphFlow/releases → `code --install-extension graphflow-<version>.vsix`
+
+Full steps: [VSIX-INSTALL.md](./VSIX-INSTALL.md).
+
+## 21-Agent Auto-Installer
+
+`graphflow install` auto-detects installed agents and registers MCP + Skill + Rules + PreToolUse/PostToolUse hooks; `graphflow uninstall` removes everything cleanly.
+
+| Group | Agents |
+| :--- | :--- |
+| IDE / editors | Cursor, VS Code (GitHub Copilot), Windsurf, Trae / Trae CN, Zed |
+| Terminal agents | Claude Code, OpenAI Codex, Gemini CLI, Antigravity, Kimi Code, DeepSeek Harness (DSH), OpenCode, ZCode |
+| Extension-hosted | Cline, Roo Code, Kilo Code, Continue, PearAI, Qoder / Qoder CN |
+| Desktop / cloud | Claude Desktop, Amazon Q |
+
+Scope an install with `graphflow install --agents cursor,claude-code --workspace`.
+
+## CLI Reference
+
+| Command | Purpose |
+| :--- | :--- |
+| `graphflow install [--workspace] [--agents <id1,id2>]` | Register MCP + Skill + Rules + Hooks in detected agents |
+| `graphflow uninstall` | Cleanly remove all GraphFlow registrations |
+| `graphflow status` | List detected agents and registration state |
+| `graphflow read [targets...] [-q <query>] [--skeleton] [--dedup]` | Surgical read from the terminal |
+| `graphflow edit <file> [--symbol <sym>] [--new <code>] [--rename <name>]` | Surgical edit / rename |
+| `graphflow exec [cmd] [--run]` | Run `affected-tests` or any command with dehydration |
+| `graphflow macro <list\|run\|save\|mine\|mine-git> [id] [args...]` | Macros and git co-change mining |
+| `graphflow graph` | Export `.graphflow/knowledge-graph.html` |
+| `graphflow brief` | Print the cross-agent handoff brief |
+| `graphflow hook <pre-tool\|post-tool>` | Host hook interceptor entry (internal) |
+| `graphflow version \| help` | Version / usage |
+
+## Docs
+
+- [README.zh.md](./README.zh.md) — Chinese documentation
+- [VSIX-INSTALL.md](./VSIX-INSTALL.md) — VS Code extension install guide (EN + 中文)
+- [skills/graphflow/SKILL.md](./skills/graphflow/SKILL.md) — agent-facing skill definition
+- [Releases](https://github.com/Roarpeng/GraphFlow/releases) · [Issues](https://github.com/Roarpeng/GraphFlow/issues) · [License: Apache-2.0](./LICENSE)
