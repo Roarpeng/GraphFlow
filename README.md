@@ -104,6 +104,12 @@ graphflow install            # equivalent: npx @roarpeng/graphflow install
 graphflow-mcp
 ```
 
+Skill-only entry via the [skills.sh](https://skills.sh) ecosystem (installs the agent skill; it then bootstraps the MCP server with `npx @roarpeng/graphflow@latest install`):
+
+```bash
+npx skills add Roarpeng/GraphFlow
+```
+
 Manual MCP registration (any agent):
 
 ```json

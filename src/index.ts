@@ -157,7 +157,7 @@ export {
   GRAPHFLOW_BLOCK_BEGIN,
   GRAPHFLOW_BLOCK_END,
   MANAGED_INSTRUCTION_BLOCK,
-  SKILL_MD_CONTENT,
+  getSkillMdContent,
   buildAgentProfiles,
   detectInstalledAgents,
   installAllAgents,

@@ -104,6 +104,12 @@ graphflow install            # 等价写法：npx @roarpeng/graphflow install
 graphflow-mcp
 ```
 
+通过 [skills.sh](https://skills.sh) 生态的轻量入口（只装 Agent Skill，内置引导：再用 `npx @roarpeng/graphflow@latest install` 注册 MCP 服务器）：
+
+```bash
+npx skills add Roarpeng/GraphFlow
+```
+
 任意 Agent 手动注册 MCP：
 
 ```json

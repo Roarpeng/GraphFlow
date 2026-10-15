@@ -68,29 +68,30 @@ export interface InstallAllAgentsReport {
 export const GRAPHFLOW_BLOCK_BEGIN = "<!-- GRAPHFLOW:BEGIN -->";
 export const GRAPHFLOW_BLOCK_END = "<!-- GRAPHFLOW:END -->";
 
-export const SKILL_MD_CONTENT = [
+/**
+ * Skill content single source of truth: `skills/graphflow/SKILL.md` at the
+ * package root (also what `npx skills add <owner>/GraphFlow` distributes).
+ * Falls back to a minimal inline copy only if the file is unreadable.
+ */
+const FALLBACK_SKILL_MD = [
   "---",
   "name: graphflow",
-  "description: Token-First Surgical Code Engine (gf_read, gf_edit, gf_exec, gf_macro) across TS/JS, Python, Go, Rust, C/C++, and C#. 外科手术级代码切片、跨文件类型闭合、爆炸半径守卫、测试日志脱水与习惯宏编译引擎。",
+  "description: Token-First Surgical Code Engine (gf_read, gf_edit, gf_exec, gf_macro) — AST symbol slicing, blast-radius guards, dehydrated test logs, bilingual code search, habit macros. Run `npx @roarpeng/graphflow@latest install` to register the MCP server.",
   "---",
   "",
-  "# GraphFlow 3.1 — Token-First Surgical Engine (外科手术级省 Token 引擎)",
+  "# GraphFlow — Token-First Surgical Engine",
   "",
-  "Always prefer the 4 surgical `gf_*` MCP tools over raw full-file reads or verbose test runs (请优先使用以下 4 个 `gf_*` 工具代替整文件读取与全量测试):",
-  "",
-  "1. **`gf_read`** (`targets`, `q`, `skeleton`, `dedup`):",
-  "   - Read exact symbols (`\"src/file.ts#symbol\"`) with automatic **Cross-File Type Closure** and 3-line **`[Blast Radius]`** caller micro-snippets (精准读取目标函数/类，自动附带跨文件类型定义与 3 行调用点爆炸半径).",
-  "   - Supports bilingual keyword search (`q: \"keyword / 中文关键词\"`) across symbol names, JSDoc/docstrings, and comments.",
-  "   - Fold large files into AST skeletons (`\"src/file.ts\"`, `skeleton: true`) cutting token cost by 93%, and pass `dedup: true` to skip unchanged files.",
-  "2. **`gf_edit`** (`file`, `symbol`, `newCode`, `edits`, `renameTo`):",
-  "   - Edit symbols or line ranges in-place, apply multi-file atomic batch `edits` bottom-up with zero line drift, or run zero-LLM cross-repo symbol rename (`renameTo`).",
-  "   - Enforces instant AST syntax rollback, caller-arity checks, and struct/interface field deletion guards (语法错误自动回滚、调用方参数个数校验、结构体字段删除引用守卫).",
-  "3. **`gf_exec`** (`cmd`, `changedFiles`, `handle`, `run`):",
-  "   - Run `cmd: \"affected-tests\"` (2-hop reverse import router) or any command with output dehydration (测试通过仅回 1 行 `PASS`；报错内联 5 行源码上下文；连续 3 次失败触发死循环熔断急救包).",
-  "4. **`gf_macro`** (`action: \"list\" | \"run\" | \"save\" | \"mine\" | \"mine-git\"`):",
-  "   - Mine git history co-change coupling (`action: \"mine-git\"`) or run auto-compiled `.graphflow/macros/*.mjs` scripts and isomorphic codemods with zero LLM turns.",
-  "",
+  "Prefer the 4 surgical `gf_*` MCP tools over full-file reads and verbose test runs. If the tools are not registered yet, run `npx @roarpeng/graphflow@latest install`.",
 ].join("\n");
+
+export function getSkillMdContent(): string {
+  try {
+    const skillPath = join(__dirname, "..", "skills", "graphflow", "SKILL.md");
+    return readFileSync(skillPath, "utf8").trimEnd() + "\n";
+  } catch {
+    return FALLBACK_SKILL_MD;
+  }
+}
 
 export const CURSOR_RULE_MDC_CONTENT = [
   "---",
@@ -877,7 +878,7 @@ export function installAllAgents(opts: InstallAllAgentsOptions = {}): InstallAll
       try {
         const existed = existsSync(skillFile);
         mkdirSync(dirname(skillFile), { recursive: true });
-        writeFileSync(skillFile, SKILL_MD_CONTENT, "utf8");
+        writeFileSync(skillFile, getSkillMdContent(), "utf8");
         results.push({
           agentId: profile.id,
           agentName: profile.name,
