@@ -87,7 +87,7 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
   {
     name: "gf_exec",
     description:
-      "Run `cmd` (or 'affected-tests') with dehydrated output, or recall `handle`.",
+      "Run `cmd`/affected-tests dehydrated; run:true executes, else preview; recall handle.",
     inputSchema: {
       type: "object",
       properties: {
@@ -297,7 +297,7 @@ export function executeV3ToolCall(
             `PASS [affected-tests] 0 test files affected by changes (${resolvedChanges.length} changed file(s)).`
           );
         }
-        const suggestedCmd = buildAffectedTestCommand(affectedTests);
+        const suggestedCmd = buildAffectedTestCommand(affectedTests, rootDir);
         if (args.run === true || cmd === "run-affected-tests") {
           const runRes = execAndDehydrate({ rootDir, command: suggestedCmd });
           return plainTextResponse(
@@ -311,6 +311,12 @@ export function executeV3ToolCall(
         );
       }
 
+      if (args.run !== true) {
+        return plainTextResponse(
+          `# Preview (not executed)\nCmd: ${cmd}\nPass run: true to execute.`
+        );
+      }
+
       const execRes = execAndDehydrate({ rootDir, command: cmd });
       const { newlyCompiled } = recordTrajectoryAndMine(rootDir, {
         sessionId,
@@ -320,15 +326,21 @@ export function executeV3ToolCall(
         ok: execRes.ok,
       });
 
+      // Only test-like commands (test/vitest/jest/pytest/ctest/go|cargo|dotnet test) update [Last Test Status].
+      const looksLikeTestCmd = /test|jest/i.test(cmd);
       recordCrossAgentActivity(rootDir, {
         agentHint: sessionId,
         action: "exec",
         summary: `Ran '${cmd}' (exit=${execRes.exitCode})`,
         files: [],
         ok: execRes.ok,
-        lastTestCommand: cmd,
-        lastTestOk: execRes.ok,
-        lastTestSummary: execRes.text.split("\n")[0] ?? "",
+        ...(looksLikeTestCmd
+          ? {
+              lastTestCommand: cmd,
+              lastTestOk: execRes.ok,
+              lastTestSummary: execRes.text.split("\n")[0] ?? "",
+            }
+          : {}),
       });
       const cb = recordTestAndCheckCircuitBreaker(rootDir, sessionId, cmd, execRes.ok);
       const cbNote = cb.tripped && cb.rescuePacket ? `\n\n${cb.rescuePacket}` : "";

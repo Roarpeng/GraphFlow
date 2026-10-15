@@ -18,6 +18,7 @@ import {
   getWorkspaceAstIndex,
   interceptPostToolUse,
   interceptPreToolUse,
+  generateCrossAgentBrief,
   loadMacroStore,
   recordTrajectoryAndMine,
   resolveAffectedTests,
@@ -827,11 +828,11 @@ async function runAllTests(): Promise<void> {
         root
       );
       const failCmd = "node -e \"process.exit(1)\"";
-      const f1 = executeV3ToolCall("gf_exec", { cmd: failCmd, sessionId: "cb-sess" }, root);
+      const f1 = executeV3ToolCall("gf_exec", { cmd: failCmd, run: true, sessionId: "cb-sess" }, root);
       assert.ok(!f1.content[0]!.text.includes("CIRCUIT BREAKER TRIPPED"));
-      const f2 = executeV3ToolCall("gf_exec", { cmd: failCmd, sessionId: "cb-sess" }, root);
+      const f2 = executeV3ToolCall("gf_exec", { cmd: failCmd, run: true, sessionId: "cb-sess" }, root);
       assert.ok(!f2.content[0]!.text.includes("CIRCUIT BREAKER TRIPPED"));
-      const f3 = executeV3ToolCall("gf_exec", { cmd: failCmd, sessionId: "cb-sess" }, root);
+      const f3 = executeV3ToolCall("gf_exec", { cmd: failCmd, run: true, sessionId: "cb-sess" }, root);
       assert.ok(
         f3.content[0]!.text.includes("⚡ [CIRCUIT BREAKER TRIPPED: 3 consecutive failures"),
         "3rd consecutive failure must trip Circuit Breaker and inject contract rescue packet"
@@ -1238,6 +1239,82 @@ async function runAllTests(): Promise<void> {
         rsFieldDel.diagnostics.some((d) => d.kind === "removed-struct-field-still-referenced" && d.message.includes("limit")),
         "Rust struct field deletion must trigger removed-struct-field-still-referenced across files"
       );
+    });
+
+    check("Fix Regression D-1/D-2/D-3: runner-aware affected-tests, run:true gating & brief noise, hub in-degree", () => {
+      // --- D-1: buildAffectedTestCommand honors package.json scripts.test ---
+      const pkgPath = join(root, "package.json");
+      writeFileSync(pkgPath, JSON.stringify({ scripts: { test: "tsx tests/util.test.ts" } }), "utf8");
+      assert.equal(
+        buildAffectedTestCommand(["tests/util.test.ts"], root),
+        "npm test",
+        "D-1: scripts.test covering an affected file must route to npm test"
+      );
+      writeFileSync(
+        pkgPath,
+        JSON.stringify({ scripts: { test: "vitest" }, devDependencies: { vitest: "^1.0.0" } }),
+        "utf8"
+      );
+      assert.equal(
+        buildAffectedTestCommand(["tests/util.test.ts"], root),
+        "npx vitest run tests/util.test.ts",
+        "D-1: vitest projects keep the npx vitest run form"
+      );
+      writeFileSync(pkgPath, JSON.stringify({ scripts: { test: "mocha 'tests/**/*.spec.ts'" } }), "utf8");
+      assert.equal(
+        buildAffectedTestCommand(["tests/util.test.ts"], root),
+        "npm test",
+        "D-1: custom runner (non-vitest scripts.test) must route to npm test"
+      );
+      writeFileSync(pkgPath, JSON.stringify({ scripts: { build: "tsc" } }), "utf8");
+      assert.equal(
+        buildAffectedTestCommand(["tests/util.test.ts"], root),
+        "npx vitest run tests/util.test.ts",
+        "D-1: missing scripts.test keeps legacy vitest heuristic"
+      );
+      assert.equal(
+        buildAffectedTestCommand(["tests/util.test.ts"]),
+        "npx vitest run tests/util.test.ts",
+        "D-1: single-arg call keeps legacy vitest heuristic"
+      );
+      rmSync(pkgPath, { force: true });
+
+      // --- D-2: run:true gating for plain commands + [Last Test Status] noise filter ---
+      const preview = executeV3ToolCall("gf_exec", { cmd: "echo leaked-d2" }, root);
+      assert.ok(preview.content[0]!.text.startsWith("# Preview (not executed)"), "D-2: no-run must return a preview");
+      assert.ok(!preview.content[0]!.text.includes("PASS ["), "D-2: no-run preview must not execute the command");
+      const executed = executeV3ToolCall("gf_exec", { cmd: "echo ran-d2", run: true, sessionId: "d2-sess" }, root);
+      assert.ok(executed.content[0]!.text.includes("PASS"), "D-2: run:true must execute");
+      const briefIdx = getWorkspaceAstIndex(root);
+      const briefAfterEcho = generateCrossAgentBrief(briefIdx);
+      assert.ok(
+        !briefAfterEcho.includes("[Last Test Status]: `echo ran-d2`"),
+        "D-2: non-test commands must not pollute [Last Test Status]"
+      );
+      executeV3ToolCall("gf_exec", { cmd: "echo test-ok", run: true, sessionId: "d2-sess" }, root);
+      const briefAfterTest = generateCrossAgentBrief(briefIdx);
+      assert.ok(
+        briefAfterTest.includes("[Last Test Status]: `echo test-ok`"),
+        "D-2: test-like commands must still be recorded in [Last Test Status]"
+      );
+
+      // --- D-3: hub in-degree counts extension-ful import specifiers (./x.ts / ./x.js) ---
+      const d3Root = mkdtempSync(join(tmpdir(), "gf-d3-reg-"));
+      try {
+        writeFileSync(join(d3Root, "hub_b.ts"), "export function hubHelper(): number {\n  return 7;\n}\n", "utf8");
+        writeFileSync(
+          join(d3Root, "hub_a.ts"),
+          "import { hubHelper } from './hub_b.ts';\nexport function hubMain(): number {\n  return hubHelper() + 1;\n}\n",
+          "utf8"
+        );
+        const d3Brief = generateCrossAgentBrief(getWorkspaceAstIndex(d3Root));
+        assert.ok(
+          d3Brief.includes("hub_b.ts (imported by 1 file(s))"),
+          "D-3: extension-ful import specifier must count toward hub in-degree"
+        );
+      } finally {
+        rmSync(d3Root, { recursive: true, force: true });
+      }
     });
 
     console.log(`\nALL ${passed} GRAPHFLOW 3.1 TESTS PASSED!`);

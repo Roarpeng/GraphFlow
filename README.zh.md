@@ -42,7 +42,7 @@
 | :--- | :--- | :--- |
 | `gf_read` | 精准符号切片（自动跨文件类型闭合）+ `[Blast Radius]` 调用点、AST 骨架折叠、双语检索、`@brief` 跨 Agent 交接 | `targets`、`q`、`topK`、`skeleton`、`dedup` |
 | `gf_edit` | 原地 / 批量原子编辑、零 LLM 跨仓重命名、结构体字段契约守卫 | `file`、`symbol`、`newCode`、`edits`、`renameTo` |
-| `gf_exec` | 变更到测试路由 + 输出脱水器：通过的测试套件只回 1 行 `PASS` | `cmd`、`changedFiles`、`handle`、`run` |
+| `gf_exec` | 变更到测试路由（感知 `package.json` `scripts.test`）+ 输出脱水器：通过的测试套件只回 1 行 `PASS`；`run: true` 才执行，缺省仅预览 | `cmd`、`changedFiles`、`handle`、`run` |
 | `gf_macro` | 习惯宏、git 共变挖掘、知识图谱 HTML 导出 | `action: "list" \| "run" \| "save" \| "mine" \| "mine-git" \| "visualize" \| "brief"` |
 
 会话级读去重跳过未变更文件；连续 3 次编辑-测试失败触发确定性急救包（爆炸半径契约 + 最近 git diff）。
@@ -148,7 +148,7 @@ npm install && npm test      # tsx tests/graphflow.test.ts
 | `graphflow status` | 列出检测到的 Agent 与注册状态 |
 | `graphflow read [targets...] [-q <query>] [--skeleton] [--dedup]` | 终端侧手术式读取 |
 | `graphflow edit <file> [--symbol <sym>] [--new <code>] [--rename <name>]` | 手术式编辑 / 重命名 |
-| `graphflow exec [cmd] [--run]` | 运行 `affected-tests` 或任意命令（带脱水） |
+| `graphflow exec [cmd] [--run]` | 运行 `affected-tests` 或任意命令（带脱水；`--run` 才执行，缺省仅预览） |
 | `graphflow macro <list\|run\|save\|mine\|mine-git> [id] [args...]` | 宏与 git 共变挖掘 |
 | `graphflow graph` | 导出 `.graphflow/knowledge-graph.html` |
 | `graphflow brief` | 打印跨 Agent 交接简报 |

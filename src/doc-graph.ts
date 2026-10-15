@@ -544,9 +544,14 @@ export function generateCrossAgentBrief(index: ReturnType<typeof getWorkspaceAst
     const data = index.getFileAnalysis(f);
     if (!data) continue;
     for (const imp of data.ast.imports) {
+      // Strip the extension from the import specifier's last path segment (handles
+      // "./order.ts", "./order.js" and bare "./order"); directory forms (".", "..",
+      // "./orders/") yield an empty/"."/".." segment and are skipped.
+      const impLast = (imp.module.split("/").pop() ?? "").replace(/\.[^.]+$/, "");
+      if (!impLast || impLast === "." || impLast === "..") continue;
       for (const candidate of files) {
-        const base = candidate.replace(/\.[^.]+$/, "");
-        if (imp.module.endsWith(base.split("/").pop() ?? "__none__")) {
+        const candLast = candidate.replace(/\.[^.]+$/, "").split("/").pop() ?? "";
+        if (impLast === candLast) {
           inDegree.set(candidate, (inDegree.get(candidate) ?? 0) + 1);
         }
       }

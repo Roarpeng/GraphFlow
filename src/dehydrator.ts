@@ -368,9 +368,35 @@ export function execAndDehydrate(params: {
 
 
 /**
+ * Resolve the TS/JS test command from the project's package.json when available:
+ * 1. `scripts.test` already mentions one of the affected test files -> `npm test` (script covers them).
+ * 2. vitest detected in `scripts.test` or devDependencies -> `npx vitest run <files>` (existing heuristic).
+ * 3. Custom runner (tsx / node --test / jest / mocha ...) -> `npm test` (full run beats a wrong runner).
+ * Falls back to the vitest heuristic when rootDir is absent, package.json is missing/unparseable,
+ * or `scripts.test` is missing.
+ */
+function resolveTsJsTestCommand(tsJsTests: string[], rootDir?: string): string {
+  const vitestCmd = `npx vitest run ${tsJsTests.join(" ")}`;
+  if (!rootDir) return vitestCmd;
+  let pkg: { scripts?: { test?: unknown }; devDependencies?: Record<string, string> };
+  try {
+    const pkgPath = join(rootDir, "package.json");
+    if (!existsSync(pkgPath)) return vitestCmd;
+    pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as typeof pkg;
+  } catch {
+    return vitestCmd;
+  }
+  const testScript = typeof pkg.scripts?.test === "string" ? pkg.scripts.test : "";
+  if (!testScript) return vitestCmd;
+  if (tsJsTests.some((f) => testScript.includes(f))) return "npm test";
+  if (testScript.includes("vitest") || pkg.devDependencies?.["vitest"]) return vitestCmd;
+  return "npm test";
+}
+
+/**
  * Build a ready-to-run multi-language test command for the discovered affected test files.
  */
-export function buildAffectedTestCommand(affectedTests: string[]): string {
+export function buildAffectedTestCommand(affectedTests: string[], rootDir?: string): string {
   if (affectedTests.length === 0) return "";
   const pyTests = affectedTests.filter((f) => f.endsWith(".py"));
   const goTests = affectedTests.filter((f) => f.endsWith(".go"));
@@ -380,7 +406,7 @@ export function buildAffectedTestCommand(affectedTests: string[]): string {
   const tsJsTests = affectedTests.filter((f) => /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(f));
 
   const cmds: string[] = [];
-  if (tsJsTests.length > 0) cmds.push(`npx vitest run ${tsJsTests.join(" ")}`);
+  if (tsJsTests.length > 0) cmds.push(resolveTsJsTestCommand(tsJsTests, rootDir));
   if (pyTests.length > 0) cmds.push(`pytest ${pyTests.join(" ")}`);
   if (goTests.length > 0) {
     const pkgs = Array.from(new Set(goTests.map((f) => {

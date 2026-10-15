@@ -42,7 +42,7 @@ Version 3.0 **replaced the entire 2.x architecture**. The 10-tool knowledge-grap
 | :--- | :--- | :--- |
 | `gf_read` | Symbol slices with cross-file type closure + `[Blast Radius]` call sites, AST skeleton folding, bilingual search, `@brief` cross-agent handoff | `targets`, `q`, `topK`, `skeleton`, `dedup` |
 | `gf_edit` | In-place / batch atomic edits, zero-LLM cross-repo rename, struct-field contract guard | `file`, `symbol`, `newCode`, `edits`, `renameTo` |
-| `gf_exec` | Diff-to-test routing + output dehydrator: passing suites → 1-line `PASS` | `cmd`, `changedFiles`, `handle`, `run` |
+| `gf_exec` | Diff-to-test routing (honors `package.json` `scripts.test`) + output dehydrator: passing suites → 1-line `PASS`; `run: true` executes, otherwise preview | `cmd`, `changedFiles`, `handle`, `run` |
 | `gf_macro` | Habit macros, git co-change mining, knowledge-graph HTML export | `action: "list" \| "run" \| "save" \| "mine" \| "mine-git" \| "visualize" \| "brief"` |
 
 Session read dedup skips unchanged files; 3 consecutive edit-test failures trigger a deterministic rescue packet (blast-radius contracts + recent git diffs).
@@ -148,7 +148,7 @@ Scope an install with `graphflow install --agents cursor,claude-code --workspace
 | `graphflow status` | List detected agents and registration state |
 | `graphflow read [targets...] [-q <query>] [--skeleton] [--dedup]` | Surgical read from the terminal |
 | `graphflow edit <file> [--symbol <sym>] [--new <code>] [--rename <name>]` | Surgical edit / rename |
-| `graphflow exec [cmd] [--run]` | Run `affected-tests` or any command with dehydration |
+| `graphflow exec [cmd] [--run]` | Run `affected-tests` or any command with dehydration (`--run` executes, otherwise preview) |
 | `graphflow macro <list\|run\|save\|mine\|mine-git> [id] [args...]` | Macros and git co-change mining |
 | `graphflow graph` | Export `.graphflow/knowledge-graph.html` |
 | `graphflow brief` | Print the cross-agent handoff brief |
