@@ -4,7 +4,7 @@
   "displayName": "GraphFlow Token-First Surgical Engine",
   "description": "Token-First Surgical Code Engine for AI Coding Agents: 6-Language AST Slicer (93% fewer tokens), Blast-Radius Guard, Output Dehydrator (99% fewer test log tokens), Git Co-Change Miner & Habit Macros.",
   "icon": "media/graphflow.png",
-  "version": "3.2.1",
+  "version": "3.3.0",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

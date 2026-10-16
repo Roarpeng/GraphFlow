@@ -7,7 +7,7 @@
 [![CI](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml)
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-roarpeng.graphflow-blue)](https://marketplace.visualstudio.com/items?itemName=roarpeng.graphflow)
 
-> **The Token-First Surgical Code Engine for AI Coding Agents (v3.2.1)**
+> **The Token-First Surgical Code Engine for AI Coding Agents (v3.3.0)**
 > An MCP server exposing exactly 4 surgical tools — `gf_read`, `gf_edit`, `gf_exec`, `gf_macro` — with first-class AST support for **TS/JS, Python, Go, Rust, C/C++, C#** and only two runtime dependencies (`@babel/parser` + `@modelcontextprotocol/sdk`).
 
 ---
@@ -37,7 +37,8 @@ Version 3.0 **replaced the entire 2.x architecture**. The 10-tool knowledge-grap
 | 3.1.0 | 21-agent installer, 3-strike circuit breaker, git co-change miner, struct-field contract guard |
 | 3.1.1 | Thin prebuilt VS Code extension, VSIX on GitHub Releases |
 | 3.2.0 | Doc-graph (cross-agent brief, doc↔code linking, HTML knowledge graph) + bilingual tokenizer |
-| **3.2.1** | **Fix pack: affected-tests honors `package.json` `scripts.test`, `gf_exec` `run:true` execute-vs-preview gating, brief hub in-degree for extension-ful imports** |
+| 3.2.1 | Fix pack: affected-tests honors `package.json` `scripts.test`, `gf_exec` `run:true` execute-vs-preview gating, brief hub in-degree for extension-ful imports |
+| **3.3.0** | **Auto-register on VSIX activate (once per version, `graphflow.autoInstall` opt-out) + legacy registration prune on `install` (alias keys, stale launchers, removed-agent leftovers; `--no-prune` to skip)** |
 
 ## The Four Surgical Tools
 
@@ -97,7 +98,7 @@ Runtime dependencies: `@babel/parser` + `@modelcontextprotocol/sdk`. Nothing els
 
 ```bash
 # 1) Install globally (Node 18+)
-npm install -g @roarpeng/graphflow@3.2.1
+npm install -g @roarpeng/graphflow@3.3.0
 
 # 2) One-click registration into detected agents (MCP + Skill + Rules + Hooks)
 graphflow install            # equivalent: npx @roarpeng/graphflow install
