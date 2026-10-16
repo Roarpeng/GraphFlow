@@ -25,7 +25,7 @@ function printUsage(): void {
       `GraphFlow v${PACKAGE_VERSION} — Token-First Surgical Code Engine`,
       "",
       "Usage:",
-      "  graphflow install [--workspace] [--agents <id1,id2>]",
+      "  graphflow install [--workspace] [--agents <id1,id2>] [--no-prune]",
       "  graphflow uninstall",
       "  graphflow status",
       "  graphflow read [targets...] [-q <query>] [--skeleton] [--dedup]",
@@ -67,6 +67,7 @@ async function main(): Promise<void> {
       workspaceRoot: rootDir,
       includeWorkspace,
       ...(agentIds ? { agentIds } : {}),
+      ...(rest.includes("--no-prune") ? { pruneLegacy: false } : {}),
     });
     const mcpCount = report.results.filter((r) => r.category === "mcp" && r.status !== "error").length;
     const skillCount = report.results.filter((r) => r.category === "skill" && r.status !== "error").length;

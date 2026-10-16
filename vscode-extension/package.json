@@ -24,6 +24,16 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "GraphFlow",
+      "properties": {
+        "graphflow.autoInstall": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically register GraphFlow MCP, Skills & Hooks to detected agents on install/update (once per version). Set to false for manual-only registration via the 'GraphFlow: Install MCP, Skills & Hooks to Agents' command."
+        }
+      }
+    },
     "commands": [
       {
         "command": "graphflow.installMcp",

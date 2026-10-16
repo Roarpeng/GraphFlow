@@ -58,6 +58,14 @@ export interface InstallAllAgentsOptions {
   includeWorkspace?: boolean;
   agentIds?: string[];
   serverName?: string;
+  /**
+   * Remove legacy registrations during install (default true): GraphFlow
+   * entries under a different server key, stale launcher commands, and
+   * leftovers for agents that are no longer installed. Only graphflow-owned
+   * keys/blocks are touched. Pass `pruneLegacy: false` (CLI `--no-prune`)
+   * to register without cleaning.
+   */
+  pruneLegacy?: boolean;
 }
 
 export interface InstallAllAgentsReport {
@@ -816,6 +824,170 @@ function installHostHook(
   return existed ? "updated" : "installed";
 }
 
+/**
+ * Legacy cleanup support: entries that reference a GraphFlow launcher under a
+ * different server key (renamed by older installers), stale launcher commands
+ * (old global dist paths, node.exe + npx-cli.js shims), and registrations left
+ * behind for agents that are no longer installed. Only graphflow-owned
+ * keys/blocks are ever removed — third-party entries are never deleted.
+ */
+
+/** True when a config value visibly points at a GraphFlow launcher. */
+function isGraphflowLauncherValue(value: unknown): boolean {
+  try {
+    return JSON.stringify(value).toLowerCase().includes("graphflow");
+  } catch {
+    return false;
+  }
+}
+
+/** GraphFlow-looking server keys other than the canonical one. No file writes. */
+function findLegacyMcpKeys(target: AgentMcpTarget, serverName: string): string[] {
+  if (!existsSync(target.configPath)) return [];
+  const format = target.configFormat ?? "json";
+
+  if (format === "codex-toml") {
+    const current = readFileSync(target.configPath, "utf8");
+    const out: string[] = [];
+    const sectionRegex = /\[mcp_servers\.([^\]]+)\]/g;
+    let match: RegExpExecArray | null;
+    while ((match = sectionRegex.exec(current)) !== null) {
+      const name = match[1] ?? "";
+      if (!name || name === serverName) continue;
+      const blockRegex = new RegExp(
+        `\\[mcp_servers\\.${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*?(?=\\n\\[|$)`,
+        "m"
+      );
+      const block = current.match(blockRegex)?.[0] ?? "";
+      if (block.toLowerCase().includes("graphflow")) out.push(name);
+    }
+    return out;
+  }
+
+  const obj = readJsonSafe(target.configPath);
+  const serversOf = (holder: unknown): Record<string, unknown> =>
+    holder && typeof holder === "object" ? (holder as Record<string, unknown>) : {};
+  let servers: Record<string, unknown> = {};
+  if (format === "opencode") {
+    servers = serversOf(obj.mcp);
+  } else if (format === "zcode") {
+    const mcp = serversOf(obj.mcp);
+    servers = serversOf(mcp.servers);
+  } else {
+    servers = serversOf(obj[target.serversKey]);
+  }
+  return Object.keys(servers).filter(
+    (key) => key !== serverName && isGraphflowLauncherValue(servers[key])
+  );
+}
+
+function removeMcpKey(target: AgentMcpTarget, key: string): boolean {
+  if (!existsSync(target.configPath)) return false;
+  const format = target.configFormat ?? "json";
+
+  if (format === "codex-toml") {
+    const current = readFileSync(target.configPath, "utf8");
+    const sectionRegex = new RegExp(
+      `\\n?\\[mcp_servers\\.${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*?(?=\\n\\[|$)`,
+      "m"
+    );
+    if (!sectionRegex.test(current)) return false;
+    const next = current.replace(sectionRegex, "").trim();
+    writeFileSync(target.configPath, next ? `${next}\n` : "", "utf8");
+    return true;
+  }
+
+  const obj = readJsonSafe(target.configPath);
+  if (format === "opencode") {
+    const mcp = obj.mcp as Record<string, unknown> | undefined;
+    if (!mcp || !(key in mcp)) return false;
+    delete mcp[key];
+    writeJsonSafe(target.configPath, obj);
+    return true;
+  }
+  if (format === "zcode") {
+    const mcp = obj.mcp as Record<string, unknown> | undefined;
+    const servers = mcp?.servers as Record<string, unknown> | undefined;
+    if (!servers || !(key in servers)) return false;
+    delete servers[key];
+    writeJsonSafe(target.configPath, obj);
+    return true;
+  }
+
+  const servers = obj[target.serversKey] as Record<string, unknown> | undefined;
+  if (!servers || !(key in servers)) return false;
+  delete servers[key];
+  writeJsonSafe(target.configPath, obj);
+  return true;
+}
+
+/**
+ * Delete legacy GraphFlow registrations across every profile in scope:
+ * alias server keys in all existing configs, plus the full GraphFlow
+ * footprint (MCP key, skill dir, managed rule blocks) for agents that are no
+ * longer installed. Hook entries have no removal helper and are only ever
+ * overwritten for detected agents, so they are left alone here.
+ */
+export function pruneLegacyRegistrations(
+  opts: InstallAllAgentsOptions = {}
+): AgentInstallItemResult[] {
+  const serverName = opts.serverName ?? "graphflow";
+  const profiles = buildAgentProfiles(opts);
+  const detectedIds = new Set(detectInstalledAgents(opts).map((d) => d.id));
+  const filterSet = opts.agentIds?.length ? new Set(opts.agentIds) : undefined;
+  const results: AgentInstallItemResult[] = [];
+
+  for (const profile of profiles) {
+    if (filterSet && !filterSet.has(profile.id)) continue;
+    const pushRemoved = (
+      category: AgentInstallItemResult["category"],
+      targetPath: string,
+      message: string
+    ): void => {
+      results.push({
+        agentId: profile.id,
+        agentName: profile.name,
+        category,
+        targetPath,
+        status: "removed",
+        message,
+      });
+    };
+
+    // 1. Alias server keys in every existing config (detected or not).
+    for (const target of profile.mcpTargets) {
+      for (const alias of findLegacyMcpKeys(target, serverName)) {
+        if (removeMcpKey(target, alias)) {
+          pushRemoved("mcp", target.configPath, `legacy MCP alias "${alias}" removed`);
+        }
+      }
+    }
+
+    if (detectedIds.has(profile.id)) continue;
+
+    // 2. Full footprint removal for agents that are no longer installed.
+    for (const target of profile.mcpTargets) {
+      if (removeMcpTarget(target, serverName)) {
+        pushRemoved("mcp", target.configPath, "stale graphflow MCP entry removed (agent not installed)");
+      }
+    }
+    for (const skillsDir of profile.skillsDirs ?? []) {
+      const skillDir = join(skillsDir, "graphflow");
+      if (existsSync(skillDir)) {
+        rmSync(skillDir, { recursive: true, force: true });
+        pushRemoved("skill", join(skillDir, "SKILL.md"), "stale graphflow skill removed (agent not installed)");
+      }
+    }
+    for (const rule of profile.rulesFiles ?? []) {
+      if (removeManagedFile(rule.filePath, rule.kind)) {
+        pushRemoved("rule", rule.filePath, "stale graphflow rule block removed (agent not installed)");
+      }
+    }
+  }
+
+  return results;
+}
+
 export function installAllAgents(opts: InstallAllAgentsOptions = {}): InstallAllAgentsReport {
   const serverName = opts.serverName ?? "graphflow";
   const profiles = buildAgentProfiles(opts);
@@ -823,6 +995,13 @@ export function installAllAgents(opts: InstallAllAgentsOptions = {}): InstallAll
   const detectedIds = new Set(detected.map((d) => d.id));
   const launcher = resolveMcpLauncherCommand();
   const results: AgentInstallItemResult[] = [];
+
+  // Legacy cleanup first (default on): alias keys everywhere, plus the full
+  // footprint for agents that are no longer installed. The register loop
+  // below then overwrites any stale canonical entries for detected agents.
+  if (opts.pruneLegacy !== false) {
+    results.push(...pruneLegacyRegistrations(opts));
+  }
 
   for (const profile of profiles) {
     if (!detectedIds.has(profile.id)) continue;

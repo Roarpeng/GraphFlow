@@ -4,7 +4,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -926,7 +926,7 @@ async function runAllTests(): Promise<void> {
         const ids = detected.map((d) => d.id);
         assert.ok(ids.includes("cursor") && ids.includes("claude-code") && ids.includes("codex") && ids.includes("vscode"));
 
-        const report = installAllAgents({ homeDir: fakeHome });
+        const report = installAllAgents({ homeDir: fakeHome, appDataDir: join(fakeHome, "appdata"), localAppDataDir: join(fakeHome, "localappdata") });
         assert.ok(report.results.some((r) => r.agentId === "cursor" && r.category === "mcp"));
         assert.ok(report.results.some((r) => r.agentId === "cursor" && r.category === "skill"));
         assert.ok(report.results.some((r) => r.agentId === "cursor" && r.category === "rule"));
@@ -946,6 +946,110 @@ async function runAllTests(): Promise<void> {
         assert.ok(removed.length >= 10);
         const claudeMdAfter = readFileSync(join(fakeHome, ".claude", "CLAUDE.md"), "utf8");
         assert.ok(claudeMdAfter.includes("Keep this line.") && !claudeMdAfter.includes("<!-- GRAPHFLOW:BEGIN -->"));
+      } finally {
+        rmSync(fakeHome, { recursive: true, force: true });
+      }
+    });
+
+    check("Legacy prune on install: alias keys removed, stale launcher normalized, third-party entries preserved", () => {
+      const fakeHome = mkdtempSync(join(tmpdir(), "gf-prune-home-"));
+      try {
+        // Detected agent (cursor, JSON): stale canonical entry + legacy alias + third-party entry.
+        mkdirSync(join(fakeHome, ".cursor"), { recursive: true });
+        writeFileSync(
+          join(fakeHome, ".cursor", "mcp.json"),
+          JSON.stringify({
+            mcpServers: {
+              graphflow: { command: "node.exe", args: ["C:\\npx-cli.js", "graphflow-mcp"] },
+              "graphflow-old": { command: "node", args: ["/old/graphflow/dist/mcp-server.js"] },
+              other: { command: "other-cmd", args: [] },
+            },
+          }),
+          "utf8"
+        );
+
+        // Detected agent (codex, TOML): stale canonical section + legacy alias section.
+        mkdirSync(join(fakeHome, ".codex"), { recursive: true });
+        writeFileSync(
+          join(fakeHome, ".codex", "config.toml"),
+          [
+            '[mcp_servers.graphflow-old-toml]',
+            'command = "node"',
+            'args = ["/old/graphflow-mcp"]',
+            "",
+            '[mcp_servers.graphflow]',
+            'command = "node"',
+            'args = ["/old/server.js"]',
+            "",
+            '[mcp_servers.other]',
+            'command = "other-cmd"',
+            'args = []',
+            "",
+          ].join("\n"),
+          "utf8"
+        );
+
+        const report = installAllAgents({ homeDir: fakeHome, appDataDir: join(fakeHome, "appdata"), localAppDataDir: join(fakeHome, "localappdata") });
+        assert.ok(
+          report.results.some((r) => r.status === "removed" && (r.message ?? "").includes("legacy MCP alias")),
+          "prune must report legacy alias removal"
+        );
+
+        const cursorMcp = JSON.parse(readFileSync(join(fakeHome, ".cursor", "mcp.json"), "utf8"));
+        assert.ok(!("graphflow-old" in cursorMcp.mcpServers), "legacy JSON alias must be removed");
+        assert.ok(cursorMcp.mcpServers.graphflow, "canonical entry must exist after install");
+        assert.ok("other" in cursorMcp.mcpServers, "third-party entry must be preserved");
+
+        const codexToml = readFileSync(join(fakeHome, ".codex", "config.toml"), "utf8");
+        assert.ok(!codexToml.includes("[mcp_servers.graphflow-old-toml]"), "legacy TOML alias must be removed");
+        assert.ok(codexToml.includes("[mcp_servers.graphflow]"), "canonical TOML section must exist after install");
+        assert.ok(codexToml.includes("[mcp_servers.other]"), "third-party TOML section must be preserved");
+      } finally {
+        rmSync(fakeHome, { recursive: true, force: true });
+      }
+    });
+
+    check("Legacy prune clears stale leftovers for agents that are no longer installed", () => {
+      const fakeHome = mkdtempSync(join(tmpdir(), "gf-prune-gone-"));
+      try {
+        // Only cursor is detected. Codex has no markers here, but its shared
+        // ~/.agents/skills dir (marker-free) still holds a stale skill.
+        mkdirSync(join(fakeHome, ".cursor"), { recursive: true });
+        mkdirSync(join(fakeHome, ".agents", "skills", "graphflow"), { recursive: true });
+        writeFileSync(join(fakeHome, ".agents", "skills", "graphflow", "SKILL.md"), "stale skill", "utf8");
+
+        const report = installAllAgents({ homeDir: fakeHome, appDataDir: join(fakeHome, "appdata"), localAppDataDir: join(fakeHome, "localappdata") });
+        assert.ok(
+          report.results.some((r) => r.status === "removed" && (r.message ?? "").includes("agent not installed")),
+          "prune must report stale-agent cleanup"
+        );
+        assert.ok(
+          !existsSync(join(fakeHome, ".agents", "skills", "graphflow")),
+          "stale skill leftover for undetected agent must be removed"
+        );
+      } finally {
+        rmSync(fakeHome, { recursive: true, force: true });
+      }
+    });
+
+    check("Install with pruneLegacy:false leaves legacy alias keys in place", () => {
+      const fakeHome = mkdtempSync(join(tmpdir(), "gf-noprune-home-"));
+      try {
+        mkdirSync(join(fakeHome, ".cursor"), { recursive: true });
+        writeFileSync(
+          join(fakeHome, ".cursor", "mcp.json"),
+          JSON.stringify({
+            mcpServers: {
+              "graphflow-old": { command: "node", args: ["/old/graphflow/dist/mcp-server.js"] },
+            },
+          }),
+          "utf8"
+        );
+
+        installAllAgents({ homeDir: fakeHome, appDataDir: join(fakeHome, "appdata"), localAppDataDir: join(fakeHome, "localappdata"), pruneLegacy: false });
+        const cursorMcp = JSON.parse(readFileSync(join(fakeHome, ".cursor", "mcp.json"), "utf8"));
+        assert.ok("graphflow-old" in cursorMcp.mcpServers, "alias must survive with pruneLegacy:false");
+        assert.ok(cursorMcp.mcpServers.graphflow, "canonical entry must still be registered");
       } finally {
         rmSync(fakeHome, { recursive: true, force: true });
       }

@@ -161,6 +161,7 @@ export {
   buildAgentProfiles,
   detectInstalledAgents,
   installAllAgents,
+  pruneLegacyRegistrations,
   uninstallAllAgents,
   type AgentInstallItemResult,
   type AgentMcpTarget,
