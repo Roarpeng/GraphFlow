@@ -3,7 +3,8 @@
  * GraphFlow 3.1 — Pure Token-First Surgical CLI (`src/cli.ts`)
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
   detectInstalledAgents,
   installAllAgents,
@@ -115,7 +116,22 @@ async function main(): Promise<void> {
     } catch {
       payload = {};
     }
-    const hookRoot = typeof payload.cwd === "string" && payload.cwd ? payload.cwd : rootDir;
+    // The hook payload's cwd may be any subdirectory of the workspace; walk up
+    // to the nearest ancestor that already owns a `.graphflow` store so events
+    // land in the workspace root instead of spawning scattered stores.
+    const resolveHookRoot = (startDir: string): string => {
+      let dir = startDir;
+      for (let i = 0; i < 6; i++) {
+        if (existsSync(join(dir, ".graphflow"))) return dir;
+        const parent = dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
+      return startDir;
+    };
+    const hookRoot = resolveHookRoot(
+      typeof payload.cwd === "string" && payload.cwd ? payload.cwd : rootDir
+    );
     if (sub === "pre-tool" || sub === "PreToolUse" || sub === "preToolUse") {
       const res = interceptPreToolUse(
         payload as unknown as Parameters<typeof interceptPreToolUse>[0],

@@ -14,6 +14,7 @@ import {
   executeSurgicalEdit,
   executeSurgicalRead,
   executeV3ToolCall,
+  evaluatePostEditHabits,
   foldFileSkeleton,
   getWorkspaceAstIndex,
   interceptPostToolUse,
@@ -709,6 +710,104 @@ async function runAllTests(): Promise<void> {
         habitEdit.content[0]!.text.includes("[co-edit-habit]"),
         "Editing src/types.ts alone must warn that it is habitually co-edited with src/resolver.ts"
       );
+    });
+
+    check("Macro Engine hardening: single-command habits, interleaved pipelines, noise filter & long-running auto-run guard", () => {
+      const mroot = mkdtempSync(join(tmpdir(), "gf-macro-reg-"));
+      try {
+        // Noise commands are never persisted (they would pollute the 500-event log).
+        recordTrajectoryAndMine(mroot, {
+          sessionId: "n1",
+          kind: "exec",
+          key: "git status",
+          items: ["git status"],
+          ok: true,
+        });
+        assert.ok(
+          !existsSync(join(mroot, ".graphflow", "trajectories.jsonl")),
+          "Noise commands like `git status` must not be recorded into trajectories"
+        );
+
+        // A read interleaved between two execs must not hide the exec pair.
+        for (const s of ["p1", "p2"]) {
+          recordTrajectoryAndMine(mroot, {
+            sessionId: s,
+            kind: "exec",
+            key: "python tools/devctl.py up gateway",
+            items: ["python tools/devctl.py up gateway"],
+            ok: true,
+          });
+          recordTrajectoryAndMine(mroot, {
+            sessionId: s,
+            kind: "read",
+            key: "src/a.ts",
+            items: ["src/a.ts"],
+            ok: true,
+          });
+          recordTrajectoryAndMine(mroot, {
+            sessionId: s,
+            kind: "exec",
+            key: "python tools/devctl.py up web",
+            items: ["python tools/devctl.py up web"],
+            ok: true,
+          });
+        }
+        const pipeMacro = loadMacroStore(mroot).macros.find(
+          (m) => m.kind === "command-pipeline" && m.steps.length === 2
+        );
+        assert.ok(
+          pipeMacro,
+          "An exec pair separated by a read must still compile into a 2-step command pipeline"
+        );
+        const pipeScript = readFileSync(join(mroot, pipeMacro.scriptPath!), "utf8");
+        assert.ok(
+          pipeScript.includes("cwd: ROOT"),
+          "Generated pipeline script must pin its working directory via cwd: ROOT"
+        );
+
+        // A single FIXED command repeated twice is itself a habit (1-step pipeline).
+        for (const s of ["s1", "s2"]) {
+          recordTrajectoryAndMine(mroot, {
+            sessionId: s,
+            kind: "exec",
+            key: "npm run build",
+            items: ["npm run build"],
+            ok: true,
+          });
+        }
+        const singleMacro = loadMacroStore(mroot).macros.find(
+          (m) => m.kind === "command-pipeline" && m.steps.length === 1 && m.steps[0] === "npm run build"
+        );
+        assert.ok(
+          singleMacro,
+          "A fixed single command repeated 2x must compile into a 1-step pipeline macro"
+        );
+
+        // Server-like directory-verify habits are hinted, never auto-executed.
+        for (const s of ["v1", "v2"]) {
+          recordTrajectoryAndMine(mroot, {
+            sessionId: s,
+            kind: "edit",
+            key: "src/a.ts",
+            items: ["src/a.ts"],
+            ok: true,
+          });
+          recordTrajectoryAndMine(mroot, {
+            sessionId: s,
+            kind: "exec",
+            key: "npm run dev",
+            items: ["npm run dev"],
+            ok: true,
+          });
+        }
+        const habitVerdict = evaluatePostEditHabits(mroot, ["src/a.ts"]);
+        assert.ok(
+          habitVerdict.autoVerifySummary?.includes("auto-run skipped"),
+          `Long-running verify commands must be hinted, not auto-run (got: ${habitVerdict.autoVerifySummary})`
+        );
+      } finally {
+        rmSync(mroot, { recursive: true, force: true });
+      }
     });
 
     check("Host Hook Interceptor: PreToolUse folds >250L raw Read into AST Skeleton & PostToolUse dehydrates Bash", () => {

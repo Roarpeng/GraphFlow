@@ -30,6 +30,7 @@ import { dehydrateCommandOutput, resolveAffectedTests } from "./dehydrator.js";
 import {
   evaluatePostEditHabits,
   findMatchingMacroHint,
+  isNoiseCommand,
   recordTrajectoryAndMine,
 } from "./macro-engine.js";
 import { executeSurgicalRead, getWorkspaceAstIndex } from "./slicer.js";
@@ -42,6 +43,10 @@ export interface HostToolUsePayload {
     stdout?: string;
     stderr?: string;
     exit_code?: number;
+    /** Host-dependent aliases tolerated at parse time (ZCode uses `exitCode`). */
+    exitCode?: number;
+    code?: number;
+    isError?: boolean;
     output?: string;
   };
   cwd?: string;
@@ -283,9 +288,26 @@ export function interceptPostToolUse(
     const command = typeof input.command === "string" ? input.command.trim() : "";
     const stdout = resp.stdout ?? resp.output ?? "";
     const stderr = resp.stderr ?? "";
-    const exitCode = typeof resp.exit_code === "number" ? resp.exit_code : 0;
+    // Hosts spell the exit code differently; tolerate the common aliases and
+    // treat an explicit isError flag as failure.
+    const exitCode =
+      typeof resp.exit_code === "number"
+        ? resp.exit_code
+        : typeof resp.exitCode === "number"
+          ? resp.exitCode
+          : typeof resp.code === "number"
+            ? resp.code
+            : resp.isError === true
+              ? 1
+              : 0;
 
     if (!command) {
+      return { intercepted: false, action: "noop", hookProtocolOutput: {} };
+    }
+
+    // One-off inspection commands (cd/ls/git status ...) carry no habit signal;
+    // skip dehydration and recording entirely so the trajectory log stays clean.
+    if (isNoiseCommand(command)) {
       return { intercepted: false, action: "noop", hookProtocolOutput: {} };
     }
 

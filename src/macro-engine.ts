@@ -176,11 +176,12 @@ function writeStandaloneMacroScript(rootDir: string, macro: CompiledMacro): stri
       `#!/usr/bin/env node`,
       `// Auto-compiled by GraphFlow 3.0 Macro Engine (${macro.id}: ${macro.description})`,
       `import { spawnSync } from "node:child_process";`,
+      `const ROOT = ${JSON.stringify(rootDir)}; // pin cwd so relative-path steps resolve`,
       `const steps = ${JSON.stringify(macro.steps, null, 2)};`,
       `const start = Date.now();`,
       `for (let i = 0; i < steps.length; i++) {`,
       `  const cmd = steps[i];`,
-      `  const res = spawnSync(cmd, { shell: true, encoding: "utf8" });`,
+      `  const res = spawnSync(cmd, { shell: true, encoding: "utf8", cwd: ROOT });`,
       `  if (res.status !== 0) {`,
       `    console.error(\`FAIL [step \${i + 1}/\${steps.length}] \${cmd}\\n\${(res.stderr || res.stdout || "").slice(0, 1200)}\`);`,
       `    process.exit(res.status ?? 1);`,
@@ -193,10 +194,11 @@ function writeStandaloneMacroScript(rootDir: string, macro: CompiledMacro): stri
       `#!/usr/bin/env node`,
       `// Auto-compiled Parameterized Habit Tool (${macro.id}: ${macro.description})`,
       `import { spawnSync } from "node:child_process";`,
+      `const ROOT = ${JSON.stringify(rootDir)}; // pin cwd so relative-path steps resolve`,
       `const template = ${JSON.stringify(macro.steps[0] ?? "")};`,
       `const args = process.argv.slice(2);`,
       `const cmd = template.replace(/\\{\\{arg(\\d+)\\}\\}/g, (_, idx) => args[Number(idx) - 1] ?? "");`,
-      `const res = spawnSync(cmd, { shell: true, encoding: "utf8" });`,
+      `const res = spawnSync(cmd, { shell: true, encoding: "utf8", cwd: ROOT });`,
       `if (res.status !== 0) {`,
       `  console.error(res.stderr || res.stdout);`,
       `  process.exit(res.status ?? 1);`,
@@ -276,6 +278,21 @@ export function extractCommandTemplate(cmd: string): {
   };
 }
 
+/**
+ * One-off inspection commands are not habits. Recording them would pollute the
+ * capped (500-event) trajectory log and evict real signal, so they are dropped
+ * at the single choke point every recorder funnels through.
+ */
+const NOISE_CMD_RE =
+  /^(cd|ls|dir|pwd|echo|cat|type|which|where|head|tail|wc|tree|file|stat|open|code|less|more|true|false|exit|set|export|source)\b/i;
+const NOISE_GIT_RE =
+  /^git\s+(status|log|diff|branch|show|rev-parse|config|add|commit|restore|stash)\b/i;
+
+export function isNoiseCommand(cmd: string): boolean {
+  const trimmed = cmd.trim();
+  return NOISE_CMD_RE.test(trimmed) || NOISE_GIT_RE.test(trimmed);
+}
+
 export function recordTrajectoryAndMine(
   rootDir: string,
   event: Omit<TrajectoryEvent, "ts"> & { ts?: string },
@@ -289,6 +306,12 @@ export function recordTrajectoryAndMine(
     items: event.items,
     ok: event.ok,
   };
+
+  // Noise exec commands are never persisted — no macro or habit may ever be
+  // compiled from them.
+  if (event.kind === "exec" && isNoiseCommand(event.key)) {
+    return { recorded: fullEvent, newlyCompiled: [], habits: loadUserHabits(rootDir) };
+  }
 
   mkdirSync(join(rootDir, ".graphflow"), { recursive: true });
   const path = trajectoryFilePath(rootDir);
@@ -370,27 +393,29 @@ export function mineAndCompileMacros(
     newlyCompiled.push(macro);
   }
 
-  // ── 2. Mine `command-pipeline` patterns (consecutive `exec -> exec` pairs) ──
+  // ── 2. Mine `command-pipeline` patterns (`exec -> exec` pairs in per-session exec order) ──
+  // Pairs are counted over the per-session exec subsequence, not raw adjacency:
+  // a read/edit interleaved between two execs no longer hides the pair.
+  const execEvents = history.filter((ev) => ev.kind === "exec" && ev.ok && ev.items[0]);
   const execPipelineCounts = new Map<string, { cmds: string[]; count: number }>();
-  for (let i = 0; i + 1 < history.length; i++) {
-    const a = history[i]!;
-    const b = history[i + 1]!;
-    if (
-      a.sessionId === b.sessionId &&
-      a.kind === "exec" &&
-      b.kind === "exec" &&
-      a.ok &&
-      b.ok &&
-      a.items[0] &&
-      b.items[0] &&
-      a.items[0] !== b.items[0]
-    ) {
-      const cmds = [a.items[0], b.items[0]];
+  for (let i = 0; i + 1 < execEvents.length; i++) {
+    const a = execEvents[i]!;
+    const b = execEvents[i + 1]!;
+    const aCmd = a.items[0]!;
+    const bCmd = b.items[0]!;
+    if (a.sessionId === b.sessionId && aCmd !== bCmd) {
+      const cmds = [aCmd, bCmd];
       const key = cmds.join(" && ");
       const entry = execPipelineCounts.get(key) ?? { cmds, count: 0 };
       entry.count += 1;
       execPipelineCounts.set(key, entry);
     }
+  }
+  const singleCmdCounts = new Map<string, { cmd: string; count: number }>();
+  for (const ev of execEvents) {
+    const entry = singleCmdCounts.get(ev.items[0]!) ?? { cmd: ev.items[0]!, count: 0 };
+    entry.count += 1;
+    singleCmdCounts.set(ev.items[0]!, entry);
   }
 
   for (const [, pipe] of execPipelineCounts) {
@@ -409,6 +434,38 @@ export function mineAndCompileMacros(
       steps: pipe.cmds,
       triggers: pipe.cmds,
       occurrences: pipe.count,
+      createdAt: new Date().toISOString(),
+    };
+    macro.scriptPath = writeStandaloneMacroScript(rootDir, macro);
+    macrosById.set(id, macro);
+    newlyCompiled.push(macro);
+  }
+
+  // A single FIXED command repeated N times is itself a habit. Without this rule
+  // such commands fell through BOTH the >=2-step pipeline rule and the
+  // parameterized-template rule (which requires varying args), so launch/dev
+  // commands like `python tools/devctl.py up gateway` never compiled.
+  for (const [, single] of singleCmdCounts) {
+    const needsStrongerSignal = extractCommandTemplate(single.cmd).hasParams;
+    if (single.count < (needsStrongerSignal ? minOccurrences + 1 : minOccurrences)) continue;
+    const alreadyCovered = Array.from(macrosById.values()).some(
+      (m) => m.kind === "command-pipeline" && m.steps.includes(single.cmd)
+    );
+    if (alreadyCovered) continue;
+    const id = `pipe_${shortHash(single.cmd)}`;
+    const existing = macrosById.get(id);
+    if (existing) {
+      existing.occurrences = Math.max(existing.occurrences, single.count);
+      continue;
+    }
+    const macro: CompiledMacro = {
+      id,
+      name: `Command Pipeline (1 step, ${single.count}x habit)`,
+      kind: "command-pipeline",
+      description: `Run [${single.cmd}] locally with dehydrated output`,
+      steps: [single.cmd],
+      triggers: [single.cmd],
+      occurrences: single.count,
       createdAt: new Date().toISOString(),
     };
     macro.scriptPath = writeStandaloneMacroScript(rootDir, macro);
@@ -461,10 +518,13 @@ export function mineAndCompileMacros(
   const coEditCounts = new Map<string, { fileA: string; fileB: string; count: number }>();
   const dirVerifyCounts = new Map<string, { dirPrefix: string; command: string; count: number }>();
 
-  for (let i = 0; i + 1 < history.length; i++) {
-    const a = history[i]!;
-    const b = history[i + 1]!;
-    if (a.sessionId !== b.sessionId || !a.ok || !b.ok) continue;
+  // Pairs are counted over the edit/exec subsequence per session, not raw
+  // adjacency — an interleaved read no longer hides a real edit->exec habit.
+  const editExecEvents = history.filter((ev) => (ev.kind === "edit" || ev.kind === "exec") && ev.ok);
+  for (let i = 0; i + 1 < editExecEvents.length; i++) {
+    const a = editExecEvents[i]!;
+    const b = editExecEvents[i + 1]!;
+    if (a.sessionId !== b.sessionId) continue;
 
     // Habit A: Co-Edited Files (`edit A -> edit B`)
     if (a.kind === "edit" && b.kind === "edit") {
@@ -683,6 +743,36 @@ export function executeMacro(
 }
 
 /**
+ * Heuristic guard — server-like / long-running commands must never be
+ * AUTO-executed by the post-edit verify habit (they would block the edit flow
+ * or spawn dev servers after every save). They stay recorded as habits; only
+ * the auto-run is suppressed in favor of a hint.
+ */
+function looksLongRunning(cmd: string): boolean {
+  const c = cmd.toLowerCase();
+  if (/[&|]\s*$/.test(cmd.trim())) return true;
+  return [
+    "quiet_start",
+    "devctl.py up",
+    "devctl up",
+    "npm run dev",
+    "npm start",
+    "yarn dev",
+    "pnpm dev",
+    "uvicorn",
+    "flask run",
+    "vite",
+    "next dev",
+    "next start",
+    "dotnet run",
+    "cargo run",
+    "go run",
+    "serve ",
+    "watch ",
+  ].some((frag) => c.includes(frag));
+}
+
+/**
  * Evaluate learned user habits after an edit:
  *   1. Checks if any edited file has a high-confidence Co-Edit partner that wasn't touched yet.
  *   2. Checks if the edited directory has a learned Post-Edit Verify command and runs it automatically!
@@ -714,6 +804,13 @@ export function evaluatePostEditHabits(
       const dir = dirname(file).replace(/\\/g, "/");
       const matchedHabit = habits.dirVerifyCommands.find((dv) => dv.dirPrefix === dir);
       if (matchedHabit) {
+        // Never auto-run server-like commands after an edit — hint instead.
+        if (looksLongRunning(matchedHabit.command)) {
+          autoVerifySummary =
+            `Auto-Verify Habit [${matchedHabit.dirPrefix} -> ${matchedHabit.command}]: ` +
+            `auto-run skipped (long-running/server-like command); invoke it explicitly via gf_macro.`;
+          break;
+        }
         const res = execAndDehydrate({ rootDir, command: matchedHabit.command, timeoutMs: 15_000 });
         autoVerifySummary = `Auto-Verify Habit [${matchedHabit.dirPrefix} -> ${matchedHabit.command}]: ${res.text}`;
         break;
