@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GraphFlow 外科手术式代码引擎",
+    "description": "为 DeepSeek Harness 注册 GraphFlow 的 4 个省 Token MCP 工具（gf_read、gf_edit、gf_exec、gf_macro），并附带 GraphFlow 技能。"
+  }
+}

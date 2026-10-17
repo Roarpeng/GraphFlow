@@ -1,25 +1,44 @@
 /**
- * GraphFlow 3.1.0 — Pure Token-First Surgical Engine Public Entrypoint (`src/index.ts`)
+ * GraphFlow 3.5.0 — Pure Token-First Surgical Engine Public Entrypoint (`src/index.ts`)
  */
 
 export {
   SUPPORTED_SOURCE_EXTS,
   analyzeSourceFile,
   extractStructFields,
+  inferReceiverTypeIndex,
+  inferReceiverTypes,
+  isSubclassOf,
   parseCCpp,
   parseCSharp,
+  parseClassParents,
   parseGo,
   parsePython,
   parseRust,
   parseWithStructuralScanner,
+  resolveReceiverType,
   resolveRelativeImportPath,
+  sourceLanguageFamily,
+  splitQualifiedSymbolName,
   type AstBackend,
   type AstCallSite,
+  type AstEngine,
   type AstImport,
   type AstSymbol,
   type FileAstAnalysis,
+  type ReceiverTypeAssignment,
+  type ReceiverTypeIndex,
+  type SourceLanguageFamily,
   type SymbolKind,
 } from "./ast-engine.js";
+
+export {
+  analyzeWithTreeSitter,
+  isTreeSitterAvailable,
+  parseTreeSitterFile,
+  treeSitterFamilyForPath,
+  type TreeSitterFamily,
+} from "./tree-sitter-engine.js";
 
 export {
   CHINESE_TYPO_NORMALIZATION,
@@ -47,10 +66,12 @@ export {
 
 export {
   computeBlastRadius,
+  createWorkspaceTypeHierarchy,
   formatBlastRadiusText,
   type CallSiteSnippet,
   type ImporterSite,
   type SymbolBlastRadius,
+  type WorkspaceTypeHierarchy,
 } from "./blast-radius.js";
 
 export {
@@ -156,38 +177,94 @@ export {
   CURSOR_RULE_MDC_CONTENT,
   GRAPHFLOW_BLOCK_BEGIN,
   GRAPHFLOW_BLOCK_END,
+  GRAPHFLOW_DSH_BEGIN,
+  GRAPHFLOW_DSH_END,
   MANAGED_INSTRUCTION_BLOCK,
   getSkillMdContent,
   buildAgentProfiles,
   detectInstalledAgents,
+  getAgentRegistrationStatus,
   installAllAgents,
   pruneLegacyRegistrations,
+  removeHostHook,
   uninstallAllAgents,
   type AgentInstallItemResult,
   type AgentMcpTarget,
   type AgentProfile,
+  type AgentRegistrationPaths,
+  type AgentRegistrationStatus,
+  type HookKind,
   type InstallAllAgentsOptions,
   type InstallAllAgentsReport,
   type McpConfigFormat,
   type McpServersKey,
+  type UninstallAllAgentsOptions,
 } from "./agent-installer.js";
+
+export {
+  createTsSemanticProvider,
+  disposeAllTsSemanticProviders,
+  disposeTsSemanticProvider,
+  getTsSemanticProvider,
+  getTypeScriptVersion,
+  isTypeScriptAvailable,
+  type TsCallTargetResolution,
+  type TsSemanticLocation,
+  type TsSemanticProvider,
+  type TsSemanticProviderOptions,
+} from "./ts-semantic.js";
+
+export {
+  LSP_COMMAND_PRESETS,
+  createLspBridge,
+  findAvailableLspPreset,
+  getLspCommandPresets,
+  isCommandAvailable,
+  type LspBridge,
+  type LspBridgeOptions,
+  type LspCommandPreset,
+  type LspHover,
+  type LspLocation,
+  type LspPosition,
+  type LspRange,
+} from "./lsp-bridge.js";
+
+export {
+  SEMANTIC_CONFIDENCE_MIN,
+  clearSemanticIndexCache,
+  getSemanticIndex,
+  semanticBaseType,
+  stripJsonComments,
+  type SemanticImportEdge,
+  type SemanticIndex,
+  type SemanticIndexStats,
+  type SemanticModuleNode,
+  type SemanticResolutionReason,
+  type SemanticResolvedCall,
+  type SemanticSymbolDecl,
+  type SemanticWorkspaceSource,
+} from "./semantic-index.js";
 
 export {
   SUPPORTED_DOC_EXTS,
   buildDocCodeLinks,
   buildKnowledgeGraphData,
+  docCodeLinkId,
   extractDocxText,
   extractPdfText,
   findLinkedDocsForSymbol,
   generateCrossAgentBrief,
   generateKnowledgeGraphHtml,
   loadCrossAgentBriefState,
+  loadDocLinkFeedback,
   parseProjectDocument,
   recordCrossAgentActivity,
+  recordDocLinkFeedback,
   scanWorkspaceDocuments,
   type CrossAgentActivityEntry,
   type CrossAgentBriefState,
   type DocCodeLink,
+  type DocLinkFeedback,
   type DocSection,
   type KnowledgeGraphData,
   type KnowledgeGraphEdge,

@@ -20,11 +20,21 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { extname, join, relative } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
 import { inflateRawSync, inflateSync } from "node:zlib";
+import {
+  inferReceiverTypeIndex,
+  isSubclassOf,
+  parseClassParents,
+  resolveReceiverType,
+  resolveRelativeImportPath,
+  sourceLanguageFamily,
+  type FileAstAnalysis,
+  type SourceLanguageFamily,
+} from "./ast-engine.js";
 import { loadMacroStore } from "./macro-engine.js";
 import type { getWorkspaceAstIndex } from "./slicer.js";
-import { tokenizeBilingualQuery } from "./tokenizer.js";
+import { segmentChinese, toPinyin, tokenizeEnglish } from "./tokenizer.js";
 
 export const SUPPORTED_DOC_EXTS = new Set([
   ".md",
@@ -85,7 +95,7 @@ export interface KnowledgeGraphNode {
 export interface KnowledgeGraphEdge {
   source: string;
   target: string;
-  kind: "imports" | "calls" | "doc-links-code" | "co-edit";
+  kind: "defines" | "imports" | "calls" | "doc-links-code" | "co-edit";
   label?: string;
 }
 
@@ -238,6 +248,31 @@ function extractCandidateSymbolsFromDocText(text: string): string[] {
 }
 
 /**
+ * Extracts raw (unexpanded) concept tokens from prose: English words + morphological stems,
+ * plus segmented CJK words and their Pinyin keys.
+ *
+ * Deliberately does NOT use `tokenizeBilingualQuery` here: its synonym/glossary expansion turns
+ * a single symbol (`cancel_order`) or heading (`Payment Callback`) into a huge vocabulary blob
+ * (`cancel`, `abort`, `refund`, `return`, `payment`, `pay`, ...) so almost every doc<->code pair
+ * overlaps. Raw tokens keep concept links anchored to what the document actually says.
+ */
+function extractConceptTokens(text: string): string[] {
+  const tokens = new Set<string>();
+  const en = tokenizeEnglish(text);
+  for (const raw of [...en.words, ...en.stems]) {
+    const token = raw.toLowerCase();
+    if (token.length >= 2) tokens.add(token);
+  }
+  const zh = segmentChinese(text);
+  for (const word of zh.words) {
+    tokens.add(word);
+    const pinyin = toPinyin(word);
+    if (pinyin) tokens.add(pinyin);
+  }
+  return Array.from(tokens);
+}
+
+/**
  * Parses a project document (`.md`, `.html`, `.xml`, `.docx`, `.pdf`) into structured sections.
  */
 export function parseProjectDocument(relPath: string, absPath: string): DocSection[] {
@@ -299,10 +334,7 @@ export function parseProjectDocument(relPath: string, absPath: string): DocSecti
     const body = currentBuf.join("\n").trim();
     if (!body && sections.length > 0) return;
     const fullText = `${currentTitle}\n${body}`;
-    const qPlan = tokenizeBilingualQuery(fullText);
-    const bilingualTokens = Array.from(
-      new Set([...qPlan.englishWords, ...qPlan.englishStems, ...qPlan.chineseWords])
-    );
+    const bilingualTokens = extractConceptTokens(fullText);
     sections.push({
       docPath: relPath,
       format,
@@ -391,8 +423,354 @@ export function scanWorkspaceDocuments(rootDir: string, maxDocs = 200): DocSecti
 }
 
 /**
+ * High-frequency engineering vocabulary that is NOT a distinctive concept. Concept-only links
+ * built solely from these tokens are noise — this is the classic over-link bug where a
+ * "Payment Callback" section matched `cancel_order` through `[cancel, order, refund, return]`.
+ * Static (language-agnostic) filtering is complemented by dynamic DF filtering in
+ * `buildDocCodeLinks`, so project-specific common words are filtered too.
+ */
+const GENERIC_DOC_CONCEPT_TOKENS = new Set<string>([
+  // English words (raw + stemmed forms used by `tokenizeEnglish`)
+  "add","added","adding","all","and","api","app","apply","array","as","async","auth",
+  "boolean","body","buffer","build","by","cache","call","callback","called","caller","calls",
+  "cancel","canceled","canceling","cancellation","cancelled","cancels","case","change","changed",
+  "changes","check","checked","class","client","close","closed","code","comment","common",
+  "component","config","configuration","content","count","create","created","current","customer",
+  "data","date","debug","default","delete","deleted","description","detail","details","doc","docs",
+  "each","else","empty","end","entry","error","errors","event","events","example","exec","execute",
+  "export","fail","failed","failure","false","feature","field","file","files","find","first","fix",
+  "fixed","flow","form","from","function","functions","get","global","handle","handler","handling",
+  "head","hook","http","id","ids","import","index","info","init","input","integration","into","is",
+  "issue","item","items","just","key","keys","last","less","line","lines","link","list","load",
+  "loaded","local","log","logs","main","manager","map","max","message","messages","method","methods",
+  "min","module","more","msg","name","names","new","next","node","note","notes","notify",
+  "notification","null","number","object","old","on","open","opened","option","options","order",
+  "orders","other","out","output","overview","page","param","params","path","paths","pay","paid",
+  "payment","payments","per","prev","process","processed","processing","promise","query","read",
+  "refund","refunds","remove","removed","req","request","requests","res","response","responses",
+  "result","results","return","returned","returns","route","run","running","runs","same","sample",
+  "samples","save","saved","section","service","services","set","setting","settings","signin",
+  "signup","simple","source","spec","specs","start","started","state","status","stop","stopped",
+  "string","success","successful","summary","sync","system","tag","target","task","tasks","temp",
+  "test","tests","text","then","time","timestamp","todo","token","tokens","tool","tools","total",
+  "true","type","types","undefined","update","updated","url","use","used","user","users","using",
+  "validation","value","values","verify","via","version","webhook","webhooks","when","write",
+  "written","wx",
+  "ad","appl","authent","cach","cancell","chang","clos","creat","delet","descript","document",
+  "entri","execut","failur","follow","generat","handl","handled","inform","integr","issu","manag",
+  "messag","modul","nam","notif","queri","remov","respons","servic","sign","stat","stor","summar",
+  "task","tim","updat","valid","valu","verif","writ",
+  // Chinese stop concepts (the same generic vocabulary expressed in Chinese)
+  "订单","取消","支付","付款","收款","退款","结账","回调","通知","消息","处理","用户","客户","账号",
+  "账户","服务","管理","系统","数据","请求","响应","状态","错误","失败","成功","结果","输出","输入",
+  "文件","路径","名称","测试","文档","接口","配置","设置","功能","方法","函数","模块","代码","逻辑",
+  "实现","创建","修改","更新","删除","查询","获取","读取","验证","校验","检查","签名","登录","示例",
+  "说明","注意","流程",
+  // Pinyin keys of the generic Chinese concepts above
+  "dingdan","danju","quxiao","zuofei","chedan","tuidan","chexiao","guanbi","zhifu","fukuan",
+  "shoukuan","jiezhang","tuikuan","huidiao","tongzhi","xiaoxi","chuli","yonghu","kehu","zhanghao",
+  "zhanghu","fuwu","guanli","xitong","shuju","qingqiu","xiangying","zhuangtai","cuowu","shibai",
+  "chenggong","jieguo","shuchu","shuru","wenjian","lujing","mingcheng","ceshi","wendang","jiekou",
+  "peizhi","shezhi","gongneng","fangfa","hanshu","mokuai","daima","luoji","shixian","chuangjian",
+  "xiugai","gengxin","shanchu","chaxun","huoqu","duqu","yanzheng","jiaoyan","jiancha","qianming",
+  "denglu","shili","shuoming","zhuyi","liucheng",
+]);
+
+/** Explicit identifier mentions always outrank any concept-only overlap. */
+const EXPLICIT_REF_SCORE = 100;
+
+// ── Self-written BM25 / IDF retrieval + reciprocal-pruned graph pipeline ────────────────────
+const BM25_K1 = 1.2;
+const BM25_B = 0.75;
+/** Minimum BM25 concept score for a concept-only doc<->code candidate. */
+const CONCEPT_MIN_SCORE = 4;
+/** Minimum normalized confidence (score / (score + softness)) for concept-only links. */
+const CONCEPT_CONFIDENCE_MIN = 0.32;
+const CONCEPT_SCORE_SOFTNESS = 8;
+/** Keep concept candidates within this fraction of the symbol's best candidate (margin pruning). */
+const CONCEPT_MARGIN_RATIO = 0.72;
+/** Strongest concept-only sections retained per symbol (before global graph matching). */
+const MAX_CONCEPT_LINKS_PER_SYMBOL = 2;
+/** Reciprocal top-K lists: a concept link must be top-K on BOTH the section and symbol sides. */
+const RECIPROCAL_SECTION_TOP_K = 3;
+const PER_SECTION_LINK_LIMIT = 3;
+const PER_SYMBOL_LINK_LIMIT = 3;
+/** Default global cap on emitted doc<->code links (`GRAPHFLOW_DOC_LINKS_MAX` overrides). */
+const DEFAULT_DOC_LINKS_MAX = 400;
+const DOC_LINKS_MAX_ENV = "GRAPHFLOW_DOC_LINKS_MAX";
+const DOC_LINK_FEEDBACK_REL_PATH = ".graphflow/doc-link-feedback.json";
+
+// Field boosts for the section retrieval document.
+const SECTION_TITLE_BOOST = 2;
+const SECTION_EXPLICIT_ID_BOOST = 2.5;
+// Weights for the symbol retrieval query context.
+const SYMBOL_NAME_WEIGHT = 3;
+const SYMBOL_PARENT_WEIGHT = 1.5;
+const SYMBOL_SIGNATURE_WEIGHT = 0.8;
+const SYMBOL_DOC_WEIGHT = 1;
+const SYMBOL_PATH_WEIGHT = 0.3;
+const SYMBOL_IMPORT_WEIGHT = 0.2;
+
+function normalizeIdentifierKey(raw: string): string {
+  return raw.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, "");
+}
+
+interface SectionRetrievalData {
+  section: DocSection;
+  /** Field-weighted term frequencies: body 1x, title +2, explicit identifiers +2.5. */
+  tf: Map<string, number>;
+  length: number;
+  identifierKeys: Set<string>;
+}
+
+interface SymbolRetrievalData {
+  relFile: string;
+  symbol: FileAstAnalysis["symbols"][number];
+  /** Field-weighted query terms: name, parentClass, signature, comments/docstring, path, imports. */
+  weights: Map<string, number>;
+  identifierKey: string;
+  qualifiedIdentifierKey?: string;
+  normalizedName: string;
+}
+
+interface ConceptCandidate {
+  symbolIdx: number;
+  sectionIdx: number;
+  score: number;
+  confidence: number;
+  sharedTokens: string[];
+  link: DocCodeLink;
+}
+
+function addWeightedConceptTokens(
+  target: Map<string, number>,
+  text: string,
+  weight: number
+): void {
+  if (!text) return;
+  for (const token of extractConceptTokens(text)) {
+    if (token.length < 2) continue;
+    target.set(token, (target.get(token) ?? 0) + weight);
+  }
+}
+
+function buildSectionIdentifierKeys(sec: DocSection): Set<string> {
+  const identifierKeys = new Set<string>();
+  for (const identifier of sec.referencedIdentifiers) {
+    const fullKey = normalizeIdentifierKey(identifier);
+    if (fullKey.length >= 3) identifierKeys.add(fullKey);
+    for (const part of identifier.split(/[.#:/_\\-]+/)) {
+      const partKey = normalizeIdentifierKey(part);
+      if (partKey.length >= 3) identifierKeys.add(partKey);
+    }
+  }
+  return identifierKeys;
+}
+
+function buildSectionRetrievalData(sec: DocSection): SectionRetrievalData {
+  const tf = new Map<string, number>();
+  for (const raw of sec.bilingualTokens) {
+    const token = raw.toLowerCase();
+    if (token.length >= 2) tf.set(token, (tf.get(token) ?? 0) + 1);
+  }
+  // Manually constructed `DocSection`s may omit token payloads; derive from title+summary.
+  if (tf.size === 0) addWeightedConceptTokens(tf, `${sec.title}\n${sec.summary}`, 1);
+  // Field boosts: title + explicit identifier mentions are the highest-signal doc fields.
+  addWeightedConceptTokens(tf, sec.title, SECTION_TITLE_BOOST);
+  addWeightedConceptTokens(tf, sec.referencedIdentifiers.join(" "), SECTION_EXPLICIT_ID_BOOST);
+  let length = 0;
+  for (const value of tf.values()) length += value;
+  return {
+    section: sec,
+    tf,
+    length: Math.max(1, length),
+    identifierKeys: buildSectionIdentifierKeys(sec),
+  };
+}
+
+/**
+ * Extracts the symbol's local documentation context: the leading comment block (JSDoc / `//` /
+ * `#` / decorators) plus an immediately-following docstring or leading body comment.
+ * Bounded, line-based best-effort scan.
+ */
+function extractSymbolDocContext(content: string, oneBasedLine: number): string {
+  if (!content) return "";
+  const lines = content.split(/\r?\n/);
+  const parts: string[] = [];
+  let blankRun = 0;
+  for (let i = oneBasedLine - 2; i >= 0 && parts.length < 12; i--) {
+    const trimmed = (lines[i] ?? "").trim();
+    if (!trimmed) {
+      blankRun += 1;
+      if (blankRun > 1 || parts.length > 0) break;
+      continue;
+    }
+    blankRun = 0;
+    if (/^(?:\/\/|\/\*|\*|#|@|"""|''')/.test(trimmed)) {
+      parts.unshift(
+        trimmed
+          .replace(/^[/*#@\s]+/, "")
+          .replace(/\*\/\s*$/, "")
+          .trim()
+      );
+      continue;
+    }
+    break;
+  }
+  for (let i = oneBasedLine; i < Math.min(lines.length, oneBasedLine + 3); i++) {
+    const trimmed = (lines[i] ?? "").trim();
+    if (!trimmed) continue;
+    if (/^(?:"""|'''|\/\/|\*|\/\*\*)/.test(trimmed)) {
+      parts.push(
+        trimmed
+          .replace(/^(?:\/\/|\*|\/\*\*|"""|''')\s*/, "")
+          .replace(/"""|'''/g, "")
+          .trim()
+      );
+    }
+    break;
+  }
+  return parts.filter(Boolean).join("\n");
+}
+
+function buildSymbolRetrievalData(
+  relFile: string,
+  ast: FileAstAnalysis,
+  content: string,
+  symbol: FileAstAnalysis["symbols"][number]
+): SymbolRetrievalData {
+  const weights = new Map<string, number>();
+  addWeightedConceptTokens(weights, symbol.name, SYMBOL_NAME_WEIGHT);
+  if (symbol.parentClass) addWeightedConceptTokens(weights, symbol.parentClass, SYMBOL_PARENT_WEIGHT);
+  if (symbol.signature) addWeightedConceptTokens(weights, symbol.signature, SYMBOL_SIGNATURE_WEIGHT);
+  const docContext = extractSymbolDocContext(content, symbol.line);
+  if (docContext) addWeightedConceptTokens(weights, docContext, SYMBOL_DOC_WEIGHT);
+  addWeightedConceptTokens(
+    weights,
+    relFile.replace(/\.[^./]+$/, "").replace(/[\\/]+/g, " "),
+    SYMBOL_PATH_WEIGHT
+  );
+  for (const imp of ast.imports.slice(0, 10)) {
+    const moduleLeaf = imp.module.split("/").filter(Boolean).pop() ?? "";
+    if (moduleLeaf) addWeightedConceptTokens(weights, moduleLeaf, SYMBOL_IMPORT_WEIGHT);
+  }
+  const parent = symbol.parentClass;
+  return {
+    relFile,
+    symbol,
+    weights,
+    identifierKey: normalizeIdentifierKey(symbol.name),
+    ...(parent ? { qualifiedIdentifierKey: normalizeIdentifierKey(`${parent}.${symbol.name}`) } : {}),
+    normalizedName: symbol.name.toLowerCase().replace(/[^a-z0-9]/g, ""),
+  };
+}
+
+/** Resolves the global doc<->code link cap (`GRAPHFLOW_DOC_LINKS_MAX`, default 400). */
+function resolveDocLinksGlobalCap(): number {
+  const raw = process.env[DOC_LINKS_MAX_ENV];
+  if (raw !== undefined && raw !== "") {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed >= 1) return parsed;
+  }
+  return DEFAULT_DOC_LINKS_MAX;
+}
+
+function docLinkSortKey(link: DocCodeLink): string {
+  return `${link.docPath}\u0000${link.sectionTitle}\u0000${link.codeFile}\u0000${link.symbolName}`;
+}
+
+/** Deterministic doc<->code link id used by `.graphflow/doc-link-feedback.json`. */
+export function docCodeLinkId(
+  link: Pick<DocCodeLink, "docPath" | "sectionTitle" | "codeFile" | "symbolName">
+): string {
+  return `${link.docPath}#${link.sectionTitle}::${link.codeFile}#${link.symbolName}`;
+}
+
+/** Optional human feedback: accepted links are boosted, rejected links are suppressed. */
+export interface DocLinkFeedback {
+  accepted?: string[];
+  rejected?: string[];
+  tokenBoosts?: Record<string, number>;
+}
+
+function feedbackStringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const list = value
+    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .map((item) => item.trim());
+  return list.length > 0 ? list : undefined;
+}
+
+/** Reads (never writes) `.graphflow/doc-link-feedback.json`; absent/invalid input yields `{}`. */
+export function loadDocLinkFeedback(rootDir: string): DocLinkFeedback {
+  const feedbackPath = join(rootDir, ...DOC_LINK_FEEDBACK_REL_PATH.split("/"));
+  if (!existsSync(feedbackPath)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(feedbackPath, "utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object") return {};
+    const record = parsed as Record<string, unknown>;
+    const feedback: DocLinkFeedback = {};
+    const accepted = feedbackStringList(record.accepted);
+    if (accepted) feedback.accepted = accepted;
+    const rejected = feedbackStringList(record.rejected);
+    if (rejected) feedback.rejected = rejected;
+    if (record.tokenBoosts && typeof record.tokenBoosts === "object") {
+      const boosts: Record<string, number> = {};
+      for (const [token, rawBoost] of Object.entries(
+        record.tokenBoosts as Record<string, unknown>
+      )) {
+        if (typeof rawBoost === "number" && Number.isFinite(rawBoost)) boosts[token] = rawBoost;
+      }
+      if (Object.keys(boosts).length > 0) feedback.tokenBoosts = boosts;
+    }
+    return feedback;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Explicit write helper for doc-link feedback (the linker itself only ever reads the file).
+ * Merges `accepted` / `rejected` link ids and per-token boosts into the existing store.
+ */
+export function recordDocLinkFeedback(rootDir: string, patch: DocLinkFeedback): DocLinkFeedback {
+  const existing = loadDocLinkFeedback(rootDir);
+  const mergeList = (a: string[] | undefined, b: string[] | undefined): string[] | undefined => {
+    const merged = [...new Set([...(a ?? []), ...(b ?? [])])];
+    return merged.length > 0 ? merged : undefined;
+  };
+  const merged: DocLinkFeedback = {};
+  const accepted = mergeList(existing.accepted, patch.accepted);
+  if (accepted) merged.accepted = accepted;
+  const rejected = mergeList(existing.rejected, patch.rejected);
+  if (rejected) merged.rejected = rejected;
+  const boosts: Record<string, number> = {
+    ...(existing.tokenBoosts ?? {}),
+    ...(patch.tokenBoosts ?? {}),
+  };
+  if (Object.keys(boosts).length > 0) merged.tokenBoosts = boosts;
+  const feedbackPath = join(rootDir, ...DOC_LINK_FEEDBACK_REL_PATH.split("/"));
+  mkdirSync(dirname(feedbackPath), { recursive: true });
+  writeFileSync(feedbackPath, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
+  return merged;
+}
+
+/**
  * Builds bidirectional links between project documents (`.md`, `.docx`, `.xml`, `.html`, `.pdf`)
  * and code symbols in the workspace AST index.
+ *
+ * Pipeline (self-written, dependency-free):
+ *  1. Explicit identifier / `Class.method` mentions are authoritative (score 100) and exempt
+ *     from concept pruning (they only respect the global cap).
+ *  2. Concept candidates are scored with BM25 over field-weighted section terms (title and
+ *     explicit ids boosted), IDF from workspace document frequency, and a PMI-style rare-token
+ *     pair bonus. Generic tokens (static stoplist + dynamic DF cutoffs) carry no weight.
+ *  3. Graph pruning: reciprocal top-K (a candidate must rank on BOTH the section and symbol
+ *     side) -> per-symbol margin -> greedy maximum-weight matching with section/symbol caps.
+ *  4. `GRAPHFLOW_DOC_LINKS_MAX` (default 400) caps the global edge count; low-confidence
+ *     concept links are dropped.
+ *  5. Optional read-only feedback from `.graphflow/doc-link-feedback.json` can boost accepted
+ *     links / suppress rejected ones (write via `recordDocLinkFeedback`).
  */
 export function buildDocCodeLinks(
   index: ReturnType<typeof getWorkspaceAstIndex>,
@@ -401,58 +779,343 @@ export function buildDocCodeLinks(
   const sections = docSections ?? scanWorkspaceDocuments(index.rootDir);
   if (sections.length === 0) return [];
 
-  const links: DocCodeLink[] = [];
-
+  const sectionData = sections.map(buildSectionRetrievalData);
+  const symbolData: SymbolRetrievalData[] = [];
   for (const relFile of index.getFiles()) {
     const fileData = index.getFileAnalysis(relFile);
     if (!fileData) continue;
-
     for (const sym of fileData.ast.symbols) {
-      const symPlan = tokenizeBilingualQuery(sym.name);
-      const symTokens = new Set([
-        ...symPlan.englishWords,
-        ...symPlan.englishStems,
-        ...symPlan.chineseWords,
-      ]);
+      symbolData.push(buildSymbolRetrievalData(relFile, fileData.ast, fileData.content, sym));
+    }
+  }
+  if (symbolData.length === 0) return [];
 
-      for (const sec of sections) {
-        let score = 0;
-        const reasons: string[] = [];
+  // ── Workspace document frequency: sections are the retrieval corpus, symbols the query corpus.
+  const sectionDf = new Map<string, number>();
+  for (const sd of sectionData) {
+    for (const token of sd.tf.keys()) {
+      sectionDf.set(token, (sectionDf.get(token) ?? 0) + 1);
+    }
+  }
+  const symbolDf = new Map<string, number>();
+  for (const sd of symbolData) {
+    for (const token of sd.weights.keys()) {
+      symbolDf.set(token, (symbolDf.get(token) ?? 0) + 1);
+    }
+  }
+  const sectionCount = sectionData.length;
+  const symbolCount = symbolData.length;
+  const avgSectionLength =
+    sectionData.reduce((sum, sd) => sum + sd.length, 0) / Math.max(1, sectionCount);
 
-        if (sec.referencedIdentifiers.includes(sym.name)) {
-          score += 30;
-          reasons.push(`explicit ref \`${sym.name}\``);
-        }
+  /**
+   * Concept token eligibility: the static generic stoplist plus dynamic workspace DF cutoffs.
+   * A token in >=25% of doc sections (or >=35% of symbols) cannot discriminate and is dropped.
+   */
+  const isEligibleConceptToken = (token: string): boolean => {
+    if (token.length < 2) return false;
+    if (GENERIC_DOC_CONCEPT_TOKENS.has(token)) return false;
+    const dfSections = sectionDf.get(token) ?? 0;
+    if (dfSections === 0) return false;
+    if (dfSections >= 4 && dfSections / sectionCount >= 0.25) return false;
+    const dfSymbols = symbolDf.get(token) ?? 0;
+    if (dfSymbols >= 6 && dfSymbols / symbolCount >= 0.35) return false;
+    return true;
+  };
+  const conceptIdf = (token: string): number => {
+    const dfSections = sectionDf.get(token) ?? 0;
+    return Math.log(1 + (sectionCount - dfSections + 0.5) / (dfSections + 0.5));
+  };
 
-        const secTokenSet = new Set(sec.bilingualTokens);
-        const shared: string[] = [];
-        for (const t of symTokens) {
-          if (t.length >= 2 && secTokenSet.has(t)) {
-            shared.push(t);
-          }
-        }
-        if (shared.length >= 2) {
-          score += shared.length * 8;
-          reasons.push(`concepts [${shared.slice(0, 4).join(", ")}]`);
-        }
+  // ── Optional read-only feedback ──
+  const feedback = loadDocLinkFeedback(index.rootDir);
+  const rejectedLinkIds = new Set(feedback.rejected ?? []);
+  const acceptedLinkIds = new Set(feedback.accepted ?? []);
+  const tokenBoosts = feedback.tokenBoosts ?? {};
+  const acceptedTokens = new Set<string>();
+  for (const linkId of acceptedLinkIds) {
+    for (const token of extractConceptTokens(linkId.replace(/[#:]/g, " "))) acceptedTokens.add(token);
+  }
 
-        if (score >= 16) {
-          links.push({
-            docPath: sec.docPath,
-            sectionTitle: sec.title,
-            codeFile: relFile,
-            symbolName: sym.name,
-            reason: reasons.join(" + "),
-            score,
-            summary: sec.summary,
-          });
-        }
-      }
+  const makeLink = (
+    sec: DocSection,
+    sd: SymbolRetrievalData,
+    conceptScore: number,
+    sharedTokens: string[],
+    explicit: boolean
+  ): DocCodeLink => {
+    const confidence = explicit
+      ? 1
+      : Math.min(1, conceptScore / (conceptScore + CONCEPT_SCORE_SOFTNESS));
+    return {
+      docPath: sec.docPath,
+      sectionTitle: sec.title,
+      codeFile: sd.relFile,
+      symbolName: sd.symbol.name,
+      reason: explicit
+        ? `explicit ref \`${sd.symbol.name}\``
+        : `distinctive concepts [${sharedTokens.slice(0, 4).join(", ")}] (conf=${confidence.toFixed(2)})`,
+      score: explicit ? EXPLICIT_REF_SCORE : Math.round(conceptScore * 100) / 100,
+      summary: sec.summary,
+    };
+  };
+
+  // ── 1. Explicit identifier / `Class.method` mentions are authoritative ──
+  const explicitEntries: Array<{ link: DocCodeLink; sectionIdx: number; symbolIdx: number }> = [];
+  const explicitPairKeys = new Set<string>();
+  for (let symbolIdx = 0; symbolIdx < symbolData.length; symbolIdx++) {
+    const sd = symbolData[symbolIdx]!;
+    for (let sectionIdx = 0; sectionIdx < sectionData.length; sectionIdx++) {
+      const sec = sectionData[sectionIdx]!;
+      const explicit =
+        sd.identifierKey.length >= 3 &&
+        (sec.identifierKeys.has(sd.identifierKey) ||
+          (sd.qualifiedIdentifierKey !== undefined &&
+            sec.identifierKeys.has(sd.qualifiedIdentifierKey)));
+      if (!explicit) continue;
+      const link = makeLink(sec.section, sd, EXPLICIT_REF_SCORE, [], true);
+      if (rejectedLinkIds.has(docCodeLinkId(link))) continue;
+      explicitEntries.push({ link, sectionIdx, symbolIdx });
+      explicitPairKeys.add(`${symbolIdx}\u0000${sectionIdx}`);
     }
   }
 
-  links.sort((a, b) => b.score - a.score);
-  return links;
+  // ── 2. Concept candidates: BM25 over field-weighted section terms ──
+  const sectionTokenPostings = new Map<string, number[]>();
+  for (let sectionIdx = 0; sectionIdx < sectionData.length; sectionIdx++) {
+    for (const token of sectionData[sectionIdx]!.tf.keys()) {
+      const posting = sectionTokenPostings.get(token);
+      if (posting) posting.push(sectionIdx);
+      else sectionTokenPostings.set(token, [sectionIdx]);
+    }
+  }
+
+  const conceptCandidates: ConceptCandidate[] = [];
+  // Precompute eligible concept tokens once (static stoplist + dynamic DF cutoffs).
+  // The bridge list is the subset of ascii/pinyin tokens that can match identifier names.
+  const eligibleConceptTokens = new Set<string>();
+  const bridgeConceptTokens: string[] = [];
+  for (const token of sectionTokenPostings.keys()) {
+    if (!isEligibleConceptToken(token)) continue;
+    eligibleConceptTokens.add(token);
+    if (token.length >= 4 && /^[a-z]+$/.test(token)) bridgeConceptTokens.push(token);
+  }
+
+  for (let symbolIdx = 0; symbolIdx < symbolData.length; symbolIdx++) {
+    const sd = symbolData[symbolIdx]!;
+    const perSection = new Map<number, { score: number; shared: string[] }>();
+    for (const [token, queryWeight] of sd.weights) {
+      if (!eligibleConceptTokens.has(token)) continue;
+      const posting = sectionTokenPostings.get(token);
+      if (!posting) continue;
+      const idf = conceptIdf(token);
+      if (idf <= 0) continue;
+      for (const sectionIdx of posting) {
+        const sec = sectionData[sectionIdx]!;
+        const tf = sec.tf.get(token) ?? 0;
+        if (tf <= 0) continue;
+        const denominator =
+          tf + BM25_K1 * (1 - BM25_B + (BM25_B * sec.length) / Math.max(1, avgSectionLength));
+        const contribution = queryWeight * idf * ((tf * (BM25_K1 + 1)) / denominator);
+        const current = perSection.get(sectionIdx);
+        if (current) {
+          current.score += contribution;
+          current.shared.push(token);
+        } else {
+          perSection.set(sectionIdx, { score: contribution, shared: [token] });
+        }
+      }
+    }
+
+    // Bilingual/Pinyin bridge: a rare ascii/pinyin section token contained in the symbol's
+    // normalized name (`dingdan` -> `handleDingDanZhiFu`) adds a small concept contribution.
+    for (const token of bridgeConceptTokens) {
+      if (sd.weights.has(token) || !sd.normalizedName.includes(token)) continue;
+      const posting = sectionTokenPostings.get(token);
+      if (!posting) continue;
+      const idf = conceptIdf(token);
+      if (idf <= 0) continue;
+      for (const sectionIdx of posting) {
+        const sec = sectionData[sectionIdx]!;
+        const tf = sec.tf.get(token) ?? 0;
+        if (tf <= 0) continue;
+        const denominator =
+          tf + BM25_K1 * (1 - BM25_B + (BM25_B * sec.length) / Math.max(1, avgSectionLength));
+        const contribution = 0.5 * idf * ((tf * (BM25_K1 + 1)) / denominator);
+        const current = perSection.get(sectionIdx);
+        if (current) {
+          current.score += contribution;
+          current.shared.push(token);
+        } else {
+          perSection.set(sectionIdx, { score: contribution, shared: [token] });
+        }
+      }
+    }
+
+    for (const [sectionIdx, entry] of perSection) {
+      if (entry.shared.length < 2) continue;
+      if (explicitPairKeys.has(`${symbolIdx}\u0000${sectionIdx}`)) continue;
+      const sec = sectionData[sectionIdx]!;
+      const baseLink = makeLink(sec.section, sd, entry.score, entry.shared, false);
+      const linkId = docCodeLinkId(baseLink);
+      if (rejectedLinkIds.has(linkId)) continue;
+
+      // PMI-style co-occurrence bonus for rare shared token pairs (both sides high IDF).
+      let pairBonus = 0;
+      const rareShared = entry.shared
+        .filter((token) => (sectionDf.get(token) ?? 0) <= 2)
+        .sort((a, b) => conceptIdf(b) - conceptIdf(a))
+        .slice(0, 4);
+      for (let i = 0; i < rareShared.length; i++) {
+        for (let j = i + 1; j < rareShared.length; j++) {
+          pairBonus += Math.min(
+            2,
+            conceptIdf(rareShared[i]!) * conceptIdf(rareShared[j]!) * 0.25
+          );
+        }
+      }
+      let score = entry.score + pairBonus;
+
+      // Per-token feedback boosts (feedback tokenBoosts + tokens from accepted links).
+      for (const token of entry.shared) {
+        const tokenBoost = tokenBoosts[token];
+        if (typeof tokenBoost === "number" && Number.isFinite(tokenBoost)) {
+          score *= 1 + Math.max(-0.9, Math.min(2, tokenBoost));
+        }
+        if (acceptedTokens.has(token)) score *= 1.15;
+      }
+
+      const acceptedFeedback = acceptedLinkIds.has(linkId);
+      if (acceptedFeedback) score += 25;
+      const confidence = Math.min(1, score / (score + CONCEPT_SCORE_SOFTNESS));
+      if (!acceptedFeedback && (score < CONCEPT_MIN_SCORE || confidence < CONCEPT_CONFIDENCE_MIN)) {
+        continue;
+      }
+
+      conceptCandidates.push({
+        symbolIdx,
+        sectionIdx,
+        score,
+        confidence,
+        sharedTokens: entry.shared,
+        link: makeLink(sec.section, sd, score, entry.shared, false),
+      });
+    }
+  }
+
+  // ── 3. Reciprocal top-K pruning: a candidate must rank high on BOTH sides ──
+  const candidatesBySymbol = new Map<number, ConceptCandidate[]>();
+  const candidatesBySection = new Map<number, ConceptCandidate[]>();
+  for (const candidate of conceptCandidates) {
+    const bySymbol = candidatesBySymbol.get(candidate.symbolIdx);
+    if (bySymbol) bySymbol.push(candidate);
+    else candidatesBySymbol.set(candidate.symbolIdx, [candidate]);
+    const bySection = candidatesBySection.get(candidate.sectionIdx);
+    if (bySection) bySection.push(candidate);
+    else candidatesBySection.set(candidate.sectionIdx, [candidate]);
+  }
+
+  const symbolTopSections = new Map<number, Set<number>>();
+  for (const [symbolIdx, list] of candidatesBySymbol) {
+    list.sort((a, b) => b.score - a.score || a.sectionIdx - b.sectionIdx);
+    symbolTopSections.set(
+      symbolIdx,
+      new Set(list.slice(0, RECIPROCAL_SECTION_TOP_K).map((c) => c.sectionIdx))
+    );
+  }
+  const sectionTopSymbols = new Map<number, Set<number>>();
+  for (const [sectionIdx, list] of candidatesBySection) {
+    list.sort((a, b) => b.score - a.score || a.symbolIdx - b.symbolIdx);
+    sectionTopSymbols.set(
+      sectionIdx,
+      new Set(list.slice(0, RECIPROCAL_SECTION_TOP_K).map((c) => c.symbolIdx))
+    );
+  }
+
+  // ── 4. Per-symbol margin pruning, then greedy max-weight matching with caps ──
+  const reciprocalSurvivors: ConceptCandidate[] = [];
+  for (const [symbolIdx, list] of candidatesBySymbol) {
+    const mySections = symbolTopSections.get(symbolIdx) ?? new Set<number>();
+    const survivors = list.filter(
+      (candidate) =>
+        mySections.has(candidate.sectionIdx) &&
+        (sectionTopSymbols.get(candidate.sectionIdx)?.has(symbolIdx) ?? false)
+    );
+    if (survivors.length === 0) continue;
+    const bestScore = survivors[0]!.score;
+    const marginFloor = Math.max(CONCEPT_MIN_SCORE, bestScore * CONCEPT_MARGIN_RATIO);
+    for (const candidate of survivors) {
+      if (candidate.score < marginFloor) continue;
+      if (candidate.confidence < CONCEPT_CONFIDENCE_MIN) continue;
+      reciprocalSurvivors.push(candidate);
+    }
+  }
+  reciprocalSurvivors.sort(
+    (a, b) => b.score - a.score || docLinkSortKey(a.link).localeCompare(docLinkSortKey(b.link))
+  );
+
+  const acceptedLinks: DocCodeLink[] = [];
+  const acceptedKeys = new Set<string>();
+  const sectionLinkCounts = new Map<number, number>();
+  const symbolLinkCounts = new Map<number, number>();
+  const symbolConceptCounts = new Map<number, number>();
+
+  const sortedExplicit = [...explicitEntries].sort(
+    (a, b) =>
+      b.link.score - a.link.score ||
+      docLinkSortKey(a.link).localeCompare(docLinkSortKey(b.link))
+  );
+  for (const entry of sortedExplicit) {
+    const key = docLinkSortKey(entry.link);
+    if (acceptedKeys.has(key)) continue;
+    // Per-section / per-symbol caps apply to the final graph, with explicit refs granted
+    // priority over concept-only candidates inside those caps.
+    if ((sectionLinkCounts.get(entry.sectionIdx) ?? 0) >= PER_SECTION_LINK_LIMIT) {
+      continue;
+    }
+    if ((symbolLinkCounts.get(entry.symbolIdx) ?? 0) >= PER_SYMBOL_LINK_LIMIT) {
+      continue;
+    }
+    acceptedKeys.add(key);
+    acceptedLinks.push(entry.link);
+    sectionLinkCounts.set(entry.sectionIdx, (sectionLinkCounts.get(entry.sectionIdx) ?? 0) + 1);
+    symbolLinkCounts.set(entry.symbolIdx, (symbolLinkCounts.get(entry.symbolIdx) ?? 0) + 1);
+  }
+
+  for (const candidate of reciprocalSurvivors) {
+    const key = docLinkSortKey(candidate.link);
+    if (acceptedKeys.has(key)) continue;
+    if ((sectionLinkCounts.get(candidate.sectionIdx) ?? 0) >= PER_SECTION_LINK_LIMIT) {
+      continue;
+    }
+    if ((symbolLinkCounts.get(candidate.symbolIdx) ?? 0) >= PER_SYMBOL_LINK_LIMIT) {
+      continue;
+    }
+    if ((symbolConceptCounts.get(candidate.symbolIdx) ?? 0) >= MAX_CONCEPT_LINKS_PER_SYMBOL) {
+      continue;
+    }
+    acceptedKeys.add(key);
+    acceptedLinks.push(candidate.link);
+    sectionLinkCounts.set(
+      candidate.sectionIdx,
+      (sectionLinkCounts.get(candidate.sectionIdx) ?? 0) + 1
+    );
+    symbolLinkCounts.set(candidate.symbolIdx, (symbolLinkCounts.get(candidate.symbolIdx) ?? 0) + 1);
+    symbolConceptCounts.set(
+      candidate.symbolIdx,
+      (symbolConceptCounts.get(candidate.symbolIdx) ?? 0) + 1
+    );
+  }
+
+  acceptedLinks.sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.docPath.localeCompare(b.docPath) ||
+      a.sectionTitle.localeCompare(b.sectionTitle) ||
+      a.codeFile.localeCompare(b.codeFile) ||
+      a.symbolName.localeCompare(b.symbolName)
+  );
+  return acceptedLinks.slice(0, resolveDocLinksGlobalCap());
 }
 
 /**
@@ -518,6 +1181,59 @@ export function recordCrossAgentActivity(
 }
 
 /**
+ * Normalizes a recorded activity file reference (`src/a.ts`, `src/a.ts#sym`, `src/a.ts:10-20`,
+ * Windows separators) into a workspace-relative path, or `undefined` if the reference is not a
+ * safe in-workspace path (absolute, `@brief`, traversal, ...).
+ */
+function normalizeBriefFileRef(rawRef: string): string | undefined {
+  let ref = rawRef.trim();
+  if (!ref || ref.startsWith("@")) return undefined;
+  const hashIdx = ref.indexOf("#");
+  if (hashIdx >= 0) ref = ref.slice(0, hashIdx);
+  const rangeMatch = ref.match(/^(.*?):\d+(?:-\d+)?$/);
+  if (rangeMatch) ref = rangeMatch[1] ?? "";
+  ref = ref.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!ref || ref === "." || ref === "..") return undefined;
+  if (isAbsolute(ref) || /^[a-zA-Z]:/.test(ref)) return undefined;
+  if (ref.split("/").includes("..")) return undefined;
+  return ref;
+}
+
+/** True when a recorded activity file still exists as a file under the workspace root. */
+function briefFileExists(rootDir: string, rawRef: string): boolean {
+  const rel = normalizeBriefFileRef(rawRef);
+  if (!rel) return false;
+  const absPath = join(rootDir, rel);
+  const relativeBack = relative(rootDir, absPath).replace(/\\/g, "/");
+  if (!relativeBack || relativeBack.startsWith("..") || isAbsolute(relativeBack)) return false;
+  try {
+    return existsSync(absPath) && statSync(absPath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Drops stale handoff noise: recorded activities whose files were all deleted (e.g. leftovers
+ * from an old 2.x checkout) are hidden, and each surviving activity only keeps file paths that
+ * still exist under the current workspace root.
+ */
+function filterLiveBriefActivities(
+  rootDir: string,
+  activities: CrossAgentActivityEntry[]
+): CrossAgentActivityEntry[] {
+  const live: CrossAgentActivityEntry[] = [];
+  for (const activity of activities) {
+    const existingFiles = activity.files.filter((file) => briefFileExists(rootDir, file));
+    // Activities without a file payload (e.g. `exec`) stay; file activities whose every
+    // recorded path is gone are stale and must not be surfaced to the next agent.
+    if (activity.files.length > 0 && existingFiles.length === 0) continue;
+    live.push({ ...activity, files: existingFiles });
+  }
+  return live;
+}
+
+/**
  * Generates a compact (~300 tokens) Cross-Agent Project Onboarding & Handoff Brief
  * so any newly switched coding agent (Cursor <-> Claude Code <-> Trae <-> Windsurf <-> Codex)
  * immediately understands the project architecture, linked docs, and previous agent's progress.
@@ -563,6 +1279,7 @@ export function generateCrossAgentBrief(index: ReturnType<typeof getWorkspaceAst
     .slice(0, 6);
 
   const briefState = loadCrossAgentBriefState(index.rootDir);
+  const liveActivities = filterLiveBriefActivities(index.rootDir, briefState.recentActivities);
   const macroStore = loadMacroStore(index.rootDir);
   const docLinks = buildDocCodeLinks(index).slice(0, 5);
 
@@ -579,9 +1296,9 @@ export function generateCrossAgentBrief(index: ReturnType<typeof getWorkspaceAst
     );
   }
 
-  if (briefState.recentActivities.length > 0) {
+  if (liveActivities.length > 0) {
     lines.push("", "## 2. Recent Cross-Agent Working Set (Session Handoff)");
-    for (const act of briefState.recentActivities.slice(-5).reverse()) {
+    for (const act of liveActivities.slice(-5).reverse()) {
       lines.push(
         `- [${act.action.toUpperCase()} ${act.ok ? "OK" : "FAIL"}] (${act.agentHint}): ${act.summary}`
       );
@@ -622,12 +1339,258 @@ export function generateCrossAgentBrief(index: ReturnType<typeof getWorkspaceAst
 // Interactive Single-File HTML Knowledge Graph Visualizer
 // ============================================================================
 
+/** Hard cap on generated edges so very large repos cannot explode the single-file HTML. */
+const MAX_KNOWLEDGE_GRAPH_EDGES = 5000;
+
+interface KnowledgeGraphFileData {
+  relFile: string;
+  ast: FileAstAnalysis;
+  content: string;
+}
+
+interface KnowledgeGraphSymbolRef {
+  id: string;
+  file: string;
+  name: string;
+  line: number;
+  endLine: number;
+  parentClass?: string;
+}
+
+/** Symbol node ids include the owning class so two same-named methods do not collide. */
+function knowledgeGraphSymbolId(
+  file: string,
+  name: string,
+  parentClass?: string
+): string {
+  return `sym:${file}#${parentClass ? `${parentClass}.` : ""}${name}`;
+}
+
+function knowledgeGraphFileStem(relPath: string): string {
+  return basename(relPath).replace(/\.[^.]+$/, "").toLowerCase();
+}
+
+/**
+ * Narrow implicit (import-free) visibility per language family, mirroring
+ * `inImplicitPackageScope` in `blast-radius.ts`. Kept local on purpose: `doc-graph` is
+ * imported by `slicer`, and `blast-radius` imports `slicer`; a runtime import here would
+ * create a module cycle for a tiny helper.
+ */
+function inKnowledgeGraphImplicitScope(
+  targetFile: string,
+  candidateFile: string,
+  family: SourceLanguageFamily
+): boolean {
+  const sameDir = dirname(targetFile) === dirname(candidateFile);
+  if (family === "go" || family === "csharp") return sameDir;
+  if (family === "c") {
+    return sameDir || knowledgeGraphFileStem(targetFile) === knowledgeGraphFileStem(candidateFile);
+  }
+  return false;
+}
+
+/** Enclosing callable symbol for a call line (innermost wins) for class-qualified caller ids. */
+function findKnowledgeGraphCaller(
+  ast: FileAstAnalysis,
+  line: number
+): FileAstAnalysis["symbols"][number] | undefined {
+  let best: FileAstAnalysis["symbols"][number] | undefined;
+  for (const sym of ast.symbols) {
+    if (sym.kind !== "function" && sym.kind !== "method") continue;
+    if (line >= sym.line && line <= sym.endLine) {
+      if (!best || sym.endLine - sym.line < best.endLine - best.line) best = sym;
+    }
+  }
+  return best;
+}
+
+// ============================================================================
+// tsconfig.json / jsconfig.json path-alias resolution for file -> file import edges
+// ============================================================================
+
+interface KnowledgeGraphPathAliasConfig {
+  /** Workspace-relative base directory ("" or "." means the workspace root). */
+  baseUrl: string;
+  paths: Array<{ pattern: string; replacements: string[] }>;
+}
+
+const KNOWLEDGE_GRAPH_ALIAS_CACHE = new Map<string, KnowledgeGraphPathAliasConfig | null>();
+const KNOWLEDGE_GRAPH_JS_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"];
+
+/** Strips `//` / `/* *\/` comments and trailing commas from JSONC (tsconfig/jsconfig). */
+function stripJsoncText(raw: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i]!;
+    const next = raw[i + 1];
+    if (inLineComment) {
+      if (ch === "\n") {
+        inLineComment = false;
+        out += ch;
+      }
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === "*" && next === "/") {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+    if (inString) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      inLineComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      inBlockComment = true;
+      i += 1;
+      continue;
+    }
+    out += ch;
+  }
+  // Trailing commas before `}` / `]` are legal JSONC but illegal JSON.
+  return out.replace(/,\s*([}\]])/g, "$1");
+}
+
+function normalizeKnowledgeGraphRelPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/{2,}/g, "/");
+}
+
+/** Resolves a workspace-relative module candidate to a known source file (ext/index fallbacks). */
+function resolveKnownGraphCodeFile(
+  candidate: string,
+  fileSet: ReadonlySet<string>
+): string | undefined {
+  const normalized = normalizeKnowledgeGraphRelPath(candidate);
+  if (!normalized) return undefined;
+  const withoutJsExt = normalized.replace(/\.(?:js|jsx|mjs|cjs)$/i, "");
+  const bases = withoutJsExt === normalized ? [normalized] : [normalized, withoutJsExt];
+  const probes: string[] = [];
+  for (const base of bases) {
+    probes.push(base);
+    if (!base) continue;
+    for (const ext of KNOWLEDGE_GRAPH_JS_EXTS) probes.push(`${base}${ext}`);
+    for (const ext of KNOWLEDGE_GRAPH_JS_EXTS) probes.push(`${base}/index${ext}`);
+  }
+  for (const probe of probes) {
+    if (fileSet.has(probe)) return probe;
+  }
+  return undefined;
+}
+
+/** Reads (and caches) `compilerOptions.baseUrl` + `paths` from root tsconfig/jsonconfig. */
+function readKnowledgeGraphPathAliases(
+  rootDir: string
+): KnowledgeGraphPathAliasConfig | null {
+  const cached = KNOWLEDGE_GRAPH_ALIAS_CACHE.get(rootDir);
+  if (cached !== undefined) return cached;
+
+  const merged: KnowledgeGraphPathAliasConfig = { baseUrl: "", paths: [] };
+  const seenPatterns = new Set<string>();
+  let baseUrlSet = false;
+
+  for (const configName of ["tsconfig.json", "jsconfig.json"]) {
+    const configPath = join(rootDir, configName);
+    if (!existsSync(configPath)) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stripJsoncText(readFileSync(configPath, "utf8")));
+    } catch {
+      continue;
+    }
+    if (!parsed || typeof parsed !== "object") continue;
+    const compilerOptions = (parsed as { compilerOptions?: unknown }).compilerOptions;
+    if (!compilerOptions || typeof compilerOptions !== "object") continue;
+    const options = compilerOptions as { baseUrl?: unknown; paths?: unknown };
+
+    if (!baseUrlSet && typeof options.baseUrl === "string") {
+      merged.baseUrl = normalizeKnowledgeGraphRelPath(options.baseUrl);
+      baseUrlSet = true;
+    }
+    if (!options.paths || typeof options.paths !== "object" || Array.isArray(options.paths)) {
+      continue;
+    }
+    for (const [pattern, replacements] of Object.entries(
+      options.paths as Record<string, unknown>
+    )) {
+      if (seenPatterns.has(pattern) || !Array.isArray(replacements)) continue;
+      const clean = replacements.filter(
+        (replacement): replacement is string =>
+          typeof replacement === "string" && replacement.length > 0
+      );
+      if (clean.length === 0) continue;
+      seenPatterns.add(pattern);
+      merged.paths.push({ pattern, replacements: clean });
+    }
+  }
+
+  const result = merged.paths.length > 0 ? merged : null;
+  KNOWLEDGE_GRAPH_ALIAS_CACHE.set(rootDir, result);
+  return result;
+}
+
+/**
+ * Resolves a tsconfig/jsconfig path alias (`@/model` -> `ts/model.ts`). Relative specifiers are
+ * left to `resolveRelativeImportPath`; matching supports one `*` wildcard per pattern and
+ * multiple fallback extensions / `/index.*` files.
+ */
+function resolveAliasImportToFile(
+  rootDir: string,
+  moduleSpec: string,
+  fileSet: ReadonlySet<string>
+): string | undefined {
+  if (!moduleSpec || moduleSpec.startsWith(".")) return undefined;
+  const config = readKnowledgeGraphPathAliases(rootDir);
+  if (!config) return undefined;
+
+  for (const entry of config.paths) {
+    const starIndex = entry.pattern.indexOf("*");
+    let captured: string;
+    if (starIndex === -1) {
+      if (moduleSpec !== entry.pattern) continue;
+      captured = "";
+    } else {
+      const prefix = entry.pattern.slice(0, starIndex);
+      const suffix = entry.pattern.slice(starIndex + 1);
+      if (!moduleSpec.startsWith(prefix) || !moduleSpec.endsWith(suffix)) continue;
+      if (moduleSpec.length < prefix.length + suffix.length) continue;
+      captured = moduleSpec.slice(prefix.length, moduleSpec.length - suffix.length);
+    }
+    for (const replacement of entry.replacements) {
+      const substituted = starIndex === -1 ? replacement : replacement.replace("*", captured);
+      const withBaseUrl =
+        config.baseUrl && config.baseUrl !== "." ? `${config.baseUrl}/${substituted}` : substituted;
+      const resolved = resolveKnownGraphCodeFile(withBaseUrl, fileSet);
+      if (resolved) return resolved;
+    }
+  }
+  return undefined;
+}
+
 export function buildKnowledgeGraphData(
   index: ReturnType<typeof getWorkspaceAstIndex>
 ): KnowledgeGraphData {
   const nodes: KnowledgeGraphNode[] = [];
   const edges: KnowledgeGraphEdge[] = [];
   const nodeIds = new Set<string>();
+  const edgeKeys = new Set<string>();
 
   const addNode = (node: KnowledgeGraphNode) => {
     if (nodeIds.has(node.id)) return;
@@ -635,37 +1598,290 @@ export function buildKnowledgeGraphData(
     nodes.push(node);
   };
 
+  const addEdge = (edge: KnowledgeGraphEdge) => {
+    if (edges.length >= MAX_KNOWLEDGE_GRAPH_EDGES) return;
+    const key = `${edge.kind}\u0000${edge.source}\u0000${edge.target}`;
+    if (edgeKeys.has(key)) return;
+    edgeKeys.add(key);
+    edges.push(edge);
+  };
+
+  // ── 1. File nodes, symbol nodes and explicit `defines` edges ──
   const files = index.getFiles();
+  const fileDataList: KnowledgeGraphFileData[] = [];
   for (const relFile of files) {
     const data = index.getFileAnalysis(relFile);
-    if (!data) continue;
+    if (data) fileDataList.push({ relFile, ast: data.ast, content: data.content });
+  }
+
+  for (const { relFile, ast } of fileDataList) {
     addNode({
       id: `file:${relFile}`,
       label: relFile,
       kind: "file",
       langOrFormat: extname(relFile).replace(".", "") || "code",
-      detail: `${data.ast.totalLines} lines, ${data.ast.symbols.length} symbols`,
+      detail: `${ast.totalLines} lines, ${ast.symbols.length} symbols`,
     });
 
-    for (const sym of data.ast.symbols) {
-      const symId = `sym:${relFile}#${sym.name}`;
+    for (const sym of ast.symbols) {
+      const symId = knowledgeGraphSymbolId(relFile, sym.name, sym.parentClass);
       addNode({
         id: symId,
-        label: `${sym.name} (${sym.kind})`,
+        label: `${sym.parentClass ? `${sym.parentClass}.` : ""}${sym.name} (${sym.kind})`,
         kind: "symbol",
         langOrFormat: extname(relFile).replace(".", "") || "code",
         detail: `${relFile}:${sym.line}-${sym.endLine} | ${sym.signature}`,
       });
-      edges.push({
+      addEdge({
         source: `file:${relFile}`,
         target: symId,
-        kind: "imports",
+        kind: "defines",
         label: "defines",
       });
     }
   }
 
-  // Add Doc nodes & Doc <-> Code edges
+  // ── 2. Symbol index (name -> declarations) + per-file stem indexes for package imports ──
+  const symbolsByName = new Map<string, KnowledgeGraphSymbolRef[]>();
+  const symbolsByFileAndName = new Map<string, KnowledgeGraphSymbolRef[]>();
+  const filesByStem = new Map<string, string[]>();
+  const filesByDirName = new Map<string, string[]>();
+
+  for (const { relFile, ast } of fileDataList) {
+    for (const sym of ast.symbols) {
+      const ref: KnowledgeGraphSymbolRef = {
+        id: knowledgeGraphSymbolId(relFile, sym.name, sym.parentClass),
+        file: relFile,
+        name: sym.name,
+        line: sym.line,
+        endLine: sym.endLine,
+        ...(sym.parentClass ? { parentClass: sym.parentClass } : {}),
+      };
+      const bucket = symbolsByName.get(sym.name);
+      if (bucket) bucket.push(ref);
+      else symbolsByName.set(sym.name, [ref]);
+      const fileKey = `${relFile}\u0000${sym.name}`;
+      const fileBucket = symbolsByFileAndName.get(fileKey);
+      if (fileBucket) fileBucket.push(ref);
+      else symbolsByFileAndName.set(fileKey, [ref]);
+    }
+
+    const stem = knowledgeGraphFileStem(relFile);
+    const stemBucket = filesByStem.get(stem);
+    if (stemBucket) stemBucket.push(relFile);
+    else filesByStem.set(stem, [relFile]);
+
+    const dirName = basename(dirname(relFile)).toLowerCase();
+    if (dirName && dirName !== ".") {
+      const dirBucket = filesByDirName.get(dirName);
+      if (dirBucket) dirBucket.push(relFile);
+      else filesByDirName.set(dirName, [relFile]);
+    }
+  }
+
+  // ── 3. File -> file `imports` edges (best-effort resolution for all supported languages) ──
+  const fileSet = index.getFileSet();
+  const resolveImportTarget = (fromRelFile: string, moduleSpec: string, importedNames: string[]): string | undefined => {
+    const resolved = resolveRelativeImportPath(index.rootDir, fromRelFile, moduleSpec, fileSet);
+    if (resolved && resolved !== fromRelFile && nodeIds.has(`file:${resolved}`)) return resolved;
+
+    const family = sourceLanguageFamily(fromRelFile);
+
+    // tsconfig.json / jsconfig.json path aliases (TS/JS only), e.g. `@/model` -> ts/model.ts.
+    if (family === "js") {
+      const aliasResolved = resolveAliasImportToFile(index.rootDir, moduleSpec, fileSet);
+      if (
+        aliasResolved &&
+        aliasResolved !== fromRelFile &&
+        nodeIds.has(`file:${aliasResolved}`)
+      ) {
+        return aliasResolved;
+      }
+    }
+
+    // Fallback for package/namespace imports that the path resolver cannot map to a file
+    // (Go package paths and C# `using` namespaces are not file paths).
+    if (family !== "go" && family !== "csharp") return undefined;
+    const moduleTail = moduleSpec.split(/[./:\\]/).filter(Boolean).pop()?.toLowerCase();
+    const names = [
+      moduleTail,
+      ...importedNames.filter((name) => name && name !== "*").map((name) => name.toLowerCase()),
+    ].filter((name): name is string => Boolean(name));
+    const fromDir = dirname(fromRelFile);
+    for (const name of names) {
+      const stemMatches = (filesByStem.get(name) ?? []).filter(
+        (candidate) =>
+          candidate !== fromRelFile && sourceLanguageFamily(candidate) === family
+      );
+      if (stemMatches.length > 0) {
+        return (
+          stemMatches.find((candidate) => dirname(candidate) === fromDir) ?? stemMatches[0]
+        );
+      }
+      const dirMatches = (filesByDirName.get(name) ?? []).filter(
+        (candidate) =>
+          candidate !== fromRelFile && sourceLanguageFamily(candidate) === family
+      );
+      if (dirMatches.length > 0) return [...dirMatches].sort()[0];
+    }
+    return undefined;
+  };
+
+  for (const { relFile, ast } of fileDataList) {
+    for (const imp of ast.imports) {
+      const targetFile = resolveImportTarget(relFile, imp.module, imp.importedNames);
+      if (!targetFile) continue;
+      addEdge({
+        source: `file:${relFile}`,
+        target: `file:${targetFile}`,
+        kind: "imports",
+        label: imp.raw,
+      });
+    }
+  }
+
+  // ── 4. Symbol -> symbol `calls` edges (receiver-type aware: known receiver -> exact class,
+  //       then same-file -> explicit import -> narrow package scope for unknown receivers) ──
+  // Local inheritance map (doc-graph must not import blast-radius/slicer at runtime: that
+  // would create a module cycle; ast-engine's parseClassParents is cycle-free).
+  const classParents = new Map<string, string>();
+  for (const { relFile, ast, content } of fileDataList) {
+    for (const [child, parent] of parseClassParents(relFile, content, ast)) {
+      if (!classParents.has(child)) classParents.set(child, parent);
+    }
+  }
+  const declaresMethodOnType = (typeName: string, methodName: string): boolean =>
+    (symbolsByName.get(methodName) ?? []).some((ref) => ref.parentClass === typeName);
+  /** A receiver typed `resolved` may dispatch to `targetClass.method` when it is the same
+   *  class or a subclass with no override between them. Mirrors blast-radius's hierarchy. */
+  const isCompatibleReceiver = (
+    resolved: string,
+    targetClass: string,
+    methodName: string
+  ): boolean => {
+    if (resolved === targetClass) return true;
+    if (!isSubclassOf(classParents, resolved, targetClass)) return false;
+    let current: string | undefined = resolved;
+    const seen = new Set<string>();
+    while (current && current !== targetClass) {
+      if (seen.has(current)) break;
+      seen.add(current);
+      if (declaresMethodOnType(current, methodName)) return false;
+      current = classParents.get(current);
+    }
+    return current === targetClass;
+  };
+
+  const receiverIndexCache = new Map<string, ReturnType<typeof inferReceiverTypeIndex>>();
+  const getReceiverIndex = (
+    relFile: string,
+    ast: FileAstAnalysis,
+    content: string
+  ): ReturnType<typeof inferReceiverTypeIndex> => {
+    const cached = receiverIndexCache.get(relFile);
+    if (cached) return cached;
+    const inferred = inferReceiverTypeIndex(relFile, content, ast);
+    receiverIndexCache.set(relFile, inferred);
+    return inferred;
+  };
+
+  for (const { relFile, ast, content } of fileDataList) {
+    const family = sourceLanguageFamily(relFile);
+    const importedNames = new Set<string>();
+    for (const imp of ast.imports) {
+      for (const name of imp.importedNames) {
+        // Wildcard/namespace imports import nothing specific (C/C++ #include, Go package, ...).
+        if (name && name !== "*") importedNames.add(name);
+      }
+    }
+    const receiverIndex = getReceiverIndex(relFile, ast, content);
+
+    for (const call of ast.calls) {
+      // Declaration headers (`bool Engine::cancel(int id);`) are never calls.
+      if (call.isDeclaration) continue;
+      const candidates = symbolsByName.get(call.callee);
+      if (!candidates || candidates.length === 0) continue;
+
+      const sameFileCandidates = candidates.filter((candidate) => candidate.file === relFile);
+      const crossFileCandidates = candidates.filter(
+        (candidate) =>
+          candidate.file !== relFile && sourceLanguageFamily(candidate.file) === family
+      );
+
+      // Caller symbol by line containment (innermost callable wins) -> class-qualified source id.
+      const callerSym = findKnowledgeGraphCaller(ast, call.line);
+      const callerRefs = callerSym
+        ? (symbolsByFileAndName.get(`${relFile}\u0000${callerSym.name}`) ?? [])
+        : [];
+      const callerRef = callerSym
+        ? (callerRefs.find(
+            (ref) => ref.line === callerSym.line && ref.endLine === callerSym.endLine
+          ) ?? callerRefs[0])
+        : undefined;
+
+      // Receiver-type inference (3.3.2): when the receiver's static type is known, ONLY a method
+      // declared on that class may be the target. A foreign receiver is dropped, not guessed.
+      const receiverType = call.receiver
+        ? resolveReceiverType(call, ast, receiverIndex)
+        : undefined;
+
+      let target: KnowledgeGraphSymbolRef | undefined;
+      if (receiverType) {
+        const typedCandidates = [...sameFileCandidates, ...crossFileCandidates].filter(
+          (candidate) =>
+            candidate.parentClass !== undefined &&
+            isCompatibleReceiver(receiverType, candidate.parentClass, call.callee)
+        );
+        if (typedCandidates.length === 0) continue;
+        target =
+          typedCandidates.find((candidate) => candidate.file === relFile) ??
+          typedCandidates.find(
+            (candidate) => candidate.parentClass && importedNames.has(candidate.parentClass)
+          ) ??
+          typedCandidates[0];
+      } else if (sameFileCandidates.length > 0) {
+        // Unknown receiver: prefer the enclosing class, else deterministic declaration order.
+        const callerParent = callerSym?.parentClass;
+        target =
+          (callerParent
+            ? sameFileCandidates.find((candidate) => candidate.parentClass === callerParent)
+            : undefined) ?? sameFileCandidates[0];
+      } else {
+        const importedMatches = crossFileCandidates.filter(
+          (candidate) =>
+            importedNames.has(candidate.name) ||
+            (candidate.parentClass ? importedNames.has(candidate.parentClass) : false)
+        );
+        if (importedMatches.length > 0) {
+          target =
+            importedMatches.find(
+              (candidate) =>
+                candidate.parentClass !== undefined &&
+                importedNames.has(candidate.parentClass)
+            ) ?? importedMatches[0];
+        } else {
+          target = crossFileCandidates.find((candidate) =>
+            inKnowledgeGraphImplicitScope(relFile, candidate.file, family)
+          );
+        }
+      }
+
+      if (!target) continue;
+      const sourceId =
+        callerRef && nodeIds.has(callerRef.id) ? callerRef.id : `file:${relFile}`;
+      const targetId = target.id;
+      if (!nodeIds.has(targetId) || sourceId === targetId) continue;
+      addEdge({
+        source: sourceId,
+        target: targetId,
+        kind: "calls",
+        label:
+          call.member && call.receiver ? `${call.receiver}.${call.callee}()` : `${call.callee}()`,
+      });
+    }
+  }
+
+  // ── 5. Doc nodes & Doc <-> Code edges ──
   const docSections = scanWorkspaceDocuments(index.rootDir);
   const docLinks = buildDocCodeLinks(index, docSections);
   for (const sec of docSections) {
@@ -679,9 +1895,14 @@ export function buildKnowledgeGraphData(
   }
   for (const link of docLinks) {
     const docId = `doc:${link.docPath}#${link.sectionTitle}`;
-    const symId = `sym:${link.codeFile}#${link.symbolName}`;
-    if (nodeIds.has(docId) && nodeIds.has(symId)) {
-      edges.push({
+    // A method link only carries its bare name; resolve to the real (class-qualified) id.
+    const symRef = symbolsByFileAndName
+      .get(`${link.codeFile}\u0000${link.symbolName}`)
+      ?.find((ref) => ref.parentClass === undefined) ??
+      symbolsByFileAndName.get(`${link.codeFile}\u0000${link.symbolName}`)?.[0];
+    const symId = symRef?.id;
+    if (symId && nodeIds.has(docId) && nodeIds.has(symId)) {
+      addEdge({
         source: docId,
         target: symId,
         kind: "doc-links-code",
@@ -690,11 +1911,11 @@ export function buildKnowledgeGraphData(
     }
   }
 
-  // Add Co-Edit edges & Macro nodes
+  // ── 6. Co-Edit edges & Macro nodes ──
   const store = loadMacroStore(index.rootDir);
   for (const ce of store.habits.coEdits) {
     if (nodeIds.has(`file:${ce.fileA}`) && nodeIds.has(`file:${ce.fileB}`)) {
-      edges.push({
+      addEdge({
         source: `file:${ce.fileA}`,
         target: `file:${ce.fileB}`,
         kind: "co-edit",
@@ -723,6 +1944,13 @@ export function generateKnowledgeGraphHtml(
   index: ReturnType<typeof getWorkspaceAstIndex>
 ): { htmlPath: string; jsonPath: string; nodeCount: number; edgeCount: number } {
   const graph = buildKnowledgeGraphData(index);
+  const edgeKindCounts = new Map<string, number>();
+  for (const edge of graph.edges) {
+    edgeKindCounts.set(edge.kind, (edgeKindCounts.get(edge.kind) ?? 0) + 1);
+  }
+  const edgeBreakdown = ["defines", "imports", "calls", "doc-links-code", "co-edit"]
+    .map((kind) => `${kind}=${edgeKindCounts.get(kind) ?? 0}`)
+    .join(" · ");
   const outDir = join(index.rootDir, ".graphflow");
   mkdirSync(outDir, { recursive: true });
 
@@ -734,7 +1962,7 @@ export function generateKnowledgeGraphHtml(
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
-<title>GraphFlow 3.1 — Interactive Project Knowledge Graph</title>
+<title>GraphFlow 3.5.0 — Interactive Project Knowledge Graph</title>
 <style>
   :root {
     --bg: #0b0f19;
@@ -746,6 +1974,11 @@ export function generateKnowledgeGraphHtml(
     --symbol: #10b981;
     --doc: #f59e0b;
     --macro: #a855f7;
+    --edge-defines: #6b7280;
+    --edge-imports: #3b82f6;
+    --edge-calls: #10b981;
+    --edge-doc: #f59e0b;
+    --edge-coedit: #ec4899;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, sans-serif; display: flex; height: 100vh; overflow: hidden; }
@@ -754,8 +1987,10 @@ export function generateKnowledgeGraphHtml(
   .stats { font-size: 12px; color: var(--muted); }
   input[type="search"] { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); background: #030712; color: var(--text); font-size: 13px; }
   .legend { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; }
+  .legend-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
   .badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 999px; background: #1f2937; cursor: pointer; }
   .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .line { width: 14px; height: 2px; border-radius: 2px; display: inline-block; }
   #inspector { border-top: 1px solid var(--border); padding-top: 12px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; color: #d1d5db; }
   #canvas-wrap { flex: 1; position: relative; }
   canvas { width: 100%; height: 100%; display: block; cursor: grab; }
@@ -763,14 +1998,23 @@ export function generateKnowledgeGraphHtml(
 </head>
 <body>
   <div id="sidebar">
-    <h1>GraphFlow 3.1 Knowledge Graph</h1>
-    <div class="stats">Nodes: ${graph.nodes.length} · Edges: ${graph.edges.length}</div>
+    <h1>GraphFlow 3.5.0 Knowledge Graph</h1>
+    <div class="stats">Nodes: ${graph.nodes.length} · Edges: ${graph.edges.length} (${edgeBreakdown})</div>
     <input id="search" type="search" placeholder="Search symbol, file, or doc (中文/EN)..." />
+    <div class="legend-title">Nodes / 节点</div>
     <div class="legend">
       <span class="badge"><span class="dot" style="background:var(--file)"></span>Code File</span>
       <span class="badge"><span class="dot" style="background:var(--symbol)"></span>AST Symbol</span>
       <span class="badge"><span class="dot" style="background:var(--doc)"></span>Spec Doc (md/docx/xml/html/pdf)</span>
       <span class="badge"><span class="dot" style="background:var(--macro)"></span>Compiled Macro</span>
+    </div>
+    <div class="legend-title">Edges / 边</div>
+    <div class="legend" id="edge-legend">
+      <span class="badge"><span class="line" style="background:var(--edge-defines)"></span>defines (file → symbol)</span>
+      <span class="badge"><span class="line" style="background:var(--edge-imports)"></span>imports (file → file)</span>
+      <span class="badge"><span class="line" style="background:var(--edge-calls)"></span>calls (symbol → symbol)</span>
+      <span class="badge"><span class="line" style="background:var(--edge-doc)"></span>doc-links-code</span>
+      <span class="badge"><span class="line" style="background:var(--edge-coedit)"></span>co-edit</span>
     </div>
     <div id="inspector">Click any node on the canvas to inspect its signature, Blast Radius, and linked development documents.</div>
   </div>
@@ -782,6 +2026,13 @@ const ctx = canvas.getContext("2d");
 const inspector = document.getElementById("inspector");
 const searchInput = document.getElementById("search");
 const COLORS = { file: "#3b82f6", symbol: "#10b981", doc: "#f59e0b", macro: "#a855f7" };
+const EDGE_STYLES = {
+  defines: { color: "#6b728099", width: 1 },
+  imports: { color: "#3b82f6bb", width: 1.5 },
+  calls: { color: "#10b981bb", width: 1.5 },
+  "doc-links-code": { color: "#f59e0bbb", width: 2 },
+  "co-edit": { color: "#ec4899bb", width: 1.5 },
+};
 
 function resize() {
   canvas.width = canvas.clientWidth * devicePixelRatio;
@@ -821,7 +2072,7 @@ canvas.addEventListener("click", e => {
   if (selected) {
     const connected = edges
       .filter(ed => ed.s === selected || ed.t === selected)
-      .map(ed => \`- [\${ed.kind}] \${ed.s === selected ? ed.t.label : ed.s.label} (\${ed.label || ""})\`);
+      .map(ed => \`- [\${ed.kind}] \${ed.s === selected ? "→ " + ed.t.label : "→ " + ed.s.label} (\${ed.label || ""})\`);
     inspector.textContent = [
       \`[\${selected.kind.toUpperCase()}] \${selected.label}\`,
       \`Format/Lang: \${selected.langOrFormat}\`,
@@ -858,8 +2109,9 @@ function tick() {
 
   ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
   for (const ed of edges) {
-    ctx.strokeStyle = ed.kind === "doc-links-code" ? "#f59e0b88" : ed.kind === "co-edit" ? "#ec489988" : "#37415188";
-    ctx.lineWidth = ed.kind === "doc-links-code" ? 2 : 1;
+    const style = EDGE_STYLES[ed.kind] || { color: "#37415188", width: 1 };
+    ctx.strokeStyle = style.color;
+    ctx.lineWidth = style.width;
     ctx.beginPath();
     ctx.moveTo(ed.s.x, ed.s.y);
     ctx.lineTo(ed.t.x, ed.t.y);

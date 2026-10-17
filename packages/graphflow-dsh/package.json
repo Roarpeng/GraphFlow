@@ -1,0 +1,47 @@
+{
+  "name": "@roarpeng/graphflow-dsh",
+  "version": "3.5.0",
+  "description": "DeepSeek Harness (DSH) configuration bundle: registers the GraphFlow MCP server (gf_read, gf_edit, gf_exec, gf_macro) as a stdio Cordis plugin and ships the GraphFlow skill.",
+  "icon": "./icon.svg",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "Roarpeng",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Roarpeng/GraphFlow.git",
+    "directory": "packages/graphflow-dsh"
+  },
+  "bugs": {
+    "url": "https://github.com/Roarpeng/GraphFlow/issues"
+  },
+  "homepage": "https://github.com/Roarpeng/GraphFlow#readme",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "mcp",
+    "graphflow",
+    "token-first"
+  ],
+  "exports": {
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "skills/graphflow/SKILL.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

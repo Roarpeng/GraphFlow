@@ -1,0 +1,24 @@
+# GraphFlow DSH bundle — DeepSeek Harness Cordis patch.
+#
+# Registers GraphFlow's four token-first MCP tools (gf_read, gf_edit, gf_exec,
+# gf_macro) through the already-shipped @deepseek-ai/dsh-mcp-client plugin.
+# Configuration-only: no Host or Client JavaScript is provided by this bundle.
+#
+# cwd: GRAPHFLOW_WORKSPACE_ROOT wins when the user sets it; otherwise the
+# Harness default working directory (always an existing, writable directory)
+# is used instead of the DSH profile directory. Every gf_* tool also accepts
+# an explicit rootDir argument, so a fixed cwd is only a convenience.
+- insert:
+    - id: mcp-graphflow
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: graphflow
+        transport: stdio
+        command: npx
+        args: ['-y', '--package=@roarpeng/graphflow', 'graphflow-mcp']
+        cwd: !!js process.env.GRAPHFLOW_WORKSPACE_ROOT || ctx.get('workingDirectory')?.defaultDirectory || process.cwd()
+        env:
+          GRAPHFLOW_MCP_STDIO: '1'
+          GRAPHFLOW_LOG_JSON: '1'
+          GRAPHFLOW_WORKSPACE_ROOT: !!js process.env.GRAPHFLOW_WORKSPACE_ROOT
+        failOnStartupError: false

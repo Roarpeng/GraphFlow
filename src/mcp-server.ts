@@ -35,7 +35,7 @@ export function resolvePackageVersion(): string {
     }
   }
 
-  return "3.1.0";
+  return "3.5.0";
 }
 
 export const PACKAGE_VERSION = resolvePackageVersion();
@@ -160,8 +160,18 @@ export function getV3ToolDefinitions(): ToolDefinition[] {
   });
 }
 
+/**
+ * Wire-optimal definitions sent on `tools/list` (~459 tokens for all 4 tools).
+ * The richer `getV3ToolDefinitions()` keeps titles/annotations/`_meta` for API
+ * consumers that need governance metadata; MCP clients do not, and the extra
+ * fields nearly double the per-turn schema tax.
+ */
 export function getToolDefinitions(): ToolDefinition[] {
-  return getV3ToolDefinitions();
+  return V3_TOOL_DEFINITIONS.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+  }));
 }
 
 export interface ToolCall {

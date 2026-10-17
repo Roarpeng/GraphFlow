@@ -1,26 +1,35 @@
 /**
- * GraphFlow 3.0 — Multi-Language Surgical AST Engine
+ * GraphFlow 3.3 — Multi-Language Surgical Code Analyzer
  *
- * First-class AST & structural extraction for 6 language families:
- *   1. TypeScript / JavaScript (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`) via `@babel/parser`
- *   2. Python (`.py`, `.pyi`) via indentation-scoped AST analyzer
- *   3. Go (`.go`) via receiver/func/struct/interface AST analyzer
- *   4. Rust (`.rs`) via fn/impl/struct/enum/trait AST analyzer
- *   5. C / C++ (`.c`, `.h`, `.cc`, `.cpp`, `.hpp`, `.cxx`, `.hxx`) via preprocessor & declaration AST analyzer
- *   6. C# (`.cs`) via namespace/class/interface/struct/method AST analyzer
+ * Analysis backends (public description: TS/JS only uses a true AST; the rest are structural analyzers):
+ *   1. TypeScript / JavaScript (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`) — true AST via `@babel/parser`
+ *   2. Python (`.py`, `.pyi`) — indentation-scoped structural analyzer (regex + bracket/colon heuristics)
+ *   3. Go (`.go`) — receiver/func/struct/interface structural analyzer (brace-scoped)
+ *   4. Rust (`.rs`) — fn/impl/struct/enum/trait structural analyzer (brace-scoped)
+ *   5. C / C++ (`.c`, `.h`, `.cc`, `.cpp`, `.hpp`, `.cxx`, `.hxx`) — preprocessor/declaration structural analyzer
+ *   6. C# (`.cs`) — namespace/class/interface/struct/method structural analyzer
+ *
+ * The non-TS/JS analyzers are heuristic structural scanners, not full language parsers: they
+ * are fast and token-efficient, but comments/strings/macros and unusual formatting may reduce
+ * precision. `syntaxErrors` for them is a conservative guard, not a complete grammar check.
+ * An optional TRUE-AST backend for the 5 non-TS/JS languages is available via
+ * `GRAPHFLOW_TREE_SITTER=1` (`src/tree-sitter-engine.ts`, tree-sitter + grammar packages are
+ * optional dependencies); when it cannot load, the structural analyzers below are used.
  *
  * Extracts for all languages:
- *   - Symbols (`function`, `class`, `method`, `interface`, `type`, `enum`, `variable`)
+ *   - Symbols (`function`, `class`, `method`, `interface`, `struct`, `type`, `enum`, `variable`)
  *     with exact 1-based `line` and `endLine`, `signature`, `exported`, `paramsCount`,
  *     and `referencedTypes` (for automatic Cross-File Type-Closure Slicing).
  *   - Imports (`module`, `importedNames`, `line`, `endLine`)
- *   - Calls (`caller`, `callee`, `line`, `argsCount`) for Blast-Radius Call-Site Slicing.
+ *   - Calls (`caller`, `callee`, `receiver`, `member`, `isDeclaration`, `line`, `argsCount`)
+ *     for Blast-Radius Call-Site Slicing.
  *   - Syntax diagnostics (`syntaxErrors`) for zero-LLM static guard verification.
  */
 
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
+import { analyzeWithTreeSitter, isTreeSitterAvailable } from "./tree-sitter-engine.js";
 
 const requireFn = createRequire(__filename);
 
@@ -72,7 +81,21 @@ export interface AstCallSite {
   callee: string;
   line: number;
   argsCount: number;
+  /** Identifier directly before the member-access operator (`service` in `service.cancel()`). */
+  receiver?: string;
+  /** True when reached through `.`, `->`, or `::` (member / associated call). */
+  member?: boolean;
+  /** True when the line is a declaration header (`bool Engine::cancel(int id);`), never an executable call. */
+  isDeclaration?: boolean;
+  /**
+   * For chained calls such as `getService().cancel()`, the callee of the receiver call
+   * (`getService`), used by the semantic index to infer a factory's return type.
+   */
+  receiverCall?: string;
 }
+
+/** Which analysis engine produced a `FileAstAnalysis`. */
+export type AstEngine = "babel" | "tree-sitter" | "structural";
 
 export interface FileAstAnalysis {
   relPath: string;
@@ -82,6 +105,12 @@ export interface FileAstAnalysis {
   imports: AstImport[];
   calls: AstCallSite[];
   syntaxErrors: Array<{ line: number; column?: number; message: string }>;
+  /**
+   * Which analysis engine produced this result (observability only):
+   * `babel` = true TS/JS AST, `tree-sitter` = opt-in `GRAPHFLOW_TREE_SITTER=1` backend,
+   * `structural` = the built-in heuristic analyzers.
+   */
+  engine?: AstEngine;
 }
 
 export const SUPPORTED_SOURCE_EXTS = new Set([
@@ -92,6 +121,24 @@ export const SUPPORTED_SOURCE_EXTS = new Set([
   ".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hxx",
   ".cs",
 ]);
+
+/**
+ * Coarse language family used to scope workspace-wide analyses (blast radius, rename safety).
+ * Files from different families must never be matched against each other, even when
+ * identifier names coincide (e.g. a Rust `cancel` vs a C++ `cancel` declaration).
+ */
+export type SourceLanguageFamily = "js" | "python" | "go" | "rust" | "c" | "csharp" | "other";
+
+export function sourceLanguageFamily(relPath: string): SourceLanguageFamily {
+  const ext = extname(relPath).toLowerCase();
+  if ([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"].includes(ext)) return "js";
+  if (ext === ".py" || ext === ".pyi") return "python";
+  if (ext === ".go") return "go";
+  if (ext === ".rs") return "rust";
+  if ([".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hxx"].includes(ext)) return "c";
+  if (ext === ".cs") return "csharp";
+  return "other";
+}
 
 const BUILTIN_TYPES = new Set([
   // TS/JS
@@ -234,7 +281,7 @@ function countTopLevelArgs(argText: string): number {
   return commas + 1;
 }
 
-function stripLineCommentsAndStrings(line: string, commentPrefix = "//"): string {
+export function stripLineCommentsAndStrings(line: string, commentPrefix = "//"): string {
   let out = "";
   let inSingle = false;
   let inDouble = false;
@@ -261,10 +308,117 @@ function stripLineCommentsAndStrings(line: string, commentPrefix = "//"): string
   return out;
 }
 
+function extractCallReceiver(
+  stripped: string,
+  matchIdx: number
+): { receiver?: string; member: boolean; receiverCall?: string } {
+  let j = matchIdx - 1;
+  while (j >= 0 && (stripped[j] === " " || stripped[j] === "\t")) j--;
+  let isMember = false;
+  if (j >= 1 && stripped[j] === ">" && stripped[j - 1] === "-") {
+    isMember = true;
+    j -= 2;
+  } else if (j >= 1 && stripped[j] === ":" && stripped[j - 1] === ":") {
+    isMember = true;
+    j -= 2;
+  } else if (j >= 0 && stripped[j] === ".") {
+    isMember = true;
+    j -= 1;
+  }
+  if (!isMember) return { member: false };
+  while (j >= 0 && (stripped[j] === " " || stripped[j] === "\t")) j--;
+  const end = j + 1;
+  while (j >= 0 && /[A-Za-z0-9_$]/.test(stripped[j]!)) j--;
+  const receiver = stripped.slice(j + 1, end).replace(/\s+/g, "");
+  if (receiver) return { receiver, member: true };
+  const prefix = stripped.slice(0, matchIdx);
+  // Base-class calls: Python `super().method()` / `super(A, self).method()`, C# `base.Method()`.
+  if (/\bsuper\s*\([^()]*\)\s*\.\s*$/.test(prefix)) return { receiver: "super", member: true };
+  if (/\bsuper\s*\.\s*$/.test(prefix)) return { receiver: "super", member: true };
+  if (/\bbase\s*\.\s*$/.test(prefix)) return { receiver: "base", member: true };
+  // Chained factory call: `getService().method()` -> receiverCall `getService`.
+  const chainMatch = prefix.match(/([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^()]*\)\s*\.\s*$/);
+  if (chainMatch) return { member: true, receiverCall: chainMatch[1]! };
+  return { member: true };
+}
+
+const C_FAMILY_STATEMENT_KEYWORDS = new Set([
+  "return", "throw", "delete", "new", "co_return", "co_await", "co_yield", "if", "for",
+  "while", "switch", "catch", "case", "else", "do", "goto", "using", "typedef", "namespace",
+  "static_assert", "sizeof", "alignof", "typeid", "await", "yield", "with",
+]);
+
+/** Removes C-family attribute prefixes (`[[nodiscard]]`, `[Obsolete]`) and `template<...>`. */
+function normalizeDeclarationCandidate(rawLine: string): string {
+  return stripLineCommentsAndStrings(rawLine, "//")
+    .trim()
+    .replace(/^(?:\[\[[^\]]*\]\]\s*)+/, "")
+    .replace(/^(?:\[[^[\]]*\]\s*)+/, "")
+    .replace(/^template\s*<[^>]*>\s*/i, "")
+    .trim();
+}
+
+/**
+ * Detects a "pure" declaration line in C/C++/C# — a prototype/interface method that ends with `;`
+ * and has no body, e.g. `bool Engine::cancel(int id);`. Such lines must never be counted as calls.
+ */
+export function isPureDeclarationLine(rawLine: string): boolean {
+  const stripped = normalizeDeclarationCandidate(rawLine);
+  if (!stripped.endsWith(";") || stripped.startsWith("#")) return false;
+  const firstWord = stripped.match(/^([A-Za-z_][A-Za-z0-9_]*)/)?.[1];
+  if (!firstWord || C_FAMILY_STATEMENT_KEYWORDS.has(firstWord)) return false;
+  return /^(?:(?:public|private|protected|internal|static|final|abstract|virtual|override|async|inline|explicit|constexpr|extern|const|unsigned|signed|long|short|friend|typename|struct|class|enum|readonly|partial|sealed|new|operator)\s+)*[A-Za-z_][A-Za-z0-9_:<>,.*&\s?\[\]]*\s+(?:[A-Za-z_][A-Za-z0-9_]*::)?[A-Za-z_][A-Za-z0-9_]*\s*\([^;{}]*\)\s*(?:const\s*)?(?:noexcept\s*)?(?:override\s*)?(?:final\s*)?;\s*$/.test(
+    stripped
+  );
+}
+
+/**
+ * Detects the opening line of a declaration whose parameters span several physical lines,
+ * e.g. `bool Engine::cancel(\n    int id);` — the header line itself must not be a call site.
+ */
+function isDeclarationHeaderStartLine(rawLine: string): boolean {
+  const stripped = normalizeDeclarationCandidate(rawLine);
+  if (!stripped || stripped.includes("{") || stripped.includes(";")) return false;
+  if (stripped.startsWith("#")) return false;
+  const firstWord = stripped.match(/^([A-Za-z_][A-Za-z0-9_]*)/)?.[1];
+  if (!firstWord || C_FAMILY_STATEMENT_KEYWORDS.has(firstWord)) return false;
+  const firstParen = stripped.indexOf("(");
+  if (firstParen < 0) return false;
+  const head = stripped.slice(0, firstParen).trim();
+  if (!head.includes(" ")) return false;
+  return /^(?:(?:public|private|protected|internal|static|final|abstract|virtual|override|async|inline|explicit|constexpr|extern|const|unsigned|signed|long|short|friend|typename|struct|class|enum|readonly|partial|sealed|new|operator)\s+)*[A-Za-z_][A-Za-z0-9_:<>,.*&\s?\[\]]*\s+(?:[A-Za-z_][A-Za-z0-9_]*::)?[A-Za-z_][A-Za-z0-9_]*$/.test(
+    head
+  );
+}
+
+/** Lines belonging to C/C++/C# prototypes (single-line or multi-line headers) are not call sites. */
+function collectCFamilyDeclarationLines(lines: string[]): Set<number> {
+  const declarationLines = new Set<number>();
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (isPureDeclarationLine(line) || isDeclarationHeaderStartLine(line)) {
+      declarationLines.add(i + 1);
+      continue;
+    }
+    // Inline class bodies (`class Engine { public: bool cancel(int id); };`) hide a
+    // prototype after `{`/`:`; mark the line when any brace segment is a declaration.
+    if (line.includes("{")) {
+      for (const segment of line.split(/[{}]/)) {
+        if (segment.trim() && isPureDeclarationLine(segment)) {
+          declarationLines.add(i + 1);
+          break;
+        }
+      }
+    }
+  }
+  return declarationLines;
+}
+
 function extractCallSitesFromLines(
   lines: string[],
   symbols: AstSymbol[],
-  commentPrefix: "//" | "#" = "//"
+  commentPrefix: "//" | "#" = "//",
+  declarationLines?: ReadonlySet<number>
 ): AstCallSite[] {
   const calls: AstCallSite[] = [];
   const fnSymbols = symbols.filter((s) => s.kind === "function" || s.kind === "method");
@@ -288,16 +442,20 @@ function extractCallSitesFromLines(
     const lineNum = i + 1;
     const stripped = stripLineCommentsAndStrings(lines[i] ?? "", commentPrefix);
     if (!stripped.trim()) continue;
+    const lineIsDeclaration = declarationLines?.has(lineNum) ?? false;
 
     for (const m of stripped.matchAll(callRe)) {
       const callee = m[1]!;
       if (NON_CALL_KEYWORDS.has(callee)) continue;
       const matchIdx = m.index ?? 0;
 
-      // Skip if this is the function declaration header itself
+      // Skip the function declaration header itself (but not calls inside a one-line body).
       if (declLines.has(lineNum)) {
+        const bodyOpen = stripped.indexOf("{");
+        const isHeaderPart = bodyOpen < 0 || matchIdx < bodyOpen;
         const before = stripped.slice(0, matchIdx).trim();
         if (
+          isHeaderPart &&
           /\b(def|func|fn|function|void|int|bool|string|auto|Task|public|private|protected|internal|static|async|virtual|override)\b/.test(
             before
           )
@@ -330,15 +488,749 @@ function extractCallSitesFromLines(
           : stripped.slice(openParenIdx + 1);
       const argsCount = countTopLevelArgs(argSlice);
       const caller = findEnclosingCaller(lineNum);
+      const receiverInfo = extractCallReceiver(stripped, matchIdx);
       calls.push({
         ...(caller ? { caller } : {}),
         callee,
         line: lineNum,
         argsCount,
+        ...(receiverInfo.receiver ? { receiver: receiverInfo.receiver } : {}),
+        ...(receiverInfo.member ? { member: true } : {}),
+        ...(receiverInfo.receiverCall ? { receiverCall: receiverInfo.receiverCall } : {}),
+        ...(lineIsDeclaration ? { isDeclaration: true } : {}),
       });
     }
   }
   return calls;
+}
+
+// ── Lightweight Receiver-Type Inference (regex/line-based; NO full type checker) ──
+//
+// Method call sites only carry a receiver *name* (`service` in `service.cancel()`), not a
+// static type. To stop attributing `b.cancel()` to `A.cancel` just because A and B share a
+// method name, we infer a best-effort local map receiver -> declared type from the same file:
+//   - TS/JS:    `const x = new Class()`, `let x: Class`, class fields `x: Class`,
+//               parameter annotations `x: Class` (from symbol signatures).
+//   - Python:   `x = Class()`, `x: Class`, `self.field = Class()`, parameter annotations.
+//   - Go:       `var x Type`, `x := Type{}`, `x *Type` parameters, method receivers.
+//   - Rust:     `let x: Type`, `let x = Type::new()/Type{..}`, `x: &Type` parameters.
+//   - C/C++:    `Type x;`, `Type* x`, `Type& x`, `const Type& x`; `auto x = new Type()`/`Type{}`.
+//   - C#:       `var x = new Type()`, `Type x`, `new Type()` parameters.
+// Resolution also understands `this`/`self`/`cls`/`Self`, `super`/`base`, static receivers
+// (`Class.method`, `Class::method`), inheritance parent maps (`class B extends A`, ...),
+// flow-insensitive last-assignment-wins within a block (different blocks with different
+// types stay unknown), and generic/nullable/array wrapper unwrapping (`Box<Order>` -> Order).
+// Nothing here is type-checked: macros, factory returns, generics with multiple arguments,
+// and dynamic receivers stay unknown; unknown receivers fall back to the importer heuristic.
+
+/** Kinds that can appear to the left of a member call as a static/associated receiver. */
+function isTypeDefinitionSymbol(sym: AstSymbol): boolean {
+  return (
+    sym.kind === "class" ||
+    sym.kind === "struct" ||
+    sym.kind === "interface" ||
+    sym.kind === "type" ||
+    sym.kind === "enum"
+  );
+}
+
+/** One inferred assignment to a local/module variable (flow-insensitive last-assignment heuristic). */
+export interface ReceiverTypeAssignment {
+  line: number;
+  /** Inferred type, or undefined when the assignment erased the previous inference. */
+  type?: string;
+  /** Innermost block opener line; differing block ids mean a possible branch conflict. */
+  block: number;
+}
+
+/**
+ * Best-effort receiver-name -> type data for one file.
+ * `byScope` is keyed `"<enclosingCallableLine>#receiver"` (line 0 = module level),
+ * `byClass` is keyed `"<className>#field"` (class fields / constructor parameter properties),
+ * `byName` is a flat last-write-wins fallback, and `assignments` retains per-scope assignment
+ * history for last-assignment-wins / branch-conflict handling.
+ */
+export interface ReceiverTypeIndex {
+  byScope: Map<string, string>;
+  byClass: Map<string, string>;
+  byName: Map<string, string>;
+  /** `class -> declared base class` pairs parsed from this file (for `super`/inheritance). */
+  parents?: Map<string, string>;
+  /** Per-scope assignment history used for last-assignment-wins / branch-conflict detection. */
+  assignments?: Map<string, ReceiverTypeAssignment[]>;
+}
+
+interface ReceiverTypePattern {
+  re: RegExp;
+  nameGroup: number;
+  typeGroup: number;
+}
+
+// Generic/nullable/array annotation expression, e.g. `Box<Order>`, `Order | null`, `Order[]`.
+const TS_TYPE_EXPR = String.raw`[A-Za-z_$][\w$.]*(?:\s*<[^<>;=,)]*>)?(?:\s*\[\s*\])*`;
+const CS_TYPE_EXPR = String.raw`[A-Z]\w*(?:<[^<>]*>)?(?:\s*\[\s*\])*`;
+const RUST_TYPE_EXPR = String.raw`[A-Za-z_]\w*(?:<[^<>;=,)]*>)?`;
+
+// TS/JS local declarations, class fields, generic `new` assignments, parameter annotations.
+const TS_RECEIVER_PATTERNS: ReceiverTypePattern[] = [
+  { re: new RegExp(String.raw`\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*:\s*(${TS_TYPE_EXPR})`, "g"), nameGroup: 1, typeGroup: 2 },
+  { re: new RegExp(String.raw`\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*new\s+([A-Za-z_$][\w$.]*)`, "g"), nameGroup: 1, typeGroup: 2 },
+  { re: new RegExp(String.raw`(?:^|[=(,;])\s*([A-Za-z_$][\w$]*)\s*=\s*new\s+([A-Za-z_$][\w$.]*)`, "g"), nameGroup: 1, typeGroup: 2 },
+  { re: new RegExp(String.raw`this\.([A-Za-z_$][\w$]*)\s*=\s*new\s+([A-Za-z_$][\w$.]*)`, "g"), nameGroup: 1, typeGroup: 2 },
+  { re: new RegExp(String.raw`^\s*(?:(?:public|private|protected|readonly|static|declare)\s+)*([A-Za-z_$][\w$]*)\s*[?!]?\s*:\s*(${TS_TYPE_EXPR})`, "g"), nameGroup: 1, typeGroup: 2 },
+  { re: new RegExp(String.raw`[(,]\s*([A-Za-z_$][\w$]*)\s*\??\s*:\s*(${TS_TYPE_EXPR})`, "g"), nameGroup: 1, typeGroup: 2 },
+];
+const TS_PARAM_TYPE_PATTERNS: ReceiverTypePattern[] = [
+  { re: new RegExp(String.raw`([A-Za-z_$][\w$]*)\s*\??\s*:\s*(${TS_TYPE_EXPR})`, "g"), nameGroup: 1, typeGroup: 2 },
+];
+
+const PY_RECEIVER_PATTERNS: ReceiverTypePattern[] = [
+  { re: /^\s*([A-Za-z_]\w*)\s*=\s*([A-Za-z_][\w.]*)\s*\(/g, nameGroup: 1, typeGroup: 2 },
+  { re: /^\s*([A-Za-z_]\w*)\s*:\s*([A-Za-z_][\w.]*(?:\[[^\]]*\])?)/g, nameGroup: 1, typeGroup: 2 },
+  { re: /self\.([A-Za-z_]\w*)\s*=\s*([A-Za-z_][\w.]*)\s*\(/g, nameGroup: 1, typeGroup: 2 },
+];
+const PY_PARAM_TYPE_PATTERNS: ReceiverTypePattern[] = [
+  { re: /([A-Za-z_]\w*)\s*:\s*([A-Za-z_][\w.]*(?:\[[^\]]*\])?)/g, nameGroup: 1, typeGroup: 2 },
+];
+
+const GO_RECEIVER_PATTERNS: ReceiverTypePattern[] = [
+  { re: /\bvar\s+([A-Za-z_]\w*)\s+\*?([A-Za-z_][\w.]*)/g, nameGroup: 1, typeGroup: 2 },
+  { re: /([A-Za-z_]\w*)\s*:=\s*&?([A-Za-z_][\w.]*)\s*\{/g, nameGroup: 1, typeGroup: 2 },
+  { re: /^func\s*\(\s*([A-Za-z_]\w*)\s+\*?([A-Za-z_][\w.]*)/g, nameGroup: 1, typeGroup: 2 },
+];
+const GO_PARAM_TYPE_PATTERNS: ReceiverTypePattern[] = [
+  { re: /([A-Za-z_]\w*)\s+\*?\[?\]?([A-Za-z_][\w.]*)/g, nameGroup: 1, typeGroup: 2 },
+];
+
+const RUST_RECEIVER_PATTERNS: ReceiverTypePattern[] = [
+  { re: new RegExp(String.raw`\blet\s+(?:mut\s+)?([A-Za-z_]\w*)\s*:\s*&?\s*(?:mut\s+)?(${RUST_TYPE_EXPR})`, "g"), nameGroup: 1, typeGroup: 2 },
+  { re: /\blet\s+(?:mut\s+)?([A-Za-z_]\w*)\s*=\s*&?\s*(?:mut\s+)?([A-Za-z_]\w*)\s*(?:::|\{)/g, nameGroup: 1, typeGroup: 2 },
+];
+const RUST_PARAM_TYPE_PATTERNS: ReceiverTypePattern[] = [
+  { re: new RegExp(String.raw`([A-Za-z_]\w*)\s*:\s*&?\s*(?:mut\s+)?(${RUST_TYPE_EXPR})`, "g"), nameGroup: 1, typeGroup: 2 },
+];
+
+const CPP_RECEIVER_PATTERNS: ReceiverTypePattern[] = [
+  { re: /^\s*(?:const\s+)?([A-Z]\w*(?:<[^<>]*>)?)\s*[&*]*\s+([A-Za-z_]\w*)\s*[;=,)]/g, nameGroup: 2, typeGroup: 1 },
+  { re: /^\s*(?:const\s+)?([A-Z]\w*(?:<[^<>]*>)?)\s*[&*]*\s+([A-Za-z_]\w*)\s*\{/g, nameGroup: 2, typeGroup: 1 },
+  // `auto* svc = new OrderService();` / `auto svc = OrderService{};`
+  { re: /\bauto\s*\*?\s*&?\s+([A-Za-z_]\w*)\s*=\s*new\s+([A-Z]\w*(?:<[^<>]*>)?)/g, nameGroup: 1, typeGroup: 2 },
+  { re: /\bauto\s*\*?\s*&?\s+([A-Za-z_]\w*)\s*=\s*([A-Z]\w*(?:<[^<>]*>)?)\s*\{/g, nameGroup: 1, typeGroup: 2 },
+];
+const CPP_PARAM_TYPE_PATTERNS: ReceiverTypePattern[] = [
+  { re: /(?:const\s+)?([A-Z]\w*(?:<[^<>]*>)?)\s*[&*]*\s+([A-Za-z_]\w*)/g, nameGroup: 2, typeGroup: 1 },
+];
+
+const CS_RECEIVER_PATTERNS: ReceiverTypePattern[] = [
+  { re: /\bvar\s+([A-Za-z_]\w*)\s*=\s*new\s+([A-Z]\w*(?:<[^<>]*>)?)/g, nameGroup: 1, typeGroup: 2 },
+  { re: /(?:^|[=(,;])\s*([A-Za-z_]\w*)\s*=\s*new\s+([A-Z]\w*(?:<[^<>]*>)?)/g, nameGroup: 1, typeGroup: 2 },
+  { re: new RegExp(String.raw`^\s*(?:(?:public|private|protected|internal|static|readonly|volatile|const|event)\s+)*(${CS_TYPE_EXPR})\??\s+([A-Za-z_]\w*)\s*[;=,)]`, "g"), nameGroup: 2, typeGroup: 1 },
+  { re: new RegExp(String.raw`^\s*(?:(?:public|private|protected|internal|static|readonly|volatile)\s+)*(${CS_TYPE_EXPR})\??\s+([A-Za-z_]\w*)\s*\{`, "g"), nameGroup: 2, typeGroup: 1 },
+];
+const CS_PARAM_TYPE_PATTERNS: ReceiverTypePattern[] = [
+  { re: new RegExp(String.raw`(${CS_TYPE_EXPR})\??\s+([A-Za-z_]\w*)`, "g"), nameGroup: 2, typeGroup: 1 },
+];
+
+function lineReceiverPatterns(family: SourceLanguageFamily): ReceiverTypePattern[] | undefined {
+  switch (family) {
+    case "js":
+      return TS_RECEIVER_PATTERNS;
+    case "python":
+      return PY_RECEIVER_PATTERNS;
+    case "go":
+      return GO_RECEIVER_PATTERNS;
+    case "rust":
+      return RUST_RECEIVER_PATTERNS;
+    case "c":
+      return CPP_RECEIVER_PATTERNS;
+    case "csharp":
+      return CS_RECEIVER_PATTERNS;
+    default:
+      return undefined;
+  }
+}
+
+function paramReceiverPatterns(family: SourceLanguageFamily): ReceiverTypePattern[] | undefined {
+  switch (family) {
+    case "js":
+      return TS_PARAM_TYPE_PATTERNS;
+    case "python":
+      return PY_PARAM_TYPE_PATTERNS;
+    case "go":
+      return GO_PARAM_TYPE_PATTERNS;
+    case "rust":
+      return RUST_PARAM_TYPE_PATTERNS;
+    case "c":
+      return CPP_PARAM_TYPE_PATTERNS;
+    case "csharp":
+      return CS_PARAM_TYPE_PATTERNS;
+    default:
+      return undefined;
+  }
+}
+
+function findEnclosingCallableSymbol(ast: FileAstAnalysis, line: number): AstSymbol | undefined {
+  let best: AstSymbol | undefined;
+  for (const sym of ast.symbols) {
+    if (sym.kind !== "function" && sym.kind !== "method") continue;
+    if (line >= sym.line && line <= sym.endLine) {
+      if (!best || sym.endLine - sym.line < best.endLine - best.line) best = sym;
+    }
+  }
+  return best;
+}
+
+function findEnclosingTypeSymbol(ast: FileAstAnalysis, line: number): AstSymbol | undefined {
+  let best: AstSymbol | undefined;
+  for (const sym of ast.symbols) {
+    if (!isTypeDefinitionSymbol(sym)) continue;
+    if (line >= sym.line && line <= sym.endLine) {
+      if (!best || sym.endLine - sym.line < best.endLine - best.line) best = sym;
+    }
+  }
+  return best;
+}
+
+/** Splits the first top-level type argument (`Order, Map<A,B>` -> `Order`). */
+function firstTopLevelTypeArg(inner: string): string {
+  let depth = 0;
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i]!;
+    if (ch === "<" || ch === "[" || ch === "(") depth += 1;
+    else if (ch === ">" || ch === "]" || ch === ")") depth = Math.max(0, depth - 1);
+    else if ((ch === "," || ch === "|") && depth === 0) return inner.slice(0, i).trim();
+  }
+  return inner.trim();
+}
+
+/**
+ * Reduces a type expression to the base type used for receiver matching:
+ * strips qualifiers/pointers/references/nullability, unwraps arrays and a generic wrapper's
+ * first type argument (`Box<Order>` -> `Order`, `Option<&Order>` -> `Order`), and treats a
+ * multi-type union as ambiguous (`A | B` -> undefined) while `A | null` -> `A`.
+ * Namespaces are stripped (`ns.Foo` -> `Foo`).
+ */
+export function unwrapTypeExpression(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  let text = raw.trim();
+  for (let guard = 0; guard < 8; guard++) {
+    const before = text;
+    text = text
+      .replace(/^(?:readonly|const|mut|static|final|volatile|unsigned|signed|long|short)\s+/i, "")
+      .replace(/^[&*]\s*/, "")
+      .replace(/^(?:async\s+)/i, "")
+      .trim();
+    if (text.startsWith("(") && text.endsWith(")") && text.length > 2) {
+      text = text.slice(1, -1).trim();
+    }
+    text = text.replace(/(?:\[\s*\])+\s*$/, "").replace(/\?\s*$/, "").trim();
+    const unionParts = text.split("|").map((part) => part.trim()).filter(Boolean);
+    if (unionParts.length > 1) {
+      const meaningful = unionParts.filter(
+        (part) => !/^(?:null|undefined|None|nil|void|never)$/i.test(part)
+      );
+      if (meaningful.length !== 1) return undefined;
+      text = meaningful[0]!;
+    }
+    const angleIdx = text.indexOf("<");
+    const bracketIdx = text.indexOf("[");
+    const cutIdx =
+      angleIdx > 0 && text.endsWith(">")
+        ? angleIdx
+        : bracketIdx > 0 && text.endsWith("]")
+          ? bracketIdx
+          : -1;
+    if (cutIdx > 0) {
+      text = firstTopLevelTypeArg(text.slice(cutIdx + 1, -1).trim());
+      continue;
+    }
+    if (text === before) break;
+  }
+  text = text.trim();
+  const last = text.split(/[.:]/).pop()?.trim();
+  if (!last || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(last)) return undefined;
+  return last;
+}
+
+/** Accepts usual PascalCase types plus locally declared/imported type names. */
+function isPlausibleInferredType(typeName: string, ast: FileAstAnalysis): boolean {
+  if (/^[A-Z]/.test(typeName)) return true;
+  if (ast.symbols.some((sym) => isTypeDefinitionSymbol(sym) && sym.name === typeName)) return true;
+  return ast.imports.some((imp) => imp.importedNames.includes(typeName));
+}
+
+/**
+ * Parses `class -> declared base class` pairs for one file (line/regex based).
+ * Supported: TS/JS `extends`, Python `class B(A)`, C# `class/record B : A`,
+ * C++ `class/struct B : public A`. Rust traits/Go embedding are intentionally skipped.
+ */
+export function parseClassParents(
+  relPath: string,
+  content: string,
+  astInput?: FileAstAnalysis
+): Map<string, string> {
+  const ast = astInput ?? analyzeSourceFile(relPath, content);
+  const family = sourceLanguageFamily(relPath);
+  const parents = new Map<string, string>();
+  const lines = content.split(/\r?\n/);
+  const commentPrefix = family === "python" ? "#" : "//";
+  const toBaseName = (raw: string): string | undefined => {
+    const last = raw.trim().split(/[.:]/).pop()?.trim();
+    return last && /^[A-Za-z_][A-Za-z0-9_]*$/.test(last) ? last : undefined;
+  };
+  const knownType = (name: string): boolean =>
+    ast.symbols.some((sym) => isTypeDefinitionSymbol(sym) && sym.name === name) ||
+    ast.imports.some((imp) => imp.importedNames.includes(name));
+  // Cross-file bases are not necessarily imported/declared in this file; accept PascalCase
+  // names as class-like and keep lowercase only when they are a known type.
+  const isLikelyTypeBase = (name: string): boolean => /^[A-Z]/.test(name) || knownType(name);
+
+  for (const raw of lines) {
+    const line = stripLineCommentsAndStrings(raw, commentPrefix).trim();
+    if (!line) continue;
+    if (family === "js") {
+      const match = line.match(
+        /\bclass\s+([A-Za-z_$][\w$]*)(?:\s*<[^>]*>)?\s+extends\s+([A-Za-z_$][\w$.]*)/
+      );
+      if (match) {
+        const base = toBaseName(match[2]!);
+        if (base && base !== match[1] && isLikelyTypeBase(base)) parents.set(match[1]!, base);
+      }
+    } else if (family === "python") {
+      const match = line.match(/^class\s+([A-Za-z_]\w*)\s*\(([^)]*)\)/);
+      if (match) {
+        const bases = match[2]!
+          .split(",")
+          .map((part) => part.trim())
+          .filter(Boolean);
+        for (const base of bases) {
+          const name = toBaseName(base);
+          if (!name || name === match[1]) continue;
+          if (/^(?:object|ABC|Protocol|Generic|Enum|str|int|float|bool|dict|list|tuple|set)$/.test(name)) {
+            continue;
+          }
+          if (isLikelyTypeBase(name)) {
+            parents.set(match[1]!, name);
+            break;
+          }
+        }
+      }
+    } else if (family === "csharp") {
+      const match = line.match(
+        /^(?:(?:public|internal|private|protected|abstract|sealed|static|partial|unsafe)\s+)*(?:class|record)\s+([A-Z]\w*)(?:\s*<[^>]*>)?\s*:\s*([A-Za-z_][\w.]*)/
+      );
+      if (match) {
+        const base = toBaseName(match[2]!);
+        if (base && base !== match[1] && isLikelyTypeBase(base)) parents.set(match[1]!, base);
+      }
+    } else if (family === "c") {
+      const match = line.match(
+        /^(?:template\s*<[^>]*>\s*)?(?:class|struct)\s+([A-Z]\w*)(?:\s*<[^>]*>)?\s*:\s*(?:(?:public|protected|private|virtual)\s+)*([A-Za-z_][\w:]*)/
+      );
+      if (match) {
+        const base = toBaseName(match[2]!);
+        if (base && base !== match[1] && isLikelyTypeBase(base)) parents.set(match[1]!, base);
+      }
+    }
+  }
+  return parents;
+}
+
+/** True when `sub` transitively extends `base` in the supplied parent map (cycle-safe). */
+export function isSubclassOf(
+  parents: ReadonlyMap<string, string>,
+  sub: string,
+  base: string
+): boolean {
+  let current = parents.get(sub);
+  const seen = new Set<string>();
+  while (current) {
+    if (current === base) return true;
+    if (seen.has(current)) return false;
+    seen.add(current);
+    current = parents.get(current);
+  }
+  return false;
+}
+
+/** Stem of a file name without extension (`engine.cpp` -> `engine`). */
+function fileStemLower(relPath: string): string {
+  return basename(relPath).replace(/\.[^.]+$/, "").toLowerCase();
+}
+
+/**
+ * Implicit (import-free) scope for languages whose build system makes sibling files
+ * visible without an explicit symbol import. Shared by blast radius, rename and the
+ * semantic index so all features agree on package visibility.
+ */
+export function inImplicitPackageScope(
+  targetFile: string,
+  candidateFile: string,
+  family: SourceLanguageFamily
+): boolean {
+  const sameDir = dirname(targetFile) === dirname(candidateFile);
+  switch (family) {
+    case "go":
+      // A Go package is exactly one directory.
+      return sameDir;
+    case "csharp":
+      // Namespace info is not modelled; same directory is the safe approximation.
+      return sameDir;
+    case "c":
+      // Translation unit + its header share a stem (`engine.cpp` <-> `engine.hpp`).
+      return sameDir || fileStemLower(targetFile) === fileStemLower(candidateFile);
+    default:
+      return false;
+  }
+}
+
+/** Minimal workspace cache shape needed to build a type hierarchy (structurally compatible with slicer). */
+export interface WorkspaceTypeHierarchySource {
+  readonly rootDir: string;
+  getFiles(): string[];
+  getRawFile(relPath: string): { content: string } | undefined;
+  getFileAnalysis(relPath: string): { ast: FileAstAnalysis } | undefined;
+}
+
+/**
+ * Best-effort, lazily built workspace type hierarchy used for inheritance-aware receiver
+ * matching: `B extends A` + `b.cancel()` may dispatch to `A.cancel` only when B (and every
+ * class between B and A) does not override `cancel`.
+ */
+export interface WorkspaceTypeHierarchy {
+  parentOf(typeName: string): string | undefined;
+  isSubclassOf(subType: string, baseType: string): boolean;
+  declaresMethod(typeName: string, methodName: string): boolean;
+  /** True when a receiver typed `resolvedType` can dispatch the call to `targetClass.methodName`. */
+  isCompatibleReceiver(resolvedType: string, targetClass: string, methodName: string): boolean;
+}
+
+export function createWorkspaceTypeHierarchy(
+  index: WorkspaceTypeHierarchySource
+): WorkspaceTypeHierarchy {
+  const parents = new Map<string, string>();
+  let parentsLoaded = false;
+  const loadParents = (): void => {
+    if (parentsLoaded) return;
+    parentsLoaded = true;
+    for (const relPath of index.getFiles()) {
+      const raw = index.getRawFile(relPath);
+      if (!raw) continue;
+      for (const [child, parent] of parseClassParents(relPath, raw.content)) {
+        if (!parents.has(child)) parents.set(child, parent);
+      }
+    }
+  };
+
+  const declaredCache = new Map<string, boolean>();
+  const declaresMethod = (typeName: string, methodName: string): boolean => {
+    const cacheKey = `${typeName}#${methodName}`;
+    const cached = declaredCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+    let found = false;
+    for (const relPath of index.getFiles()) {
+      const raw = index.getRawFile(relPath);
+      if (!raw || !raw.content.includes(typeName) || !raw.content.includes(methodName)) continue;
+      const ast = index.getFileAnalysis(relPath)?.ast;
+      if (!ast) continue;
+      if (ast.symbols.some((sym) => sym.name === methodName && sym.parentClass === typeName)) {
+        found = true;
+        break;
+      }
+    }
+    declaredCache.set(cacheKey, found);
+    return found;
+  };
+
+  return {
+    parentOf(typeName: string): string | undefined {
+      loadParents();
+      return parents.get(typeName);
+    },
+    isSubclassOf(subType: string, baseType: string): boolean {
+      loadParents();
+      return isSubclassOf(parents, subType, baseType);
+    },
+    declaresMethod,
+    isCompatibleReceiver(resolvedType: string, targetClass: string, methodName: string): boolean {
+      if (resolvedType === targetClass) return true;
+      loadParents();
+      if (!isSubclassOf(parents, resolvedType, targetClass)) return false;
+      // Walk the inheritance chain from the receiver type up to (but excluding) the target
+      // class. Any intermediate override means the call does not reach the target method.
+      let current: string | undefined = resolvedType;
+      const seen = new Set<string>();
+      while (current && current !== targetClass) {
+        if (declaresMethod(current, methodName)) return false;
+        const next = parents.get(current);
+        if (!next || seen.has(next)) return false;
+        seen.add(next);
+        current = next;
+      }
+      return true;
+    },
+  };
+}
+
+/** Innermost block opener line per source line (brace languages; indentation for Python). */
+function computeLineBlockIds(codeLines: string[], family: SourceLanguageFamily): number[] {
+  const blocks = new Array<number>(codeLines.length).fill(0);
+  if (family === "python") {
+    const stack: Array<{ indent: number; line: number }> = [];
+    const controlRe =
+      /^(?:async\s+)?(?:def|class|if|elif|else|for|while|try|except|finally|with|match|case)\b/;
+    for (let i = 0; i < codeLines.length; i++) {
+      const line = codeLines[i] ?? "";
+      if (!line.trim()) {
+        blocks[i] = stack.length > 0 ? stack[stack.length - 1]!.line : 0;
+        continue;
+      }
+      const indent = indentColumns(line);
+      while (stack.length > 0 && indent <= stack[stack.length - 1]!.indent) stack.pop();
+      blocks[i] = stack.length > 0 ? stack[stack.length - 1]!.line : 0;
+      if (controlRe.test(line.trim())) stack.push({ indent, line: i + 1 });
+    }
+    return blocks;
+  }
+  const stack: number[] = [];
+  for (let i = 0; i < codeLines.length; i++) {
+    blocks[i] = stack.length > 0 ? stack[stack.length - 1]! : 0;
+    const line = codeLines[i] ?? "";
+    for (const ch of line) {
+      if (ch === "{") stack.push(i + 1);
+      else if (ch === "}") stack.pop();
+    }
+  }
+  return blocks;
+}
+
+function extractSignatureParamText(signature: string): string {
+  const open = signature.indexOf("(");
+  if (open < 0) return "";
+  let depth = 0;
+  for (let i = open; i < signature.length; i++) {
+    const ch = signature[i]!;
+    if (ch === "(") depth += 1;
+    else if (ch === ")") {
+      depth -= 1;
+      if (depth === 0) return signature.slice(open + 1, i);
+    }
+  }
+  return signature.slice(open + 1);
+}
+
+/**
+ * Infers receiver-name -> declared-type data for one file. Pure regex/line heuristics over
+ * comment/string-masked lines, plus parameter annotations parsed out of extracted symbol
+ * signatures (so multi-line signatures still contribute).
+ *  - last assignment in a scope wins for calls after it; assignments spread across different
+ *    blocks (if/else/loop) with different types are treated as unknown;
+ *  - generic/array/nullable wrappers are unwrapped to a base type (`Box<Order>` -> `Order`);
+ *  - `class B extends A` and equivalents are recorded in `parents` for super/inheritance.
+ */
+export function inferReceiverTypeIndex(
+  relPath: string,
+  content: string,
+  astInput?: FileAstAnalysis
+): ReceiverTypeIndex {
+  const ast = astInput ?? analyzeSourceFile(relPath, content);
+  const family = sourceLanguageFamily(relPath);
+  const rawLines = content.split(/\r?\n/);
+  const codeLines =
+    family === "python"
+      ? maskPythonSource(rawLines).maskedLines
+      : rawLines.map((line) => stripLineCommentsAndStrings(line, "//"));
+  const blockIds = computeLineBlockIds(codeLines, family);
+
+  const index: ReceiverTypeIndex = {
+    byScope: new Map<string, string>(),
+    byClass: new Map<string, string>(),
+    byName: new Map<string, string>(),
+    parents: parseClassParents(relPath, content, ast),
+    assignments: new Map<string, ReceiverTypeAssignment[]>(),
+  };
+
+  const record = (
+    receiver: string | undefined,
+    rawType: string | undefined,
+    line: number,
+    scopeLine?: number,
+    mode: "assignment" | "static" = "assignment"
+  ): void => {
+    if (!receiver || !rawType) return;
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(receiver)) return;
+    if (
+      receiver === "this" ||
+      receiver === "self" ||
+      receiver === "cls" ||
+      receiver === "super" ||
+      receiver === "base"
+    ) {
+      return;
+    }
+    const callable = findEnclosingCallableSymbol(ast, line);
+    let type = unwrapTypeExpression(rawType);
+    if (!type || type === receiver) return;
+    if (type === "Self") {
+      type = callable?.parentClass;
+      if (!type) return;
+    }
+    if (!isPlausibleInferredType(type, ast)) return;
+    const scopeKey =
+      scopeLine !== undefined ? String(scopeLine) : callable ? String(callable.line) : "0";
+    const enclosingType = findEnclosingTypeSymbol(ast, line);
+    index.byScope.set(`${scopeKey}#${receiver}`, type);
+    if (mode === "assignment") {
+      const isClassField = scopeLine === undefined && !callable && enclosingType !== undefined;
+      if (!isClassField) {
+        const key = `${scopeKey}#${receiver}`;
+        const list = index.assignments!.get(key) ?? [];
+        list.push({ line, block: blockIds[line - 1] ?? 0, type });
+        index.assignments!.set(key, list);
+      }
+    }
+    const classScope = callable?.parentClass ?? enclosingType?.name;
+    if (classScope) index.byClass.set(`${classScope}#${receiver}`, type);
+    index.byName.set(receiver, type);
+  };
+
+  const applyPatterns = (
+    patterns: ReceiverTypePattern[],
+    text: string,
+    line: number,
+    scopeLine?: number,
+    mode: "assignment" | "static" = "assignment"
+  ): void => {
+    for (const pattern of patterns) {
+      pattern.re.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = pattern.re.exec(text)) !== null) {
+        record(match[pattern.nameGroup], match[pattern.typeGroup], line, scopeLine, mode);
+        if (match.index === pattern.re.lastIndex) pattern.re.lastIndex += 1;
+      }
+    }
+  };
+
+  const linePatterns = lineReceiverPatterns(family);
+  if (linePatterns) {
+    for (let i = 0; i < codeLines.length; i++) {
+      applyPatterns(linePatterns, codeLines[i] ?? "", i + 1);
+    }
+  }
+
+  // Parameter annotations are recovered from extracted signatures (covers multi-line headers).
+  const paramPatterns = paramReceiverPatterns(family);
+  if (paramPatterns) {
+    for (const sym of ast.symbols) {
+      if (sym.kind !== "function" && sym.kind !== "method") continue;
+      if (!sym.signature) continue;
+      const params = extractSignatureParamText(sym.signature);
+      if (!params) continue;
+      applyPatterns(paramPatterns, params, sym.line, sym.line, "static");
+    }
+  }
+
+  return index;
+}
+
+/** Flat fallback form: receiver name -> inferred type (last write wins). */
+export function inferReceiverTypes(
+  relPath: string,
+  content: string,
+  astInput?: FileAstAnalysis
+): Map<string, string> {
+  return inferReceiverTypeIndex(relPath, content, astInput).byName;
+}
+
+interface AssignmentLookup {
+  found: boolean;
+  type?: string;
+}
+
+/**
+ * Flow-insensitive assignment lookup: the last assignment before the call wins, unless
+ * different inferred types live in different blocks (branches), which is reported as unknown.
+ */
+function lookupAssignmentType(
+  index: ReceiverTypeIndex,
+  key: string,
+  callLine: number
+): AssignmentLookup {
+  const entries = index.assignments?.get(key);
+  if (!entries || entries.length === 0) return { found: false };
+  const before = entries.filter((entry) => entry.line < callLine);
+  if (before.length === 0) return { found: false };
+  const last = before[before.length - 1]!;
+  if (!last.type) return { found: true };
+  const types = new Set<string>();
+  const blocks = new Set<number>();
+  for (const entry of before) {
+    if (entry.type) types.add(entry.type);
+    blocks.add(entry.block);
+  }
+  if (types.size > 1 && blocks.size > 1) return { found: true };
+  return { found: true, type: last.type };
+}
+
+/**
+ * Resolves the static type of a member-call receiver, using the call's enclosing callable
+ * (`this`/`self`/`Self` -> caller's parentClass, `super`/`base` -> parent class, flow-insensitive
+ * last assignment in scope, class fields) and falling back to a static/associated receiver
+ * (`Class.method`, `Class::method`). Returns `undefined` when the receiver type stays unknown.
+ */
+export function resolveReceiverType(
+  call: Pick<AstCallSite, "receiver" | "line">,
+  ast: FileAstAnalysis,
+  index: ReceiverTypeIndex
+): string | undefined {
+  const receiver = call.receiver;
+  if (!receiver) return undefined;
+  const callable = findEnclosingCallableSymbol(ast, call.line);
+  if (receiver === "super" || receiver === "base") {
+    if (!callable?.parentClass) return undefined;
+    return index.parents?.get(callable.parentClass);
+  }
+  if (receiver === "this" || receiver === "self" || receiver === "cls" || receiver === "Self") {
+    return callable?.parentClass;
+  }
+  if (callable) {
+    const scoped = lookupAssignmentType(index, `${callable.line}#${receiver}`, call.line);
+    if (scoped.found) return scoped.type;
+    const scopedStatic = index.byScope.get(`${callable.line}#${receiver}`);
+    if (scopedStatic) return scopedStatic;
+    if (callable.parentClass) {
+      const classScoped = index.byClass.get(`${callable.parentClass}#${receiver}`);
+      if (classScoped) return classScoped;
+    }
+  }
+  const moduleScoped = lookupAssignmentType(index, `0#${receiver}`, call.line);
+  if (moduleScoped.found) return moduleScoped.type;
+  const moduleStatic = index.byScope.get(`0#${receiver}`);
+  if (moduleStatic) return moduleStatic;
+  const typeSymbol = ast.symbols.find((sym) => sym.name === receiver && isTypeDefinitionSymbol(sym));
+  if (typeSymbol) return typeSymbol.name;
+  // Associated/static call such as `OrderService.cancel(...)` or `Engine::cancel(...)`.
+  if (/^[A-Z][A-Za-z0-9_]*$/.test(receiver)) return receiver;
+  return undefined;
+}
+
+/**
+ * Splits a scoped symbol query (`Class.method`, `Class::method`) into container and member.
+ * Bare names return `{ member }` unchanged.
+ */
+export function splitQualifiedSymbolName(raw: string): { member: string; container?: string } {
+  const trimmed = raw.trim();
+  if (trimmed.includes("::")) {
+    const parts = trimmed.split("::");
+    const member = parts[parts.length - 1]?.trim() ?? trimmed;
+    const container = parts.slice(0, -1).join("::").trim();
+    return container ? { member, container } : { member };
+  }
+  const dot = trimmed.lastIndexOf(".");
+  if (dot > 0 && dot < trimmed.length - 1) {
+    return { member: trimmed.slice(dot + 1), container: trimmed.slice(0, dot) };
+  }
+  return { member: trimmed };
 }
 
 function checkBraceBalanceSyntax(
@@ -672,10 +1564,41 @@ function parseWithBabel(relPath: string, content: string, parser: BabelParserMod
     ) {
       const callee = node.callee;
       let calleeName: string | undefined;
+      let receiver: string | undefined;
+      let receiverCall: string | undefined;
+      let member = false;
       if (callee?.type === "Identifier") {
         calleeName = callee.name;
       } else if (callee?.type === "MemberExpression" || callee?.type === "OptionalMemberExpression") {
         calleeName = callee.property?.name;
+        member = true;
+        // Unwrap TS non-null / as / parenthesized wrappers around the receiver expression.
+        let obj = callee.object;
+        while (
+          obj &&
+          (obj.type === "TSNonNullExpression" ||
+            obj.type === "TSAsExpression" ||
+            obj.type === "TSTypeAssertion" ||
+            obj.type === "ParenthesizedExpression")
+        ) {
+          obj = obj.expression;
+        }
+        if (obj?.type === "Identifier") {
+          receiver = obj.name;
+        } else if (obj?.type === "ThisExpression") {
+          receiver = "this";
+        } else if (obj?.type === "Super") {
+          receiver = "super";
+        } else if (obj?.type === "CallExpression" || obj?.type === "OptionalCallExpression") {
+          // Factory chain: `getService().cancel()`.
+          if (obj.callee?.type === "Identifier") receiverCall = obj.callee.name;
+        } else if (
+          obj?.type === "MemberExpression" ||
+          obj?.type === "OptionalMemberExpression"
+        ) {
+          if (!obj.computed && typeof obj.property?.name === "string") receiver = obj.property.name;
+          else if (obj.object?.type === "Identifier") receiver = obj.object.name;
+        }
       }
       if (calleeName && calleeName !== "require" && calleeName !== "import") {
         calls.push({
@@ -683,6 +1606,9 @@ function parseWithBabel(relPath: string, content: string, parser: BabelParserMod
           callee: calleeName,
           line: node.loc?.start?.line ?? 1,
           argsCount: Array.isArray(node.arguments) ? node.arguments.length : 0,
+          ...(receiver ? { receiver } : {}),
+          ...(member ? { member: true } : {}),
+          ...(receiverCall ? { receiverCall } : {}),
         });
       }
     }
@@ -735,37 +1661,244 @@ function indentColumns(line: string): number {
   return cols;
 }
 
+interface PythonMaskResult {
+  maskedLines: string[];
+  inMultilineString: boolean[];
+  unclosedTriple: '"""' | "'''" | null;
+}
+
+/**
+ * Masks Python comments and string literals (including multi-line triple-quoted strings)
+ * with spaces while preserving line structure, so bracket/colon analysis never trips on
+ * string contents or docstrings.
+ */
+function maskPythonSource(lines: string[]): PythonMaskResult {
+  const maskedLines: string[] = [];
+  const inMultilineString: boolean[] = [];
+  let inSingle = false;
+  let inDouble = false;
+  let triple: '"""' | "'''" | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    inMultilineString.push(triple !== null);
+    const raw = lines[i] ?? "";
+    let out = "";
+    let j = 0;
+    while (j < raw.length) {
+      if (triple !== null) {
+        if (raw.startsWith(triple, j)) {
+          triple = null;
+          out += "   ";
+          j += 3;
+        } else {
+          out += " ";
+          j += 1;
+        }
+        continue;
+      }
+      const ch = raw[j]!;
+      if (inSingle || inDouble) {
+        if (ch === "\\") {
+          out += "  ";
+          j += 2;
+          continue;
+        }
+        if ((inSingle && ch === "'") || (inDouble && ch === '"')) {
+          inSingle = false;
+          inDouble = false;
+        }
+        out += " ";
+        j += 1;
+        continue;
+      }
+      if (ch === "#") {
+        out += " ".repeat(raw.length - j);
+        break;
+      }
+      if (raw.startsWith('"""', j) || raw.startsWith("'''", j)) {
+        triple = raw.slice(j, j + 3) as '"""' | "'''";
+        out += "   ";
+        j += 3;
+        continue;
+      }
+      if (ch === "'") {
+        inSingle = true;
+        out += " ";
+        j += 1;
+        continue;
+      }
+      if (ch === '"') {
+        inDouble = true;
+        out += " ";
+        j += 1;
+        continue;
+      }
+      out += ch;
+      j += 1;
+    }
+    // Single/double quoted strings cannot span physical lines without a backslash continuation.
+    inSingle = false;
+    inDouble = false;
+    maskedLines.push(out);
+  }
+
+  return { maskedLines, inMultilineString, unclosedTriple: triple };
+}
+
+const PY_COMPOUND_KEYWORDS = new Set([
+  "def", "class", "if", "elif", "else", "for", "while", "with",
+  "try", "except", "finally", "match", "case",
+]);
+
+/** Returns the index of the first `:` at bracket depth 0 that is not a `:=` walrus. */
+function findTopLevelColon(masked: string): number {
+  let depth = 0;
+  for (let i = 0; i < masked.length; i++) {
+    const ch = masked[i]!;
+    if (ch === "(" || ch === "[" || ch === "{") depth += 1;
+    else if (ch === ")" || ch === "]" || ch === "}") depth = Math.max(0, depth - 1);
+    else if (ch === ":" && depth === 0 && masked[i + 1] !== "=") return i;
+  }
+  return -1;
+}
+
+/**
+ * Structural Python syntax guard (heuristic, not a full parser):
+ *  - unbalanced `()[]{}` across logical lines,
+ *  - missing `:` after `def/class/if/elif/else/for/while/with/try/except/finally/match/case`,
+ *  - `def`/`class` without a name,
+ *  - compound statements illegally starting a one-line suite (`def f(): if x`).
+ * Bracket depth is tracked so multi-line signatures are not false positives, and
+ * triple-quoted strings/docstrings are masked out.
+ */
+function checkPythonSyntax(lines: string[], masked: PythonMaskResult): Array<{ line: number; column?: number; message: string }> {
+  const errors: Array<{ line: number; column?: number; message: string }> = [];
+  if (masked.unclosedTriple !== null) {
+    errors.push({
+      line: lines.length,
+      message: `Unclosed triple-quoted string (${masked.unclosedTriple})`,
+    });
+  }
+
+  const stack: Array<{ ch: string; line: number }> = [];
+  const depthBefore: number[] = [];
+  const depthAfter: number[] = [];
+  const pairs: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
+  let unbalanced = false;
+
+  for (let i = 0; i < masked.maskedLines.length; i++) {
+    depthBefore.push(stack.length);
+    const line = masked.maskedLines[i]!;
+    for (let c = 0; c < line.length; c++) {
+      const ch = line[c]!;
+      if (ch === "(" || ch === "[" || ch === "{") {
+        stack.push({ ch, line: i + 1 });
+      } else if (ch === ")" || ch === "]" || ch === "}") {
+        const top = stack.pop();
+        if (!top || top.ch !== pairs[ch]) {
+          errors.push({ line: i + 1, column: c + 1, message: `Unmatched closing '${ch}'` });
+          unbalanced = true;
+          break;
+        }
+      }
+    }
+    depthAfter.push(stack.length);
+    if (unbalanced) break;
+  }
+  if (unbalanced) return errors;
+  if (stack.length > 0) {
+    const unclosed = stack[stack.length - 1]!;
+    errors.push({
+      line: unclosed.line,
+      message: `Unclosed '${unclosed.ch}' opened at line ${unclosed.line}`,
+    });
+    return errors;
+  }
+
+  const maskedLines = masked.maskedLines;
+  const consumed = new Set<number>();
+
+  for (let i = 0; i < maskedLines.length; i++) {
+    if (consumed.has(i) || masked.inMultilineString[i]) continue;
+    if (depthBefore[i]! > 0) continue;
+    const line = maskedLines[i]!;
+    if (!line.trim()) continue;
+    if (i > 0 && /\\\s*$/.test(maskedLines[i - 1]!.trimEnd())) continue;
+
+    let header = line.trimStart();
+    let kw = header.match(/^([A-Za-z_][A-Za-z0-9_]*)/)?.[1];
+    if (!kw) continue;
+    if (kw === "async") {
+      const rest = header.slice(5).trimStart();
+      const inner = rest.match(/^([A-Za-z_][A-Za-z0-9_]*)/)?.[1];
+      if (!inner || (inner !== "def" && inner !== "for" && inner !== "with")) continue;
+      kw = inner;
+      header = rest;
+    }
+    if (!PY_COMPOUND_KEYWORDS.has(kw)) continue;
+
+    if (kw === "def" || kw === "class") {
+      if (!new RegExp(`^${kw}\\s+[A-Za-z_][A-Za-z0-9_]*`).test(header)) {
+        errors.push({ line: i + 1, message: `Python '${kw}' statement is missing a name` });
+        continue;
+      }
+    }
+
+    // Scan the (possibly multi-line) header for its terminating top-level ':'.
+    let colonLine = -1;
+    let colonPos = -1;
+    let headerEndLine = i + 1;
+    for (let j = i; j < Math.min(maskedLines.length, i + 50); j++) {
+      const text = j === i ? header : maskedLines[j]!;
+      const pos = findTopLevelColon(text);
+      if (pos >= 0) {
+        colonLine = j;
+        colonPos = pos;
+        headerEndLine = j + 1;
+        break;
+      }
+      const continues = (depthAfter[j]! > depthBefore[i]!) || /\\\s*$/.test(maskedLines[j]!);
+      if (!continues) break;
+      if (j > i) consumed.add(j);
+    }
+
+    if (colonLine < 0) {
+      // `match` and `case` are soft keywords: skip ordinary assignments/attribute access
+      // (`match = re.match(...)`, `case.group(1)`) so they don't look like broken statements.
+      if (
+        (kw === "match" || kw === "case") &&
+        new RegExp(`^${kw}\\s*(?:[=(.,\\[+\\-*/%]|$)`).test(header)
+      ) {
+        continue;
+      }
+      errors.push({ line: i + 1, message: `Python '${kw}' statement is missing ':' at line ${i + 1}` });
+      continue;
+    }
+
+    // A one-line suite may only contain simple statements, never another compound statement.
+    const colonText = colonLine === i ? header : maskedLines[colonLine]!;
+    const inlineSuite = colonText.slice(colonPos + 1).trim();
+    const inlineWord = inlineSuite.match(/^([A-Za-z_][A-Za-z0-9_]*)/)?.[1];
+    if (inlineWord && (PY_COMPOUND_KEYWORDS.has(inlineWord) || inlineWord === "async")) {
+      errors.push({
+        line: headerEndLine,
+        message: `Python '${kw}' one-line suite cannot start with compound statement '${inlineWord}' (missing ':'?)`,
+      });
+    }
+  }
+
+  return errors;
+}
+
 export function parsePython(relPath: string, content: string): FileAstAnalysis {
   const lines = content.split(/\r?\n/);
   const symbols: AstSymbol[] = [];
   const imports: AstImport[] = [];
-  const syntaxErrors = checkBraceBalanceSyntax(lines, "#");
 
-  // Track multiline triple-quoted strings so indentation inside docstrings is ignored
-  const inMultilineString = new Array<boolean>(lines.length).fill(false);
-  let activeTriple: '"""' | "'''" | null = null;
-  for (let i = 0; i < lines.length; i++) {
-    inMultilineString[i] = activeTriple !== null;
-    const raw = lines[i] ?? "";
-    let j = 0;
-    while (j < raw.length) {
-      if (!activeTriple && raw[j] === "#") break;
-      const sub3 = raw.slice(j, j + 3);
-      if (sub3 === '"""' || sub3 === "'''") {
-        if (activeTriple === sub3) activeTriple = null;
-        else if (!activeTriple) activeTriple = sub3;
-        j += 3;
-        continue;
-      }
-      j += 1;
-    }
-  }
-  if (activeTriple !== null) {
-    syntaxErrors.push({
-      line: lines.length,
-      message: `Unclosed triple-quoted string (${activeTriple})`,
-    });
-  }
+  // Mask comments/strings first so multi-line docstrings never trip bracket/colon checks.
+  const masked = maskPythonSource(lines);
+  const inMultilineString = masked.inMultilineString;
+  const syntaxErrors = checkPythonSyntax(lines, masked);
 
   const findHeaderEndLine = (startIdx: number): number => {
     let parenDepth = 0;
@@ -902,13 +2035,8 @@ export function parsePython(relPath: string, content: string): FileAstAnalysis {
         .map((l) => stripLineCommentsAndStrings(l, "#").trim())
         .join(" ");
 
-      // Syntax check: ensure header ends with `:` and body is non-empty
-      if (!headerText.trimEnd().endsWith(":")) {
-        syntaxErrors.push({
-          line: headerEnd,
-          message: `Python function '${name}' header missing ':'`,
-        });
-      } else if (endLine <= headerEnd && !headerText.replace(/^.*:\s*/, "").trim()) {
+      // Colon placement is validated by checkPythonSyntax(); here only guard an empty body.
+      if (headerText.trimEnd().endsWith(":") && endLine <= headerEnd && !headerText.replace(/^.*:\s*/, "").trim()) {
         syntaxErrors.push({
           line: headerEnd,
           message: `IndentationError: expected an indented block after 'def ${name}'`,
@@ -1102,7 +2230,7 @@ export function parseGo(relPath: string, content: string): FileAstAnalysis {
       const { endLine, bodyStartLine } = findBraceSpan(lines, i);
       const rawBlock = lines.slice(i, endLine).join("\n");
       const kind: SymbolKind =
-        kindKw === "interface" || kindKw === "struct" ? "interface" : "type";
+        kindKw === "struct" ? "struct" : kindKw === "interface" ? "interface" : "type";
       const goFields = extractStructFields(rawBlock, ".go");
       symbols.push({
         name,
@@ -1230,7 +2358,7 @@ export function parseRust(relPath: string, content: string): FileAstAnalysis {
       const { endLine, bodyStartLine } = findBraceSpan(lines, i);
       const rawBlock = lines.slice(i, endLine).join("\n");
       const kind: SymbolKind =
-        kw === "enum" ? "enum" : kw === "trait" || kw === "struct" ? "interface" : "type";
+        kw === "enum" ? "enum" : kw === "struct" ? "struct" : kw === "trait" ? "interface" : "type";
       const rsFields = extractStructFields(rawBlock, ".rs");
       symbols.push({
         name,
@@ -1270,6 +2398,9 @@ export function parseCCpp(relPath: string, content: string): FileAstAnalysis {
   const imports: AstImport[] = [];
   const syntaxErrors = checkBraceBalanceSyntax(lines, "//");
 
+  // Pure prototypes/declarations (`bool Engine::cancel(int id);`) are not call sites.
+  const declarationLines = collectCFamilyDeclarationLines(lines);
+
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i] ?? "";
     const trimmed = raw.trim();
@@ -1302,7 +2433,7 @@ export function parseCCpp(relPath: string, content: string): FileAstAnalysis {
       const kind: SymbolKind = kw.startsWith("enum")
         ? "enum"
         : kw === "struct"
-          ? "interface"
+          ? "struct"
           : "class";
       const cppFields = extractStructFields(rawBlock, ".cpp");
       symbols.push({
@@ -1367,7 +2498,7 @@ export function parseCCpp(relPath: string, content: string): FileAstAnalysis {
     }
   }
 
-  const calls = extractCallSitesFromLines(lines, symbols, "//");
+  const calls = extractCallSitesFromLines(lines, symbols, "//", declarationLines);
   return {
     relPath,
     totalLines: lines.length,
@@ -1386,6 +2517,9 @@ export function parseCSharp(relPath: string, content: string): FileAstAnalysis {
   const symbols: AstSymbol[] = [];
   const imports: AstImport[] = [];
   const syntaxErrors = checkBraceBalanceSyntax(lines, "//");
+
+  // Interface/abstract method prototypes (`void Cancel(int id);`) are not call sites.
+  const declarationLines = collectCFamilyDeclarationLines(lines);
 
   const activeClassStack: Array<{ name: string; endLine: number }> = [];
 
@@ -1425,9 +2559,11 @@ export function parseCSharp(relPath: string, content: string): FileAstAnalysis {
       const kind: SymbolKind =
         kw === "enum"
           ? "enum"
-          : kw === "interface" || kw === "struct" || kw === "record"
-            ? "interface"
-            : "class";
+          : kw === "struct"
+            ? "struct"
+            : kw === "interface" || kw === "record"
+              ? "interface"
+              : "class";
       const csFields = extractStructFields(rawBlock, ".cs");
       symbols.push({
         name,
@@ -1475,7 +2611,7 @@ export function parseCSharp(relPath: string, content: string): FileAstAnalysis {
     }
   }
 
-  const calls = extractCallSitesFromLines(lines, symbols, "//");
+  const calls = extractCallSitesFromLines(lines, symbols, "//", declarationLines);
   return {
     relPath,
     totalLines: lines.length,
@@ -1571,7 +2707,7 @@ function enrichSymbolFields(relPath: string, content: string, analysis: FileAstA
   const ext = extname(relPath).toLowerCase();
   const lines = content.split(/\r?\n/);
   for (const sym of analysis.symbols) {
-    if (!sym.fields && (sym.kind === "interface" || sym.kind === "class" || sym.kind === "type")) {
+    if (!sym.fields && (sym.kind === "interface" || sym.kind === "class" || sym.kind === "struct" || sym.kind === "type")) {
       const rawBlock = lines.slice(sym.line - 1, sym.endLine).join("\n");
       const fields = extractStructFields(rawBlock, ext);
       if (fields.length > 0) sym.fields = fields;
@@ -1582,29 +2718,40 @@ function enrichSymbolFields(relPath: string, content: string, analysis: FileAstA
 
 export function analyzeSourceFile(relPath: string, content: string): FileAstAnalysis {
   const ext = extname(relPath).toLowerCase();
-  if ([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"].includes(ext)) {
+  const tsJsExts = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
+  if (tsJsExts.includes(ext)) {
     const babelParser = loadBabelParser();
     if (babelParser) {
-      return parseWithBabel(relPath, content, babelParser);
+      return { ...parseWithBabel(relPath, content, babelParser), engine: "babel" };
     }
-    return parseWithStructuralScanner(relPath, content);
+    return { ...parseWithStructuralScanner(relPath, content), engine: "structural" };
   }
+
+  // True-AST backend when the optional tree-sitter bindings are installed.
+  // `GRAPHFLOW_TREE_SITTER=0` forces the structural analyzers (fallback if bindings are absent).
+  if (process.env.GRAPHFLOW_TREE_SITTER !== "0" && isTreeSitterAvailable()) {
+    const treeSitterResult = analyzeWithTreeSitter(relPath, content);
+    if (treeSitterResult) {
+      return { ...treeSitterResult, engine: "tree-sitter" };
+    }
+  }
+
   if (ext === ".py" || ext === ".pyi") {
-    return enrichSymbolFields(relPath, content, parsePython(relPath, content));
+    return { ...enrichSymbolFields(relPath, content, parsePython(relPath, content)), engine: "structural" };
   }
   if (ext === ".go") {
-    return enrichSymbolFields(relPath, content, parseGo(relPath, content));
+    return { ...enrichSymbolFields(relPath, content, parseGo(relPath, content)), engine: "structural" };
   }
   if (ext === ".rs") {
-    return enrichSymbolFields(relPath, content, parseRust(relPath, content));
+    return { ...enrichSymbolFields(relPath, content, parseRust(relPath, content)), engine: "structural" };
   }
   if ([".c", ".h", ".cc", ".cpp", ".hpp", ".cxx", ".hxx"].includes(ext)) {
-    return enrichSymbolFields(relPath, content, parseCCpp(relPath, content));
+    return { ...enrichSymbolFields(relPath, content, parseCCpp(relPath, content)), engine: "structural" };
   }
   if (ext === ".cs") {
-    return enrichSymbolFields(relPath, content, parseCSharp(relPath, content));
+    return { ...enrichSymbolFields(relPath, content, parseCSharp(relPath, content)), engine: "structural" };
   }
-  return parseWithStructuralScanner(relPath, content);
+  return { ...parseWithStructuralScanner(relPath, content), engine: "structural" };
 }
 
 /**

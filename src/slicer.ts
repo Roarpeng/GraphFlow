@@ -312,7 +312,10 @@ export function foldFileSkeleton(
           replacement: `${String(sym.line).padStart(4)}: ${sigLine}${suffix}`,
         });
       }
-    } else if ((sym.kind === "interface" || sym.kind === "type" || sym.kind === "enum") && span > 20) {
+    } else if (
+      (sym.kind === "interface" || sym.kind === "type" || sym.kind === "enum" || sym.kind === "struct") &&
+      span > 20
+    ) {
       const sigLine = (lines[sym.line - 1] ?? sym.signature).trimEnd();
       const suffix = isPython
         ? ` ...  # [lines ${sym.line + 1}-${sym.endLine} folded (${span} lines)]`
@@ -351,7 +354,13 @@ export function foldFileSkeleton(
 }
 
 function isTypeDefinitionKind(kind: AstSymbol["kind"]): boolean {
-  return kind === "interface" || kind === "type" || kind === "enum" || kind === "class";
+  return (
+    kind === "interface" ||
+    kind === "type" ||
+    kind === "enum" ||
+    kind === "class" ||
+    kind === "struct"
+  );
 }
 
 function resolveTypeClosure(
@@ -548,7 +557,13 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
           }
 
           if (includeCallers) {
-            const blast = computeBlastRadius(index, fileData.ast.relPath, sym.name);
+            const blast = computeBlastRadius(
+              index,
+              fileData.ast.relPath,
+              sym.name,
+              6,
+              sym.parentClass
+            );
             const blastText = formatBlastRadiusText(blast);
             if (blastText) blockLines.push(blastText);
           }
@@ -793,7 +808,7 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
         }
 
         if (includeCallers) {
-          const blast = computeBlastRadius(index, c.relPath, c.sym.name, 4);
+          const blast = computeBlastRadius(index, c.relPath, c.sym.name, 4, c.sym.parentClass);
           const blastText = formatBlastRadiusText(blast);
           if (blastText) block.push(blastText);
         }

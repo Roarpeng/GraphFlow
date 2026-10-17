@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "3.3.0",
+  "version": "3.5.0",
   "publishConfig": {
     "access": "public"
   },
@@ -16,7 +16,7 @@
   "engines": {
     "node": ">=18"
   },
-  "description": "Token-First Surgical Code Engine for AI Coding Agents (6-Language AST Slicer, Blast-Radius Guard, Output Dehydrator, Habit & Git Co-Change Macros)",
+  "description": "Token-First Surgical Code Engine for AI Coding Agents (true AST for TS/JS via @babel/parser and for Python/Go/Rust/C/C++/C# via optional tree-sitter grammars, receiver-aware Blast-Radius Guard, Output Dehydrator, Habit & Git Co-Change Macros)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -35,7 +35,12 @@
     "build": "tsc -p tsconfig.json",
     "start": "tsx src/cli.ts",
     "start:mcp": "tsx src/mcp-server.ts",
-    "test": "tsx tests/graphflow.test.ts"
+    "test": "tsx tests/run-all.ts",
+    "bench": "node scripts/benchmark.mjs",
+    "preflight": "node scripts/release-preflight.mjs",
+    "preflight:release": "node scripts/release-preflight.mjs --with-tests --with-package",
+    "verify:parsers": "node scripts/verify-parsers.mjs",
+    "verify:parsers:strict": "node scripts/verify-parsers.mjs --strict"
   },
   "repository": {
     "type": "git",
@@ -49,7 +54,19 @@
   "homepage": "https://github.com/Roarpeng/GraphFlow#readme",
   "dependencies": {
     "@babel/parser": "^7.26.0",
-    "@modelcontextprotocol/sdk": "^1.32.1"
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "tree-sitter": "0.22.4"
+  },
+  "optionalDependencies": {
+    "tree-sitter-c": "0.23.6",
+    "tree-sitter-c-sharp": "0.23.1",
+    "tree-sitter-cpp": "0.23.4",
+    "tree-sitter-go": "0.23.4",
+    "tree-sitter-python": "0.23.6",
+    "tree-sitter-rust": "0.24.0"
+  },
+  "overrides": {
+    "tree-sitter": "0.22.4"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

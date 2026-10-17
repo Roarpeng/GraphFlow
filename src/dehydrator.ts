@@ -5,8 +5,8 @@
 
 import { execSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { resolveRelativeImportPath } from "./ast-engine.js";
 import { formatNumberedLines, getWorkspaceAstIndex } from "./slicer.js";
 
@@ -23,6 +23,61 @@ const PYTHON_TRACEBACK_FILE_LINE_RE =
 
 const FAST_IMPORT_SPEC_RE =
   /(?:from|import|require\(|#\s*include\s+|use\s+)\s*["'<]?([a-zA-Z0-9_./:-]+)[">']?/g;
+
+/** Dynamic `import("./x")` / `require("./x")` with a quoted literal. */
+const DYNAMIC_IMPORT_SPEC_RE = /\b(?:import|require)\s*\(\s*["'`]([^"'`\r\n]+)["'`]\s*\)/g;
+
+/**
+ * Quoted static specifiers (`from "@/alias"`, side-effect `import "..."`).
+ * Kept separate from FAST_IMPORT_SPEC_RE so aliases (`@/`, `~/`, `#/`) and
+ * scoped packages are captured by their quotes instead of the identifier charset.
+ */
+const QUOTED_IMPORT_SPEC_RE = /\b(?:from|import)\s*["'`]([^"'`\r\n]+)["'`]/g;
+
+/** Go `import ( "pkg/a" ... )` blocks; quoted literals are extracted separately. */
+const GO_IMPORT_BLOCK_RE = /\bimport\s*\(([\s\S]*?)\)/g;
+
+const QUOTED_LITERAL_RE = /["'`]([^"'`\r\n]+)["'`]/g;
+
+/** C# `using Foo.Bar;` / `using static Foo.Bar;` namespace imports. */
+const CSHARP_USING_RE =
+  /\busing\s+(?:static\s+)?([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*;/g;
+
+const JS_FAMILY_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"]);
+
+const IMPORT_RESOLVE_EXTS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"] as const;
+
+/** Source extensions the workspace AST index does not scan; found by a local walk. */
+const EXTRA_ROUTING_EXTS = new Set([".mts", ".cts"]);
+
+interface FailureSourceLocation {
+  file: string;
+  line: number;
+}
+
+/** Stack frames that live outside the workspace are never useful as failure source. */
+function isIgnoredStackLine(line: string): boolean {
+  const trimmed = line.trim();
+  return (
+    (trimmed.startsWith("at ") && trimmed.includes("node_modules/")) ||
+    trimmed.includes("/site-packages/") ||
+    trimmed.includes("/rustc/")
+  );
+}
+
+/**
+ * Parse a workspace-relative `path:line` location or a Python
+ * `File "...", line N` traceback frame. Returns undefined when the line carries
+ * no resolvable workspace location.
+ */
+function parseFailureSourceLocation(line: string): FailureSourceLocation | undefined {
+  const locMatch = line.match(WORKSPACE_FILE_LINE_RE) ?? line.match(PYTHON_TRACEBACK_FILE_LINE_RE);
+  if (!locMatch) return undefined;
+  const file = locMatch[1]!.replace(/^\.\//, "");
+  const lineNumber = Number.parseInt(locMatch[2]!, 10);
+  if (!Number.isFinite(lineNumber) || lineNumber <= 0) return undefined;
+  return { file, line: lineNumber };
+}
 
 export interface DehydratedExecResult {
   ok: boolean;
@@ -118,36 +173,41 @@ export function dehydrateCommandOutput(params: {
   const referencedLocations: Array<{ file: string; line: number }> = [];
   const seenLocations = new Set<string>();
 
+  const recordLocation = (location: FailureSourceLocation): void => {
+    const key = `${location.file}:${location.line}`;
+    if (!seenLocations.has(key) && referencedLocations.length < 3) {
+      seenLocations.add(key);
+      referencedLocations.push(location);
+    }
+  };
+
   for (let i = 0; i < allLines.length; i++) {
     const line = allLines[i] ?? "";
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    if (
-      (trimmed.startsWith("at ") && trimmed.includes("node_modules/")) ||
-      trimmed.includes("/site-packages/") ||
-      trimmed.includes("/rustc/")
-    ) {
+    if (isIgnoredStackLine(line)) {
       continue;
     }
 
-    const locMatch = line.match(WORKSPACE_FILE_LINE_RE) ?? line.match(PYTHON_TRACEBACK_FILE_LINE_RE);
-    if (locMatch) {
-      const file = locMatch[1]!.replace(/^\.\//, "");
-      const ln = Number.parseInt(locMatch[2]!, 10);
-      const key = `${file}:${ln}`;
-      if (!seenLocations.has(key) && referencedLocations.length < 3) {
-        seenLocations.add(key);
-        referencedLocations.push({ file, line: ln });
-      }
+    const location = parseFailureSourceLocation(line);
+    if (location) {
+      recordLocation(location);
       salientLines.push(line);
       continue;
     }
 
     if (SALIENT_ERROR_LINE_RE.test(line)) {
       salientLines.push(line);
-      if (i + 1 < allLines.length && allLines[i + 1]!.trim() && !allLines[i + 1]!.includes("node_modules/")) {
-        salientLines.push(allLines[i + 1]!);
+      // The next line is usually the stack frame that carries the failure
+      // location. Consume it, but still parse it for source context (the old
+      // code skipped it, so `Error:` + `at run (tests/fail.js:3:9)` attached
+      // nothing).
+      const nextLine = allLines[i + 1];
+      if (nextLine !== undefined && nextLine.trim() && !isIgnoredStackLine(nextLine)) {
+        salientLines.push(nextLine);
+        const nextLocation = parseFailureSourceLocation(nextLine);
+        if (nextLocation) recordLocation(nextLocation);
         i += 1;
       }
     }
@@ -170,7 +230,7 @@ export function dehydrateCommandOutput(params: {
   if (referencedLocations.length > 0) {
     const snipBlocks: string[] = ["# Auto-Attached Failure Source Context:"];
     for (const loc of referencedLocations) {
-      const abs = join(params.rootDir, loc.file);
+      const abs = isAbsolute(loc.file) ? loc.file : join(params.rootDir, loc.file);
       if (existsSync(abs)) {
         try {
           const srcLines = readFileSync(abs, "utf8").split(/\r?\n/);
@@ -202,21 +262,28 @@ export function dehydrateCommandOutput(params: {
   };
 }
 
+/** Test-directory conventions honored in addition to filename conventions. */
+const TEST_DIR_RE = /(?:^|\/)(?:tests|__tests__|spec)\//;
+
 function isTestFilePath(relPath: string): boolean {
-  const base = basename(relPath);
+  const normalized = relPath.replace(/\\/g, "/");
+  const base = basename(normalized);
   return (
-    relPath.startsWith("tests/") ||
-    relPath.includes(".test.") ||
-    relPath.includes(".spec.") ||
+    TEST_DIR_RE.test(normalized) ||
+    normalized.includes(".test.") ||
+    normalized.includes(".spec.") ||
     /^test_.*\.py$/.test(base) ||
-    /_test\.(py|go|rs|cpp|cc|c)$/.test(base) ||
+    /_test\.(?:py|go|rs|c|cpp|cc|mts|cts)$/.test(base) ||
     /Tests?\.cs$/.test(base)
   );
 }
 
 function stemsForPath(relPath: string): string[] {
   const base = basename(relPath)
-    .replace(/\.(test|spec)?\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|c|h|cc|cpp|hpp|cxx|cs)$/, "")
+    .replace(
+      /(?:\.(?:test|spec))?\.(ts|tsx|js|jsx|mjs|cjs|mts|cts|py|go|rs|c|h|cc|cpp|hpp|cxx|cs)$/,
+      ""
+    )
     .replace(/^test_/, "")
     .replace(/_test$/, "")
     .replace(/Tests?$/, "");
@@ -227,12 +294,570 @@ function stemsForPath(relPath: string): string[] {
   return [base];
 }
 
-function extractFastImportSpecs(content: string): string[] {
-  const out: string[] = [];
-  for (const m of content.matchAll(FAST_IMPORT_SPEC_RE)) {
-    if (m[1]) out.push(m[1]);
+/**
+ * Extract import specifiers from source text: static `import`/`from`,
+ * side-effect `import "..."`, `require(...)`, dynamic `import(...)`, Go import
+ * blocks, Rust `use ...`, C/C++ `#include`, Python `from .x`, and C# `using`.
+ */
+function extractImportSpecs(content: string): string[] {
+  const specs = new Set<string>();
+  const addSpec = (spec: string | undefined): void => {
+    const trimmed = spec?.trim();
+    if (trimmed && trimmed.length > 0) specs.add(trimmed);
+  };
+  for (const m of content.matchAll(FAST_IMPORT_SPEC_RE)) addSpec(m[1]);
+  for (const m of content.matchAll(QUOTED_IMPORT_SPEC_RE)) addSpec(m[1]);
+  for (const m of content.matchAll(DYNAMIC_IMPORT_SPEC_RE)) addSpec(m[1]);
+  for (const m of content.matchAll(GO_IMPORT_BLOCK_RE)) {
+    const block = m[1] ?? "";
+    for (const quoted of block.matchAll(QUOTED_LITERAL_RE)) addSpec(quoted[1]);
   }
+  for (const m of content.matchAll(CSHARP_USING_RE)) addSpec(m[1]);
+  return Array.from(specs);
+}
+
+function normalizeRoutingPath(value: string): string {
+  const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
+  return normalized === "." ? "" : normalized;
+}
+
+function isJsFamilyPath(relPath: string): boolean {
+  return JS_FAMILY_EXTS.has(extname(relPath).toLowerCase());
+}
+
+interface TsPathAliasPattern {
+  prefix: string;
+  suffix: string;
+  wildcard: boolean;
+  /** Workspace-relative target paths (may contain `*`). */
+  targets: string[];
+}
+
+interface EffectiveTsPathAliasConfig {
+  /** Workspace-relative directory used for bare `baseUrl` resolution, if any. */
+  baseUrl: string | undefined;
+  patterns: TsPathAliasPattern[];
+  hasPaths: boolean;
+}
+
+interface RawTsConfig {
+  compilerOptions?: unknown;
+  extends?: unknown;
+  references?: unknown;
+}
+
+const rawTsConfigByPath = new Map<string, RawTsConfig | null>();
+const effectiveTsConfigByKey = new Map<string, EffectiveTsPathAliasConfig | null>();
+const nearestConfigByDir = new Map<string, string | null>();
+const referencedConfigsByRoot = new Map<string, string[]>();
+
+/** Strip `//` / block comments and trailing commas so tsconfig JSONC can be parsed. */
+function stripJsonComments(text: string): string {
+  const source = text.replace(/^\uFEFF/, "");
+  let out = "";
+  let i = 0;
+  let inString = false;
+  let quote = '"';
+  while (i < source.length) {
+    const ch = source[i]!;
+    const next = source[i + 1];
+    if (inString) {
+      out += ch;
+      if (ch === "\\") {
+        out += next ?? "";
+        i += 2;
+        continue;
+      }
+      if (ch === quote) inString = false;
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      quote = ch;
+      out += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      while (i < source.length && source[i] !== "\n") i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      i += 2;
+      while (i < source.length && !(source[i] === "*" && source[i + 1] === "/")) i += 1;
+      i += 2;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out.replace(/,\s*([}\]])/g, "$1");
+}
+
+function isWithinRoot(rootAbs: string, absolutePath: string): boolean {
+  const rel = relative(rootAbs, absolutePath);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/** Convert an absolute path to a workspace-relative one; undefined when outside the workspace. */
+function toWorkspaceRelPath(rootAbs: string, absolutePath: string): string | undefined {
+  if (!isWithinRoot(rootAbs, absolutePath)) return undefined;
+  return normalizeRoutingPath(relative(rootAbs, absolutePath).replace(/\\/g, "/"));
+}
+
+/** Read and cache a tsconfig/jsconfig file as raw JSONC (no extends merge). */
+function readRawTsConfig(configPath: string): RawTsConfig | null {
+  const configAbs = resolve(configPath);
+  const cached = rawTsConfigByPath.get(configAbs);
+  if (cached !== undefined) return cached;
+  let parsed: RawTsConfig | null = null;
+  try {
+    if (existsSync(configAbs)) {
+      const value = JSON.parse(stripJsonComments(readFileSync(configAbs, "utf8"))) as unknown;
+      if (value && typeof value === "object" && !Array.isArray(value)) parsed = value as RawTsConfig;
+    }
+  } catch {
+    parsed = null;
+  }
+  rawTsConfigByPath.set(configAbs, parsed);
+  return parsed;
+}
+
+function findConfigInDir(absDir: string): string | null {
+  for (const fileName of ["tsconfig.json", "jsconfig.json"]) {
+    const candidate = join(absDir, fileName);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Nearest tsconfig/jsconfig walking upward from the importing file's directory
+ * to the workspace root (the root config is the last candidate). Cached per dir.
+ */
+function findNearestConfig(rootDir: string, fromRelPath: string): string | null {
+  const rootAbs = resolve(rootDir);
+  let dir = resolve(rootAbs, dirname(fromRelPath));
+  if (!isWithinRoot(rootAbs, dir)) dir = rootAbs;
+  while (true) {
+    const cached = nearestConfigByDir.get(dir);
+    if (cached !== undefined) {
+      // A cached `null` only means "no config in this directory"; keep walking
+      // upward, otherwise the first lookup would poison later ones.
+      if (cached) return cached;
+    } else {
+      const found = findConfigInDir(dir);
+      nearestConfigByDir.set(dir, found);
+      if (found) return found;
+    }
+    if (dir === rootAbs) return null;
+    const parent = dirname(dir);
+    if (parent === dir || !isWithinRoot(rootAbs, parent)) return null;
+    dir = parent;
+  }
+}
+
+/** Discover `<root>/tsconfig.json` `references[].path` project configs (best effort, cached). */
+function getReferencedConfigPaths(rootDir: string): string[] {
+  const rootAbs = resolve(rootDir);
+  const cached = referencedConfigsByRoot.get(rootAbs);
+  if (cached) return cached;
+
+  const results: string[] = [];
+  const raw = readRawTsConfig(join(rootAbs, "tsconfig.json"));
+  if (raw && Array.isArray(raw.references)) {
+    for (const reference of raw.references) {
+      if (!reference || typeof reference !== "object") continue;
+      const refPath = (reference as { path?: unknown }).path;
+      if (typeof refPath !== "string" || refPath.trim().length === 0) continue;
+      const target = isAbsolute(refPath) ? resolve(refPath) : resolve(rootAbs, refPath);
+      const candidates = [
+        target,
+        `${target}.json`,
+        join(target, "tsconfig.json"),
+        join(target, "jsconfig.json"),
+      ];
+      for (const candidate of candidates) {
+        if (existsSync(candidate) && readRawTsConfig(candidate)) {
+          results.push(candidate);
+          break;
+        }
+      }
+    }
+  }
+  referencedConfigsByRoot.set(rootAbs, results);
+  return results;
+}
+
+function normalizeExtendsList(value: unknown): string[] {
+  if (typeof value === "string") return value.trim() ? [value.trim()] : [];
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Resolve one `extends` entry: relative paths (with optional `.json`) and
+ * node_modules package specifiers (`package.json` `tsconfig` field, then
+ * `<pkg>/tsconfig.json`), walking node_modules up to the workspace root.
+ */
+function resolveExtendsValue(
+  spec: string,
+  fromConfigPath: string,
+  rootAbs: string
+): string | null {
+  const tryCandidates = (candidates: string[]): string | null => {
+    for (const candidate of candidates) {
+      if (existsSync(candidate) && readRawTsConfig(candidate)) return candidate;
+    }
+    return null;
+  };
+
+  if (spec.startsWith(".") || isAbsolute(spec)) {
+    const base = isAbsolute(spec) ? resolve(spec) : resolve(dirname(fromConfigPath), spec);
+    return tryCandidates([
+      base,
+      `${base}.json`,
+      join(base, "tsconfig.json"),
+      join(base, "jsconfig.json"),
+    ]);
+  }
+
+  const isScoped = spec.startsWith("@");
+  const parts = spec.split("/");
+  const subPath = parts.slice(isScoped ? 2 : 1).join("/");
+  let dir = dirname(fromConfigPath);
+  while (true) {
+    const nodeModules = join(dir, "node_modules");
+    if (existsSync(nodeModules)) {
+      const direct = join(nodeModules, spec);
+      if (subPath) {
+        const hit = tryCandidates([
+          direct,
+          `${direct}.json`,
+          join(direct, "tsconfig.json"),
+          join(direct, "jsconfig.json"),
+        ]);
+        if (hit) return hit;
+      } else {
+        const candidates: string[] = [];
+        const packageJsonPath = join(direct, "package.json");
+        if (existsSync(packageJsonPath)) {
+          try {
+            const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { tsconfig?: unknown };
+            if (typeof pkg.tsconfig === "string" && pkg.tsconfig.trim()) {
+              candidates.push(
+                isAbsolute(pkg.tsconfig) ? pkg.tsconfig : join(direct, pkg.tsconfig)
+              );
+            }
+          } catch {
+            // Malformed package.json: fall through to tsconfig.json.
+          }
+        }
+        candidates.push(join(direct, "tsconfig.json"), join(direct, "jsconfig.json"));
+        const hit = tryCandidates(candidates);
+        if (hit) return hit;
+      }
+    }
+    if (dir === rootAbs) break;
+    const parent = dirname(dir);
+    if (parent === dir || !isWithinRoot(rootAbs, parent)) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/** Build alias patterns whose targets are already resolved to workspace-relative paths. */
+function buildTsPathAliasPatterns(
+  paths: Record<string, unknown>,
+  rootAbs: string,
+  resolutionBaseAbs: string
+): TsPathAliasPattern[] {
+  const patterns: TsPathAliasPattern[] = [];
+  for (const [patternText, targetValue] of Object.entries(paths)) {
+    if (!Array.isArray(targetValue)) continue;
+    const targets: string[] = [];
+    for (const value of targetValue) {
+      if (typeof value !== "string" || value.trim().length === 0) continue;
+      const trimmed = value.trim();
+      const targetAbs = isAbsolute(trimmed) ? resolve(trimmed) : resolve(resolutionBaseAbs, trimmed);
+      const relTarget = toWorkspaceRelPath(rootAbs, targetAbs);
+      if (relTarget !== undefined) targets.push(relTarget);
+    }
+    if (targets.length === 0) continue;
+    const star = patternText.indexOf("*");
+    patterns.push(
+      star >= 0
+        ? {
+            wildcard: true,
+            prefix: patternText.slice(0, star),
+            suffix: patternText.slice(star + 1),
+            targets,
+          }
+        : { wildcard: false, prefix: patternText, suffix: "", targets }
+    );
+  }
+  // Longest prefix first so the most specific alias wins.
+  patterns.sort((a, b) => b.prefix.length - a.prefix.length);
+  return patterns;
+}
+
+/**
+ * Load a config's effective `baseUrl`/`paths`, merging its `extends` chain
+ * (child overrides parent, later array entries override earlier ones, cycles
+ * are cut). Cached per root + resolved config path.
+ */
+function loadEffectiveTsConfig(
+  rootDir: string,
+  configPath: string,
+  chain: ReadonlySet<string> = new Set<string>()
+): EffectiveTsPathAliasConfig | null {
+  const rootAbs = resolve(rootDir);
+  const configAbs = resolve(configPath);
+  const cacheKey = `${rootAbs}::${configAbs}`;
+  const cached = effectiveTsConfigByKey.get(cacheKey);
+  if (cached !== undefined) return cached;
+  if (chain.has(configAbs)) return null;
+
+  const raw = readRawTsConfig(configAbs);
+  if (!raw) {
+    effectiveTsConfigByKey.set(cacheKey, null);
+    return null;
+  }
+
+  const nextChain = new Set(chain);
+  nextChain.add(configAbs);
+
+  let baseUrl: string | undefined;
+  let patterns: TsPathAliasPattern[] = [];
+  let hasPaths = false;
+
+  for (const spec of normalizeExtendsList(raw.extends)) {
+    const parentPath = resolveExtendsValue(spec, configAbs, rootAbs);
+    if (!parentPath) continue;
+    const parent = loadEffectiveTsConfig(rootAbs, parentPath, nextChain);
+    if (!parent) continue;
+    if (parent.baseUrl !== undefined) baseUrl = parent.baseUrl;
+    if (parent.hasPaths) {
+      patterns = parent.patterns;
+      hasPaths = true;
+    }
+  }
+
+  const compilerOptions = raw.compilerOptions;
+  const opts =
+    compilerOptions && typeof compilerOptions === "object" && !Array.isArray(compilerOptions)
+      ? (compilerOptions as { baseUrl?: unknown; paths?: unknown })
+      : {};
+  const configDirAbs = dirname(configAbs);
+
+  let explicitBaseAbs: string | undefined;
+  if (typeof opts.baseUrl === "string") {
+    explicitBaseAbs = isAbsolute(opts.baseUrl)
+      ? resolve(opts.baseUrl)
+      : resolve(configDirAbs, opts.baseUrl);
+    baseUrl = toWorkspaceRelPath(rootAbs, explicitBaseAbs);
+  }
+  if (opts.paths && typeof opts.paths === "object" && !Array.isArray(opts.paths)) {
+    const resolutionBaseAbs =
+      explicitBaseAbs ?? (baseUrl !== undefined ? resolve(rootAbs, baseUrl) : configDirAbs);
+    patterns = buildTsPathAliasPatterns(
+      opts.paths as Record<string, unknown>,
+      rootAbs,
+      resolutionBaseAbs
+    );
+    hasPaths = true;
+  }
+
+  const effective: EffectiveTsPathAliasConfig = { baseUrl, patterns, hasPaths };
+  effectiveTsConfigByKey.set(cacheKey, effective);
+  return effective;
+}
+
+/** Try a workspace-relative candidate path with the usual source extension/index fallbacks. */
+function resolveImportCandidate(
+  relCandidate: string,
+  knownFiles: ReadonlySet<string>
+): string | undefined {
+  const normalized = normalizeRoutingPath(relCandidate);
+  if (!normalized || normalized.startsWith("../")) return undefined;
+
+  const ext = extname(normalized).toLowerCase();
+  const candidates: string[] = [normalized];
+  if ((IMPORT_RESOLVE_EXTS as readonly string[]).includes(ext)) {
+    // `import "./x.js"` in a TS project also resolves to `./x.ts`.
+    const stripped = normalized.slice(0, -ext.length);
+    for (const candidateExt of IMPORT_RESOLVE_EXTS) candidates.push(`${stripped}${candidateExt}`);
+  } else {
+    for (const candidateExt of IMPORT_RESOLVE_EXTS) candidates.push(`${normalized}${candidateExt}`);
+    for (const candidateExt of IMPORT_RESOLVE_EXTS) {
+      candidates.push(`${normalized}/index${candidateExt}`);
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (knownFiles.has(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+/** Match one effective config's `paths`/`baseUrl` against a specifier. */
+function matchTsPathAliasImport(
+  config: EffectiveTsPathAliasConfig,
+  moduleSpec: string,
+  knownFiles: ReadonlySet<string>
+): string | undefined {
+  for (const pattern of config.patterns) {
+    let captured: string | undefined;
+    if (pattern.wildcard) {
+      if (
+        moduleSpec.length >= pattern.prefix.length + pattern.suffix.length &&
+        moduleSpec.startsWith(pattern.prefix) &&
+        moduleSpec.endsWith(pattern.suffix)
+      ) {
+        captured = moduleSpec.slice(pattern.prefix.length, moduleSpec.length - pattern.suffix.length);
+      }
+    } else if (moduleSpec === pattern.prefix) {
+      captured = "";
+    }
+    if (captured === undefined) continue;
+
+    for (const target of pattern.targets) {
+      const substituted = target.includes("*") ? target.split("*").join(captured) : target;
+      const resolvedFile = resolveImportCandidate(substituted, knownFiles);
+      if (resolvedFile) return resolvedFile;
+    }
+  }
+
+  if (config.baseUrl !== undefined) {
+    // TypeScript's `baseUrl` alone resolves bare specifiers as root-relative paths.
+    const candidate = config.baseUrl ? `${config.baseUrl}/${moduleSpec}` : moduleSpec;
+    return resolveImportCandidate(candidate, knownFiles);
+  }
+  return undefined;
+}
+
+/**
+ * Resolve a tsconfig/jsconfig `paths` alias (or bare `baseUrl`) to a known
+ * workspace file. Uses the nearest config upward from the importing file, then
+ * project-reference configs discovered from the workspace root config.
+ */
+function resolveTsPathAliasImport(
+  rootDir: string,
+  fromRelPath: string,
+  moduleSpec: string,
+  knownFiles: ReadonlySet<string>
+): string | undefined {
+  const configPaths: string[] = [];
+  const nearest = findNearestConfig(rootDir, fromRelPath);
+  if (nearest) configPaths.push(nearest);
+  for (const referenced of getReferencedConfigPaths(rootDir)) configPaths.push(referenced);
+
+  const visited = new Set<string>();
+  for (const configPath of configPaths) {
+    const configAbs = resolve(configPath);
+    if (visited.has(configAbs)) continue;
+    visited.add(configAbs);
+    const effective = loadEffectiveTsConfig(rootDir, configAbs);
+    if (!effective) continue;
+    const resolved = matchTsPathAliasImport(effective, moduleSpec, knownFiles);
+    if (resolved) return resolved;
+  }
+  return undefined;
+}
+
+/** Resolve a `.`-relative specifier with the wider extension/index fallback set. */
+function resolveRelativeImportCandidate(
+  fromRelPath: string,
+  moduleSpec: string,
+  knownFiles: ReadonlySet<string>
+): string | undefined {
+  if (!moduleSpec.startsWith(".")) return undefined;
+  const fromDir = dirname(fromRelPath);
+  const joined = fromDir === "." ? moduleSpec : `${fromDir}/${moduleSpec}`;
+  return resolveImportCandidate(joined, knownFiles);
+}
+
+function resolveImportSpecifier(
+  rootDir: string,
+  fromRelPath: string,
+  moduleSpec: string,
+  knownFiles: ReadonlySet<string>
+): string | undefined {
+  const resolved = resolveRelativeImportPath(rootDir, fromRelPath, moduleSpec, knownFiles);
+  if (resolved) return resolved;
+  if (!isJsFamilyPath(fromRelPath)) return undefined;
+  // The shared resolver predates `.mts`/`.cts`/`index.*` fallbacks; fill the gap locally.
+  const relativeFallback = resolveRelativeImportCandidate(fromRelPath, moduleSpec, knownFiles);
+  if (relativeFallback) return relativeFallback;
+  return resolveTsPathAliasImport(rootDir, fromRelPath, moduleSpec, knownFiles);
+}
+
+const ROUTING_IGNORED_DIRS = new Set([
+  "vendor", "third_party", ".turbo", ".nuxt", ".svelte-kit", ".cache", "cmake-build-debug",
+  "node_modules", ".git", "dist", "build", "coverage", ".graphflow", ".graphflow-cache",
+  "graphflow-out", "wasm", ".next", "out", "__pycache__", ".venv", "venv", "target", "bin", "obj",
+]);
+
+const ROUTING_EXTRA_MAX_FILES = 5_000;
+const ROUTING_EXTRA_MAX_DEPTH = 8;
+const ROUTING_FILES_CACHE_TTL_MS = 5_000;
+
+interface RoutingFilesCacheEntry {
+  at: number;
+  files: string[];
+  fileSet: ReadonlySet<string>;
+}
+
+const routingFilesByRoot = new Map<string, RoutingFilesCacheEntry>();
+
+/** Locate source files the shared AST index skips (currently `.mts`/`.cts`). */
+function collectExtraRoutingFiles(rootDir: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string, depth: number): void => {
+    if (depth > ROUTING_EXTRA_MAX_DEPTH || out.length >= ROUTING_EXTRA_MAX_FILES) return;
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (out.length >= ROUTING_EXTRA_MAX_FILES) break;
+      if (entry.name.startsWith(".") && entry.name !== ".trae") continue;
+      if (ROUTING_IGNORED_DIRS.has(entry.name)) continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full, depth + 1);
+      } else if (entry.isFile() && EXTRA_ROUTING_EXTS.has(extname(entry.name).toLowerCase())) {
+        out.push(relative(rootDir, full).replace(/\\/g, "/"));
+      }
+    }
+  };
+  walk(rootDir, 0);
   return out;
+}
+
+/** AST-index files plus locally-discovered extra source files, cached briefly per root. */
+function getRoutingFiles(
+  rootDir: string,
+  indexedFiles: string[]
+): { files: string[]; fileSet: ReadonlySet<string> } {
+  const cacheKey = resolve(rootDir);
+  const now = Date.now();
+  const cached = routingFilesByRoot.get(cacheKey);
+  if (cached && now - cached.at < ROUTING_FILES_CACHE_TTL_MS) {
+    return { files: cached.files, fileSet: cached.fileSet };
+  }
+  const merged = new Set(indexedFiles);
+  for (const extra of collectExtraRoutingFiles(rootDir)) merged.add(extra);
+  const files = Array.from(merged).sort();
+  const fileSet: ReadonlySet<string> = new Set(files);
+  routingFilesByRoot.set(cacheKey, { at: now, files, fileSet });
+  return { files, fileSet };
 }
 
 /**
@@ -257,7 +882,7 @@ export function resolveAffectedTests(rootDir: string, explicitChangedFiles?: str
         .filter(
           (f) =>
             f.length > 0 &&
-            /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|c|h|cc|cpp|hpp|cxx|cs)$/.test(f)
+            /\.(ts|tsx|js|jsx|mjs|cjs|mts|cts|py|go|rs|c|h|cc|cpp|hpp|cxx|cs)$/.test(f)
         );
     } catch {
       changed = [];
@@ -270,7 +895,7 @@ export function resolveAffectedTests(rootDir: string, explicitChangedFiles?: str
   }
 
   const index = getWorkspaceAstIndex(rootDir);
-  const allFiles = index.getFiles();
+  const { files: allFiles, fileSet } = getRoutingFiles(rootDir, index.getFiles());
   const affectedTests = new Set<string>();
 
   for (const f of normalizedChanged) {
@@ -291,13 +916,19 @@ export function resolveAffectedTests(rootDir: string, explicitChangedFiles?: str
       const raw = index.getRawFile(relPath);
       if (!raw) continue;
 
-      const specs = extractFastImportSpecs(raw.content);
+      const specs = extractImportSpecs(raw.content);
       let importsTainted = false;
       for (const spec of specs) {
-        const resolved = resolveRelativeImportPath(rootDir, relPath, spec, index.getFileSet());
-        if (resolved && taintedSourceFiles.has(resolved)) {
-          importsTainted = true;
-          break;
+        const resolved = resolveImportSpecifier(rootDir, relPath, spec, fileSet);
+        if (resolved) {
+          // A resolved import is authoritative: do not also apply the loose
+          // stem heuristic, or an alias/import of `model` would link every
+          // changed `*model*` file through the raw specifier text.
+          if (taintedSourceFiles.has(resolved)) {
+            importsTainted = true;
+            break;
+          }
+          continue;
         }
         for (const stem of taintedStems) {
           if (
@@ -311,6 +942,7 @@ export function resolveAffectedTests(rootDir: string, explicitChangedFiles?: str
             break;
           }
         }
+        if (importsTainted) break;
       }
 
       // Same-directory Go `*_test.go` or stem-matched test files (`foo.py` -> `test_foo.py`)
@@ -403,7 +1035,7 @@ export function buildAffectedTestCommand(affectedTests: string[], rootDir?: stri
   const rsTests = affectedTests.filter((f) => f.endsWith(".rs"));
   const csTests = affectedTests.filter((f) => f.endsWith(".cs"));
   const cppTests = affectedTests.filter((f) => /\.(c|cc|cpp|cxx)$/.test(f));
-  const tsJsTests = affectedTests.filter((f) => /\.(ts|tsx|js|jsx|mjs|cjs)$/.test(f));
+  const tsJsTests = affectedTests.filter((f) => /\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$/.test(f));
 
   const cmds: string[] = [];
   if (tsJsTests.length > 0) cmds.push(resolveTsJsTestCommand(tsJsTests, rootDir));

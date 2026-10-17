@@ -7,20 +7,20 @@
 [![CI](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml)
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-roarpeng.graphflow-blue)](https://marketplace.visualstudio.com/items?itemName=roarpeng.graphflow)
 
-> **面向 AI 编程 Agent 的省 Token 外科手术级代码引擎（v3.3.0）**
-> 只暴露 4 个外科手术工具的 MCP 服务器 —— `gf_read`、`gf_edit`、`gf_exec`、`gf_macro` —— 对 **TS/JS、Python、Go、Rust、C/C++、C#** 提供一等公民 AST 支持，运行时依赖仅 `@babel/parser` + `@modelcontextprotocol/sdk` 两个。
+> **面向 AI 编程 Agent 的省 Token 外科手术级代码引擎（v3.5.0）**
+> 只暴露 4 个外科手术工具的 MCP 服务器 —— `gf_read`、`gf_edit`、`gf_exec`、`gf_macro` —— 对**全部 6 种语言家族提供真 AST 解析**：TypeScript/JavaScript 用 `@babel/parser`，Python、Go、Rust、C/C++、C# 用可选 tree-sitter 语法包（缺省回退结构化分析器）。**自研语义索引**为爆炸半径/重命名解析调用目标（不新增运行时依赖），**精度调优的文档↔代码链接**（BM25/IDF + PMI + 上限 + 置信度）让知识图谱更可信。运行时依赖：`@babel/parser`、`@modelcontextprotocol/sdk` 与 `tree-sitter`；语法包为可选依赖。
 
 ---
 
 ## GraphFlow 3.0 — 大刀阔斧的重写
 
-3.0 版本**整体替换了 2.x 架构**：10 工具的知识图谱 / 上下文压缩 MCP 面（`graphflow_context`、`graphflow_plan`、`graphflow_run`、`graphflow_index`、`graphflow_insight`、`graphflow_skill_*`、`graphflow_diagnose`、`graphflow_artifact`）、情景技能飞轮、VS Code 图记忆扩展、LLM 路由 —— **全部移除**。取而代之的是跑在纯 AST 流水线上的 4 个确定性手术工具。MCP schema 开销下降 **92%**（每轮 5897 → 约 460 tokens）。
+3.0 版本**整体替换了 2.x 架构**：10 工具的知识图谱 / 上下文压缩 MCP 面（`graphflow_context`、`graphflow_plan`、`graphflow_run`、`graphflow_index`、`graphflow_insight`、`graphflow_skill_*`、`graphflow_diagnose`、`graphflow_artifact`）、情景技能飞轮、VS Code 图记忆扩展、LLM 路由 —— **全部移除**。取而代之的是跑在 AST/结构化流水线上的 4 个确定性手术工具。MCP schema 开销下降 **92.2%**（每轮 5897 → 459 tokens）。
 
 | 2.x（已移除） | 3.x 替代方案 |
 | :--- | :--- |
 | `graphflow_context(...)` | `gf_read({ targets, q, skeleton: true })` |
 | `graphflow_plan` / `graphflow_run` | 移除 —— 确定性流水线，无 LLM 路由 |
-| `graphflow_index` | 移除 —— AST 索引按需构建 |
+| `graphflow_index` | 移除 —— 符号索引按需构建 |
 | `graphflow_insight` / `graphflow_skill_*` | `gf_macro({ action: "mine" \| "mine-git" })` |
 | `graphflow_diagnose` | `graphflow status`（CLI） |
 | `graphflow_artifact` | `gf_macro({ action: "visualize" })` → `.graphflow/knowledge-graph.html` |
@@ -39,17 +39,70 @@
 | 3.2.0 | 文档图谱（跨 Agent 交接简报、文档↔代码链接、HTML 知识图）+ 中英双语分词器 |
 | 3.2.1 | 修复包：affected-tests 感知 `package.json` `scripts.test`、`gf_exec` `run:true` 执行/预览门控、简报 hub 入度匹配带扩展名 import |
 | **3.3.0** | **VSIX 激活自动注册（每版本一次，`graphflow.autoInstall` 可关）+ `install` 自动清理旧注册（别名键、陈旧 launcher、已卸载 Agent 残留；`--no-prune` 跳过）** |
+| **3.3.1** | **方法级爆炸半径与重命名（覆盖成员调用点，存在未解析调用方则中止）· 真正可用的 DSH Cordis patch 安装（`cwd` + `GRAPHFLOW_WORKSPACE_ROOT`）· 可安全限范围的 `uninstall`（`--agents` / `--all`）· Python 启发式语法守卫 · `exec` 参数解析 · `Error:` + 栈帧后的失败源码窗口 · Go/Rust `struct` 类型** |
+| **3.3.2** | **真实知识图谱边（defines/imports/calls/doc-links-code/co-edit，方法节点 id 带类名，最多 5000 条边）· 接收者类型推断感知的爆炸半径与重命名（同名方法 A/B 消歧、`REJECTED [ambiguous-symbol]`）· tsconfig/jsconfig 别名 + 动态 import 感知的受影响测试路由** |
+| **3.3.3** | **类型感知的知识图谱 calls（按接收者匹配目标、外部接收者丢弃、别名解析 imports）· 继承/`super`/`base` 接收者推断（子类→基类分派、最后赋值优先、泛型/数组/可空解包）· tsconfig/jsconfig `extends` 链、嵌套配置与 project references 感知的受影响测试路由 · `npm run bench` 基准脚本** |
+| **3.3.4** | **`install` 安全合并宿主钩子（保留用户 `PreToolUse`/`PostToolUse` 钩子；重复安装幂等）· `uninstall` 只移除 GraphFlow 钩子 · `graphflow status` 按 Agent 显示注册状态（`[MCP ✓] [Skill ✓] [Rule -] [Hook ✓]`），支持 `--agents` / `--all` · MCP stdio 端到端测试（initialize → tools/list 4 工具 → gf_read/gf_exec → 未知工具优雅报错）** |
+| **3.4.0** | **Python/Go/Rust/C/C++/C# 默认真 AST：可选 tree-sitter 语法包（`engine: "tree-sitter"`），缺少原生绑定时回退结构化分析器，`GRAPHFLOW_TREE_SITTER=0` 强制结构化 · C/C++ 头文件/原型处理与 Python `super` 接收者 · 依赖变化：必需 `tree-sitter` 核心 + 可选语法包 · 基准数据刷新** |
+| **3.5.0** | **文档↔代码链接精度（自研 BM25/IDF + PMI + 互惠剪枝 + 上限，`GRAPHFLOW_DOC_LINKS_MAX`；仓库 728 → 约 150 条边，−80%）· `graphflow doctor parsers` + `npm run verify:parsers` + 增量 CI 解析器矩阵 · 自研 L0 语义索引（置信度 ≥0.75）与可选 TypeScript/LSP 提供者 · DSH 配置包 `@roarpeng/graphflow-dsh` · 发布预检（`npm run preflight` / `preflight:release`）· 基准数据刷新** |
 
 ## 四个外科手术工具
 
 | 工具 | 用途 | 关键参数 |
 | :--- | :--- | :--- |
-| `gf_read` | 精准符号切片（自动跨文件类型闭合）+ `[Blast Radius]` 调用点、AST 骨架折叠、双语检索、`@brief` 跨 Agent 交接 | `targets`、`q`、`topK`、`skeleton`、`dedup` |
-| `gf_edit` | 原地 / 批量原子编辑、零 LLM 跨仓重命名、结构体字段契约守卫 | `file`、`symbol`、`newCode`、`edits`、`renameTo` |
-| `gf_exec` | 变更到测试路由（感知 `package.json` `scripts.test`）+ 输出脱水器：通过的测试套件只回 1 行 `PASS`；`run: true` 才执行，缺省仅预览 | `cmd`、`changedFiles`、`handle`、`run` |
-| `gf_macro` | 习惯宏、git 共变挖掘、知识图谱 HTML 导出 | `action: "list" \| "run" \| "save" \| "mine" \| "mine-git" \| "visualize" \| "brief"` |
+| `gf_read` | 精准符号切片（自动跨文件类型闭合）+ 接收者类型感知的 `[Blast Radius]` 调用点（先查语义索引，再回退继承/`super` 启发式）、骨架折叠、双语检索、`@brief` 跨 Agent 交接 | `targets`、`q`、`topK`、`skeleton`、`dedup` |
+| `gf_edit` | 原地 / 批量原子编辑、零 LLM 跨仓重命名（先做语义目标判定，再回退接收者/继承启发式；拒绝歧义/外部接收者文件；仍有未解析调用方则中止）、结构体字段契约守卫 | `file`、`symbol`、`newCode`、`edits`、`renameTo` |
+| `gf_exec` | 变更到测试路由（感知 `package.json` `scripts.test`；解析 tsconfig/jsconfig 别名、`extends` 链、嵌套配置与动态 import）+ 输出脱水器：通过的测试套件只回 1 行 `PASS`；失败时内联最多 5 行源码上下文；`run: true` 才执行，缺省仅预览 | `cmd`、`changedFiles`、`handle`、`run` |
+| `gf_macro` | 习惯宏、git 共变挖掘、知识图谱 HTML 导出（类型感知 `calls`、别名解析 `imports`、BM25/IDF 受限的 `doc-links-code`，以及 `defines` / `co-edit` 边） | `action: "list" \| "run" \| "save" \| "mine" \| "mine-git" \| "visualize" \| "brief"` |
 
-会话级读去重跳过未变更文件；连续 3 次编辑-测试失败触发确定性急救包（爆炸半径契约 + 最近 git diff）。
+会话级读去重跳过未变更文件；连续 3 次编辑-测试失败触发确定性急救包（爆炸半径契约 + 最近 git diff）。语法守卫在有真 AST 后端时使用它们 —— TS/JS 用 `@babel/parser`，其余 5 种用 tree-sitter 的 ERROR/MISSING 诊断 —— 结构化分析器的启发式检查（花括号/声明级、Python 缺冒号/括号诊断）作为回退，设置 `GRAPHFLOW_TREE_SITTER=0` 时同样适用。
+
+## 3.5.0 新特性
+
+- **文档↔代码链接精度** —— 文档图链接器现在是一条自研检索流水线：对字段加权的文档小节词项做 BM25/IDF（标题与显式标识符加权），叠加 PMI 风格的稀有词对奖励，在「小节侧」和「符号侧」双向取互惠 Top-K，做边际剪枝与贪心最大权匹配，再施加每小节/每符号上限（≤3）、全局上限 `GRAPHFLOW_DOC_LINKS_MAX`（默认 400）与逐链接置信度标签。本仓库文档↔代码边从 **728 降到约 150（−80%）**；显式引用链接占主导，但同样受上限约束（在上限内优先保留），纯概念链接需要分数边际/置信度达标。`.md` / `.html` / `.xml` / `.docx` / `.pdf` 仍受支持，`.graphflow/doc-link-feedback.json` 作为只读的接受/拒绝调参输入。
+- **解析器矩阵与 doctor** —— `graphflow doctor parsers`（别名 `graphflow parsers`，支持 `--strict`）打印 tree-sitter 核心/语法包版本与生效的默认引擎；`npm run verify:parsers` 运行 `scripts/verify-parsers.mjs`，对 6 个 fixture 分别在真 AST 模式与 `GRAPHFLOW_TREE_SITTER=0` 结构化模式下验证（支持 `--json`、`--strict`、`--check-install`）。新增增量工作流 `.github/workflows/ci-parser-matrix.yml`，覆盖 ubuntu/windows/macos × Node 20/22 另加一个严格 ubuntu job；现有 ci/publish 工作流不变。
+- **自研 L0 语义索引** —— `src/semantic-index.ts`（不新增依赖）构建模块图（根 tsconfig/jsconfig 别名、barrel/re-export）、工作区符号表、逐文件类型环境（标注、`new`、参数、字段、赋值，分支冲突视为未知，泛型/可空/数组解包，继承/`super`），以及带置信度的调用目标解析。爆炸半径与重命名优先查询它（置信度 ≥0.75），否则回退到语言启发式。残余限制：仅根配置（不支持 `extends`/project references）、default/namespace import 限制、不做流敏感收窄与泛型替换。
+- **可选语义加速** —— `src/ts-semantic.ts` 通过既有 devDependency 惰性包装 TypeScript Compiler API（缺省时返回 `undefined`；提供 `resolveCallTarget` / `getReferences` / `getTypeAt`）；`src/lsp-bridge.ts` 是自研 JSON-RPC stdio LSP 客户端，内置 pyright/pylsp、gopls、rust-analyzer、clangd、OmniSharp/csharp-ls 与 typescript-language-server 预设（超时、惰性重启、dispose）。两者均为**可选**：不新增必需依赖、不捆绑语言服务器 —— 可用性取决于用户环境。
+- **DSH 配置包** —— 新包 `@roarpeng/graphflow-dsh`（版本与 CLI 同步）是纯配置的 Cordis bundle：`dsh.bundle.patch` 插入同一条 `mcp-graphflow` stdio 行（cwd 取 `GRAPHFLOW_WORKSPACE_ROOT`，否则回退 DSH 默认工作目录）并随包携带 Skill。通过 `plugin_manager install_bundle` 安装（或 `node scripts/install-dsh-bundle.mjs --print|--stage|--check`）。DSH 能力矩阵如实标注：**MCP ✅ · Skill ✅ · Rules ❌ · Hooks ❌**。配置包 **或** `graphflow install --agents deepseek-harness` 二选一（两者注册同一 row id/serverName，同时使用会重复）；CLI 安装器仍会把 Skill 复制到 `DSH_HOME/skills`。
+- **发布预检** —— `npm run preflight` 是只读门禁：校验版本一致性（package / lock / 扩展 / README tagline）、必需文件、`mcp.json`、现有工作流的关键内容契约、Skill frontmatter 与包元数据；`npm run preflight:release` 额外运行 `npm test`、`npm pack --dry-run` 与本地 `vsce package` 试打包（未安装 vsce 时跳过）。现有 ci/publish-npm/publish-marketplace 工作流保持不变并通过校验；解析器矩阵为增量新增。审计注意事项：tag 与版本一致性守卫不在 CI 中，VSIX 工作流打包的是已提交的扩展构建产物。
+- **基准数据刷新** —— MCP wire 459 tokens；骨架折叠 27,507 → 7,694 tokens（72.0%，范围 68–86%）；单符号切片 95.8%（约 96%）；PASS 脱水 4,282 → 30 tokens（99.3%）；知识图谱约 1,156 节点 / 约 2,436 条边，构建约 1.15 s（约 145–150 条 doc links）；受影响测试路由 22 ms；爆炸半径 6 ms。见[基准数据](#基准数据)。
+
+## 3.4.0 新特性
+
+- **默认启用 6 语言真 AST** —— 只要安装了可选的 tree-sitter 原生绑定，`analyzeSourceFile` 就会用 tree-sitter 解析 Python、Go、Rust、C/C++、C#（`engine: "tree-sitter"`）；缺少语法包时回退到内置结构化分析器，设置 `GRAPHFLOW_TREE_SITTER=0` 可强制走结构化路径。TypeScript/JavaScript 继续使用 `@babel/parser` 真 AST。tree-sitter 后端提取符号（kind/span/signature/params/`parentClass`/fields/referencedTypes）、imports、calls（callee/receiver/member/argsCount/caller/`isDeclaration`）以及 ERROR/MISSING 语法诊断；C/C++ 原型保留为 `isDeclaration` 调用点并与定义去重，`.h` 头文件先尝试 C++ 语法再回退到 C。
+- **Python `super` 接收者** —— 接收者推断能从 tree-sitter CST 识别 `super()` / `super(A, self)` 调用，与爆炸半径/重命名中已有的 `super`/`base` 处理一致。
+- **依赖变化** —— 必需运行时依赖现在是 `@babel/parser`、`@modelcontextprotocol/sdk` 与 `tree-sitter`；6 个语法包（`tree-sitter-python`/`-go`/`-rust`/`-c`/`-cpp`/`-c-sharp`）以 optionalDependencies 安装。安装时 npm 可能打印原生语法包的 peer 范围警告 —— 这是预期现象；缺少某个语法包时该语言自动回退到结构化分析器。除这些以外没有其他运行时依赖。
+- **基准数据刷新** —— 真 AST 切换后重跑基准脚本：MCP wire schema 仍为 459 tokens；骨架折叠 25,994 → 7,178 tokens（72.4%，仓库文件范围 68–86%）；单符号切片约 95–96%（随运行略有波动）；通过测试套件脱水 2,966 → 30 tokens（99.0%）；知识图谱约 750 节点 / 约 2.2k 条边，构建约 1 s；受影响测试路由 31 ms。见[基准数据](#基准数据)。
+
+## 3.3.4 新特性
+
+- **安全合并宿主机钩子与卸载** —— `graphflow install` 现在把 GraphFlow 的 `PreToolUse` / `PostToolUse` 钩子**合并**进各宿主机现有钩子配置（Cursor、Claude Code、Codex、Gemini CLI），而不是覆盖：同阶段的用户钩子及其他阶段/键全部保留，Claude/Codex/Gemini 的嵌套 hooks 条目逐个过滤，重复执行 install 只刷新 GraphFlow 自己的条目（幂等）。`graphflow uninstall` 只移除 GraphFlow 所有的钩子条目，不动用户钩子，并保持钩子文件为合法 JSON。
+- **按 Agent 的注册状态** —— `graphflow status` 现在每个 Agent 输出一行，明确显示注册了什么，例如 `[MCP ✓] [Skill ✓] [Rule -] [Hook ✓] Cursor (cursor)`，并支持 `--agents <id1,id2>` / `--all` 限定范围（`graphflow doctor` 为别名）。
+- **MCP stdio 端到端测试** —— 新增 e2e 测试驱动真实 stdio 服务器：`initialize` → `notifications/initialized` → `tools/list`（恰好 4 个 `gf_*` 工具，wire 负载 459 tokens）→ `gf_read`（符号切片 + `[Blast Radius]`）→ `gf_exec`（`affected-tests` 回执）→ 未知工具（优雅报错、不崩溃）→ 再次 `tools/list`。该测试随 `npm test` 运行。
+
+## 3.3.3 新特性
+
+- **类型感知的知识图谱 calls** —— `graphflow graph` 现在复用爆炸半径的接收者类型推断：调用接收者能解析到某个类时，目标只能是该类声明的方法，外部接收者会被丢弃而不是错误归属（同一文件里的 `a.cancel()` / `b.cancel()` 分别指向 `A.cancel` / `B.cancel`）。接收者未知时仍沿用「同文件 → 显式 import → 窄包作用域」启发式。文件 → 文件 `imports` 边除相对路径外，现在也解析本地 `tsconfig.json` / `jsconfig.json` 的 `compilerOptions.baseUrl` + `paths` 别名（仅工作区根配置）。注意：calls 仍是尽力而为的启发式，**不是类型检查**；5000 条边上限与 Go/C# 的文件名主干/目录 import 回退依旧生效。
+- **继承与 `super` 感知的接收者推断** —— 接收者推断现在解析类继承关系：TS/JS `extends` + `super.method()`、Python `class B(A)` + `super()`、C# `class B : A` + `base.Method()`、C++ `class B : public A` + `A::method()`。`super`/`base` 解析到父类；当中间类没有覆写时，子类接收者会为继承来的基类方法计数。推断是流不敏感的「最后赋值优先」（不同分支的冲突赋值视为未知），并会解包泛型/数组/可空包装（`Box<Order>`、`Order | null`、`Order[]`、`&Order`）；C++ `auto x = new Type()` / `Type{}` 也能处理。残余限制：多级覆写链要求中间类可解析；Rust trait 与 Go 嵌入有意不做继承；歧义联合类型/工厂返回仍为未知。依然不是类型检查器。
+- **受影响测试路由：`extends` / 嵌套配置 / project references** —— `gf_exec({ cmd: "affected-tests" })` 现在会合并 `tsconfig.json` / `jsconfig.json` 的 `extends` 链（相对路径与 node_modules 包，支持 `package.json` 的 `tsconfig` 字段、数组、防环，子配置覆盖父配置），从导入文件所在目录向上取最近的配置，`jsconfig.json` 同样支持继承，并把根配置 `references[].path` 指向的项目配置作为额外别名来源。限制：不做项目到项目的嵌套 reference 遍历、不支持 Node `exports` map、node_modules 的 `extends` 止于工作区根、配置在进程生命周期内缓存。
+- **本地基准脚本** —— 先 `npm run build`，再 `npm run bench` 运行 `scripts/benchmark.mjs`，写出 `benchmarks/latest.md` + `benchmarks/latest.json`；见[基准数据](#基准数据)。
+
+## 3.3.2 新特性
+
+- **真实知识图谱边** —— `graphflow graph` 不再只是平铺清单，而是导出尽力而为的依赖图：`defines`（文件 → 符号）、`imports`（文件 → 文件，由各文件 import 解析）、`calls`（符号 → 符号；能定位调用方符号时以其为源，否则用文件节点）、`doc-links-code`、`co-edit`。方法节点 id 带类名（`sym:file#Class.method`），同名方法不再冲突；单文件 HTML 的图例/颜色/检查器可渲染全部 5 种边。注意：`calls` 边是尽力而为的启发式，**不是类型检查**（3.3.3 加入接收者类型匹配）；大型仓库最多 5000 条边；Go、C# 的 `imports` 边因包路径/命名空间不是文件路径，会回退到文件名主干/目录匹配。
+- **接收者类型推断感知的爆炸半径** —— 对方法目标，`gf_read` 会从局部声明、类型标注、`new Type()`、参数、类字段、`var x Type` / `x := Type{}`（Go）、`let x: Type`（Rust）、`Type x`（C++/C#）、方法接收者、`this`/`self`/`cls`/`Self`、`Class.method`/`Class::method` 推断每个调用的接收者类型，只有接收者匹配声明类时才计入。已知不匹配的排除、已知匹配的接受；声明文件内接收者未知则忽略（因此同一文件里的 `A.cancel` 与 `B.cancel` 可消歧），其他文件中接收者未知时仍按 importer 启发式计入。这仍是静态启发式 —— 不做流敏感分析：工厂返回、动态/鸭子类型接收者仍无法解析（3.3.3 加入继承/`super` 与最后赋值处理，见上文）。
+- **更安全的重命名** —— `gf_edit({ renameTo })` 复用同一套接收者解析：只有外部接收者命中的文件会被跳过，同时混有目标与外部接收者的文件会以 `REJECTED [ambiguous-symbol]` 拒绝，同名兄弟声明会在写入前拒绝。重命名后「仍有未解析调用方则回滚」的保护依旧生效；重命名不是类型检查器级别的安全。
+- **别名感知的受影响测试路由** —— `gf_exec({ cmd: "affected-tests" })` 现在读取 `tsconfig.json` / `jsconfig.json`（JSONC：允许注释与尾逗号）的 `compilerOptions.baseUrl` + `paths` 别名并解析到工作区文件；会跟踪动态 `import("./x")` 与 `require("./x")`；并识别更多测试约定（`__tests__/`、`spec/`、`.test.mts`/`.cts`、`*_test.go`、`test_*.py`、`*Tests.cs`）以及 `.mts`/`.cts` 文件。runner 感知的命令不变（优先 `scripts.test`，检测到 vitest 用 vitest，自定义 runner 用 `npm test`）。仍是启发式（3.3.3 已加入 `extends` 链、嵌套配置与 project references，见上文）。
+
+## 3.3.1 新特性
+
+- **方法级爆炸半径** —— 调用点现在携带接收者/成员信息：在 import 了所属类的文件里，`service.cancelOrder(...)`、`this.cancelOrder(...)`、`Type.cancelOrder(...)`、`Type::cancelOrder(...)` 都会被统计（3.3.2 起改为按接收者类型推断，见上文）。声明不再被当作调用，通配 import（`#include`、`import *`）不再代表某个具体符号，不同语言家族也不再互相匹配。
+- **重命名安全** —— `gf_edit({ renameTo })` 同样更新成员调用点；编辑后会重新分析工作区，若旧名字仍作为调用或标识符出现，则回滚并返回带文件列表的 `REJECTED`，不会悄悄弄坏调用方。
+- **真正可用的 DSH 注册** —— `graphflow install` 会写入托管块到 `~/.dsh/cordis.patch.yml`（插入 `@deepseek-ai/dsh-mcp-client`），`cwd` 指向工作区，env 带 `GRAPHFLOW_WORKSPACE_ROOT`。DSH **不读取** `~/.dsh/mcp.json`，该文件现在仅作为遗留产物写入。详见下文「DeepSeek Harness（DSH）」一节。
+- **安全卸载** —— `graphflow uninstall` 缺省只移除**检测到的 Agent**；`--agents <ids>` 指定子集，`--all` 清理所有已知配置。
+- **Python 启发式语法守卫** —— `gf_edit` 会拒绝 `def`/`class`/复合语句缺冒号（括号深度 0 处）、括号不配对、`def`/`class` 缺名，且不会误报多行签名。
+- **失败源码窗口** —— `gf_exec` 脱水后的失败现在会在 `Error:` 行紧跟栈帧时附带源码上下文，Python traceback 同样支持。
+- **解析器/CLI 准确性** —— Go、Rust 结构体报告 `kind: "struct"`；`graphflow exec --root <dir>` 不再把目录值追加进命令。
 
 ## 3.2.0 新特性
 
@@ -62,7 +115,7 @@
   - `.docx` 通过原生 ZIP Central Directory + 对 `word/document.xml` 执行 `zlib.inflateRawSync` 解析 —— 把 Word 设计规格小节链接到它提到的符号。
   - `.pdf` 通过对 `/FlateDecode` 流执行 `zlib.inflateSync` + `BT..ET` 文本提取 —— 把 PDF 接口协议链接到实现函数。
   - PLCopen / 配置 XML 小节链接到它们描述的解析器符号。
-- **交互式知识图** —— `graphflow graph` 导出 `.graphflow/knowledge-graph.html`，单文件力导向 Canvas 拓扑，带搜索、节点过滤与点击检查器（文件、符号、文档、宏）。
+- **交互式知识图** —— `graphflow graph` 导出 `.graphflow/knowledge-graph.html`，单文件力导向 Canvas 拓扑，带搜索、节点过滤与点击检查器（文件、符号、文档、宏）。自 3.3.2 起承载真实的 `defines` / `imports` / `calls` / `doc-links-code` / `co-edit` 边（见「3.3.2 新特性」）。
 
 ### 中英双语分词器（`src/tokenizer.ts`）
 
@@ -75,35 +128,48 @@
 
 ## 基准数据
 
-| 指标 | 基线 | GraphFlow 3.x | 节省 |
+| 指标 | 基线 | GraphFlow 3.5.0 | 节省 |
 | :--- | :--- | :--- | :--- |
-| 每轮 MCP 工具 schema 开销 | 5897 tokens（2.x，10 工具） | 444 tokens（4 工具） | **−92%** |
-| 大文件读取 | 整文件原文 | AST 骨架折叠 | **−93%** |
-| 通过的测试套件输出 | 完整日志 | 1 行 `PASS` 回执 | **−99%** |
+| 每轮 MCP 工具 schema 开销 | 5897 tokens（2.x，10 工具） | wire 负载 459 tokens（4 工具，约 460） | **−92.2%** |
+| 大文件读取 —— 骨架折叠 | 整文件原文 | `ast-engine.ts` 27,507 → 7,694 tokens（缩小 72.0%；仓库文件范围 68–86%） | **−68% … −86%** |
+| 单符号读取 —— 切片 | 整文件原文 | `ast-engine.ts` 缩小 95.8%（27,507 → 1,165 tokens，约 96%） | **~−96%** |
+| 通过的测试套件输出 | 完整日志 | 1 行 `PASS` 回执（仓库套件 4,282 → 30 tokens） | **−99.3%** |
+| 知识图谱构建（仓库） | — | 约 1,156 节点 / 约 2,436 条边，约 1.15 s（约 145–150 条 doc links） | — |
+| 受影响测试路由 | — | 单个变更文件 22 ms | — |
+| 爆炸半径（仓库符号） | — | 6 ms | — |
+
+**Schema 开销说明：** `tools/list` 的 wire 负载为 459 tokens —— 冗余的 `$schema` / `title` / `annotations` / `_meta` 已从 wire 剥离；程序化 `getV3ToolDefinitions()` 仍保留这些字段供治理 API 使用，因此 API 视图大于 wire 视图。
+
+**本地基准脚本：** 先 `npm run build`，再 `npm run bench`（`scripts/benchmark.mjs`）会测量 MCP schema 开销、骨架/切片压缩、PASS/失败脱水、知识图谱构建、受影响测试与爆炸半径耗时，并写出 `benchmarks/latest.md` 与 `benchmarks/latest.json`。以上为当前 3.5.0 仓库实测值（耗时/计数为约数，随运行略有波动）；可在自己的仓库重跑复现。
 
 ## 支持语言
 
-| 语言 | 一等公民 AST |
+| 语言 | 提取后端 |
 | :--- | :--- |
-| TypeScript / JavaScript | 是（`@babel/parser`） |
-| Python | 是 |
-| Go | 是 |
-| Rust | 是 |
-| C / C++ | 是 |
-| C# | 是 |
+| TypeScript / JavaScript | **真 AST**（`@babel/parser`） |
+| Python | **真 AST**，可选 `tree-sitter-python`（缺省回退结构化分析器） |
+| Go | **真 AST**，可选 `tree-sitter-go`（缺省回退结构化分析器） |
+| Rust | **真 AST**，可选 `tree-sitter-rust`（缺省回退结构化分析器） |
+| C / C++ | **真 AST**，可选 `tree-sitter-c` / `tree-sitter-cpp`（缺省回退结构化分析器） |
+| C# | **真 AST**，可选 `tree-sitter-c-sharp`（缺省回退结构化分析器） |
 
-运行时依赖：`@babel/parser` + `@modelcontextprotocol/sdk`，仅此两项。
+tree-sitter 语法包是可选依赖：安装后 Python/Go/Rust/C/C++/C# 默认使用真语法树；缺少语法包（或设置 `GRAPHFLOW_TREE_SITTER=0`）时，该语言改用内置结构化分析器。tree-sitter 只做**语法**解析 —— 不做语义类型解析，因此跨文件接收者/类型推断仍为启发式，并有已记录的限制（Python import 别名/嵌套函数、Go 分组参数/嵌入字段、Rust trait/宏、C/C++ 宏/命名空间、C# 属性即字段/构造函数）。
+
+运行时依赖：`@babel/parser`、`@modelcontextprotocol/sdk` 与 `tree-sitter`（必需），外加可选语法包 `tree-sitter-python` / `-go` / `-rust` / `-c` / `-cpp` / `-c-sharp`。除此之外没有其他运行时依赖。
 
 ## 快速开始
 
 ```bash
 # 1) 全局安装（Node 18+）
-npm install -g @roarpeng/graphflow@3.3.0
+npm install -g @roarpeng/graphflow@3.5.0
 
 # 2) 一键注册到检测到的 Agent（MCP + Skill + Rules + Hooks）
 graphflow install            # 等价写法：npx @roarpeng/graphflow install
 
-# 3) 启动 MCP 服务器（stdio）
+# 3) 查看按 Agent 的注册状态
+graphflow status
+
+# 4) 启动 MCP 服务器（stdio）
 graphflow-mcp
 ```
 
@@ -113,7 +179,7 @@ graphflow-mcp
 npx skills add Roarpeng/GraphFlow
 ```
 
-任意 Agent 手动注册 MCP：
+读取 `mcpServers` JSON 块的 Agent 可手动注册 MCP（DSH 请改用下文的 Cordis patch）：
 
 ```json
 { "mcpServers": { "graphflow": { "command": "graphflow-mcp" } } }
@@ -123,7 +189,10 @@ npx skills add Roarpeng/GraphFlow
 
 ```bash
 git clone https://github.com/Roarpeng/GraphFlow && cd GraphFlow
-npm install && npm test      # tsx tests/graphflow.test.ts
+npm install && npm test      # tsx tests/run-all.ts（含 MCP stdio e2e）
+npm run build && npm run bench  # 可选：本地基准脚本 → benchmarks/latest.md
+npm run verify:parsers       # 可选：真 AST 与强制结构化解析器矩阵
+npm run preflight            # 可选：静态发布预检
 ```
 
 ## VS Code 扩展
@@ -138,7 +207,7 @@ npm install && npm test      # tsx tests/graphflow.test.ts
 
 ## 21-Agent 自动安装器
 
-`graphflow install` 自动探测已安装的 Agent，注册 MCP + Skill + Rules + PreToolUse/PostToolUse 钩子；`graphflow uninstall` 干净卸载。
+`graphflow install` 自动探测已安装的 Agent，注册 MCP + Skill + Rules + Hooks。宿主钩子会合并进现有 `PreToolUse`/`PostToolUse` 配置（保留用户钩子；重复安装幂等）；`graphflow uninstall` 干净移除 MCP、Skill、Rules 与 Hooks —— 只删除 GraphFlow 所有的条目，保留用户钩子与其他阶段 —— 缺省仅针对**检测到的 Agent**；可用 `--agents <id1,id2>` 限定子集，或用 `--all` 清理所有已知配置。
 
 | 分组 | Agent |
 | :--- | :--- |
@@ -149,16 +218,43 @@ npm install && npm test      # tsx tests/graphflow.test.ts
 
 限定安装范围：`graphflow install --agents cursor,claude-code --workspace`。
 
+## DeepSeek Harness（DSH）
+
+DSH **不读取** `~/.dsh/mcp.json`。它的 MCP 服务器是 `~/.dsh/cordis.patch.yml` 中的 Cordis 插件 insert。`graphflow install` 现在会在该文件写入托管块（以 `# GRAPHFLOW-DSH-BEGIN` / `# GRAPHFLOW-DSH-END` 界定），并把 Agent Skill 复制到 `~/.dsh/skills/graphflow/SKILL.md`：
+
+```yaml
+# GRAPHFLOW-DSH-BEGIN
+- insert:
+    - id: mcp-graphflow
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: graphflow
+        transport: stdio
+        command: npx
+        args: ['-y', '--package=@roarpeng/graphflow', 'graphflow-mcp']
+        cwd: "C:/path/to/your/workspace"
+        env: { GRAPHFLOW_WORKSPACE_ROOT: "C:/path/to/your/workspace", GRAPHFLOW_MCP_STDIO: '1', GRAPHFLOW_LOG_JSON: '1' }
+        failOnStartupError: false
+# GRAPHFLOW-DSH-END
+```
+
+`cwd` 很关键：没有它，MCP 子进程会在 DSH 配置目录启动，`gf_*` 调用就必须显式传 `rootDir`。在工作区里执行 `graphflow install` 后，`cwd` 与 `GRAPHFLOW_WORKSPACE_ROOT` 都指向该工作区，`src/app.ts#main` 这类相对目标即可正常解析。重复执行 `install` 会原地替换托管块（包括使用 `cwd: !!js process.cwd()` 的旧块）；`graphflow uninstall --agents deepseek-harness` 会移除它。
+
+`~/.dsh/mcp.json` 仍会作为遗留产物写入，供其他工具使用，但 DSH 本身忽略它。
+
+**配置包替代方案。** `@roarpeng/graphflow-dsh` 是纯配置的 DSH Cordis bundle（版本与 CLI 同步）：其 `dsh.bundle.patch` 插入同一条 `mcp-graphflow` stdio 行，`cwd` 取 `GRAPHFLOW_WORKSPACE_ROOT`（否则回退 DSH 默认工作目录），并随包携带 Skill。通过 DSH 的 `plugin_manager install_bundle` 安装（或 `node scripts/install-dsh-bundle.mjs --print|--stage|--check`），再把 bundle/暂存目录中的 Skill 复制到 `DSH_HOME/skills`。DSH 能力矩阵：**MCP ✅ · Skill ✅ · Rules ❌ · Hooks ❌**（DSH 没有 rules 文件或宿主钩子 API）。配置包 **或** `graphflow install --agents deepseek-harness` 二选一 —— 两者都注册同一条 `mcp-graphflow` row，同时使用会重复。
+
 ## CLI 参考
 
 | 命令 | 用途 |
 | :--- | :--- |
-| `graphflow install [--workspace] [--agents <id1,id2>]` | 向检测到的 Agent 注册 MCP + Skill + Rules + Hooks |
-| `graphflow uninstall` | 干净移除所有 GraphFlow 注册项 |
-| `graphflow status` | 列出检测到的 Agent 与注册状态 |
+| `graphflow install [--workspace] [--agents <id1,id2>]` | 向检测到的 Agent 注册 MCP + Skill + Rules + Hooks（合并宿主钩子，保留用户钩子） |
+| `graphflow uninstall [--agents <id1,id2>] [--all]` | 干净移除 MCP、Skill、Rules 与 Hooks（仅 GraphFlow 所有的钩子条目）；缺省仅检测到的 Agent，`--all` 清理所有配置 |
+| `graphflow status [--agents <id1,id2>] [--all]` | 列出检测到的 Agent 及按 Agent 的注册状态（`[MCP ✓] [Skill ✓] [Rule -] [Hook ✓]`） |
+| `graphflow doctor parsers [--strict]` / `graphflow parsers` | 打印 tree-sitter 核心/语法包版本、生效的默认引擎与 `GRAPHFLOW_TREE_SITTER`；`--strict` 在真 AST 不可用时以非零码退出 |
 | `graphflow read [targets...] [-q <query>] [--skeleton] [--dedup]` | 终端侧手术式读取 |
 | `graphflow edit <file> [--symbol <sym>] [--new <code>] [--rename <name>]` | 手术式编辑 / 重命名 |
-| `graphflow exec [cmd] [--run]` | 运行 `affected-tests` 或任意命令（带脱水；`--run` 才执行，缺省仅预览） |
+| `graphflow exec [cmd] [--run] [--root <dir>]` | 运行 `affected-tests` 或任意命令（带脱水；`--run` 才执行，缺省仅预览）；`--root` 按参数解析，绝不追加进命令 |
 | `graphflow macro <list\|run\|save\|mine\|mine-git> [id] [args...]` | 宏与 git 共变挖掘 |
 | `graphflow graph` | 导出 `.graphflow/knowledge-graph.html` |
 | `graphflow brief` | 打印跨 Agent 交接简报 |

@@ -16,6 +16,9 @@ import { dirname, join } from "node:path";
 export type McpServersKey = "mcpServers" | "servers" | "context_servers" | "mcp";
 export type McpConfigFormat = "json" | "codex-toml" | "opencode" | "zcode";
 
+/** Hosts with a PreToolUse/PostToolUse hook file GraphFlow can manage. */
+export type HookKind = "claude" | "cursor" | "gemini" | "codex";
+
 export interface AgentMcpTarget {
   configPath: string;
   serversKey: McpServersKey;
@@ -37,8 +40,14 @@ export interface AgentProfile {
     filePath: string;
     kind: "cursor-mdc" | "managed-md" | "dedicated-md";
   }>;
-  hookKind?: "claude" | "cursor" | "gemini" | "codex";
+  hookKind?: HookKind;
   hookConfigPath?: string;
+  /**
+   * DeepSeek Harness does not read `mcp.json`; its MCP servers are Cordis
+   * plugin inserts in a profile patch file. When set, install writes/updates a
+   * marker-delimited block in this file and uninstall removes it.
+   */
+  cordisPatchPath?: string;
 }
 
 export interface AgentInstallItemResult {
@@ -54,6 +63,11 @@ export interface InstallAllAgentsOptions {
   homeDir?: string;
   appDataDir?: string;
   localAppDataDir?: string;
+  /**
+   * DeepSeek Harness profile dir. When omitted, `DSH_HOME` is used for the
+   * real (non-isolated) run, falling back to `<home>/.dsh`.
+   */
+  dshHome?: string;
   workspaceRoot?: string;
   includeWorkspace?: boolean;
   agentIds?: string[];
@@ -68,13 +82,49 @@ export interface InstallAllAgentsOptions {
   pruneLegacy?: boolean;
 }
 
+/**
+ * Uninstall scope. `agentIds` wins, then `all`, otherwise only agents that are
+ * actually detected are touched (safe default — never wipe every profile).
+ */
+export type UninstallAllAgentsOptions = InstallAllAgentsOptions & { all?: boolean };
+
 export interface InstallAllAgentsReport {
   detectedAgents: Array<{ id: string; name: string }>;
   results: AgentInstallItemResult[];
 }
 
+/** Files GraphFlow would (or did) register for one detected agent. */
+export interface AgentRegistrationPaths {
+  mcp: string[];
+  skill: string[];
+  rule: string[];
+  hook: string | undefined;
+}
+
+/** Per-agent registration state reported by `graphflow status`. */
+export interface AgentRegistrationStatus {
+  id: string;
+  name: string;
+  mcp: boolean;
+  skill: boolean;
+  /** `undefined` when the host has no rules/instructions surface at all. */
+  rule: boolean | undefined;
+  /** `undefined` when the host has no host-hook surface at all. */
+  hook: boolean | undefined;
+  paths: AgentRegistrationPaths;
+}
+
 export const GRAPHFLOW_BLOCK_BEGIN = "<!-- GRAPHFLOW:BEGIN -->";
 export const GRAPHFLOW_BLOCK_END = "<!-- GRAPHFLOW:END -->";
+
+/**
+ * Managed DeepSeek Harness Cordis patch markers. DSH (DeepSeek Harness) reads
+ * MCP registration from `~/.dsh/cordis.patch.yml` (a Cordis bundle patch), not
+ * from `~/.dsh/mcp.json`, so the installer owns exactly this marker-delimited
+ * block and never touches surrounding user patches.
+ */
+export const GRAPHFLOW_DSH_BEGIN = "# GRAPHFLOW-DSH-BEGIN";
+export const GRAPHFLOW_DSH_END = "# GRAPHFLOW-DSH-END";
 
 /**
  * Skill content single source of truth: `skills/graphflow/SKILL.md` at the
@@ -132,7 +182,8 @@ export const MANAGED_INSTRUCTION_BLOCK = [
 
 function resolvePaths(opts: InstallAllAgentsOptions = {}) {
   const isWin = process.platform === "win32";
-  const home = opts.homeDir ?? homedir();
+  const homeProvided = typeof opts.homeDir === "string" && opts.homeDir.trim().length > 0;
+  const home = homeProvided ? opts.homeDir!.trim() : homedir();
   const appData =
     opts.appDataDir ??
     process.env.APPDATA ??
@@ -142,7 +193,11 @@ function resolvePaths(opts: InstallAllAgentsOptions = {}) {
     process.env.LOCALAPPDATA ??
     (isWin ? join(home, "AppData", "Local") : join(home, ".local", "share"));
   const kimiHome = process.env.KIMI_CODE_HOME?.trim() || join(home, ".kimi");
-  const dshHome = process.env.DSH_HOME?.trim() || join(home, ".dsh");
+  // An explicit `homeDir` means the caller wants an isolated sandbox (tests,
+  // CI): never fall back to the ambient real DSH_HOME in that case.
+  const optDshHome = typeof opts.dshHome === "string" ? opts.dshHome.trim() : "";
+  const envDshHome = homeProvided ? "" : process.env.DSH_HOME?.trim() ?? "";
+  const dshHome = optDshHome || envDshHome || join(home, ".dsh");
   return { isWin, home, appData, localAppData, kimiHome, dshHome };
 }
 
@@ -436,6 +491,8 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
       markerPaths: [dshHome],
       mcpTargets: [{ configPath: join(dshHome, "mcp.json"), serversKey: "mcpServers" }],
       skillsDirs: [join(dshHome, "skills")],
+      // DSH loads MCP servers from a Cordis patch file, not from mcp.json.
+      cordisPatchPath: join(dshHome, "cordis.patch.yml"),
     },
     {
       id: "qoder",
@@ -778,50 +835,302 @@ function removeManagedFile(
   return true;
 }
 
-function installHostHook(
-  hookKind: "claude" | "cursor" | "gemini" | "codex",
-  configPath: string
-): "installed" | "updated" {
-  const existed = existsSync(configPath);
-  const obj = readJsonSafe(configPath);
-  const hooks =
-    obj.hooks && typeof obj.hooks === "object" ? (obj.hooks as Record<string, unknown>) : {};
+/* ---------------------- DSH Cordis patch management ---------------------- */
 
-  if (hookKind === "cursor") {
-    obj.version = obj.version ?? 1;
-    hooks.preToolUse = [{ command: "graphflow hook pre-tool", timeout: 15 }];
-    hooks.postToolUse = [{ command: "graphflow hook post-tool", timeout: 15 }];
-  } else if (hookKind === "gemini") {
-    hooks.BeforeTool = [
-      {
-        matcher: ".*",
-        hooks: [{ name: "graphflow-pre", type: "command", command: "graphflow hook pre-tool" }],
-      },
-    ];
-    hooks.AfterTool = [
-      {
-        matcher: ".*",
-        hooks: [{ name: "graphflow-post", type: "command", command: "graphflow hook post-tool" }],
-      },
-    ];
+function normalizeCordisPath(value: string): string {
+  return value.replace(/\\/g, "/");
+}
+
+function yamlDoubleQuoted(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function yamlSingleQuoted(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+/** Plain YAML scalar for simple tokens (npx, node, graphflow); quote otherwise. */
+function yamlPlainOrSingleQuoted(value: string): string {
+  return /^[A-Za-z0-9_][A-Za-z0-9._/-]*$/.test(value) ? value : yamlSingleQuoted(value);
+}
+
+/**
+ * Launcher recorded in the DSH Cordis insert. This mirrors the known-working
+ * legacy patch (`npx -y --package=@roarpeng/graphflow graphflow-mcp`) and is
+ * kept fixed so the generated block stays deterministic across machines; the
+ * legacy `mcp.json` copy above still uses the global-aware launcher.
+ */
+const DSH_CORDIS_LAUNCHER: { command: string; args: string[] } = {
+  command: "npx",
+  args: ["-y", "--package=@roarpeng/graphflow", "graphflow-mcp"],
+};
+
+/**
+ * The managed DSH Cordis insert. `cwd` is pinned to the workspace root so the
+ * MCP server resolves relative `gf_*` targets inside the project instead of the
+ * DSH profile directory. It replaces the legacy `cwd: !!js process.cwd()`
+ * variant (which only worked when DSH itself happened to start in the project).
+ */
+function buildDshCordisBlock(serverName: string, opts: InstallAllAgentsOptions): string {
+  const workspace = normalizeCordisPath(opts.workspaceRoot ?? process.cwd());
+  const args = DSH_CORDIS_LAUNCHER.args.map((arg) => yamlSingleQuoted(arg)).join(", ");
+  return [
+    GRAPHFLOW_DSH_BEGIN,
+    "- insert:",
+    `    - id: ${yamlPlainOrSingleQuoted(`mcp-${serverName}`)}`,
+    "      name: '@deepseek-ai/dsh-mcp-client'",
+    "      config:",
+    `        serverName: ${yamlPlainOrSingleQuoted(serverName)}`,
+    "        transport: stdio",
+    `        command: ${yamlPlainOrSingleQuoted(DSH_CORDIS_LAUNCHER.command)}`,
+    `        args: [${args}]`,
+    `        cwd: ${yamlDoubleQuoted(workspace)}`,
+    `        env: { GRAPHFLOW_WORKSPACE_ROOT: ${yamlDoubleQuoted(workspace)}, GRAPHFLOW_MCP_STDIO: '1', GRAPHFLOW_LOG_JSON: '1' }`,
+    "        failOnStartupError: false",
+    GRAPHFLOW_DSH_END,
+  ].join("\n");
+}
+
+/** Locate every graphflow-owned marker span (unterminated begin markers clamp to EOF). */
+function findCordisMarkerSpans(raw: string): Array<{ begin: number; end: number }> {
+  const spans: Array<{ begin: number; end: number }> = [];
+  let cursor = 0;
+  for (;;) {
+    const begin = raw.indexOf(GRAPHFLOW_DSH_BEGIN, cursor);
+    if (begin < 0) break;
+    const endStart = raw.indexOf(GRAPHFLOW_DSH_END, begin + GRAPHFLOW_DSH_BEGIN.length);
+    const end = endStart < 0 ? raw.length : endStart + GRAPHFLOW_DSH_END.length;
+    spans.push({ begin, end });
+    cursor = end;
+  }
+  return spans;
+}
+
+/**
+ * Idempotently write the managed Cordis insert:
+ * - existing marker block(s): replace the first, drop duplicates, keep the rest
+ *   of the patch byte-for-byte;
+ * - empty file / exact `[]`: write just the block;
+ * - anything else: append a new block, preserving existing patches.
+ */
+function writeDshCordisPatch(
+  filePath: string,
+  serverName: string,
+  opts: InstallAllAgentsOptions
+): "installed" | "updated" {
+  const existed = existsSync(filePath);
+  const current = existed ? readFileSync(filePath, "utf8") : "";
+  const block = buildDshCordisBlock(serverName, opts);
+  const spans = findCordisMarkerSpans(current);
+  let next: string;
+
+  if (spans.length > 0) {
+    let rebuilt = "";
+    let cursor = 0;
+    spans.forEach((span, index) => {
+      rebuilt += current.slice(cursor, span.begin);
+      if (index === 0) rebuilt += block;
+      cursor = span.end;
+    });
+    next = rebuilt + current.slice(cursor);
   } else {
-    hooks.PreToolUse = [
-      {
-        matcher: ".*",
-        hooks: [{ type: "command", command: "graphflow hook pre-tool", timeout: 15 }],
-      },
-    ];
-    hooks.PostToolUse = [
-      {
-        matcher: ".*",
-        hooks: [{ type: "command", command: "graphflow hook post-tool", timeout: 15 }],
-      },
-    ];
+    // `[]` (possibly padded / followed by comments) is the canonical "empty
+    // patch" placeholder; replace it instead of appending a second YAML root.
+    const withoutFlowSeq = current.replace(/^\s*\[[ \t]*\]/, "");
+    const hadEmptyFlowSeq = withoutFlowSeq !== current;
+    const remainder = hadEmptyFlowSeq ? withoutFlowSeq.replace(/^[ \t]*\r?\n/, "") : "";
+    if (current.trim() === "") {
+      next = block;
+    } else if (hadEmptyFlowSeq) {
+      next = remainder.trim() ? `${block}\n${remainder.replace(/^\s+/, "")}` : block;
+    } else {
+      next = `${current.trimEnd()}\n${block}`;
+    }
   }
 
+  next = `${next.trimEnd()}\n`;
+  mkdirSync(dirname(filePath), { recursive: true });
+  if (!existed || next !== current) {
+    writeFileSync(filePath, next, "utf8");
+  }
+  return existed ? "updated" : "installed";
+}
+
+/** Remove every graphflow-owned Cordis block, keeping unrelated patches valid. */
+function removeDshCordisPatch(filePath: string): boolean {
+  if (!existsSync(filePath)) return false;
+  const current = readFileSync(filePath, "utf8");
+  const spans = findCordisMarkerSpans(current);
+  if (spans.length === 0) return false;
+  let rebuilt = "";
+  let cursor = 0;
+  for (const span of spans) {
+    rebuilt += current.slice(cursor, span.begin);
+    cursor = span.end;
+  }
+  rebuilt += current.slice(cursor);
+  const cleaned = rebuilt
+    .replace(/[ \t]+\r?\n/g, "\n")
+    .replace(/\r?\n{3,}/g, "\n\n")
+    .trim();
+  // Keep a valid top-level YAML array even when the managed block was the only
+  // entry; an empty file parses as `null` and Cordis expects a patch list.
+  writeFileSync(filePath, cleaned ? `${cleaned}\n` : "[]\n", "utf8");
+  return true;
+}
+
+const GRAPHFLOW_HOOK_COMMAND = "graphflow hook";
+
+function hookPhaseKeys(hookKind: HookKind): { pre: string; post: string } {
+  if (hookKind === "cursor") return { pre: "preToolUse", post: "postToolUse" };
+  if (hookKind === "gemini") return { pre: "BeforeTool", post: "AfterTool" };
+  return { pre: "PreToolUse", post: "PostToolUse" };
+}
+
+function isGraphflowHookCommand(value: unknown): boolean {
+  return typeof value === "string" && value.toLowerCase().includes(GRAPHFLOW_HOOK_COMMAND);
+}
+
+/** A hook object is graphflow-owned when its command (or Gemini name) says so. */
+function isGraphflowHookObject(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (isGraphflowHookCommand(record.command)) return true;
+  const name = record.name;
+  return typeof name === "string" && (name === "graphflow-pre" || name === "graphflow-post");
+}
+
+/**
+ * Strip graphflow-owned hook entries from one phase array while preserving every
+ * user entry/object:
+ * - Claude/Codex/Gemini entries carry a nested `hooks` array; filter it
+ *   hook-by-hook and drop the wrapper only when nothing user-owned remains;
+ * - Cursor entries are flat `{ command, timeout }` objects, filtered directly;
+ * - unknown/primitive entries are never touched.
+ */
+function sanitizeHostHookEntries(entries: unknown[]): unknown[] {
+  const kept: unknown[] = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      kept.push(entry);
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const nested = record.hooks;
+    if (Array.isArray(nested)) {
+      const filteredNested = nested.filter((hook) => !isGraphflowHookObject(hook));
+      if (filteredNested.length === 0) continue;
+      if (filteredNested.length !== nested.length) {
+        kept.push({ ...record, hooks: filteredNested });
+        continue;
+      }
+      kept.push(entry);
+      continue;
+    }
+    if (isGraphflowHookObject(record)) continue;
+    kept.push(entry);
+  }
+  return kept;
+}
+
+function buildGraphflowHookEntry(
+  hookKind: HookKind,
+  phase: "pre" | "post"
+): Record<string, unknown> {
+  const command = `graphflow hook ${phase}-tool`;
+  if (hookKind === "cursor") return { command, timeout: 15 };
+  if (hookKind === "gemini") {
+    return {
+      matcher: ".*",
+      hooks: [{ name: `graphflow-${phase}`, type: "command", command }],
+    };
+  }
+  return {
+    matcher: ".*",
+    hooks: [{ type: "command", command, timeout: 15 }],
+  };
+}
+
+/**
+ * Merge the GraphFlow PreToolUse/PostToolUse hooks into a host hook config
+ * instead of replacing the user's hook arrays. Existing graphflow-owned entries
+ * are refreshed in place (idempotent reinstall); every user hook is preserved.
+ */
+export function installHostHook(hookKind: HookKind, configPath: string): "installed" | "updated" {
+  const existed = existsSync(configPath);
+  const obj = readJsonSafe(configPath);
+  const rawHooks = obj.hooks;
+  const hooks: Record<string, unknown> =
+    rawHooks && typeof rawHooks === "object" && !Array.isArray(rawHooks)
+      ? { ...(rawHooks as Record<string, unknown>) }
+      : {};
+  const { pre, post } = hookPhaseKeys(hookKind);
+
+  for (const [key, phase] of [
+    [pre, "pre"],
+    [post, "post"],
+  ] as const) {
+    const existing = Array.isArray(hooks[key]) ? (hooks[key] as unknown[]) : [];
+    hooks[key] = [...sanitizeHostHookEntries(existing), buildGraphflowHookEntry(hookKind, phase)];
+  }
+
+  if (hookKind === "cursor") obj.version = obj.version ?? 1;
   obj.hooks = hooks;
   writeJsonSafe(configPath, obj);
   return existed ? "updated" : "installed";
+}
+
+/**
+ * Remove only graphflow-owned hooks from a host hook config. User hooks (and any
+ * unrelated phases/keys) are preserved, the file is kept and stays valid JSON.
+ * Returns true when at least one graphflow hook entry was removed.
+ */
+export function removeHostHook(hookKind: HookKind, configPath: string): boolean {
+  if (!existsSync(configPath)) return false;
+  const obj = readJsonSafe(configPath);
+  const rawHooks = obj.hooks;
+  if (!rawHooks || typeof rawHooks !== "object" || Array.isArray(rawHooks)) return false;
+  const hooks = { ...(rawHooks as Record<string, unknown>) };
+  const { pre, post } = hookPhaseKeys(hookKind);
+  let removed = false;
+
+  for (const key of [pre, post]) {
+    const entries = hooks[key];
+    if (!Array.isArray(entries)) continue;
+    const filtered = sanitizeHostHookEntries(entries as unknown[]);
+    if (JSON.stringify(filtered) !== JSON.stringify(entries)) {
+      hooks[key] = filtered;
+      removed = true;
+    }
+  }
+
+  if (!removed) return false;
+  obj.hooks = hooks;
+  writeJsonSafe(configPath, obj);
+  return true;
+}
+
+/** True when at least one graphflow-owned hook is registered for this host. */
+function hasGraphflowHook(hookKind: HookKind, configPath: string): boolean {
+  if (!existsSync(configPath)) return false;
+  const obj = readJsonSafe(configPath);
+  const rawHooks = obj.hooks;
+  if (!rawHooks || typeof rawHooks !== "object" || Array.isArray(rawHooks)) return false;
+  const hooks = rawHooks as Record<string, unknown>;
+  const { pre, post } = hookPhaseKeys(hookKind);
+  for (const key of [pre, post]) {
+    const entries = hooks[key];
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries as unknown[]) {
+      if (isGraphflowHookObject(entry)) return true;
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const nested = (entry as Record<string, unknown>).hooks;
+      if (Array.isArray(nested) && nested.some((hook) => isGraphflowHookObject(hook))) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**
@@ -924,9 +1233,8 @@ function removeMcpKey(target: AgentMcpTarget, key: string): boolean {
 /**
  * Delete legacy GraphFlow registrations across every profile in scope:
  * alias server keys in all existing configs, plus the full GraphFlow
- * footprint (MCP key, skill dir, managed rule blocks) for agents that are no
- * longer installed. Hook entries have no removal helper and are only ever
- * overwritten for detected agents, so they are left alone here.
+ * footprint (MCP key, skill dir, managed rule blocks, graphflow-owned host
+ * hooks) for agents that are no longer installed.
  */
 export function pruneLegacyRegistrations(
   opts: InstallAllAgentsOptions = {}
@@ -971,6 +1279,15 @@ export function pruneLegacyRegistrations(
         pushRemoved("mcp", target.configPath, "stale graphflow MCP entry removed (agent not installed)");
       }
     }
+    // DSH Cordis patches are graphflow-owned blocks: drop them when DSH is no
+    // longer installed, and let the install pass replace them when it is.
+    if (profile.cordisPatchPath && removeDshCordisPatch(profile.cordisPatchPath)) {
+      pushRemoved(
+        "mcp",
+        profile.cordisPatchPath,
+        "stale graphflow Cordis patch removed (agent not installed)"
+      );
+    }
     for (const skillsDir of profile.skillsDirs ?? []) {
       const skillDir = join(skillsDir, "graphflow");
       if (existsSync(skillDir)) {
@@ -981,6 +1298,15 @@ export function pruneLegacyRegistrations(
     for (const rule of profile.rulesFiles ?? []) {
       if (removeManagedFile(rule.filePath, rule.kind)) {
         pushRemoved("rule", rule.filePath, "stale graphflow rule block removed (agent not installed)");
+      }
+    }
+    if (profile.hookKind && profile.hookConfigPath) {
+      if (removeHostHook(profile.hookKind, profile.hookConfigPath)) {
+        pushRemoved(
+          "hook",
+          profile.hookConfigPath,
+          "stale graphflow hooks removed (agent not installed)"
+        );
       }
     }
   }
@@ -1047,6 +1373,34 @@ export function installAllAgents(opts: InstallAllAgentsOptions = {}): InstallAll
           category: "mcp",
           targetPath: fullPath,
           status,
+        });
+      }
+    }
+
+    // 1b. DSH: register MCP via the profile's Cordis patch file (the path DSH
+    // actually reads; `mcp.json` above is only kept as a harmless legacy copy).
+    if (profile.cordisPatchPath) {
+      try {
+        const status = writeDshCordisPatch(
+          profile.cordisPatchPath,
+          serverName,
+          opts
+        );
+        results.push({
+          agentId: profile.id,
+          agentName: profile.name,
+          category: "mcp",
+          targetPath: profile.cordisPatchPath,
+          status,
+        });
+      } catch (err) {
+        results.push({
+          agentId: profile.id,
+          agentName: profile.name,
+          category: "mcp",
+          targetPath: profile.cordisPatchPath,
+          status: "error",
+          message: err instanceof Error ? err.message : String(err),
         });
       }
     }
@@ -1127,12 +1481,27 @@ export function installAllAgents(opts: InstallAllAgentsOptions = {}): InstallAll
   return { detectedAgents: detected, results };
 }
 
-export function uninstallAllAgents(opts: InstallAllAgentsOptions = {}): AgentInstallItemResult[] {
+/**
+ * Remove GraphFlow registrations. Scope is deliberately narrow by default:
+ *   1. `agentIds` (if non-empty) -> only those profiles;
+ *   2. `all: true`               -> every profile (explicit `--all`);
+ *   3. otherwise                 -> only agents detected on this machine.
+ * This prevents an uninstall from wiping registrations for editors the user
+ * does not even have installed.
+ */
+export function uninstallAllAgents(opts: UninstallAllAgentsOptions = {}): AgentInstallItemResult[] {
   const serverName = opts.serverName ?? "graphflow";
   const profiles = buildAgentProfiles(opts);
   const results: AgentInstallItemResult[] = [];
+  const scopedIds = opts.agentIds?.length
+    ? new Set(opts.agentIds)
+    : opts.all
+      ? undefined
+      : new Set(detectInstalledAgents(opts).map((detected) => detected.id));
 
   for (const profile of profiles) {
+    if (scopedIds && !scopedIds.has(profile.id)) continue;
+
     for (const target of profile.mcpTargets) {
       const removed = removeMcpTarget(target, serverName);
       if (removed) {
@@ -1144,6 +1513,17 @@ export function uninstallAllAgents(opts: InstallAllAgentsOptions = {}): AgentIns
           status: "removed",
         });
       }
+    }
+
+    // DSH reads the Cordis patch, not mcp.json: remove the managed block too.
+    if (profile.cordisPatchPath && removeDshCordisPatch(profile.cordisPatchPath)) {
+      results.push({
+        agentId: profile.id,
+        agentName: profile.name,
+        category: "mcp",
+        targetPath: profile.cordisPatchPath,
+        status: "removed",
+      });
     }
 
     for (const skillsDir of profile.skillsDirs ?? []) {
@@ -1172,7 +1552,143 @@ export function uninstallAllAgents(opts: InstallAllAgentsOptions = {}): AgentIns
         });
       }
     }
+
+    // 4. Remove GraphFlow host hooks, preserving the host's user hooks.
+    if (profile.hookKind && profile.hookConfigPath) {
+      if (removeHostHook(profile.hookKind, profile.hookConfigPath)) {
+        results.push({
+          agentId: profile.id,
+          agentName: profile.name,
+          category: "hook",
+          targetPath: profile.hookConfigPath,
+          status: "removed",
+        });
+      }
+    }
   }
 
   return results;
+}
+
+/* ------------------- Registration status (`graphflow status`) ------------------ */
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Whether one MCP config target contains the canonical GraphFlow server entry. */
+function mcpTargetHasServer(target: AgentMcpTarget, serverName: string): boolean {
+  if (!existsSync(target.configPath)) return false;
+  const format = target.configFormat ?? "json";
+  if (format === "codex-toml") {
+    const current = readFileSync(target.configPath, "utf8");
+    return new RegExp(`^\\[mcp_servers\\.${escapeRegExp(serverName)}\\]\\s*$`, "m").test(current);
+  }
+  const obj = readJsonSafe(target.configPath);
+  if (format === "opencode") {
+    const servers = asRecord(obj.mcp);
+    return !!servers && serverName in servers;
+  }
+  if (format === "zcode") {
+    const servers = asRecord(asRecord(obj.mcp)?.servers);
+    return !!servers && serverName in servers;
+  }
+  const servers = asRecord(obj[target.serversKey]);
+  return !!servers && serverName in servers;
+}
+
+/** DSH registration is real only when the managed Cordis patch block is present. */
+function dshCordisRegistered(cordisPatchPath: string): boolean {
+  if (!existsSync(cordisPatchPath)) return false;
+  try {
+    return findCordisMarkerSpans(readFileSync(cordisPatchPath, "utf8")).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function managedRuleRegistered(
+  rule: NonNullable<AgentProfile["rulesFiles"]>[number]
+): boolean {
+  if (!existsSync(rule.filePath)) return false;
+  if (rule.kind === "managed-md") {
+    try {
+      return readFileSync(rule.filePath, "utf8").includes(GRAPHFLOW_BLOCK_BEGIN);
+    } catch {
+      return false;
+    }
+  }
+  // cursor-mdc / dedicated-md files are fully GraphFlow-owned.
+  return true;
+}
+
+function buildRegistrationStatus(
+  profile: AgentProfile,
+  serverName: string
+): AgentRegistrationStatus {
+  const mcpPaths: string[] = [];
+  for (const target of profile.mcpTargets) mcpPaths.push(target.configPath);
+
+  let mcp: boolean;
+  if (profile.cordisPatchPath) {
+    mcpPaths.unshift(profile.cordisPatchPath);
+    // DSH ignores mcp.json, so success means the Cordis patch block exists.
+    mcp = dshCordisRegistered(profile.cordisPatchPath);
+  } else {
+    mcp = profile.mcpTargets.some((target) => mcpTargetHasServer(target, serverName));
+  }
+
+  const skillPaths = (profile.skillsDirs ?? []).map((dir) =>
+    join(dir, "graphflow", "SKILL.md")
+  );
+  const rules = profile.rulesFiles ?? [];
+  const hookPath =
+    profile.hookKind && profile.hookConfigPath ? profile.hookConfigPath : undefined;
+
+  return {
+    id: profile.id,
+    name: profile.name,
+    mcp,
+    skill: skillPaths.some((skillPath) => existsSync(skillPath)),
+    rule: rules.length > 0 ? rules.some((rule) => managedRuleRegistered(rule)) : undefined,
+    hook:
+      profile.hookKind && profile.hookConfigPath
+        ? hasGraphflowHook(profile.hookKind, profile.hookConfigPath)
+        : undefined,
+    paths: {
+      mcp: mcpPaths,
+      skill: skillPaths,
+      rule: rules.map((rule) => rule.filePath),
+      hook: hookPath,
+    },
+  };
+}
+
+/**
+ * Report registration state for every agent in scope:
+ * - default: detected agents only;
+ * - `agentIds`: only the requested profiles;
+ * - `all: true`: every known profile (useful to spot leftovers).
+ */
+export function getAgentRegistrationStatus(
+  opts: UninstallAllAgentsOptions = {}
+): AgentRegistrationStatus[] {
+  const serverName = opts.serverName ?? "graphflow";
+  const profiles = buildAgentProfiles(opts);
+  const detectedIds = new Set(detectInstalledAgents(opts).map((agent) => agent.id));
+  const filterSet = opts.agentIds?.length ? new Set(opts.agentIds) : undefined;
+  const inScope = (id: string): boolean => {
+    if (filterSet) return filterSet.has(id);
+    if (opts.all) return true;
+    return detectedIds.has(id);
+  };
+  return profiles
+    .filter((profile) => inScope(profile.id))
+    .map((profile) => buildRegistrationStatus(profile, serverName));
 }

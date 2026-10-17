@@ -9,15 +9,33 @@
  *      if any file has a syntax error, ALL files are rolled back atomically.
  *   2. Zero-LLM Cross-Repo Symbol Rename (`renameTo`): Deterministically renames a
  *      symbol at its declaration AND across all workspace files that import/call it,
- *      spending 0 LLM output tokens on repetitive find-and-replace.
+ *      spending 0 LLM output tokens on repetitive find-and-replace. Receiver-type
+ *      inference keeps same-named methods on other classes untouched: files whose
+ *      `<oldName>` calls all resolve to another receiver type are skipped, mixed-receiver
+ *      files are rejected as `ambiguous-symbol` instead of being blindly rewritten.
+ *      Inheritance (`class B extends A`, `super`/`base`/`Base::method`) is resolved too, so
+ *      inherited and base-class call sites are renamed without touching overrides.
  *   3. Instant Post-Edit Static Guard: Checks AST syntax, broken relative imports,
  *      removed exports still imported elsewhere, and caller parameter arity drift.
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { analyzeSourceFile, resolveRelativeImportPath } from "./ast-engine.js";
-import { computeBlastRadius } from "./blast-radius.js";
+import {
+  analyzeSourceFile,
+  inferReceiverTypeIndex,
+  resolveReceiverType,
+  resolveRelativeImportPath,
+  sourceLanguageFamily,
+  stripLineCommentsAndStrings,
+  type AstCallSite,
+} from "./ast-engine.js";
+import { computeBlastRadius, createWorkspaceTypeHierarchy } from "./blast-radius.js";
+import {
+  getSemanticIndex,
+  SEMANTIC_CONFIDENCE_MIN,
+  type SemanticResolvedCall,
+} from "./semantic-index.js";
 import { markSessionFilesEdited } from "./circuit-breaker.js";
 import {
   findMatchingSymbolsInAst,
@@ -74,6 +92,176 @@ export interface SurgicalEditResult {
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Best-effort semantic index access for rename safety analysis. If the index cannot be built
+ * (dependency/runtime problem) rename keeps using the existing heuristic guards.
+ */
+function tryGetSemanticIndex(rootDir: string): ReturnType<typeof getSemanticIndex> | undefined {
+  try {
+    return getSemanticIndex(rootDir);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Post-rename safety net: re-analyzes the workspace (staged content included) and returns
+ * every same-language file whose code still references `oldName` in a way rename did not
+ * rewrite — a leftover import, call, type reference, or a member/property reference
+ * (dynamic/duck-typed receivers, wildcard imports, macro-generated names...).
+ * Files that declare their own unrelated symbol with the same name are ignored.
+ */
+function collectUnresolvedRenameReferences(
+  rootDir: string,
+  index: ReturnType<typeof getWorkspaceAstIndex>,
+  declRelPath: string,
+  oldName: string,
+  parentClass: string | undefined,
+  family: ReturnType<typeof sourceLanguageFamily>,
+  stagedWrites: ReadonlyMap<string, { absPath: string; content: string; replacements: number }>
+): string[] {
+  const found = new Map<string, string>();
+  const add = (relPath: string, line: number, reason: string) => {
+    if (!found.has(relPath)) found.set(relPath, `${relPath}:${line} (${reason})`);
+  };
+
+  const wordRe = new RegExp(`\\b${escapeRegExp(oldName)}\\b`);
+  const propertyRefRe = new RegExp(
+    `([A-Za-z_$][\\w$]*)\\s*(?:\\.|->|::)\\s*${escapeRegExp(oldName)}\\b(?!\\s*\\()`,
+    "g"
+  );
+  const isMethodRename = Boolean(parentClass);
+  const hierarchy = isMethodRename ? createWorkspaceTypeHierarchy(index) : undefined;
+  const isTargetReceiver = (resolved: string | undefined): boolean => {
+    if (resolved === undefined) return true; // unknown receivers remain possible callers
+    if (!hierarchy || !parentClass) return resolved === parentClass;
+    return hierarchy.isCompatibleReceiver(resolved, parentClass, oldName);
+  };
+  const semantic = tryGetSemanticIndex(rootDir);
+  /** true = resolves to the rename target, false = provably another symbol, undefined = unknown. */
+  const semanticVerdict = (relPath: string, call: AstCallSite): boolean | undefined => {
+    if (!semantic) return undefined;
+    let resolved: SemanticResolvedCall;
+    try {
+      resolved = semantic.resolveCall(relPath, call);
+    } catch {
+      return undefined;
+    }
+    if (!resolved.targetFile || !resolved.targetSymbol) return undefined;
+    if (resolved.confidence < SEMANTIC_CONFIDENCE_MIN) return undefined;
+    return (
+      resolved.targetFile === declRelPath &&
+      resolved.targetSymbol === oldName &&
+      (resolved.parentClass ?? "") === (parentClass ?? "")
+    );
+  };
+  const commentPrefix = family === "python" ? "#" : "//";
+  const stagedPaths = new Set(stagedWrites.keys());
+
+  for (const relPath of index.getFiles()) {
+    if (stagedPaths.has(relPath) || relPath === declRelPath) continue;
+    if (sourceLanguageFamily(relPath) !== family) continue;
+    const absPath = join(rootDir, relPath);
+    if (!existsSync(absPath)) continue;
+    let content: string;
+    try {
+      content = readFileSync(absPath, "utf8");
+    } catch {
+      continue;
+    }
+    if (!wordRe.test(content)) continue;
+
+    const ast = analyzeSourceFile(relPath, content);
+    // A sibling declaration of the same name is unrelated; its own callers stay valid.
+    if (ast.symbols.some((s) => s.name === oldName)) continue;
+
+    let receiverIndex: ReturnType<typeof inferReceiverTypeIndex> | undefined;
+    const getReceiverIndex = (): ReturnType<typeof inferReceiverTypeIndex> => {
+      if (receiverIndex === undefined) {
+        receiverIndex = inferReceiverTypeIndex(relPath, content, ast);
+      }
+      return receiverIndex;
+    };
+
+    const staleImport = ast.imports.find((imp) => imp.importedNames.includes(oldName));
+    if (staleImport) {
+      add(relPath, staleImport.line, "still imports the old symbol name");
+      continue;
+    }
+
+    const staleCalls = ast.calls.filter((c) => c.callee === oldName && !c.isDeclaration);
+    if (staleCalls.length > 0) {
+      // Prefer the semantic index's resolved target when available; receiver-type inference
+      // and conservative assumptions remain the fallback for unresolved calls.
+      const possibleCalls = staleCalls.filter((call) => {
+        const verdict = semanticVerdict(relPath, call);
+        if (verdict !== undefined) return verdict;
+        if (!isMethodRename) return true;
+        if (!call.member) return true;
+        return isTargetReceiver(resolveReceiverType(call, ast, getReceiverIndex()));
+      });
+      const firstPossible = possibleCalls[0];
+      if (firstPossible) {
+        add(
+          relPath,
+          firstPossible.line,
+          isMethodRename ? "still calls the old method name" : "still calls the old symbol name"
+        );
+        continue;
+      }
+    }
+
+    if (ast.symbols.some((s) => s.referencedTypes.includes(oldName))) {
+      add(relPath, 1, "still references the old type name");
+      continue;
+    }
+
+    if (isMethodRename) {
+      const lines = content.split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        const code = stripLineCommentsAndStrings(lines[i] ?? "", commentPrefix);
+        propertyRefRe.lastIndex = 0;
+        let possibleRef = false;
+        for (const propertyMatch of code.matchAll(propertyRefRe)) {
+          const receiverName = propertyMatch[1];
+          if (!receiverName) {
+            possibleRef = true;
+            break;
+          }
+          const syntheticCall: AstCallSite = {
+            callee: oldName,
+            line: i + 1,
+            argsCount: 0,
+            receiver: receiverName,
+            member: true,
+          };
+          const verdict = semanticVerdict(relPath, syntheticCall);
+          if (verdict !== undefined) {
+            if (!verdict) continue;
+            possibleRef = true;
+            break;
+          }
+          const resolved = resolveReceiverType(
+            syntheticCall,
+            ast,
+            getReceiverIndex()
+          );
+          // A property reference on another class's receiver is unrelated to this rename.
+          if (isTargetReceiver(resolved)) {
+            possibleRef = true;
+            break;
+          }
+        }
+        if (!possibleRef) continue;
+        add(relPath, i + 1, "still references the old method name as a property");
+        break;
+      }
+    }
+  }
+
+  return [...found.values()];
 }
 
 /**
@@ -142,13 +330,36 @@ function executeCrossRepoRename(
     };
   }
 
-  // Collect all files to update: declaration file + importers + callers + type-referencing files
-  const blast = computeBlastRadius(index, relDecl, oldName, 100);
+  // A blind word-boundary rename cannot tell two same-named declarations apart.
+  // Renaming one would also rewrite the sibling (and its calls), so refuse instead
+  // of corrupting the file. Scoped queries such as `Class.method` are resolved by
+  // the normal edit path; rename needs an unambiguous symbol name.
+  const sameNameDecls = declData.ast.symbols.filter((s) => s.name === oldName);
+  if (sameNameDecls.length > 1) {
+    return {
+      ok: false,
+      file: relDecl,
+      touchedFiles: [],
+      mode: "rename",
+      replacedSpan: [sym.line, sym.endLine],
+      newSpan: [sym.line, sym.endLine],
+      diagnostics: [],
+      text:
+        `REJECTED [ambiguous-symbol] '${oldName}' is declared ${sameNameDecls.length} times in ${relDecl} ` +
+        `(lines ${sameNameDecls.map((s) => s.line).join(", ")}). Rename the declaration manually or ` +
+        `use a scoped edit so sibling methods are not rewritten.`,
+    };
+  }
+
+  // Collect all files to update: declaration file + importers + callers + type-referencing files.
+  // For methods, computeBlastRadius resolves member call sites through the imported parent class.
+  const blast = computeBlastRadius(index, relDecl, oldName, 100, sym.parentClass);
   const candidateFiles = new Set<string>([
     relDecl,
     ...blast.importers.map((i) => i.file),
     ...blast.callSites.map((c) => c.file),
   ]);
+  const parentClass = sym.parentClass;
   const typeCheckRe = new RegExp(`\\b${escapeRegExp(oldName)}\\b`);
   for (const relPath of index.getFiles(true)) {
     if (candidateFiles.has(relPath)) continue;
@@ -156,11 +367,131 @@ function executeCrossRepoRename(
     if (!raw || !typeCheckRe.test(raw.content)) continue;
     const fData = index.getFileAnalysis(relPath);
     if (!fData) continue;
+    // Explicit imports only: a wildcard import does not import this specific symbol.
     if (
       fData.ast.symbols.some((s) => s.referencedTypes.includes(oldName)) ||
-      fData.ast.imports.some((imp) => imp.importedNames.includes(oldName) || imp.importedNames.includes("*"))
+      fData.ast.imports.some((imp) => imp.importedNames.includes(oldName))
     ) {
       candidateFiles.add(relPath);
+    }
+  }
+
+  // A candidate file may declare its own same-named symbol (a duck-typed sibling
+  // method in another module). Blind replacement would rename that unrelated
+  // declaration and its calls too; refuse rather than corrupt a second symbol.
+  for (const relPath of candidateFiles) {
+    if (relPath === relDecl) continue;
+    const candidateAst = index.getFileAnalysis(relPath)?.ast;
+    const conflicting = candidateAst?.symbols.find((s) => s.name === oldName);
+    if (conflicting) {
+      return {
+        ok: false,
+        file: relDecl,
+        touchedFiles: [],
+        mode: "rename",
+        replacedSpan: [sym.line, sym.endLine],
+        newSpan: [sym.line, sym.endLine],
+        diagnostics: [],
+        text:
+          `REJECTED [ambiguous-symbol] '${oldName}' is also declared in ${relPath}:${conflicting.line}; ` +
+          `renaming '${relDecl}' would rewrite that unrelated symbol too. Rename it manually.`,
+      };
+    }
+  }
+
+  // Receiver-type-aware staging for methods: a candidate file whose `<oldName>` calls all
+  // resolve to a *different* inferred receiver type has no target call sites and must not be
+  // rewritten (blind word replacement would rename that other class's method). A file that
+  // mixes target and foreign receivers cannot be safely blind-replaced either -> reject.
+  if (parentClass) {
+    const hierarchy = createWorkspaceTypeHierarchy(index);
+    const semantic = tryGetSemanticIndex(rootDir);
+    const isTargetReceiver = (resolved: string | undefined): boolean => {
+      if (resolved === undefined) return true; // unknown -> keep (renamed by word replace)
+      return hierarchy.isCompatibleReceiver(resolved, parentClass, oldName);
+    };
+    const semanticVerdictForCall = (relPath: string, call: AstCallSite): boolean | undefined => {
+      if (!semantic) return undefined;
+      let resolved: SemanticResolvedCall;
+      try {
+        resolved = semantic.resolveCall(relPath, call);
+      } catch {
+        return undefined;
+      }
+      if (!resolved.targetFile || !resolved.targetSymbol) return undefined;
+      if (resolved.confidence < SEMANTIC_CONFIDENCE_MIN) return undefined;
+      return (
+        resolved.targetFile === relDecl &&
+        resolved.targetSymbol === oldName &&
+        (resolved.parentClass ?? "") === parentClass
+      );
+    };
+    const receiverConflicts: string[] = [];
+    for (const relPath of [...candidateFiles]) {
+      if (relPath === relDecl) continue;
+      const candidate = index.getFileAnalysis(relPath);
+      if (!candidate) continue;
+      const receiverIndex = inferReceiverTypeIndex(relPath, candidate.content, candidate.ast);
+      const oldCalls = candidate.ast.calls.filter(
+        (call) => call.callee === oldName && !call.isDeclaration
+      );
+      let targetRelated = 0;
+      let foreignReceiver = 0;
+      for (const call of oldCalls) {
+        if (!call.member) {
+          targetRelated += 1;
+          continue;
+        }
+        const semanticVerdict = semanticVerdictForCall(relPath, call);
+        if (semanticVerdict !== undefined) {
+          if (semanticVerdict) targetRelated += 1;
+          else foreignReceiver += 1;
+          continue;
+        }
+        const resolved = resolveReceiverType(call, candidate.ast, receiverIndex);
+        if (isTargetReceiver(resolved)) targetRelated += 1;
+        else foreignReceiver += 1;
+      }
+      if (foreignReceiver > 0 && targetRelated === 0) {
+        // Clearly another class's receiver: leave the file untouched.
+        candidateFiles.delete(relPath);
+      } else if (foreignReceiver > 0) {
+        receiverConflicts.push(
+          `${relPath} (<${oldName}> call(s) on another receiver type)`
+        );
+      }
+    }
+    // The declaring file itself may mix receiver types as well.
+    const declReceiverIndex = inferReceiverTypeIndex(relDecl, declData.content, declData.ast);
+    for (const call of declData.ast.calls) {
+      if (call.callee !== oldName || call.isDeclaration || !call.member) continue;
+      const semanticVerdict = semanticVerdictForCall(relDecl, call);
+      if (semanticVerdict === false) {
+        receiverConflicts.push(`${relDecl}:${call.line} (semantic target is another symbol)`);
+        continue;
+      }
+      if (semanticVerdict === true) continue;
+      const resolved = resolveReceiverType(call, declData.ast, declReceiverIndex);
+      if (resolved !== undefined && !isTargetReceiver(resolved)) {
+        receiverConflicts.push(`${relDecl}:${call.line} (receiver type ${resolved})`);
+      }
+    }
+    if (receiverConflicts.length > 0) {
+      return {
+        ok: false,
+        file: relDecl,
+        touchedFiles: [],
+        mode: "rename",
+        replacedSpan: [sym.line, sym.endLine],
+        newSpan: [sym.line, sym.endLine],
+        diagnostics: [],
+        text: [
+          `REJECTED [ambiguous-symbol] Cannot safely rename '${oldName}' on ${parentClass}: ` +
+            `mixed same-named calls resolve to other receiver types:`,
+          ...receiverConflicts.map((item) => `  - ${item}`),
+          "Rename the intended declaration manually so unrelated methods are not rewritten.",
+        ].join("\n"),
+      };
     }
   }
 
@@ -202,6 +533,39 @@ function executeCrossRepoRename(
       diagnostics,
       text: `REJECTED [rename-syntax-error] Rolled back rename ${oldName} -> ${newName}:\n` +
         diagnostics.map((d) => `  - ${d.location}: ${d.message}`).join("\n"),
+    };
+  }
+
+  // Safety re-analysis on the staged (not-yet-written) workspace: if the old name still
+  // survives as a call/import/reference in the same language family, the rename would
+  // silently leave broken callers (duck-typed receivers, wildcard imports, macros...).
+  // Nothing has been written yet, so "rolling back" is simply not committing the stage.
+  const targetFamily = sourceLanguageFamily(relDecl);
+  const unresolvedFiles = collectUnresolvedRenameReferences(
+    rootDir,
+    index,
+    relDecl,
+    oldName,
+    parentClass,
+    targetFamily,
+    stagedWrites
+  );
+
+  if (unresolvedFiles.length > 0) {
+    return {
+      ok: false,
+      file: relDecl,
+      touchedFiles: [],
+      mode: "rename",
+      replacedSpan: [sym.line, sym.endLine],
+      newSpan: [sym.line, sym.endLine],
+      diagnostics,
+      text: [
+        `REJECTED [rename-unresolved-callers] Rolled back rename ${oldName} -> ${newName}: ` +
+          `the old name is still referenced at:`,
+        ...unresolvedFiles.map((item) => `  - ${item}`),
+        "Review these call sites (dynamic/unknown receiver types) and rename them manually, or retry after they are fixed.",
+      ].join("\n"),
     };
   }
 

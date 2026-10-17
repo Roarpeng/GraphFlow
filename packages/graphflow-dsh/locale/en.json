@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GraphFlow Surgical Code Engine",
+    "description": "Registers GraphFlow's four token-first MCP tools (gf_read, gf_edit, gf_exec, gf_macro) with DeepSeek Harness and ships the GraphFlow skill."
+  }
+}

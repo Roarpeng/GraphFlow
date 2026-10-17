@@ -4,20 +4,167 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import {
   detectInstalledAgents,
+  getAgentRegistrationStatus,
   installAllAgents,
   uninstallAllAgents,
+  type AgentRegistrationStatus,
 } from "./agent-installer.js";
 import { interceptPostToolUse, interceptPreToolUse } from "./host-interceptor.js";
 import { PACKAGE_VERSION } from "./mcp-server.js";
 import { executeV3ToolCall } from "./mcp-tools.js";
+import { isTreeSitterAvailable } from "./tree-sitter-engine.js";
+
+const requireFromCli = createRequire(__filename);
 
 function readFlag(args: string[], flag: string): string | undefined {
   const idx = args.indexOf(flag);
   if (idx >= 0 && idx + 1 < args.length) return args[idx + 1];
   return undefined;
+}
+
+interface ParsedFlagArgs {
+  positionals: string[];
+  values: Map<string, string>;
+  flags: Set<string>;
+}
+
+/**
+ * Small deterministic argv tokenizer shared by `read`, `exec` and `uninstall`.
+ * Value flags consume their next token (`--root <dir>` as well as
+ * `--root=<dir>`), a bare `--` terminates flag parsing, and any other
+ * `-`-prefixed token is treated as a flag. Only real positionals are returned,
+ * so a flag value can never leak into the command/targets list.
+ */
+function parseFlagArgs(args: string[], valueFlags: readonly string[]): ParsedFlagArgs {
+  const valueFlagSet = new Set(valueFlags);
+  const positionals: string[] = [];
+  const values = new Map<string, string>();
+  const flags = new Set<string>();
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] ?? "";
+    if (arg === "--") {
+      positionals.push(...args.slice(i + 1));
+      break;
+    }
+    if (valueFlagSet.has(arg)) {
+      const value = args[i + 1];
+      if (value !== undefined) {
+        values.set(arg, value);
+        i += 1;
+      }
+      continue;
+    }
+    if (arg.startsWith("--")) {
+      const eq = arg.indexOf("=");
+      if (eq > 2) {
+        const name = arg.slice(0, eq);
+        if (valueFlagSet.has(name)) {
+          values.set(name, arg.slice(eq + 1));
+          continue;
+        }
+      }
+      flags.add(arg);
+      continue;
+    }
+    if (arg.startsWith("-") && arg !== "-") {
+      flags.add(arg);
+      continue;
+    }
+    positionals.push(arg);
+  }
+
+  return { positionals, values, flags };
+}
+
+export interface ParsedExecArgs {
+  cmd: string;
+  run: boolean;
+  rootDir?: string;
+}
+
+/**
+ * Parse `graphflow exec [cmd...] [--run] [--root <dir>] [-- <cmd...>]`.
+ * Defaults to the impacted-test router (`affected-tests`) when no positional
+ * command is supplied. Use `--` to forward flags to the wrapped command.
+ */
+export function parseExecArgs(args: string[], defaultCmd = "affected-tests"): ParsedExecArgs {
+  const parsed = parseFlagArgs(args, ["--root"]);
+  const rootDir = parsed.values.get("--root");
+  return {
+    cmd: parsed.positionals.length > 0 ? parsed.positionals.join(" ") : defaultCmd,
+    run: parsed.flags.has("--run"),
+    ...(rootDir !== undefined ? { rootDir } : {}),
+  };
+}
+
+export interface ParsedUninstallArgs {
+  agentIds?: string[];
+  all: boolean;
+  rootDir?: string;
+}
+
+function splitCsv(value: string): string[] {
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Parse `graphflow uninstall [--agents <id1,id2>] [--all] [--root <dir>]`.
+ * With neither `--agents` nor `--all` the CLI uninstalls detected agents only.
+ */
+export function parseUninstallArgs(args: string[]): ParsedUninstallArgs {
+  const parsed = parseFlagArgs(args, ["--agents", "--root"]);
+  const agentsCsv = parsed.values.get("--agents");
+  const agentIds = agentsCsv === undefined ? [] : splitCsv(agentsCsv);
+  const rootDir = parsed.values.get("--root");
+  return {
+    ...(agentIds.length > 0 ? { agentIds } : {}),
+    all: parsed.flags.has("--all"),
+    ...(rootDir !== undefined ? { rootDir } : {}),
+  };
+}
+
+export interface ParsedReadArgs {
+  targets: string[];
+  q?: string;
+  skeleton: boolean;
+  dedup: boolean;
+  rootDir?: string;
+}
+
+/** Parse `graphflow read [targets...] [-q <query>] [--skeleton] [--dedup]`. */
+export function parseReadArgs(args: string[]): ParsedReadArgs {
+  const parsed = parseFlagArgs(args, ["-q", "--query", "--root"]);
+  const q = parsed.values.get("-q") ?? parsed.values.get("--query");
+  const rootDir = parsed.values.get("--root");
+  return {
+    targets: parsed.positionals,
+    ...(q !== undefined ? { q } : {}),
+    skeleton: parsed.flags.has("--skeleton"),
+    dedup: parsed.flags.has("--dedup"),
+    ...(rootDir !== undefined ? { rootDir } : {}),
+  };
+}
+
+/**
+ * One-line `graphflow status` entry, e.g.
+ * `[MCP ✓] [Skill ✓] [Rule -] [Hook ✓] Cursor (cursor)`.
+ * `-` means "not registered" or "this host has no such surface".
+ */
+export function formatRegistrationStatusLine(status: AgentRegistrationStatus): string {
+  const mark = (value: boolean | undefined): string => (value ? "✓" : "-");
+  return (
+    `[MCP ${mark(status.mcp)}] [Skill ${mark(status.skill)}] ` +
+    `[Rule ${mark(status.rule)}] [Hook ${mark(status.hook)}] ` +
+    `${status.name} (${status.id})`
+  );
 }
 
 function printUsage(): void {
@@ -27,14 +174,19 @@ function printUsage(): void {
       "",
       "Usage:",
       "  graphflow install [--workspace] [--agents <id1,id2>] [--no-prune]",
-      "  graphflow uninstall",
-      "  graphflow status",
+      "  graphflow uninstall [--agents <id1,id2>] [--all] [--root <dir>]",
+      "  graphflow status [--agents <id1,id2>] [--all]",
+      "  graphflow doctor parsers [--strict] | graphflow parsers",
       "  graphflow read [targets...] [-q <query>] [--skeleton] [--dedup]",
       "  graphflow edit <file> [--symbol <sym>] [--new <code>] [--rename <newName>]",
-      "  graphflow exec [cmd] [--run]",
+      "  graphflow exec [cmd] [--run] [--root <dir>] [-- <cmd...>]",
       "  graphflow macro <list|run|mine|mine-git|save> [id] [args...]",
       "  graphflow hook <pre-tool|post-tool>",
       "  graphflow version | help",
+      "",
+      "Notes:",
+      "  uninstall without flags removes detected agents only; --all removes every profile.",
+      "  exec defaults to affected-tests and forwards everything after `--` to the command.",
     ].join("\n")
   );
 }
@@ -85,7 +237,12 @@ async function main(): Promise<void> {
   }
 
   if (cmd === "uninstall") {
-    const removed = uninstallAllAgents({ workspaceRoot: rootDir });
+    const parsed = parseUninstallArgs(rest);
+    const removed = uninstallAllAgents({
+      workspaceRoot: parsed.rootDir ?? rootDir,
+      ...(parsed.agentIds ? { agentIds: parsed.agentIds } : {}),
+      ...(parsed.all ? { all: true } : {}),
+    });
     console.log(`GraphFlow v${PACKAGE_VERSION} uninstalled (${removed.length} item(s) removed).`);
     for (const item of removed) {
       console.log(`  [REMOVED] (${item.category}) ${item.agentName} -> ${item.targetPath}`);
@@ -93,12 +250,76 @@ async function main(): Promise<void> {
     return;
   }
 
+  if ((cmd === "doctor" && rest[0] === "parsers") || cmd === "parsers") {
+    const grammarPackages: Array<[string, string]> = [
+      ["python", "tree-sitter-python"],
+      ["go", "tree-sitter-go"],
+      ["rust", "tree-sitter-rust"],
+      ["c", "tree-sitter-c"],
+      ["cpp", "tree-sitter-cpp"],
+      ["csharp", "tree-sitter-c-sharp"],
+    ];
+    const packageVersion = (name: string): string | undefined => {
+      try {
+        const pkgPath = requireFromCli.resolve(`${name}/package.json`);
+        const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
+        return pkg.version;
+      } catch {
+        return undefined;
+      }
+    };
+    const available = isTreeSitterAvailable();
+    const envValue = process.env.GRAPHFLOW_TREE_SITTER;
+    console.log(`GraphFlow v${PACKAGE_VERSION} — parser backends`);
+    console.log(`  TS/JS: @babel/parser (engine "babel")`);
+    console.log(`  tree-sitter core: ${packageVersion("tree-sitter") ?? "NOT INSTALLED"}`);
+    for (const [family, pkg] of grammarPackages) {
+      const version = packageVersion(pkg);
+      console.log(`  ${family.padEnd(7)} ${pkg}: ${version ?? "NOT INSTALLED"}`);
+    }
+    console.log(
+      `  default engine: ${
+        envValue === "0"
+          ? "structural (GRAPHFLOW_TREE_SITTER=0)"
+          : available
+            ? "tree-sitter"
+            : "structural (tree-sitter unavailable)"
+      }`
+    );
+    if (!available) {
+      console.log(
+        "  hint: install the optional native grammars (`npm install`) or keep using the structural fallback."
+      );
+      if (rest.includes("--strict")) process.exitCode = 1;
+    }
+    return;
+  }
+
   if (cmd === "status" || cmd === "doctor") {
+    const agentsCsv = readFlag(rest, "--agents");
+    const agentIds = agentsCsv
+      ? agentsCsv
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : undefined;
+    const all = rest.includes("--all");
     const detected = detectInstalledAgents();
+    const statuses = getAgentRegistrationStatus({
+      ...(agentIds?.length ? { agentIds } : {}),
+      ...(all ? { all: true } : {}),
+    });
     console.log(
       `GraphFlow v${PACKAGE_VERSION} — Detected ${detected.length} coding agent(s): ` +
         (detected.map((d) => `${d.name} (${d.id})`).join(", ") || "none")
     );
+    if (statuses.length === 0) {
+      console.log("  No agent registrations in scope.");
+    } else {
+      for (const status of statuses) {
+        console.log(`  ${formatRegistrationStatusLine(status)}`);
+      }
+    }
     return;
   }
 
@@ -153,26 +374,18 @@ async function main(): Promise<void> {
   }
 
   if (cmd === "read" || cmd === "gf-read") {
-    const q = readFlag(rest, "-q") ?? readFlag(rest, "--query");
-    const skeleton = rest.includes("--skeleton");
-    const dedup = rest.includes("--dedup");
-    const targets = rest.filter(
-      (a, i) =>
-        !a.startsWith("-") &&
-        rest[i - 1] !== "-q" &&
-        rest[i - 1] !== "--query" &&
-        rest[i - 1] !== "--root"
-    );
+    const parsed = parseReadArgs(rest);
+    const effectiveRoot = parsed.rootDir ?? rootDir;
     const res = executeV3ToolCall(
       "gf_read",
       {
-        ...(targets.length > 0 ? { targets } : {}),
-        ...(q ? { q } : {}),
-        skeleton,
-        dedup,
-        rootDir,
+        ...(parsed.targets.length > 0 ? { targets: parsed.targets } : {}),
+        ...(parsed.q ? { q: parsed.q } : {}),
+        skeleton: parsed.skeleton,
+        dedup: parsed.dedup,
+        rootDir: effectiveRoot,
       },
-      rootDir
+      effectiveRoot
     );
     console.log(res.content[0]?.text ?? "");
     return;
@@ -201,10 +414,13 @@ async function main(): Promise<void> {
   }
 
   if (cmd === "exec" || cmd === "gf-exec") {
-    const run = rest.includes("--run");
-    const positional = rest.filter((a) => !a.startsWith("-"));
-    const execCmd = positional.length > 0 ? positional.join(" ") : "affected-tests";
-    const res = executeV3ToolCall("gf_exec", { cmd: execCmd, run, rootDir }, rootDir);
+    const parsed = parseExecArgs(rest);
+    const effectiveRoot = parsed.rootDir ?? rootDir;
+    const res = executeV3ToolCall(
+      "gf_exec",
+      { cmd: parsed.cmd, run: parsed.run, rootDir: effectiveRoot },
+      effectiveRoot
+    );
     console.log(res.content[0]?.text ?? "");
     return;
   }
@@ -244,7 +460,14 @@ async function main(): Promise<void> {
   process.exitCode = 1;
 }
 
-main().catch((err) => {
-  console.error("GraphFlow CLI error:", err);
-  process.exitCode = 1;
-});
+// Only auto-run when executed as the CLI entry point. Importing this module
+// (e.g. from tests that exercise the pure arg parsers) must stay side-effect free.
+const isCliEntryPoint =
+  typeof require !== "undefined" && typeof module !== "undefined" && require.main === module;
+
+if (isCliEntryPoint) {
+  main().catch((err) => {
+    console.error("GraphFlow CLI error:", err);
+    process.exitCode = 1;
+  });
+}

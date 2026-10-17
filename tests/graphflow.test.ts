@@ -33,7 +33,7 @@ import {
   tokenizeEnglish,
   tokenizeBilingualQuery,
 } from "../src/index.js";
-import { getV3ToolDefinitions } from "../src/mcp-server.js";
+import { getToolDefinitions, getV3ToolDefinitions } from "../src/mcp-server.js";
 
 function createSampleWorkspace(): string {
   const root = mkdtempSync(join(tmpdir(), "gf-v3-test-"));
@@ -1006,6 +1006,13 @@ async function runAllTests(): Promise<void> {
       const v3Tokens = Math.ceil(v3Bytes / 4);
       assert.equal(V3_TOOL_DEFINITIONS.length, 4);
       assert.ok(v3Tokens < 460, `Expected <460 tokens for all 4 V3 tool schemas, got ${v3Tokens}`);
+
+      // The actual `tools/list` payload must stay lean: governance metadata stays in
+      // getV3ToolDefinitions() for API consumers, not on the MCP wire.
+      const wire = getToolDefinitions();
+      const wireTokens = Math.ceil(Buffer.byteLength(JSON.stringify(wire), "utf8") / 4);
+      assert.equal(wire.length, 4);
+      assert.ok(wireTokens < 460, `Expected <460 wire tokens for tools/list, got ${wireTokens}`);
     });
 
 
@@ -1407,7 +1414,7 @@ async function runAllTests(): Promise<void> {
       const vizRes = executeV3ToolCall("gf_macro", { action: "visualize" }, root);
       assert.ok(vizRes.content[0]!.text.includes("OK [knowledge-graph]"));
       const htmlContent = readFileSync(join(root, ".graphflow", "knowledge-graph.html"), "utf8");
-      assert.ok(htmlContent.includes("GraphFlow 3.1 Knowledge Graph") && htmlContent.includes("doc-links-code"));
+      assert.ok(htmlContent.includes("GraphFlow 3.5.0 Knowledge Graph") && htmlContent.includes("doc-links-code"));
 
       // 5. Verify 6-Language Struct Field Deletion Guard Parity (Python @dataclass, Go struct, Rust struct)
       const pyFieldDel = executeSurgicalEdit({
