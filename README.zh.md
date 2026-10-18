@@ -64,7 +64,7 @@
 - **双语召回 1.000 / 1.000** —— 新增 `tests/bilingual-parity.test.ts` 测量 30 对 EN/ZH 查询：EN 与 ZH 在 @1/@3/@5 均为 **1.000**，拼音/混合/同义词家族也是 **1.000**（基线 ZH@1 0.967、拼音 0.769）。分词器修复：词形还原救援不对称、同义词前向扩展污染、缺失的 zh/拼音词表 + EN→ZH 拼音桥、过宽映射。残余：切片文档窗口/名称权重仍可能影响紧密排列的文件；泛用英文在 @1 上无法区分拼音命名符号；词表为人工维护。
 - **本地任务反射（无 LLM、无网络）** —— 重复的 shell 指令可记录到 `.graphflow/tasks.json` 并编译为 `.graphflow/tasks/<id>.mjs`：`graphflow task list|show|record|run`（`--step` / `--steps` / `--args` / `--json` / `--root`）与 `graphflow reflect "<instruction>"`（未知时返回 `MISS`），或 MCP `gf_macro` 动作 `task-list` / `task-run` / `task-record` + `instruction`。第二次记录会提升任务，之后相同/近似匹配（token-Jaccard 0.86）的指令会在本地重放。MCP 表面仍恰好 4 个工具、**458 wire tokens**。限制：仅显式记录（暂无自动采集）、shell 步骤以记录者权限在本地执行、手工 `{{argN}}` 参数化、并发跨进程记录为最后写入者胜出。
 - **CI 与发布** —— Windows CI 的 `dsh-bundle` CRLF 失败已在测试中修复（篡改检测兼容 CRLF；校验器不变）；**CI（6 job）**与**解析器矩阵（7 job）**在 ubuntu/windows/macos × Node 20/22（另加严格 ubuntu job）上全绿。现有发布工作流不变；`npm run preflight` / `preflight:release` 与 `npm run task` / `npm run reflect` 可用，测试套件现为 **24 个文件**。
-- **实测数据** —— wire schema 为 **458 tokens**；骨架折叠 27,507 → 7,694（72.0%），符号切片 95.8%，PASS 脱水 4,282 → 30（99.3%），知识图谱约 1,156 节点 / 约 2,436 条边 / 约 1.15 s，受影响测试路由 22 ms，爆炸半径 6 ms。见[基准数据](#基准数据)。
+- **实测数据** —— wire schema 为 **458 tokens**；骨架折叠 27,926 → 7,840（71.9%），符号切片 27,926 → 1,165（95.8%），PASS 脱水 5,946 → 30（99.5%，24 文件套件），知识图谱约 1,277 节点 / 约 2,750 条边 / 约 2.08 s（165 条 doc links），受影响测试路由 26 ms（16 项测试），爆炸半径 7 ms。见[基准数据](#基准数据)。
 
 ## 3.5.0 新特性
 
@@ -74,7 +74,7 @@
 - **可选语义加速** —— `src/ts-semantic.ts` 通过既有 devDependency 惰性包装 TypeScript Compiler API（缺省时返回 `undefined`；提供 `resolveCallTarget` / `getReferences` / `getTypeAt`）；`src/lsp-bridge.ts` 是自研 JSON-RPC stdio LSP 客户端，内置 pyright/pylsp、gopls、rust-analyzer、clangd、OmniSharp/csharp-ls 与 typescript-language-server 预设（超时、惰性重启、dispose）。两者均为**可选**：不新增必需依赖、不捆绑语言服务器 —— 可用性取决于用户环境。
 - **DSH 配置包** —— 新包 `@roarpeng/graphflow-dsh`（版本与 CLI 同步）是纯配置的 Cordis bundle：`dsh.bundle.patch` 插入同一条 `mcp-graphflow` stdio 行（cwd 取 `GRAPHFLOW_WORKSPACE_ROOT`，否则回退 DSH 默认工作目录）并随包携带 Skill。通过 `plugin_manager install_bundle` 安装（或 `node scripts/install-dsh-bundle.mjs --print|--stage|--check`）。DSH 能力矩阵如实标注：**MCP ✅ · Skill ✅ · Rules ❌ · Hooks ❌**。配置包 **或** `graphflow install --agents deepseek-harness` 二选一（两者注册同一 row id/serverName，同时使用会重复）；CLI 安装器仍会把 Skill 复制到 `DSH_HOME/skills`。
 - **发布预检** —— `npm run preflight` 是只读门禁：校验版本一致性（package / lock / 扩展 / README tagline）、必需文件、`mcp.json`、现有工作流的关键内容契约、Skill frontmatter 与包元数据；`npm run preflight:release` 额外运行 `npm test`、`npm pack --dry-run` 与本地 `vsce package` 试打包（未安装 vsce 时跳过）。现有 ci/publish-npm/publish-marketplace 工作流保持不变并通过校验；解析器矩阵为增量新增。审计注意事项：tag 与版本一致性守卫不在 CI 中，VSIX 工作流打包的是已提交的扩展构建产物。
-- **基准数据刷新** —— MCP wire 459 tokens；骨架折叠 27,507 → 7,694 tokens（72.0%，范围 68–86%）；单符号切片 95.8%（约 96%）；PASS 脱水 4,282 → 30 tokens（99.3%）；知识图谱约 1,156 节点 / 约 2,436 条边，构建约 1.15 s（约 145–150 条 doc links）；受影响测试路由 22 ms；爆炸半径 6 ms。见[基准数据](#基准数据)。
+- **基准数据刷新（3.5.0 运行 —— 历史值；当前 3.6.0 数字见上文）** —— MCP wire 459 tokens；骨架折叠 27,507 → 7,694 tokens（72.0%，范围 68–86%）；单符号切片 95.8%（约 96%）；PASS 脱水 4,282 → 30 tokens（99.3%）；知识图谱约 1,156 节点 / 约 2,436 条边，构建约 1.15 s（约 145–150 条 doc links）；受影响测试路由 22 ms；爆炸半径 6 ms。见[基准数据](#基准数据)。
 
 ## 3.4.0 新特性
 
@@ -140,12 +140,12 @@
 | 指标 | 基线 | GraphFlow 3.6.0 | 节省 |
 | :--- | :--- | :--- | :--- |
 | 每轮 MCP 工具 schema 开销 | 5897 tokens（2.x，10 工具） | wire 负载 458 tokens（4 工具，约 460） | **−92.2%** |
-| 大文件读取 —— 骨架折叠 | 整文件原文 | `ast-engine.ts` 27,507 → 7,694 tokens（缩小 72.0%；仓库文件范围 68–86%） | **−68% … −86%** |
-| 单符号读取 —— 切片 | 整文件原文 | `ast-engine.ts` 缩小 95.8%（27,507 → 1,165 tokens，约 96%） | **~−96%** |
-| 通过的测试套件输出 | 完整日志 | 1 行 `PASS` 回执（24 文件套件 4,282 → 30 tokens） | **−99.3%** |
-| 知识图谱构建（仓库） | — | 约 1,156 节点 / 约 2,436 条边，约 1.15 s（约 145–150 条 doc links） | — |
-| 受影响测试路由 | — | 单个变更文件 22 ms | — |
-| 爆炸半径（仓库符号） | — | 6 ms | — |
+| 大文件读取 —— 骨架折叠 | 整文件原文 | `ast-engine.ts` 27,926 → 7,840 tokens（缩小 71.9%；仓库文件范围 68–86%） | **−68% … −86%** |
+| 单符号读取 —— 切片 | 整文件原文 | `ast-engine.ts` 缩小 95.8%（27,926 → 1,165 tokens，约 96%） | **~−96%** |
+| 通过的测试套件输出 | 完整日志 | 1 行 `PASS` 回执（24 文件套件 5,946 → 30 tokens） | **−99.5%** |
+| 知识图谱构建（仓库） | — | 约 1,277 节点 / 约 2,750 条边，约 2.08 s（165 条 doc links） | — |
+| 受影响测试路由 | — | 单个变更文件 26 ms（16 项受影响测试） | — |
+| 爆炸半径（仓库符号） | — | 7 ms | — |
 
 **Schema 开销说明：** `tools/list` 的 wire 负载为 458 tokens —— 冗余的 `$schema` / `title` / `annotations` / `_meta` 已从 wire 剥离；程序化 `getV3ToolDefinitions()` 仍保留这些字段供治理 API 使用，因此 API 视图大于 wire 视图。
 

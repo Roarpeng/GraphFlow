@@ -64,7 +64,7 @@ Session read dedup skips unchanged files; 3 consecutive edit-test failures trigg
 - **Bilingual recall 1.000 / 1.000** — new `tests/bilingual-parity.test.ts` measures 30 EN/ZH query pairs: EN and ZH recall are both **1.000 at @1/@3/@5**, and pinyin / mixed / synonym families are **1.000** (baseline ZH@1 0.967, pinyin 0.769). Tokenizer fixes: morphological-rescue asymmetry, synonym forward-expansion pollution, a missing zh/pinyin glossary + EN→ZH pinyin bridge, and over-broad mappings. Residuals: slicer doc-window/name weighting can still affect tightly packed files; generic English cannot disambiguate pinyin-named symbols at @1; the glossary is curated.
 - **Local task reflection (no LLM, no network)** — repeated shell instructions can be recorded into `.graphflow/tasks.json` and compiled to `.graphflow/tasks/<id>.mjs`: `graphflow task list|show|record|run` (`--step` / `--steps` / `--args` / `--json` / `--root`) and `graphflow reflect "<instruction>"` (returns `MISS` when unknown), or MCP `gf_macro` actions `task-list` / `task-run` / `task-record` with `instruction`. The second recording promotes the task, and later identical/near-match (token-Jaccard 0.86) instructions replay it locally. The MCP surface stays exactly 4 tools at **458 wire tokens**. Limits: explicit recording only (no auto-harvest yet), shell steps run locally with the recorder's privileges, manual `{{argN}}` parameterization, and last-writer-wins on concurrent cross-process records.
 - **CI & release** — the Windows CI `dsh-bundle` CRLF failure is fixed in the test (tamper check is now CRLF-safe; the validator is unchanged); **CI (6 jobs)** and the **parser matrix (7 jobs)** are green across ubuntu/windows/macos × Node 20/22 (plus the strict ubuntu job). The existing publish workflows are untouched; `npm run preflight` / `preflight:release` and `npm run task` / `npm run reflect` are available, and the suite now has **24 test files**.
-- **Measurements** — wire schema is **458 tokens**; skeleton folding 27,507 → 7,694 (72.0%), symbol slice 95.8%, PASS dehydration 4,282 → 30 (99.3%), knowledge graph ≈1,156 nodes / ≈2,436 edges in ≈1.15 s, affected-test routing 22 ms, blast radius 6 ms. See [Benchmarks](#benchmarks).
+- **Measurements** — wire schema is **458 tokens**; skeleton folding 27,926 → 7,840 (71.9%), symbol slice 27,926 → 1,165 (95.8%), PASS dehydration 5,946 → 30 (99.5%, 24-file suite), knowledge graph ≈1,277 nodes / ≈2,750 edges in ≈2.08 s (165 doc links), affected-test routing 26 ms (16 tests), blast radius 7 ms. See [Benchmarks](#benchmarks).
 
 ## What's New in 3.5.0
 
@@ -74,7 +74,7 @@ Session read dedup skips unchanged files; 3 consecutive edit-test failures trigg
 - **Optional semantic acceleration** — `src/ts-semantic.ts` wraps the TypeScript Compiler API lazily through the existing devDependency (returns `undefined` when absent; `resolveCallTarget` / `getReferences` / `getTypeAt`), and `src/lsp-bridge.ts` is a self-written JSON-RPC stdio LSP client with presets for pyright/pylsp, gopls, rust-analyzer, clangd, OmniSharp/csharp-ls and typescript-language-server (timeouts, lazy restart, dispose). Both are **optional**: no new required dependencies and no bundled language servers — availability depends on your environment.
 - **DSH config bundle** — the new `@roarpeng/graphflow-dsh` package (version mirrors the CLI) is a configuration-only Cordis bundle: `dsh.bundle.patch` inserts the same `mcp-graphflow` stdio row (cwd from `GRAPHFLOW_WORKSPACE_ROOT`, falling back to DSH's default working directory) and ships the skill. Install with `plugin_manager install_bundle` (or `node scripts/install-dsh-bundle.mjs --print|--stage|--check`). Honest DSH matrix: **MCP ✅ · Skill ✅ · Rules ❌ · Hooks ❌**. Use the bundle **or** `graphflow install --agents deepseek-harness`, not both (same row id/serverName); the CLI installer still copies the skill to `DSH_HOME/skills`.
 - **Release preflight** — `npm run preflight` is a read-only gate over version consistency (package / lock / extension / README taglines), required files, `mcp.json`, existing workflow key contracts, skill frontmatter and package metadata; `npm run preflight:release` adds `npm test`, `npm pack --dry-run` and a local `vsce package` dry run (skipped when vsce is absent). The existing ci/publish-npm/publish-marketplace workflows are unchanged and validated; the parser matrix is additive. Audit caveats: the tag-vs-version guard is not in CI, and the VSIX workflow packages the committed extension build.
-- **Refreshed measurements** — MCP wire 459 tokens; skeleton 27,507 → 7,694 tokens (72.0%, 68–86% range); symbol slice 95.8% (~96%); PASS dehydration 4,282 → 30 tokens (99.3%); knowledge graph ≈1,156 nodes / ≈2,436 edges built in ≈1.15 s (≈145–150 doc links); affected-test routing 22 ms; blast radius 6 ms. See [Benchmarks](#benchmarks).
+- **Measurements (3.5.0 run — historical; current 3.6.0 numbers above)** — MCP wire 459 tokens; skeleton 27,507 → 7,694 tokens (72.0%, 68–86% range); symbol slice 95.8% (~96%); PASS dehydration 4,282 → 30 tokens (99.3%); knowledge graph ≈1,156 nodes / ≈2,436 edges built in ≈1.15 s (≈145–150 doc links); affected-test routing 22 ms; blast radius 6 ms. See [Benchmarks](#benchmarks).
 
 ## What's New in 3.4.0
 
@@ -140,12 +140,12 @@ One query engine for Chinese and English code search:
 | Metric | Baseline | GraphFlow 3.6.0 | Saving |
 | :--- | :--- | :--- | :--- |
 | MCP tool schema tax / turn | 5897 tokens (2.x, 10 tools) | 458 tokens on the wire (4 tools, ~460) | **−92.2%** |
-| Large-file read — skeleton folding | raw file read | 27,507 → 7,694 tokens on `ast-engine.ts` (72.0% smaller; 68–86% across repo files) | **−68% … −86%** |
-| Single-symbol read — slice | raw file read | 95.8% smaller on `ast-engine.ts` (27,507 → 1,165 tokens; ~96%) | **~−96%** |
-| Passing test-suite output | full log | 1-line `PASS` receipt (4,282 → 30 tokens on the 24-file suite) | **−99.3%** |
-| Knowledge-graph build (repo) | — | ≈1,156 nodes / ≈2,436 edges in ≈1.15 s (≈145–150 doc links) | — |
-| Affected-test routing | — | 22 ms for 1 changed file | — |
-| Blast radius (repo symbol) | — | 6 ms | — |
+| Large-file read — skeleton folding | raw file read | 27,926 → 7,840 tokens on `ast-engine.ts` (71.9% smaller; 68–86% across repo files) | **−68% … −86%** |
+| Single-symbol read — slice | raw file read | 95.8% smaller on `ast-engine.ts` (27,926 → 1,165 tokens; ~96%) | **~−96%** |
+| Passing test-suite output | full log | 1-line `PASS` receipt (5,946 → 30 tokens on the 24-file suite) | **−99.5%** |
+| Knowledge-graph build (repo) | — | ≈1,277 nodes / ≈2,750 edges in ≈2.08 s (165 doc links) | — |
+| Affected-test routing | — | 26 ms for 1 changed file (16 affected tests) | — |
+| Blast radius (repo symbol) | — | 7 ms | — |
 
 **Schema tax detail:** the `tools/list` wire payload is 458 tokens — redundant `$schema` / `title` / `annotations` / `_meta` are stripped from the wire. The programmatic `getV3ToolDefinitions()` keeps those fields for the governance API, so the API view is larger than the wire view.
 
