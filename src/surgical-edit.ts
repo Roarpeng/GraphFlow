@@ -20,15 +20,17 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   analyzeSourceFile,
+  inImplicitPackageScope,
   inferReceiverTypeIndex,
   resolveReceiverType,
   resolveRelativeImportPath,
   sourceLanguageFamily,
   stripLineCommentsAndStrings,
   type AstCallSite,
+  type AstSymbol,
 } from "./ast-engine.js";
 import { computeBlastRadius, createWorkspaceTypeHierarchy } from "./blast-radius.js";
 import {
@@ -360,9 +362,12 @@ function executeCrossRepoRename(
     ...blast.callSites.map((c) => c.file),
   ]);
   const parentClass = sym.parentClass;
+  const declLangFamily = sourceLanguageFamily(relDecl);
   const typeCheckRe = new RegExp(`\\b${escapeRegExp(oldName)}\\b`);
   for (const relPath of index.getFiles(true)) {
     if (candidateFiles.has(relPath)) continue;
+    // Cross-language references are impossible: never stage another family's same-named code.
+    if (sourceLanguageFamily(relPath) !== declLangFamily) continue;
     const raw = index.getRawFile(relPath);
     if (!raw || !typeCheckRe.test(raw.content)) continue;
     const fData = index.getFileAnalysis(relPath);
@@ -376,6 +381,33 @@ function executeCrossRepoRename(
     }
   }
 
+  // Split declarations (C/C++ header prototype + source definition, ...) are the *same*
+  // symbol: include body-less prototypes/definitions in the same package/scope so renaming a
+  // definition also fixes its header (and vice versa) instead of leaving a stale prototype.
+  const declFamily = sourceLanguageFamily(relDecl);
+  const isSameDeclarationCluster = (candidate: AstSymbol): boolean =>
+    (candidate.parentClass ?? "") === (parentClass ?? "") &&
+    (candidate.kind === "function" || candidate.kind === "method") &&
+    candidate.paramsCount === sym.paramsCount;
+  for (const relPath of index.getFiles(true)) {
+    if (declFamily !== "c") break; // split prototype/definition declarations exist in C/C++
+    if (candidateFiles.has(relPath)) continue;
+    if (sourceLanguageFamily(relPath) !== declFamily) continue;
+    const raw = index.getRawFile(relPath);
+    if (!raw || !typeCheckRe.test(raw.content)) continue;
+    if (
+      dirname(relPath) !== dirname(relDecl) &&
+      !inImplicitPackageScope(relDecl, relPath, declFamily)
+    ) {
+      continue;
+    }
+    const fData = index.getFileAnalysis(relPath);
+    if (!fData) continue;
+    if (fData.ast.symbols.some((s) => s.name === oldName && isSameDeclarationCluster(s))) {
+      candidateFiles.add(relPath);
+    }
+  }
+
   // A candidate file may declare its own same-named symbol (a duck-typed sibling
   // method in another module). Blind replacement would rename that unrelated
   // declaration and its calls too; refuse rather than corrupt a second symbol.
@@ -384,6 +416,8 @@ function executeCrossRepoRename(
     const candidateAst = index.getFileAnalysis(relPath)?.ast;
     const conflicting = candidateAst?.symbols.find((s) => s.name === oldName);
     if (conflicting) {
+      // Prototype/definition pairs of the same declaration are updated together, not rejected.
+      if (isSameDeclarationCluster(conflicting)) continue;
       return {
         ok: false,
         file: relDecl,

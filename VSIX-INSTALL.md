@@ -36,6 +36,8 @@ The engine now parses all six language families with true ASTs: TS/JS via `@babe
 
 Tune and verify parser backends with `graphflow doctor parsers` (`--strict` fails when true AST is unavailable) and, from a source checkout, `npm run verify:parsers`. Call-target resolution is backed by a self-written semantic index (no extra runtime deps); the optional TypeScript compiler API and LSP providers activate only when present in your environment. DSH users can alternatively install the configuration-only `@roarpeng/graphflow-dsh` bundle via `plugin_manager install_bundle` — use the bundle or the CLI installer, not both.
 
+The npm package also ships a local task reflector: `graphflow task record "<instruction>" --step "<cmd>"` / `graphflow task list|show|run`, `graphflow reflect "<instruction>"`, and MCP `gf_macro` actions `task-list` / `task-run` / `task-record`. Recording is explicit; later identical/near-match instructions replay the recorded shell steps locally with no LLM/network call (steps run with your privileges).
+
 ## 中文
 
 环境要求：VS Code ≥ 1.99；`PATH` 上有 Node 18+（命令通过 `npx` 调用外部进程）。
@@ -68,3 +70,5 @@ code --install-extension graphflow-<version>.vsix
 引擎现在对全部 6 种语言家族使用真 AST：TS/JS 用 `@babel/parser`，Python/Go/Rust/C/C++/C# 用可选的 tree-sitter 原生语法包。安装语法包时 npm 可能打印 peer 范围警告 —— 属正常现象；若某个语法包不可用，该语言会回退到结构化分析器（设置 `GRAPHFLOW_TREE_SITTER=0` 可强制全部走结构化）。
 
 解析器后端可用 `graphflow doctor parsers` 检查（`--strict` 在真 AST 不可用时失败），源码检出下可用 `npm run verify:parsers` 验证。调用目标解析由自研语义索引支撑（不新增运行时依赖）；可选 TypeScript Compiler API 与 LSP 提供者仅在你的环境中存在时启用。DSH 用户也可改用纯配置的 `@roarpeng/graphflow-dsh` bundle（`plugin_manager install_bundle` 安装）—— 配置包与 CLI 安装器二选一。
+
+npm 包还提供本地任务反射器：`graphflow task record "<instruction>" --step "<cmd>"` / `graphflow task list|show|run`、`graphflow reflect "<instruction>"`，以及 MCP `gf_macro` 的 `task-list` / `task-run` / `task-record` 动作。记录是显式的；之后相同/近似匹配的指令会在本地重放已记录的 shell 步骤，无需 LLM/网络（步骤以你的权限执行）。

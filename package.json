@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow",
-  "version": "3.5.0",
+  "version": "3.6.0",
   "publishConfig": {
     "access": "public"
   },
@@ -40,7 +40,9 @@
     "preflight": "node scripts/release-preflight.mjs",
     "preflight:release": "node scripts/release-preflight.mjs --with-tests --with-package",
     "verify:parsers": "node scripts/verify-parsers.mjs",
-    "verify:parsers:strict": "node scripts/verify-parsers.mjs --strict"
+    "verify:parsers:strict": "node scripts/verify-parsers.mjs --strict",
+    "task": "tsx src/cli.ts task",
+    "reflect": "tsx src/cli.ts reflect"
   },
   "repository": {
     "type": "git",

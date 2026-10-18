@@ -607,7 +607,8 @@ const RUST_RECEIVER_PATTERNS: ReceiverTypePattern[] = [
   { re: /\blet\s+(?:mut\s+)?([A-Za-z_]\w*)\s*=\s*&?\s*(?:mut\s+)?([A-Za-z_]\w*)\s*(?:::|\{)/g, nameGroup: 1, typeGroup: 2 },
 ];
 const RUST_PARAM_TYPE_PATTERNS: ReceiverTypePattern[] = [
-  { re: new RegExp(String.raw`([A-Za-z_]\w*)\s*:\s*&?\s*(?:mut\s+)?(${RUST_TYPE_EXPR})`, "g"), nameGroup: 1, typeGroup: 2 },
+  // `b: &dyn Base`, `b: impl Base`, `b: &'a Base` all name a receiver type of `Base`.
+  { re: new RegExp(String.raw`([A-Za-z_]\w*)\s*:\s*&?\s*(?:'\w+\s*)?(?:mut\s+)?(?:(?:dyn|impl)\s+)?(${RUST_TYPE_EXPR})`, "g"), nameGroup: 1, typeGroup: 2 },
 ];
 
 const CPP_RECEIVER_PATTERNS: ReceiverTypePattern[] = [
@@ -760,9 +761,45 @@ function isPlausibleInferredType(typeName: string, ast: FileAstAnalysis): boolea
 }
 
 /**
+ * Go has no `extends`; embedding (`type Child struct { Base }`) is the parity equivalent for
+ * method promotion. Parsed with a small brace-depth scan so named fields are not mistaken for
+ * embedded types.
+ */
+function parseGoEmbeddedParents(content: string): Map<string, string> {
+  const parents = new Map<string, string>();
+  const lines = content.split(/\r?\n/);
+  const structStack: Array<{ name: string; depth: number }> = [];
+  let depth = 0;
+  for (const raw of lines) {
+    const line = stripLineCommentsAndStrings(raw, "//").trim();
+    if (!line) continue;
+    const depthBefore = depth;
+    const structStart = line.match(/^type\s+([A-Z]\w*)\s+struct\s*\{/);
+    if (structStart) {
+      structStack.push({ name: structStart[1]!, depth: depthBefore });
+    } else if (
+      structStack.length > 0 &&
+      depthBefore > structStack[structStack.length - 1]!.depth
+    ) {
+      const embedded = line.match(/^\*?(?:[A-Za-z_]\w*\.)?([A-Z]\w*)\s*(?:`[^`]*`)?$/);
+      if (embedded) {
+        const top = structStack[structStack.length - 1]!;
+        if (!parents.has(top.name)) parents.set(top.name, embedded[1]!);
+      }
+    }
+    depth += (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length;
+    while (structStack.length > 0 && depth <= structStack[structStack.length - 1]!.depth) {
+      structStack.pop();
+    }
+  }
+  return parents;
+}
+
+/**
  * Parses `class -> declared base class` pairs for one file (line/regex based).
  * Supported: TS/JS `extends`, Python `class B(A)`, C# `class/record B : A`,
- * C++ `class/struct B : public A`. Rust traits/Go embedding are intentionally skipped.
+ * C++ `class/struct B : public A`, Go struct embedding (`type Child struct { Base }`).
+ * Rust traits/impl inheritance is intentionally skipped (no inheritance in Rust).
  */
 export function parseClassParents(
   relPath: string,
@@ -771,6 +808,7 @@ export function parseClassParents(
 ): Map<string, string> {
   const ast = astInput ?? analyzeSourceFile(relPath, content);
   const family = sourceLanguageFamily(relPath);
+  if (family === "go") return parseGoEmbeddedParents(content);
   const parents = new Map<string, string>();
   const lines = content.split(/\r?\n/);
   const commentPrefix = family === "python" ? "#" : "//";

@@ -1,5 +1,5 @@
 /**
- * GraphFlow 3.5.0 — Pure Token-First Surgical Engine Public Entrypoint (`src/index.ts`)
+ * GraphFlow 3.6.0 — Pure Token-First Surgical Engine Public Entrypoint (`src/index.ts`)
  */
 
 export {
@@ -244,6 +244,35 @@ export {
   type SemanticSymbolDecl,
   type SemanticWorkspaceSource,
 } from "./semantic-index.js";
+
+export {
+  TASK_NEAR_MATCH_THRESHOLD,
+  TASK_PROMOTION_USES,
+  TASK_SCRIPT_DIR,
+  TASK_STORE_VERSION,
+  compileTask,
+  findTask,
+  formatTaskDetails,
+  formatTaskSummary,
+  jaccardSimilarity,
+  listTasks,
+  loadTasks,
+  normalizeInstructionKey,
+  normalizeTaskSteps,
+  recordTaskUse,
+  runTask,
+  taskScriptFilePath,
+  taskStoreFilePath,
+  tokenizeInstruction,
+  type FindTaskOptions,
+  type RecordTaskOptions,
+  type ReflectedTask,
+  type RunTaskResult,
+  type TaskMatch,
+  type TaskStep,
+  type TaskStepCommand,
+  type TaskStoreFile,
+} from "./task-reflector.js";
 
 export {
   SUPPORTED_DOC_EXTS,

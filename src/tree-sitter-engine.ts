@@ -866,10 +866,14 @@ function goParamsCount(node: TsNode): number {
   if (!parameters) return 0;
   let count = 0;
   for (const child of parameters.namedChildren) {
-    if (child.type === "parameter_declaration" || child.type === "variadic_parameter_declaration") {
-      const nameNode = child.childForFieldName("name");
-      count += nameNode ? 1 : 1;
+    if (child.type !== "parameter_declaration" && child.type !== "variadic_parameter_declaration") {
+      continue;
     }
+    // Go groups names sharing one type: `(a, b int)` declares two parameters.
+    const names = child.namedChildren.filter(
+      (grandchild) => grandchild.type === "identifier"
+    ).length;
+    count += Math.max(1, names);
   }
   return count;
 }
@@ -895,7 +899,16 @@ function goStructFields(ctx: AnalysisContext, typeNode: TsNode | null): string[]
     if (declaration.type !== "field_declaration") continue;
     const nameNode = declaration.childForFieldName("name");
     const name = nameNode ? nameOf(ctx, nameNode) : undefined;
-    if (name) fields.push(name);
+    if (name) {
+      fields.push(name);
+      continue;
+    }
+    // Embedded field (`Base` / `*Base`): the promoted parent type also acts as a field.
+    const typeNode = declaration.childForFieldName("type");
+    if (typeNode) {
+      const embedded = cleanTypeName(textOf(ctx, typeNode));
+      if (embedded) fields.push(embedded);
+    }
   }
   return fields;
 }
@@ -1215,6 +1228,50 @@ function collectCCppSymbols(
     case "type_definition": {
       const declarator = node.childForFieldName("declarator");
       const info = analyzeCDeclarator(ctx, declarator);
+      const typeNode =
+        node.childForFieldName("type") ??
+        node.namedChildren.find(
+          (child) =>
+            child.type === "struct_specifier" ||
+            child.type === "class_specifier" ||
+            child.type === "union_specifier"
+        );
+      const body = typeNode?.childForFieldName("body") ?? null;
+      if (
+        typeNode &&
+        body &&
+        (typeNode.type === "struct_specifier" || typeNode.type === "class_specifier")
+      ) {
+        // `typedef struct Base { ... } Base;` — the struct itself is the useful declaration.
+        const innerName = nameOf(ctx, typeNode.childForFieldName("name"));
+        if (innerName) {
+          collectCCppSymbols(ctx, typeNode, classStack);
+          if (info.name && info.name !== innerName) {
+            pushSymbol(ctx, { name: info.name, kind: "type", exported: true, node });
+          }
+        } else if (info.name) {
+          const kind: SymbolKind =
+            typeNode.type === "class_specifier" ? "class" : "struct";
+          const symbol = pushSymbol(ctx, {
+            name: info.name,
+            kind,
+            exported: true,
+            node: typeNode,
+            bodyNode: body,
+          });
+          if (symbol) {
+            const { fields } = cFieldsAndPrototypes(ctx, body, info.name);
+            if (fields.length > 0) {
+              const stored = ctx.symbols[ctx.symbols.indexOf(symbol)];
+              if (stored) stored.fields = Array.from(new Set(fields));
+            }
+            for (const child of body.namedChildren) {
+              collectCCppSymbols(ctx, child, [...classStack, symbol]);
+            }
+          }
+        }
+        return;
+      }
       if (info.name) {
         pushSymbol(ctx, { name: info.name, kind: "type", exported: true, node });
       }

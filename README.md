@@ -7,14 +7,14 @@
 [![CI](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml)
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-roarpeng.graphflow-blue)](https://marketplace.visualstudio.com/items?itemName=roarpeng.graphflow)
 
-> **The Token-First Surgical Code Engine for AI Coding Agents (v3.5.0)**
-> An MCP server exposing exactly 4 surgical tools — `gf_read`, `gf_edit`, `gf_exec`, `gf_macro` — with **true AST parsing for all six language families**: TypeScript/JavaScript via `@babel/parser`, and Python, Go, Rust, C/C++, C# via optional tree-sitter grammars (the built-in structural analyzers remain the fallback). A **self-written semantic index** resolves call targets for blast radius/rename (no extra runtime deps), and **precision-tuned doc↔code linking** (BM25/IDF + PMI + caps + confidence) keeps the knowledge graph honest. Runtime dependencies: `@babel/parser`, `@modelcontextprotocol/sdk` and `tree-sitter`; the grammar packages are optional.
+> **The Token-First Surgical Code Engine for AI Coding Agents (v3.6.0)**
+> An MCP server exposing exactly 4 surgical tools — `gf_read`, `gf_edit`, `gf_exec`, `gf_macro` — with **true AST parsing for all six language families**: TypeScript/JavaScript via `@babel/parser`, and Python, Go, Rust, C/C++, C# via optional tree-sitter grammars (the built-in structural analyzers remain the fallback). A **self-written semantic index** resolves call targets for blast radius/rename (no extra runtime deps), and **precision-tuned doc↔code linking** (BM25/IDF + PMI + caps + confidence) keeps the knowledge graph honest. **Six-language parity is regression-tested** (48-case matrix), bilingual retrieval scores **1.000 EN / 1.000 ZH** on the 30-pair parity suite, and a **local task reflector** replays recorded shell instructions with no LLM/network calls. Runtime dependencies: `@babel/parser`, `@modelcontextprotocol/sdk` and `tree-sitter`; the grammar packages are optional.
 
 ---
 
 ## GraphFlow 3.0 — The Radical Rewrite
 
-Version 3.0 **replaced the entire 2.x architecture**. The 10-tool knowledge-graph / context-compression MCP surface (`graphflow_context`, `graphflow_plan`, `graphflow_run`, `graphflow_index`, `graphflow_insight`, `graphflow_skill_*`, `graphflow_diagnose`, `graphflow_artifact`), the episodic-skill flywheel, the VS Code graph-memory extension, and LLM routing were **all removed**. In their place: 4 deterministic surgical tools over an AST/structural pipeline. MCP schema tax dropped **92.2%** (5897 → 459 tokens per turn).
+Version 3.0 **replaced the entire 2.x architecture**. The 10-tool knowledge-graph / context-compression MCP surface (`graphflow_context`, `graphflow_plan`, `graphflow_run`, `graphflow_index`, `graphflow_insight`, `graphflow_skill_*`, `graphflow_diagnose`, `graphflow_artifact`), the episodic-skill flywheel, the VS Code graph-memory extension, and LLM routing were **all removed**. In their place: 4 deterministic surgical tools over an AST/structural pipeline. MCP schema tax dropped **92.2%** (5897 → 458 tokens per turn).
 
 | 2.x (removed) | 3.x replacement |
 | :--- | :--- |
@@ -45,17 +45,26 @@ Version 3.0 **replaced the entire 2.x architecture**. The 10-tool knowledge-grap
 | **3.3.4** | **Safe host-hook merge on `install` (user `PreToolUse`/`PostToolUse` hooks preserved; idempotent reinstall) · `uninstall` removes only GraphFlow hooks · `graphflow status` per-agent registration state (`[MCP ✓] [Skill ✓] [Rule -] [Hook ✓]`) with `--agents` / `--all` · MCP stdio end-to-end test (initialize → tools/list 4 tools → gf_read/gf_exec → graceful unknown tool)** |
 | **3.4.0** | **True AST by default for Python/Go/Rust/C/C++/C# via optional tree-sitter grammars (`engine: "tree-sitter"`); structural fallback when bindings are missing, `GRAPHFLOW_TREE_SITTER=0` forces structural · C/C++ header/prototype handling and Python `super` receiver · dependency story: required `tree-sitter` core + optional grammar packages · refreshed benchmark measurements** |
 | **3.5.0** | **Doc↔code link precision (self-written BM25/IDF + PMI + reciprocal pruning + caps, `GRAPHFLOW_DOC_LINKS_MAX`; repo 728 → ≈150 edges, −80%) · `graphflow doctor parsers` + `npm run verify:parsers` + additive CI parser matrix · self-written L0 semantic index (confidence ≥0.75) with optional TypeScript/LSP providers · DSH config bundle `@roarpeng/graphflow-dsh` · release preflight (`npm run preflight` / `preflight:release`) · refreshed benchmarks** |
+| **3.6.0** | **48-case six-language parity matrix + fixes (family-scoped `resolveMethod`/rename, Go embedding/grouped params, C typedef fields, Rust `&dyn`/`impl` unwrap, C/C++ header prototype↔definition rename) · bilingual recall 1.000 EN / 1.000 ZH on 30 pairs (pinyin/mixed/synonym 1.000; baseline ZH@1 0.967, pinyin 0.769) · local task reflection (`graphflow task`/`reflect`, `gf_macro` task-list/run/record) · Windows CRLF test fix; CI (6 jobs) + parser matrix (7 jobs) green · 458-token wire · 24 test files** |
 
 ## The Four Surgical Tools
 
 | Tool | Purpose | Key arguments |
 | :--- | :--- | :--- |
-| `gf_read` | Symbol slices with cross-file type closure + receiver-type-aware `[Blast Radius]` call sites (semantic index first, then inheritance/`super` heuristics), skeleton folding, bilingual search, `@brief` cross-agent handoff | `targets`, `q`, `topK`, `skeleton`, `dedup` |
-| `gf_edit` | In-place / batch atomic edits, zero-LLM cross-repo rename (semantic target check first, receiver/inheritance heuristics as fallback; rejects ambiguous/foreign-receiver files; aborts if unresolved callers remain), struct-field contract guard | `file`, `symbol`, `newCode`, `edits`, `renameTo` |
+| `gf_read` | Symbol slices with cross-file type closure + receiver-type-aware `[Blast Radius]` call sites (semantic index first, then inheritance/`super` heuristics), skeleton folding, bilingual search (1.000 EN/ZH parity recall), `@brief` cross-agent handoff | `targets`, `q`, `topK`, `skeleton`, `dedup` |
+| `gf_edit` | In-place / batch atomic edits, zero-LLM cross-repo rename (semantic target check first, receiver/inheritance heuristics as fallback; family-scoped staging, rejects ambiguous/foreign-receiver files; aborts if unresolved callers remain), struct-field contract guard | `file`, `symbol`, `newCode`, `edits`, `renameTo` |
 | `gf_exec` | Diff-to-test routing (honors `package.json` `scripts.test`; resolves tsconfig/jsconfig aliases, `extends` chains, nested configs and dynamic imports) + output dehydrator: passing suites → 1-line `PASS`; failures inline up to 5 lines of source context; `run: true` executes, otherwise preview | `cmd`, `changedFiles`, `handle`, `run` |
-| `gf_macro` | Habit macros, git co-change mining, knowledge-graph HTML export (type-aware `calls`, alias-resolved `imports`, BM25/IDF-capped `doc-links-code`; plus `defines` / `co-edit` edges) | `action: "list" \| "run" \| "save" \| "mine" \| "mine-git" \| "visualize" \| "brief"` |
+| `gf_macro` | Habit macros, git co-change mining, knowledge-graph HTML export (type-aware `calls`, alias-resolved `imports`, BM25/IDF-capped `doc-links-code`; plus `defines` / `co-edit` edges), and **local task reflection** (`task-list` / `task-run` / `task-record`) | `action: "list" \| "run" \| "save" \| "mine" \| "mine-git" \| "visualize" \| "brief" \| "task-list" \| "task-run" \| "task-record"` |
 
 Session read dedup skips unchanged files; 3 consecutive edit-test failures trigger a deterministic rescue packet (blast-radius contracts + recent git diffs). Syntax guards use the true-AST backends when available — `@babel/parser` for TS/JS and tree-sitter ERROR/MISSING diagnostics for the other five — with the structural analyzers' heuristic checks (brace/declaration, Python missing-colon/bracket diagnostics) as the fallback, including when `GRAPHFLOW_TREE_SITTER=0` is set.
+
+## What's New in 3.6.0
+
+- **Six-language parity matrix & fixes** — new `tests/language-parity.test.ts` (48 tests) asserts symbol/span/field parity for TS/JS, Python, Go, Rust, C/C++, C# across slicing + type closure, receiver-aware blast radius, cross-file rename, and knowledge-graph `defines`/`imports`/`calls`. Fixes: language-family-scoped `resolveMethod`/rename staging (no cross-language leakage), Go struct embedding + grouped params + embedded fields, C `typedef struct` fields, Rust `&dyn`/`impl` receiver unwrap, and the C/C++ header prototype↔definition rename cluster. Documented residuals: Go same-package siblings have no file `imports` edge; Rust trait declarations are not emitted as method symbols (trait dispatch yields 0, never a wrong target); C# `record` maps to `interface` kind; C is function-level (no inheritance); deep/multiple Go embedding is not chained; the structural fallback is not part of the parity matrix.
+- **Bilingual recall 1.000 / 1.000** — new `tests/bilingual-parity.test.ts` measures 30 EN/ZH query pairs: EN and ZH recall are both **1.000 at @1/@3/@5**, and pinyin / mixed / synonym families are **1.000** (baseline ZH@1 0.967, pinyin 0.769). Tokenizer fixes: morphological-rescue asymmetry, synonym forward-expansion pollution, a missing zh/pinyin glossary + EN→ZH pinyin bridge, and over-broad mappings. Residuals: slicer doc-window/name weighting can still affect tightly packed files; generic English cannot disambiguate pinyin-named symbols at @1; the glossary is curated.
+- **Local task reflection (no LLM, no network)** — repeated shell instructions can be recorded into `.graphflow/tasks.json` and compiled to `.graphflow/tasks/<id>.mjs`: `graphflow task list|show|record|run` (`--step` / `--steps` / `--args` / `--json` / `--root`) and `graphflow reflect "<instruction>"` (returns `MISS` when unknown), or MCP `gf_macro` actions `task-list` / `task-run` / `task-record` with `instruction`. The second recording promotes the task, and later identical/near-match (token-Jaccard 0.86) instructions replay it locally. The MCP surface stays exactly 4 tools at **458 wire tokens**. Limits: explicit recording only (no auto-harvest yet), shell steps run locally with the recorder's privileges, manual `{{argN}}` parameterization, and last-writer-wins on concurrent cross-process records.
+- **CI & release** — the Windows CI `dsh-bundle` CRLF failure is fixed in the test (tamper check is now CRLF-safe; the validator is unchanged); **CI (6 jobs)** and the **parser matrix (7 jobs)** are green across ubuntu/windows/macos × Node 20/22 (plus the strict ubuntu job). The existing publish workflows are untouched; `npm run preflight` / `preflight:release` and `npm run task` / `npm run reflect` are available, and the suite now has **24 test files**.
+- **Measurements** — wire schema is **458 tokens**; skeleton folding 27,507 → 7,694 (72.0%), symbol slice 95.8%, PASS dehydration 4,282 → 30 (99.3%), knowledge graph ≈1,156 nodes / ≈2,436 edges in ≈1.15 s, affected-test routing 22 ms, blast radius 6 ms. See [Benchmarks](#benchmarks).
 
 ## What's New in 3.5.0
 
@@ -128,19 +137,19 @@ One query engine for Chinese and English code search:
 
 ## Benchmarks
 
-| Metric | Baseline | GraphFlow 3.5.0 | Saving |
+| Metric | Baseline | GraphFlow 3.6.0 | Saving |
 | :--- | :--- | :--- | :--- |
-| MCP tool schema tax / turn | 5897 tokens (2.x, 10 tools) | 459 tokens on the wire (4 tools, ~460) | **−92.2%** |
+| MCP tool schema tax / turn | 5897 tokens (2.x, 10 tools) | 458 tokens on the wire (4 tools, ~460) | **−92.2%** |
 | Large-file read — skeleton folding | raw file read | 27,507 → 7,694 tokens on `ast-engine.ts` (72.0% smaller; 68–86% across repo files) | **−68% … −86%** |
 | Single-symbol read — slice | raw file read | 95.8% smaller on `ast-engine.ts` (27,507 → 1,165 tokens; ~96%) | **~−96%** |
-| Passing test-suite output | full log | 1-line `PASS` receipt (4,282 → 30 tokens on the repo suite) | **−99.3%** |
+| Passing test-suite output | full log | 1-line `PASS` receipt (4,282 → 30 tokens on the 24-file suite) | **−99.3%** |
 | Knowledge-graph build (repo) | — | ≈1,156 nodes / ≈2,436 edges in ≈1.15 s (≈145–150 doc links) | — |
 | Affected-test routing | — | 22 ms for 1 changed file | — |
 | Blast radius (repo symbol) | — | 6 ms | — |
 
-**Schema tax detail:** the `tools/list` wire payload is 459 tokens — redundant `$schema` / `title` / `annotations` / `_meta` are stripped from the wire. The programmatic `getV3ToolDefinitions()` keeps those fields for the governance API, so the API view is larger than the wire view.
+**Schema tax detail:** the `tools/list` wire payload is 458 tokens — redundant `$schema` / `title` / `annotations` / `_meta` are stripped from the wire. The programmatic `getV3ToolDefinitions()` keeps those fields for the governance API, so the API view is larger than the wire view.
 
-**Local harness:** after `npm run build`, `npm run bench` (`scripts/benchmark.mjs`) measures MCP schema tax, skeleton/slice compression, PASS/failure dehydration, knowledge-graph build, and affected-test/blast-radius latency, then writes `benchmarks/latest.md` and `benchmarks/latest.json`. The figures above are the current 3.5.0 repo measurements (timing/count figures are rounded and vary slightly per run); re-run it to reproduce them on your own repo.
+**Local harness:** after `npm run build`, `npm run bench` (`scripts/benchmark.mjs`) measures MCP schema tax, skeleton/slice compression, PASS/failure dehydration, knowledge-graph build, and affected-test/blast-radius latency, then writes `benchmarks/latest.md` and `benchmarks/latest.json`. The figures above are the current 3.6.0 repo measurements (timing/count figures are rounded and vary slightly per run); re-run it to reproduce them on your own repo.
 
 ## Supported Languages
 
@@ -161,7 +170,7 @@ Runtime dependencies: `@babel/parser`, `@modelcontextprotocol/sdk` and `tree-sit
 
 ```bash
 # 1) Install globally (Node 18+)
-npm install -g @roarpeng/graphflow@3.5.0
+npm install -g @roarpeng/graphflow@3.6.0
 
 # 2) One-click registration into detected agents (MCP + Skill + Rules + Hooks)
 graphflow install            # equivalent: npx @roarpeng/graphflow install
@@ -189,7 +198,7 @@ Run the test suite from source:
 
 ```bash
 git clone https://github.com/Roarpeng/GraphFlow && cd GraphFlow
-npm install && npm test      # tsx tests/run-all.ts (incl. MCP stdio e2e)
+npm install && npm test      # tsx tests/run-all.ts (24 test files, incl. MCP stdio e2e)
 npm run build && npm run bench  # optional: local benchmark harness → benchmarks/latest.md
 npm run verify:parsers       # optional: true-AST vs forced-structural parser matrix
 npm run preflight            # optional: static release checks
@@ -256,6 +265,8 @@ DSH does **not** read `~/.dsh/mcp.json`. Its MCP servers are Cordis plugin inser
 | `graphflow edit <file> [--symbol <sym>] [--new <code>] [--rename <name>]` | Surgical edit / rename |
 | `graphflow exec [cmd] [--run] [--root <dir>]` | Run `affected-tests` or any command with dehydration (`--run` executes, otherwise preview); `--root` is parsed as a flag and never appended to the command |
 | `graphflow macro <list\|run\|save\|mine\|mine-git> [id] [args...]` | Macros and git co-change mining |
+| `graphflow task <list\|show\|record\|run> [--step <cmd>] [--args <a>] [--json] [--root <dir>]` | Local task reflection: record repeated shell instructions into `.graphflow/tasks.json`, promote on the second recording, replay offline |
+| `graphflow reflect "<instruction>" [args...] [--json] [--root <dir>]` | Run the recorded/near-match task for an instruction locally (MISS when unknown) |
 | `graphflow graph` | Export `.graphflow/knowledge-graph.html` |
 | `graphflow brief` | Print the cross-agent handoff brief |
 | `graphflow hook <pre-tool\|post-tool>` | Host hook interceptor entry (internal) |

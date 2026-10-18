@@ -33,6 +33,13 @@ import {
 } from "./doc-graph.js";
 import { executeSurgicalRead, getWorkspaceAstIndex, resolveSafeWorkspaceRoot } from "./slicer.js";
 import { executeSurgicalEdit, type SingleEditSpec } from "./surgical-edit.js";
+import {
+  formatTaskSummary,
+  listTasks,
+  recordTaskUse,
+  runTask,
+  type TaskStep,
+} from "./task-reflector.js";
 
 export interface V3ToolDefinition {
   name: "gf_read" | "gf_edit" | "gf_exec" | "gf_macro";
@@ -48,8 +55,7 @@ export interface V3ToolDefinition {
 export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
   {
     name: "gf_read",
-    description:
-      "Surgical read: `targets` (['file#sym', 'file:L1-L2', 'file']), `q`, or `topicId`.",
+    description: "Read: `targets` (file#sym, file:L1-L2), `q`, `topicId`.",
     inputSchema: {
       type: "object",
       properties: {
@@ -66,8 +72,7 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
   },
   {
     name: "gf_edit",
-    description:
-      "Edit by `symbol`, `startLine`+`endLine`, `oldCode`, `edits`, or `renameTo`.",
+    description: "Edit by `symbol`, lines, `oldCode`, `edits`, `renameTo`.",
     inputSchema: {
       type: "object",
       properties: {
@@ -86,8 +91,7 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
   },
   {
     name: "gf_exec",
-    description:
-      "Run `cmd`/affected-tests dehydrated; run:true executes, else preview; recall handle.",
+    description: "Run `cmd`/affected-tests dehydrated; preview unless run:true.",
     inputSchema: {
       type: "object",
       properties: {
@@ -103,16 +107,30 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
   },
   {
     name: "gf_macro",
-    description:
-      "Manage or run macros & git habits ('list'|'run'|'save'|'mine'|'mine-git').",
+    description: "Macros/habits/tasks ('list','run','save','mine','mine-git','task-*').",
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["list", "run", "save", "mine", "mine-git", "visualize", "brief"] },
+        action: {
+          type: "string",
+          enum: [
+            "list",
+            "run",
+            "save",
+            "mine",
+            "mine-git",
+            "visualize",
+            "brief",
+            "task-list",
+            "task-run",
+            "task-record",
+          ],
+        },
         id: { type: "string" },
         kind: { type: "string", enum: ["context-bundle", "command-pipeline", "command-template", "edit-codemod"] },
         steps: { type: "array", items: { type: "string" } },
         args: { type: "array", items: { type: "string" } },
+        instruction: { type: "string" },
         rootDir: { type: "string" },
       },
       required: ["action"],
@@ -405,6 +423,77 @@ export function executeV3ToolCall(
         );
       }
 
+      if (action === "task-list") {
+        const tasks = listTasks(rootDir);
+        if (tasks.length === 0) {
+          return plainTextResponse(
+            "# Reflected Tasks (0 recorded yet — record the same instruction with its steps twice to compile a local runner)"
+          );
+        }
+        return plainTextResponse(
+          `# Reflected Tasks (${tasks.length}):\n${tasks.map((task) => formatTaskSummary(task)).join("\n")}`
+        );
+      }
+
+      if (action === "task-record") {
+        const instruction =
+          typeof args.instruction === "string" && args.instruction.trim()
+            ? args.instruction
+            : typeof args.id === "string"
+              ? args.id
+              : "";
+        const rawSteps = Array.isArray(args.steps) ? args.steps : [];
+        const steps: TaskStep[] = rawSteps.filter(
+          (step): step is string => typeof step === "string" && step.trim().length > 0
+        );
+        if (!instruction.trim()) {
+          return plainTextResponse(
+            'ERR [task-record] Provide `instruction` (and `steps` array of shell commands).'
+          );
+        }
+        if (steps.length === 0) {
+          return plainTextResponse(
+            "ERR [task-record] Provide a non-empty `steps` array of shell command strings."
+          );
+        }
+        try {
+          const taskArgs = Array.isArray(args.args)
+            ? args.args.filter((arg): arg is string => typeof arg === "string")
+            : [];
+          const record = recordTaskUse(rootDir, instruction, steps, {
+            ...(taskArgs.length > 0 ? { args: taskArgs } : {}),
+          });
+          return plainTextResponse(
+            `OK [task-recorded] id=${record.id} uses=${record.count}/${2} ` +
+              `${record.scriptPath ? `compiled=${record.scriptPath}` : "not-compiled-yet"} ` +
+              `instruction=${JSON.stringify(record.instructionRaw)}`
+          );
+        } catch (error) {
+          return plainTextResponse(
+            `ERR [task-record] ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
+
+      if (action === "task-run") {
+        const target =
+          typeof args.instruction === "string" && args.instruction.trim()
+            ? args.instruction
+            : typeof args.id === "string"
+              ? args.id.trim()
+              : "";
+        if (!target) {
+          return plainTextResponse(
+            'ERR [task-run] Provide `instruction` (exact/near match) or `id` of a reflected task.'
+          );
+        }
+        const runArgs = Array.isArray(args.args)
+          ? args.args.filter((arg): arg is string => typeof arg === "string")
+          : [];
+        const res = runTask(rootDir, target, runArgs);
+        return plainTextResponse(res.text);
+      }
+
       if (action === "save") {
         const id = typeof args.id === "string" ? args.id.trim() : undefined;
         const kind: MacroKind =
@@ -444,7 +533,9 @@ export function executeV3ToolCall(
         return plainTextResponse(res.text);
       }
 
-      return plainTextResponse(`ERR [unknown-action] '${action}'. Use 'list', 'run', 'save', 'mine', or 'mine-git'.`);
+      return plainTextResponse(
+        `ERR [unknown-action] '${action}'. Use 'list', 'run', 'save', 'mine', 'mine-git', 'task-list', 'task-run', or 'task-record'.`
+      );
     }
 
     default:

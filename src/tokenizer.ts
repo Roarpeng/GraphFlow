@@ -397,6 +397,15 @@ const CHAR_TO_PINYIN: Record<string, string> = {
   "迟": "chi", "池": "chi",
   "崩": "beng",
   "溃": "kui",
+  // Extended domain characters (pinyin keys for the bilingual glossary/query terms below).
+  "送": "song",
+  "审": "shen",
+  "淘": "tao",
+  "汰": "tai",
+  "避": "bi",
+  "速": "su",
+  "醒": "xing",
+  "荷": "he",
 };
 
 /**
@@ -419,14 +428,17 @@ export const CJK_SYNONYM_CLUSTERS: string[][] = [
   ["缓存", "暂存"],
   ["事务", "数据库"],
   ["回滚", "还原", "恢复", "撤销"],
-  ["回调", "钩子", "通知"],
+  ["回调", "钩子"],
+  ["通知", "消息", "提醒", "告警"],
   ["删除", "移除", "清理", "清除", "销毁"],
   ["创建", "新增", "添加", "生成", "新建"],
   ["修改", "更新", "编辑", "变更", "改动"],
   ["查询", "检索", "搜索", "查找", "获取", "读取"],
   ["配置", "设置", "选项", "参数"],
   ["压缩", "折叠", "脱水", "精简"],
-  ["熔断", "死循环", "限流"],
+  ["熔断", "死循环"],
+  ["限流", "限速", "节流"],
+  ["任务", "作业", "工单"],
 ];
 
 // Build fast lookup: Chinese word -> all Chinese synonyms in its cluster(s)
@@ -524,7 +536,7 @@ export const CJK_ENGINEERING_GLOSSARY: Record<string, string[]> = {
   "会话": ["session", "context", "state", "token", "cookie", "huihua"],
   "订单": ["order", "checkout", "trade", "purchase", "cart", "dingdan"],
   "单据": ["order", "bill", "invoice", "receipt", "danju"],
-  "支付": ["pay", "payment", "charge", "refund", "billing", "wechat", "alipay", "zhifu"],
+  "支付": ["pay", "payment", "charge", "billing", "wechat", "alipay", "zhifu"],
   "付款": ["pay", "payment", "checkout", "charge", "billing", "fukuan"],
   "收款": ["pay", "payment", "receive", "collect", "charge", "shoukuan"],
   "结账": ["checkout", "pay", "settle", "billing", "jiezhang"],
@@ -536,8 +548,10 @@ export const CJK_ENGINEERING_GLOSSARY: Record<string, string[]> = {
   "折扣": ["discount", "coupon", "promo", "price", "rate", "zhekou"],
   "优惠券": ["coupon", "voucher", "discount", "promo", "youhuiquan"],
   "余额": ["balance", "wallet", "account", "credit", "fund", "yue"],
-  "库存": ["stock", "inventory", "sku", "reserve", "deduct", "kucun"],
-  "扣减": ["deduct", "decrease", "subtract", "reserve", "stock", "koujian"],
+  "库存": ["stock", "inventory", "sku", "kucun"],
+  "结构": ["structure", "schema", "struct", "shape", "jiegou"],
+  "模式": ["schema", "model", "pattern", "mode", "moshi"],
+  "扣减": ["deduct", "decrease", "subtract", "stock", "koujian"],
   "超时": ["timeout", "expired", "expire", "deadline", "ttl", "delay", "chaoshi"],
   "过期": ["expire", "expired", "ttl", "timeout", "stale", "guoqi"],
   "逾期": ["overdue", "expired", "expire", "timeout", "yuqi"],
@@ -596,6 +610,25 @@ export const CJK_ENGINEERING_GLOSSARY: Record<string, string[]> = {
   "代理": ["proxy", "agent", "forward", "gateway", "client", "daili"],
   "自动": ["auto", "automatic", "cron", "batch", "zidong"],
   "批量": ["batch", "bulk", "multi", "all", "piliang"],
+  // Extended bilingual coverage: terms whose Chinese form previously had no English mapping,
+  // which made Chinese/pinyin queries unable to reach English identifiers (recall asymmetry).
+  "发送": ["send", "dispatch", "emit", "publish", "fasong"],
+  "报告": ["report", "summary", "analytics", "baogao"],
+  "加载": ["load", "import", "jiazai"],
+  "订阅": ["subscribe", "subscription", "dingyue"],
+  "任务": ["task", "job", "work", "renwu"],
+  "入队": ["enqueue", "push", "rudui"],
+  "出队": ["dequeue", "pop", "chudui"],
+  "载荷": ["payload", "body", "zaihe"],
+  "审计": ["audit", "log", "record", "shenji"],
+  "淘汰": ["evict", "eviction", "expire", "taotai"],
+  "退避": ["backoff", "retry", "delay", "tuibi"],
+  "预留": ["reserve", "reservation", "yuliu"],
+  "限速": ["throttle", "limit", "rate", "xiansu"],
+  "节流": ["throttle", "rate", "limit", "jieliu"],
+  "提醒": ["remind", "notify", "alert", "tixing"],
+  "作业": ["task", "job", "work", "zuoye"],
+  "工单": ["ticket", "work", "order", "gongdan"],
 };
 
 /**
@@ -755,9 +788,18 @@ export function stemEnglishWord(word: string): string {
   let w = word.toLowerCase().trim();
   if (w.length <= 3) return w;
 
-  // Resolve 1-char typo against known canonical vocabulary if exact match not found
+  // Resolve 1-char typo against known canonical vocabulary if exact match not found.
+  // Skip morphological derivatives (e.g. `handle` -> `handler`, `read` -> `reader`): a token
+  // that is a prefix of a known term is a different word form, not a typo. Rescuing it used to
+  // inject agent-nouns into query plans and cause false identifier matches.
   for (const known of REVERSE_EN_OR_PINYIN_TO_CJK.keys()) {
-    if (known.length >= 5 && isFuzzyTokenMatch(w, known)) {
+    if (known === w) break;
+    if (
+      known.length >= 5 &&
+      !known.startsWith(w) &&
+      !w.startsWith(known) &&
+      isFuzzyTokenMatch(w, known)
+    ) {
       w = known;
       break;
     }
@@ -906,9 +948,11 @@ export function tokenizeEnglish(text: string): EnglishTokenResult {
 
     for (const p of parts) {
       words.add(p);
-      // Resolve fuzzy 1-char typo if matching a known domain word
+      // Resolve fuzzy 1-char typo if matching a known domain word. Do not rescale words that are
+      // morphological derivatives of a known term (`handle` stays `handle`, not `handler`).
       for (const known of REVERSE_EN_OR_PINYIN_TO_CJK.keys()) {
-        if (known.length >= 5 && isFuzzyTokenMatch(p, known)) {
+        if (known === p) break;
+        if (known.length >= 5 && !known.startsWith(p) && !p.startsWith(known) && isFuzzyTokenMatch(p, known)) {
           words.add(known);
         }
       }
@@ -1059,8 +1103,12 @@ export function segmentChinese(text: string): ChineseSegmentResult {
  * Unified Bilingual Query Tokenizer (`tokenizeBilingualQuery`):
  *  1. Normalizes Chinese homophone typos (`定单钞时` -> `订单超时`) and English 1-char typos (`cancle` -> `cancel`).
  *  2. Segments Chinese (`segmentChinese`) and English/Pinyin (`tokenizeEnglish`).
- *  3. Expands Chinese synonyms (`CJK_SYNONYM_CLUSTERS`: `付款` <-> `支付`, `核对` <-> `验签`).
- *  4. Expands bidirectionally across Chinese <-> English <-> Pinyin (`dingdan` <-> `订单` <-> `order`).
+ *  3. Expands Chinese synonyms (`CJK_SYNONYM_CLUSTERS`: `付款` <-> `支付`, `核对` <-> `验签`) for
+ *     CJK doc/comment matching only — synonyms are NOT forward-mapped to English, which keeps
+ *     query plans symmetric (`取消订单` -> cancel+order, not refund+cancel+...).
+ *  4. Expands bidirectionally across Chinese <-> English <-> Pinyin for the primary query words
+ *     (`dingdan` <-> `订单` <-> `order`); English words also seed pinyin keys so EN queries can
+ *     reach Pinyin-named identifiers (`payment` -> `zhifu` -> `handleDingDanZhiFu`).
  */
 export function tokenizeBilingualQuery(query: string): BilingualQueryPlan {
   const normalizedQuery = normalizeChineseTypos(query);
@@ -1069,26 +1117,46 @@ export function tokenizeBilingualQuery(query: string): BilingualQueryPlan {
 
   const englishWords = new Set<string>(en.words);
   const englishStems = new Set<string>(en.stems);
-  const chineseWords = new Set<string>(zh.words);
+  const primaryChineseWords = new Set<string>(zh.words);
+  // Only directly-typed CJK words and pinyin-resolved words are forward-expanded back to
+  // English. Ordinary English query words (`payment`, `webhook`) are already in the plan and
+  // re-deriving their Chinese synonyms would inject unrelated identifiers (`refund`, `verify`).
+  const forwardChineseWords = new Set<string>(zh.words);
 
-  // 1. Reverse expansion first: English OR Pinyin word -> Chinese domain words (e.g. "dingdan" -> "订单", "wechat" -> "微信")
+  // 1. Reverse expansion first: English OR Pinyin word -> Chinese domain words (e.g. "dingdan" -> "订单", "wechat" -> "微信").
+  //    The pinyin key of each resolved CJK word is also added as an English token so English
+  //    queries can reach Pinyin-named identifiers (`payment` -> `zhifu` -> `handleDingDanZhiFu`).
   for (const ew of [...en.words, ...en.stems]) {
     const mappedCjk = REVERSE_EN_OR_PINYIN_TO_CJK.get(ew);
-    if (mappedCjk) {
-      for (const zw of mappedCjk) chineseWords.add(zw);
+    if (!mappedCjk) continue;
+    const wasPinyin = PINYIN_TO_CANONICAL_CJK.has(ew);
+    for (const zw of mappedCjk) {
+      primaryChineseWords.add(zw);
+      const py = toPinyin(zw);
+      if (py) {
+        englishWords.add(py);
+        englishStems.add(py);
+      }
+      if (wasPinyin) forwardChineseWords.add(zw);
     }
   }
 
-  // 2. Chinese Synonym Cluster expansion (`付款` -> `支付`, `核对` -> `验签/校验/签名`)
-  for (const zw of Array.from(chineseWords)) {
+  // 2. Chinese Synonym Cluster expansion (`付款` -> `支付`, `核对` -> `验签/校验/签名`).
+  //    Synonyms are kept for CJK doc/comment matching, but English/Pinyin forward expansion
+  //    below intentionally uses only the PRIMARY query words: forward-expanding synonyms
+  //    (`取消` -> `撤单` -> `order`) used to inject unrelated English tokens and skewed
+  //    ranking (e.g. `取消订阅` matching `createOrder` via `order`).
+  const chineseWords = new Set<string>(primaryChineseWords);
+  for (const zw of primaryChineseWords) {
     const syns = CJK_TO_SYNONYMS.get(zw);
     if (syns) {
       for (const peer of syns) chineseWords.add(peer);
     }
   }
 
-  // 3. Forward expansion: All Chinese words (including expanded synonyms & Pinyin-resolved words) -> English + Pinyin tokens
-  for (const zw of chineseWords) {
+  // 3. Forward expansion: primary Chinese words (segmented query + Pinyin-resolved words) ->
+  //    English + Pinyin tokens. Synonyms stay CJK-only to keep English query plans clean.
+  for (const zw of forwardChineseWords) {
     const py = toPinyin(zw);
     if (py) {
       englishWords.add(py);

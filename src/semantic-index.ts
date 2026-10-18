@@ -24,7 +24,7 @@
 
 import { createRequire } from "node:module";
 import { existsSync, readFileSync } from "node:fs";
-import { extname, isAbsolute, join, relative, resolve } from "node:path";import {
+import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";import {
   createWorkspaceTypeHierarchy,
   inImplicitPackageScope,
   inferReceiverTypeIndex,
@@ -718,6 +718,9 @@ class SemanticIndexImpl implements SemanticIndex {
   ): { decl: SemanticSymbolDecl; confidence: number; reason: SemanticResolutionReason } | undefined {
     this.queries += 1;
     this.ensureFresh();
+    const family = fromFile ? sourceLanguageFamily(fromFile) : undefined;
+    const matchesFamily = (decl: SemanticSymbolDecl): boolean =>
+      family === undefined || sourceLanguageFamily(decl.file) === family;
     let classDecl: SemanticSymbolDecl | undefined;
     if (fromFile) {
       const local = this.entries
@@ -730,16 +733,26 @@ class SemanticIndexImpl implements SemanticIndex {
       }
     }
     if (!classDecl) {
-      const candidates = (this.declsByName.get(className) ?? []).filter((decl) =>
-        isTypeKind(decl.kind)
+      // Language-family scoped lookup (a JS `Base` is not the Python/Rust/C/C# `Base`).
+      const candidates = (this.declsByName.get(className) ?? []).filter(
+        (decl) => isTypeKind(decl.kind) && matchesFamily(decl)
       );
       if (candidates.length === 0) return undefined;
-      if (candidates.length > 1) {
-        // Prefer a same-file candidate when available, otherwise stay ambiguous.
+      if (fromFile && family) {
+        // Prefer the caller's package/namespace scope, then its directory.
+        const scopeMatch = candidates.find((candidate) =>
+          inImplicitPackageScope(fromFile, candidate.file, family)
+        );
+        const dirMatch = candidates.find(
+          (candidate) => dirname(candidate.file) === dirname(fromFile)
+        );
+        classDecl = scopeMatch ?? dirMatch;
+      }
+      if (!classDecl) {
         const uniqueFiles = new Set(candidates.map((candidate) => candidate.file));
         if (uniqueFiles.size > 1) return undefined;
+        classDecl = candidates[0];
       }
-      classDecl = candidates[0]!;
     }
     if (!classDecl) return undefined;
     const resolvedClass: SemanticSymbolDecl = classDecl;
@@ -749,7 +762,10 @@ class SemanticIndexImpl implements SemanticIndex {
     while (current && !visited.has(current)) {
       visited.add(current);
       const candidates = (this.declsByName.get(methodName) ?? []).filter(
-        (decl) => decl.parentClass === current && (decl.kind === "method" || decl.kind === "function")
+        (decl) =>
+          decl.parentClass === current &&
+          (decl.kind === "method" || decl.kind === "function") &&
+          matchesFamily(decl)
       );
       if (candidates.length > 0) {
         // Prefer an in-workspace definition over a body-less prototype (C/C++ headers).

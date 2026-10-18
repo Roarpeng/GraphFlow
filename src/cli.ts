@@ -16,6 +16,15 @@ import {
 import { interceptPostToolUse, interceptPreToolUse } from "./host-interceptor.js";
 import { PACKAGE_VERSION } from "./mcp-server.js";
 import { executeV3ToolCall } from "./mcp-tools.js";
+import {
+  TASK_PROMOTION_USES,
+  findTask,
+  formatTaskDetails,
+  formatTaskSummary,
+  listTasks,
+  recordTaskUse,
+  runTask,
+} from "./task-reflector.js";
 import { isTreeSitterAvailable } from "./tree-sitter-engine.js";
 
 const requireFromCli = createRequire(__filename);
@@ -29,21 +38,31 @@ function readFlag(args: string[], flag: string): string | undefined {
 interface ParsedFlagArgs {
   positionals: string[];
   values: Map<string, string>;
+  multiValues: Map<string, string[]>;
   flags: Set<string>;
 }
 
 /**
- * Small deterministic argv tokenizer shared by `read`, `exec` and `uninstall`.
- * Value flags consume their next token (`--root <dir>` as well as
+ * Small deterministic argv tokenizer shared by `read`, `exec`, `uninstall`, and
+ * `task`. Value flags consume their next token (`--root <dir>` as well as
  * `--root=<dir>`), a bare `--` terminates flag parsing, and any other
- * `-`-prefixed token is treated as a flag. Only real positionals are returned,
- * so a flag value can never leak into the command/targets list.
+ * `-`-prefixed token is treated as a flag. Repeated value flags are preserved
+ * in `multiValues` (e.g. `--step a --step b`). Only real positionals are
+ * returned, so a flag value can never leak into the command/targets list.
  */
 function parseFlagArgs(args: string[], valueFlags: readonly string[]): ParsedFlagArgs {
   const valueFlagSet = new Set(valueFlags);
   const positionals: string[] = [];
   const values = new Map<string, string>();
+  const multiValues = new Map<string, string[]>();
   const flags = new Set<string>();
+
+  const recordValue = (name: string, value: string): void => {
+    values.set(name, value);
+    const existing = multiValues.get(name);
+    if (existing) existing.push(value);
+    else multiValues.set(name, [value]);
+  };
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i] ?? "";
@@ -54,7 +73,7 @@ function parseFlagArgs(args: string[], valueFlags: readonly string[]): ParsedFla
     if (valueFlagSet.has(arg)) {
       const value = args[i + 1];
       if (value !== undefined) {
-        values.set(arg, value);
+        recordValue(arg, value);
         i += 1;
       }
       continue;
@@ -64,7 +83,7 @@ function parseFlagArgs(args: string[], valueFlags: readonly string[]): ParsedFla
       if (eq > 2) {
         const name = arg.slice(0, eq);
         if (valueFlagSet.has(name)) {
-          values.set(name, arg.slice(eq + 1));
+          recordValue(name, arg.slice(eq + 1));
           continue;
         }
       }
@@ -78,7 +97,7 @@ function parseFlagArgs(args: string[], valueFlags: readonly string[]): ParsedFla
     positionals.push(arg);
   }
 
-  return { positionals, values, flags };
+  return { positionals, values, multiValues, flags };
 }
 
 export interface ParsedExecArgs {
@@ -153,6 +172,79 @@ export function parseReadArgs(args: string[]): ParsedReadArgs {
   };
 }
 
+export interface ParsedTaskArgs {
+  subcommand: string;
+  target?: string;
+  instruction?: string;
+  steps: string[];
+  args: string[];
+  json: boolean;
+  rootDir?: string;
+}
+
+/**
+ * Parse `graphflow task <list|show|record|run> ...`:
+ *   task list [--json]
+ *   task show <id|instruction> [--json]
+ *   task record "<instruction>" --step "<cmd>" [--step ...] [--steps ...] [--args ...] [--json]
+ *   task run <id|instruction> [args...] [--args ...] [--json]
+ * `--root <dir>` is honored by every subcommand; `--steps` is an alias for
+ * another `--step` value.
+ */
+export function parseTaskArgs(args: string[]): ParsedTaskArgs {
+  const parsed = parseFlagArgs(args, ["--root", "--step", "--steps", "--args"]);
+  const subcommand = (parsed.positionals[0] ?? "list").trim().toLowerCase();
+  const positionals = parsed.positionals.slice(1);
+  const rootDir = parsed.values.get("--root");
+  const steps = [
+    ...(parsed.multiValues.get("--step") ?? []),
+    ...(parsed.multiValues.get("--steps") ?? []),
+  ];
+  const extraArgs = parsed.multiValues.get("--args") ?? [];
+  const json = parsed.flags.has("--json");
+  const common = {
+    subcommand,
+    json,
+    ...(rootDir !== undefined ? { rootDir } : {}),
+  };
+
+  if (subcommand === "record") {
+    return { ...common, instruction: positionals.join(" ").trim(), steps, args: extraArgs };
+  }
+  if (subcommand === "run") {
+    return {
+      ...common,
+      target: (positionals[0] ?? "").trim(),
+      steps: [],
+      args: [...positionals.slice(1), ...extraArgs],
+    };
+  }
+  if (subcommand === "show") {
+    return { ...common, target: positionals.join(" ").trim(), steps: [], args: [] };
+  }
+  return { ...common, steps: [], args: [] };
+}
+
+export interface ParsedReflectArgs {
+  instruction: string;
+  args: string[];
+  json: boolean;
+  rootDir?: string;
+}
+
+/** Parse `graphflow reflect "<instruction>" [args...] [--root <dir>] [--json]`. */
+export function parseReflectArgs(args: string[]): ParsedReflectArgs {
+  const parsed = parseFlagArgs(args, ["--root"]);
+  const instruction = (parsed.positionals[0] ?? "").trim();
+  const rootDir = parsed.values.get("--root");
+  return {
+    instruction,
+    args: parsed.positionals.slice(1),
+    json: parsed.flags.has("--json"),
+    ...(rootDir !== undefined ? { rootDir } : {}),
+  };
+}
+
 /**
  * One-line `graphflow status` entry, e.g.
  * `[MCP ✓] [Skill ✓] [Rule -] [Hook ✓] Cursor (cursor)`.
@@ -181,12 +273,16 @@ function printUsage(): void {
       "  graphflow edit <file> [--symbol <sym>] [--new <code>] [--rename <newName>]",
       "  graphflow exec [cmd] [--run] [--root <dir>] [-- <cmd...>]",
       "  graphflow macro <list|run|mine|mine-git|save> [id] [args...]",
+      "  graphflow task <list|show|record|run> [--step <cmd>] [--json] [--root <dir>]",
+      '  graphflow reflect "<instruction>" [args...] [--json] [--root <dir>]',
       "  graphflow hook <pre-tool|post-tool>",
       "  graphflow version | help",
       "",
       "Notes:",
       "  uninstall without flags removes detected agents only; --all removes every profile.",
       "  exec defaults to affected-tests and forwards everything after `--` to the command.",
+      "  task/reflect: recording the same instruction twice compiles a local .mjs runner;",
+      "  the 3rd use runs it with no LLM/network. Use `--step` once per shell step to record.",
     ].join("\n")
   );
 }
@@ -422,6 +518,106 @@ async function main(): Promise<void> {
       effectiveRoot
     );
     console.log(res.content[0]?.text ?? "");
+    return;
+  }
+
+  if (cmd === "task" || cmd === "gf-task") {
+    const parsed = parseTaskArgs(rest);
+    const effectiveRoot = parsed.rootDir ?? rootDir;
+    const json = parsed.json;
+
+    if (parsed.subcommand === "list") {
+      const tasks = listTasks(effectiveRoot);
+      if (json) {
+        console.log(JSON.stringify({ rootDir: effectiveRoot, tasks }, null, 2));
+        return;
+      }
+      if (tasks.length === 0) {
+        console.log(
+          "# Reflected Tasks (0 recorded yet — record the same instruction twice with --step to compile a local runner)"
+        );
+        return;
+      }
+      console.log(`# Reflected Tasks (${tasks.length}):`);
+      for (const task of tasks) console.log(formatTaskSummary(task));
+      return;
+    }
+
+    if (parsed.subcommand === "show") {
+      const target = parsed.target ?? "";
+      const tasks = listTasks(effectiveRoot);
+      const byId = tasks.find((task) => task.id === target);
+      const found = byId ?? (target ? findTask(effectiveRoot, target)?.record : undefined);
+      if (!found) {
+        console.error(`MISS [task-not-found] ${JSON.stringify(target)}`);
+        process.exitCode = 1;
+        return;
+      }
+      console.log(json ? JSON.stringify(found, null, 2) : formatTaskDetails(found));
+      return;
+    }
+
+    if (parsed.subcommand === "record") {
+      const instruction = parsed.instruction ?? "";
+      if (!instruction) {
+        console.error('ERR [task-record] Provide an instruction string: graphflow task record "<instruction>" --step "<cmd>"');
+        process.exitCode = 1;
+        return;
+      }
+      if (parsed.steps.length === 0) {
+        console.error("ERR [task-record] Provide at least one --step \"<shell command>\" to record.");
+        process.exitCode = 1;
+        return;
+      }
+      try {
+        const record = recordTaskUse(effectiveRoot, instruction, parsed.steps, {
+          ...(parsed.args.length > 0 ? { args: parsed.args } : {}),
+        });
+        if (json) {
+          console.log(JSON.stringify(record, null, 2));
+          return;
+        }
+        console.log(
+          `OK [task-recorded] id=${record.id} uses=${record.count}/${TASK_PROMOTION_USES} ` +
+            `${record.scriptPath ? `compiled=${record.scriptPath}` : "not-compiled-yet"} ` +
+            `instruction=${JSON.stringify(record.instructionRaw)}`
+        );
+      } catch (error) {
+        console.error(`ERR [task-record] ${error instanceof Error ? error.message : String(error)}`);
+        process.exitCode = 1;
+      }
+      return;
+    }
+
+    if (parsed.subcommand === "run") {
+      const target = parsed.target ?? "";
+      if (!target) {
+        console.error('ERR [task-run] Provide a reflected task id or instruction: graphflow task run "<id|instruction>" [args...]');
+        process.exitCode = 1;
+        return;
+      }
+      const result = runTask(effectiveRoot, target, parsed.args);
+      console.log(json ? JSON.stringify(result, null, 2) : result.text);
+      if (!result.hit || result.exitCode !== 0) process.exitCode = result.exitCode || 1;
+      return;
+    }
+
+    console.error(`ERR [unknown-task-command] '${parsed.subcommand}'. Use list|show|record|run.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (cmd === "reflect") {
+    const parsed = parseReflectArgs(rest);
+    const effectiveRoot = parsed.rootDir ?? rootDir;
+    if (!parsed.instruction) {
+      console.error('usage: graphflow reflect "<instruction>" [args...] [--json] [--root <dir>]');
+      process.exitCode = 1;
+      return;
+    }
+    const result = runTask(effectiveRoot, parsed.instruction, parsed.args);
+    console.log(parsed.json ? JSON.stringify(result, null, 2) : result.text);
+    if (!result.hit || result.exitCode !== 0) process.exitCode = result.exitCode || 1;
     return;
   }
 
