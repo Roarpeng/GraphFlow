@@ -150,6 +150,48 @@ function writeFixture(root: string): void {
   }
 }
 
+/**
+ * Packed (realistic) corpus: 6 symbols per file with Chinese-only docstrings. The grouping is
+ * deliberately adversarial for a line-window based ranker:
+ *   - `handleWebhook` is placed immediately BEFORE `handlePayment`; for the Chinese query
+ *     `支付回调` the webhook's doc-bleed + English synonym name tokens used to outrank the
+ *     generic payment handler.
+ *   - `verifySignature` sits before `validateSchema` (验证* tie: both names share verify-ish words)
+ *   - `dequeueJob` sits before `enqueueJob` (队列 -> job tie for both names)
+ * A correct ranker must use each symbol's OWN docstring/body, not a ±7-line window that bleeds
+ * into neighbouring docstrings, and must not let English name tokens swamp the CJK doc match.
+ */
+const PACKED_GROUPS: FixtureSymbol[][] = (() => {
+  const byName = (name: string): FixtureSymbol => {
+    const symbol = SYMBOLS.find((candidate) => candidate.name === name);
+    if (!symbol) throw new Error(`unknown packed symbol ${name}`);
+    return symbol;
+  };
+  return [
+    ["handleWebhook", "handlePayment", "verifySignature", "validateSchema", "dequeueJob", "enqueueJob"].map(byName),
+    ["cancelOrder", "createOrder", "cancelSubscription", "refreshToken", "createUser", "deleteAccount"].map(byName),
+    ["refundPayment", "updateInventory", "checkStock", "reserveStock", "retryPolicy", "connectDatabase"].map(byName),
+    ["rollbackTransaction", "circuitBreaker", "rateLimit", "cacheEviction", "loadMacro", "searchIndex"].map(byName),
+    ["sendNotification", "parseConfig", "generateReport", "uploadFile", "downloadFile", "compressOutput"].map(byName),
+  ];
+})();
+
+function writePackedFixture(root: string): void {
+  for (let fileIdx = 0; fileIdx < PACKED_GROUPS.length; fileIdx++) {
+    const blocks = PACKED_GROUPS[fileIdx]!.map((sym) =>
+      [
+        `/** ${sym.zh}。 */`,
+        `export function ${sym.name}(input: string): boolean {`,
+        "  return input.length > 0;",
+        "}",
+      ].join("\n")
+    );
+    const abs = join(root, "src", "packed", `p${fileIdx}.ts`);
+    mkdirSync(join(abs, ".."), { recursive: true });
+    writeFileSync(abs, `${blocks.join("\n\n")}\n`, "utf8");
+  }
+}
+
 function matchedSymbolNames(root: string, query: string, topK: number): string[] {
   const result = executeSurgicalRead({ rootDir: root, query, topK });
   return result.matchedSymbols.map((symbol) => symbol.name);
@@ -189,8 +231,10 @@ function formatReport(family: QueryFamily, report: RecallReport): string {
 
 function run(): void {
   const root = mkdtempSync(join(tmpdir(), "gf-bilingual-parity-"));
+  const packedRoot = mkdtempSync(join(tmpdir(), "gf-bilingual-packed-"));
   try {
     writeFixture(root);
+    writePackedFixture(packedRoot);
     const startedAt = Date.now();
 
     // ── 1. Tokenizer symmetry unit checks (the root causes that were fixed) ──
@@ -317,6 +361,49 @@ function run(): void {
     assert.equal(matchedSymbolNames(root, "取消订但", 1)[0], "cancelOrder");
     assert.equal(matchedSymbolNames(root, "支付回掉", 1)[0], "handlePayment");
 
+    // ── 3b. Packed-file (5-8 symbols/file) parity: realistic Chinese-only docstrings ──
+    // The same EN/ZH query pairs are measured against a corpus where neighbouring symbols share
+    // doc vocabulary, so doc-window bleed or English-name over-weighting would break parity.
+    const packedEn = measureFamily(packedRoot, "en");
+    const packedZh = measureFamily(packedRoot, "zh");
+    console.log(`[bilingual-parity] PACKED ${formatReport("en", packedEn)}`);
+    console.log(`[bilingual-parity] PACKED ${formatReport("zh", packedZh)}`);
+    for (const failure of [
+      ...packedEn.failures.map((f) => `PACKED-EN ${f}`),
+      ...packedZh.failures.map((f) => `PACKED-ZH ${f}`),
+    ]) {
+      console.log(`[bilingual-parity] FAIL ${failure}`);
+    }
+    for (const [label, report] of [
+      ["PACKED EN", packedEn],
+      ["PACKED ZH", packedZh],
+    ] as const) {
+      assert.ok(
+        report.r1 >= 0.95,
+        `${label} recall@1 must be >= 0.95 on packed files (got ${report.r1.toFixed(3)})`
+      );
+      assert.ok(
+        report.r3 >= 0.95,
+        `${label} recall@3 must be >= 0.95 on packed files (got ${report.r3.toFixed(3)})`
+      );
+      assert.ok(
+        report.r5 >= 0.95,
+        `${label} recall@5 must be >= 0.95 on packed files (got ${report.r5.toFixed(3)})`
+      );
+    }
+    assert.ok(
+      packedZh.r1 >= packedEn.r1 - 0.05,
+      `PACKED ZH recall@1 parity: ${packedZh.r1.toFixed(3)} must be >= EN ${packedEn.r1.toFixed(3)} - 0.05`
+    );
+    assert.ok(
+      packedZh.r3 >= packedEn.r3 - 0.05,
+      `PACKED ZH recall@3 parity: ${packedZh.r3.toFixed(3)} must be >= EN ${packedEn.r3.toFixed(3)} - 0.05`
+    );
+    assert.ok(
+      packedZh.r5 >= packedEn.r5 - 0.05,
+      `PACKED ZH recall@5 parity: ${packedZh.r5.toFixed(3)} must be >= EN ${packedEn.r5.toFixed(3)} - 0.05`
+    );
+
     // ── 4. Determinism + runtime budget ──
     const repeated = measureFamily(root, "en");
     assert.deepEqual(
@@ -324,17 +411,31 @@ function run(): void {
       { r1: en.r1, r3: en.r3, r5: en.r5, n: en.n },
       "recall measurement must be deterministic"
     );
+    const packedEnRepeated = measureFamily(packedRoot, "en");
+    const packedZhRepeated = measureFamily(packedRoot, "zh");
+    assert.deepEqual(
+      { r1: packedEnRepeated.r1, r3: packedEnRepeated.r3, r5: packedEnRepeated.r5, n: packedEnRepeated.n },
+      { r1: packedEn.r1, r3: packedEn.r3, r5: packedEn.r5, n: packedEn.n },
+      "packed-file English recall must be deterministic per symbol"
+    );
+    assert.deepEqual(
+      { r1: packedZhRepeated.r1, r3: packedZhRepeated.r3, r5: packedZhRepeated.r5, n: packedZhRepeated.n },
+      { r1: packedZh.r1, r3: packedZh.r3, r5: packedZh.r5, n: packedZh.n },
+      "packed-file Chinese recall must be deterministic per symbol"
+    );
     const elapsedMs = Date.now() - startedAt;
     assert.ok(elapsedMs < 20000, `fixture recall suite must finish well under 20s (took ${elapsedMs}ms)`);
 
     console.log(
-      `[bilingual-parity] elapsed=${elapsedMs}ms parityGap@1=${(en.r1 - zh.r1).toFixed(3)}`
+      `[bilingual-parity] elapsed=${elapsedMs}ms isolatedParityGap@1=${(en.r1 - zh.r1).toFixed(3)} ` +
+        `packedParityGap@1=${(packedEn.r1 - packedZh.r1).toFixed(3)}`
     );
     console.log(
-      "PASS [bilingual-parity] EN/ZH recall parity, pinyin/mixed/synonym recall, tokenizer symmetry and adversarial bilingual cases"
+      "PASS [bilingual-parity] EN/ZH recall parity on isolated and packed corpora, pinyin/mixed/synonym recall, tokenizer symmetry and adversarial bilingual cases"
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
+    rmSync(packedRoot, { recursive: true, force: true });
   }
 }
 

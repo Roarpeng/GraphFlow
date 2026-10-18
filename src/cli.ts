@@ -18,9 +18,12 @@ import { PACKAGE_VERSION } from "./mcp-server.js";
 import { executeV3ToolCall } from "./mcp-tools.js";
 import {
   TASK_PROMOTION_USES,
+  appendInstructionLogEntry,
   findTask,
+  formatHarvestReport,
   formatTaskDetails,
   formatTaskSummary,
+  harvestInstructionLog,
   listTasks,
   recordTaskUse,
   runTask,
@@ -180,22 +183,27 @@ export interface ParsedTaskArgs {
   args: string[];
   json: boolean;
   rootDir?: string;
+  logPath?: string;
 }
 
 /**
- * Parse `graphflow task <list|show|record|run> ...`:
+ * Parse `graphflow task <list|show|record|run|log|harvest> ...`:
  *   task list [--json]
  *   task show <id|instruction> [--json]
  *   task record "<instruction>" --step "<cmd>" [--step ...] [--steps ...] [--args ...] [--json]
  *   task run <id|instruction> [args...] [--args ...] [--json]
+ *   task log "<instruction>" --step "<cmd>" [--log <path>]   (append to JSONL only)
+ *   task harvest [--log <path>] [--json]                     (promote repeated log entries)
  * `--root <dir>` is honored by every subcommand; `--steps` is an alias for
- * another `--step` value.
+ * another `--step` value; `--log` overrides `.graphflow/instruction-log.jsonl`
+ * (must stay inside the workspace).
  */
 export function parseTaskArgs(args: string[]): ParsedTaskArgs {
-  const parsed = parseFlagArgs(args, ["--root", "--step", "--steps", "--args"]);
+  const parsed = parseFlagArgs(args, ["--root", "--step", "--steps", "--args", "--log"]);
   const subcommand = (parsed.positionals[0] ?? "list").trim().toLowerCase();
   const positionals = parsed.positionals.slice(1);
   const rootDir = parsed.values.get("--root");
+  const logPath = parsed.values.get("--log");
   const steps = [
     ...(parsed.multiValues.get("--step") ?? []),
     ...(parsed.multiValues.get("--steps") ?? []),
@@ -206,9 +214,10 @@ export function parseTaskArgs(args: string[]): ParsedTaskArgs {
     subcommand,
     json,
     ...(rootDir !== undefined ? { rootDir } : {}),
+    ...(logPath !== undefined ? { logPath } : {}),
   };
 
-  if (subcommand === "record") {
+  if (subcommand === "record" || subcommand === "log") {
     return { ...common, instruction: positionals.join(" ").trim(), steps, args: extraArgs };
   }
   if (subcommand === "run") {
@@ -273,7 +282,7 @@ function printUsage(): void {
       "  graphflow edit <file> [--symbol <sym>] [--new <code>] [--rename <newName>]",
       "  graphflow exec [cmd] [--run] [--root <dir>] [-- <cmd...>]",
       "  graphflow macro <list|run|mine|mine-git|save> [id] [args...]",
-      "  graphflow task <list|show|record|run> [--step <cmd>] [--json] [--root <dir>]",
+      "  graphflow task <list|show|record|run|log|harvest> [--step <cmd>] [--log <path>] [--json] [--root <dir>]",
       '  graphflow reflect "<instruction>" [args...] [--json] [--root <dir>]',
       "  graphflow hook <pre-tool|post-tool>",
       "  graphflow version | help",
@@ -283,6 +292,8 @@ function printUsage(): void {
       "  exec defaults to affected-tests and forwards everything after `--` to the command.",
       "  task/reflect: recording the same instruction twice compiles a local .mjs runner;",
       "  the 3rd use runs it with no LLM/network. Use `--step` once per shell step to record.",
+      "  task log/harvest: append to .graphflow/instruction-log.jsonl (e.g. from a shell wrapper or",
+      "  DSH skill) then harvest to promote repeated instructions; `task harvest` is incremental.",
     ].join("\n")
   );
 }
@@ -589,6 +600,54 @@ async function main(): Promise<void> {
       return;
     }
 
+    if (parsed.subcommand === "log") {
+      const instruction = parsed.instruction ?? "";
+      if (!instruction) {
+        console.error('ERR [task-log] Provide an instruction string: graphflow task log "<instruction>" --step "<cmd>"');
+        process.exitCode = 1;
+        return;
+      }
+      if (parsed.steps.length === 0) {
+        console.error('ERR [task-log] Provide at least one --step "<shell command>" to log.');
+        process.exitCode = 1;
+        return;
+      }
+      try {
+        const entry = appendInstructionLogEntry(
+          effectiveRoot,
+          instruction,
+          parsed.steps,
+          parsed.logPath !== undefined ? { logPath: parsed.logPath } : {}
+        );
+        if (json) {
+          console.log(JSON.stringify(entry, null, 2));
+          return;
+        }
+        console.log(
+          `OK [instruction-logged] at=${entry.at} log=${parsed.logPath ?? ".graphflow/instruction-log.jsonl"} ` +
+            `(run \`graphflow task harvest\` to promote repeated instructions)`
+        );
+      } catch (error) {
+        console.error(`ERR [task-log] ${error instanceof Error ? error.message : String(error)}`);
+        process.exitCode = 1;
+      }
+      return;
+    }
+
+    if (parsed.subcommand === "harvest") {
+      try {
+        const report = harvestInstructionLog(
+          effectiveRoot,
+          parsed.logPath !== undefined ? { logPath: parsed.logPath } : {}
+        );
+        console.log(json ? JSON.stringify(report, null, 2) : formatHarvestReport(report));
+      } catch (error) {
+        console.error(`ERR [task-harvest] ${error instanceof Error ? error.message : String(error)}`);
+        process.exitCode = 1;
+      }
+      return;
+    }
+
     if (parsed.subcommand === "run") {
       const target = parsed.target ?? "";
       if (!target) {
@@ -602,7 +661,9 @@ async function main(): Promise<void> {
       return;
     }
 
-    console.error(`ERR [unknown-task-command] '${parsed.subcommand}'. Use list|show|record|run.`);
+    console.error(
+      `ERR [unknown-task-command] '${parsed.subcommand}'. Use list|show|record|run|log|harvest.`
+    );
     process.exitCode = 1;
     return;
   }

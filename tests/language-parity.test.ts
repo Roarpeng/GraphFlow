@@ -1,4 +1,4 @@
-/**
+﻿/**
  * GraphFlow — Six-language capability parity matrix (`tests/language-parity.test.ts`)
  *
  * Proves that Python / Go / Rust / C / C++ / C# behave as close as possible to TS/JS for:
@@ -32,6 +32,7 @@ import {
   executeSurgicalRead,
   getWorkspaceAstIndex,
 } from "../src/index.js";
+import { getSemanticIndex } from "../src/semantic-index.js";
 
 // ── Harness ────────────────────────────────────────────────────────────────
 
@@ -758,7 +759,36 @@ const ADVERSARIAL_FILES: Record<string, string> = {
     "}",
     "",
   ].join("\n"),
-  "adv-cs/Point.cs": ["namespace Demo.Partial;", "public record struct Point(int X, int Y);", ""].join("\n"),
+  "adv-cs/Point.cs": [
+    "namespace Demo.Partial;",
+    "public record struct Point(int X, int Y);",
+    "public record Circle(int Radius);",
+    "",
+  ].join("\n"),
+  "adv-cs/ns/one/Gadget.cs": [
+    "namespace Demo.One;",
+    "public class Gadget {",
+    "    public int Limit;",
+    "    public virtual bool Cancel(int id) { return id > 0; }",
+    "}",
+    "",
+  ].join("\n"),
+  "adv-cs/ns/two/Gadget.cs": [
+    "namespace Demo.Two;",
+    "public class Gadget {",
+    "    public int Limit;",
+    "    public virtual bool Cancel(int id) { return id > 0; }",
+    "}",
+    "",
+  ].join("\n"),
+  "adv-cs/ns/three/UseThing.cs": [
+    "using Demo.Two;",
+    "namespace Demo.Three;",
+    "public static class UseThing {",
+    "    public static bool Run(Gadget g) { return g.Cancel(1); }",
+    "}",
+    "",
+  ].join("\n"),
   "adv-cs/UsePartial.cs": [
     "namespace Demo.Partial;",
     "public static class UsePartial",
@@ -786,7 +816,7 @@ const ADVERSARIAL_FILES: Record<string, string> = {
     "    fn cancel(&self) -> bool;",
     "}",
     "",
-    "pub struct Child;",
+    "pub struct TraitChild;",
     "",
     "impl Base for Child {",
     "    fn cancel(&self) -> bool {",
@@ -795,6 +825,46 @@ const ADVERSARIAL_FILES: Record<string, string> = {
     "}",
     "",
     "pub fn run(c: &Child) -> bool {",
+    "    c.cancel()",
+    "}",
+    "",
+    "pub fn run_trait(b: &dyn Base) -> bool {",
+    "    b.cancel()",
+    "}",
+    "",
+  ].join("\n"),
+  // Cross-file Rust trait dispatch: dyn/impl receiver -> trait method, concrete -> impl method.
+  "adv-rs/trait_base.rs": [
+    "pub trait Cancellable {",
+    "    fn cancel(&self) -> bool;",
+    "}",
+    "",
+  ].join("\n"),
+  "adv-rs/trait_child.rs": [
+    "use crate::trait_base::Cancellable;",
+    "",
+    "pub struct TraitChild;",
+    "",
+    "impl Cancellable for TraitChild {",
+    "    fn cancel(&self) -> bool {",
+    "        true",
+    "    }",
+    "}",
+    "",
+  ].join("\n"),
+  "adv-rs/trait_user.rs": [
+    "use crate::trait_base::Cancellable;",
+    "use crate::trait_child::TraitChild;",
+    "",
+    "pub fn run_trait(b: &dyn Cancellable) -> bool {",
+    "    b.cancel()",
+    "}",
+    "",
+    "pub fn run_impl(b: impl Cancellable) -> bool {",
+    "    b.cancel()",
+    "}",
+    "",
+    "pub fn run_concrete(c: &TraitChild) -> bool {",
     "    c.cancel()",
     "}",
     "",
@@ -847,6 +917,32 @@ function main(): void {
     }
   });
 
+  runTest("Go: same-package siblings expose no invented imports edges", () => {
+    const semantic = getSemanticIndex(root);
+    const goModule = semantic.getModuleGraph().get("go/user.go");
+    assertTrue(goModule, "go: semantic module node exists");
+    assertEqual(goModule!.imports.length, 0, "go: no file-level imports for same-package siblings");
+    const kgGoImports = graph.edges.filter(
+      (edge) => edge.kind === "imports" && edge.source.startsWith("file:go/")
+    );
+    assertEqual(kgGoImports.length, 0, "go: KG emits no same-package imports edges");
+    // Honest fallback: Go package scope still resolves calls/calls edges.
+    const goAst = index.getFileAnalysis("go/user.go")!.ast;
+    const goCall = goAst.calls.find((site) => site.callee === "Cancel" && site.receiver === "b");
+    assertTrue(goCall, "go: user call extracted");
+    const goResolved = semantic.resolveCall("go/user.go", goCall!);
+    assertEqual(goResolved.targetFile, "go/base.go", "go: package-scope call still resolves to Base.Cancel");
+    assertTrue(
+      graph.edges.some(
+        (edge) =>
+          edge.kind === "calls" &&
+          edge.source === "sym:go/user.go#Run" &&
+          edge.target === "sym:go/base.go#Base.Cancel"
+      ),
+      "go: package-scope calls edge still present"
+    );
+  });
+
   // ── Rename parity: run last (mutates the workspace) ──
   for (const testCase of LANGUAGE_CASES) {
     runTest(`${testCase.id}: cross-file rename (${testCase.method} -> ${testCase.rename.newName})`, () => {
@@ -888,6 +984,8 @@ function main(): void {
   // ── Adversarial per-language cases ──
   const adversarialRoot = createWorkspace("adversarial", ADVERSARIAL_FILES);
   const adversarialIndex = getWorkspaceAstIndex(adversarialRoot);
+  const adversarialSemantic = getSemanticIndex(adversarialRoot);
+  const adversarialGraph = buildKnowledgeGraphData(adversarialIndex);
 
   runTest("Go adversarial: grouped params and embedded fields", () => {
     const ast = adversarialIndex.getFileAnalysis("adv-go/group.go")!.ast;
@@ -926,16 +1024,22 @@ function main(): void {
     );
   });
 
-  runTest("C# adversarial: partial classes + record mapping", () => {
+  runTest("C# adversarial: partial classes + record class/record struct mapping", () => {
     const part1 = adversarialIndex.getFileAnalysis("adv-cs/Part1.cs")!.ast;
     const part2 = adversarialIndex.getFileAnalysis("adv-cs/Part2.cs")!.ast;
     const split1 = part1.symbols.find((s) => s.name === "Split" && s.kind === "class");
     const split2 = part2.symbols.find((s) => s.name === "Split" && s.kind === "class");
     assertTrue(split1, "cs: partial class Split in part 1");
     assertTrue(split2, "cs: partial class Split in part 2");
-    const record = adversarialIndex.getFileAnalysis("adv-cs/Point.cs")!.ast.symbols.find((s) => s.name === "Point");
-    assertTrue(record, "cs: record struct Point symbol");
-    assertEqual(record!.kind, "interface", "cs: record currently maps to interface kind (documented parity choice)");
+    const pointAst = adversarialIndex.getFileAnalysis("adv-cs/Point.cs")!.ast;
+    const point = pointAst.symbols.find((s) => s.name === "Point");
+    assertTrue(point, "cs: record struct Point symbol");
+    assertEqual(point!.kind, "struct", "cs: record struct maps to struct kind");
+    assertSameSet(point!.fields ?? [], ["X", "Y"], "cs: record struct primary-constructor fields");
+    const circle = pointAst.symbols.find((s) => s.name === "Circle");
+    assertTrue(circle, "cs: record Circle symbol");
+    assertEqual(circle!.kind, "class", "cs: record maps to class kind");
+    assertIncludes(circle!.fields ?? [], "Radius", "cs: record primary-constructor field");
     const blast = computeBlastRadius(adversarialIndex, "adv-cs/Part1.cs", "Split.Process", 20);
     assertTrue(blast.callSites.some((site) => site.file === "adv-cs/UsePartial.cs"), "cs: partial-class method blast finds caller");
     const rename = executeSurgicalEdit({
@@ -950,6 +1054,50 @@ function main(): void {
       readFileSync(join(adversarialRoot, "adv-cs/UsePartial.cs"), "utf8").includes(".Execute("),
       "cs: caller uses Execute"
     );
+  });
+
+  runTest("C# adversarial: namespace->file map disambiguates same-stem directories", () => {
+    const namespaces = adversarialSemantic.getNamespaceMap();
+    assertSameSet(
+      [...(namespaces.get("Demo.Two") ?? [])],
+      ["adv-cs/ns/two/Gadget.cs"],
+      "cs: namespace map records Demo.Two"
+    );
+    assertEqual(
+      adversarialSemantic.resolveImport("adv-cs/ns/three/UseThing.cs", "Demo.Two"),
+      "adv-cs/ns/two/Gadget.cs",
+      "cs: using Demo.Two resolves through the namespace map (not a file stem)"
+    );
+    const imported = adversarialSemantic.resolveImportedSymbol("adv-cs/ns/three/UseThing.cs", "Gadget");
+    assertTrue(imported, "cs: namespace import resolves Gadget declaration");
+    assertEqual(imported!.decl.file, "adv-cs/ns/two/Gadget.cs", "cs: Gadget comes from the imported namespace");
+    assertEqual(imported!.via, "namespace", "cs: resolution reason via namespace");
+    const userAst = adversarialIndex.getFileAnalysis("adv-cs/ns/three/UseThing.cs")!.ast;
+    const call = userAst.calls.find((site) => site.callee === "Cancel");
+    assertTrue(call, "cs: g.Cancel call extracted");
+    const resolved = adversarialSemantic.resolveCall("adv-cs/ns/three/UseThing.cs", call!);
+    assertEqual(resolved.targetFile, "adv-cs/ns/two/Gadget.cs", "cs: call resolves to the imported namespace's type");
+    assertEqual(resolved.parentClass, "Gadget", "cs: call resolves owning class Gadget");
+    const correctBlast = computeBlastRadius(adversarialIndex, "adv-cs/ns/two/Gadget.cs", "Gadget.Cancel", 20);
+    assertTrue(
+      correctBlast.callSites.some((site) => site.file === "adv-cs/ns/three/UseThing.cs"),
+      "cs: blast for the imported namespace's type finds the caller"
+    );
+    const otherNamespaceBlast = computeBlastRadius(adversarialIndex, "adv-cs/ns/one/Gadget.cs", "Gadget.Cancel", 20);
+    assertEqual(otherNamespaceBlast.totalCallSites, 0, "cs: same-named type in another namespace has no callers");
+    const imports = adversarialGraph.edges
+      .filter((edge) => edge.kind === "imports")
+      .map((edge) => [edge.source, edge.target] as [string, string]);
+    assertTrue(
+      imports.some(
+        ([source, target]) =>
+          source === "file:adv-cs/ns/three/UseThing.cs" && target === "file:adv-cs/ns/two/Gadget.cs"
+      ),
+      "cs: KG imports edge follows using Demo.Two to the right file"
+    );
+    // Residual (doc-graph, not owned by this task): KG `calls` still uses a directory/stem
+    // heuristic for ambiguous same-stem namespaces and may pick the wrong same-named type;
+    // the semantic index above resolves it correctly.
   });
 
   runTest("Python adversarial: decorated class/method spans and resolution", () => {
@@ -967,27 +1115,117 @@ function main(): void {
     assertIncludes(decorated!.fields ?? [], "limit", "py: dataclass annotation field captured");
   });
 
-  runTest("Rust adversarial: trait/impl recognized; trait dispatch documented as unsupported", () => {
+  runTest("Rust adversarial: trait methods emitted with parentClass + dyn dispatch", () => {
     const ast = adversarialIndex.getFileAnalysis("adv-rs/trait.rs")!.ast;
     const traitSymbol = ast.symbols.find((s) => s.name === "Base" && s.kind === "interface");
     assertTrue(traitSymbol, "rs: trait Base maps to interface kind");
+    const traitMethod = ast.symbols.find((s) => s.name === "cancel" && s.parentClass === "Base");
+    assertTrue(traitMethod, "rs: trait method cancel emitted with parentClass Base");
+    assertEqual(traitMethod!.kind, "method", "rs: trait method kind");
+    assertEqual(traitMethod!.bodyStartLine, undefined, "rs: trait method has no body");
     const implMethod = ast.symbols.find((s) => s.name === "cancel" && s.parentClass === "Child");
     assertTrue(implMethod, "rs: impl Base for Child method has parentClass Child");
-    const blast = computeBlastRadius(adversarialIndex, "adv-rs/trait.rs", "Child.cancel", 20);
-    assertTrue(blast.callSites.some((site) => site.file === "adv-rs/trait.rs"), "rs: concrete impl method blast finds caller");
-    // Documented gap: trait-method declarations are not emitted as method symbols, so
-    // dispatching to the trait target yields a graceful empty result (never a wrong target).
+    const concreteBlast = computeBlastRadius(adversarialIndex, "adv-rs/trait.rs", "Child.cancel", 20);
+    assertTrue(
+      concreteBlast.callSites.some((site) => site.file === "adv-rs/trait.rs" && site.line === 14),
+      "rs: concrete impl method blast finds c.cancel()"
+    );
     const traitBlast = computeBlastRadius(adversarialIndex, "adv-rs/trait.rs", "Base.cancel", 20);
-    assertEqual(traitBlast.totalCallSites, 0, "rs: trait-level dispatch not modelled (documented unsupported)");
+    assertTrue(
+      traitBlast.callSites.some((site) => site.file === "adv-rs/trait.rs" && site.line === 18),
+      "rs: trait blast finds dyn Base caller"
+    );
+    assertTrue(
+      !traitBlast.callSites.some((site) => site.line === 14),
+      "rs: concrete override call is not attributed to the trait target"
+    );
+    // Residual: renaming a trait method is rejected by the ambiguity guard because the impls
+    // share the method name in separate files; that is safe (no partial rename) but trait
+    // renames still need to move the declaration+all impls together.
+    const rename = executeSurgicalEdit({
+      rootDir: adversarialRoot,
+      file: "adv-rs/trait.rs",
+      symbol: "cancel",
+      renameTo: "abortTraitCancel",
+    });
+    assertEqual(rename.ok, false, "rs: trait/impl same-name rename is rejected (documented residual)");
+  });
+
+  runTest("Rust adversarial: cross-file trait dispatch (dyn/impl -> trait, concrete -> impl)", () => {
+    const baseAst = adversarialIndex.getFileAnalysis("adv-rs/trait_base.rs")!.ast;
+    const traitMethod = baseAst.symbols.find((s) => s.name === "cancel" && s.parentClass === "Cancellable");
+    assertTrue(traitMethod, "rs: cross-file trait method emitted");
+    assertEqual(traitMethod!.paramsCount, 0, "rs: &self excluded from trait method params");
+
+    const userAst = adversarialIndex.getFileAnalysis("adv-rs/trait_user.rs")!.ast;
+    const calls = userAst.calls.filter((site) => site.callee === "cancel");
+    assertEqual(calls.length, 3, "rs: three trait/concrete calls extracted");
+    const traitCall = calls.find((site) => site.receiver === "b" && site.line === 5);
+    assertTrue(traitCall, "rs: dyn caller b.cancel() extracted");
+    const dynResolved = adversarialSemantic.resolveCall("adv-rs/trait_user.rs", traitCall!);
+    assertEqual(dynResolved.targetFile, "adv-rs/trait_base.rs", "rs: dyn receiver resolves to trait file");
+    assertEqual(dynResolved.parentClass, "Cancellable", "rs: dyn receiver resolves to trait method");
+    const implCall = calls.find((site) => site.receiver === "b" && site.line === 9);
+    assertTrue(implCall, "rs: impl Trait caller b.cancel() extracted");
+    const implResolved = adversarialSemantic.resolveCall("adv-rs/trait_user.rs", implCall!);
+    assertEqual(implResolved.parentClass, "Cancellable", "rs: `impl Trait` receiver resolves to trait method");
+    const concreteCall = calls.find((site) => site.receiver === "c");
+    assertTrue(concreteCall, "rs: concrete caller c.cancel() extracted");
+    const concreteResolved = adversarialSemantic.resolveCall("adv-rs/trait_user.rs", concreteCall!);
+    assertEqual(concreteResolved.targetFile, "adv-rs/trait_child.rs", "rs: concrete receiver resolves to impl file");
+    assertEqual(concreteResolved.parentClass, "TraitChild", "rs: concrete receiver resolves to impl method");
+
+    const traitBlast = computeBlastRadius(adversarialIndex, "adv-rs/trait_base.rs", "Cancellable.cancel", 20);
+    assertSameSet(
+      traitBlast.callSites.map((site) => `${site.file}:${site.line}`),
+      ["adv-rs/trait_user.rs:5", "adv-rs/trait_user.rs:9"],
+      "rs: trait blast counts dyn + impl callers only"
+    );
+    const concreteBlast = computeBlastRadius(adversarialIndex, "adv-rs/trait_child.rs", "TraitChild.cancel", 20);
+    assertSameSet(
+      concreteBlast.callSites.map((site) => `${site.file}:${site.line}`),
+      ["adv-rs/trait_user.rs:13"],
+      "rs: concrete impl blast counts the concrete caller"
+    );
+
+    const callsEdges = adversarialGraph.edges
+      .filter((edge) => edge.kind === "calls")
+      .map((edge) => [edge.source, edge.target] as [string, string]);
+    for (const [source, target] of [
+      ["sym:adv-rs/trait_user.rs#run_trait", "sym:adv-rs/trait_base.rs#Cancellable.cancel"],
+      ["sym:adv-rs/trait_user.rs#run_impl", "sym:adv-rs/trait_base.rs#Cancellable.cancel"],
+      ["sym:adv-rs/trait_user.rs#run_concrete", "sym:adv-rs/trait_child.rs#TraitChild.cancel"],
+    ] as Array<[string, string]>) {
+      assertTrue(
+        callsEdges.some(([s, t]) => s === source && t === target),
+        `rs: KG calls edge ${source} -> ${target}`
+      );
+    }
+
+    // Structural fallback (`GRAPHFLOW_TREE_SITTER=0`) emits the same trait method context.
+    const previous = process.env.GRAPHFLOW_TREE_SITTER;
+    process.env.GRAPHFLOW_TREE_SITTER = "0";
+    try {
+      const fallback = analyzeSourceFile("adv-rs/trait_base.rs", readFileSync(join(adversarialRoot, "adv-rs/trait_base.rs"), "utf8"));
+      assertEqual(fallback.engine, "structural", "rs: forced structural fallback engine");
+      const fallbackTraitMethod = fallback.symbols.find(
+        (s) => s.name === "cancel" && s.parentClass === "Cancellable"
+      );
+      assertTrue(fallbackTraitMethod, "rs: structural fallback also emits trait method with parentClass");
+    } finally {
+      if (previous === undefined) delete process.env.GRAPHFLOW_TREE_SITTER;
+      else process.env.GRAPHFLOW_TREE_SITTER = previous;
+    }
   });
 
   // ── Parity matrix / gap report ──
   console.log("\n=== parity matrix ===");
   for (const row of matrixRows) console.log(`  ${row}`);
   console.log("  gaps (documented, asserted as graceful degradation):");
-  console.log("    - Go same-package siblings have no file `imports` edges (package scope, not file imports)");
-  console.log("    - Rust trait-method declarations are not emitted as method symbols (trait dispatch unsupported)");
-  console.log("    - C# `record` maps to interface kind and `using` namespaces resolve by file stem");
+  console.log("    - Go same-package siblings have no file `imports` edges (package scope is not a file import; calls/blast still resolve)");
+  console.log("    - Rust trait methods now dispatch to the trait target for dyn/impl receivers; renaming a trait method is rejected while impls share the name (no partial trait rename)");
+  console.log("    - Rust `impl Trait for Type` is not modelled as subclassing (receiver-exact and trait-method resolution are sound; inherited-override chaining is not)");
+  console.log("    - C# record -> class / record struct -> struct; namespace->file map resolves `using` for the semantic index, but doc-graph KG `calls` still uses a dir/stem heuristic for ambiguous same-stem namespaces");
   console.log("    - C has no inheritance: parity uses function call/rename/type closure (struct field reference)");
   console.log("    - Go embedding models the first embedded type as the promoted parent (deep embedding not chained)");
   console.log("    - rename stays receiver-aware: a file mixing target and foreign same-named receiver calls is rejected");

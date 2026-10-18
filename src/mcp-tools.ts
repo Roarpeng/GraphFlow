@@ -34,7 +34,10 @@ import {
 import { executeSurgicalRead, getWorkspaceAstIndex, resolveSafeWorkspaceRoot } from "./slicer.js";
 import { executeSurgicalEdit, type SingleEditSpec } from "./surgical-edit.js";
 import {
+  formatHarvestReport,
   formatTaskSummary,
+  harvestInstructionLog,
+  harvestTaskInstruction,
   listTasks,
   recordTaskUse,
   runTask,
@@ -107,7 +110,7 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
   },
   {
     name: "gf_macro",
-    description: "Macros/habits/tasks ('list','run','save','mine','mine-git','task-*').",
+    description: "Macros/habits/tasks: list,run,save,mine,mine-git,task-*.",
     inputSchema: {
       type: "object",
       properties: {
@@ -124,6 +127,7 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
             "task-list",
             "task-run",
             "task-record",
+            "task-harvest",
           ],
         },
         id: { type: "string" },
@@ -494,6 +498,28 @@ export function executeV3ToolCall(
         return plainTextResponse(res.text);
       }
 
+      if (action === "task-harvest") {
+        const instruction = typeof args.instruction === "string" ? args.instruction : "";
+        const rawSteps = Array.isArray(args.steps) ? args.steps : [];
+        const steps: TaskStep[] = rawSteps.filter(
+          (step): step is string => typeof step === "string" && step.trim().length > 0
+        );
+        try {
+          if (instruction.trim() && steps.length > 0) {
+            const harvested = harvestTaskInstruction(rootDir, instruction, steps);
+            return plainTextResponse(
+              formatHarvestReport(harvested.report, harvested.record)
+            );
+          }
+          const report = harvestInstructionLog(rootDir);
+          return plainTextResponse(formatHarvestReport(report));
+        } catch (error) {
+          return plainTextResponse(
+            `ERR [task-harvest] ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
+
       if (action === "save") {
         const id = typeof args.id === "string" ? args.id.trim() : undefined;
         const kind: MacroKind =
@@ -534,7 +560,7 @@ export function executeV3ToolCall(
       }
 
       return plainTextResponse(
-        `ERR [unknown-action] '${action}'. Use 'list', 'run', 'save', 'mine', 'mine-git', 'task-list', 'task-run', or 'task-record'.`
+        `ERR [unknown-action] '${action}'. Use 'list', 'run', 'save', 'mine', 'mine-git', 'task-list', 'task-run', 'task-record', or 'task-harvest'.`
       );
     }
 

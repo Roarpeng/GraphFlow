@@ -7,8 +7,8 @@
 [![CI](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml)
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-roarpeng.graphflow-blue)](https://marketplace.visualstudio.com/items?itemName=roarpeng.graphflow)
 
-> **面向 AI 编程 Agent 的省 Token 外科手术级代码引擎（v3.6.0）**
-> 只暴露 4 个外科手术工具的 MCP 服务器 —— `gf_read`、`gf_edit`、`gf_exec`、`gf_macro` —— 对**全部 6 种语言家族提供真 AST 解析**：TypeScript/JavaScript 用 `@babel/parser`，Python、Go、Rust、C/C++、C# 用可选 tree-sitter 语法包（缺省回退结构化分析器）。**自研语义索引**为爆炸半径/重命名解析调用目标（不新增运行时依赖），**精度调优的文档↔代码链接**（BM25/IDF + PMI + 上限 + 置信度）让知识图谱更可信。**六语言能力平价已纳入回归测试**（48 项矩阵），双语检索在 30 对 EN/ZH 语料上达到 **EN 1.000 / ZH 1.000**，**本地任务反射器**可在无 LLM/网络下重放已记录的 shell 指令。运行时依赖：`@babel/parser`、`@modelcontextprotocol/sdk` 与 `tree-sitter`；语法包为可选依赖。
+> **面向 AI 编程 Agent 的省 Token 外科手术级代码引擎（v3.6.1）**
+> 只暴露 4 个外科手术工具的 MCP 服务器 —— `gf_read`、`gf_edit`、`gf_exec`、`gf_macro` —— 对**全部 6 种语言家族提供真 AST 解析**：TypeScript/JavaScript 用 `@babel/parser`，Python、Go、Rust、C/C++、C# 用可选 tree-sitter 语法包（缺省回退结构化分析器）。**自研语义索引**为爆炸半径/重命名解析调用目标（不新增运行时依赖），**精度调优的文档↔代码链接**（BM25/IDF + PMI + 上限 + 置信度）让知识图谱更可信。**六语言能力平价已纳入回归测试**（51 项矩阵），双语检索在「孤立 30 对 + packed 30 对」语料上达到 **EN 1.000 / ZH 1.000**，**本地任务反射**可通过显式记录或自动收割外部指令日志，在无 LLM/网络下重放已记录的 shell 指令。运行时依赖：`@babel/parser`、`@modelcontextprotocol/sdk` 与 `tree-sitter`；语法包为可选依赖。
 
 ---
 
@@ -46,6 +46,7 @@
 | **3.4.0** | **Python/Go/Rust/C/C++/C# 默认真 AST：可选 tree-sitter 语法包（`engine: "tree-sitter"`），缺少原生绑定时回退结构化分析器，`GRAPHFLOW_TREE_SITTER=0` 强制结构化 · C/C++ 头文件/原型处理与 Python `super` 接收者 · 依赖变化：必需 `tree-sitter` 核心 + 可选语法包 · 基准数据刷新** |
 | **3.5.0** | **文档↔代码链接精度（自研 BM25/IDF + PMI + 互惠剪枝 + 上限，`GRAPHFLOW_DOC_LINKS_MAX`；仓库 728 → 约 150 条边，−80%）· `graphflow doctor parsers` + `npm run verify:parsers` + 增量 CI 解析器矩阵 · 自研 L0 语义索引（置信度 ≥0.75）与可选 TypeScript/LSP 提供者 · DSH 配置包 `@roarpeng/graphflow-dsh` · 发布预检（`npm run preflight` / `preflight:release`）· 基准数据刷新** |
 | **3.6.0** | **48 项六语言平价矩阵与修复（语言家族作用域的 `resolveMethod`/重命名、Go 嵌入/分组参数、C typedef 字段、Rust `&dyn`/`impl` 解包、C/C++ 头文件原型↔定义重命名）· 30 对双语召回 1.000 EN / 1.000 ZH（拼音/混合/同义词 1.000；基线 ZH@1 0.967、拼音 0.769）· 本地任务反射（`graphflow task`/`reflect`、`gf_macro` task-list/run/record）· Windows CRLF 测试修复；CI（6 job）+ 解析器矩阵（7 job）全绿 · 458 wire tokens · 24 个测试文件** |
+| **3.6.1** | **六语言平价 51 项：Rust trait 分派闭环（trait 方法带 `parentClass`=trait；`dyn Trait`/`impl Trait` 接收者解析到 trait 方法，具体接收者解析到 impl）、C# `record`/`record struct` kind + 位置参数字段 + namespace 映射闭环（Go 同包 imports 仍为诚实缺口）· packed 文件双语语料：packed EN 1.000 / ZH 1.000 @1/@3/@5（ZH@1 原为 0.900；修复 ±7 行 own-doc 串扰）· 任务自动收割（`.graphflow/instruction-log.jsonl`、`task log`/`task harvest`、`gf_macro` `task-harvest`；需要外部写入者）· 458 wire tokens · 24 个测试文件** |
 
 ## 四个外科手术工具
 
@@ -54,15 +55,22 @@
 | `gf_read` | 精准符号切片（自动跨文件类型闭合）+ 接收者类型感知的 `[Blast Radius]` 调用点（先查语义索引，再回退继承/`super` 启发式）、骨架折叠、双语检索（1.000 EN/ZH 平价召回）、`@brief` 跨 Agent 交接 | `targets`、`q`、`topK`、`skeleton`、`dedup` |
 | `gf_edit` | 原地 / 批量原子编辑、零 LLM 跨仓重命名（先做语义目标判定，再回退接收者/继承启发式；语言家族作用域 staging，拒绝歧义/外部接收者文件；仍有未解析调用方则中止）、结构体字段契约守卫 | `file`、`symbol`、`newCode`、`edits`、`renameTo` |
 | `gf_exec` | 变更到测试路由（感知 `package.json` `scripts.test`；解析 tsconfig/jsconfig 别名、`extends` 链、嵌套配置与动态 import）+ 输出脱水器：通过的测试套件只回 1 行 `PASS`；失败时内联最多 5 行源码上下文；`run: true` 才执行，缺省仅预览 | `cmd`、`changedFiles`、`handle`、`run` |
-| `gf_macro` | 习惯宏、git 共变挖掘、知识图谱 HTML 导出（类型感知 `calls`、别名解析 `imports`、BM25/IDF 受限的 `doc-links-code`，以及 `defines` / `co-edit` 边），以及**本地任务反射**（`task-list` / `task-run` / `task-record`） | `action: "list" \| "run" \| "save" \| "mine" \| "mine-git" \| "visualize" \| "brief" \| "task-list" \| "task-run" \| "task-record"` |
+| `gf_macro` | 习惯宏、git 共变挖掘、知识图谱 HTML 导出（类型感知 `calls`、别名解析 `imports`、BM25/IDF 受限的 `doc-links-code`，以及 `defines` / `co-edit` 边），以及**本地任务反射**（`task-list` / `task-run` / `task-record` / `task-harvest`） | `action: "list" \| "run" \| "save" \| "mine" \| "mine-git" \| "visualize" \| "brief" \| "task-list" \| "task-run" \| "task-record" \| "task-harvest"` |
 
 会话级读去重跳过未变更文件；连续 3 次编辑-测试失败触发确定性急救包（爆炸半径契约 + 最近 git diff）。语法守卫在有真 AST 后端时使用它们 —— TS/JS 用 `@babel/parser`，其余 5 种用 tree-sitter 的 ERROR/MISSING 诊断 —— 结构化分析器的启发式检查（花括号/声明级、Python 缺冒号/括号诊断）作为回退，设置 `GRAPHFLOW_TREE_SITTER=0` 时同样适用。
 
+## 3.6.1 新特性
+
+- **平价矩阵 48 → 51 项** —— `tests/language-parity.test.ts` 闭环两个已记录的缺口：**Rust trait 分派**（trait 方法以 `parentClass`=trait 名输出，`dyn Trait`/`impl Trait` 接收者解析到 trait 方法，具体接收者解析到 impl；含跨文件 trait/impl 断言与结构化回退的 trait 作用域）与 **C# record 类型**（`record`→class、`record struct`→struct、位置 record 参数暴露为字段）。自研语义索引新增 C# `namespace → files` 映射，用于 `using`/import、符号与方法候选解析（带文件主干回退）。**Go 同包 imports 仍是诚实缺口**：同包兄弟文件没有文件级 `imports` 边（不虚构边；包作用域的 calls/边可解析）。其余残余：trait+impl 的原子重命名会安全拒绝、`impl Trait for Type` 不视为继承、doc-graph KG 的 `calls` 对同名 namespace 仍用目录/主干启发式（imports 正确）、C 为函数级、Go 只建模第一个嵌入类型、重命名保持保守、C++ 原型定位为尽力而为。
+- **Packed 文件双语语料** —— 双语平价套件在孤立 30 对语料之外新增 packed 文件语料（每文件 6 个符号、仅中文 docstring）。packed **EN 1.000 / ZH 1.000 @1/@3/@5**（修复前 packed ZH@1 为 0.900）；own-doc 注释提取不再使用会串到相邻符号的固定 ±7 行窗口，并加入词项上限/归一化。孤立单符号、拼音、混合、同义词查询仍为 **1.000**。残余不变：泛用英文在 @1 上仍无法区分拼音命名符号；词表为人工维护。
+- **任务自动收割（仍无 LLM/网络）** —— 反射现在可由外部指令日志驱动：用 `graphflow task log "<instruction>" --step "<cmd>"` 追加到 `.graphflow/instruction-log.jsonl`（仅追加；`--log <path>` 可覆盖路径），再用 `graphflow task harvest [--log <path>]` 把重复的归一化指令提升为同一套 `.graphflow/tasks.json` + 编译后的 `.graphflow/tasks/<id>.mjs` runner。MCP 等价动作：`gf_macro({ action: "task-harvest", instruction, steps })`，或裸 `task-harvest` 收割日志。收割通过字节偏移状态文件（`.graphflow/task-harvest.json`）增量进行；显式 `graphflow task record` 路径不变，`graphflow reflect` 无匹配时仍返回 `MISS`。限制：**仍需外部写入者**（shell wrapper / DSH skill 向日志追加 —— 没有宿主钩子或守护进程）、步骤以记录者权限本地执行、`{{argN}}` 需手工参数化、并发记录最后写入者胜出。
+- **版本/状态** —— 3.6.1；MCP wire 仍为 **458 tokens**，测试套件 **24 个文件**，CI（6 job）+ 解析器矩阵（7 job）保持全绿，基准数字沿用 3.6.0 最终运行（未变）。
+
 ## 3.6.0 新特性
 
-- **六语言平价矩阵与修复** —— 新增 `tests/language-parity.test.ts`（48 项测试），对 TS/JS、Python、Go、Rust、C/C++、C# 断言符号/跨度/字段平价，覆盖切片 + 类型闭合、接收者感知爆炸半径、跨文件重命名，以及知识图谱 `defines`/`imports`/`calls`。修复：语言家族作用域的 `resolveMethod`/重命名 staging（杜绝跨语言串扰）、Go 结构体嵌入 + 分组参数 + 嵌入字段、C `typedef struct` 字段、Rust `&dyn`/`impl` 接收者解包、C/C++ 头文件原型↔定义重命名簇。如实记录的残余：Go 同包兄弟文件没有文件级 `imports` 边；Rust trait 声明不作为方法符号（trait 分派返回 0，不会给错目标）；C# `record` 映射为 `interface` kind；C 为函数级（无继承）；深层/多重 Go 嵌入不链式展开；结构化回退不在平价矩阵内。
-- **双语召回 1.000 / 1.000** —— 新增 `tests/bilingual-parity.test.ts` 测量 30 对 EN/ZH 查询：EN 与 ZH 在 @1/@3/@5 均为 **1.000**，拼音/混合/同义词家族也是 **1.000**（基线 ZH@1 0.967、拼音 0.769）。分词器修复：词形还原救援不对称、同义词前向扩展污染、缺失的 zh/拼音词表 + EN→ZH 拼音桥、过宽映射。残余：切片文档窗口/名称权重仍可能影响紧密排列的文件；泛用英文在 @1 上无法区分拼音命名符号；词表为人工维护。
-- **本地任务反射（无 LLM、无网络）** —— 重复的 shell 指令可记录到 `.graphflow/tasks.json` 并编译为 `.graphflow/tasks/<id>.mjs`：`graphflow task list|show|record|run`（`--step` / `--steps` / `--args` / `--json` / `--root`）与 `graphflow reflect "<instruction>"`（未知时返回 `MISS`），或 MCP `gf_macro` 动作 `task-list` / `task-run` / `task-record` + `instruction`。第二次记录会提升任务，之后相同/近似匹配（token-Jaccard 0.86）的指令会在本地重放。MCP 表面仍恰好 4 个工具、**458 wire tokens**。限制：仅显式记录（暂无自动采集）、shell 步骤以记录者权限在本地执行、手工 `{{argN}}` 参数化、并发跨进程记录为最后写入者胜出。
+- **六语言平价矩阵与修复** —— 新增 `tests/language-parity.test.ts`（48 项测试），对 TS/JS、Python、Go、Rust、C/C++、C# 断言符号/跨度/字段平价，覆盖切片 + 类型闭合、接收者感知爆炸半径、跨文件重命名，以及知识图谱 `defines`/`imports`/`calls`。修复：语言家族作用域的 `resolveMethod`/重命名 staging（杜绝跨语言串扰）、Go 结构体嵌入 + 分组参数 + 嵌入字段、C `typedef struct` 字段、Rust `&dyn`/`impl` 接收者解包、C/C++ 头文件原型↔定义重命名簇。如实记录的残余：Go 同包兄弟文件没有文件级 `imports` 边；Rust trait 声明不作为方法符号（trait 分派返回 0，不会给错目标）；C# `record` 映射为 `interface` kind；C 为函数级（无继承）；深层/多重 Go 嵌入不链式展开；结构化回退不在平价矩阵内。（3.6.1 将矩阵提升到 51 项并闭环 Rust trait 分派与 C# record 缺口；Go 同包 imports 仍为诚实缺口 —— 见上文。）
+- **双语召回 1.000 / 1.000** —— 新增 `tests/bilingual-parity.test.ts` 测量 30 对 EN/ZH 查询：EN 与 ZH 在 @1/@3/@5 均为 **1.000**，拼音/混合/同义词家族也是 **1.000**（基线 ZH@1 0.967、拼音 0.769）。分词器修复：词形还原救援不对称、同义词前向扩展污染、缺失的 zh/拼音词表 + EN→ZH 拼音桥、过宽映射。残余：切片文档窗口/名称权重仍可能影响紧密排列的文件；泛用英文在 @1 上无法区分拼音命名符号；词表为人工维护。（3.6.1 新增 packed 文件语料，并通过 own-doc 注释提取修复把 packed ZH@1 从 0.900 提升到 1.000。）
+- **本地任务反射（无 LLM、无网络）** —— 重复的 shell 指令可记录到 `.graphflow/tasks.json` 并编译为 `.graphflow/tasks/<id>.mjs`：`graphflow task list|show|record|run`（`--step` / `--steps` / `--args` / `--json` / `--root`）与 `graphflow reflect "<instruction>"`（未知时返回 `MISS`），或 MCP `gf_macro` 动作 `task-list` / `task-run` / `task-record` + `instruction`。第二次记录会提升任务，之后相同/近似匹配（token-Jaccard 0.86）的指令会在本地重放。MCP 表面仍恰好 4 个工具、**458 wire tokens**。限制：仅显式记录（暂无自动采集）、shell 步骤以记录者权限在本地执行、手工 `{{argN}}` 参数化、并发跨进程记录为最后写入者胜出。（3.6.1 新增外部日志自动收割：`graphflow task log` / `graphflow task harvest`。）
 - **CI 与发布** —— Windows CI 的 `dsh-bundle` CRLF 失败已在测试中修复（篡改检测兼容 CRLF；校验器不变）；**CI（6 job）**与**解析器矩阵（7 job）**在 ubuntu/windows/macos × Node 20/22（另加严格 ubuntu job）上全绿。现有发布工作流不变；`npm run preflight` / `preflight:release` 与 `npm run task` / `npm run reflect` 可用，测试套件现为 **24 个文件**。
 - **实测数据** —— wire schema 为 **458 tokens**；骨架折叠 27,926 → 7,840（71.9%），符号切片 27,926 → 1,165（95.8%），PASS 脱水 5,946 → 30（99.5%，24 文件套件），知识图谱约 1,277 节点 / 约 2,750 条边 / 约 2.08 s（165 条 doc links），受影响测试路由 26 ms（16 项测试），爆炸半径 7 ms。见[基准数据](#基准数据)。
 
@@ -149,7 +157,7 @@
 
 **Schema 开销说明：** `tools/list` 的 wire 负载为 458 tokens —— 冗余的 `$schema` / `title` / `annotations` / `_meta` 已从 wire 剥离；程序化 `getV3ToolDefinitions()` 仍保留这些字段供治理 API 使用，因此 API 视图大于 wire 视图。
 
-**本地基准脚本：** 先 `npm run build`，再 `npm run bench`（`scripts/benchmark.mjs`）会测量 MCP schema 开销、骨架/切片压缩、PASS/失败脱水、知识图谱构建、受影响测试与爆炸半径耗时，并写出 `benchmarks/latest.md` 与 `benchmarks/latest.json`。以上为当前 3.6.0 仓库实测值（耗时/计数为约数，随运行略有波动）；可在自己的仓库重跑复现。
+**本地基准脚本：** 先 `npm run build`，再 `npm run bench`（`scripts/benchmark.mjs`）会测量 MCP schema 开销、骨架/切片压缩、PASS/失败脱水、知识图谱构建、受影响测试与爆炸半径耗时，并写出 `benchmarks/latest.md` 与 `benchmarks/latest.json`。以上为 3.6.0 最终基准运行的数字（3.6.1 未变；耗时/计数为约数，随运行略有波动）；可在自己的仓库重跑复现。
 
 ## 支持语言
 
@@ -162,7 +170,7 @@
 | C / C++ | **真 AST**，可选 `tree-sitter-c` / `tree-sitter-cpp`（缺省回退结构化分析器） |
 | C# | **真 AST**，可选 `tree-sitter-c-sharp`（缺省回退结构化分析器） |
 
-tree-sitter 语法包是可选依赖：安装后 Python/Go/Rust/C/C++/C# 默认使用真语法树；缺少语法包（或设置 `GRAPHFLOW_TREE_SITTER=0`）时，该语言改用内置结构化分析器。tree-sitter 只做**语法**解析 —— 不做语义类型解析，因此跨文件接收者/类型推断仍为启发式，并有已记录的限制（Python import 别名/嵌套函数、Go 分组参数/嵌入字段、Rust trait/宏、C/C++ 宏/命名空间、C# 属性即字段/构造函数）。
+tree-sitter 语法包是可选依赖：安装后 Python/Go/Rust/C/C++/C# 默认使用真语法树；缺少语法包（或设置 `GRAPHFLOW_TREE_SITTER=0`）时，该语言改用内置结构化分析器。tree-sitter 只做**语法**解析 —— 不做语义类型解析，因此跨文件接收者/类型推断仍为启发式，并有已记录的限制（Python import 别名/嵌套函数、Go 分组参数/嵌入字段、Rust 宏/trait-宏边界、C/C++ 宏/命名空间、C# 属性即字段/非 record 构造函数）。
 
 运行时依赖：`@babel/parser`、`@modelcontextprotocol/sdk` 与 `tree-sitter`（必需），外加可选语法包 `tree-sitter-python` / `-go` / `-rust` / `-c` / `-cpp` / `-c-sharp`。除此之外没有其他运行时依赖。
 
@@ -170,7 +178,7 @@ tree-sitter 语法包是可选依赖：安装后 Python/Go/Rust/C/C++/C# 默认�
 
 ```bash
 # 1) 全局安装（Node 18+）
-npm install -g @roarpeng/graphflow@3.6.0
+npm install -g @roarpeng/graphflow@3.6.1
 
 # 2) 一键注册到检测到的 Agent（MCP + Skill + Rules + Hooks）
 graphflow install            # 等价写法：npx @roarpeng/graphflow install
@@ -265,7 +273,7 @@ DSH **不读取** `~/.dsh/mcp.json`。它的 MCP 服务器是 `~/.dsh/cordis.pat
 | `graphflow edit <file> [--symbol <sym>] [--new <code>] [--rename <name>]` | 手术式编辑 / 重命名 |
 | `graphflow exec [cmd] [--run] [--root <dir>]` | 运行 `affected-tests` 或任意命令（带脱水；`--run` 才执行，缺省仅预览）；`--root` 按参数解析，绝不追加进命令 |
 | `graphflow macro <list\|run\|save\|mine\|mine-git> [id] [args...]` | 宏与 git 共变挖掘 |
-| `graphflow task <list\|show\|record\|run> [--step <cmd>] [--args <a>] [--json] [--root <dir>]` | 本地任务反射：把重复 shell 指令记录到 `.graphflow/tasks.json`，第二次记录时提升，之后离线重放 |
+| `graphflow task <list\|show\|record\|run\|log\|harvest> [--step <cmd>] [--log <path>] [--args <a>] [--json] [--root <dir>]` | 本地任务反射：显式 `record`，或用 `task log` 追加到 `.graphflow/instruction-log.jsonl` 再以增量 `task harvest` 提升重复指令；离线重放 |
 | `graphflow reflect "<instruction>" [args...] [--json] [--root <dir>]` | 在本地运行该指令对应（或近似匹配）的已记录任务（未知时返回 MISS） |
 | `graphflow graph` | 导出 `.graphflow/knowledge-graph.html` |
 | `graphflow brief` | 打印跨 Agent 交接简报 |

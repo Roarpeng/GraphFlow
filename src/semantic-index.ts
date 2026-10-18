@@ -24,7 +24,7 @@
 
 import { createRequire } from "node:module";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";import {
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";import {
   createWorkspaceTypeHierarchy,
   inImplicitPackageScope,
   inferReceiverTypeIndex,
@@ -103,6 +103,8 @@ export interface SemanticModuleNode {
   /** Resolved files reached by `export * from` / `export * as ns from`. */
   exportAllFrom: string[];
   aliases: Record<string, string>;
+  /** Declared namespaces (C# `namespace A.B;` / `namespace A.B { ... }`; empty elsewhere). */
+  namespaces: string[];
 }
 
 export type SemanticResolutionReason =
@@ -144,6 +146,8 @@ export interface SemanticIndex {
   readonly rootDir: string;
   getFiles(): readonly string[];
   getModuleGraph(): ReadonlyMap<string, SemanticModuleNode>;
+  /** Namespace -> declaring files (C# namespace/using resolution; empty for other languages). */
+  getNamespaceMap(): ReadonlyMap<string, readonly string[]>;
   getTypeEnvironment(file: string): ReadonlyMap<string, string>;
   getHierarchy(): WorkspaceTypeHierarchy;
   findDeclarations(name: string): readonly SemanticSymbolDecl[];
@@ -153,7 +157,7 @@ export interface SemanticIndex {
   resolveImportedSymbol(
     fromFile: string,
     localName: string
-  ): { decl: SemanticSymbolDecl; via: "alias" | "symbol" | "barrel" } | undefined;
+  ): { decl: SemanticSymbolDecl; via: "alias" | "symbol" | "barrel" | "namespace" } | undefined;
   resolveMethod(
     className: string,
     methodName: string,
@@ -184,6 +188,8 @@ interface SemanticFileEntry {
   module: SemanticModuleNode;
   receiverIndex: ReceiverTypeIndex;
   decls: SemanticSymbolDecl[];
+  /** Declared namespaces (C#), used for `using` -> file resolution. */
+  namespaces: string[];
 }
 
 interface AliasPattern {
@@ -215,6 +221,19 @@ function fnv1a(text: string): string {
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return hash.toString(16);
+}
+
+const CS_NAMESPACE_DECL_RE = /(?:^|[{};])\s*namespace\s+([A-Za-z_][\w.]*)/g;
+
+/** Declared namespaces for a file (C# only): `namespace A.B;` and block form `namespace A.B {`. */
+function extractNamespaces(file: string, content: string): string[] {
+  if (extname(file).toLowerCase() !== ".cs") return [];
+  const out: string[] = [];
+  for (const match of content.matchAll(CS_NAMESPACE_DECL_RE)) {
+    const namespace = match[1];
+    if (namespace && !out.includes(namespace)) out.push(namespace);
+  }
+  return out;
 }
 
 /** Strips `//` and `/* *\/` comments plus trailing commas from JSONC config text. */
@@ -354,6 +373,7 @@ class SemanticIndexImpl implements SemanticIndex {
   private declsByName = new Map<string, SemanticSymbolDecl[]>();
   private moduleGraph = new Map<string, SemanticModuleNode>();
   private fileStates = new Map<string, string>();
+  private namespaceToFiles = new Map<string, string[]>();
   private hierarchyCache: WorkspaceTypeHierarchy | null = null;
   private aliasConfigCache: AliasConfig | null | undefined;
   private buildTimeMs = 0;
@@ -368,11 +388,15 @@ class SemanticIndexImpl implements SemanticIndex {
   private ensureFresh(): void {
     const files = this.workspace.getFiles().slice().sort();
     const present = new Set(files);
+    let changed = false;
     for (const existing of Array.from(this.entries.keys())) {
-      if (!present.has(existing)) this.removeEntry(existing);
+      if (!present.has(existing)) {
+        this.removeEntry(existing);
+        changed = true;
+      }
     }
     const startedAt = Date.now();
-    let changed = false;
+    const pending: Array<{ file: string; state: string; contentHash: string }> = [];
     for (const file of files) {
       const raw = this.workspace.getRawFile(file);
       if (!raw) continue;
@@ -380,10 +404,25 @@ class SemanticIndexImpl implements SemanticIndex {
       if (this.entries.get(file)?.state === state) continue;
       // Content hash is captured on (re)build; it only needs to run when the cheap
       // mtime+size fingerprint changes, keeping warm queries cheap.
-      this.buildFile(file, state, fnv1a(raw.content));
+      pending.push({ file, state, contentHash: fnv1a(raw.content) });
+    }
+    for (const change of pending) {
+      this.buildFile(change.file, change.state, change.contentHash);
       changed = true;
     }
     if (changed) {
+      // Namespace/import resolution needs the full namespace map, so (re)build module nodes
+      // in a second pass once every pending file has registered its namespaces.
+      for (const [file, entry] of Array.from(this.entries.entries())) {
+        const moduleNode = this.buildModuleNode(
+          file,
+          entry.module.language,
+          entry.ast,
+          entry.namespaces
+        );
+        entry.module = moduleNode;
+        this.moduleGraph.set(file, moduleNode);
+      }
       this.buildTimeMs += Date.now() - startedAt;
       this.hierarchyCache = null;
     }
@@ -399,10 +438,28 @@ class SemanticIndexImpl implements SemanticIndex {
       if (next.length > 0) this.declsByName.set(decl.name, next);
       else this.declsByName.delete(decl.name);
     }
+    this.unregisterNamespaces(file);
     this.entries.delete(file);
     this.moduleGraph.delete(file);
     this.fileStates.delete(file);
     this.hierarchyCache = null;
+  }
+
+  private registerNamespaces(file: string, namespaces: readonly string[]): void {
+    for (const namespace of namespaces) {
+      const files = this.namespaceToFiles.get(namespace) ?? [];
+      if (!files.includes(file)) files.push(file);
+      files.sort();
+      this.namespaceToFiles.set(namespace, files);
+    }
+  }
+
+  private unregisterNamespaces(file: string): void {
+    for (const [namespace, files] of Array.from(this.namespaceToFiles.entries())) {
+      const next = files.filter((candidate) => candidate !== file);
+      if (next.length > 0) this.namespaceToFiles.set(namespace, next);
+      else this.namespaceToFiles.delete(namespace);
+    }
   }
 
   private buildFile(file: string, state: string, contentHash: string): void {
@@ -411,7 +468,9 @@ class SemanticIndexImpl implements SemanticIndex {
     if (!data) return;
     const { ast, content } = data;
     const language = sourceLanguageFamily(file);
-    const moduleNode = this.buildModuleNode(file, language, ast);
+    const namespaces = extractNamespaces(file, content);
+    this.registerNamespaces(file, namespaces);
+    const moduleNode = this.buildModuleNode(file, language, ast, namespaces);
     const decls: SemanticSymbolDecl[] = ast.symbols.map((symbol) => ({
       file,
       name: symbol.name,
@@ -433,6 +492,7 @@ class SemanticIndexImpl implements SemanticIndex {
       module: moduleNode,
       receiverIndex: inferReceiverTypeIndex(file, content, ast),
       decls,
+      namespaces,
     };
     this.entries.set(file, entry);
     this.moduleGraph.set(file, moduleNode);
@@ -528,13 +588,58 @@ class SemanticIndexImpl implements SemanticIndex {
       fileSet
     );
     if (direct) return direct;
-    return this.resolveAlias(moduleSpecifier, fileSet);
+    const alias = this.resolveAlias(moduleSpecifier, fileSet);
+    if (alias) return alias;
+    if (sourceLanguageFamily(fromFile) === "csharp") {
+      return this.resolveCSharpModule(fromFile, moduleSpecifier);
+    }
+    return undefined;
+  }
+
+  /**
+   * C# `using` targets a namespace, not a file path. Resolve through the namespace map built
+   * from parsed namespace declarations; fall back to a file-stem match for name==namespace
+   * conventions (`using Demo.Base;` -> Base.cs). Same-directory candidates win.
+   */
+  private resolveCSharpModule(fromFile: string, moduleSpecifier: string): string | undefined {
+    const namespace = moduleSpecifier.replace(/^global::\s*/, "").trim();
+    const namespaceFiles = this.namespaceToFiles.get(namespace);
+    if (namespaceFiles && namespaceFiles.length > 0) {
+      return (
+        namespaceFiles.find((candidate) => dirname(candidate) === dirname(fromFile)) ??
+        namespaceFiles[0]
+      );
+    }
+    const leaf = namespace.split(".").pop();
+    if (!leaf) return undefined;
+    let fallback: string | undefined;
+    for (const candidate of this.workspace.getFiles()) {
+      if (candidate === fromFile) continue;
+      if (sourceLanguageFamily(candidate) !== "csharp") continue;
+      if (basename(candidate).replace(/\.cs$/i, "").toLowerCase() !== leaf.toLowerCase()) continue;
+      if (dirname(candidate) === dirname(fromFile)) return candidate;
+      fallback ??= candidate;
+    }
+    return fallback;
+  }
+
+  /** True when `candidateFile` declares a namespace imported by `fromFile` (C# `using`). */
+  private isInImportedNamespace(fromFile: string, candidateFile: string): boolean {
+    const entry = this.entries.get(fromFile);
+    if (!entry || entry.module.language !== "csharp") return false;
+    for (const edge of entry.module.imports) {
+      const namespace = edge.module.replace(/^global::\s*/, "").trim();
+      const files = this.namespaceToFiles.get(namespace);
+      if (files?.includes(candidateFile)) return true;
+    }
+    return false;
   }
 
   private buildModuleNode(
     file: string,
     language: SourceLanguageFamily,
-    ast: FileAstAnalysis
+    ast: FileAstAnalysis,
+    namespaces: readonly string[] = []
   ): SemanticModuleNode {
     const imports: SemanticImportEdge[] = [];
     const reexports: SemanticImportEdge[] = [];
@@ -595,7 +700,15 @@ class SemanticIndexImpl implements SemanticIndex {
       else imports.push(edge);
     }
 
-    return { file, language, imports, reexports, exportAllFrom, aliases };
+    return {
+      file,
+      language,
+      imports,
+      reexports,
+      exportAllFrom,
+      aliases,
+      namespaces: [...namespaces],
+    };
   }
 
   private entry(file: string): SemanticFileEntry | undefined {
@@ -611,6 +724,13 @@ class SemanticIndexImpl implements SemanticIndex {
   getModuleGraph(): ReadonlyMap<string, SemanticModuleNode> {
     this.ensureFresh();
     return new Map(this.moduleGraph);
+  }
+
+  getNamespaceMap(): ReadonlyMap<string, readonly string[]> {
+    this.ensureFresh();
+    const snapshot = new Map<string, readonly string[]>();
+    for (const [namespace, files] of this.namespaceToFiles) snapshot.set(namespace, [...files]);
+    return snapshot;
   }
 
   getTypeEnvironment(file: string): ReadonlyMap<string, string> {
@@ -689,7 +809,7 @@ class SemanticIndexImpl implements SemanticIndex {
   resolveImportedSymbol(
     fromFile: string,
     localName: string
-  ): { decl: SemanticSymbolDecl; via: "alias" | "symbol" | "barrel" } | undefined {
+  ): { decl: SemanticSymbolDecl; via: "alias" | "symbol" | "barrel" | "namespace" } | undefined {
     this.queries += 1;
     const entry = this.entry(fromFile);
     if (!entry) return undefined;
@@ -707,6 +827,17 @@ class SemanticIndexImpl implements SemanticIndex {
       // Wildcard imports (`import * as m`, `#include`, `from x import *`) never bind a
       // specific symbol here — barrel resolution is handled by resolveExportedSymbol and the
       // language-specific implicit-package scope by call resolution.
+    }
+    // C# `using Demo.Base;` imports a namespace: search every file declaring that namespace.
+    if (entry.module.language === "csharp") {
+      for (const edge of entry.module.imports) {
+        const namespace = edge.module.replace(/^global::\s*/, "").trim();
+        for (const namespaceFile of this.namespaceToFiles.get(namespace) ?? []) {
+          if (namespaceFile === fromFile) continue;
+          const decl = this.resolveExportedSymbol(namespaceFile, localName);
+          if (decl) return { decl, via: "namespace" };
+        }
+      }
     }
     return undefined;
   }
@@ -743,10 +874,13 @@ class SemanticIndexImpl implements SemanticIndex {
         const scopeMatch = candidates.find((candidate) =>
           inImplicitPackageScope(fromFile, candidate.file, family)
         );
+        const namespaceMatch = candidates.find((candidate) =>
+          this.isInImportedNamespace(fromFile, candidate.file)
+        );
         const dirMatch = candidates.find(
           (candidate) => dirname(candidate.file) === dirname(fromFile)
         );
-        classDecl = scopeMatch ?? dirMatch;
+        classDecl = scopeMatch ?? namespaceMatch ?? dirMatch;
       }
       if (!classDecl) {
         const uniqueFiles = new Set(candidates.map((candidate) => candidate.file));
@@ -921,6 +1055,7 @@ class SemanticIndexImpl implements SemanticIndex {
     this.declsByName.clear();
     this.moduleGraph.clear();
     this.fileStates.clear();
+    this.namespaceToFiles.clear();
     this.hierarchyCache = null;
     this.aliasConfigCache = undefined;
     this.ensureFresh();
@@ -931,6 +1066,7 @@ class SemanticIndexImpl implements SemanticIndex {
     this.declsByName.clear();
     this.moduleGraph.clear();
     this.fileStates.clear();
+    this.namespaceToFiles.clear();
     this.hierarchyCache = null;
     this.aliasConfigCache = undefined;
     this.buildTimeMs = 0;

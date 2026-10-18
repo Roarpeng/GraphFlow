@@ -35,7 +35,7 @@ export function resolvePackageVersion(): string {
     }
   }
 
-  return "3.6.0";
+  return "3.6.1";
 }
 
 export const PACKAGE_VERSION = resolvePackageVersion();

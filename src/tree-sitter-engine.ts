@@ -1045,11 +1045,18 @@ function collectRustSymbols(
       });
       if (node.type === "trait_item") {
         const body = node.childForFieldName("body") ?? findChildOfType(node, "declaration_list");
-        if (body) for (const child of body.namedChildren) collectRustSymbols(ctx, child, implStack);
+        // Trait methods are methods of the trait (`parentClass = <trait name>`), so a
+        // `dyn Base`/`impl Base` receiver can resolve `b.cancel()` to `Base.cancel`.
+        if (body) {
+          for (const child of body.namedChildren) {
+            collectRustSymbols(ctx, child, [...implStack, name]);
+          }
+        }
       }
       return;
     }
-    case "function_item": {
+    case "function_item":
+    case "function_signature_item": {
       const name = nameOf(ctx, node.childForFieldName("name")) ?? identifierText(ctx, node.namedChildren[1]);
       if (!name) return;
       const parentClass = implStack.length > 0 ? implStack[implStack.length - 1] : undefined;
@@ -1059,6 +1066,7 @@ function collectRustSymbols(
         kind: parentClass ? "method" : "function",
         exported: Boolean(visibility) || Boolean(parentClass),
         node,
+        // `function_signature_item` (trait method declaration) has no body.
         bodyNode: node.childForFieldName("body") ?? undefined,
         paramsCount: rustParamsCount(node),
         ...(parentClass ? { parentClass } : {}),
@@ -1368,6 +1376,16 @@ function csharpParamsCount(node: TsNode): number {
 
 function csharpClassFields(ctx: AnalysisContext, classNode: TsNode): string[] {
   const fields: string[] = [];
+  // Positional records expose their primary-constructor parameters as properties.
+  if (classNode.type === "record_declaration") {
+    const parameterList = classNode.namedChildren.find((child) => child.type === "parameter_list");
+    for (const parameter of parameterList?.namedChildren ?? []) {
+      if (parameter.type !== "parameter") continue;
+      const nameNode = parameter.childForFieldName("name");
+      const name = nameNode ? nameOf(ctx, nameNode) : undefined;
+      if (name) fields.push(name);
+    }
+  }
   const body = classNode.childForFieldName("body") ?? findChildOfType(classNode, "declaration_list");
   if (!body) return fields;
   for (const child of body.namedChildren) {
@@ -1420,15 +1438,21 @@ function collectCSharpSymbols(
     case "enum_declaration": {
       const name = nameOf(ctx, node.childForFieldName("name"));
       if (!name) return;
+      const modifiers = csharpModifiersText(ctx, node);
+      // tree-sitter-c-sharp keeps `record`/`struct`/`class` as anonymous tokens, not modifiers.
+      const isRecordStruct =
+        node.type === "record_struct_declaration" ||
+        (node.type === "record_declaration" && node.children.some((child) => child.type === "struct"));
       const kind: SymbolKind =
         node.type === "class_declaration"
           ? "class"
-          : node.type === "struct_declaration" || node.type === "record_struct_declaration"
+          : node.type === "struct_declaration" || isRecordStruct
             ? "struct"
-            : node.type === "enum_declaration"
-              ? "enum"
-              : "interface";
-      const modifiers = csharpModifiersText(ctx, node);
+            : node.type === "record_declaration"
+              ? "class"
+              : node.type === "enum_declaration"
+                ? "enum"
+                : "interface";
       const symbol = pushSymbol(ctx, {
         name,
         kind,

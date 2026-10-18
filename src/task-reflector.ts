@@ -17,8 +17,15 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { dehydrateCommandOutput } from "./dehydrator.js";
 import { stemEnglishWord } from "./tokenizer.js";
 
@@ -29,8 +36,11 @@ export const TASK_NEAR_MATCH_THRESHOLD = 0.86;
 export const TASK_STORE_VERSION = 1;
 /** Workspace-relative directory for compiled task runners. */
 export const TASK_SCRIPT_DIR = ".graphflow/tasks";
+/** Default JSONL log consumed by `harvestInstructionLog` (written externally). */
+export const TASK_LOG_REL_PATH = ".graphflow/instruction-log.jsonl";
 
 const TASK_STORE_REL_PATH = ".graphflow/tasks.json";
+const TASK_HARVEST_STATE_REL_PATH = ".graphflow/task-harvest.json";
 const TASK_RUN_TIMEOUT_MS = 180_000;
 const MAX_CAPTURE_BYTES = 16 * 1024 * 1024;
 
@@ -95,6 +105,44 @@ export interface RunTaskResult {
   taskId?: string;
   score?: number;
   matchedBy?: "id" | "exact" | "near";
+}
+
+/** One JSONL line in `.graphflow/instruction-log.jsonl`. */
+export interface InstructionLogEntry {
+  instruction: string;
+  steps: TaskStep[];
+  at: string;
+}
+
+export interface AppendInstructionLogOptions {
+  /** Workspace-relative (or absolute inside the workspace) log path. */
+  logPath?: string;
+  now?: Date;
+}
+
+export interface HarvestInstructionLogOptions {
+  /** Workspace-relative (or absolute inside the workspace) log path. */
+  logPath?: string;
+  /** Default true: promoted tasks compile their local runner. */
+  autoCompile?: boolean;
+  /** Reprocess the whole log (tests/maintenance) instead of the saved offset. */
+  replay?: boolean;
+  now?: Date;
+}
+
+export interface HarvestReport {
+  /** Workspace-relative log path that was harvested. */
+  logPath: string;
+  entriesRead: number;
+  entriesInvalid: number;
+  usesRecorded: number;
+  /** Task ids that reached the promotion threshold during this harvest. */
+  tasksPromoted: string[];
+}
+
+export interface HarvestTaskResult {
+  report: HarvestReport;
+  record?: ReflectedTask;
 }
 
 function normalizeWhitespace(text: string): string {
@@ -570,4 +618,224 @@ export function runTask(
   };
   if (score !== undefined) result.score = score;
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// P-C2: auto-harvest of externally-written JSONL instruction logs
+// ---------------------------------------------------------------------------
+
+function isWithinWorkspace(rootAbs: string, absolutePath: string): boolean {
+  return absolutePath === rootAbs || absolutePath.startsWith(rootAbs + sep);
+}
+
+/**
+ * Resolve the instruction log path and keep it inside the workspace. Rejects
+ * absolute paths or `../` traversal outside `rootDir` (path-safety guard).
+ */
+export function instructionLogFilePath(rootDir: string, logPath?: string): string {
+  const rootAbs = resolve(rootDir);
+  const raw = typeof logPath === "string" && logPath.trim() ? logPath.trim() : TASK_LOG_REL_PATH;
+  const candidate = isAbsolute(raw) ? resolve(raw) : resolve(rootAbs, raw);
+  if (!isWithinWorkspace(rootAbs, candidate)) {
+    throw new Error(`instruction log must stay inside the workspace: ${raw}`);
+  }
+  return candidate;
+}
+
+interface HarvestStateFile {
+  version: number;
+  logs: Record<string, { offset: number; updatedAt?: string }>;
+}
+
+function harvestStateFilePath(rootDir: string): string {
+  return join(rootDir, TASK_HARVEST_STATE_REL_PATH);
+}
+
+function loadHarvestState(rootDir: string): HarvestStateFile {
+  const statePath = harvestStateFilePath(rootDir);
+  if (!existsSync(statePath)) return { version: 1, logs: {} };
+  try {
+    const parsed = JSON.parse(readFileSync(statePath, "utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { version: 1, logs: {} };
+    const rawLogs = (parsed as { logs?: unknown }).logs;
+    const logs: Record<string, { offset: number; updatedAt?: string }> = {};
+    if (rawLogs && typeof rawLogs === "object" && !Array.isArray(rawLogs)) {
+      for (const [key, value] of Object.entries(rawLogs as Record<string, unknown>)) {
+        if (!value || typeof value !== "object") continue;
+        const offset = (value as { offset?: unknown }).offset;
+        if (typeof offset !== "number" || !Number.isFinite(offset) || offset < 0) continue;
+        const updatedAt = (value as { updatedAt?: unknown }).updatedAt;
+        logs[key] = typeof updatedAt === "string"
+          ? { offset: Math.floor(offset), updatedAt }
+          : { offset: Math.floor(offset) };
+      }
+    }
+    return { version: 1, logs };
+  } catch {
+    return { version: 1, logs: {} };
+  }
+}
+
+function saveHarvestState(rootDir: string, state: HarvestStateFile): void {
+  const statePath = harvestStateFilePath(rootDir);
+  mkdirSync(dirname(statePath), { recursive: true });
+  const tmpPath = `${statePath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  writeFileSync(tmpPath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  renameSync(tmpPath, statePath);
+}
+
+/**
+ * Append one `{ instruction, steps, at }` JSON line to the local instruction
+ * log (default `.graphflow/instruction-log.jsonl`). Does not harvest by itself;
+ * use `harvestInstructionLog`/`harvestTaskInstruction` to promote repeats.
+ */
+export function appendInstructionLogEntry(
+  rootDir: string,
+  instruction: string,
+  steps: readonly TaskStep[],
+  opts: AppendInstructionLogOptions = {}
+): InstructionLogEntry {
+  if (typeof instruction !== "string" || instruction.trim().length === 0) {
+    throw new Error("instruction must not be empty");
+  }
+  const normalizedSteps = normalizeTaskSteps(steps);
+  if (normalizedSteps.length === 0) {
+    throw new Error("steps must not be empty (shell command strings or { cmd, cwd? } objects)");
+  }
+  assertStepCwdsAreSafe(rootDir, normalizedSteps);
+  const logAbs = instructionLogFilePath(rootDir, opts.logPath);
+  mkdirSync(dirname(logAbs), { recursive: true });
+  const entry: InstructionLogEntry = {
+    instruction: normalizeWhitespace(instruction),
+    steps: normalizedSteps,
+    at: (opts.now ?? new Date()).toISOString(),
+  };
+  appendFileSync(logAbs, `${JSON.stringify(entry)}\n`, "utf8");
+  return entry;
+}
+
+/**
+ * Harvest new lines from the JSONL instruction log: valid entries are recorded
+ * as task uses (normalized identity), malformed/incomplete lines are skipped,
+ * and repeated normalized instructions reach the promotion threshold and get a
+ * compiled local runner. Incremental by byte offset stored in
+ * `.graphflow/task-harvest.json`; `replay: true` reprocesses the whole log.
+ * No LLM, no network; the log path must stay inside the workspace.
+ */
+export function harvestInstructionLog(
+  rootDir: string,
+  opts: HarvestInstructionLogOptions = {}
+): HarvestReport {
+  const rootAbs = resolve(rootDir);
+  const logAbs = instructionLogFilePath(rootDir, opts.logPath);
+  const logRel = relative(rootAbs, logAbs).replace(/\\/g, "/");
+  const report: HarvestReport = {
+    logPath: logRel,
+    entriesRead: 0,
+    entriesInvalid: 0,
+    usesRecorded: 0,
+    tasksPromoted: [],
+  };
+  if (!existsSync(logAbs)) return report;
+
+  let buffer: Buffer;
+  try {
+    buffer = readFileSync(logAbs);
+  } catch {
+    return report;
+  }
+
+  const state = loadHarvestState(rootDir);
+  const stored = state.logs[logRel];
+  const requestedOffset = opts.replay ? 0 : stored ? stored.offset : 0;
+  const startOffset =
+    requestedOffset >= 0 && requestedOffset <= buffer.length ? Math.floor(requestedOffset) : 0;
+  const lastNewline = buffer.lastIndexOf(0x0a);
+  const completeLength = lastNewline >= 0 ? lastNewline + 1 : 0;
+
+  if (completeLength <= startOffset) {
+    if (startOffset !== requestedOffset) {
+      state.logs[logRel] = { offset: startOffset, updatedAt: new Date().toISOString() };
+      saveHarvestState(rootDir, state);
+    }
+    return report;
+  }
+
+  const segment = buffer.subarray(startOffset, completeLength).toString("utf8");
+  const promoted = new Set<string>();
+  for (const line of segment.split("\n")) {
+    if (!line.trim()) continue;
+    report.entriesRead += 1;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      report.entriesInvalid += 1;
+      continue;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      report.entriesInvalid += 1;
+      continue;
+    }
+    const entry = parsed as { instruction?: unknown; steps?: unknown; at?: unknown };
+    const instruction = typeof entry.instruction === "string" ? entry.instruction : "";
+    const steps = normalizeTaskSteps(Array.isArray(entry.steps) ? (entry.steps as TaskStep[]) : []);
+    if (!instruction.trim() || steps.length === 0) {
+      report.entriesInvalid += 1;
+      continue;
+    }
+    const recordOptions: RecordTaskOptions = {};
+    if (opts.autoCompile === false) recordOptions.autoCompile = false;
+    if (opts.now) recordOptions.now = opts.now;
+    try {
+      const record = recordTaskUse(rootAbs, instruction, steps, recordOptions);
+      report.usesRecorded += 1;
+      if (record.scriptPath && record.count >= TASK_PROMOTION_USES) promoted.add(record.id);
+    } catch {
+      report.entriesInvalid += 1;
+    }
+  }
+
+  report.tasksPromoted = [...promoted];
+  state.logs[logRel] = { offset: completeLength, updatedAt: new Date().toISOString() };
+  saveHarvestState(rootDir, state);
+  return report;
+}
+
+/**
+ * Append one instruction use to the JSONL log and immediately harvest it. This
+ * is the safe local-capture entry point for a shell wrapper / DSH skill (no
+ * host hook, no daemon): every call logs `{instruction, steps, at}`, and the
+ * second normalized use promotes + compiles the local runner.
+ */
+export function harvestTaskInstruction(
+  rootDir: string,
+  instruction: string,
+  steps: readonly TaskStep[],
+  opts: HarvestInstructionLogOptions = {}
+): HarvestTaskResult {
+  const logOptions: AppendInstructionLogOptions = {};
+  if (opts.logPath !== undefined) logOptions.logPath = opts.logPath;
+  if (opts.now !== undefined) logOptions.now = opts.now;
+  const entry = appendInstructionLogEntry(rootDir, instruction, steps, logOptions);
+  const report = harvestInstructionLog(rootDir, opts);
+  const instructionKey = normalizeInstructionKey(entry.instruction);
+  const record = loadTasks(resolve(rootDir)).find((task) => task.instructionKey === instructionKey);
+  return record ? { report, record } : { report };
+}
+
+/** One-line CLI/MCP summary of a harvest report. */
+export function formatHarvestReport(report: HarvestReport, record?: ReflectedTask): string {
+  const promoted = report.tasksPromoted.length > 0 ? report.tasksPromoted.join(",") : "none";
+  const lines = [
+    `PASS [task-harvest] log=${report.logPath} entries=${report.entriesRead} ` +
+      `invalid=${report.entriesInvalid} uses=${report.usesRecorded} promoted=${promoted}`,
+  ];
+  if (record) {
+    lines.push(
+      `  instruction=${JSON.stringify(record.instructionRaw)} id=${record.id} uses=${record.count} ` +
+        `${record.scriptPath ? `compiled=${record.scriptPath}` : "not-compiled-yet"}`
+    );
+  }
+  return lines.join("\n");
 }

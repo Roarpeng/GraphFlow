@@ -1962,7 +1962,7 @@ export function generateKnowledgeGraphHtml(
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
-<title>GraphFlow 3.6.0 — Interactive Project Knowledge Graph</title>
+<title>GraphFlow 3.6.1 — Interactive Project Knowledge Graph</title>
 <style>
   :root {
     --bg: #0b0f19;
@@ -1998,7 +1998,7 @@ export function generateKnowledgeGraphHtml(
 </head>
 <body>
   <div id="sidebar">
-    <h1>GraphFlow 3.6.0 Knowledge Graph</h1>
+    <h1>GraphFlow 3.6.1 Knowledge Graph</h1>
     <div class="stats">Nodes: ${graph.nodes.length} · Edges: ${graph.edges.length} (${edgeBreakdown})</div>
     <input id="search" type="search" placeholder="Search symbol, file, or doc (中文/EN)..." />
     <div class="legend-title">Nodes / 节点</div>

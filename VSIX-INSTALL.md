@@ -36,7 +36,7 @@ The engine now parses all six language families with true ASTs: TS/JS via `@babe
 
 Tune and verify parser backends with `graphflow doctor parsers` (`--strict` fails when true AST is unavailable) and, from a source checkout, `npm run verify:parsers`. Call-target resolution is backed by a self-written semantic index (no extra runtime deps); the optional TypeScript compiler API and LSP providers activate only when present in your environment. DSH users can alternatively install the configuration-only `@roarpeng/graphflow-dsh` bundle via `plugin_manager install_bundle` — use the bundle or the CLI installer, not both.
 
-The npm package also ships a local task reflector: `graphflow task record "<instruction>" --step "<cmd>"` / `graphflow task list|show|run`, `graphflow reflect "<instruction>"`, and MCP `gf_macro` actions `task-list` / `task-run` / `task-record`. Recording is explicit; later identical/near-match instructions replay the recorded shell steps locally with no LLM/network call (steps run with your privileges).
+The npm package also ships a local task reflector: explicit `graphflow task record "<instruction>" --step "<cmd>"` / `graphflow task list|show|run`, `graphflow reflect "<instruction>"`, or external-log auto-harvest — a writer appends to `.graphflow/instruction-log.jsonl` with `graphflow task log "<instruction>" --step "<cmd>"`, then `graphflow task harvest [--log <path>]` promotes repeated instructions (incremental byte-offset state). MCP equivalents are `gf_macro` actions `task-list` / `task-run` / `task-record` / `task-harvest`. Replay runs the recorded shell steps locally with no LLM/network call (steps run with your privileges); auto-harvest still needs an external writer — there is no host hook or daemon.
 
 ## 中文
 
@@ -71,4 +71,4 @@ code --install-extension graphflow-<version>.vsix
 
 解析器后端可用 `graphflow doctor parsers` 检查（`--strict` 在真 AST 不可用时失败），源码检出下可用 `npm run verify:parsers` 验证。调用目标解析由自研语义索引支撑（不新增运行时依赖）；可选 TypeScript Compiler API 与 LSP 提供者仅在你的环境中存在时启用。DSH 用户也可改用纯配置的 `@roarpeng/graphflow-dsh` bundle（`plugin_manager install_bundle` 安装）—— 配置包与 CLI 安装器二选一。
 
-npm 包还提供本地任务反射器：`graphflow task record "<instruction>" --step "<cmd>"` / `graphflow task list|show|run`、`graphflow reflect "<instruction>"`，以及 MCP `gf_macro` 的 `task-list` / `task-run` / `task-record` 动作。记录是显式的；之后相同/近似匹配的指令会在本地重放已记录的 shell 步骤，无需 LLM/网络（步骤以你的权限执行）。
+npm 包还提供本地任务反射器：显式 `graphflow task record "<instruction>" --step "<cmd>"` / `graphflow task list|show|run`、`graphflow reflect "<instruction>"`，或外部日志自动收割 —— 由外部写入者用 `graphflow task log "<instruction>" --step "<cmd>"` 追加到 `.graphflow/instruction-log.jsonl`，再执行 `graphflow task harvest [--log <path>]` 提升重复指令（按字节偏移增量处理）。MCP 等价动作为 `gf_macro` 的 `task-list` / `task-run` / `task-record` / `task-harvest`。重放会在本地执行已记录的 shell 步骤，无需 LLM/网络（步骤以你的权限执行）；自动收割仍需外部写入者 —— 没有宿主钩子或守护进程。

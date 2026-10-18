@@ -273,6 +273,28 @@ export function getWorkspaceAstIndex(rootDir: string): WorkspaceAstIndex {
   return idx;
 }
 
+/**
+ * Extracts only the documentation comment block that belongs to a symbol: the contiguous
+ * JSDoc / line-comment / decorator lines immediately above the declaration.
+ *
+ * Ranking must never use a fixed ±N-line window here: in packed files such a window reaches into
+ * neighbouring symbols' docstrings, so several symbols receive identical CJK doc scores and the
+ * decision silently falls back to English-name token counts / file order (breaking EN vs ZH
+ * recall parity). Stopping at the first blank or code line keeps each symbol's doc isolated.
+ */
+function extractOwnDocComment(lines: string[], oneBasedSymbolLine: number): string {
+  const collected: string[] = [];
+  let index = oneBasedSymbolLine - 2; // 0-based index of the line directly above the declaration
+  while (index >= 0 && collected.length < 24) {
+    const trimmed = (lines[index] ?? "").trim();
+    if (!trimmed) break;
+    if (!/^(?:\/\/|\/\*|\*|#|@|"""|''')/.test(trimmed)) break;
+    collected.unshift(trimmed);
+    index -= 1;
+  }
+  return collected.join("\n");
+}
+
 export function formatNumberedLines(lines: string[], startLine: number, endLine: number): string {
   const s = Math.max(1, startLine);
   const e = Math.min(lines.length, endLine);
@@ -691,50 +713,86 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
         const symWordSet = new Set(symTokenized.words);
         const symStemSet = new Set(symTokenized.stems);
 
+        // Exact identifier match. Substring hits are capped so long identifiers cannot collect
+        // arbitrary numbers of expanded bilingual query tokens.
         if (exactLower.has(symLower)) {
           score += 50;
         } else {
+          let exactContainsHits = 0;
           for (const id of exactLower) {
-            if (symLower.includes(id)) score += 20;
+            if (exactContainsHits >= 2) break;
+            if (symLower.includes(id)) {
+              score += 20;
+              exactContainsHits += 1;
+            }
           }
         }
 
+        // English identifier-token matches. Capped per field so a Chinese query (whose plan
+        // carries many synonym-expanded English tokens) cannot inflate an ASCII identifier purely
+        // by name-token volume; the residual signal still comes from its own CJK docstring.
+        let nameWordHits = 0;
+        let signatureWordHits = 0;
         for (const tok of queryWords) {
-          if (symLower === tok || symWordSet.has(tok)) score += 15;
-          else if (symLower.includes(tok)) score += tok.length >= 5 ? 14 : 6;
-          else if (sigLower.includes(tok)) score += 2;
-        }
-
-        // Morphological stem match (e.g. query "canceling expiring orders" -> stems ["cancel", "expir", "order"] matches cancelExpiredOrder)
-        for (const st of queryStems) {
-          if (symStemSet.has(st)) score += 10;
-          else if (st.length >= 4 && symTokenized.stems.some((ss) => isFuzzyTokenMatch(st, ss))) {
-            score += 8;
+          if ((symLower === tok || symWordSet.has(tok)) && nameWordHits < 4) {
+            score += 15;
+            nameWordHits += 1;
+          } else if (symLower.includes(tok) && nameWordHits < 4) {
+            score += tok.length >= 5 ? 14 : 6;
+            nameWordHits += 1;
+          } else if (sigLower.includes(tok) && signatureWordHits < 3) {
+            score += 2;
+            signatureWordHits += 1;
           }
         }
 
-        // Segmented Chinese word & phrase match across symbol name, JSDoc/docstring window, and symbol body
+        // Morphological stem match (e.g. query "canceling expiring orders" -> stems ["cancel",
+        // "expir", "order"] matches cancelExpiredOrder). Capped to keep fields comparable.
+        let stemHits = 0;
+        for (const st of queryStems) {
+          if (stemHits >= 3) break;
+          if (symStemSet.has(st)) {
+            score += 10;
+            stemHits += 1;
+          } else if (st.length >= 4 && symTokenized.stems.some((ss) => isFuzzyTokenMatch(st, ss))) {
+            score += 8;
+            stemHits += 1;
+          }
+        }
+
+        // Segmented Chinese word & phrase match using ONLY this symbol's own leading doc comment
+        // plus its own body (never a fixed ±7-line window that bleeds across adjacent symbols).
         if (cjkWords.length > 0 || cjkPhrases.length > 0) {
-          const docStart = Math.max(0, sym.line - 7);
-          const docWindow = fileLines
-            .slice(docStart, Math.min(fileLines.length, sym.line + 4))
-            .join("\n");
+          const docWindow = extractOwnDocComment(fileLines, sym.line);
           const bodyWindow = fileLines
             .slice(Math.max(0, sym.line - 1), Math.min(fileLines.length, sym.endLine))
             .join("\n");
+          // Longer doc blocks are slightly discounted so documentation volume alone cannot
+          // dominate a precise name/doc match.
+          const docLengthNorm = 1 + Math.min(0.5, docWindow.length / 2400);
 
+          let phraseHits = 0;
           for (const phrase of cjkPhrases) {
+            if (phraseHits >= 1) break;
             if (docWindow.includes(phrase) || bodyWindow.includes(phrase)) {
               score += 20;
+              phraseHits += 1;
             }
           }
+
+          let cjkNameHits = 0;
+          let cjkDocHits = 0;
+          let cjkBodyHits = 0;
           for (const cjk of cjkWords) {
-            if (sym.name.includes(cjk)) {
+            if (cjkNameHits < 2 && sym.name.includes(cjk)) {
               score += 25;
-            } else if (docWindow.includes(cjk)) {
-              score += 12;
-            } else if (bodyWindow.includes(cjk)) {
+              cjkNameHits += 1;
+            } else if (cjkDocHits < 4 && docWindow.includes(cjk)) {
+              score += Math.round(12 / docLengthNorm);
+              cjkDocHits += 1;
+            } else if (cjkBodyHits < 3 && bodyWindow.includes(cjk)) {
               score += 6;
+              cjkBodyHits += 1;
             }
           }
         }

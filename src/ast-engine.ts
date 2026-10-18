@@ -2305,6 +2305,7 @@ export function parseRust(relPath: string, content: string): FileAstAnalysis {
   const syntaxErrors = checkBraceBalanceSyntax(lines, "//");
 
   const activeImplStack: Array<{ targetType: string; endLine: number }> = [];
+  const activeTraitStack: Array<{ traitName: string; endLine: number }> = [];
 
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i] ?? "";
@@ -2313,6 +2314,9 @@ export function parseRust(relPath: string, content: string): FileAstAnalysis {
 
     while (activeImplStack.length > 0 && i + 1 > activeImplStack[activeImplStack.length - 1]!.endLine) {
       activeImplStack.pop();
+    }
+    while (activeTraitStack.length > 0 && i + 1 > activeTraitStack[activeTraitStack.length - 1]!.endLine) {
+      activeTraitStack.pop();
     }
 
     // `use crate::types::{BudgetPolicy, PolicyMode};` or `use super::resolver::resolve_budget;`
@@ -2369,18 +2373,20 @@ export function parseRust(relPath: string, content: string): FileAstAnalysis {
         (p) => !/^(&\s*(mut\s+)?)?self\b/.test(p) && !/^mut\s+self\b/.test(p)
       );
       const enclosingImpl = activeImplStack[activeImplStack.length - 1]?.targetType;
+      const enclosingTrait = activeTraitStack[activeTraitStack.length - 1]?.traitName;
+      const parentClass = enclosingImpl ?? enclosingTrait;
 
       symbols.push({
         name,
-        kind: enclosingImpl ? "method" : "function",
-        exported: exported || Boolean(enclosingImpl),
+        kind: parentClass ? "method" : "function",
+        exported: exported || Boolean(parentClass),
         line: i + 1,
         endLine,
         ...(bodyStartLine ? { bodyStartLine } : {}),
         signature: cleanSignatureHeader(lines, i + 1, bodyStartLine ?? endLine),
         paramsCount: filteredParams.length,
         referencedTypes: extractPascalCaseTypes(rawBlock, name),
-        ...(enclosingImpl ? { parentClass: enclosingImpl } : {}),
+        ...(parentClass ? { parentClass } : {}),
       });
       continue;
     }
@@ -2409,6 +2415,9 @@ export function parseRust(relPath: string, content: string): FileAstAnalysis {
         referencedTypes: extractPascalCaseTypes(rawBlock, name),
         ...(rsFields.length > 0 ? { fields: rsFields } : {}),
       });
+      if (kw === "trait") {
+        activeTraitStack.push({ traitName: name, endLine });
+      }
     }
   }
 
@@ -2585,21 +2594,21 @@ export function parseCSharp(relPath: string, content: string): FileAstAnalysis {
       continue;
     }
 
-    // C# class / interface / struct / record / enum
+    // C# class / interface / struct / record / record class / record struct / enum
     const typeMatch = raw.match(
-      /^(\s*)(?:(?:public|internal|private|protected|abstract|sealed|static|partial)\s+)*(class|interface|struct|record|enum)\s+([A-Z][a-zA-Z0-9_]*)/
+      /^(\s*)(?:(?:public|internal|private|protected|abstract|sealed|static|partial)\s+)*(record\s+struct|record\s+class|class|interface|struct|record|enum)\s+([A-Z][a-zA-Z0-9_]*)/
     );
     if (typeMatch) {
-      const kw = typeMatch[2]!;
+      const kw = typeMatch[2]!.replace(/\s+/g, " ");
       const name = typeMatch[3]!;
       const { endLine, bodyStartLine } = findBraceSpan(lines, i);
       const rawBlock = lines.slice(i, endLine).join("\n");
       const kind: SymbolKind =
         kw === "enum"
           ? "enum"
-          : kw === "struct"
+          : kw === "struct" || kw === "record struct"
             ? "struct"
-            : kw === "interface" || kw === "record"
+            : kw === "interface"
               ? "interface"
               : "class";
       const csFields = extractStructFields(rawBlock, ".cs");
@@ -2614,7 +2623,7 @@ export function parseCSharp(relPath: string, content: string): FileAstAnalysis {
         referencedTypes: extractPascalCaseTypes(rawBlock, name),
         ...(csFields.length > 0 ? { fields: csFields } : {}),
       });
-      if (kw === "class" || kw === "struct" || kw === "record") {
+      if (kw === "class" || kw === "struct" || kw === "record" || kw === "record class" || kw === "record struct") {
         activeClassStack.push({ name, endLine });
       }
       continue;

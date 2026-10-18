@@ -1,5 +1,5 @@
 /**
- * GraphFlow 3.6.0 — Pure Token-First Surgical Engine Public Entrypoint (`src/index.ts`)
+ * GraphFlow 3.6.1 — Pure Token-First Surgical Engine Public Entrypoint (`src/index.ts`)
  */
 
 export {
@@ -247,13 +247,19 @@ export {
 
 export {
   TASK_NEAR_MATCH_THRESHOLD,
+  TASK_LOG_REL_PATH,
   TASK_PROMOTION_USES,
   TASK_SCRIPT_DIR,
   TASK_STORE_VERSION,
+  appendInstructionLogEntry,
   compileTask,
   findTask,
+  formatHarvestReport,
   formatTaskDetails,
   formatTaskSummary,
+  harvestInstructionLog,
+  harvestTaskInstruction,
+  instructionLogFilePath,
   jaccardSimilarity,
   listTasks,
   loadTasks,
@@ -264,7 +270,12 @@ export {
   taskScriptFilePath,
   taskStoreFilePath,
   tokenizeInstruction,
+  type AppendInstructionLogOptions,
   type FindTaskOptions,
+  type HarvestInstructionLogOptions,
+  type HarvestReport,
+  type HarvestTaskResult,
+  type InstructionLogEntry,
   type RecordTaskOptions,
   type ReflectedTask,
   type RunTaskResult,

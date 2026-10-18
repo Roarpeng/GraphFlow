@@ -15,12 +15,18 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+  TASK_LOG_REL_PATH,
   TASK_NEAR_MATCH_THRESHOLD,
   TASK_PROMOTION_USES,
+  appendInstructionLogEntry,
   compileTask,
   findTask,
+  formatHarvestReport,
   formatTaskDetails,
   formatTaskSummary,
+  harvestInstructionLog,
+  harvestTaskInstruction,
+  instructionLogFilePath,
   jaccardSimilarity,
   listTasks,
   loadTasks,
@@ -429,10 +435,207 @@ function testMcpIntegration(): void {
     const macro = V3_TOOL_DEFINITIONS.find((tool) => tool.name === "gf_macro");
     assert(macro, "gf_macro definition present");
     const actions = (macro!.inputSchema.properties.action as { enum?: string[] }).enum ?? [];
-    for (const expected of ["task-list", "task-run", "task-record"]) {
+    for (const expected of ["task-list", "task-run", "task-record", "task-harvest"]) {
       assert(actions.includes(expected), `action enum must include ${expected}`);
     }
     assert("instruction" in macro!.inputSchema.properties, "instruction input property present");
+  });
+}
+
+function testAutoHarvest(): void {
+  function logLine(instruction: string, steps: string[] = [markerStep()]): string {
+    return JSON.stringify({ instruction, steps, at: new Date().toISOString() });
+  }
+
+  check("harvest promotes repeated normalized JSONL log entries and is incremental", () => {
+    const root = makeRoot();
+    const instruction = "Harvest the repeated marker instruction";
+    writeFile(
+      root,
+      TASK_LOG_REL_PATH,
+      [
+        logLine(instruction, [markerStep("harvest-marker.txt")]),
+        logLine("  harvest THE repeated marker instruction! ", [markerStep("harvest-marker.txt")]),
+      ].join("\n") + "\n"
+    );
+    const report = harvestInstructionLog(root);
+    assertEqual(report.logPath, TASK_LOG_REL_PATH, "workspace-relative log path");
+    assertEqual(report.entriesRead, 2, "complete log entries read");
+    assertEqual(report.entriesInvalid, 0, "no invalid entries");
+    assertEqual(report.usesRecorded, 2, "both normalized entries recorded");
+    assertEqual(report.tasksPromoted.length, 1, "repeated instruction promoted");
+    const tasks = loadTasks(root);
+    assertEqual(tasks.length, 1, "one reflected task");
+    assert(tasks[0]!.scriptPath?.startsWith(".graphflow/tasks/"), `script: ${tasks[0]!.scriptPath}`);
+    const rerun = harvestInstructionLog(root);
+    assertEqual(rerun.usesRecorded, 0, "incremental harvest must not double count");
+    assertEqual(loadTasks(root)[0]!.count, 2, "count unchanged on re-harvest");
+    const run = runTask(root, instruction);
+    assertEqual(run.hit, true, `hit: ${run.text}`);
+    assertEqual(run.exitCode, 0, `exit: ${run.text}`);
+    assert(existsSync(join(root, "harvest-marker.txt")), "harvested runner executed its step");
+    const script = readFileSync(join(root, tasks[0]!.scriptPath!), "utf8");
+    assert(script.includes("spawnSync"), "runner uses spawnSync");
+    assert(!script.includes("fetch(") && !script.includes("node:http"), "runner stays local-only");
+  });
+
+  check("harvestTaskInstruction appends + harvests incrementally and promotes on the 2nd use", () => {
+    const root = makeRoot();
+    const instruction = "Auto harvest this instruction";
+    const first = harvestTaskInstruction(root, instruction, [markerStep("auto-marker.txt")]);
+    assert(first.record, "first harvest returns the recorded task");
+    assertEqual(first.report.entriesRead, 1, "one new line");
+    assertEqual(first.report.usesRecorded, 1, "one use");
+    assertEqual(first.report.tasksPromoted.length, 0, "not promoted on first use");
+    assertEqual(first.record!.count, 1, "count 1");
+    assertEqual(first.record!.scriptPath, undefined, "not compiled yet");
+    const second = harvestTaskInstruction(root, "AUTO harvest this instruction.", [
+      markerStep("auto-marker.txt"),
+    ]);
+    assertEqual(second.report.entriesRead, 1, "only the appended line is harvested");
+    assertEqual(second.report.usesRecorded, 1, "second use recorded");
+    assertEqual(second.report.tasksPromoted.length, 1, "promoted on the second normalized use");
+    assertEqual(second.record!.count, 2, "count 2");
+    assert(second.record!.scriptPath?.startsWith(".graphflow/tasks/"), "compiled runner");
+    const summary = formatHarvestReport(second.report, second.record);
+    assert(summary.includes("PASS [task-harvest]"), `summary: ${summary}`);
+    assert(summary.includes("compiled="), `summary compile state: ${summary}`);
+    const third = harvestInstructionLog(root);
+    assertEqual(third.usesRecorded, 0, "no further uses without new lines");
+    assertEqual(loadTasks(root)[0]!.count, 2, "count stays 2");
+    const lines = readFileSync(join(root, TASK_LOG_REL_PATH), "utf8").trim().split("\n");
+    assertEqual(lines.length, 2, "both uses appended to the JSONL log");
+  });
+
+  check("malformed log lines are skipped and incomplete trailing lines wait for a newline", () => {
+    const root = makeRoot();
+    const valid = logLine("Malformed line tolerant task", [markerStep("tolerant.txt")]);
+    const invalidEmpty = JSON.stringify({ instruction: "", steps: [] });
+    const incomplete = logLine("Incomplete trailing instruction", [markerStep("incomplete.txt")]);
+    const body = `${[valid, "not json at all", invalidEmpty].join("\n")}\n${incomplete}`;
+    writeFile(root, TASK_LOG_REL_PATH, body);
+    const report = harvestInstructionLog(root);
+    assertEqual(report.entriesRead, 3, "only complete lines are read");
+    assertEqual(report.entriesInvalid, 2, "garbage + empty instruction skipped");
+    assertEqual(report.usesRecorded, 1, "one valid entry recorded");
+    assertEqual(loadTasks(root).length, 1, "one task from valid line");
+    const stillPartial = harvestInstructionLog(root);
+    assertEqual(stillPartial.entriesRead, 0, "unterminated trailing line is not consumed");
+    writeFile(root, TASK_LOG_REL_PATH, `${body}\n`);
+    const completed = harvestInstructionLog(root);
+    assertEqual(completed.entriesRead, 1, "completed trailing line is harvested");
+    assertEqual(completed.usesRecorded, 1, "trailing instruction recorded once");
+    assertEqual(loadTasks(root).length, 2, "two tasks after completing the partial line");
+  });
+
+  check("instruction log paths cannot escape the workspace (custom in-workspace log works)", () => {
+    const root = makeRoot();
+    assertThrows(() => instructionLogFilePath(root, "../outside.jsonl"), "relative escape rejected");
+    assertThrows(
+      () => harvestInstructionLog(root, { logPath: "../../escape.jsonl" }),
+      "harvest escape rejected"
+    );
+    assertThrows(
+      () =>
+        appendInstructionLogEntry(root, "Path safety log instruction", [markerStep()], {
+          logPath: join(root, "..", "outside-log.jsonl"),
+        }),
+      "absolute outside log rejected"
+    );
+    assertThrows(
+      () =>
+        harvestTaskInstruction(root, "Path safety harvest instruction", [markerStep()], {
+          logPath: join(root, "..", "outside-harvest.jsonl"),
+        }),
+      "harvestTaskInstruction escape rejected"
+    );
+    assert(!existsSync(join(root, "..", "outside-log.jsonl")), "no outside log file created");
+    const relLog = "custom/instruction-log.jsonl";
+    appendInstructionLogEntry(root, "Custom log path instruction", [markerStep("custom-marker.txt")], {
+      logPath: relLog,
+    });
+    appendInstructionLogEntry(root, "Custom log path instruction", [markerStep("custom-marker.txt")], {
+      logPath: relLog,
+    });
+    const report = harvestInstructionLog(root, { logPath: relLog });
+    assertEqual(report.logPath, relLog, "custom workspace-relative log path");
+    assertEqual(report.tasksPromoted.length, 1, "custom log promoted");
+    assert(existsSync(join(root, "custom", "instruction-log.jsonl")), "custom log written in workspace");
+    assert(existsSync(join(root, ".graphflow", "task-harvest.json")), "harvest state inside .graphflow");
+    const run = runTask(root, "Custom log path instruction");
+    assertEqual(run.hit, true, `custom log run: ${run.text}`);
+    assert(existsSync(join(root, "custom-marker.txt")), "custom-log task executed locally");
+  });
+
+  check("CLI task log + task harvest round-trips into a local runner", () => {
+    const root = makeRoot();
+    const instruction = "CLI harvested instruction";
+    const marker = "cli-harvest-marker.txt";
+    for (let i = 0; i < 2; i += 1) {
+      const logged = runCli(root, ["task", "log", instruction, "--step", markerStep(marker)]);
+      assertEqual(logged.status, 0, `log #${i + 1} stderr=${logged.stderr}`);
+      assert((logged.stdout ?? "").includes("OK [instruction-logged]"), `log stdout=${logged.stdout}`);
+    }
+    const harvested = runCli(root, ["task", "harvest", "--json"]);
+    assertEqual(harvested.status, 0, `harvest stderr=${harvested.stderr}`);
+    const report = JSON.parse((harvested.stdout ?? "").trim()) as {
+      entriesRead: number;
+      usesRecorded: number;
+      tasksPromoted: string[];
+    };
+    assertEqual(report.entriesRead, 2, "CLI harvest entries");
+    assertEqual(report.usesRecorded, 2, "CLI harvest uses");
+    assertEqual(report.tasksPromoted.length, 1, "CLI harvest promoted");
+    const listed = runCli(root, ["task", "list", "--json"]);
+    assertEqual(listed.status, 0, `list stderr=${listed.stderr}`);
+    const tasks = (JSON.parse((listed.stdout ?? "").trim()) as {
+      tasks: Array<{ scriptPath?: string }>;
+    }).tasks;
+    assert(tasks[0]?.scriptPath?.startsWith(".graphflow/tasks/"), `listed script: ${tasks[0]?.scriptPath}`);
+    const reflected = runCli(root, ["reflect", instruction]);
+    assertEqual(reflected.status, 0, `reflect stderr=${reflected.stderr}`);
+    assert(existsSync(join(root, marker)), "CLI-harvested runner executed its step");
+  });
+
+  check("gf_macro action task-harvest promotes from the log and keeps the 4-tool wire budget", () => {
+    const root = makeRoot();
+    const instruction = "MCP harvested instruction";
+    const marker = "mcp-harvest-marker.txt";
+    appendInstructionLogEntry(root, instruction, [markerStep(marker)]);
+    appendInstructionLogEntry(root, instruction, [markerStep(marker)]);
+    const harvestText = executeV3ToolCall("gf_macro", { action: "task-harvest", rootDir: root })
+      .content[0]?.text ?? "";
+    assert(harvestText.includes("PASS [task-harvest]"), `task-harvest text: ${harvestText}`);
+    assert(!harvestText.includes("promoted=none"), `expected a promoted task: ${harvestText}`);
+    const runText = executeV3ToolCall("gf_macro", { action: "task-run", instruction, rootDir: root })
+      .content[0]?.text ?? "";
+    assert(runText.includes("# Reflected Task"), `task-run text: ${runText}`);
+    assert(existsSync(join(root, marker)), "MCP-harvested task executed its step");
+
+    // MCP auto-append path: instruction + steps are logged and harvested together.
+    const root2 = makeRoot();
+    const appendInstruction = "MCP appended harvest instruction";
+    const first = executeV3ToolCall("gf_macro", {
+      action: "task-harvest",
+      instruction: appendInstruction,
+      steps: [markerStep("mcp-append-marker.txt")],
+      rootDir: root2,
+    }).content[0]?.text ?? "";
+    assert(first.includes("uses=1") && first.includes("not-compiled-yet"), `first append harvest: ${first}`);
+    const second = executeV3ToolCall("gf_macro", {
+      action: "task-harvest",
+      instruction: `  ${appendInstruction.toLowerCase()}!`,
+      steps: [markerStep("mcp-append-marker.txt")],
+      rootDir: root2,
+    }).content[0]?.text ?? "";
+    assert(second.includes("uses=2") && second.includes("compiled="), `second append harvest: ${second}`);
+
+    assertEqual(V3_TOOL_DEFINITIONS.length, 4, "4 tools");
+    const wireChars = JSON.stringify(V3_TOOL_DEFINITIONS).length;
+    assert(wireChars < 1840, `wire chars ${wireChars} (${wireChars / 4} tokens) must stay <460 tokens`);
+    const macro = V3_TOOL_DEFINITIONS.find((tool) => tool.name === "gf_macro");
+    const actions = (macro!.inputSchema.properties.action as { enum?: string[] }).enum ?? [];
+    assert(actions.includes("task-harvest"), "action enum includes task-harvest");
   });
 }
 
@@ -445,6 +648,7 @@ function main(): void {
     testRepeatedRecordIdempotency();
     testCliIntegration();
     testMcpIntegration();
+    testAutoHarvest();
   } finally {
     for (const root of createdRoots) {
       rmSync(root, { recursive: true, force: true });
