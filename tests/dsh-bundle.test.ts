@@ -17,9 +17,18 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { extname, join, resolve } from "node:path";
 
 const repoRoot = resolve(__dirname, "..");
 const bundleDir = join(repoRoot, "packages", "graphflow-dsh");
@@ -74,6 +83,57 @@ function copyBundleToTemp(): TempBundleCopy {
 
 function failNames(result: { checks: Array<{ name: string; ok: boolean }> }): string[] {
   return result.checks.filter((item) => !item.ok).map((item) => item.name);
+}
+
+/**
+ * Replace once while failing loudly when nothing changed. A silent no-op is how
+ * line-ending drift (LF checkout here vs CRLF on Windows CI) turns a tamper
+ * test into a false positive.
+ */
+function replaceOnce(content: string, search: string | RegExp, replacement: string, label: string): string {
+  const next = content.replace(search, replacement);
+  assert.notEqual(next, content, `${label}: tamper replacement was a no-op (line-ending drift?)`);
+  return next;
+}
+
+/** Regex that removes one complete YAML line regardless of CRLF/LF endings. */
+const YAML_LINE_PATTERN = (key: string): RegExp =>
+  new RegExp(`^[ \\t]*${key}:[^\\r\\n]*(?:\\r?\\n)?`, "m");
+
+const TEXT_FILE_EXTENSIONS = new Set([".json", ".yml", ".yaml", ".md", ".svg", ".txt"]);
+
+/**
+ * Normalize every text file in a copied bundle to CRLF, reproducing the
+ * `core.autocrlf=true` Windows CI checkout. Returns the number of files whose
+ * bytes changed (0 when the source worktree is already CRLF).
+ */
+function convertTextFilesToCrlf(rootDir: string): number {
+  let converted = 0;
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath);
+        continue;
+      }
+      if (!TEXT_FILE_EXTENSIONS.has(extname(entry.name).toLowerCase())) continue;
+      const content = readFileSync(fullPath, "utf8");
+      const crlf = content.replace(/\r?\n/g, "\r\n");
+      if (crlf !== content) {
+        writeFileSync(fullPath, crlf, "utf8");
+        converted += 1;
+      }
+    }
+  };
+  walk(rootDir);
+  return converted;
+}
+
+/** Assert a file really has CRLF line endings and no bare LF line break. */
+function assertCrlf(filePath: string): void {
+  const content = readFileSync(filePath, "utf8");
+  assert.ok(content.includes("\r\n"), `${filePath} must contain CRLF line endings`);
+  assert.ok(!/(^|[^\r])\n/.test(content), `${filePath} must not contain bare LF line breaks`);
 }
 
 async function run(): Promise<void> {
@@ -272,8 +332,11 @@ async function run(): Promise<void> {
 
   // -------------------------------------------------------------------------
   // 10. Tampered copies are rejected with specific failed checks.
+  //     Every tamper runs against an LF copy and a CRLF copy (the Windows CI
+  //     `core.autocrlf=true` checkout shape) so line-ending drift can never
+  //     turn a tamper into a silent no-op again.
   // -------------------------------------------------------------------------
-  check("validation rejects version drift, broken patch, missing skill, false matrix, dependencies", () => {
+  check("validation rejects tampered LF and CRLF copies with specific failed checks", () => {
     const cases: Array<{ label: string; expectedCheck: string; tamper: (dir: string) => void }> = [
       {
         label: "version mismatch",
@@ -289,7 +352,13 @@ async function run(): Promise<void> {
         expectedCheck: "patch-server-name",
         tamper: (dir) => {
           const patchPath = join(dir, "cordis.patch.yml");
-          writeFileSync(patchPath, readFileSync(patchPath, "utf8").replace("        serverName: graphflow\n", ""), "utf8");
+          const stripped = replaceOnce(
+            readFileSync(patchPath, "utf8"),
+            YAML_LINE_PATTERN("serverName"),
+            "",
+            "remove serverName from cordis.patch.yml"
+          );
+          writeFileSync(patchPath, stripped, "utf8");
         },
       },
       {
@@ -304,7 +373,12 @@ async function run(): Promise<void> {
           const readmePath = join(dir, "README.md");
           writeFileSync(
             readmePath,
-            readFileSync(readmePath, "utf8").replace("| Host hooks | ❌ |", "| Host hooks | ✅ |"),
+            replaceOnce(
+              readFileSync(readmePath, "utf8"),
+              "| Host hooks | ❌ |",
+              "| Host hooks | ✅ |",
+              "flip the Host hooks matrix row"
+            ),
             "utf8"
           );
         },
@@ -329,19 +403,74 @@ async function run(): Promise<void> {
       },
     ];
 
-    for (const testCase of cases) {
-      const copy = copyBundleToTemp();
-      try {
-        testCase.tamper(copy.dir);
-        const result = validateBundle(copy.dir, { repoRoot });
-        assert.equal(result.ok, false, `${testCase.label} must fail validation`);
-        assert.ok(
-          failNames(result).includes(testCase.expectedCheck),
-          `${testCase.label}: expected failed check ${testCase.expectedCheck}, got ${failNames(result).join(", ")}`
-        );
-      } finally {
-        rmSync(copy.root, { recursive: true, force: true });
+    // "as-checked-out" is LF on Linux/macOS and CRLF on Windows CI; the forced
+    // CRLF run guarantees the CRLF path is exercised on every platform.
+    for (const eol of ["as-checked-out", "forced-crlf"] as const) {
+      for (const testCase of cases) {
+        const copy = copyBundleToTemp();
+        try {
+          if (eol === "forced-crlf") {
+            convertTextFilesToCrlf(copy.dir);
+            assertCrlf(join(copy.dir, "cordis.patch.yml"));
+            assertCrlf(join(copy.dir, "README.md"));
+            const baseline = validateBundle(copy.dir, { repoRoot });
+            assert.equal(baseline.ok, true, `CRLF copy must validate before tampering: ${formatValidation(baseline)}`);
+          }
+          testCase.tamper(copy.dir);
+          const result = validateBundle(copy.dir, { repoRoot });
+          assert.equal(result.ok, false, `${eol} ${testCase.label} must fail validation`);
+          assert.ok(
+            failNames(result).includes(testCase.expectedCheck),
+            `${eol} ${testCase.label}: expected failed check ${testCase.expectedCheck}, got ${failNames(result).join(", ")}`
+          );
+        } finally {
+          rmSync(copy.root, { recursive: true, force: true });
+        }
       }
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // 10b. CRLF audit: the validator and --stage keep working on a CRLF
+  //      checkout, and the tamper helper removes the line on CRLF too.
+  // -------------------------------------------------------------------------
+  check("validator and staging stay CRLF-safe (Windows CI parity)", () => {
+    const copy = copyBundleToTemp();
+    const stageRoot = mkdtempSync(join(tmpdir(), "gf-dsh-stage-crlf-"));
+    try {
+      convertTextFilesToCrlf(copy.dir);
+      assertCrlf(join(copy.dir, "cordis.patch.yml"));
+      assertCrlf(join(copy.dir, "README.md"));
+      assertCrlf(join(copy.dir, "skills", "graphflow", "SKILL.md"));
+      const crlfValidation = validateBundle(copy.dir, { repoRoot });
+      assert.equal(crlfValidation.ok, true, formatValidation(crlfValidation));
+
+      const staged = stageBundle(join(stageRoot, "staged-crlf"), { repoRoot, bundleDir: copy.dir });
+      assert.equal(staged.validation.ok, true);
+      const stagedPatchPath = join(staged.stageDir, "cordis.patch.yml");
+      const stagedPatch = readFileSync(stagedPatchPath, "utf8");
+      assert.match(stagedPatch, /serverName:\s*graphflow\s*$/m, "staged CRLF patch is readable by the validator");
+      if (stagedPatch.includes("\r\n")) {
+        assertCrlf(stagedPatchPath);
+      }
+
+      const stripped = replaceOnce(
+        stagedPatch,
+        YAML_LINE_PATTERN("serverName"),
+        "",
+        "remove serverName from a CRLF patch"
+      );
+      assert.ok(!/serverName:\s*graphflow\s*$/m.test(stripped), "serverName line is really gone");
+      writeFileSync(stagedPatchPath, stripped, "utf8");
+      const broken = validateBundle(staged.stageDir, { repoRoot });
+      assert.equal(broken.ok, false, "tampered CRLF patch must fail validation");
+      assert.ok(
+        failNames(broken).includes("patch-server-name"),
+        `expected patch-server-name failure, got ${failNames(broken).join(", ")}`
+      );
+    } finally {
+      rmSync(copy.root, { recursive: true, force: true });
+      rmSync(stageRoot, { recursive: true, force: true });
     }
   });
 
