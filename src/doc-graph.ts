@@ -29,10 +29,12 @@ import {
   resolveReceiverType,
   resolveRelativeImportPath,
   sourceLanguageFamily,
+  type AstCallSite,
   type FileAstAnalysis,
   type SourceLanguageFamily,
 } from "./ast-engine.js";
 import { loadMacroStore } from "./macro-engine.js";
+import { getSemanticIndex, SEMANTIC_CONFIDENCE_MIN } from "./semantic-index.js";
 import type { getWorkspaceAstIndex } from "./slicer.js";
 import { segmentChinese, toPinyin, tokenizeEnglish } from "./tokenizer.js";
 
@@ -1785,6 +1787,40 @@ export function buildKnowledgeGraphData(
     return inferred;
   };
 
+  // Lazy semantic-index preference for ambiguous callees: the same class name can be declared in
+  // two C# namespaces (`Demo.One.Gadget` / `Demo.Two.Gadget`), where a name/import heuristic cannot
+  // tell which file to use. Building the index is deferred to the first ambiguous call and falls
+  // back silently to the local heuristics when the semantic index is unavailable.
+  // `GRAPHFLOW_KG_SEMANTIC=0` disables the lookup (diagnostics/perf fallback).
+  const useSemanticCalls = process.env.GRAPHFLOW_KG_SEMANTIC !== "0";
+  let semanticIndex: ReturnType<typeof getSemanticIndex> | undefined;
+  let semanticIndexUnavailable = false;
+  const trySemanticCallTarget = (
+    relFile: string,
+    call: AstCallSite
+  ): KnowledgeGraphSymbolRef | undefined => {
+    if (semanticIndexUnavailable || !useSemanticCalls) return undefined;
+    try {
+      semanticIndex ??= getSemanticIndex(index.rootDir);
+      const resolved = semanticIndex.resolveCall(relFile, call);
+      if (!resolved.targetFile || !resolved.targetSymbol) return undefined;
+      if (resolved.confidence < SEMANTIC_CONFIDENCE_MIN) return undefined;
+      const refs =
+        symbolsByFileAndName.get(`${resolved.targetFile}\u0000${resolved.targetSymbol}`) ?? [];
+      if (refs.length === 0) return undefined;
+      return (
+        (resolved.parentClass
+          ? refs.find((ref) => ref.parentClass === resolved.parentClass)
+          : undefined) ??
+        refs.find((ref) => ref.parentClass !== undefined) ??
+        refs[0]
+      );
+    } catch {
+      semanticIndexUnavailable = true;
+      return undefined;
+    }
+  };
+
   for (const { relFile, ast, content } of fileDataList) {
     const family = sourceLanguageFamily(relFile);
     const importedNames = new Set<string>();
@@ -1826,43 +1862,50 @@ export function buildKnowledgeGraphData(
         : undefined;
 
       let target: KnowledgeGraphSymbolRef | undefined;
-      if (receiverType) {
-        const typedCandidates = [...sameFileCandidates, ...crossFileCandidates].filter(
-          (candidate) =>
-            candidate.parentClass !== undefined &&
-            isCompatibleReceiver(receiverType, candidate.parentClass, call.callee)
-        );
-        if (typedCandidates.length === 0) continue;
-        target =
-          typedCandidates.find((candidate) => candidate.file === relFile) ??
-          typedCandidates.find(
-            (candidate) => candidate.parentClass && importedNames.has(candidate.parentClass)
-          ) ??
-          typedCandidates[0];
-      } else if (sameFileCandidates.length > 0) {
-        // Unknown receiver: prefer the enclosing class, else deterministic declaration order.
-        const callerParent = callerSym?.parentClass;
-        target =
-          (callerParent
-            ? sameFileCandidates.find((candidate) => candidate.parentClass === callerParent)
-            : undefined) ?? sameFileCandidates[0];
-      } else {
-        const importedMatches = crossFileCandidates.filter(
-          (candidate) =>
-            importedNames.has(candidate.name) ||
-            (candidate.parentClass ? importedNames.has(candidate.parentClass) : false)
-        );
-        if (importedMatches.length > 0) {
-          target =
-            importedMatches.find(
-              (candidate) =>
-                candidate.parentClass !== undefined &&
-                importedNames.has(candidate.parentClass)
-            ) ?? importedMatches[0];
-        } else {
-          target = crossFileCandidates.find((candidate) =>
-            inKnowledgeGraphImplicitScope(relFile, candidate.file, family)
+      // Ambiguous callee name: prefer the semantic index's namespace/import/inheritance-aware
+      // resolution (e.g. `using Demo.Two;` must select two/Gadget.cs among two same-stem files).
+      if (candidates.length > 1) {
+        target = trySemanticCallTarget(relFile, call);
+      }
+      if (!target) {
+        if (receiverType) {
+          const typedCandidates = [...sameFileCandidates, ...crossFileCandidates].filter(
+            (candidate) =>
+              candidate.parentClass !== undefined &&
+              isCompatibleReceiver(receiverType, candidate.parentClass, call.callee)
           );
+          if (typedCandidates.length === 0) continue;
+          target =
+            typedCandidates.find((candidate) => candidate.file === relFile) ??
+            typedCandidates.find(
+              (candidate) => candidate.parentClass && importedNames.has(candidate.parentClass)
+            ) ??
+            typedCandidates[0];
+        } else if (sameFileCandidates.length > 0) {
+          // Unknown receiver: prefer the enclosing class, else deterministic declaration order.
+          const callerParent = callerSym?.parentClass;
+          target =
+            (callerParent
+              ? sameFileCandidates.find((candidate) => candidate.parentClass === callerParent)
+              : undefined) ?? sameFileCandidates[0];
+        } else {
+          const importedMatches = crossFileCandidates.filter(
+            (candidate) =>
+              importedNames.has(candidate.name) ||
+              (candidate.parentClass ? importedNames.has(candidate.parentClass) : false)
+          );
+          if (importedMatches.length > 0) {
+            target =
+              importedMatches.find(
+                (candidate) =>
+                  candidate.parentClass !== undefined &&
+                  importedNames.has(candidate.parentClass)
+              ) ?? importedMatches[0];
+          } else {
+            target = crossFileCandidates.find((candidate) =>
+              inKnowledgeGraphImplicitScope(relFile, candidate.file, family)
+            );
+          }
         }
       }
 

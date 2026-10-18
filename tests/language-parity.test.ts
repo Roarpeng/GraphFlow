@@ -1,4 +1,4 @@
-﻿/**
+/**
  * GraphFlow — Six-language capability parity matrix (`tests/language-parity.test.ts`)
  *
  * Proves that Python / Go / Rust / C / C++ / C# behave as close as possible to TS/JS for:
@@ -1095,9 +1095,47 @@ function main(): void {
       ),
       "cs: KG imports edge follows using Demo.Two to the right file"
     );
-    // Residual (doc-graph, not owned by this task): KG `calls` still uses a directory/stem
-    // heuristic for ambiguous same-stem namespaces and may pick the wrong same-named type;
-    // the semantic index above resolves it correctly.
+    // KG `calls` must follow the semantic index for ambiguous same-stem namespaces: the call is
+    // attributed to the type from `using Demo.Two;`, never to the directory/stem neighbour.
+    const calls = adversarialGraph.edges
+      .filter((edge) => edge.kind === "calls")
+      .map((edge) => [edge.source, edge.target] as [string, string]);
+    assertTrue(
+      calls.some(
+        ([source, target]) =>
+          source === "sym:adv-cs/ns/three/UseThing.cs#UseThing.Run" &&
+          target === "sym:adv-cs/ns/two/Gadget.cs#Gadget.Cancel"
+      ),
+      "cs: KG calls edge targets the imported namespace's Gadget.Cancel"
+    );
+    assertTrue(
+      !calls.some(
+        ([source, target]) =>
+          source.startsWith("sym:adv-cs/ns/three/") &&
+          target === "sym:adv-cs/ns/one/Gadget.cs#Gadget.Cancel"
+      ),
+      "cs: KG calls edge never targets the same-stem namespace's Gadget"
+    );
+    assertEqual(
+      calls.filter(([, target]) => target === "sym:adv-cs/ns/two/Gadget.cs#Gadget.Cancel").length,
+      1,
+      "cs: exactly one KG calls edge to the imported namespace's Gadget.Cancel (no duplicates)"
+    );
+    const callTargets = (edges: typeof adversarialGraph.edges): string[] =>
+      edges
+        .filter((edge) => edge.kind === "calls")
+        .map((edge) => `${edge.source}->${edge.target}`)
+        .sort()
+        .join("|");
+    // Rebuild twice at the same (post-mutation) workspace state to prove determinism; comparing
+    // against the pre-mutation graph would legitimately differ because earlier tests renamed symbols.
+    const rebuiltOnce = buildKnowledgeGraphData(adversarialIndex);
+    const rebuiltTwice = buildKnowledgeGraphData(adversarialIndex);
+    assertEqual(
+      callTargets(rebuiltTwice.edges),
+      callTargets(rebuiltOnce.edges),
+      "cs: KG calls targets are deterministic across repeated builds"
+    );
   });
 
   runTest("Python adversarial: decorated class/method spans and resolution", () => {
@@ -1225,7 +1263,7 @@ function main(): void {
   console.log("    - Go same-package siblings have no file `imports` edges (package scope is not a file import; calls/blast still resolve)");
   console.log("    - Rust trait methods now dispatch to the trait target for dyn/impl receivers; renaming a trait method is rejected while impls share the name (no partial trait rename)");
   console.log("    - Rust `impl Trait for Type` is not modelled as subclassing (receiver-exact and trait-method resolution are sound; inherited-override chaining is not)");
-  console.log("    - C# record -> class / record struct -> struct; namespace->file map resolves `using` for the semantic index, but doc-graph KG `calls` still uses a dir/stem heuristic for ambiguous same-stem namespaces");
+  console.log("    - C# record -> class / record struct -> struct; namespace->file map resolves `using` for the semantic index and doc-graph KG `calls` (ambiguous same-stem namespaces now target the imported namespace's type)");
   console.log("    - C has no inheritance: parity uses function call/rename/type closure (struct field reference)");
   console.log("    - Go embedding models the first embedded type as the promoted parent (deep embedding not chained)");
   console.log("    - rename stays receiver-aware: a file mixing target and foreign same-named receiver calls is rejected");
