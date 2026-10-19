@@ -161,7 +161,71 @@ One query engine for Chinese and English code search:
 - **Homophone typo correction** — IME typos auto-corrected: `定单钞时取销 → 订单超时取消`, `回掉验千 → 回调验签`, `事物回滚 → 事务回滚`, `登陆帐号 → 登录账号`.
 - **English fuzzy matching** — camelCase/snake_case splitting (`resolveEfficiencyPolicy → resolve/efficiency/policy`), stemming, and edit-distance-1 tolerance (`cancle → cancel`, `expried → expired`).
 
+## Independent evaluation (graphflow-eval)
+
+These figures come from the fixture repository [graphflow-eval](https://github.com/Roarpeng/graphflow-eval). They are not a production trace. The [Benchmarks](#benchmarks) table below is a different measurement: `npm run bench` on this repository.
+
+**Method.** A token is `ceil(chars/4)`. On the main suite, baseline tokens are the naive whole-file size of that task's baseline files, and GraphFlow tokens are `ceil(chars/4)` of the tool stdout an agent would read, including linked spec appendices. Task rubrics are `fixtures/tasks/*.json`. The scorer is `scripts/score.mjs`.
+
+The **3.6.1** main suite is the checked-in run `results/run-3.6.1.md` (2026-10-19T00:42:20Z, binary `@roarpeng/graphflow@3.6.1`): score fail, safety gate fail, **6/10** passed, mean token savings **−0.368** (unrounded mean of the ten ratios −0.3678).
+
+The **3.6.2** main suite is a local rescore of `dist/cli.js` from the 3.6.2 tree (2026-10-19T01:52:23Z, same scorer): score fail, safety gate fail, **9/10** passed, mean token savings **+0.281** (unrounded +0.2806). `scripts/run-tasks.mjs` does not fill `edited_files` or `callers`, so that rescore used a transcriber kept outside both repositories. It records stdout, blast-radius lines, edited files, and harvest steps read back from `.graphflow/tasks.json`. `python` on `PATH` was a symlink to `python3`. Two baselines moved by a few characters because the local runner recounted file bytes: `py-super-blast` 218→222, `ts-rename-safe` 938→939.
+
+| Task | 3.6.1 result | 3.6.1 tokens | 3.6.2 result | 3.6.2 tokens |
+| :--- | :--- | :--- | :--- | :--- |
+| ts-read-symbol-slice | pass | 938→552 (+0.4115) | pass | 938→559 (+0.4041) |
+| ts-blast-disambiguate | pass | 1573→552 (+0.6491) | pass | 1573→559 (+0.6446) |
+| ts-rename-safe | fail | 938→158 (+0.8316) | **fail** | 939→66 (+0.9297) |
+| ts-zh-search | pass | 1245→5872 (−3.7165) | pass | 1245→3198 (−1.5687) |
+| ts-affected-tests | pass | 304→33 (+0.8914) | pass | 304→33 (+0.8914) |
+| py-super-blast | fail | 218→674 (−2.0917) | pass | 222→243 (−0.0946) |
+| py-task-harvest-doc | pass | 117→166 (−0.4188) | pass | 117→122 (−0.0427) |
+| go-embed-read | pass | 415→931 (−1.2434) | pass | 415→354 (+0.1470) |
+| rs-trait-dispatch | fail | 523→450 (+0.1396) | pass | 523→191 (+0.6348) |
+| cross-doc-link | fail | 237→31 (+0.8692) | pass | 237→33 (+0.8608) |
+
+A negative ratio means the tool stdout was larger than the raw files. On 3.6.2 that is still true for `ts-zh-search` (−1.5687), `py-super-blast` (−0.0946) and `py-task-harvest-doc` (−0.0427).
+
+**Why `ts-rename-safe` still fails.** The rubric's `must_edit_files` includes `packages/order-ts/__tests__/checkout.test.ts`. That file is 13 lines and has no bare identifier `cancel`. The nearby spellings are the verb "cancels", the status `"cancelled"`, and the field `cancelReason`:
+
+```ts
+it("cancels through OrderService", () => {
+  const next = buyerCancels(new OrderService(), pendingOrder());
+  expect(next.status).toBe("cancelled");
+  expect(next.cancelReason).toBe("buyer-request");
+});
+```
+
+A word-boundary rename of `cancel` → `cancelOrder` has nothing to change in this file. Rewriting `cancelReason` or "cancels" would edit a different identifier or a string, and `npm test --prefix packages/order-ts` would fail. 3.6.2 does edit `order-service.ts`, `vip-order-service.ts` (the `super.cancel` call only; the `VipOrderService.cancel` declaration stays), `checkout.ts`, and `order-service.test.ts`. `renamed_to` is `cancelOrder` and `tests_green` is true. The safety gate fails only because this safety task fails that one `must_edit_files` check. This is a fixture rubric bug: the file the rubric requires to change does not contain the symbol. On 3.6.1 the same task failed earlier and for a different reason (qualified symbol not found, then `ambiguous-symbol`, no files edited).
+
+**Reflex suite.** `results/run-3.6.1-reflex.md`, re-run against the 3.6.2 build with the same outcome: **5/5** passed, safety gate pass, mean savings **+0.664**. The token task replays a compiled runner **N=3** times. Baseline (instruction + both commands + full stdout/stderr) is **750** tokens. Reflex (one `gf_macro` `task-run` plus dehydrated text) is **252** tokens, 66% fewer. Jaccard threshold 0.86: near hit 0.875, dropped-token miss 0.8571428571428571, unrelated 0.
+
+**Chinese held-out, 80 queries** (`tests/zh-recall.test.ts` on 3.7.0). None of the phrasings are in the L0 glossary. Ranking below uses an explicit `topK` of 5.
+
+| Layer | n | P@1 | MRR | R@3 |
+| :--- | ---: | :--- | :--- | :--- |
+| L0 only | 80 | 0.000 | 0.000 | 0.000 |
+| +L1 | 80 | 0.375 | 0.375 | 0.375 |
+| +L1+L2 | 80 | 0.813 | 0.813 | 0.813 |
+
+The 30 queries taught only by commit subjects go from P@1 0.000 to 1.000 with L1. The 35 colloquial queries go from 0.000 to 1.000 with L2. The other **15/80** match no comment, commit subject, or curated colloquial entry, so their P@1 stays **0.000**. L3 was not scored as a neural model.
+
+**Adaptive topK** on those 80 queries, summing `ceil(chars/4)` of the search output: explicit `topK` 3 is **22157** tokens; omitting `topK` is **4849**. Adaptive P@1 stays **0.813**.
+
+**`ts-zh-search` on the fixture CLI.** Three `graphflow read -q` queries against the graphflow-eval tree: 3.6.2 total **3198** tokens, 3.7.0 total **1077** (`订单超时` 369, `dingdan zhifu` 191, `支付订单` 517). The whole-file baseline of the same queries is 1245. The required hits are still present. Near-ties still include `TIMEOUT_WINDOW_MS` and the `OrderService` class slice.
+
+### Limits of these numbers
+
+- A small file can still cost more tokens than reading it raw. The negative rows in the table are that case. Adaptive search reduced `ts-zh-search`; it does not make every read cheaper than the file.
+- Automatic task learning appends `.graphflow/instruction-log.jsonl` only after `graphflow install` (the PostToolUse hook) or `gf_exec` with `run: true`. `GRAPHFLOW_AUTO_LOG=0` turns it off. There is no daemon. The published 3.6.1 reflex run called `graphflow task log` itself.
+- L3 is the `registerZhEnModel` hook. It stays off unless `GRAPHFLOW_ZH_EN_MODEL=1` and a translator is registered. No translation model is bundled, and the 0.813 figure does not include one.
+- Go same-package imports are still a gap: sibling files in one package have no file-level `imports` edge.
+- A reflex hit needs Jaccard of at least 0.86. The dropped-token probe scores 0.857 and is a miss. `{{argN}}` placeholders are written by hand. Concurrent records are last-writer-wins, and the reflex run did not exercise that race.
+- Every number in this section is from a fixture (graphflow-eval, or the 80-query unit fixture). None of it is a production trace.
+
 ## Benchmarks
+
+**Self-measured on this repository**, by `npm run bench` against GraphFlow's own source. This is not the [graphflow-eval](#independent-evaluation-graphflow-eval) measurement above. The wire figure in the table is the 3.6.0 run (458 tokens). 3.6.2 and 3.7.0 measure **459** tokens (1834 chars, `ceil(chars/4)`) on a schema that did not change.
 
 | Metric | Baseline | GraphFlow 3.6.0 | Saving |
 | :--- | :--- | :--- | :--- |
@@ -175,7 +239,7 @@ One query engine for Chinese and English code search:
 
 **Schema tax detail:** the `tools/list` wire payload is 458 tokens — redundant `$schema` / `title` / `annotations` / `_meta` are stripped from the wire. The programmatic `getV3ToolDefinitions()` keeps those fields for the governance API, so the API view is larger than the wire view.
 
-**Local harness:** after `npm run build`, `npm run bench` (`scripts/benchmark.mjs`) measures MCP schema tax, skeleton/slice compression, PASS/failure dehydration, knowledge-graph build, and affected-test/blast-radius latency, then writes `benchmarks/latest.md` and `benchmarks/latest.json`. The figures above are from the final 3.6.0 benchmark run (unchanged in 3.6.1; timing/count figures are rounded and vary slightly per run); re-run it to reproduce them on your own repo.
+**Local harness (self-measured):** after `npm run build`, `npm run bench` (`scripts/benchmark.mjs`) measures MCP schema tax, skeleton/slice compression, PASS/failure dehydration, knowledge-graph build, and affected-test/blast-radius latency, then writes `benchmarks/latest.md` and `benchmarks/latest.json`. The table above is the final 3.6.0 benchmark run on this repo (unchanged in 3.6.1; timing and counts are rounded and vary slightly per run). Re-run it to reproduce the self-measured numbers. The fixture scores live in [Independent evaluation (graphflow-eval)](#independent-evaluation-graphflow-eval).
 
 ## Supported Languages
 
