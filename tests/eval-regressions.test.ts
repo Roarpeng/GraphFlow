@@ -382,6 +382,176 @@ check("doc links keep constants, skip generic buyer words, and cap a section at 
   }
 });
 
+check("rename ignores override calls, block-comment mentions, and module paths", () => {
+  const root = tempRoot("gf-rename-foreign-");
+  try {
+    writeFile(
+      root,
+      "order-service.ts",
+      [
+        "export class OrderService {",
+        "  /** `RefundService.cancel` is a different method. */",
+        "  cancel(order: string): string { return order; }",
+        "}",
+        "",
+      ].join("\n")
+    );
+    writeFile(
+      root,
+      "vip-order-service.ts",
+      [
+        "import { OrderService } from './order-service';",
+        "export class VipOrderService extends OrderService {",
+        "  override cancel(order: string): string { return super.cancel(order); }",
+        "}",
+        "",
+      ].join("\n")
+    );
+    writeFile(
+      root,
+      "refund-desk.ts",
+      [
+        "import { RefundService } from './refund-service';",
+        "/**",
+        " * Receiver type is RefundService. This call is not OrderService.cancel.",
+        " */",
+        "export function buyerWithdrawsRefund(refunds: RefundService): string {",
+        "  return refunds.cancel('x');",
+        "}",
+        "",
+      ].join("\n")
+    );
+    writeFile(
+      root,
+      "refund-service.ts",
+      "export class RefundService { cancel(order: string): string { return order; } }\n"
+    );
+    writeFile(
+      root,
+      "vip-order-service.test.ts",
+      [
+        "import { VipOrderService } from './vip-order-service';",
+        "export function vipCase(): string {",
+        "  return new VipOrderService().cancel('late');",
+        "}",
+        "",
+      ].join("\n")
+    );
+    writeFile(
+      root,
+      "billing/refund.py",
+      "class RefundPolicy:\n    def refund(self, amount: int) -> int:\n        return amount\n"
+    );
+    writeFile(
+      root,
+      "billing/__init__.py",
+      '"""Invoice, tax, and refund fixture."""\nfrom billing.refund import RefundPolicy\n'
+    );
+    writeFile(
+      root,
+      "billing/settle_full.py",
+      [
+        "from billing.refund import RefundPolicy",
+        "def settle_full(policy: RefundPolicy, amount: int) -> int:",
+        "    return policy.refund(amount)",
+        "",
+      ].join("\n")
+    );
+    writeFile(
+      root,
+      "tests/test_refund.py",
+      "from billing.refund import RefundPolicy\nfrom billing.settle_full import settle_full\n"
+    );
+    const deskBefore = readFileSync(join(root, "refund-desk.ts"), "utf8");
+    const vipTestBefore = readFileSync(join(root, "vip-order-service.test.ts"), "utf8");
+    const initBefore = readFileSync(join(root, "billing/__init__.py"), "utf8");
+    const testBefore = readFileSync(join(root, "tests/test_refund.py"), "utf8");
+
+    const ts = executeSurgicalEdit({
+      rootDir: root,
+      file: "order-service.ts",
+      symbol: "OrderService.cancel",
+      renameTo: "cancelOrder",
+    });
+    assert.equal(ts.ok, true, ts.text);
+    assert.equal(readFileSync(join(root, "refund-desk.ts"), "utf8"), deskBefore);
+    assert.equal(readFileSync(join(root, "vip-order-service.test.ts"), "utf8"), vipTestBefore);
+    assert.match(readFileSync(join(root, "order-service.ts"), "utf8"), /RefundService\.cancel/);
+    assert.match(readFileSync(join(root, "vip-order-service.ts"), "utf8"), /super\.cancelOrder\(/);
+
+    const py = executeSurgicalEdit({
+      rootDir: root,
+      file: "billing/refund.py",
+      symbol: "RefundPolicy.refund",
+      renameTo: "refundInvoice",
+    });
+    assert.equal(py.ok, true, py.text);
+    const full = readFileSync(join(root, "billing/settle_full.py"), "utf8");
+    assert.match(full, /from billing\.refund import RefundPolicy/);
+    assert.match(full, /policy\.refundInvoice\(/);
+    assert.equal(readFileSync(join(root, "billing/__init__.py"), "utf8"), initBefore);
+    assert.equal(readFileSync(join(root, "tests/test_refund.py"), "utf8"), testBefore);
+    assert.ok(!py.touchedFiles.some((file) => file.includes("test_refund")), py.text);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+check("explicit doc links survive when other docs mention the same symbols", () => {
+  const root = tempRoot("gf-doc-cap-");
+  try {
+    writeFile(
+      root,
+      "src/order-service.ts",
+      [
+        "export function handleDingDanChaoShi(order: string): string { return order; }",
+        "export const TIMEOUT_WINDOW_MS = 1;",
+        "export class OrderService {",
+        "  timeout(order: string): string { return order; }",
+        "  isExpired(order: string): boolean { return false; }",
+        "}",
+        "export function assertPending(order: string): void { return; }",
+        "",
+      ].join("\n")
+    );
+    const mention = [
+      "`handleDingDanChaoShi`",
+      "`OrderService.timeout`",
+      "`TIMEOUT_WINDOW_MS`",
+    ].join(" ");
+    writeFile(
+      root,
+      "EVAL.md",
+      ["# A", "", mention, "", "# B", "", mention, "", "# C", "", mention, ""].join("\n")
+    );
+    writeFile(
+      root,
+      "docs/订单超时.md",
+      [
+        "# 订单超时",
+        "",
+        "## 关单路径",
+        "",
+        "未支付订单由 `handleDingDanChaoShi` 调用 `OrderService.timeout`。",
+        "窗口常量是 `TIMEOUT_WINDOW_MS`。窗口内保持 pending。",
+        "",
+      ].join("\n")
+    );
+    const links = buildDocCodeLinks(getWorkspaceAstIndex(root)).filter((link) =>
+      link.docPath.endsWith("订单超时.md")
+    );
+    const names = links.map((link) => link.symbolName);
+    assert.ok(names.includes("handleDingDanChaoShi"), JSON.stringify(links));
+    assert.ok(names.includes("timeout"), JSON.stringify(links));
+    assert.ok(names.includes("TIMEOUT_WINDOW_MS"), JSON.stringify(links));
+    assert.ok(!names.includes("assertPending"), JSON.stringify(links));
+    assert.ok(!names.includes("isExpired"), JSON.stringify(links));
+    assert.ok(links.length <= 3, JSON.stringify(links));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 check("read budget trims oversized slices and can be disabled", () => {
   const root = tempRoot("gf-budget-");
   const previous = process.env.GRAPHFLOW_READ_BUDGET_RATIO;

@@ -1132,12 +1132,11 @@ export function buildDocCodeLinks(
   for (const entry of sortedExplicit) {
     const key = docLinkSortKey(entry.link);
     if (acceptedKeys.has(key)) continue;
-    // Per-section / per-symbol caps apply to the final graph, with explicit refs granted
-    // priority over concept-only candidates inside those caps.
+    // Explicit refs are authoritative: they respect the per-section cap (and the global
+    // cap applied at the end) but not the per-symbol cap. Otherwise a monorepo's own
+    // EVAL/README mentions of `OrderService.timeout` fill the three symbol slots and the
+    // section that actually defines the constant never links the method.
     if ((sectionLinkCounts.get(entry.sectionIdx) ?? 0) >= PER_SECTION_LINK_LIMIT) {
-      continue;
-    }
-    if ((symbolLinkCounts.get(entry.symbolIdx) ?? 0) >= PER_SYMBOL_LINK_LIMIT) {
       continue;
     }
     acceptedKeys.add(key);

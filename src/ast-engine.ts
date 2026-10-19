@@ -1630,6 +1630,26 @@ function parseWithBabel(relPath: string, content: string, parser: BabelParserMod
         } else if (obj?.type === "CallExpression" || obj?.type === "OptionalCallExpression") {
           // Factory chain: `getService().cancel()`.
           if (obj.callee?.type === "Identifier") receiverCall = obj.callee.name;
+        } else if (obj?.type === "NewExpression") {
+          // `new VipOrderService().cancel()` — the constructed class is the receiver.
+          let ctor = obj.callee;
+          while (
+            ctor &&
+            (ctor.type === "TSAsExpression" ||
+              ctor.type === "TSTypeAssertion" ||
+              ctor.type === "ParenthesizedExpression" ||
+              ctor.type === "TSNonNullExpression")
+          ) {
+            ctor = ctor.expression;
+          }
+          if (ctor?.type === "Identifier") receiver = ctor.name;
+          else if (
+            ctor?.type === "MemberExpression" &&
+            !ctor.computed &&
+            typeof ctor.property?.name === "string"
+          ) {
+            receiver = ctor.property.name;
+          }
         } else if (
           obj?.type === "MemberExpression" ||
           obj?.type === "OptionalMemberExpression"

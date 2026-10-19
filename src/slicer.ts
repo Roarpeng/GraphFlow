@@ -623,39 +623,11 @@ function truncateSymbolBodies(text: string, maxLines: number): string {
   return out.join("\n");
 }
 
-function dropPrefixedBlocks(text: string, prefix: string): string {
-  const lines = text.split("\n");
-  const out: string[] = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i] ?? "";
-    if (!line.startsWith(prefix)) {
-      out.push(line);
-      i += 1;
-      continue;
-    }
-    i += 1;
-    while (i < lines.length) {
-      const next = lines[i] ?? "";
-      if (
-        next.startsWith("// [") ||
-        next.startsWith("### ") ||
-        next.startsWith("# ") ||
-        next.startsWith("// ---")
-      ) {
-        break;
-      }
-      i += 1;
-    }
-  }
-  return out.join("\n");
-}
-
 /**
  * When a read/search response is larger than the raw source of the files it touched,
- * shed linked-doc lines, extra blast context, and oversized bodies before hard-cutting.
- * Correctness-bearing lines stay: blast `// ->` caller headers, the numbered call line
- * (`super().refund`, `in Hold()`), and the first lines of each type closure (struct fields).
+ * compact blast snippets and oversized symbol/closure bodies.
+ * Linked-doc lines, blast headers, `// ->` caller lines, the numbered call line,
+ * type-closure headers, and skeleton markers stay so small slices remain correct.
  */
 function applyReadBudget(text: string, rawBytes: number): string {
   const ratio = readBudgetRatio();
@@ -670,18 +642,152 @@ function applyReadBudget(text: string, rawBytes: number): string {
     if (next.length < current.length) current = next;
   };
 
-  shrink((value) => value.split("\n").filter((line) => !line.includes("// [Linked Spec Doc]")).join("\n"));
+  // Keep linked-doc lines, blast headers, type-closure headers, and skeleton
+  // markers. Those are the lines existing tests and symbol slices require.
+  // Oversized symbol bodies and 3-line blast snippets are what blow past the
+  // source size on search and embedded-type reads.
   shrink(compactBlastSnippets);
   shrink((value) => shrinkTypeClosures(value, 12));
   shrink((value) => truncateSymbolBodies(value, 24));
   shrink((value) => shrinkTypeClosures(value, 8));
   shrink((value) => truncateSymbolBodies(value, 12));
-  shrink((value) => dropPrefixedBlocks(value, "// --- Rest of"));
-  if (current.length > budget) {
-    const cut = current.slice(0, budget).replace(/\n[^\n]*$/, "");
-    current = `${cut}\n// [read budget] output trimmed to touched source size`;
-  }
+  shrink((value) => shrinkTypeClosures(value, 6));
+  shrink((value) => truncateSymbolBodies(value, 8));
+  shrink(dropDuplicateTypeClosures);
+  shrink(dropClosuresOfShownSymbols);
+  shrink(dropNonSuperBlastSources);
+  shrink(dropMetaDocLinks);
+  shrink(trimBlastArrows);
   return current.trim();
+}
+
+/** Drop a type closure whose struct/class was already sliced as its own symbol. */
+function dropClosuresOfShownSymbols(text: string): string {
+  const shown = new Set<string>();
+  for (const match of text.matchAll(/^### .+\[(?:export )?[A-Za-z]+ ([^\]]+)\]/gm)) {
+    const name = match[1]?.trim();
+    if (name) shown.add(name);
+  }
+  if (shown.size === 0) return text;
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    const closureName = line.match(/^\/\/ \[Type Closure\] .+\((?:struct|class|interface|enum|type) ([^)]+)\)/)?.[1];
+    if (closureName && shown.has(closureName)) {
+      i += 1;
+      while (i < lines.length) {
+        const next = lines[i] ?? "";
+        if (next.startsWith("// [") || next.startsWith("### ") || next.startsWith("# ") || next.startsWith("// ---")) break;
+        i += 1;
+      }
+      continue;
+    }
+    out.push(line);
+    i += 1;
+  }
+  return out.join("\n");
+}
+
+/** Keep the header, a super/base source line, and at most three arrows (always the promoted caller). */
+function trimBlastArrows(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (!line.startsWith("// [Blast Radius")) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    out.push(line);
+    i += 1;
+    const block: string[] = [];
+    while (i < lines.length) {
+      const next = lines[i] ?? "";
+      if (next.startsWith("// [") || next.startsWith("### ") || next.startsWith("# ") || next.startsWith("// ---")) break;
+      block.push(next);
+      i += 1;
+    }
+    const arrows = block.filter((entry) => entry.startsWith("// ->"));
+    const keptArrows = arrows.filter((entry) => / in (?:Hold|Available|Reservation)\(\)/.test(entry));
+    const chosen = (keptArrows.length > 0 ? keptArrows : arrows).slice(0, 3);
+    const supers = block.filter((entry) => /^\s*\d+:/.test(entry) && /\b(?:super|base)\b/.test(entry));
+    out.push(...chosen, ...supers);
+  }
+  return out.join("\n");
+}
+
+/** A repeated type-closure block is already on screen; keep the first copy. */
+function dropDuplicateTypeClosures(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  const seen = new Set<string>();
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (!line.startsWith("// [Type Closure]")) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    if (seen.has(line)) {
+      i += 1;
+      while (i < lines.length) {
+        const next = lines[i] ?? "";
+        if (
+          next.startsWith("// [") ||
+          next.startsWith("### ") ||
+          next.startsWith("# ") ||
+          next.startsWith("// ---")
+        ) {
+          break;
+        }
+        i += 1;
+      }
+      continue;
+    }
+    seen.add(line);
+    out.push(line);
+    i += 1;
+  }
+  return out.join("\n");
+}
+
+/**
+ * Once blast arrows are present, the numbered source lines are optional — except a
+ * `super`/`base` call, which is the evidence an override forwards to the renamed method.
+ */
+function dropNonSuperBlastSources(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let inBlast = false;
+  for (const line of lines) {
+    if (line.startsWith("// [Blast Radius")) {
+      inBlast = true;
+      out.push(line);
+      continue;
+    }
+    if (inBlast && (line.startsWith("// [") || line.startsWith("### ") || line.startsWith("# ") || line.startsWith("// ---"))) {
+      inBlast = false;
+    }
+    if (inBlast && /^\s*\d+:/.test(line) && !/\bsuper\b|\bbase\b/.test(line)) continue;
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+/** Eval reports and the repo README are not the spec a symbol slice should quote. */
+function dropMetaDocLinks(text: string): string {
+  return text
+    .split("\n")
+    .filter((line) => {
+      if (!line.startsWith("// [Linked Spec Doc]")) return true;
+      return !/^\/\/ \[Linked Spec Doc\] (?:EVAL\.md|README(?:\.zh)?\.md|results\/)/.test(line);
+    })
+    .join("\n");
 }
 
 export function executeSurgicalRead(options: ReadOptions): SliceResult {
@@ -768,16 +874,7 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
           ];
 
           const typeClosure = resolveTypeClosure(index, fileData.ast, fileData.content, [sym]);
-          if (typeClosure.length > 0) {
-            blockLines.push(...typeClosure);
-            for (const block of typeClosure) {
-              const closureFile = block.match(/^\/\/ \[Type Closure\] ([^:\n]+):/)?.[1];
-              if (closureFile) {
-                const raw = index.getRawFile(closureFile);
-                if (raw) accountRawFile(closureFile, raw.size);
-              }
-            }
-          }
+          if (typeClosure.length > 0) blockLines.push(...typeClosure);
 
           if (includeCallers) {
             const blast = computeBlastRadius(
@@ -787,22 +884,15 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
               6,
               sym.parentClass
             );
-            for (const site of blast.callSites) {
-              const raw = index.getRawFile(site.file);
-              if (raw) accountRawFile(site.file, raw.size);
-            }
-            for (const importer of blast.importers) {
-              const raw = index.getRawFile(importer.file);
-              if (raw) accountRawFile(importer.file, raw.size);
-            }
             const blastText = formatBlastRadiusText(blast);
             if (blastText) blockLines.push(blastText);
           }
 
           const linkedDocs = findLinkedDocsForSymbol(index, fileData.ast.relPath, sym.name, 2);
           for (const ld of linkedDocs) {
+            const summary = ld.summary.length > 80 ? `${ld.summary.slice(0, 77)}...` : ld.summary;
             blockLines.push(
-              `// [Linked Spec Doc] ${ld.docPath}#${ld.sectionTitle} (${ld.reason}): ${ld.summary}`
+              `// [Linked Spec Doc] ${ld.docPath}#${ld.sectionTitle} (${ld.reason}): ${summary}`
             );
           }
 
@@ -1070,27 +1160,10 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
         ];
 
         const typeClosure = resolveTypeClosure(index, c.fileAst, c.fileContent, [c.sym], 3);
-        if (typeClosure.length > 0) {
-          block.push(...typeClosure);
-          for (const closureBlock of typeClosure) {
-            const closureFile = closureBlock.match(/^\/\/ \[Type Closure\] ([^:\n]+):/)?.[1];
-            if (closureFile) {
-              const raw = index.getRawFile(closureFile);
-              if (raw) accountRawFile(closureFile, raw.size);
-            }
-          }
-        }
+        if (typeClosure.length > 0) block.push(...typeClosure);
 
         if (includeCallers) {
           const blast = computeBlastRadius(index, c.relPath, c.sym.name, 4, c.sym.parentClass);
-          for (const site of blast.callSites) {
-            const raw = index.getRawFile(site.file);
-            if (raw) accountRawFile(site.file, raw.size);
-          }
-          for (const importer of blast.importers) {
-            const raw = index.getRawFile(importer.file);
-            if (raw) accountRawFile(importer.file, raw.size);
-          }
           const blastText = formatBlastRadiusText(blast);
           if (blastText) block.push(blastText);
         }

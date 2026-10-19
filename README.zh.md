@@ -62,10 +62,10 @@
 
 ## 3.6.2 新特性
 
-- **限定名重命名会跟着覆写走** —— `gf_edit` / `graphflow edit --symbol OrderService.cancel --rename cancelOrder` 接受与 `gf_read` 的 `file#Class.method` 相同的类限定符号。子类覆写（`VipOrderService.cancel`、`PartialRefundPolicy.refund`）不再被当成 `ambiguous-symbol` 拒绝：覆写声明保持原名，只改写基类调用（`super.cancel`、`super().refund`）。外部接收者（`RefundService.cancel`、`settle_partial`）不动。同一文件里的同名重复声明、以及无关的同名类，仍然拒绝。
+- **限定名重命名会跟着覆写走** —— `gf_edit` / `graphflow edit --symbol OrderService.cancel --rename cancelOrder` 接受与 `gf_read` 的 `file#Class.method` 相同的类限定符号。子类覆写（`VipOrderService.cancel`、`PartialRefundPolicy.refund`）不再被当成 `ambiguous-symbol` 拒绝：覆写声明保持原名，只改写基类调用（`super.cancel`、`super().refund`）。外部接收者（`RefundService.cancel`、`settle_partial`）、import 模块路径（`from billing.refund`）和块注释里的提及都不改。`new VipOrderService().cancel()` 会解析到构造出的类，因此覆写调用不会被改写。同一文件里的同名重复声明、以及无关的同名类，仍然拒绝。
 - **宏里面的 Rust `impl Trait` 调用** —— 爆炸半径会扫描 `macro_invocation` 里的 `receiver.method()`（例如 `describe(d: impl Device) { format!(..., d.read()) }`）。直接的 `&dyn Trait` 调用行为不变。trait+impl 的原子重命名仍安全拒绝。
-- **文档↔代码链接** —— 反引号标识符不再拆碎，因此 `` `OrderService.timeout` `` 不会挤掉 `TIMEOUT_WINDOW_MS` 的名额。泛词 `买家` / `卖家` / `会员` / `客服`（及其拼音）进入停用表，同一词的拼音回声只计一次，概念链接跳过测试符号（`setUp`、`tests/`、`test_*.py`）。显式提及仍然链接。每节上限仍是 3。
-- **读取预算** —— 当 `gf_read` 的响应会大于它所触及文件的源码体积时，切片器先丢掉链接文档行、多余的爆炸半径上下文和过长函数体，最后才硬截断。`GRAPHFLOW_READ_BUDGET_RATIO` 默认 `1`，设为 `0` 关闭。调用方标题（`// -> ... in settle_full()`）和那一行调用代码会保留。
+- **文档↔代码链接** —— 反引号标识符不再拆碎，因此 `` `OrderService.timeout` `` 不会挤掉 `TIMEOUT_WINDOW_MS` 的名额。显式标识符链接不再受每符号 3 条上限约束（每节上限 3 和全局上限仍然生效），所以 EVAL/README 里对同一符号的提及不会挤掉真正定义它们的章节。泛词 `买家` / `卖家` / `会员` / `客服`（及其拼音）进入停用表，同一词的拼音回声只计一次，概念链接跳过测试符号（`setUp`、`tests/`、`test_*.py`）。
+- **读取预算** —— 当 `gf_read` 的响应会大于它所切片或检索的主文件源码体积时（爆炸半径/类型闭合的邻居文件不计入预算），切片器就地压缩，不做硬截断。它会缩短爆炸半径片段和符号/闭合函数体，丢掉重复闭合以及已经作为符号展示过的闭合，丢掉不是 `super`/`base` 的编号调用行，丢掉 `EVAL.md` / `README` / `results/` 的引用，并最多保留三条 `// ->` 箭头（出现 `in Hold()` / `in Available()` / `in Reservation()` 时一定保留）加上 `super`/`base` 调用行。`GRAPHFLOW_READ_BUDGET_RATIO` 默认 `1`，设为 `0` 关闭。未超预算时，链接文档行和骨架标记保留。
 - **自动指令日志** —— `graphflow install` 注册的 PostToolUse 钩子，以及 `run: true` 的 `gf_exec`，会追加 `.graphflow/instruction-log.jsonl` 并立即收割，因此第二次相同命令就能提升为本地任务，不再需要外部写入者。`GRAPHFLOW_AUTO_LOG=0` 关闭。噪音命令（`echo`、`git status` 等）会跳过。`MISS` 文本带 `(jaccard=…)`，MCP `task-run` 在 `structuredContent.exitCode` 里返回退出码（tools/list schema 未改）。
 - **版本/状态** —— 3.6.2；MCP 面仍是 **4 个工具**。实测 wire schema 为 **459 tokens**（1834 字符，`ceil(chars/4)`；schema 未变，仍低于 460 上限；3.6.1 文档写的是 458）。测试套件 **25 个文件**（`tests/eval-regressions.test.ts`）。CI（6 job）+ 解析器矩阵（7 job）未改。
 
