@@ -440,7 +440,15 @@ async function main(): Promise<void> {
     }
     let payload: Record<string, unknown> = {};
     try {
-      payload = JSON.parse(rawStdin || "{}") as Record<string, unknown>;
+      // `JSON.parse("null")` succeeds and yields `null`, and `"[]"`/`"1"` yield
+      // non-objects: every later `payload.x` read then throws or silently reads
+      // garbage. Hook payloads come from an external tool over a pipe, so only a
+      // real object is treated as a payload.
+      const parsed: unknown = JSON.parse(rawStdin || "{}");
+      payload =
+        typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>)
+          : {};
     } catch {
       payload = {};
     }
