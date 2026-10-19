@@ -35,7 +35,7 @@ export function resolvePackageVersion(): string {
     }
   }
 
-  return "3.6.1";
+  return "3.6.2";
 }
 
 export const PACKAGE_VERSION = resolvePackageVersion();
@@ -205,6 +205,7 @@ export async function executeToolCall(
     structuredContent: {
       tool: call.name,
       ok,
+      ...(v3Res.structuredContent ?? {}),
     },
   };
 }

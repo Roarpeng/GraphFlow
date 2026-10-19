@@ -97,6 +97,34 @@ function escapeRegExp(s: string): string {
 }
 
 /**
+ * Rewrites member accesses (`obj.method`, `super().method`, `obj->method`, `Type::method`)
+ * of `oldName` on the given 1-based lines. Bare declarations (`def method`, `method(`) stay.
+ */
+function replaceMemberAccessOnLines(
+  content: string,
+  oldName: string,
+  newName: string,
+  lines: ReadonlySet<number>
+): { updated: string; count: number } {
+  if (lines.size === 0) return { updated: content, count: 0 };
+  const eol = content.includes("\r\n") ? "\r\n" : "\n";
+  const parts = content.split(/\r?\n/);
+  const re = new RegExp(
+    `(\\(\\s*\\)\\s*\\.|->|::|\\.)(\\s*)${escapeRegExp(oldName)}\\b`,
+    "g"
+  );
+  let count = 0;
+  const next = parts.map((line, index) => {
+    if (!lines.has(index + 1)) return line;
+    return line.replace(re, (_match, access: string, space: string) => {
+      count += 1;
+      return `${access}${space}${newName}`;
+    });
+  });
+  return { updated: next.join(eol), count };
+}
+
+/**
  * Best-effort semantic index access for rename safety analysis. If the index cannot be built
  * (dependency/runtime problem) rename keeps using the existing heuristic guards.
  */
@@ -318,8 +346,11 @@ function executeCrossRepoRename(
     };
   }
 
-  const sym = declData.ast.symbols.find((s) => s.name === oldName);
-  if (!sym) {
+  // Class-qualified ids (`OrderService.cancel`, `RefundPolicy.refund`) resolve the same way
+  // gf_read does. A bare name that matches two declarations in this file is still ambiguous.
+  const requestedSymbol = oldName;
+  const matchedSyms = findMatchingSymbolsInAst(declData.ast, requestedSymbol);
+  if (matchedSyms.length === 0) {
     return {
       ok: false,
       file: relDecl,
@@ -328,30 +359,27 @@ function executeCrossRepoRename(
       replacedSpan: [0, 0],
       newSpan: [0, 0],
       diagnostics: [],
-      text: `ERR [symbol-not-found] '${oldName}' in ${relDecl}`,
+      text: `ERR [symbol-not-found] '${requestedSymbol}' in ${relDecl}`,
     };
   }
-
-  // A blind word-boundary rename cannot tell two same-named declarations apart.
-  // Renaming one would also rewrite the sibling (and its calls), so refuse instead
-  // of corrupting the file. Scoped queries such as `Class.method` are resolved by
-  // the normal edit path; rename needs an unambiguous symbol name.
-  const sameNameDecls = declData.ast.symbols.filter((s) => s.name === oldName);
-  if (sameNameDecls.length > 1) {
+  if (matchedSyms.length > 1) {
+    const sym0 = matchedSyms[0]!;
     return {
       ok: false,
       file: relDecl,
       touchedFiles: [],
       mode: "rename",
-      replacedSpan: [sym.line, sym.endLine],
-      newSpan: [sym.line, sym.endLine],
+      replacedSpan: [sym0.line, sym0.endLine],
+      newSpan: [sym0.line, sym0.endLine],
       diagnostics: [],
       text:
-        `REJECTED [ambiguous-symbol] '${oldName}' is declared ${sameNameDecls.length} times in ${relDecl} ` +
-        `(lines ${sameNameDecls.map((s) => s.line).join(", ")}). Rename the declaration manually or ` +
+        `REJECTED [ambiguous-symbol] '${requestedSymbol}' is declared ${matchedSyms.length} times in ${relDecl} ` +
+        `(lines ${matchedSyms.map((s) => s.line).join(", ")}). Rename the declaration manually or ` +
         `use a scoped edit so sibling methods are not rewritten.`,
     };
   }
+  const sym = matchedSyms[0]!;
+  oldName = sym.name;
 
   // Collect all files to update: declaration file + importers + callers + type-referencing files.
   // For methods, computeBlastRadius resolves member call sites through the imported parent class.
@@ -408,16 +436,25 @@ function executeCrossRepoRename(
     }
   }
 
-  // A candidate file may declare its own same-named symbol (a duck-typed sibling
-  // method in another module). Blind replacement would rename that unrelated
-  // declaration and its calls too; refuse rather than corrupt a second symbol.
+  // A candidate file may declare its own same-named symbol. An override in a subclass
+  // (`class Vip extends OrderService { cancel() { super.cancel() } }`) is the same method
+  // hierarchy: keep the override declaration and rewrite only the base call (`super.cancel`).
+  // An unrelated sibling (another class that merely shares the name) is still rejected.
+  const hierarchy = parentClass ? createWorkspaceTypeHierarchy(index) : undefined;
+  const overrideFiles = new Set<string>();
   for (const relPath of candidateFiles) {
     if (relPath === relDecl) continue;
     const candidateAst = index.getFileAnalysis(relPath)?.ast;
-    const conflicting = candidateAst?.symbols.find((s) => s.name === oldName);
-    if (conflicting) {
+    const conflicts = candidateAst?.symbols.filter((s) => s.name === oldName) ?? [];
+    let sawOverride = false;
+    for (const conflicting of conflicts) {
       // Prototype/definition pairs of the same declaration are updated together, not rejected.
       if (isSameDeclarationCluster(conflicting)) continue;
+      const sub = conflicting.parentClass;
+      if (hierarchy && parentClass && sub && hierarchy.isSubclassOf(sub, parentClass)) {
+        sawOverride = true;
+        continue;
+      }
       return {
         ok: false,
         file: relDecl,
@@ -431,14 +468,14 @@ function executeCrossRepoRename(
           `renaming '${relDecl}' would rewrite that unrelated symbol too. Rename it manually.`,
       };
     }
+    if (sawOverride) overrideFiles.add(relPath);
   }
 
   // Receiver-type-aware staging for methods: a candidate file whose `<oldName>` calls all
   // resolve to a *different* inferred receiver type has no target call sites and must not be
   // rewritten (blind word replacement would rename that other class's method). A file that
   // mixes target and foreign receivers cannot be safely blind-replaced either -> reject.
-  if (parentClass) {
-    const hierarchy = createWorkspaceTypeHierarchy(index);
+  if (parentClass && hierarchy) {
     const semantic = tryGetSemanticIndex(rootDir);
     const isTargetReceiver = (resolved: string | undefined): boolean => {
       if (resolved === undefined) return true; // unknown -> keep (renamed by word replace)
@@ -538,10 +575,41 @@ function executeCrossRepoRename(
     if (!existsSync(absPath)) continue;
     const raw = readFileSync(absPath, "utf8");
     let count = 0;
-    const updated = raw.replace(wordRe, () => {
-      count += 1;
-      return newName;
-    });
+    let updated: string;
+    if (overrideFiles.has(relPath) && parentClass && hierarchy) {
+      const fData = index.getFileAnalysis(relPath);
+      const ast = fData?.ast ?? analyzeSourceFile(relPath, raw);
+      const receiverIndex = inferReceiverTypeIndex(relPath, raw, ast);
+      const targetLines = new Set<number>();
+      for (const call of ast.calls) {
+        if (call.callee !== oldName || call.isDeclaration || !call.member) continue;
+        const resolved = resolveReceiverType(call, ast, receiverIndex);
+        if (resolved === undefined) {
+          const lineText = raw.split(/\r?\n/)[call.line - 1] ?? "";
+          if (/\b(?:super|base)\b/.test(lineText)) targetLines.add(call.line);
+          continue;
+        }
+        if (hierarchy.isCompatibleReceiver(resolved, parentClass, oldName)) {
+          targetLines.add(call.line);
+        }
+      }
+      if (targetLines.size === 0) {
+        const fallbackRe = new RegExp(
+          `\\b(?:super\\s*(?:\\([^)]*\\))?\\s*\\.\\s*|base\\s*\\.\\s*)${escapeRegExp(oldName)}\\b`
+        );
+        raw.split(/\r?\n/).forEach((line, index) => {
+          if (fallbackRe.test(line)) targetLines.add(index + 1);
+        });
+      }
+      const replaced = replaceMemberAccessOnLines(raw, oldName, newName, targetLines);
+      updated = replaced.updated;
+      count = replaced.count;
+    } else {
+      updated = raw.replace(wordRe, () => {
+        count += 1;
+        return newName;
+      });
+    }
     if (count === 0) continue;
 
     const afterAst = analyzeSourceFile(relPath, updated);

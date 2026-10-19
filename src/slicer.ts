@@ -492,6 +492,198 @@ export function tokenizeQuery(query: string): {
   };
 }
 
+/** `GRAPHFLOW_READ_BUDGET_RATIO`: output chars / raw bytes of touched files. `0` disables. */
+function readBudgetRatio(): number {
+  const raw = process.env.GRAPHFLOW_READ_BUDGET_RATIO;
+  if (raw === undefined || raw.trim() === "") return 1;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return Number.POSITIVE_INFINITY;
+  return parsed;
+}
+
+function compactBlastSnippets(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (!line.startsWith("// [Blast Radius")) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    out.push(line);
+    i += 1;
+    while (i < lines.length && (lines[i] ?? "").startsWith("// ->")) {
+      const arrow = lines[i]!;
+      out.push(arrow);
+      i += 1;
+      const lineNo = Number(arrow.match(/:(\d+)/)?.[1] ?? "");
+      const snippet: string[] = [];
+      while (i < lines.length && /^\s*\d+:/.test(lines[i] ?? "")) {
+        snippet.push(lines[i]!);
+        i += 1;
+      }
+      const callLine = snippet.find((entry) => Number(entry.match(/^\s*(\d+):/)?.[1] ?? "") === lineNo);
+      if (callLine) out.push(callLine);
+      else if (snippet.length > 0) out.push(snippet[Math.min(1, snippet.length - 1)]!);
+    }
+  }
+  return out.join("\n");
+}
+
+function shrinkTypeClosures(text: string, maxBodyLines: number): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (!line.startsWith("// [Type Closure]")) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    out.push(line);
+    i += 1;
+    let kept = 0;
+    let omitted = 0;
+    while (i < lines.length) {
+      const body = lines[i] ?? "";
+      if (
+        body.startsWith("// [") ||
+        body.startsWith("### ") ||
+        body.startsWith("# ") ||
+        body.startsWith("// ---")
+      ) {
+        break;
+      }
+      if (body.trim() === "") {
+        i += 1;
+        continue;
+      }
+      if (kept < maxBodyLines) {
+        out.push(body);
+        kept += 1;
+      } else {
+        omitted += 1;
+      }
+      i += 1;
+    }
+    if (omitted > 0) out.push(`// ... [${omitted} type-closure lines omitted by read budget]`);
+  }
+  return out.join("\n");
+}
+
+function truncateSymbolBodies(text: string, maxLines: number): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  const signatureRe =
+    /^\s*\d+:.*\b(?:function|def|func|fn|public|private|protected|override|async|export)\b/;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (!line.startsWith("### ")) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    out.push(line);
+    i += 1;
+    const body: string[] = [];
+    while (i < lines.length) {
+      const next = lines[i] ?? "";
+      if (next.startsWith("### ") || next.startsWith("// [") || next.startsWith("// ---") || next.startsWith("# ")) {
+        break;
+      }
+      body.push(next);
+      i += 1;
+    }
+    const numbered = body.filter((entry) => /^\s*\d+:/.test(entry));
+    if (numbered.length <= maxLines) {
+      out.push(...body);
+      continue;
+    }
+    let kept = 0;
+    let omitted = 0;
+    for (const entry of body) {
+      const isNum = /^\s*\d+:/.test(entry);
+      if (!isNum) {
+        out.push(entry);
+        continue;
+      }
+      if (kept < maxLines || signatureRe.test(entry)) {
+        out.push(entry);
+        kept += 1;
+      } else {
+        omitted += 1;
+      }
+    }
+    if (omitted > 0) out.push(`// ... [${omitted} lines omitted by read budget]`);
+  }
+  return out.join("\n");
+}
+
+function dropPrefixedBlocks(text: string, prefix: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (!line.startsWith(prefix)) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    i += 1;
+    while (i < lines.length) {
+      const next = lines[i] ?? "";
+      if (
+        next.startsWith("// [") ||
+        next.startsWith("### ") ||
+        next.startsWith("# ") ||
+        next.startsWith("// ---")
+      ) {
+        break;
+      }
+      i += 1;
+    }
+  }
+  return out.join("\n");
+}
+
+/**
+ * When a read/search response is larger than the raw source of the files it touched,
+ * shed linked-doc lines, extra blast context, and oversized bodies before hard-cutting.
+ * Correctness-bearing lines stay: blast `// ->` caller headers, the numbered call line
+ * (`super().refund`, `in Hold()`), and the first lines of each type closure (struct fields).
+ */
+function applyReadBudget(text: string, rawBytes: number): string {
+  const ratio = readBudgetRatio();
+  if (!Number.isFinite(ratio) || rawBytes <= 0) return text;
+  const budget = Math.max(1, Math.floor(rawBytes * ratio));
+  if (text.length <= budget) return text;
+
+  let current = text;
+  const shrink = (fn: (value: string) => string): void => {
+    if (current.length <= budget) return;
+    const next = fn(current);
+    if (next.length < current.length) current = next;
+  };
+
+  shrink((value) => value.split("\n").filter((line) => !line.includes("// [Linked Spec Doc]")).join("\n"));
+  shrink(compactBlastSnippets);
+  shrink((value) => shrinkTypeClosures(value, 12));
+  shrink((value) => truncateSymbolBodies(value, 24));
+  shrink((value) => shrinkTypeClosures(value, 8));
+  shrink((value) => truncateSymbolBodies(value, 12));
+  shrink((value) => dropPrefixedBlocks(value, "// --- Rest of"));
+  if (current.length > budget) {
+    const cut = current.slice(0, budget).replace(/\n[^\n]*$/, "");
+    current = `${cut}\n// [read budget] output trimmed to touched source size`;
+  }
+  return current.trim();
+}
+
 export function executeSurgicalRead(options: ReadOptions): SliceResult {
   const index = getWorkspaceAstIndex(options.rootDir);
   const includeCallers = options.includeCallers !== false;
@@ -499,11 +691,13 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
   const matchedSymbols: SliceResult["matchedSymbols"] = [];
   const countedRawFiles = new Set<string>();
   let rawFileTokens = 0;
+  let rawFileBytes = 0;
 
   const accountRawFile = (relPath: string, sizeBytes: number) => {
     if (!countedRawFiles.has(relPath)) {
       countedRawFiles.add(relPath);
       rawFileTokens += Math.ceil(sizeBytes / 4);
+      rawFileBytes += sizeBytes;
     }
   };
 
@@ -576,6 +770,13 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
           const typeClosure = resolveTypeClosure(index, fileData.ast, fileData.content, [sym]);
           if (typeClosure.length > 0) {
             blockLines.push(...typeClosure);
+            for (const block of typeClosure) {
+              const closureFile = block.match(/^\/\/ \[Type Closure\] ([^:\n]+):/)?.[1];
+              if (closureFile) {
+                const raw = index.getRawFile(closureFile);
+                if (raw) accountRawFile(closureFile, raw.size);
+              }
+            }
           }
 
           if (includeCallers) {
@@ -586,6 +787,14 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
               6,
               sym.parentClass
             );
+            for (const site of blast.callSites) {
+              const raw = index.getRawFile(site.file);
+              if (raw) accountRawFile(site.file, raw.size);
+            }
+            for (const importer of blast.importers) {
+              const raw = index.getRawFile(importer.file);
+              if (raw) accountRawFile(importer.file, raw.size);
+            }
             const blastText = formatBlastRadiusText(blast);
             if (blastText) blockLines.push(blastText);
           }
@@ -863,10 +1072,25 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
         const typeClosure = resolveTypeClosure(index, c.fileAst, c.fileContent, [c.sym], 3);
         if (typeClosure.length > 0) {
           block.push(...typeClosure);
+          for (const closureBlock of typeClosure) {
+            const closureFile = closureBlock.match(/^\/\/ \[Type Closure\] ([^:\n]+):/)?.[1];
+            if (closureFile) {
+              const raw = index.getRawFile(closureFile);
+              if (raw) accountRawFile(closureFile, raw.size);
+            }
+          }
         }
 
         if (includeCallers) {
           const blast = computeBlastRadius(index, c.relPath, c.sym.name, 4, c.sym.parentClass);
+          for (const site of blast.callSites) {
+            const raw = index.getRawFile(site.file);
+            if (raw) accountRawFile(site.file, raw.size);
+          }
+          for (const importer of blast.importers) {
+            const raw = index.getRawFile(importer.file);
+            if (raw) accountRawFile(importer.file, raw.size);
+          }
           const blastText = formatBlastRadiusText(blast);
           if (blastText) block.push(blastText);
         }
@@ -886,7 +1110,7 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
     }
   }
 
-  const text = sections.join("\n\n").trim();
+  const text = applyReadBudget(sections.join("\n\n").trim(), rawFileBytes);
   const estimatedTokens = Math.max(1, Math.ceil(text.length / 4));
   return {
     text,

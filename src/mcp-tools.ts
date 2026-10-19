@@ -34,6 +34,7 @@ import {
 import { executeSurgicalRead, getWorkspaceAstIndex, resolveSafeWorkspaceRoot } from "./slicer.js";
 import { executeSurgicalEdit, type SingleEditSpec } from "./surgical-edit.js";
 import {
+  autoLogExecutedCommand,
   formatHarvestReport,
   formatTaskSummary,
   harvestInstructionLog,
@@ -145,6 +146,8 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
 
 export interface V3ToolCallResponse {
   content: Array<{ type: "text"; text: string }>;
+  /** Not part of the tools/list schema. MCP task-run uses this for exitCode. */
+  structuredContent?: Record<string, unknown>;
 }
 
 function plainTextResponse(text: string): V3ToolCallResponse {
@@ -322,6 +325,10 @@ export function executeV3ToolCall(
         const suggestedCmd = buildAffectedTestCommand(affectedTests, rootDir);
         if (args.run === true || cmd === "run-affected-tests") {
           const runRes = execAndDehydrate({ rootDir, command: suggestedCmd });
+          const instruction = typeof args.instruction === "string" ? args.instruction : undefined;
+          autoLogExecutedCommand(rootDir, suggestedCmd, {
+            ...(instruction ? { instruction } : {}),
+          });
           return plainTextResponse(
             `# Affected Tests Executed (${affectedTests.join(", ")}):\n${runRes.text}`
           );
@@ -340,6 +347,10 @@ export function executeV3ToolCall(
       }
 
       const execRes = execAndDehydrate({ rootDir, command: cmd });
+      const runInstruction = typeof args.instruction === "string" ? args.instruction : undefined;
+      autoLogExecutedCommand(rootDir, cmd, {
+        ...(runInstruction ? { instruction: runInstruction } : {}),
+      });
       const { newlyCompiled } = recordTrajectoryAndMine(rootDir, {
         sessionId,
         kind: "exec",
@@ -495,7 +506,16 @@ export function executeV3ToolCall(
           ? args.args.filter((arg): arg is string => typeof arg === "string")
           : [];
         const res = runTask(rootDir, target, runArgs);
-        return plainTextResponse(res.text);
+        return {
+          ...plainTextResponse(res.text),
+          structuredContent: {
+            exitCode: res.exitCode,
+            hit: res.hit,
+            ...(res.score !== undefined ? { score: res.score } : {}),
+            ...(res.taskId ? { taskId: res.taskId } : {}),
+            ...(res.matchedBy ? { matchedBy: res.matchedBy } : {}),
+          },
+        };
       }
 
       if (action === "task-harvest") {

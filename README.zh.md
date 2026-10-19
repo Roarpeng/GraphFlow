@@ -7,7 +7,7 @@
 [![CI](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml)
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-roarpeng.graphflow-blue)](https://marketplace.visualstudio.com/items?itemName=roarpeng.graphflow)
 
-> **面向 AI 编程 Agent 的省 Token 外科手术级代码引擎（v3.6.1）**
+> **面向 AI 编程 Agent 的省 Token 外科手术级代码引擎（v3.6.2）**
 > 只暴露 4 个外科手术工具的 MCP 服务器 —— `gf_read`、`gf_edit`、`gf_exec`、`gf_macro` —— 对**全部 6 种语言家族提供真 AST 解析**：TypeScript/JavaScript 用 `@babel/parser`，Python、Go、Rust、C/C++、C# 用可选 tree-sitter 语法包（缺省回退结构化分析器）。**自研语义索引**为爆炸半径/重命名解析调用目标（不新增运行时依赖），**精度调优的文档↔代码链接**（BM25/IDF + PMI + 上限 + 置信度）让知识图谱更可信。**六语言能力平价已纳入回归测试**（51 项矩阵），双语检索在「孤立 30 对 + packed 30 对」语料上达到 **EN 1.000 / ZH 1.000**，**本地任务反射**可通过显式记录或自动收割外部指令日志，在无 LLM/网络下重放已记录的 shell 指令。运行时依赖：`@babel/parser`、`@modelcontextprotocol/sdk` 与 `tree-sitter`；语法包为可选依赖。
 
 ---
@@ -47,6 +47,7 @@
 | **3.5.0** | **文档↔代码链接精度（自研 BM25/IDF + PMI + 互惠剪枝 + 上限，`GRAPHFLOW_DOC_LINKS_MAX`；仓库 728 → 约 150 条边，−80%）· `graphflow doctor parsers` + `npm run verify:parsers` + 增量 CI 解析器矩阵 · 自研 L0 语义索引（置信度 ≥0.75）与可选 TypeScript/LSP 提供者 · DSH 配置包 `@roarpeng/graphflow-dsh` · 发布预检（`npm run preflight` / `preflight:release`）· 基准数据刷新** |
 | **3.6.0** | **48 项六语言平价矩阵与修复（语言家族作用域的 `resolveMethod`/重命名、Go 嵌入/分组参数、C typedef 字段、Rust `&dyn`/`impl` 解包、C/C++ 头文件原型↔定义重命名）· 30 对双语召回 1.000 EN / 1.000 ZH（拼音/混合/同义词 1.000；基线 ZH@1 0.967、拼音 0.769）· 本地任务反射（`graphflow task`/`reflect`、`gf_macro` task-list/run/record）· Windows CRLF 测试修复；CI（6 job）+ 解析器矩阵（7 job）全绿 · 458 wire tokens · 24 个测试文件** |
 | **3.6.1** | **六语言平价 51 项：Rust trait 分派闭环（trait 方法带 `parentClass`=trait；`dyn Trait`/`impl Trait` 接收者解析到 trait 方法，具体接收者解析到 impl）、C# `record`/`record struct` kind + 位置参数字段 + namespace 映射闭环（Go 同包 imports 仍为诚实缺口）· packed 文件双语语料：packed EN 1.000 / ZH 1.000 @1/@3/@5（ZH@1 原为 0.900；修复 ±7 行 own-doc 串扰）· 任务自动收割（`.graphflow/instruction-log.jsonl`、`task log`/`task harvest`、`gf_macro` `task-harvest`；需要外部写入者）· 458 wire tokens · 24 个测试文件** |
+| **3.6.2** | **评测修复包：类限定名重命名（`OrderService.cancel`）并沿覆写层级更新 `super` · Rust 宏内 `impl Trait` 爆炸半径 · 文档↔代码常量 / 泛词 / 测试符号上限 · `gf_read` 源码体积预算（`GRAPHFLOW_READ_BUDGET_RATIO`）· PostToolUse 钩子与 `gf_exec` `run:true` 自动写指令日志 · MISS Jaccard + task-run 结构化 `exitCode` · wire **459** tokens · 25 个测试文件** |
 
 ## 四个外科手术工具
 
@@ -58,6 +59,15 @@
 | `gf_macro` | 习惯宏、git 共变挖掘、知识图谱 HTML 导出（类型感知 `calls`、别名解析 `imports`、BM25/IDF 受限的 `doc-links-code`，以及 `defines` / `co-edit` 边），以及**本地任务反射**（`task-list` / `task-run` / `task-record` / `task-harvest`） | `action: "list" \| "run" \| "save" \| "mine" \| "mine-git" \| "visualize" \| "brief" \| "task-list" \| "task-run" \| "task-record" \| "task-harvest"` |
 
 会话级读去重跳过未变更文件；连续 3 次编辑-测试失败触发确定性急救包（爆炸半径契约 + 最近 git diff）。语法守卫在有真 AST 后端时使用它们 —— TS/JS 用 `@babel/parser`，其余 5 种用 tree-sitter 的 ERROR/MISSING 诊断 —— 结构化分析器的启发式检查（花括号/声明级、Python 缺冒号/括号诊断）作为回退，设置 `GRAPHFLOW_TREE_SITTER=0` 时同样适用。
+
+## 3.6.2 新特性
+
+- **限定名重命名会跟着覆写走** —— `gf_edit` / `graphflow edit --symbol OrderService.cancel --rename cancelOrder` 接受与 `gf_read` 的 `file#Class.method` 相同的类限定符号。子类覆写（`VipOrderService.cancel`、`PartialRefundPolicy.refund`）不再被当成 `ambiguous-symbol` 拒绝：覆写声明保持原名，只改写基类调用（`super.cancel`、`super().refund`）。外部接收者（`RefundService.cancel`、`settle_partial`）不动。同一文件里的同名重复声明、以及无关的同名类，仍然拒绝。
+- **宏里面的 Rust `impl Trait` 调用** —— 爆炸半径会扫描 `macro_invocation` 里的 `receiver.method()`（例如 `describe(d: impl Device) { format!(..., d.read()) }`）。直接的 `&dyn Trait` 调用行为不变。trait+impl 的原子重命名仍安全拒绝。
+- **文档↔代码链接** —— 反引号标识符不再拆碎，因此 `` `OrderService.timeout` `` 不会挤掉 `TIMEOUT_WINDOW_MS` 的名额。泛词 `买家` / `卖家` / `会员` / `客服`（及其拼音）进入停用表，同一词的拼音回声只计一次，概念链接跳过测试符号（`setUp`、`tests/`、`test_*.py`）。显式提及仍然链接。每节上限仍是 3。
+- **读取预算** —— 当 `gf_read` 的响应会大于它所触及文件的源码体积时，切片器先丢掉链接文档行、多余的爆炸半径上下文和过长函数体，最后才硬截断。`GRAPHFLOW_READ_BUDGET_RATIO` 默认 `1`，设为 `0` 关闭。调用方标题（`// -> ... in settle_full()`）和那一行调用代码会保留。
+- **自动指令日志** —— `graphflow install` 注册的 PostToolUse 钩子，以及 `run: true` 的 `gf_exec`，会追加 `.graphflow/instruction-log.jsonl` 并立即收割，因此第二次相同命令就能提升为本地任务，不再需要外部写入者。`GRAPHFLOW_AUTO_LOG=0` 关闭。噪音命令（`echo`、`git status` 等）会跳过。`MISS` 文本带 `(jaccard=…)`，MCP `task-run` 在 `structuredContent.exitCode` 里返回退出码（tools/list schema 未改）。
+- **版本/状态** —— 3.6.2；MCP 面仍是 **4 个工具**。实测 wire schema 为 **459 tokens**（1834 字符，`ceil(chars/4)`；schema 未变，仍低于 460 上限；3.6.1 文档写的是 458）。测试套件 **25 个文件**（`tests/eval-regressions.test.ts`）。CI（6 job）+ 解析器矩阵（7 job）未改。
 
 ## 3.6.1 新特性
 
@@ -178,7 +188,7 @@ tree-sitter 语法包是可选依赖：安装后 Python/Go/Rust/C/C++/C# 默认�
 
 ```bash
 # 1) 全局安装（Node 18+）
-npm install -g @roarpeng/graphflow@3.6.1
+npm install -g @roarpeng/graphflow@3.6.2
 
 # 2) 一键注册到检测到的 Agent（MCP + Skill + Rules + Hooks）
 graphflow install            # 等价写法：npx @roarpeng/graphflow install
@@ -206,7 +216,7 @@ npx skills add Roarpeng/GraphFlow
 
 ```bash
 git clone https://github.com/Roarpeng/GraphFlow && cd GraphFlow
-npm install && npm test      # tsx tests/run-all.ts（24 个测试文件，含 MCP stdio e2e）
+npm install && npm test      # tsx tests/run-all.ts（25 个测试文件，含 MCP stdio e2e）
 npm run build && npm run bench  # 可选：本地基准脚本 → benchmarks/latest.md
 npm run verify:parsers       # 可选：真 AST 与强制结构化解析器矩阵
 npm run preflight            # 可选：静态发布预检

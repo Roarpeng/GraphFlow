@@ -231,20 +231,32 @@ export function extractPdfText(buffer: Buffer): string {
 
 function extractCandidateSymbolsFromDocText(text: string): string[] {
   const ids = new Set<string>();
-  // 1. Backticked code spans: `symbolName` or `ClassName.method`
+  const backtickSpans: Array<{ start: number; end: number; raw: string }> = [];
+  // 1. Backticked code spans: `symbolName` or `ClassName.method`.
+  // Keep the full identifier. Splitting `OrderService.timeout` into `OrderService` + `timeout`
+  // steals the per-section link cap from the real method and the constant beside it.
   for (const m of text.matchAll(/`([a-zA-Z_$][a-zA-Z0-9_$.:#-]*)`/g)) {
     const raw = m[1]!;
     ids.add(raw);
-    for (const part of raw.split(/[.#:/]/)) {
-      if (part.length >= 3) ids.add(part);
+    if (m.index !== undefined) {
+      backtickSpans.push({ start: m.index + 1, end: m.index + 1 + raw.length, raw });
     }
   }
-  // 2. CamelCase or snake_case identifiers in prose
+  // 2. CamelCase or snake_case identifiers in prose. A CamelCase word that is only the
+  // qualifier inside `` `Class.method` `` is not its own explicit symbol.
   for (const m of text.matchAll(/\b([a-zA-Z_][a-zA-Z0-9_]{3,})\b/g)) {
     const word = m[1]!;
-    if (/[A-Z]/.test(word) || word.includes("_")) {
-      ids.add(word);
-    }
+    if (!(/[A-Z]/.test(word) || word.includes("_"))) continue;
+    const idx = m.index ?? -1;
+    const qualifierOnly = backtickSpans.some(
+      (span) =>
+        idx >= span.start &&
+        idx < span.end &&
+        span.raw !== word &&
+        /[.#:]/.test(span.raw)
+    );
+    if (qualifierOnly) continue;
+    ids.add(word);
   }
   return Array.from(ids);
 }
@@ -467,7 +479,7 @@ const GENERIC_DOC_CONCEPT_TOKENS = new Set<string>([
   "账户","服务","管理","系统","数据","请求","响应","状态","错误","失败","成功","结果","输出","输入",
   "文件","路径","名称","测试","文档","接口","配置","设置","功能","方法","函数","模块","代码","逻辑",
   "实现","创建","修改","更新","删除","查询","获取","读取","验证","校验","检查","签名","登录","示例",
-  "说明","注意","流程",
+  "说明","注意","流程","买家","卖家","会员","客服",
   // Pinyin keys of the generic Chinese concepts above
   "dingdan","danju","quxiao","zuofei","chedan","tuidan","chexiao","guanbi","zhifu","fukuan",
   "shoukuan","jiezhang","tuikuan","huidiao","tongzhi","xiaoxi","chuli","yonghu","kehu","zhanghao",
@@ -475,7 +487,7 @@ const GENERIC_DOC_CONCEPT_TOKENS = new Set<string>([
   "chenggong","jieguo","shuchu","shuru","wenjian","lujing","mingcheng","ceshi","wendang","jiekou",
   "peizhi","shezhi","gongneng","fangfa","hanshu","mokuai","daima","luoji","shixian","chuangjian",
   "xiugai","gengxin","shanchu","chaxun","huoqu","duqu","yanzheng","jiaoyan","jiancha","qianming",
-  "denglu","shili","shuoming","zhuyi","liucheng",
+  "denglu","shili","shuoming","zhuyi","liucheng","maijia","huiyuan","kefu",
 ]);
 
 /** Explicit identifier mentions always outrank any concept-only overlap. */
@@ -559,14 +571,47 @@ function addWeightedConceptTokens(
 function buildSectionIdentifierKeys(sec: DocSection): Set<string> {
   const identifierKeys = new Set<string>();
   for (const identifier of sec.referencedIdentifiers) {
+    // Full key only. `OrderService.timeout` matches the qualified method key
+    // (`orderservicetimeout`); splitting on `.`/`_` also matched the class and a
+    // bare `timeout` fragment and crowded out constants such as TIMEOUT_WINDOW_MS.
     const fullKey = normalizeIdentifierKey(identifier);
     if (fullKey.length >= 3) identifierKeys.add(fullKey);
-    for (const part of identifier.split(/[.#:/_\\-]+/)) {
-      const partKey = normalizeIdentifierKey(part);
-      if (partKey.length >= 3) identifierKeys.add(partKey);
-    }
   }
   return identifierKeys;
+}
+
+/** Concept-only links should not land on test fixtures. Explicit `` `Symbol` `` mentions still link. */
+function isConceptDeprioritizedSymbol(relFile: string, symbolName: string): boolean {
+  const file = relFile.replace(/\\/g, "/");
+  const base = file.split("/").pop() ?? file;
+  if (
+    file.includes("/tests/") ||
+    file.includes("/__tests__/") ||
+    file.includes("/test/") ||
+    /\.test\./.test(base) ||
+    /\.spec\./.test(base) ||
+    /^test_.*\.py$/.test(base) ||
+    /_test\.go$/.test(base) ||
+    /Tests\.(?:cs|java)$/.test(base)
+  ) {
+    return true;
+  }
+  if (/^(?:test_|Test|setUp|tearDown|SetUp|TearDown)/.test(symbolName)) return true;
+  if (/(?:Tests|Test)$/.test(symbolName) && symbolName !== "Test") return true;
+  return false;
+}
+
+/**
+ * Pinyin of a CJK token is the same concept, not a second shared token.
+ * `买家` + `maijia` therefore counts as one.
+ */
+function independentSharedCount(shared: readonly string[]): number {
+  const keys = new Set<string>();
+  for (const token of shared) {
+    const pinyin = /[\u4e00-\u9fff]/.test(token) ? toPinyin(token) : undefined;
+    keys.add(pinyin && pinyin.length > 0 ? pinyin : token);
+  }
+  return keys.size;
 }
 
 function buildSectionRetrievalData(sec: DocSection): SectionRetrievalData {
@@ -863,7 +908,12 @@ export function buildDocCodeLinks(
   };
 
   // ── 1. Explicit identifier / `Class.method` mentions are authoritative ──
-  const explicitEntries: Array<{ link: DocCodeLink; sectionIdx: number; symbolIdx: number }> = [];
+  const explicitEntries: Array<{
+    link: DocCodeLink;
+    sectionIdx: number;
+    symbolIdx: number;
+    matchedKeyLength: number;
+  }> = [];
   const explicitPairKeys = new Set<string>();
   for (let symbolIdx = 0; symbolIdx < symbolData.length; symbolIdx++) {
     const sd = symbolData[symbolIdx]!;
@@ -877,7 +927,17 @@ export function buildDocCodeLinks(
       if (!explicit) continue;
       const link = makeLink(sec.section, sd, EXPLICIT_REF_SCORE, [], true);
       if (rejectedLinkIds.has(docCodeLinkId(link))) continue;
-      explicitEntries.push({ link, sectionIdx, symbolIdx });
+      const qualifiedLen =
+        sd.qualifiedIdentifierKey !== undefined && sec.identifierKeys.has(sd.qualifiedIdentifierKey)
+          ? sd.qualifiedIdentifierKey.length
+          : 0;
+      const bareLen = sec.identifierKeys.has(sd.identifierKey) ? sd.identifierKey.length : 0;
+      explicitEntries.push({
+        link,
+        sectionIdx,
+        symbolIdx,
+        matchedKeyLength: Math.max(qualifiedLen, bareLen),
+      });
       explicitPairKeys.add(`${symbolIdx}\u0000${sectionIdx}`);
     }
   }
@@ -955,7 +1015,8 @@ export function buildDocCodeLinks(
     }
 
     for (const [sectionIdx, entry] of perSection) {
-      if (entry.shared.length < 2) continue;
+      if (independentSharedCount(entry.shared) < 2) continue;
+      if (isConceptDeprioritizedSymbol(sd.relFile, sd.symbol.name)) continue;
       if (explicitPairKeys.has(`${symbolIdx}\u0000${sectionIdx}`)) continue;
       const sec = sectionData[sectionIdx]!;
       const baseLink = makeLink(sec.section, sd, entry.score, entry.shared, false);
@@ -1065,6 +1126,7 @@ export function buildDocCodeLinks(
   const sortedExplicit = [...explicitEntries].sort(
     (a, b) =>
       b.link.score - a.link.score ||
+      b.matchedKeyLength - a.matchedKeyLength ||
       docLinkSortKey(a.link).localeCompare(docLinkSortKey(b.link))
   );
   for (const entry of sortedExplicit) {
@@ -2005,7 +2067,7 @@ export function generateKnowledgeGraphHtml(
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
-<title>GraphFlow 3.6.1 — Interactive Project Knowledge Graph</title>
+<title>GraphFlow 3.6.2 — Interactive Project Knowledge Graph</title>
 <style>
   :root {
     --bg: #0b0f19;
@@ -2041,7 +2103,7 @@ export function generateKnowledgeGraphHtml(
 </head>
 <body>
   <div id="sidebar">
-    <h1>GraphFlow 3.6.1 Knowledge Graph</h1>
+    <h1>GraphFlow 3.6.2 Knowledge Graph</h1>
     <div class="stats">Nodes: ${graph.nodes.length} · Edges: ${graph.edges.length} (${edgeBreakdown})</div>
     <input id="search" type="search" placeholder="Search symbol, file, or doc (中文/EN)..." />
     <div class="legend-title">Nodes / 节点</div>

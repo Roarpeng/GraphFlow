@@ -27,6 +27,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { dehydrateCommandOutput } from "./dehydrator.js";
+import { isNoiseCommand } from "./macro-engine.js";
 import { stemEnglishWord } from "./tokenizer.js";
 
 /** Uses required before a reflected task is compiled into a local runner. */
@@ -445,6 +446,25 @@ export function recordTaskUse(
   return { ...record, steps: [...record.steps] };
 }
 
+/**
+ * Best token-Jaccard against stored tasks, including scores below the near-match
+ * threshold. `0` when the workspace has no comparable tasks.
+ */
+export function bestTaskSimilarity(rootDir: string, instruction: string): number {
+  const instructionKey = normalizeInstructionKey(instruction);
+  if (!instructionKey) return 0;
+  const tasks = loadTasks(rootDir);
+  const queryTokens = instructionKey.split(" ").filter(Boolean);
+  if (queryTokens.length === 0 || tasks.length === 0) return 0;
+  let bestScore = 0;
+  for (const task of tasks) {
+    if (task.instructionKey === instructionKey) return 1;
+    const score = jaccardSimilarity(queryTokens, task.instructionKey.split(" ").filter(Boolean));
+    if (score > bestScore) bestScore = score;
+  }
+  return bestScore;
+}
+
 /** Exact-key or token-Jaccard near-match lookup. */
 export function findTask(
   rootDir: string,
@@ -505,14 +525,17 @@ export function formatTaskDetails(task: ReflectedTask): string {
   return lines.join("\n");
 }
 
-function missResult(instructionOrId: string, startedAt: number): RunTaskResult {
+function missResult(rootDir: string, instructionOrId: string, startedAt: number): RunTaskResult {
+  const score = bestTaskSimilarity(rootDir, instructionOrId);
   return {
     hit: false,
+    score,
     text:
       `MISS [no-reflected-task] No reflected task matched ${JSON.stringify(instructionOrId)}.\n` +
       `Record the same instruction ${TASK_PROMOTION_USES}x with its shell steps to compile a local runner, e.g.\n` +
       `  graphflow task record "<instruction>" --step "<cmd>"\n` +
-      `or MCP gf_macro({ action: "task-record", instruction, steps: ["<cmd>"] }).`,
+      `or MCP gf_macro({ action: "task-record", instruction, steps: ["<cmd>"] }).\n` +
+      `(jaccard=${score.toFixed(3)})`,
     exitCode: 1,
     durationMs: Date.now() - startedAt,
   };
@@ -552,7 +575,7 @@ export function runTask(
     }
   }
 
-  if (!record) return missResult(instructionOrId, startedAt);
+  if (!record) return missResult(rootDir, instructionOrId, startedAt);
   const matchedRecord = record;
 
   const compiled = compileTask(rootDir, matchedRecord);
@@ -712,6 +735,39 @@ export function appendInstructionLogEntry(
   };
   appendFileSync(logAbs, `${JSON.stringify(entry)}\n`, "utf8");
   return entry;
+}
+
+export interface AutoLogExecutedCommandOptions {
+  /** Natural-language instruction. Defaults to the command itself. */
+  instruction?: string;
+  /** Workspace-relative cwd stored on the step when it stays inside the workspace. */
+  cwd?: string;
+}
+
+/**
+ * Opt-in automatic instruction log. Callers are the `graphflow install` PostToolUse
+ * hook and `gf_exec` when `run: true`. Set `GRAPHFLOW_AUTO_LOG=0` to disable.
+ * A repeated identical command is harvested immediately so the second run promotes
+ * a local task without an external writer. Failures are swallowed.
+ */
+export function autoLogExecutedCommand(
+  rootDir: string,
+  command: string,
+  opts: AutoLogExecutedCommandOptions = {}
+): void {
+  try {
+    if (process.env.GRAPHFLOW_AUTO_LOG === "0") return;
+    const cmd = command.trim();
+    if (!cmd || isNoiseCommand(cmd)) return;
+    const instruction = opts.instruction?.trim() || cmd;
+    const cwd = opts.cwd?.trim();
+    const step: TaskStep =
+      cwd && !isAbsolute(cwd) && !cwd.split(/[/\\]/).includes("..") ? { cmd, cwd } : cmd;
+    appendInstructionLogEntry(rootDir, instruction, [step]);
+    harvestInstructionLog(rootDir);
+  } catch {
+    // Logging must never break the tool or the host hook.
+  }
 }
 
 /**

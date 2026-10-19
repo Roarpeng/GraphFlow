@@ -7,7 +7,7 @@
 [![CI](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml)
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-roarpeng.graphflow-blue)](https://marketplace.visualstudio.com/items?itemName=roarpeng.graphflow)
 
-> **The Token-First Surgical Code Engine for AI Coding Agents (v3.6.1)**
+> **The Token-First Surgical Code Engine for AI Coding Agents (v3.6.2)**
 > An MCP server exposing exactly 4 surgical tools — `gf_read`, `gf_edit`, `gf_exec`, `gf_macro` — with **true AST parsing for all six language families**: TypeScript/JavaScript via `@babel/parser`, and Python, Go, Rust, C/C++, C# via optional tree-sitter grammars (the built-in structural analyzers remain the fallback). A **self-written semantic index** resolves call targets for blast radius/rename (no extra runtime deps), and **precision-tuned doc↔code linking** (BM25/IDF + PMI + caps + confidence) keeps the knowledge graph honest. **Six-language parity is regression-tested** (51-case matrix), bilingual retrieval scores **1.000 EN / 1.000 ZH** on the isolated + packed 30+30 pair corpus, and **local task reflection** replays recorded shell instructions — by explicit record or by auto-harvesting an external instruction log — with no LLM/network calls. Runtime dependencies: `@babel/parser`, `@modelcontextprotocol/sdk` and `tree-sitter`; the grammar packages are optional.
 
 ---
@@ -47,6 +47,7 @@ Version 3.0 **replaced the entire 2.x architecture**. The 10-tool knowledge-grap
 | **3.5.0** | **Doc↔code link precision (self-written BM25/IDF + PMI + reciprocal pruning + caps, `GRAPHFLOW_DOC_LINKS_MAX`; repo 728 → ≈150 edges, −80%) · `graphflow doctor parsers` + `npm run verify:parsers` + additive CI parser matrix · self-written L0 semantic index (confidence ≥0.75) with optional TypeScript/LSP providers · DSH config bundle `@roarpeng/graphflow-dsh` · release preflight (`npm run preflight` / `preflight:release`) · refreshed benchmarks** |
 | **3.6.0** | **48-case six-language parity matrix + fixes (family-scoped `resolveMethod`/rename, Go embedding/grouped params, C typedef fields, Rust `&dyn`/`impl` unwrap, C/C++ header prototype↔definition rename) · bilingual recall 1.000 EN / 1.000 ZH on 30 pairs (pinyin/mixed/synonym 1.000; baseline ZH@1 0.967, pinyin 0.769) · local task reflection (`graphflow task`/`reflect`, `gf_macro` task-list/run/record) · Windows CRLF test fix; CI (6 jobs) + parser matrix (7 jobs) green · 458-token wire · 24 test files** |
 | **3.6.1** | **Six-language parity 51 tests: Rust trait dispatch CLOSED (trait methods with `parentClass`=trait; `dyn Trait`/`impl Trait` receivers resolve to the trait method, concrete receivers to the impl), C# `record`/`record struct` kinds + positional fields + namespace map CLOSED (Go same-package imports stays an honest gap) · packed-file bilingual corpus: packed EN 1.000 / ZH 1.000 @1/@3/@5 (ZH@1 was 0.900; ±7-line own-doc bleed fixed) · task auto-harvest (`.graphflow/instruction-log.jsonl`, `task log`/`task harvest`, `gf_macro` `task-harvest`; external writer needed) · 458-token wire · 24 test files** |
+| **3.6.2** | **Eval fix pack: class-qualified rename (`OrderService.cancel`) plus override-hierarchy `super` updates · Rust macro `impl Trait` blast · doc↔code constants / generic-token / test-symbol cap · `gf_read` source-size budget (`GRAPHFLOW_READ_BUDGET_RATIO`) · automatic instruction log from the PostToolUse hook and `gf_exec` `run:true` · MISS Jaccard + structural task-run `exitCode` · wire **459** tokens · 25 test files** |
 
 ## The Four Surgical Tools
 
@@ -58,6 +59,15 @@ Version 3.0 **replaced the entire 2.x architecture**. The 10-tool knowledge-grap
 | `gf_macro` | Habit macros, git co-change mining, knowledge-graph HTML export (type-aware `calls`, alias-resolved `imports`, BM25/IDF-capped `doc-links-code`; plus `defines` / `co-edit` edges), and **local task reflection** (`task-list` / `task-run` / `task-record` / `task-harvest`) | `action: "list" \| "run" \| "save" \| "mine" \| "mine-git" \| "visualize" \| "brief" \| "task-list" \| "task-run" \| "task-record" \| "task-harvest"` |
 
 Session read dedup skips unchanged files; 3 consecutive edit-test failures trigger a deterministic rescue packet (blast-radius contracts + recent git diffs). Syntax guards use the true-AST backends when available — `@babel/parser` for TS/JS and tree-sitter ERROR/MISSING diagnostics for the other five — with the structural analyzers' heuristic checks (brace/declaration, Python missing-colon/bracket diagnostics) as the fallback, including when `GRAPHFLOW_TREE_SITTER=0` is set.
+
+## What's New in 3.6.2
+
+- **Qualified rename follows overrides** — `gf_edit` / `graphflow edit --symbol OrderService.cancel --rename cancelOrder` resolves class-qualified ids the same way `gf_read` accepts `file#Class.method`. A subclass override (`VipOrderService.cancel`, `PartialRefundPolicy.refund`) is no longer an `ambiguous-symbol` reject: the override declaration stays, and only the base call (`super.cancel`, `super().refund`) is rewritten. Foreign receivers (`RefundService.cancel`, `settle_partial`) stay untouched. Same-file duplicates and unrelated same-named classes are still rejected.
+- **Rust `impl Trait` calls inside macros** — blast radius now sees `receiver.method()` tokens nested in `macro_invocation` bodies (for example `describe(d: impl Device) { format!(..., d.read()) }`). Direct `&dyn Trait` calls are unchanged. Trait+impl atomic rename remains a safe reject.
+- **Doc↔code links** — backtick identifiers are no longer split, so `` `OrderService.timeout` `` does not steal a cap slot from `TIMEOUT_WINDOW_MS`. Generic tokens `买家` / `卖家` / `会员` / `客服` (and their pinyin) are stop-listed, pinyin echoes of the same word count once, and concept-only links skip test symbols (`setUp`, `tests/`, `test_*.py`). Explicit mentions still link. Per-section cap stays 3.
+- **Read budget** — when a `gf_read` response would be larger than the raw source of the files it touches, the slicer drops linked-doc lines, extra blast context, and oversized bodies before a hard cut. `GRAPHFLOW_READ_BUDGET_RATIO` defaults to `1`; `0` disables the guard. Caller headers (`// -> ... in settle_full()`) and the numbered call line stay.
+- **Automatic instruction log** — the `graphflow install` PostToolUse hook and `gf_exec` with `run: true` append `.graphflow/instruction-log.jsonl` and harvest it, so the second identical command promotes a local task without an external writer. `GRAPHFLOW_AUTO_LOG=0` turns this off. Noise commands (`echo`, `git status`, …) are skipped. `MISS` text includes `(jaccard=…)`, and MCP `task-run` returns `structuredContent.exitCode` (the tools/list schema is unchanged).
+- **Version/state** — 3.6.2; MCP surface stays **4 tools**. Measured wire schema is **459 tokens** (1834 chars, `ceil(chars/4)`; schema unchanged, still under the 460-token cap; 3.6.1 documented 458). The suite is **25 test files** (`tests/eval-regressions.test.ts`). CI (6 jobs) + parser matrix (7 jobs) are unchanged.
 
 ## What's New in 3.6.1
 
@@ -178,7 +188,7 @@ Runtime dependencies: `@babel/parser`, `@modelcontextprotocol/sdk` and `tree-sit
 
 ```bash
 # 1) Install globally (Node 18+)
-npm install -g @roarpeng/graphflow@3.6.1
+npm install -g @roarpeng/graphflow@3.6.2
 
 # 2) One-click registration into detected agents (MCP + Skill + Rules + Hooks)
 graphflow install            # equivalent: npx @roarpeng/graphflow install
@@ -206,7 +216,7 @@ Run the test suite from source:
 
 ```bash
 git clone https://github.com/Roarpeng/GraphFlow && cd GraphFlow
-npm install && npm test      # tsx tests/run-all.ts (24 test files, incl. MCP stdio e2e)
+npm install && npm test      # tsx tests/run-all.ts (25 test files, incl. MCP stdio e2e)
 npm run build && npm run bench  # optional: local benchmark harness → benchmarks/latest.md
 npm run verify:parsers       # optional: true-AST vs forced-structural parser matrix
 npm run preflight            # optional: static release checks
