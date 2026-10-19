@@ -32,6 +32,13 @@ import {
   type AstCallSite,
   type AstSymbol,
 } from "./ast-engine.js";
+import {
+  escapeRegExp,
+  ID_CONTINUE_CLASS,
+  identifierBoundary,
+  identifierBoundaryRe,
+  isIdentifierName,
+} from "./identifier-regex.js";
 import { computeBlastRadius, createWorkspaceTypeHierarchy } from "./blast-radius.js";
 import {
   getSemanticIndex,
@@ -92,10 +99,6 @@ export interface SurgicalEditResult {
   text: string;
 }
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 /** Masks `/* ... *\/` so a doc comment that names `OrderService.cancel` is not a live reference. */
 function maskBlockComments(content: string): string {
   let out = "";
@@ -144,7 +147,7 @@ function replaceBareIdentifierOnLines(
   if (lines.size === 0) return { updated: content, count: 0 };
   const eol = content.includes("\r\n") ? "\r\n" : "\n";
   const parts = content.split(/\r?\n/);
-  const re = new RegExp(`(^|[^\\w$.])${escapeRegExp(oldName)}\\b`, "g");
+  const re = new RegExp(`(^|[^\\p{ID_Continue}$.])${escapeRegExp(oldName)}(?!${ID_CONTINUE_CLASS})`, "gu");
   let count = 0;
   const next = parts.map((line, index) => {
     if (!lines.has(index + 1)) return line;
@@ -170,8 +173,8 @@ function replaceMemberAccessOnLines(
   const eol = content.includes("\r\n") ? "\r\n" : "\n";
   const parts = content.split(/\r?\n/);
   const re = new RegExp(
-    `(\\(\\s*\\)\\s*\\.|->|::|\\.)(\\s*)${escapeRegExp(oldName)}\\b`,
-    "g"
+    `(\\(\\s*\\)\\s*\\.|->|::|\\.)(\\s*)${escapeRegExp(oldName)}(?!${ID_CONTINUE_CLASS})`,
+    "gu"
   );
   let count = 0;
   const next = parts.map((line, index) => {
@@ -217,10 +220,10 @@ function collectUnresolvedRenameReferences(
     if (!found.has(relPath)) found.set(relPath, `${relPath}:${line} (${reason})`);
   };
 
-  const wordRe = new RegExp(`\\b${escapeRegExp(oldName)}\\b`);
+  const wordRe = identifierBoundaryRe(oldName);
   const propertyRefRe = new RegExp(
-    `([A-Za-z_$][\\w$]*)\\s*(?:\\.|->|::)\\s*${escapeRegExp(oldName)}\\b(?!\\s*\\()`,
-    "g"
+    `([A-Za-z_$][\\w$]*)\\s*(?:\\.|->|::)\\s*${identifierBoundary(oldName)}(?!\\s*\\()`,
+    "gu"
   );
   const isMethodRename = Boolean(parentClass);
   const hierarchy = isMethodRename ? createWorkspaceTypeHierarchy(index) : undefined;
@@ -380,7 +383,7 @@ function executeCrossRepoRename(
       text: `ERR [path-outside-workspace] '${declFile}' is outside workspace root.`,
     };
   }
-  if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(newName)) {
+  if (!isIdentifierName(newName)) {
     return {
       ok: false,
       file: relDecl,
@@ -476,7 +479,7 @@ function executeCrossRepoRename(
   ]);
   const parentClass = sym.parentClass;
   const declLangFamily = sourceLanguageFamily(relDecl);
-  const typeCheckRe = new RegExp(`\\b${escapeRegExp(oldName)}\\b`);
+  const typeCheckRe = identifierBoundaryRe(oldName);
   for (const relPath of index.getFiles(true)) {
     if (candidateFiles.has(relPath)) continue;
     // Cross-language references are impossible: never stage another family's same-named code.
@@ -651,7 +654,7 @@ function executeCrossRepoRename(
     }
   }
 
-  const wordRe = new RegExp(`\\b${escapeRegExp(oldName)}\\b`, "g");
+  const wordRe = identifierBoundaryRe(oldName, "g");
   const stagedWrites = new Map<string, { absPath: string; content: string; replacements: number }>();
   const diagnostics: StaticGuardDiagnostic[] = [];
 
@@ -721,7 +724,8 @@ function executeCrossRepoRename(
       }
       if (isOverride && targetLines.size === 0) {
         const fallbackRe = new RegExp(
-          `\\b(?:super\\s*(?:\\([^)]*\\))?\\s*\\.\\s*|base\\s*\\.\\s*)${escapeRegExp(oldName)}\\b`
+          `\\b(?:super\\s*(?:\\([^)]*\\))?\\s*\\.\\s*|base\\s*\\.\\s*)${escapeRegExp(oldName)}(?!${ID_CONTINUE_CLASS})`,
+          "u"
         );
         raw.split(/\r?\n/).forEach((line, index) => {
           if (fallbackRe.test(line)) targetLines.add(index + 1);
@@ -1171,7 +1175,7 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
         const newFieldSet = new Set(newSym.fields ?? []);
         const removedFields = oldSym.fields.filter((fld) => !newFieldSet.has(fld));
         for (const fld of removedFields) {
-          const fldAccessRe = new RegExp(`(?:\\.|->)\\b${escapeRegExp(fld)}\\b`);
+          const fldAccessRe = new RegExp(`(?:\\.|->)${identifierBoundary(fld)}`, "u");
           const fldRefs: string[] = [];
           for (const candidateRel of index.getFiles()) {
             if (stagedFiles.has(candidateRel)) continue;
