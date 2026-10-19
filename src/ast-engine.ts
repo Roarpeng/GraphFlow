@@ -1335,11 +1335,10 @@ function checkBraceBalanceSyntax(
 
 // ── 1. TypeScript / JavaScript (@babel/parser) ──────────────────────────
 
-/* eslint-disable @typescript-eslint/no-explicit-any --
- * Babel AST interop: the parser module is resolved lazily at runtime and the
- * repo carries no @babel/types dependency, so AST nodes are traversed as
- * untyped `any`. Hand-rolling the recursive BabelNode shape here would be a
- * large, error-prone mirror of an external AST contract. */
+// Babel AST interop: the parser module is resolved lazily at runtime and the
+// repo carries no @babel/types dependency, so AST nodes are traversed as
+// untyped `any`. Hand-rolling the recursive BabelNode shape here would be a
+// large, error-prone mirror of an external AST contract.
 interface BabelParserModule {
   parse(
     input: string,
@@ -1705,7 +1704,6 @@ function parseWithBabel(relPath: string, content: string, parser: BabelParserMod
     syntaxErrors,
   };
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ── 2. Python (`.py`, `.pyi`) Indentation-Scoped AST Analyzer ────────────
 
