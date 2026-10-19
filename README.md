@@ -7,7 +7,7 @@
 [![CI](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml)
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-roarpeng.graphflow-blue)](https://marketplace.visualstudio.com/items?itemName=roarpeng.graphflow)
 
-> **The Token-First Surgical Code Engine for AI Coding Agents (v3.6.2)**
+> **The Token-First Surgical Code Engine for AI Coding Agents (v3.7.0)**
 > An MCP server exposing exactly 4 surgical tools — `gf_read`, `gf_edit`, `gf_exec`, `gf_macro` — with **true AST parsing for all six language families**: TypeScript/JavaScript via `@babel/parser`, and Python, Go, Rust, C/C++, C# via optional tree-sitter grammars (the built-in structural analyzers remain the fallback). A **self-written semantic index** resolves call targets for blast radius/rename (no extra runtime deps), and **precision-tuned doc↔code linking** (BM25/IDF + PMI + caps + confidence) keeps the knowledge graph honest. **Six-language parity is regression-tested** (51-case matrix), bilingual retrieval scores **1.000 EN / 1.000 ZH** on the isolated + packed 30+30 pair corpus, and **local task reflection** replays recorded shell instructions — by explicit record or by auto-harvesting an external instruction log — with no LLM/network calls. Runtime dependencies: `@babel/parser`, `@modelcontextprotocol/sdk` and `tree-sitter`; the grammar packages are optional.
 
 ---
@@ -47,6 +47,7 @@ Version 3.0 **replaced the entire 2.x architecture**. The 10-tool knowledge-grap
 | **3.5.0** | **Doc↔code link precision (self-written BM25/IDF + PMI + reciprocal pruning + caps, `GRAPHFLOW_DOC_LINKS_MAX`; repo 728 → ≈150 edges, −80%) · `graphflow doctor parsers` + `npm run verify:parsers` + additive CI parser matrix · self-written L0 semantic index (confidence ≥0.75) with optional TypeScript/LSP providers · DSH config bundle `@roarpeng/graphflow-dsh` · release preflight (`npm run preflight` / `preflight:release`) · refreshed benchmarks** |
 | **3.6.0** | **48-case six-language parity matrix + fixes (family-scoped `resolveMethod`/rename, Go embedding/grouped params, C typedef fields, Rust `&dyn`/`impl` unwrap, C/C++ header prototype↔definition rename) · bilingual recall 1.000 EN / 1.000 ZH on 30 pairs (pinyin/mixed/synonym 1.000; baseline ZH@1 0.967, pinyin 0.769) · local task reflection (`graphflow task`/`reflect`, `gf_macro` task-list/run/record) · Windows CRLF test fix; CI (6 jobs) + parser matrix (7 jobs) green · 458-token wire · 24 test files** |
 | **3.6.1** | **Six-language parity 51 tests: Rust trait dispatch CLOSED (trait methods with `parentClass`=trait; `dyn Trait`/`impl Trait` receivers resolve to the trait method, concrete receivers to the impl), C# `record`/`record struct` kinds + positional fields + namespace map CLOSED (Go same-package imports stays an honest gap) · packed-file bilingual corpus: packed EN 1.000 / ZH 1.000 @1/@3/@5 (ZH@1 was 0.900; ±7-line own-doc bleed fixed) · task auto-harvest (`.graphflow/instruction-log.jsonl`, `task log`/`task harvest`, `gf_macro` `task-harvest`; external writer needed) · 458-token wire · 24 test files** |
+| **3.7.0** | **Chinese→English recall outside the glossary: L1 PMI map from comments/commits, L2 curated colloquial lexicon (optional local ECDICT), L3 translator hook off by default · adaptive `gf_read` search budget · held-out 80 queries P@1 0.000 → 0.813 · `ts-zh-search` 3198 → 1077 tokens · wire **459** tokens · 26 test files** |
 | **3.6.2** | **Eval fix pack: class-qualified rename (`OrderService.cancel`) plus override-hierarchy `super` updates · Rust macro `impl Trait` blast · doc↔code constants / generic-token / test-symbol cap · `gf_read` source-size budget (`GRAPHFLOW_READ_BUDGET_RATIO`) · automatic instruction log from the PostToolUse hook and `gf_exec` `run:true` · MISS Jaccard + structural task-run `exitCode` · wire **459** tokens · 25 test files** |
 
 ## The Four Surgical Tools
@@ -59,6 +60,13 @@ Version 3.0 **replaced the entire 2.x architecture**. The 10-tool knowledge-grap
 | `gf_macro` | Habit macros, git co-change mining, knowledge-graph HTML export (type-aware `calls`, alias-resolved `imports`, BM25/IDF-capped `doc-links-code`; plus `defines` / `co-edit` edges), and **local task reflection** (`task-list` / `task-run` / `task-record` / `task-harvest`) | `action: "list" \| "run" \| "save" \| "mine" \| "mine-git" \| "visualize" \| "brief" \| "task-list" \| "task-run" \| "task-record" \| "task-harvest"` |
 
 Session read dedup skips unchanged files; 3 consecutive edit-test failures trigger a deterministic rescue packet (blast-radius contracts + recent git diffs). Syntax guards use the true-AST backends when available — `@babel/parser` for TS/JS and tree-sitter ERROR/MISSING diagnostics for the other five — with the structural analyzers' heuristic checks (brace/declaration, Python missing-colon/bracket diagnostics) as the fallback, including when `GRAPHFLOW_TREE_SITTER=0` is set.
+
+## What's New in 3.7.0
+
+- **Uncovered Chinese still finds English identifiers** — L0 pinyin, synonyms and the engineering glossary are unchanged, so the saturated 30+30 parity set stays **1.000**. L1, at index time, pairs Chinese n-grams in comments and `git log` subjects with nearby identifier sub-tokens, keeps the high-PMI pairs (support 1 only when that English token does not also appear in other Chinese windows), and caches `.graphflow/zh-identifier-map.json`. A warm lookup is about **0.005 ms**. L2 is an original colloquial programming list shipped with GraphFlow (Apache-2.0, not a copy of CC-CEDICT or ECDICT) and then filtered to English tokens that actually occur in the repo, so the cache stays well under 1 MB. A local ECDICT TSV (MIT; `GRAPHFLOW_ECDICT` or `.graphflow/ecdict.csv`) is optional and is not bundled. L3 is `registerZhEnModel`; it runs only when `GRAPHFLOW_ZH_EN_MODEL=1`. No model package is added. `GRAPHFLOW_ZH_RECALL=0` / `GRAPHFLOW_ZH_L1=0` / `GRAPHFLOW_ZH_L2=0` turn layers off.
+- **Held-out set, 80 phrasings absent from L0** — baseline (L0 only) **P@1 0.000 / MRR 0.000 / R@3 0.000**. **+L1: 0.375 / 0.375 / 0.375** (30 commit-taught queries go from 0 to **1.000**). **+L1+L2: 0.813 / 0.813 / 0.813** (35 colloquial queries go from 0 to **1.000**). The other **15** phrasings stay at **0** — there is no comment, commit, or curated entry for them. L3 was not scored as a neural model; with the hook registered, one of those misses resolves. A shorter L1 n-gram can distract (`搞定发货` → a commit that only taught `发货`) until the longer L2 phrase outranks it.
+- **Adaptive search budget** — when `topK` is omitted, a margin of at least **0.45** between the top two scores returns **one** slice; closer scores stay as a cluster of at most 3 (so `订单超时` still returns both the handler and `OrderService.timeout`). Those default slices skip type closure and blast radius. Passing `topK` keeps the previous full slice. On the 80 held-out queries the token sum drops **22157 → 4849** while adaptive P@1 stays **0.813**. CLI `ts-zh-search` (three queries, `ceil(chars/4)`) drops **3198 → 1077** against a 1245-token file baseline; the required hits remain.
+- **Version/state** — 3.7.0; MCP surface stays **4 tools**. Wire schema is unchanged at **459 tokens** (1834 chars, `ceil(chars/4)`). The suite is **26 test files** (`tests/zh-recall.test.ts`). CI (6 jobs) + parser matrix (7 jobs) are unchanged.
 
 ## What's New in 3.6.2
 
@@ -188,7 +196,7 @@ Runtime dependencies: `@babel/parser`, `@modelcontextprotocol/sdk` and `tree-sit
 
 ```bash
 # 1) Install globally (Node 18+)
-npm install -g @roarpeng/graphflow@3.6.2
+npm install -g @roarpeng/graphflow@3.7.0
 
 # 2) One-click registration into detected agents (MCP + Skill + Rules + Hooks)
 graphflow install            # equivalent: npx @roarpeng/graphflow install
@@ -216,7 +224,7 @@ Run the test suite from source:
 
 ```bash
 git clone https://github.com/Roarpeng/GraphFlow && cd GraphFlow
-npm install && npm test      # tsx tests/run-all.ts (25 test files, incl. MCP stdio e2e)
+npm install && npm test      # tsx tests/run-all.ts (26 test files, incl. MCP stdio e2e)
 npm run build && npm run bench  # optional: local benchmark harness → benchmarks/latest.md
 npm run verify:parsers       # optional: true-AST vs forced-structural parser matrix
 npm run preflight            # optional: static release checks

@@ -1,6 +1,6 @@
 {
   "name": "@roarpeng/graphflow-dsh",
-  "version": "3.6.2",
+  "version": "3.7.0",
   "description": "DeepSeek Harness (DSH) configuration bundle: registers the GraphFlow MCP server (gf_read, gf_edit, gf_exec, gf_macro) as a stdio Cordis plugin and ships the GraphFlow skill.",
   "icon": "./icon.svg",
   "type": "module",

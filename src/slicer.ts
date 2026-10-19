@@ -35,6 +35,7 @@ import {
   tokenizeEnglish,
   type BilingualQueryPlan,
 } from "./tokenizer.js";
+import { expandUncoveredChinese, getZhRecallBundle } from "./zh-recall.js";
 
 export {
   CHINESE_TYPO_NORMALIZATION,
@@ -798,6 +799,8 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
   const countedRawFiles = new Set<string>();
   let rawFileTokens = 0;
   let rawFileBytes = 0;
+  // Search responses use this instead of the touched-file byte budget.
+  let confidenceBudget: number | undefined;
 
   const accountRawFile = (relPath: string, sizeBytes: number) => {
     if (!countedRawFiles.has(relPath)) {
@@ -950,12 +953,20 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
       );
     }
   } else if (options.query) {
+    const adaptive = options.topK === undefined;
     const topK = options.topK ?? 3;
     // Step 1: Segment & tokenize the user query (Chinese Bi-MM + ICU Segmenter & English camelCase + Stemmer)
     const plan = tokenizeBilingualQuery(options.query);
+    const recallFiles = index.getFiles(false).flatMap((relPath) => {
+      const raw = index.getRawFile(relPath);
+      return raw ? [{ relPath, content: raw.content }] : [];
+    });
+    const recallBundle = getZhRecallBundle(index.rootDir, recallFiles);
+    const recallTokens = expandUncoveredChinese(plan, recallBundle);
     const exactLower = new Set(plan.exactIdentifiers.map((s) => s.toLowerCase()));
-    const queryWords = plan.englishWords;
+    const queryWords = [...plan.englishWords, ...recallTokens];
     const queryStems = new Set(plan.englishStems);
+    for (const token of recallTokens) queryStems.add(stemEnglishWord(token));
     const cjkWords = plan.chineseWords;
     const cjkPhrases = plan.chinesePhrases;
 
@@ -1113,21 +1124,37 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
 
     candidates.sort((a, b) => b.score - a.score || a.relPath.localeCompare(b.relPath) || a.sym.line - b.sym.line);
 
+    const topScore = candidates[0]?.score ?? 0;
+    const secondScore = candidates[1]?.score ?? 0;
+    const margin = topScore > 0 ? (topScore - secondScore) / topScore : 1;
+    const confidentSingle = adaptive && candidates.length > 0 && margin >= 0.45 && topScore >= 28;
     const picked: ScoredCandidate[] = [];
     const perFileCount = new Map<string, number>();
     for (const c of candidates) {
       if (picked.length >= topK) break;
+      if (confidentSingle && picked.length >= 1) break;
+      if (adaptive && picked.length >= 1 && c.score < topScore * 0.72) break;
       const cnt = perFileCount.get(c.relPath) ?? 0;
       if (cnt >= Math.max(2, topK)) continue;
       perFileCount.set(c.relPath, cnt + 1);
       picked.push(c);
     }
+    if (process.env.GRAPHFLOW_SEARCH_TRACE === "1") {
+      console.error(
+        `[search] q=${JSON.stringify(options.query)} margin=${margin.toFixed(2)} ` +
+          candidates
+            .slice(0, 5)
+            .map((c) => `${c.score}:${c.sym.name}`)
+            .join(" ")
+      );
+    }
 
     if (picked.length === 0) {
       sections.push(`# No symbols matched query: "${options.query}"`);
     } else {
+      const navLimit = adaptive ? Math.min(4, candidates.length) : 8;
       const navLines: string[] = [`# Locate & Slice (${picked.length} sliced, ${candidates.length} total hits)`];
-      for (const c of candidates.slice(0, 8)) {
+      for (const c of candidates.slice(0, navLimit)) {
         const mark = picked.includes(c) ? "[SLICED]" : "[OTHER] ";
         navLines.push(
           `${mark} ${c.relPath}:${c.sym.line}-${c.sym.endLine} (${c.sym.kind} ${c.sym.name})`
@@ -1135,8 +1162,13 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
       }
       sections.push(navLines.join("\n"));
 
+      if (adaptive) {
+        const perHit = confidentSingle || picked.length === 1 ? 720 : 980;
+        confidenceBudget = 220 + perHit * picked.length;
+      }
+
       for (const c of picked) {
-        accountRawFile(c.relPath, c.fileSize);
+        if (!adaptive) accountRawFile(c.relPath, c.fileSize);
         const key = `${c.relPath}#${c.sym.name}`;
         resolvedKeys.push(key);
         matchedSymbols.push({
@@ -1148,7 +1180,8 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
         });
 
         const lines = c.fileContent.split(/\r?\n/);
-        const maxSpanEnd = Math.min(c.sym.endLine, c.sym.line + 75);
+        const bodyCap = adaptive ? (picked.length === 1 && margin >= 0.45 ? 8 : 10) : 75;
+        const maxSpanEnd = Math.min(c.sym.endLine, c.sym.line + bodyCap - 1);
         const truncatedNote =
           c.sym.endLine > maxSpanEnd
             ? `\n// ... [lines ${maxSpanEnd + 1}-${c.sym.endLine} omitted; call gf_read(targets=["${c.relPath}:${maxSpanEnd + 1}-${c.sym.endLine}"]) if needed]`
@@ -1159,13 +1192,16 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
           formatNumberedLines(lines, c.sym.line, maxSpanEnd) + truncatedNote,
         ];
 
-        const typeClosure = resolveTypeClosure(index, c.fileAst, c.fileContent, [c.sym], 3);
-        if (typeClosure.length > 0) block.push(...typeClosure);
+        // Default search keeps a short slice. Explicit topK still attaches closure and callers.
+        if (!adaptive) {
+          const typeClosure = resolveTypeClosure(index, c.fileAst, c.fileContent, [c.sym], 3);
+          if (typeClosure.length > 0) block.push(...typeClosure);
 
-        if (includeCallers) {
-          const blast = computeBlastRadius(index, c.relPath, c.sym.name, 4, c.sym.parentClass);
-          const blastText = formatBlastRadiusText(blast);
-          if (blastText) block.push(blastText);
+          if (includeCallers) {
+            const blast = computeBlastRadius(index, c.relPath, c.sym.name, 4, c.sym.parentClass);
+            const blastText = formatBlastRadiusText(blast);
+            if (blastText) block.push(blastText);
+          }
         }
 
         sections.push(block.join("\n"));
@@ -1183,7 +1219,7 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
     }
   }
 
-  const text = applyReadBudget(sections.join("\n\n").trim(), rawFileBytes);
+  const text = applyReadBudget(sections.join("\n\n").trim(), confidenceBudget ?? rawFileBytes);
   const estimatedTokens = Math.max(1, Math.ceil(text.length / 4));
   return {
     text,
