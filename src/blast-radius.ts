@@ -4,7 +4,8 @@
  * Uses a two-stage pipeline for <50ms workspace-wide call-site discovery across
  * TypeScript/JS, Python, Go, Rust, C/C++, and C#:
  *   Stage 1 (Fast Word-Boundary Pre-filter): Checks if `raw.content` contains
- *           `symbolName` as a whole identifier (`\bsymbolName\b`).
+ *           `symbolName` as a whole identifier — `ID_Continue` boundaries, not `\b`,
+ *           so `$symbolName` and non-ASCII identifiers are not false positives.
  *   Stage 2 (AST Verification): Parses only the candidate files that pass Stage 1
  *           and extracts exact call sites + 3-line numbered micro-snippets.
  *
@@ -54,6 +55,7 @@ import {
   SEMANTIC_CONFIDENCE_MIN,
   type SemanticResolvedCall,
 } from "./semantic-index.js";
+import { identifierBoundaryRe } from "./identifier-regex.js";
 
 export { createWorkspaceTypeHierarchy, inImplicitPackageScope, type WorkspaceTypeHierarchy };
 
@@ -77,10 +79,6 @@ export interface SymbolBlastRadius {
   totalCallSites: number;
   callSites: CallSiteSnippet[];
   importers: ImporterSite[];
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function stemOf(relPath: string): string {
@@ -137,7 +135,7 @@ export function computeBlastRadius(
   const effectiveSymbolName = parsedQuery.member;
   const parentClassHint = targetParentClass ?? parsedQuery.container;
 
-  const wordRe = new RegExp(`\\b${escapeRegExp(effectiveSymbolName)}\\b`);
+  const wordRe = identifierBoundaryRe(effectiveSymbolName);
   const targetFamily = sourceLanguageFamily(targetFile);
   const fileSet = index.getFileSet();
   const targetAst = index.getFileAnalysis(targetFile)?.ast;
