@@ -861,6 +861,31 @@ function getRoutingFiles(
 }
 
 /**
+ * Parses `git status --porcelain -z` output.
+ *
+ * `-z` is required, not cosmetic: without it git honours `core.quotepath` and
+ * emits any path outside ASCII as a double-quoted string with octal escapes
+ * (`?? "\344\270\255\346\226\207.ts"`), so the changed file never matches the
+ * workspace index and its tests are reported as unaffected. With `-z` paths are
+ * raw and NUL-terminated, and a rename/copy entry contributes its original path
+ * as an extra token that belongs to the previous entry.
+ */
+function parsePorcelainZ(raw: string): string[] {
+  const tokens = raw.split("\0");
+  const paths: string[] = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    const entry = tokens[i] ?? "";
+    if (entry.length < 4) continue; // trailing empty token, or a truncated line
+    const status = entry.slice(0, 2);
+    paths.push(entry.slice(3));
+    if ((status.includes("R") || status.includes("C")) && i + 1 < tokens.length) {
+      i += 1; // keep only the post-rename path; skip the original one
+    }
+  }
+  return paths;
+}
+
+/**
  * Ultra-fast Multi-Language Diff-to-Test Impact Router (<15ms across 400+ files):
  * Supports TypeScript/JS, Python, Go, Rust, C/C++, and C# test conventions.
  */
@@ -871,19 +896,16 @@ export function resolveAffectedTests(rootDir: string, explicitChangedFiles?: str
   let changed = explicitChangedFiles ?? [];
   if (changed.length === 0) {
     try {
-      const raw = execSync("git status --porcelain", {
+      const raw = execSync("git status --porcelain -z", {
         cwd: rootDir,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
+        maxBuffer: 16 * 1024 * 1024,
+        timeout: 5_000,
       });
-      changed = raw
-        .split(/\r?\n/)
-        .map((line) => line.slice(3).trim().replace(/^.* -> /, ""))
-        .filter(
-          (f) =>
-            f.length > 0 &&
-            /\.(ts|tsx|js|jsx|mjs|cjs|mts|cts|py|go|rs|c|h|cc|cpp|hpp|cxx|cs)$/.test(f)
-        );
+      changed = parsePorcelainZ(raw).filter((f) =>
+        /\.(ts|tsx|js|jsx|mjs|cjs|mts|cts|py|go|rs|c|h|cc|cpp|hpp|cxx|cs)$/.test(f)
+      );
     } catch {
       changed = [];
     }
