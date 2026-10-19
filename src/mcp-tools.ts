@@ -174,7 +174,10 @@ export function executeV3ToolCall(
         ? args.targets.filter((t): t is string => typeof t === "string" && t.trim().length > 0)
         : undefined;
       const query = typeof args.q === "string" && args.q.trim() ? args.q.trim() : undefined;
-      const topK = typeof args.topK === "number" ? args.topK : 3;
+      const topK =
+        typeof args.topK === "number" && Number.isFinite(args.topK) && args.topK > 0
+          ? Math.floor(args.topK)
+          : undefined;
       const includeSkeleton = args.skeleton === true;
       const topicId =
         typeof args.topicId === "string" && args.topicId.trim()
@@ -200,7 +203,7 @@ export function executeV3ToolCall(
         rootDir,
         ...(targets && targets.length > 0 ? { targets } : {}),
         ...(query ? { query } : {}),
-        topK,
+        ...(topK !== undefined ? { topK } : {}),
         includeCallers: true,
         includeSkeleton,
         macroHintLookup: (keys) => findMatchingMacroHint(rootDir, keys),

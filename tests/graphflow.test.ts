@@ -1414,7 +1414,7 @@ async function runAllTests(): Promise<void> {
       const vizRes = executeV3ToolCall("gf_macro", { action: "visualize" }, root);
       assert.ok(vizRes.content[0]!.text.includes("OK [knowledge-graph]"));
       const htmlContent = readFileSync(join(root, ".graphflow", "knowledge-graph.html"), "utf8");
-      assert.ok(htmlContent.includes("GraphFlow 3.6.2 Knowledge Graph") && htmlContent.includes("doc-links-code"));
+      assert.ok(htmlContent.includes("GraphFlow 3.7.0 Knowledge Graph") && htmlContent.includes("doc-links-code"));
 
       // 5. Verify 6-Language Struct Field Deletion Guard Parity (Python @dataclass, Go struct, Rust struct)
       const pyFieldDel = executeSurgicalEdit({

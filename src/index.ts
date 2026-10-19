@@ -1,5 +1,5 @@
 /**
- * GraphFlow 3.6.2 — Pure Token-First Surgical Engine Public Entrypoint (`src/index.ts`)
+ * GraphFlow 3.7.0 — Pure Token-First Surgical Engine Public Entrypoint (`src/index.ts`)
  */
 
 export {
@@ -63,6 +63,18 @@ export {
   type ReadOptions,
   type SliceResult,
 } from "./slicer.js";
+
+export {
+  expandUncoveredChinese,
+  filterEcdictTranslations,
+  getZhRecallBundle,
+  isGlossaryCovered,
+  mineZhIdentifierMap,
+  registerZhEnModel,
+  resetZhRecallCache,
+  type ZhEnModelTranslator,
+  type ZhRecallBundle,
+} from "./zh-recall.js";
 
 export {
   computeBlastRadius,

@@ -376,7 +376,7 @@ function run(): void {
       assert.ok(html.includes(legendText), `legend must contain "${legendText}"`);
     }
     assert.ok(html.includes("EDGE_STYLES"), "canvas renderer must style edges per kind");
-    assert.ok(html.includes("GraphFlow 3.6.2 Knowledge Graph"), "single-file HTML title preserved");
+    assert.ok(html.includes("GraphFlow 3.7.0 Knowledge Graph"), "single-file HTML title preserved");
 
     console.log(
       "PASS [knowledge-graph] defines/imports/calls edges real, cross-language guarded, deduped, HTML legend updated"
