@@ -96,6 +96,94 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** Masks `/* ... *\/` so a doc comment that names `OrderService.cancel` is not a live reference. */
+function maskBlockComments(content: string): string {
+  let out = "";
+  let inBlock = false;
+  let inSingle = false;
+  let inDouble = false;
+  let inTemplate = false;
+  for (let i = 0; i < content.length; i++) {
+    const ch = content[i]!;
+    const next = content[i + 1] ?? "";
+    const prev = i > 0 ? content[i - 1]! : "";
+    if (inBlock) {
+      if (ch === "*" && next === "/") {
+        inBlock = false;
+        out += "  ";
+        i += 1;
+        continue;
+      }
+      out += ch === "\n" || ch === "\r" ? ch : " ";
+      continue;
+    }
+    if (!inSingle && !inDouble && !inTemplate && ch === "/" && next === "*") {
+      inBlock = true;
+      out += "  ";
+      i += 1;
+      continue;
+    }
+    if (!inDouble && !inTemplate && ch === "'" && prev !== "\\") inSingle = !inSingle;
+    else if (!inSingle && !inTemplate && ch === '"' && prev !== "\\") inDouble = !inDouble;
+    else if (!inSingle && !inDouble && ch === "`" && prev !== "\\") inTemplate = !inTemplate;
+    out += ch;
+  }
+  return out;
+}
+
+/**
+ * Rewrites a bare declaration token (`def refund`, `cancel(`) on the given lines.
+ * Member access (`obj.refund`, `Type::refund`) is left for `replaceMemberAccessOnLines`.
+ */
+function replaceBareIdentifierOnLines(
+  content: string,
+  oldName: string,
+  newName: string,
+  lines: ReadonlySet<number>
+): { updated: string; count: number } {
+  if (lines.size === 0) return { updated: content, count: 0 };
+  const eol = content.includes("\r\n") ? "\r\n" : "\n";
+  const parts = content.split(/\r?\n/);
+  const re = new RegExp(`(^|[^\\w$.])${escapeRegExp(oldName)}\\b`, "g");
+  let count = 0;
+  const next = parts.map((line, index) => {
+    if (!lines.has(index + 1)) return line;
+    return line.replace(re, (_match, prefix: string) => {
+      count += 1;
+      return `${prefix}${newName}`;
+    });
+  });
+  return { updated: next.join(eol), count };
+}
+
+/**
+ * Rewrites member accesses (`obj.method`, `super().method`, `obj->method`, `Type::method`)
+ * of `oldName` on the given 1-based lines. Bare declarations (`def method`, `method(`) stay.
+ */
+function replaceMemberAccessOnLines(
+  content: string,
+  oldName: string,
+  newName: string,
+  lines: ReadonlySet<number>
+): { updated: string; count: number } {
+  if (lines.size === 0) return { updated: content, count: 0 };
+  const eol = content.includes("\r\n") ? "\r\n" : "\n";
+  const parts = content.split(/\r?\n/);
+  const re = new RegExp(
+    `(\\(\\s*\\)\\s*\\.|->|::|\\.)(\\s*)${escapeRegExp(oldName)}\\b`,
+    "g"
+  );
+  let count = 0;
+  const next = parts.map((line, index) => {
+    if (!lines.has(index + 1)) return line;
+    return line.replace(re, (_match, access: string, space: string) => {
+      count += 1;
+      return `${access}${space}${newName}`;
+    });
+  });
+  return { updated: next.join(eol), count };
+}
+
 /**
  * Best-effort semantic index access for rename safety analysis. If the index cannot be built
  * (dependency/runtime problem) rename keeps using the existing heuristic guards.
@@ -176,6 +264,7 @@ function collectUnresolvedRenameReferences(
     if (!wordRe.test(content)) continue;
 
     const ast = analyzeSourceFile(relPath, content);
+    const importLines = new Set(ast.imports.map((imp) => imp.line));
     // A sibling declaration of the same name is unrelated; its own callers stay valid.
     if (ast.symbols.some((s) => s.name === oldName)) continue;
 
@@ -221,8 +310,9 @@ function collectUnresolvedRenameReferences(
     }
 
     if (isMethodRename) {
-      const lines = content.split(/\r?\n/);
+      const lines = maskBlockComments(content).split(/\r?\n/);
       for (let i = 0; i < lines.length; i++) {
+        if (importLines.has(i + 1)) continue;
         const code = stripLineCommentsAndStrings(lines[i] ?? "", commentPrefix);
         propertyRefRe.lastIndex = 0;
         let possibleRef = false;
@@ -318,8 +408,11 @@ function executeCrossRepoRename(
     };
   }
 
-  const sym = declData.ast.symbols.find((s) => s.name === oldName);
-  if (!sym) {
+  // Class-qualified ids (`OrderService.cancel`, `RefundPolicy.refund`) resolve the same way
+  // gf_read does. A bare name that matches two declarations in this file is still ambiguous.
+  const requestedSymbol = oldName;
+  const matchedSyms = findMatchingSymbolsInAst(declData.ast, requestedSymbol);
+  if (matchedSyms.length === 0) {
     return {
       ok: false,
       file: relDecl,
@@ -328,16 +421,36 @@ function executeCrossRepoRename(
       replacedSpan: [0, 0],
       newSpan: [0, 0],
       diagnostics: [],
-      text: `ERR [symbol-not-found] '${oldName}' in ${relDecl}`,
+      text: `ERR [symbol-not-found] '${requestedSymbol}' in ${relDecl}`,
     };
   }
-
-  // A blind word-boundary rename cannot tell two same-named declarations apart.
-  // Renaming one would also rewrite the sibling (and its calls), so refuse instead
-  // of corrupting the file. Scoped queries such as `Class.method` are resolved by
-  // the normal edit path; rename needs an unambiguous symbol name.
-  const sameNameDecls = declData.ast.symbols.filter((s) => s.name === oldName);
-  if (sameNameDecls.length > 1) {
+  if (matchedSyms.length > 1) {
+    const sym0 = matchedSyms[0]!;
+    return {
+      ok: false,
+      file: relDecl,
+      touchedFiles: [],
+      mode: "rename",
+      replacedSpan: [sym0.line, sym0.endLine],
+      newSpan: [sym0.line, sym0.endLine],
+      diagnostics: [],
+      text:
+        `REJECTED [ambiguous-symbol] '${requestedSymbol}' is declared ${matchedSyms.length} times in ${relDecl} ` +
+        `(lines ${matchedSyms.map((s) => s.line).join(", ")}). Rename the declaration manually or ` +
+        `use a scoped edit so sibling methods are not rewritten.`,
+    };
+  }
+  const sym = matchedSyms[0]!;
+  oldName = sym.name;
+  // A qualified id picks one declaration, but a same-file sibling with the same bare
+  // name (A.cancel next to B.cancel) still cannot be word-replaced safely.
+  const sameFileSiblings = declData.ast.symbols.filter(
+    (candidate) =>
+      candidate !== sym &&
+      candidate.name === sym.name &&
+      (candidate.parentClass ?? "") !== (sym.parentClass ?? "")
+  );
+  if (sameFileSiblings.length > 0) {
     return {
       ok: false,
       file: relDecl,
@@ -347,8 +460,8 @@ function executeCrossRepoRename(
       newSpan: [sym.line, sym.endLine],
       diagnostics: [],
       text:
-        `REJECTED [ambiguous-symbol] '${oldName}' is declared ${sameNameDecls.length} times in ${relDecl} ` +
-        `(lines ${sameNameDecls.map((s) => s.line).join(", ")}). Rename the declaration manually or ` +
+        `REJECTED [ambiguous-symbol] '${requestedSymbol}' is declared ${sameFileSiblings.length + 1} times in ${relDecl} ` +
+        `(lines ${[sym, ...sameFileSiblings].map((s) => s.line).join(", ")}). Rename the declaration manually or ` +
         `use a scoped edit so sibling methods are not rewritten.`,
     };
   }
@@ -408,16 +521,25 @@ function executeCrossRepoRename(
     }
   }
 
-  // A candidate file may declare its own same-named symbol (a duck-typed sibling
-  // method in another module). Blind replacement would rename that unrelated
-  // declaration and its calls too; refuse rather than corrupt a second symbol.
+  // A candidate file may declare its own same-named symbol. An override in a subclass
+  // (`class Vip extends OrderService { cancel() { super.cancel() } }`) is the same method
+  // hierarchy: keep the override declaration and rewrite only the base call (`super.cancel`).
+  // An unrelated sibling (another class that merely shares the name) is still rejected.
+  const hierarchy = parentClass ? createWorkspaceTypeHierarchy(index) : undefined;
+  const overrideFiles = new Set<string>();
   for (const relPath of candidateFiles) {
     if (relPath === relDecl) continue;
     const candidateAst = index.getFileAnalysis(relPath)?.ast;
-    const conflicting = candidateAst?.symbols.find((s) => s.name === oldName);
-    if (conflicting) {
+    const conflicts = candidateAst?.symbols.filter((s) => s.name === oldName) ?? [];
+    let sawOverride = false;
+    for (const conflicting of conflicts) {
       // Prototype/definition pairs of the same declaration are updated together, not rejected.
       if (isSameDeclarationCluster(conflicting)) continue;
+      const sub = conflicting.parentClass;
+      if (hierarchy && parentClass && sub && hierarchy.isSubclassOf(sub, parentClass)) {
+        sawOverride = true;
+        continue;
+      }
       return {
         ok: false,
         file: relDecl,
@@ -431,14 +553,14 @@ function executeCrossRepoRename(
           `renaming '${relDecl}' would rewrite that unrelated symbol too. Rename it manually.`,
       };
     }
+    if (sawOverride) overrideFiles.add(relPath);
   }
 
   // Receiver-type-aware staging for methods: a candidate file whose `<oldName>` calls all
   // resolve to a *different* inferred receiver type has no target call sites and must not be
   // rewritten (blind word replacement would rename that other class's method). A file that
   // mixes target and foreign receivers cannot be safely blind-replaced either -> reject.
-  if (parentClass) {
-    const hierarchy = createWorkspaceTypeHierarchy(index);
+  if (parentClass && hierarchy) {
     const semantic = tryGetSemanticIndex(rootDir);
     const isTargetReceiver = (resolved: string | undefined): boolean => {
       if (resolved === undefined) return true; // unknown -> keep (renamed by word replace)
@@ -538,10 +660,83 @@ function executeCrossRepoRename(
     if (!existsSync(absPath)) continue;
     const raw = readFileSync(absPath, "utf8");
     let count = 0;
-    const updated = raw.replace(wordRe, () => {
-      count += 1;
-      return newName;
-    });
+    let updated: string;
+    if (parentClass && hierarchy) {
+      // Methods are not blind word-replaced: `from billing.refund` and prose must stay,
+      // while `def refund` / `policy.refund(` / `super().refund(` update.
+      const isOverride = overrideFiles.has(relPath);
+      const fData = index.getFileAnalysis(relPath);
+      const ast = fData?.ast ?? analyzeSourceFile(relPath, raw);
+      const receiverIndex = inferReceiverTypeIndex(relPath, raw, ast);
+      const semantic = tryGetSemanticIndex(rootDir);
+      const semanticHitsTarget = (call: AstCallSite): boolean | undefined => {
+        if (!semantic) return undefined;
+        let resolved: SemanticResolvedCall;
+        try {
+          resolved = semantic.resolveCall(relPath, call);
+        } catch {
+          return undefined;
+        }
+        if (!resolved.targetFile || !resolved.targetSymbol) return undefined;
+        if (resolved.confidence < SEMANTIC_CONFIDENCE_MIN) return undefined;
+        return (
+          resolved.targetFile === relDecl &&
+          resolved.targetSymbol === oldName &&
+          (resolved.parentClass ?? "") === parentClass
+        );
+      };
+      const declLines = new Set<number>();
+      if (!isOverride) {
+        for (const candidate of ast.symbols) {
+          if (candidate.name !== oldName) continue;
+          if ((candidate.parentClass ?? "") !== parentClass) continue;
+          declLines.add(candidate.line);
+        }
+      }
+      const targetLines = new Set<number>();
+      for (const call of ast.calls) {
+        if (call.callee !== oldName || call.isDeclaration || !call.member) continue;
+        // Alias imports (`OrderService as Svc`) and inherited receivers are proven here.
+        // A same-named type in another language must not hide that proof.
+        const verdict = semanticHitsTarget(call);
+        if (verdict === true) {
+          targetLines.add(call.line);
+          continue;
+        }
+        if (verdict === false) continue;
+        const resolved = resolveReceiverType(call, ast, receiverIndex);
+        if (resolved === undefined) {
+          const lineText = raw.split(/\r?\n/)[call.line - 1] ?? "";
+          if (isOverride) {
+            if (/\b(?:super|base)\b/.test(lineText)) targetLines.add(call.line);
+          } else if (!/^\s*(?:from|import)\b/.test(lineText)) {
+            // Unknown receiver in a file already staged as a target caller (duck typing).
+            targetLines.add(call.line);
+          }
+          continue;
+        }
+        if (hierarchy.isCompatibleReceiver(resolved, parentClass, oldName)) {
+          targetLines.add(call.line);
+        }
+      }
+      if (isOverride && targetLines.size === 0) {
+        const fallbackRe = new RegExp(
+          `\\b(?:super\\s*(?:\\([^)]*\\))?\\s*\\.\\s*|base\\s*\\.\\s*)${escapeRegExp(oldName)}\\b`
+        );
+        raw.split(/\r?\n/).forEach((line, index) => {
+          if (fallbackRe.test(line)) targetLines.add(index + 1);
+        });
+      }
+      const members = replaceMemberAccessOnLines(raw, oldName, newName, targetLines);
+      const declared = replaceBareIdentifierOnLines(members.updated, oldName, newName, declLines);
+      updated = declared.updated;
+      count = members.count + declared.count;
+    } else {
+      updated = raw.replace(wordRe, () => {
+        count += 1;
+        return newName;
+      });
+    }
     if (count === 0) continue;
 
     const afterAst = analyzeSourceFile(relPath, updated);

@@ -34,6 +34,7 @@ import {
   recordTrajectoryAndMine,
 } from "./macro-engine.js";
 import { executeSurgicalRead, getWorkspaceAstIndex } from "./slicer.js";
+import { autoLogExecutedCommand } from "./task-reflector.js";
 
 export interface HostToolUsePayload {
   hook_event_name?: "PreToolUse" | "PostToolUse" | "preToolUse" | "postToolUse";
@@ -310,6 +311,16 @@ export function interceptPostToolUse(
     if (isNoiseCommand(command)) {
       return { intercepted: false, action: "noop", hookProtocolOutput: {} };
     }
+
+    const loggedInstruction =
+      typeof input.instruction === "string" && input.instruction.trim()
+        ? input.instruction
+        : typeof input.description === "string" && input.description.trim()
+          ? input.description
+          : undefined;
+    autoLogExecutedCommand(rootDir, command, {
+      ...(loggedInstruction ? { instruction: loggedInstruction } : {}),
+    });
 
     const dehydrated = dehydrateCommandOutput({
       rootDir,

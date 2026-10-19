@@ -689,6 +689,48 @@ function parseCallNode(
   }
 }
 
+/**
+ * Tree-sitter does not emit `call_expression` nodes for tokens nested inside a
+ * Rust macro (`format!("{}={}", device.id(), device.read())`). Scan the macro
+ * token text for `receiver.method(` so `impl Trait` calls inside macros still
+ * reach blast radius. Direct calls already recorded by `collectCalls` win.
+ */
+function collectRustMacroMethodCalls(ctx: AnalysisContext, root: TsNode): void {
+  const methodRe = /\b([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*\(/g;
+  walkNodes(root, (node) => {
+    if (node.type !== "macro_invocation") return;
+    const text = textOf(ctx, node);
+    const baseLine = nodeLine(node);
+    const macroLines = text.split(/\r?\n/);
+    for (let offset = 0; offset < macroLines.length; offset++) {
+      const code = (macroLines[offset] ?? "").replace(/\b[A-Za-z_]\w*\s*!/g, " ");
+      methodRe.lastIndex = 0;
+      for (const match of code.matchAll(methodRe)) {
+        const receiver = match[1];
+        const callee = match[2];
+        if (!receiver || !callee) continue;
+        const lineNo = baseLine + offset;
+        const duplicate = ctx.calls.some(
+          (existing) =>
+            existing.line === lineNo &&
+            existing.callee === callee &&
+            (existing.receiver ?? "") === receiver
+        );
+        if (duplicate) continue;
+        const caller = findEnclosingCaller(ctx.symbols, lineNo);
+        ctx.calls.push({
+          callee,
+          line: lineNo,
+          argsCount: 0,
+          ...(caller ? { caller } : {}),
+          receiver,
+          member: true,
+        });
+      }
+    }
+  });
+}
+
 function collectCalls(ctx: AnalysisContext, root: TsNode): void {
   walkNodes(root, (node, ancestors) => {
     const parsed = parseCallNode(ctx, node);
@@ -1669,6 +1711,7 @@ export function analyzeWithTreeSitter(
   }
 
   collectCalls(ctx, root);
+  if (chosenFamily === "rust") collectRustMacroMethodCalls(ctx, root);
   // Synthetic prototype entries come last so real executable calls win same-name lookups.
   ctx.calls.push(...ctx.declarationCalls);
   collectSyntaxErrors(ctx, root);

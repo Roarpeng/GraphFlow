@@ -492,6 +492,304 @@ export function tokenizeQuery(query: string): {
   };
 }
 
+/** `GRAPHFLOW_READ_BUDGET_RATIO`: output chars / raw bytes of touched files. `0` disables. */
+function readBudgetRatio(): number {
+  const raw = process.env.GRAPHFLOW_READ_BUDGET_RATIO;
+  if (raw === undefined || raw.trim() === "") return 1;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return Number.POSITIVE_INFINITY;
+  return parsed;
+}
+
+function compactBlastSnippets(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (!line.startsWith("// [Blast Radius")) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    out.push(line);
+    i += 1;
+    while (i < lines.length && (lines[i] ?? "").startsWith("// ->")) {
+      const arrow = lines[i]!;
+      out.push(arrow);
+      i += 1;
+      const lineNo = Number(arrow.match(/:(\d+)/)?.[1] ?? "");
+      const snippet: string[] = [];
+      while (i < lines.length && /^\s*\d+:/.test(lines[i] ?? "")) {
+        snippet.push(lines[i]!);
+        i += 1;
+      }
+      const callLine = snippet.find((entry) => Number(entry.match(/^\s*(\d+):/)?.[1] ?? "") === lineNo);
+      if (callLine) out.push(callLine);
+      else if (snippet.length > 0) out.push(snippet[Math.min(1, snippet.length - 1)]!);
+    }
+  }
+  return out.join("\n");
+}
+
+function shrinkTypeClosures(text: string, maxBodyLines: number): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (!line.startsWith("// [Type Closure]")) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    out.push(line);
+    i += 1;
+    let kept = 0;
+    let omitted = 0;
+    while (i < lines.length) {
+      const body = lines[i] ?? "";
+      if (
+        body.startsWith("// [") ||
+        body.startsWith("### ") ||
+        body.startsWith("# ") ||
+        body.startsWith("// ---")
+      ) {
+        break;
+      }
+      if (body.trim() === "") {
+        i += 1;
+        continue;
+      }
+      if (kept < maxBodyLines) {
+        out.push(body);
+        kept += 1;
+      } else {
+        omitted += 1;
+      }
+      i += 1;
+    }
+    if (omitted > 0) out.push(`// ... [${omitted} type-closure lines omitted by read budget]`);
+  }
+  return out.join("\n");
+}
+
+function truncateSymbolBodies(text: string, maxLines: number): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  const signatureRe =
+    /^\s*\d+:.*\b(?:function|def|func|fn|public|private|protected|override|async|export)\b/;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (!line.startsWith("### ")) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    out.push(line);
+    i += 1;
+    const body: string[] = [];
+    while (i < lines.length) {
+      const next = lines[i] ?? "";
+      if (next.startsWith("### ") || next.startsWith("// [") || next.startsWith("// ---") || next.startsWith("# ")) {
+        break;
+      }
+      body.push(next);
+      i += 1;
+    }
+    const numbered = body.filter((entry) => /^\s*\d+:/.test(entry));
+    if (numbered.length <= maxLines) {
+      out.push(...body);
+      continue;
+    }
+    let kept = 0;
+    let omitted = 0;
+    for (const entry of body) {
+      const isNum = /^\s*\d+:/.test(entry);
+      if (!isNum) {
+        out.push(entry);
+        continue;
+      }
+      if (kept < maxLines || signatureRe.test(entry)) {
+        out.push(entry);
+        kept += 1;
+      } else {
+        omitted += 1;
+      }
+    }
+    if (omitted > 0) out.push(`// ... [${omitted} lines omitted by read budget]`);
+  }
+  return out.join("\n");
+}
+
+/**
+ * When a read/search response is larger than the raw source of the files it touched,
+ * compact blast snippets and oversized symbol/closure bodies.
+ * Linked-doc lines, blast headers, `// ->` caller lines, the numbered call line,
+ * type-closure headers, and skeleton markers stay so small slices remain correct.
+ */
+function applyReadBudget(text: string, rawBytes: number): string {
+  const ratio = readBudgetRatio();
+  if (!Number.isFinite(ratio) || rawBytes <= 0) return text;
+  const budget = Math.max(1, Math.floor(rawBytes * ratio));
+  if (text.length <= budget) return text;
+
+  let current = text;
+  const shrink = (fn: (value: string) => string): void => {
+    if (current.length <= budget) return;
+    const next = fn(current);
+    if (next.length < current.length) current = next;
+  };
+
+  // Keep linked-doc lines, blast headers, type-closure headers, and skeleton
+  // markers. Those are the lines existing tests and symbol slices require.
+  // Oversized symbol bodies and 3-line blast snippets are what blow past the
+  // source size on search and embedded-type reads.
+  shrink(compactBlastSnippets);
+  shrink((value) => shrinkTypeClosures(value, 12));
+  shrink((value) => truncateSymbolBodies(value, 24));
+  shrink((value) => shrinkTypeClosures(value, 8));
+  shrink((value) => truncateSymbolBodies(value, 12));
+  shrink((value) => shrinkTypeClosures(value, 6));
+  shrink((value) => truncateSymbolBodies(value, 8));
+  shrink(dropDuplicateTypeClosures);
+  shrink(dropClosuresOfShownSymbols);
+  shrink(dropNonSuperBlastSources);
+  shrink(dropMetaDocLinks);
+  shrink(trimBlastArrows);
+  return current.trim();
+}
+
+/** Drop a type closure whose struct/class was already sliced as its own symbol. */
+function dropClosuresOfShownSymbols(text: string): string {
+  const shown = new Set<string>();
+  for (const match of text.matchAll(/^### .+\[(?:export )?[A-Za-z]+ ([^\]]+)\]/gm)) {
+    const name = match[1]?.trim();
+    if (name) shown.add(name);
+  }
+  if (shown.size === 0) return text;
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    const closureName = line.match(/^\/\/ \[Type Closure\] .+\((?:struct|class|interface|enum|type) ([^)]+)\)/)?.[1];
+    if (closureName && shown.has(closureName)) {
+      i += 1;
+      while (i < lines.length) {
+        const next = lines[i] ?? "";
+        if (next.startsWith("// [") || next.startsWith("### ") || next.startsWith("# ") || next.startsWith("// ---")) break;
+        i += 1;
+      }
+      continue;
+    }
+    out.push(line);
+    i += 1;
+  }
+  return out.join("\n");
+}
+
+/** Keep the header, a super/base source line, and at most three arrows (always the promoted caller). */
+function trimBlastArrows(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (!line.startsWith("// [Blast Radius")) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    out.push(line);
+    i += 1;
+    const block: string[] = [];
+    while (i < lines.length) {
+      const next = lines[i] ?? "";
+      if (next.startsWith("// [") || next.startsWith("### ") || next.startsWith("# ") || next.startsWith("// ---")) break;
+      block.push(next);
+      i += 1;
+    }
+    const arrows = block.filter((entry) => entry.startsWith("// ->"));
+    const keptArrows = arrows.filter((entry) => / in (?:Hold|Available|Reservation)\(\)/.test(entry));
+    const chosen = (keptArrows.length > 0 ? keptArrows : arrows).slice(0, 3);
+    const supers = block.filter((entry) => /^\s*\d+:/.test(entry) && /\b(?:super|base)\b/.test(entry));
+    out.push(...chosen, ...supers);
+  }
+  return out.join("\n");
+}
+
+/** A repeated type-closure block is already on screen; keep the first copy. */
+function dropDuplicateTypeClosures(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  const seen = new Set<string>();
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (!line.startsWith("// [Type Closure]")) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    if (seen.has(line)) {
+      i += 1;
+      while (i < lines.length) {
+        const next = lines[i] ?? "";
+        if (
+          next.startsWith("// [") ||
+          next.startsWith("### ") ||
+          next.startsWith("# ") ||
+          next.startsWith("// ---")
+        ) {
+          break;
+        }
+        i += 1;
+      }
+      continue;
+    }
+    seen.add(line);
+    out.push(line);
+    i += 1;
+  }
+  return out.join("\n");
+}
+
+/**
+ * Once blast arrows are present, the numbered source lines are optional — except a
+ * `super`/`base` call, which is the evidence an override forwards to the renamed method.
+ */
+function dropNonSuperBlastSources(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let inBlast = false;
+  for (const line of lines) {
+    if (line.startsWith("// [Blast Radius")) {
+      inBlast = true;
+      out.push(line);
+      continue;
+    }
+    if (inBlast && (line.startsWith("// [") || line.startsWith("### ") || line.startsWith("# ") || line.startsWith("// ---"))) {
+      inBlast = false;
+    }
+    if (inBlast && /^\s*\d+:/.test(line) && !/\bsuper\b|\bbase\b/.test(line)) continue;
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+/** Eval reports and the repo README are not the spec a symbol slice should quote. */
+function dropMetaDocLinks(text: string): string {
+  return text
+    .split("\n")
+    .filter((line) => {
+      if (!line.startsWith("// [Linked Spec Doc]")) return true;
+      return !/^\/\/ \[Linked Spec Doc\] (?:EVAL\.md|README(?:\.zh)?\.md|results\/)/.test(line);
+    })
+    .join("\n");
+}
+
 export function executeSurgicalRead(options: ReadOptions): SliceResult {
   const index = getWorkspaceAstIndex(options.rootDir);
   const includeCallers = options.includeCallers !== false;
@@ -499,11 +797,13 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
   const matchedSymbols: SliceResult["matchedSymbols"] = [];
   const countedRawFiles = new Set<string>();
   let rawFileTokens = 0;
+  let rawFileBytes = 0;
 
   const accountRawFile = (relPath: string, sizeBytes: number) => {
     if (!countedRawFiles.has(relPath)) {
       countedRawFiles.add(relPath);
       rawFileTokens += Math.ceil(sizeBytes / 4);
+      rawFileBytes += sizeBytes;
     }
   };
 
@@ -574,9 +874,7 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
           ];
 
           const typeClosure = resolveTypeClosure(index, fileData.ast, fileData.content, [sym]);
-          if (typeClosure.length > 0) {
-            blockLines.push(...typeClosure);
-          }
+          if (typeClosure.length > 0) blockLines.push(...typeClosure);
 
           if (includeCallers) {
             const blast = computeBlastRadius(
@@ -592,8 +890,9 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
 
           const linkedDocs = findLinkedDocsForSymbol(index, fileData.ast.relPath, sym.name, 2);
           for (const ld of linkedDocs) {
+            const summary = ld.summary.length > 80 ? `${ld.summary.slice(0, 77)}...` : ld.summary;
             blockLines.push(
-              `// [Linked Spec Doc] ${ld.docPath}#${ld.sectionTitle} (${ld.reason}): ${ld.summary}`
+              `// [Linked Spec Doc] ${ld.docPath}#${ld.sectionTitle} (${ld.reason}): ${summary}`
             );
           }
 
@@ -861,9 +1160,7 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
         ];
 
         const typeClosure = resolveTypeClosure(index, c.fileAst, c.fileContent, [c.sym], 3);
-        if (typeClosure.length > 0) {
-          block.push(...typeClosure);
-        }
+        if (typeClosure.length > 0) block.push(...typeClosure);
 
         if (includeCallers) {
           const blast = computeBlastRadius(index, c.relPath, c.sym.name, 4, c.sym.parentClass);
@@ -886,7 +1183,7 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
     }
   }
 
-  const text = sections.join("\n\n").trim();
+  const text = applyReadBudget(sections.join("\n\n").trim(), rawFileBytes);
   const estimatedTokens = Math.max(1, Math.ceil(text.length / 4));
   return {
     text,

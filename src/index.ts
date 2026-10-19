@@ -1,5 +1,5 @@
 /**
- * GraphFlow 3.6.1 — Pure Token-First Surgical Engine Public Entrypoint (`src/index.ts`)
+ * GraphFlow 3.6.2 — Pure Token-First Surgical Engine Public Entrypoint (`src/index.ts`)
  */
 
 export {
@@ -252,6 +252,8 @@ export {
   TASK_SCRIPT_DIR,
   TASK_STORE_VERSION,
   appendInstructionLogEntry,
+  autoLogExecutedCommand,
+  bestTaskSimilarity,
   compileTask,
   findTask,
   formatHarvestReport,
