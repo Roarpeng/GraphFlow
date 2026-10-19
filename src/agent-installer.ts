@@ -9,9 +9,18 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { stripJsonComments } from "./semantic-index.js";
 
 export type McpServersKey = "mcpServers" | "servers" | "context_servers" | "mcp";
 export type McpConfigFormat = "json" | "codex-toml" | "opencode" | "zcode";
@@ -636,7 +645,7 @@ function resolveMcpLauncherCommand(): { command: string; args: string[] } {
 function readJsonSafe(filePath: string): Record<string, unknown> {
   if (!existsSync(filePath)) return {};
   try {
-    const raw = readFileSync(filePath, "utf8").trim();
+    const raw = readFileSync(filePath, "utf8").replace(/^\uFEFF/, "").trim();
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" && !Array.isArray(parsed)
@@ -647,9 +656,82 @@ function readJsonSafe(filePath: string): Record<string, unknown> {
   }
 }
 
+/** Result of reading a config file GraphFlow is about to rewrite. */
+type JsonConfigRead =
+  | { ok: true; data: Record<string, unknown> }
+  | { ok: false; detail: string };
+
+/**
+ * Reads a host config file for a write path. Hosts that allow JSONC (VS Code
+ * `settings.json`, Codex `config.toml`-adjacent files) are common, so the text is
+ * retried with comments and trailing commas stripped before it is declared broken.
+ */
+function readJsonConfig(filePath: string): JsonConfigRead {
+  if (!existsSync(filePath)) return { ok: true, data: {} };
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, "utf8").replace(/^\uFEFF/, "");
+  } catch (err) {
+    return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+  }
+  if (!raw.trim()) return { ok: true, data: {} };
+
+  let detail = "unknown parse failure";
+  for (const text of [raw, stripJsonComments(raw)]) {
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return { ok: true, data: parsed as Record<string, unknown> };
+      }
+      detail = Array.isArray(parsed)
+        ? "the file contains a JSON array, not an object"
+        : `the file contains ${parsed === null ? "null" : `a ${typeof parsed}`}, not an object`;
+      break;
+    } catch (err) {
+      detail = err instanceof Error ? err.message : String(err);
+    }
+  }
+  return { ok: false, detail };
+}
+
+/**
+ * Reads a config file that is about to be rewritten.
+ *
+ * {@link readJsonSafe} degrades to `{}` so read-only callers keep working; doing the same
+ * before a write is destructive. The caller then merges its one entry into an empty
+ * object and replaces the file, so a stray trailing comma or comment in
+ * `~/.cursor/mcp.json` silently deletes every other MCP server the user configured.
+ * Rewriting callers therefore refuse to touch a file they cannot parse, and leave a
+ * backup next to it.
+ */
+function readJsonForUpdate(filePath: string): Record<string, unknown> {
+  const result = readJsonConfig(filePath);
+  if (result.ok) return result.data;
+
+  const backupPath = `${filePath}.graphflow-bak`;
+  try {
+    copyFileSync(filePath, backupPath);
+  } catch {
+    // The backup is a courtesy; the refusal below is what protects the file.
+  }
+  throw new Error(
+    `refusing to overwrite ${filePath}: it is not valid JSON (${result.detail}). ` +
+      `A backup was written to ${backupPath}. Fix or delete the file and re-run.`
+  );
+}
+
 function writeJsonSafe(filePath: string, data: Record<string, unknown>): void {
   mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  // Write to a sibling temp file and rename: a crash, a full disk or a killed editor must
+  // not leave the host's config half-written — rename() is atomic on POSIX and NTFS.
+  const tmpPath = `${filePath}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmpPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+    renameSync(tmpPath, filePath);
+  } catch (err) {
+    rmSync(tmpPath, { force: true });
+    throw err;
+  }
 }
 
 function writeMcpTarget(
@@ -677,7 +759,7 @@ function writeMcpTarget(
     return existed ? "updated" : "installed";
   }
 
-  const obj = readJsonSafe(target.configPath);
+  const obj = readJsonForUpdate(target.configPath);
 
   if (format === "opencode") {
     const mcp =
@@ -738,7 +820,7 @@ function removeMcpTarget(target: AgentMcpTarget, serverName: string): boolean {
     return true;
   }
 
-  const obj = readJsonSafe(target.configPath);
+  const obj = readJsonForUpdate(target.configPath);
   if (format === "opencode") {
     const mcp = obj.mcp as Record<string, unknown> | undefined;
     if (!mcp || !(serverName in mcp)) return false;
@@ -1058,7 +1140,7 @@ function buildGraphflowHookEntry(
  */
 export function installHostHook(hookKind: HookKind, configPath: string): "installed" | "updated" {
   const existed = existsSync(configPath);
-  const obj = readJsonSafe(configPath);
+  const obj = readJsonForUpdate(configPath);
   const rawHooks = obj.hooks;
   const hooks: Record<string, unknown> =
     rawHooks && typeof rawHooks === "object" && !Array.isArray(rawHooks)
@@ -1087,7 +1169,7 @@ export function installHostHook(hookKind: HookKind, configPath: string): "instal
  */
 export function removeHostHook(hookKind: HookKind, configPath: string): boolean {
   if (!existsSync(configPath)) return false;
-  const obj = readJsonSafe(configPath);
+  const obj = readJsonForUpdate(configPath);
   const rawHooks = obj.hooks;
   if (!rawHooks || typeof rawHooks !== "object" || Array.isArray(rawHooks)) return false;
   const hooks = { ...(rawHooks as Record<string, unknown>) };
@@ -1206,7 +1288,7 @@ function removeMcpKey(target: AgentMcpTarget, key: string): boolean {
     return true;
   }
 
-  const obj = readJsonSafe(target.configPath);
+  const obj = readJsonForUpdate(target.configPath);
   if (format === "opencode") {
     const mcp = obj.mcp as Record<string, unknown> | undefined;
     if (!mcp || !(key in mcp)) return false;
@@ -1262,11 +1344,31 @@ export function pruneLegacyRegistrations(
       });
     };
 
+    const pushError = (
+      category: AgentInstallItemResult["category"],
+      targetPath: string,
+      err: unknown
+    ): void => {
+      results.push({
+        agentId: profile.id,
+        agentName: profile.name,
+        category,
+        targetPath,
+        status: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    };
+
     // 1. Alias server keys in every existing config (detected or not).
     for (const target of profile.mcpTargets) {
       for (const alias of findLegacyMcpKeys(target, serverName)) {
-        if (removeMcpKey(target, alias)) {
-          pushRemoved("mcp", target.configPath, `legacy MCP alias "${alias}" removed`);
+        try {
+          if (removeMcpKey(target, alias)) {
+            pushRemoved("mcp", target.configPath, `legacy MCP alias "${alias}" removed`);
+          }
+        } catch (err) {
+          pushError("mcp", target.configPath, err);
+          break; // the same file will fail for every remaining alias
         }
       }
     }
@@ -1275,8 +1377,12 @@ export function pruneLegacyRegistrations(
 
     // 2. Full footprint removal for agents that are no longer installed.
     for (const target of profile.mcpTargets) {
-      if (removeMcpTarget(target, serverName)) {
-        pushRemoved("mcp", target.configPath, "stale graphflow MCP entry removed (agent not installed)");
+      try {
+        if (removeMcpTarget(target, serverName)) {
+          pushRemoved("mcp", target.configPath, "stale graphflow MCP entry removed (agent not installed)");
+        }
+      } catch (err) {
+        pushError("mcp", target.configPath, err);
       }
     }
     // DSH Cordis patches are graphflow-owned blocks: drop them when DSH is no
@@ -1301,12 +1407,16 @@ export function pruneLegacyRegistrations(
       }
     }
     if (profile.hookKind && profile.hookConfigPath) {
-      if (removeHostHook(profile.hookKind, profile.hookConfigPath)) {
-        pushRemoved(
-          "hook",
-          profile.hookConfigPath,
-          "stale graphflow hooks removed (agent not installed)"
-        );
+      try {
+        if (removeHostHook(profile.hookKind, profile.hookConfigPath)) {
+          pushRemoved(
+            "hook",
+            profile.hookConfigPath,
+            "stale graphflow hooks removed (agent not installed)"
+          );
+        }
+      } catch (err) {
+        pushError("hook", profile.hookConfigPath, err);
       }
     }
   }
@@ -1358,22 +1468,33 @@ export function installAllAgents(opts: InstallAllAgentsOptions = {}): InstallAll
     if (opts.includeWorkspace && opts.workspaceRoot && profile.workspaceMcpTargets) {
       for (const wsTarget of profile.workspaceMcpTargets) {
         const fullPath = join(opts.workspaceRoot, wsTarget.relativePath);
-        const status = writeMcpTarget(
-          {
-            configPath: fullPath,
-            serversKey: wsTarget.serversKey,
-            ...(wsTarget.configFormat ? { configFormat: wsTarget.configFormat } : {}),
-          },
-          serverName,
-          launcher
-        );
-        results.push({
-          agentId: profile.id,
-          agentName: `${profile.name} (workspace)`,
-          category: "mcp",
-          targetPath: fullPath,
-          status,
-        });
+        try {
+          const status = writeMcpTarget(
+            {
+              configPath: fullPath,
+              serversKey: wsTarget.serversKey,
+              ...(wsTarget.configFormat ? { configFormat: wsTarget.configFormat } : {}),
+            },
+            serverName,
+            launcher
+          );
+          results.push({
+            agentId: profile.id,
+            agentName: `${profile.name} (workspace)`,
+            category: "mcp",
+            targetPath: fullPath,
+            status,
+          });
+        } catch (err) {
+          results.push({
+            agentId: profile.id,
+            agentName: `${profile.name} (workspace)`,
+            category: "mcp",
+            targetPath: fullPath,
+            status: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     }
 
@@ -1503,14 +1624,25 @@ export function uninstallAllAgents(opts: UninstallAllAgentsOptions = {}): AgentI
     if (scopedIds && !scopedIds.has(profile.id)) continue;
 
     for (const target of profile.mcpTargets) {
-      const removed = removeMcpTarget(target, serverName);
-      if (removed) {
+      try {
+        const removed = removeMcpTarget(target, serverName);
+        if (removed) {
+          results.push({
+            agentId: profile.id,
+            agentName: profile.name,
+            category: "mcp",
+            targetPath: target.configPath,
+            status: "removed",
+          });
+        }
+      } catch (err) {
         results.push({
           agentId: profile.id,
           agentName: profile.name,
           category: "mcp",
           targetPath: target.configPath,
-          status: "removed",
+          status: "error",
+          message: err instanceof Error ? err.message : String(err),
         });
       }
     }
@@ -1555,13 +1687,24 @@ export function uninstallAllAgents(opts: UninstallAllAgentsOptions = {}): AgentI
 
     // 4. Remove GraphFlow host hooks, preserving the host's user hooks.
     if (profile.hookKind && profile.hookConfigPath) {
-      if (removeHostHook(profile.hookKind, profile.hookConfigPath)) {
+      try {
+        if (removeHostHook(profile.hookKind, profile.hookConfigPath)) {
+          results.push({
+            agentId: profile.id,
+            agentName: profile.name,
+            category: "hook",
+            targetPath: profile.hookConfigPath,
+            status: "removed",
+          });
+        }
+      } catch (err) {
         results.push({
           agentId: profile.id,
           agentName: profile.name,
           category: "hook",
           targetPath: profile.hookConfigPath,
-          status: "removed",
+          status: "error",
+          message: err instanceof Error ? err.message : String(err),
         });
       }
     }
