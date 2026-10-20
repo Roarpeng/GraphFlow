@@ -19,7 +19,8 @@
  *       with an interactive force-directed Canvas topology, search, node filtering, and click inspector.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
 import { inflateRawSync, inflateSync } from "node:zlib";
 import {
@@ -34,6 +35,7 @@ import {
   type SourceLanguageFamily,
 } from "./ast-engine.js";
 import { loadMacroStore } from "./macro-engine.js";
+import { ensureGraphflowDir } from "./graphflow-dir.js";
 import { getSemanticIndex, SEMANTIC_CONFIDENCE_MIN } from "./semantic-index.js";
 import type { getWorkspaceAstIndex } from "./slicer.js";
 import { segmentChinese, toPinyin, tokenizeEnglish } from "./tokenizer.js";
@@ -57,6 +59,12 @@ export interface DocSection {
   summary: string;
   referencedIdentifiers: string[];
   bilingualTokens: string[];
+  /**
+   * Full section text (title + body, before the 220-char `summary` truncation). Used to verify
+   * that a doc<->code link target is literally mentioned in this section before emitting an
+   * edge. Optional because hand-built `DocSection`s may omit it.
+   */
+  text?: string;
 }
 
 export interface DocCodeLink {
@@ -358,6 +366,7 @@ export function parseProjectDocument(relPath: string, absPath: string): DocSecti
       summary: body.replace(/\s+/g, " ").slice(0, 220),
       referencedIdentifiers: extractCandidateSymbolsFromDocText(fullText),
       bilingualTokens,
+      text: fullText,
     });
   };
 
@@ -395,14 +404,14 @@ const IGNORED_DOC_DIRS = new Set([
 ]);
 
 /**
- * Scans workspace for development documents (`.md`, `.html`, `.xml`, `.docx`, `.pdf`).
+ * Lists workspace development documents (`.md`, `.html`, `.xml`, `.docx`, `.pdf`) without
+ * parsing them. Shared by the scanner and by the graph fingerprint (stat-only, cheap).
  */
-export function scanWorkspaceDocuments(rootDir: string, maxDocs = 200): DocSection[] {
-  const sections: DocSection[] = [];
-  let docCount = 0;
+function listWorkspaceDocumentPaths(rootDir: string, maxDocs = 200): string[] {
+  const paths: string[] = [];
 
   const walk = (dir: string, depth: number) => {
-    if (depth > 6 || docCount >= maxDocs) return;
+    if (depth > 6 || paths.length >= maxDocs) return;
     let entries;
     try {
       entries = readdirSync(dir, { withFileTypes: true });
@@ -410,7 +419,7 @@ export function scanWorkspaceDocuments(rootDir: string, maxDocs = 200): DocSecti
       return;
     }
     for (const entry of entries) {
-      if (docCount >= maxDocs) break;
+      if (paths.length >= maxDocs) break;
       if (entry.name.startsWith(".")) continue;
       if (IGNORED_DOC_DIRS.has(entry.name)) continue;
       const full = join(dir, entry.name);
@@ -425,14 +434,95 @@ export function scanWorkspaceDocuments(rootDir: string, maxDocs = 200): DocSecti
         } catch {
           continue;
         }
-        const rel = relative(rootDir, full).replace(/\\/g, "/");
-        docCount += 1;
-        sections.push(...parseProjectDocument(rel, full));
+        paths.push(relative(rootDir, full).replace(/\\/g, "/"));
       }
     }
   };
 
   walk(rootDir, 0);
+  return paths;
+}
+
+/**
+ * Scans workspace for development documents (`.md`, `.html`, `.xml`, `.docx`, `.pdf`).
+ */
+/**
+ * Document parsing is the single most expensive part of a doc-link rebuild (≈920 ms for a
+ * mid-size repo) and it depends on nothing but the documentation files themselves, which
+ * change far less often than source. The parsed sections are therefore cached wholesale and
+ * invalidated by a fingerprint over every document's path/size/mtime.
+ */
+const DOC_SECTION_CACHE_VERSION = 1;
+const DOC_SECTION_CACHE_REL = ".graphflow/doc-links/sections.json";
+
+interface DocSectionCacheFile {
+  version: number;
+  fingerprint: string;
+  sections: readonly DocSection[];
+}
+
+function computeDocSectionFingerprint(rootDir: string, maxDocs: number): string {
+  const hash = createHash("sha1");
+  hash.update(`v${DOC_SECTION_CACHE_VERSION}\nmax=${maxDocs}\n`);
+  for (const rel of listWorkspaceDocumentPaths(rootDir, maxDocs)) {
+    appendStatFingerprint(hash, rootDir, rel);
+  }
+  return hash.digest("hex");
+}
+
+function readDocSectionCache(rootDir: string, fingerprint: string): DocSection[] | undefined {
+  try {
+    const parsed = JSON.parse(
+      readFileSync(join(rootDir, ...DOC_SECTION_CACHE_REL.split("/")), "utf8")
+    ) as DocSectionCacheFile;
+    if (parsed?.version !== DOC_SECTION_CACHE_VERSION) return undefined;
+    if (parsed.fingerprint !== fingerprint) return undefined;
+    if (!Array.isArray(parsed.sections)) return undefined;
+    return parsed.sections;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeDocSectionCache(
+  rootDir: string,
+  fingerprint: string,
+  sections: readonly DocSection[]
+): void {
+  try {
+    ensureGraphflowDir(rootDir);
+    const path = join(rootDir, ...DOC_SECTION_CACHE_REL.split("/"));
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(
+      path,
+      JSON.stringify({
+        version: DOC_SECTION_CACHE_VERSION,
+        fingerprint,
+        sections,
+      } satisfies DocSectionCacheFile),
+      "utf8"
+    );
+  } catch {
+    // A cache that cannot be written is simply a cache that is never hit.
+  }
+}
+
+export function scanWorkspaceDocuments(rootDir: string, maxDocs = 200): DocSection[] {
+  if (process.env.GRAPHFLOW_DOC_LINK_CACHE === "0") {
+    const sections: DocSection[] = [];
+    for (const rel of listWorkspaceDocumentPaths(rootDir, maxDocs)) {
+      sections.push(...parseProjectDocument(rel, join(rootDir, rel)));
+    }
+    return sections;
+  }
+  const fingerprint = computeDocSectionFingerprint(rootDir, maxDocs);
+  const cached = readDocSectionCache(rootDir, fingerprint);
+  if (cached) return cached;
+  const sections: DocSection[] = [];
+  for (const rel of listWorkspaceDocumentPaths(rootDir, maxDocs)) {
+    sections.push(...parseProjectDocument(rel, join(rootDir, rel)));
+  }
+  writeDocSectionCache(rootDir, fingerprint, sections);
   return sections;
 }
 
@@ -554,6 +644,64 @@ interface ConceptCandidate {
   confidence: number;
   sharedTokens: string[];
   link: DocCodeLink;
+}
+
+/**
+ * A cached concept candidate. `so` is the symbol index *within its own file* rather than the
+ * flat `symbolData` index: the flat index shifts whenever an earlier file gains or loses a
+ * symbol, which would invalidate every later file's cache entry.
+ */
+interface ConceptFileCandidate {
+  so: number;
+  si: number;
+  sc: number;
+  cf: number;
+  st: string[];
+  link: DocCodeLink;
+}
+
+interface ConceptFileRecord {
+  /** Symbol-data hash of the file this record was computed from. */
+  hash: string;
+  /** Concept tokens this file's symbols use; the DF-based eligibility test depends on them. */
+  tokens: string[];
+  cand: ConceptFileCandidate[];
+}
+
+interface ConceptStore {
+  version: number;
+  /** Fingerprint of the parsed documentation: sections are the retrieval corpus. */
+  docFp: string;
+  /** Fingerprint of the feedback file, which can reject or boost individual links. */
+  feedbackFp: string;
+  files: Record<string, ConceptFileRecord>;
+}
+
+const CONCEPT_STORE_VERSION = 1;
+const CONCEPT_STORE_REL = ".graphflow/doc-links/concepts.json";
+
+function readConceptStore(rootDir: string): ConceptStore | undefined {
+  try {
+    const parsed = JSON.parse(
+      readFileSync(join(rootDir, ...CONCEPT_STORE_REL.split("/")), "utf8")
+    ) as ConceptStore;
+    if (parsed?.version !== CONCEPT_STORE_VERSION) return undefined;
+    if (typeof parsed.files !== "object" || parsed.files === null) return undefined;
+    return parsed;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeConceptStore(rootDir: string, store: ConceptStore): void {
+  try {
+    ensureGraphflowDir(rootDir);
+    const path = join(rootDir, ...CONCEPT_STORE_REL.split("/"));
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(store), "utf8");
+  } catch {
+    // A cache that cannot be written is simply a cache that is never hit.
+  }
 }
 
 function addWeightedConceptTokens(
@@ -819,24 +967,227 @@ export function recordDocLinkFeedback(rootDir: string, patch: DocLinkFeedback): 
  *  5. Optional read-only feedback from `.graphflow/doc-link-feedback.json` can boost accepted
  *     links / suppress rejected ones (write via `recordDocLinkFeedback`).
  */
+/**
+ * On-disk cache for `buildDocCodeLinks`.
+ *
+ * The link corpus is a whole-workspace computation (document frequency over every
+ * doc section and every symbol), so even a single-symbol `read` paid for all of
+ * it — ~1.2s of a 274-file workspace. The result is a pure function of the source
+ * files, the document files and the global cap, so it can be reused by every later
+ * process and by every agent sharing the workspace.
+ *
+ * The cache is keyed by fingerprint rather than by path, so a modified file
+ * invalidates it without any bookkeeping. `GRAPHFLOW_DOC_LINK_CACHE=0` disables it.
+ */
+const DOC_LINK_CACHE_VERSION = 1;
+const DOC_LINK_CACHE_DIR_REL = ".graphflow/doc-links";
+/** Version of the per-file symbol retrieval shard; bump when `buildSymbolRetrievalData` changes. */
+const SYMBOL_DATA_CACHE_VERSION = 1;
+
+function docLinkCacheEnabled(): boolean {
+  return process.env.GRAPHFLOW_DOC_LINK_CACHE !== "0";
+}
+
+function docLinkCachePath(rootDir: string, key: string): string {
+  return join(rootDir, DOC_LINK_CACHE_DIR_REL, `${createHash("sha1").update(key).digest("hex")}.json`);
+}
+
+function computeDocLinkFingerprint(
+  index: ReturnType<typeof getWorkspaceAstIndex>,
+  docSections: readonly DocSection[] | undefined
+): string {
+  const hash = createHash("sha1");
+  hash.update(`v${DOC_LINK_CACHE_VERSION}\n`);
+  hash.update(`cap=${resolveDocLinksGlobalCap()}\n`);
+  if (docSections && docSections.length > 0) {
+    for (const relPath of [...new Set(docSections.map((s) => s.docPath))].sort()) {
+      hash.update(`${relPath}\n`);
+      appendStatFingerprint(hash, index.rootDir, relPath);
+    }
+  } else {
+    hash.update("*all-docs*\n");
+    for (const relPath of listWorkspaceDocumentPaths(index.rootDir)) {
+      appendStatFingerprint(hash, index.rootDir, relPath);
+    }
+  }
+  // Feedback can reject/boost individual links, so it is a first-class cache input:
+  // without this the cache would hide a user's "reject this link" decision.
+  appendStatFingerprint(hash, index.rootDir, DOC_LINK_FEEDBACK_REL_PATH);
+  for (const relPath of index.getFiles()) appendStatFingerprint(hash, index.rootDir, relPath);
+  return hash.digest("hex");
+}
+
+function readDocLinkCache(rootDir: string, key: string): DocCodeLink[] | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(docLinkCachePath(rootDir, key), "utf8")) as
+      | { version?: number; links?: DocCodeLink[] }
+      | undefined;
+    if (!parsed || parsed.version !== DOC_LINK_CACHE_VERSION || !Array.isArray(parsed.links)) {
+      return undefined;
+    }
+    return parsed.links;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeDocLinkCache(rootDir: string, key: string, links: readonly DocCodeLink[]): void {
+  try {
+    ensureGraphflowDir(rootDir);
+    const dir = join(rootDir, DOC_LINK_CACHE_DIR_REL);
+    mkdirSync(dir, { recursive: true });
+    const target = docLinkCachePath(rootDir, key);
+    const tmp = join(dir, `.tmp-${process.pid}-${Date.now().toString(36)}.json`);
+    writeFileSync(tmp, JSON.stringify({ version: DOC_LINK_CACHE_VERSION, links }), "utf8");
+    renameSync(tmp, target);
+  } catch {
+    // A read-only workspace or a lost race must never fail the link build.
+  }
+}
+
+
+
+interface SymbolDataShardEntry {
+  symbol: unknown;
+  weights: Array<[string, number]>;
+  identifierKey: string;
+  qualifiedIdentifierKey?: string;
+  normalizedName: string;
+}
+
+interface SymbolDataStoreRecord {
+  hash: string;
+  entries: SymbolDataShardEntry[];
+}
+
+interface SymbolDataStore {
+  version: number;
+  files: Record<string, SymbolDataStoreRecord>;
+}
+
+const SYMBOL_DATA_STORE_REL = ".graphflow/doc-links/symbols.json";
+
+function readSymbolDataStore(rootDir: string): SymbolDataStore | undefined {
+  try {
+    const parsed = JSON.parse(
+      readFileSync(join(rootDir, ...SYMBOL_DATA_STORE_REL.split("/")), "utf8")
+    ) as SymbolDataStore;
+    if (parsed?.version !== SYMBOL_DATA_CACHE_VERSION) return undefined;
+    if (typeof parsed.files !== "object" || parsed.files === null) return undefined;
+    return parsed;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeSymbolDataStore(rootDir: string, store: SymbolDataStore): void {
+  try {
+    ensureGraphflowDir(rootDir);
+    const path = join(rootDir, ...SYMBOL_DATA_STORE_REL.split("/"));
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(store), "utf8");
+  } catch {
+    // A cache that cannot be written is simply a cache that is never hit.
+  }
+}
+
+/**
+ * Reads the cached retrieval data for one source file, or `undefined` when the
+ * file changed (content hash mismatch) or nothing was cached yet.
+ */
+
+
 export function buildDocCodeLinks(
   index: ReturnType<typeof getWorkspaceAstIndex>,
   docSections?: DocSection[]
 ): DocCodeLink[] {
+  const cacheEnabled = docLinkCacheEnabled();
+  const cacheKey = cacheEnabled ? computeDocLinkFingerprint(index, docSections) : "";
+  if (cacheEnabled) {
+    const cached = readDocLinkCache(index.rootDir, cacheKey);
+    if (cached) return cached;
+  }
   const sections = docSections ?? scanWorkspaceDocuments(index.rootDir);
   if (sections.length === 0) return [];
 
+  kgStage("doc: scan documents");
   const sectionData = sections.map(buildSectionRetrievalData);
+  kgStage("doc: sectionData");
+  // Per-file incremental: the retrieval data of an unchanged file is reused from
+  // `.graphflow/doc-links/symbols/`, so editing one file no longer re-tokenizes
+  // every symbol in the workspace.
+  const symbolDataCacheOn = docLinkCacheEnabled();
   const symbolData: SymbolRetrievalData[] = [];
+  // One file instead of one shard per source file: 274 small reads cost ~1s on Windows,
+  // which dominated the whole doc-link stage. The store is rewritten only when something
+  // actually changed, and is rebuilt from the current file list so deleted files drop out.
+  const store = symbolDataCacheOn ? readSymbolDataStore(index.rootDir) : undefined;
+  const storeFiles: Record<string, SymbolDataStoreRecord> = {};
+  let storeChanged = false;
+  /** Where each file's symbols live inside the flat `symbolData` array. */
+  const fileRanges: Array<{ relFile: string; start: number; count: number; hash: string }> = [];
   for (const relFile of index.getFiles()) {
     const fileData = index.getFileAnalysis(relFile);
     if (!fileData) continue;
-    for (const sym of fileData.ast.symbols) {
-      symbolData.push(buildSymbolRetrievalData(relFile, fileData.ast, fileData.content, sym));
+    const contentHash = store
+      ? createHash("sha1").update(fileData.content).digest("hex")
+      : "";
+    const fileStart = symbolData.length;
+    const cached = store?.files[relFile];
+    if (cached && cached.hash === contentHash) {
+      for (const entry of cached.entries) {
+        symbolData.push({
+          relFile,
+          symbol: entry.symbol as SymbolRetrievalData["symbol"],
+          weights: new Map(entry.weights),
+          identifierKey: entry.identifierKey,
+          ...(entry.qualifiedIdentifierKey !== undefined
+            ? { qualifiedIdentifierKey: entry.qualifiedIdentifierKey }
+            : {}),
+          normalizedName: entry.normalizedName,
+        });
+      }
+      storeFiles[relFile] = cached;
+      fileRanges.push({
+        relFile,
+        start: fileStart,
+        count: cached.entries.length,
+        hash: contentHash,
+      });
+      continue;
     }
+    const built: SymbolRetrievalData[] = [];
+    for (const sym of fileData.ast.symbols) {
+      built.push(buildSymbolRetrievalData(relFile, fileData.ast, fileData.content, sym));
+    }
+    symbolData.push(...built);
+    fileRanges.push({ relFile, start: fileStart, count: built.length, hash: contentHash });
+    if (store) {
+      storeFiles[relFile] = {
+        hash: contentHash,
+        entries: built.map((sd) => ({
+          symbol: sd.symbol,
+          weights: [...sd.weights],
+          identifierKey: sd.identifierKey,
+          ...(sd.qualifiedIdentifierKey !== undefined
+            ? { qualifiedIdentifierKey: sd.qualifiedIdentifierKey }
+            : {}),
+          normalizedName: sd.normalizedName,
+        })),
+      };
+      storeChanged = true;
+    }
+  }
+  kgStage("doc: symbolData loaded");
+  if (store && storeChanged) {
+    writeSymbolDataStore(index.rootDir, {
+      version: SYMBOL_DATA_CACHE_VERSION,
+      files: storeFiles,
+    });
   }
   if (symbolData.length === 0) return [];
 
+  kgStage("doc: symbolData+df");
   // ── Workspace document frequency: sections are the retrieval corpus, symbols the query corpus.
   const sectionDf = new Map<string, number>();
   for (const sd of sectionData) {
@@ -874,6 +1225,7 @@ export function buildDocCodeLinks(
     return Math.log(1 + (sectionCount - dfSections + 0.5) / (dfSections + 0.5));
   };
 
+  kgStage("doc: feedback");
   // ── Optional read-only feedback ──
   const feedback = loadDocLinkFeedback(index.rootDir);
   const rejectedLinkIds = new Set(feedback.rejected ?? []);
@@ -942,6 +1294,7 @@ export function buildDocCodeLinks(
     }
   }
 
+  kgStage("doc: explicit pass");
   // ── 2. Concept candidates: BM25 over field-weighted section terms ──
   const sectionTokenPostings = new Map<string, number[]>();
   for (let sectionIdx = 0; sectionIdx < sectionData.length; sectionIdx++) {
@@ -963,7 +1316,13 @@ export function buildDocCodeLinks(
     if (token.length >= 4 && /^[a-z]+$/.test(token)) bridgeConceptTokens.push(token);
   }
 
-  for (let symbolIdx = 0; symbolIdx < symbolData.length; symbolIdx++) {
+  // Per-file unit of incremental work. `so` is the symbol's index *within its file*, so a
+  // cached entry survives files being inserted or deleted around it; the flat `symbolIdx`
+  // is rebuilt as `fileStart + so` when the entry is replayed.
+  const computeFileCandidates = (start: number, count: number): ConceptFileCandidate[] => {
+    const out: ConceptFileCandidate[] = [];
+    for (let i = 0; i < count; i++) {
+    const symbolIdx = start + i;
     const sd = symbolData[symbolIdx]!;
     const perSection = new Map<number, { score: number; shared: string[] }>();
     for (const [token, queryWeight] of sd.weights) {
@@ -1055,17 +1414,109 @@ export function buildDocCodeLinks(
         continue;
       }
 
-      conceptCandidates.push({
-        symbolIdx,
-        sectionIdx,
-        score,
-        confidence,
-        sharedTokens: entry.shared,
+      out.push({
+        so: i,
+        si: sectionIdx,
+        sc: score,
+        cf: confidence,
+        st: entry.shared,
         link: makeLink(sec.section, sd, score, entry.shared, false),
+      });
+    }
+    }
+    return out;
+  };
+
+  // ── Per-file incremental dispatch ──
+  // Concept scoring is per-symbol: a symbol's candidates depend only on its own weights plus
+  // the section corpus and the workspace-wide token frequencies. That makes it a pure sum over
+  // files, so only files whose bytes changed — or whose tokens overlap the changed tokens that
+  // shift the DF cutoffs — have to be recomputed.
+  const conceptCacheOn = docLinkCacheEnabled();
+  const conceptStore = conceptCacheOn ? readConceptStore(index.rootDir) : undefined;
+  const docFp = createHash("sha1").update(JSON.stringify(sections)).digest("hex");
+  const feedbackFp = createHash("sha1").update(JSON.stringify(feedback)).digest("hex");
+  const storeUsable =
+    conceptStore !== undefined &&
+    conceptStore.docFp === docFp &&
+    conceptStore.feedbackFp === feedbackFp;
+
+  const fileTokens = (start: number, count: number): string[] => {
+    const out = new Set<string>();
+    for (let i = 0; i < count; i++) {
+      const sd = symbolData[start + i];
+      if (!sd) continue;
+      for (const token of sd.weights.keys()) out.add(token);
+    }
+    return [...out];
+  };
+
+  const conceptFiles: Record<string, ConceptFileRecord> = {};
+  const recomputed = new Set<string>();
+  const tokenDelta = new Set<string>();
+  const stale: Array<(typeof fileRanges)[number]> = [];
+
+  for (const range of fileRanges) {
+    const rec = storeUsable ? conceptStore!.files[range.relFile] : undefined;
+    if (rec && rec.hash === range.hash) {
+      conceptFiles[range.relFile] = rec;
+      continue;
+    }
+    stale.push(range);
+  }
+
+  for (const range of stale) {
+    const cand = computeFileCandidates(range.start, range.count);
+    const tokens = fileTokens(range.start, range.count);
+    conceptFiles[range.relFile] = { hash: range.hash, tokens, cand };
+    recomputed.add(range.relFile);
+    // Both the old and the new token set are folded in: a token that vanished can flip the
+    // DF-based eligibility test just as easily as one that appeared.
+    for (const token of tokens) tokenDelta.add(token);
+    const oldTokens = storeUsable ? conceptStore!.files[range.relFile]?.tokens ?? [] : [];
+    for (const token of oldTokens) tokenDelta.add(token);
+  }
+
+  if (storeUsable && tokenDelta.size > 0) {
+    for (const range of fileRanges) {
+      if (recomputed.has(range.relFile)) continue;
+      const rec = conceptFiles[range.relFile];
+      if (!rec) continue;
+      if (!rec.tokens.some((token) => tokenDelta.has(token))) continue;
+      conceptFiles[range.relFile] = {
+        hash: range.hash,
+        tokens: rec.tokens,
+        cand: computeFileCandidates(range.start, range.count),
+      };
+      recomputed.add(range.relFile);
+    }
+  }
+
+  for (const range of fileRanges) {
+    const rec = conceptFiles[range.relFile];
+    if (!rec) continue;
+    for (const c of rec.cand) {
+      conceptCandidates.push({
+        symbolIdx: range.start + c.so,
+        sectionIdx: c.si,
+        score: c.sc,
+        confidence: c.cf,
+        sharedTokens: c.st,
+        link: c.link,
       });
     }
   }
 
+  if (conceptCacheOn && (!storeUsable || recomputed.size > 0)) {
+    writeConceptStore(index.rootDir, {
+      version: CONCEPT_STORE_VERSION,
+      docFp,
+      feedbackFp,
+      files: conceptFiles,
+    });
+  }
+
+  kgStage(`doc: concept pass (recomputed=${recomputed.size}/${fileRanges.length})`);
   // ── 3. Reciprocal top-K pruning: a candidate must rank high on BOTH sides ──
   const candidatesBySymbol = new Map<number, ConceptCandidate[]>();
   const candidatesBySection = new Map<number, ConceptCandidate[]>();
@@ -1178,7 +1629,9 @@ export function buildDocCodeLinks(
       a.codeFile.localeCompare(b.codeFile) ||
       a.symbolName.localeCompare(b.symbolName)
   );
-  return acceptedLinks.slice(0, resolveDocLinksGlobalCap());
+  const result = acceptedLinks.slice(0, resolveDocLinksGlobalCap());
+  if (cacheEnabled) writeDocLinkCache(index.rootDir, cacheKey, result);
+  return result;
 }
 
 /**
@@ -1239,7 +1692,7 @@ export function recordCrossAgentActivity(
   if (entry.lastTestOk !== undefined) state.lastTestOk = entry.lastTestOk;
   if (entry.lastTestSummary !== undefined) state.lastTestSummary = entry.lastTestSummary;
 
-  mkdirSync(join(rootDir, ".graphflow"), { recursive: true });
+  ensureGraphflowDir(rootDir);
   writeFileSync(briefFilePath(rootDir), `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
@@ -1319,21 +1772,21 @@ export function generateCrossAgentBrief(index: ReturnType<typeof getWorkspaceAst
     );
   }
 
+  const fileSet = index.getFileSet();
   for (const f of files) {
     const data = index.getFileAnalysis(f);
     if (!data) continue;
+    // Resolve every specifier to a real workspace file, exactly like the `imports` graph edges:
+    // a relative import is anchored at the importing file's directory, then probed with source
+    // extensions and `/index.*`. Bare package names never resolve and therefore never count.
+    // One importing file contributes at most one in-degree point per target (`imported by N file(s)`).
+    const importedTargets = new Set<string>();
     for (const imp of data.ast.imports) {
-      // Strip the extension from the import specifier's last path segment (handles
-      // "./order.ts", "./order.js" and bare "./order"); directory forms (".", "..",
-      // "./orders/") yield an empty/"."/".." segment and are skipped.
-      const impLast = (imp.module.split("/").pop() ?? "").replace(/\.[^.]+$/, "");
-      if (!impLast || impLast === "." || impLast === "..") continue;
-      for (const candidate of files) {
-        const candLast = candidate.replace(/\.[^.]+$/, "").split("/").pop() ?? "";
-        if (impLast === candLast) {
-          inDegree.set(candidate, (inDegree.get(candidate) ?? 0) + 1);
-        }
-      }
+      const resolved = resolveRelativeImportPath(index.rootDir, f, imp.module, fileSet);
+      if (resolved && resolved !== f && fileSet.has(resolved)) importedTargets.add(resolved);
+    }
+    for (const target of importedTargets) {
+      inDegree.set(target, (inDegree.get(target) ?? 0) + 1);
     }
   }
 
@@ -1404,6 +1857,140 @@ export function generateCrossAgentBrief(index: ReturnType<typeof getWorkspaceAst
 
 /** Hard cap on generated edges so very large repos cannot explode the single-file HTML. */
 const MAX_KNOWLEDGE_GRAPH_EDGES = 5000;
+
+/**
+ * Generic method/function names carry no type evidence on their own: `headers.get()`,
+ * `changedState.has()`, `request()` and friends exist on native containers or third-party
+ * packages that are not part of the workspace. When the receiver type is unknown, any binding
+ * to a workspace symbol with such a name is a guess (one candidate is not proof either:
+ * `response.headers.get()` would otherwise bind the only `get` in the repo). The edge is
+ * dropped — a deterministic policy, not a `confidence` downgrade. A bare call to a function
+ * declared in the same file is still deterministic and stays.
+ * Module scope: the set is immutable and rebuilt per file inside a hot loop otherwise.
+ */
+const GENERIC_CALL_NAMES = new Set([
+  "get", "set", "has", "run", "request", "send", "on", "emit", "toString", "valueOf",
+  "add", "delete", "clear", "keys", "values", "entries", "forEach", "push", "pop",
+  "then", "catch", "apply", "call", "bind", "test", "exec", "read", "write", "close",
+  "open", "connect", "listen", "pipe", "next",
+]);
+
+// ============================================================================
+// Incremental knowledge-graph construction
+// ============================================================================
+
+/**
+ * Every node and edge in the graph is *owned* by exactly one workspace file:
+ * `defines`/`imports`/`calls` by the file that declares / imports / calls, and doc links by
+ * the code file they point at. Ownership turns the graph into a pure sum of per-file
+ * contributions, which is what makes incremental rebuilds possible: editing one file only
+ * requires rebuilding that file plus the files whose symbol resolution *queried* a name that
+ * appeared or disappeared.
+ */
+interface KgFileContribution {
+  nodes: KnowledgeGraphNode[];
+  defines: KnowledgeGraphEdge[];
+  imports: KnowledgeGraphEdge[];
+  calls: KnowledgeGraphEdge[];
+  /** Names this file declares. Drives reverse-dependency invalidation when it changes. */
+  declaredNames: string[];
+  /** Global names this file's resolution queried. Intersected with the delta to find dependents. */
+  queriedNames: string[];
+  /** True when some call site has a receiver, i.e. results depend on the class hierarchy. */
+  hasReceiverCalls: boolean;
+  /** `child -> parent` inheritance edges declared here (part of the global hierarchy). */
+  parents: Array<[string, string]>;
+  /** Import specifiers that could not be resolved to a workspace file. */
+  unresolvedImports: string[];
+}
+
+interface KgBuildContext {
+  index: ReturnType<typeof getWorkspaceAstIndex>;
+  fileSet: ReadonlySet<string>;
+  filesByStem: Map<string, string[]>;
+  filesByDirName: Map<string, string[]>;
+  symbolsByName: Map<string, KnowledgeGraphSymbolRef[]>;
+  symbolsByFileAndName: Map<string, KnowledgeGraphSymbolRef[]>;
+  classParents: Map<string, string>;
+  /** Lazy shared semantic call resolver; `unavailable` short-circuits after the first failure. */
+  semantic: { index?: ReturnType<typeof getSemanticIndex>; unavailable: boolean };
+  receiverIndexes: Map<string, ReturnType<typeof inferReceiverTypeIndex>>;
+  /** Per-file `child -> parent` declarations, used to detect hierarchy changes. */
+  parentsByFile: Map<string, Array<[string, string]>>;
+}
+
+/**
+ * On-disk graph cache. The fingerprint covers every input that can change the graph: source
+ * files (path + size + mtimeMs), documentation files, tsconfig/jsconfig path aliases, the macro
+ * store, doc-link feedback, and the two behaviour switches. A matching fingerprint lets `graph`
+ * reuse the previously written HTML/JSON without re-parsing a single file.
+ * `GRAPHFLOW_GRAPH_CACHE=0` disables both reads and writes.
+ */
+const KNOWLEDGE_GRAPH_CACHE_VERSION = 1;
+const KNOWLEDGE_GRAPH_CACHE_REL_PATH = ".graphflow/knowledge-graph.cache.json";
+
+interface KnowledgeGraphCacheMeta {
+  version: number;
+  fingerprint: string;
+  nodeCount: number;
+  edgeCount: number;
+}
+
+function knowledgeGraphCacheEnabled(): boolean {
+  return process.env.GRAPHFLOW_GRAPH_CACHE !== "0";
+}
+
+function appendStatFingerprint(hash: ReturnType<typeof createHash>, rootDir: string, relPath: string): void {
+  try {
+    const st = statSync(join(rootDir, relPath));
+    hash.update(`${relPath}\u0000${st.size}\u0000${st.mtimeMs}\n`);
+  } catch {
+    hash.update(`${relPath}\u0000missing\n`);
+  }
+}
+
+function computeKnowledgeGraphFingerprint(
+  index: ReturnType<typeof getWorkspaceAstIndex>,
+  docPaths: readonly string[]
+): string {
+  const hash = createHash("sha1");
+  hash.update(`v${KNOWLEDGE_GRAPH_CACHE_VERSION}\n`);
+  hash.update(`semantic=${process.env.GRAPHFLOW_KG_SEMANTIC ?? ""}\n`);
+  hash.update(`doc-links-max=${process.env.GRAPHFLOW_DOC_LINKS_MAX ?? ""}\n`);
+  for (const relPath of index.getFiles()) appendStatFingerprint(hash, index.rootDir, relPath);
+  for (const relPath of [...docPaths].sort()) appendStatFingerprint(hash, index.rootDir, relPath);
+  for (const relPath of [
+    "tsconfig.json",
+    "jsconfig.json",
+    ".graphflow/macros.json",
+    ".graphflow/doc-link-feedback.json",
+  ]) {
+    appendStatFingerprint(hash, index.rootDir, relPath);
+  }
+  return hash.digest("hex");
+}
+
+function readKnowledgeGraphCache(cachePath: string, fingerprint: string): KnowledgeGraphCacheMeta | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(cachePath, "utf8")) as Partial<KnowledgeGraphCacheMeta>;
+    if (
+      parsed.version !== KNOWLEDGE_GRAPH_CACHE_VERSION ||
+      parsed.fingerprint !== fingerprint ||
+      typeof parsed.nodeCount !== "number" ||
+      typeof parsed.edgeCount !== "number"
+    ) {
+      return undefined;
+    }
+    return {
+      version: parsed.version,
+      fingerprint: parsed.fingerprint,
+      nodeCount: parsed.nodeCount,
+      edgeCount: parsed.edgeCount,
+    };
+  } catch {
+    return undefined;
+  }
+}
 
 interface KnowledgeGraphFileData {
   relFile: string;
@@ -1536,6 +2123,23 @@ function normalizeKnowledgeGraphRelPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/{2,}/g, "/");
 }
 
+/**
+ * Case-sensitive identifier-boundary test (`$`/`_` are identifier chars, so `\b` is not enough).
+ * Used to dismiss doc<->code links whose target is only a normalization collision.
+ */
+function containsLiteralIdentifier(text: string, identifier: string): boolean {
+  if (!text || !identifier) return false;
+  const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![A-Za-z0-9_$])${escaped}(?![A-Za-z0-9_$])`).test(text);
+}
+
+/** Case-insensitive variant for doc prose that lowercases a receiver (`options.responseType`). */
+function containsLiteralIdentifierCi(text: string, identifier: string): boolean {
+  if (!text || !identifier) return false;
+  const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![A-Za-z0-9_$])${escaped}(?![A-Za-z0-9_$])`, "i").test(text);
+}
+
 /** Resolves a workspace-relative module candidate to a known source file (ext/index fallbacks). */
 function resolveKnownGraphCodeFile(
   candidate: string,
@@ -1647,6 +2251,699 @@ function resolveAliasImportToFile(
   return undefined;
 }
 
+// ============================================================================
+// Persisted per-file shards
+// ============================================================================
+
+const GRAPH_SHARD_VERSION = 1;
+const GRAPH_SHARD_REL = ".graphflow/graph-shards.json";
+
+/**
+ * Everything one file contributes, plus the metadata the next rebuild needs to decide whether
+ * it has to be redone. `syms` is the key to cheap rebuilds: it carries enough of the symbol
+ * table to rebuild the global name indexes without loading a single unchanged AST.
+ */
+interface KgShardRecord {
+  /** `size:mtimeMs` staleness fingerprint. */
+  fp: string;
+  /** Declared symbols as `[name, line, endLine, parentClass?]`. */
+  syms: Array<[string, number, number, string?]>;
+  declaredNames: string[];
+  queriedNames: string[];
+  hasReceiverCalls: boolean;
+  parents: Array<[string, string]>;
+  unresolvedImports: string[];
+  nodes: KnowledgeGraphNode[];
+  defines: KnowledgeGraphEdge[];
+  imports: KnowledgeGraphEdge[];
+  calls: KnowledgeGraphEdge[];
+}
+
+interface KgShardManifest {
+  version: number;
+  signature: string;
+  files: Record<string, KgShardRecord>;
+}
+
+interface KgRebuildPlan {
+  ctx: KgBuildContext;
+  orderedFiles: string[];
+  /** Files whose contribution must be recomputed. */
+  dirty: Set<string>;
+  /** Parsed ASTs — only ever populated for dirty files. */
+  fileData: Map<string, KnowledgeGraphFileData>;
+  /** Reusable records for files that stayed clean. */
+  records: Map<string, KgShardRecord>;
+  manifest: KgShardManifest | undefined;
+  rootDir: string;
+  /** `size:mtime` per file, computed once and reused when the manifest is rewritten. */
+  fpByFile: Map<string, string>;
+}
+
+function pushKgIndex<T>(map: Map<string, T[]>, key: string, value: T): void {
+  const bucket = map.get(key);
+  if (bucket) bucket.push(value);
+  else map.set(key, [value]);
+}
+
+/**
+ * Builds the global lookup tables (name -> declarations, file stems, class hierarchy) that
+ * per-file resolution reads from. This is the only still-O(N) part of a rebuild, and it is
+ * cheap: it only walks already-parsed ASTs, never re-tokenizes.
+ */
+function buildKgContext(
+  index: ReturnType<typeof getWorkspaceAstIndex>,
+  orderedFiles: string[],
+  fileData: Map<string, KnowledgeGraphFileData>,
+  records: Map<string, KgShardRecord>
+): KgBuildContext {
+  const ctx: KgBuildContext = {
+    index,
+    fileSet: index.getFileSet(),
+    filesByStem: new Map(),
+    filesByDirName: new Map(),
+    symbolsByName: new Map(),
+    symbolsByFileAndName: new Map(),
+    classParents: new Map(),
+    semantic: { unavailable: process.env.GRAPHFLOW_KG_SEMANTIC === "0" },
+    receiverIndexes: new Map(),
+    parentsByFile: new Map(),
+  };
+  for (const relFile of orderedFiles) {
+    // Stems and directory names need only the path, never the file body.
+    pushKgIndex(ctx.filesByStem, knowledgeGraphFileStem(relFile), relFile);
+    const dirName = basename(dirname(relFile)).toLowerCase();
+    if (dirName && dirName !== ".") pushKgIndex(ctx.filesByDirName, dirName, relFile);
+
+    const data = fileData.get(relFile);
+    if (data) {
+      for (const sym of data.ast.symbols) {
+        const ref: KnowledgeGraphSymbolRef = {
+          id: knowledgeGraphSymbolId(relFile, sym.name, sym.parentClass),
+          file: relFile,
+          name: sym.name,
+          line: sym.line,
+          endLine: sym.endLine,
+          ...(sym.parentClass ? { parentClass: sym.parentClass } : {}),
+        };
+        pushKgIndex(ctx.symbolsByName, sym.name, ref);
+        pushKgIndex(ctx.symbolsByFileAndName, `${relFile}\u0000${sym.name}`, ref);
+      }
+      // First declaration wins, matching the original single-pass hierarchy build.
+      let parents: Array<[string, string]> | undefined;
+      for (const [child, parent] of parseClassParents(relFile, data.content, data.ast)) {
+        if (!ctx.classParents.has(child)) ctx.classParents.set(child, parent);
+        (parents ??= []).push([child, parent]);
+      }
+      if (parents) ctx.parentsByFile.set(relFile, parents);
+      continue;
+    }
+
+    // Unchanged file: rebuild its symbol refs from the persisted record. This is the step
+    // that makes incremental rebuilds cheap — no AST is loaded at all.
+    const rec = records.get(relFile);
+    if (!rec) continue;
+    for (const [name, line, endLine, parentClass] of rec.syms) {
+      pushKgIndex(ctx.symbolsByName, name, {
+        id: knowledgeGraphSymbolId(relFile, name, parentClass),
+        file: relFile,
+        name,
+        line,
+        endLine,
+        ...(parentClass ? { parentClass } : {}),
+      });
+      pushKgIndex(ctx.symbolsByFileAndName, `${relFile}\u0000${name}`, {
+        id: knowledgeGraphSymbolId(relFile, name, parentClass),
+        file: relFile,
+        name,
+        line,
+        endLine,
+        ...(parentClass ? { parentClass } : {}),
+      });
+    }
+    for (const [child, parent] of rec.parents) {
+      if (!ctx.classParents.has(child)) ctx.classParents.set(child, parent);
+    }
+    ctx.parentsByFile.set(relFile, rec.parents);
+  }
+  return ctx;
+}
+
+/**
+ * Computes everything one file contributes to the graph: its file/symbol nodes, `defines`,
+ * `imports` and `calls` edges, plus the reverse-dependency metadata (`declaredNames`,
+ * `queriedNames`) that tells a later rebuild whether this file must be redone.
+ */
+function buildFileCodeContribution(
+  relFile: string,
+  ast: FileAstAnalysis,
+  content: string,
+  ctx: KgBuildContext
+): KgFileContribution {
+  const nodes: KnowledgeGraphNode[] = [];
+  const defines: KnowledgeGraphEdge[] = [];
+  const imports: KnowledgeGraphEdge[] = [];
+  const calls: KnowledgeGraphEdge[] = [];
+  const declaredNames = new Set<string>();
+  const queriedNames = new Set<string>();
+  const unresolvedImports: string[] = [];
+  let hasReceiverCalls = false;
+
+  const langOrFormat = extname(relFile).replace(".", "") || "code";
+  const family = sourceLanguageFamily(relFile);
+
+  // ── File node, symbol nodes and `defines` edges ──
+  nodes.push({
+    id: `file:${relFile}`,
+    label: relFile,
+    kind: "file",
+    langOrFormat,
+    detail: `${ast.totalLines} lines, ${ast.symbols.length} symbols`,
+  });
+  for (const sym of ast.symbols) {
+    const symId = knowledgeGraphSymbolId(relFile, sym.name, sym.parentClass);
+    nodes.push({
+      id: symId,
+      label: `${sym.parentClass ? `${sym.parentClass}.` : ""}${sym.name} (${sym.kind})`,
+      kind: "symbol",
+      langOrFormat,
+      detail: `${relFile}:${sym.line}-${sym.endLine} | ${sym.signature}`,
+    });
+    defines.push({ source: `file:${relFile}`, target: symId, kind: "defines", label: "defines" });
+    declaredNames.add(sym.name);
+    if (sym.parentClass) declaredNames.add(sym.parentClass);
+  }
+
+  // ── `imports` edges ──
+  const resolveImportTarget = (moduleSpec: string, importedNames: string[]): string | undefined => {
+    const resolved = resolveRelativeImportPath(ctx.index.rootDir, relFile, moduleSpec, ctx.fileSet);
+    if (resolved && resolved !== relFile && ctx.fileSet.has(resolved)) return resolved;
+
+    // tsconfig.json / jsconfig.json path aliases (TS/JS only), e.g. `@/model` -> ts/model.ts.
+    if (family === "js") {
+      const aliasResolved = resolveAliasImportToFile(ctx.index.rootDir, moduleSpec, ctx.fileSet);
+      if (aliasResolved && aliasResolved !== relFile && ctx.fileSet.has(aliasResolved)) {
+        return aliasResolved;
+      }
+    }
+
+    // Fallback for package/namespace imports that the path resolver cannot map to a file
+    // (Go package paths and C# `using` namespaces are not file paths).
+    if (family !== "go" && family !== "csharp") return undefined;
+    const moduleTail = moduleSpec.split(/[./:\\]/).filter(Boolean).pop()?.toLowerCase();
+    const names = [
+      moduleTail,
+      ...importedNames.filter((name) => name && name !== "*").map((name) => name.toLowerCase()),
+    ].filter((name): name is string => Boolean(name));
+    const fromDir = dirname(relFile);
+    for (const name of names) {
+      const stemMatches = (ctx.filesByStem.get(name) ?? []).filter(
+        (candidate) => candidate !== relFile && sourceLanguageFamily(candidate) === family
+      );
+      if (stemMatches.length > 0) {
+        return stemMatches.find((candidate) => dirname(candidate) === fromDir) ?? stemMatches[0];
+      }
+      const dirMatches = (ctx.filesByDirName.get(name) ?? []).filter(
+        (candidate) => candidate !== relFile && sourceLanguageFamily(candidate) === family
+      );
+      if (dirMatches.length > 0) return [...dirMatches].sort()[0];
+    }
+    return undefined;
+  };
+
+  for (const imp of ast.imports) {
+    const targetFile = resolveImportTarget(imp.module, imp.importedNames);
+    if (!targetFile) {
+      // Remember the miss: a later added/deleted file may resolve it, which would change
+      // this file's edges. Without the record such a file would never be invalidated.
+      unresolvedImports.push(imp.module);
+      continue;
+    }
+    imports.push({
+      source: `file:${relFile}`,
+      target: `file:${targetFile}`,
+      kind: "imports",
+      label: imp.raw,
+    });
+  }
+
+  // ── `calls` edges ──
+  const declaresMethodOnType = (typeName: string, methodName: string): boolean =>
+    (ctx.symbolsByName.get(methodName) ?? []).some((ref) => ref.parentClass === typeName);
+  /** A receiver typed `resolved` may dispatch to `targetClass.method` when it is the same class
+   *  or a subclass with no override between them. Mirrors blast-radius's hierarchy. */
+  const isCompatibleReceiver = (
+    resolved: string,
+    targetClass: string,
+    methodName: string
+  ): boolean => {
+    if (resolved === targetClass) return true;
+    if (!isSubclassOf(ctx.classParents, resolved, targetClass)) return false;
+    let current: string | undefined = resolved;
+    const seen = new Set<string>();
+    while (current && current !== targetClass) {
+      if (seen.has(current)) break;
+      seen.add(current);
+      if (declaresMethodOnType(current, methodName)) return false;
+      current = ctx.classParents.get(current);
+    }
+    return current === targetClass;
+  };
+
+  const getReceiverIndex = (): ReturnType<typeof inferReceiverTypeIndex> => {
+    const cached = ctx.receiverIndexes.get(relFile);
+    if (cached) return cached;
+    const inferred = inferReceiverTypeIndex(relFile, content, ast);
+    ctx.receiverIndexes.set(relFile, inferred);
+    return inferred;
+  };
+
+  const trySemanticCallTarget = (
+    call: AstCallSite
+  ): KnowledgeGraphSymbolRef | undefined => {
+    if (ctx.semantic.unavailable) return undefined;
+    try {
+      ctx.semantic.index ??= getSemanticIndex(ctx.index.rootDir);
+      const resolved = ctx.semantic.index.resolveCall(relFile, call);
+      if (!resolved.targetFile || !resolved.targetSymbol) return undefined;
+      if (resolved.confidence < SEMANTIC_CONFIDENCE_MIN) return undefined;
+      const refs =
+        ctx.symbolsByFileAndName.get(`${resolved.targetFile}\u0000${resolved.targetSymbol}`) ?? [];
+      if (refs.length === 0) return undefined;
+      return (
+        (resolved.parentClass
+          ? refs.find((ref) => ref.parentClass === resolved.parentClass)
+          : undefined) ??
+        refs.find((ref) => ref.parentClass !== undefined) ??
+        refs[0]
+      );
+    } catch {
+      ctx.semantic.unavailable = true;
+      return undefined;
+    }
+  };
+
+  const importedNames = new Set<string>();
+  for (const imp of ast.imports) {
+    for (const name of imp.importedNames) {
+      // Wildcard/namespace imports import nothing specific (C/C++ #include, Go package, ...).
+      if (name && name !== "*") importedNames.add(name);
+    }
+  }
+  const receiverIndex = getReceiverIndex();
+
+  for (const call of ast.calls) {
+    // Declaration headers (`bool Engine::cancel(int id);`) are never calls.
+    if (call.isDeclaration) continue;
+    queriedNames.add(call.callee);
+    const candidates = ctx.symbolsByName.get(call.callee);
+    if (!candidates || candidates.length === 0) continue;
+
+    const sameFileCandidates = candidates.filter((candidate) => candidate.file === relFile);
+    const crossFileCandidates = candidates.filter(
+      (candidate) =>
+        candidate.file !== relFile && sourceLanguageFamily(candidate.file) === family
+    );
+
+    // Caller symbol by line containment (innermost callable wins) -> class-qualified source id.
+    const callerSym = findKnowledgeGraphCaller(ast, call.line);
+    const callerRefs = callerSym
+      ? (ctx.symbolsByFileAndName.get(`${relFile}\u0000${callerSym.name}`) ?? [])
+      : [];
+    const callerRef = callerSym
+      ? (callerRefs.find(
+          (ref) => ref.line === callerSym.line && ref.endLine === callerSym.endLine
+        ) ?? callerRefs[0])
+      : undefined;
+
+    // Receiver-type inference (3.3.2): when the receiver's static type is known, ONLY a method
+    // declared on that class may be the target. A foreign receiver is dropped, not guessed.
+    const receiverType = call.receiver
+      ? resolveReceiverType(call, ast, receiverIndex)
+      : undefined;
+    if (receiverType) {
+      hasReceiverCalls = true;
+      queriedNames.add(receiverType);
+    }
+
+    let target: KnowledgeGraphSymbolRef | undefined;
+    if (GENERIC_CALL_NAMES.has(call.callee)) {
+      const receiverTypeDeclared =
+        receiverType !== undefined &&
+        (ctx.symbolsByName.get(receiverType) ?? []).some((ref) => ref.parentClass === undefined);
+      if (!receiverTypeDeclared) {
+        const bareLocalFunction =
+          !call.receiver &&
+          sameFileCandidates.some((candidate) => candidate.parentClass === undefined);
+        if (!bareLocalFunction) continue;
+      }
+    }
+    // Ambiguous callee name: prefer the semantic index's namespace/import/inheritance-aware
+    // resolution (e.g. `using Demo.Two;` must select two/Gadget.cs among two same-stem files).
+    if (candidates.length > 1) {
+      target = trySemanticCallTarget(call);
+    }
+    if (!target) {
+      if (receiverType) {
+        const typedCandidates = [...sameFileCandidates, ...crossFileCandidates].filter(
+          (candidate) =>
+            candidate.parentClass !== undefined &&
+            isCompatibleReceiver(receiverType, candidate.parentClass, call.callee)
+        );
+        if (typedCandidates.length === 0) continue;
+        target =
+          typedCandidates.find((candidate) => candidate.file === relFile) ??
+          typedCandidates.find(
+            (candidate) => candidate.parentClass && importedNames.has(candidate.parentClass)
+          ) ??
+          typedCandidates[0];
+      } else if (sameFileCandidates.length > 0) {
+        // Unknown receiver: prefer the enclosing class, else deterministic declaration order.
+        const callerParent = callerSym?.parentClass;
+        target =
+          (callerParent
+            ? sameFileCandidates.find((candidate) => candidate.parentClass === callerParent)
+            : undefined) ?? sameFileCandidates[0];
+      } else {
+        const importedMatches = crossFileCandidates.filter(
+          (candidate) =>
+            importedNames.has(candidate.name) ||
+            (candidate.parentClass ? importedNames.has(candidate.parentClass) : false)
+        );
+        if (importedMatches.length > 0) {
+          target =
+            importedMatches.find(
+              (candidate) =>
+                candidate.parentClass !== undefined &&
+                importedNames.has(candidate.parentClass)
+            ) ?? importedMatches[0];
+        } else {
+          target = crossFileCandidates.find((candidate) =>
+            inKnowledgeGraphImplicitScope(relFile, candidate.file, family)
+          );
+        }
+      }
+    }
+
+    if (!target) continue;
+    const sourceId = callerRef ? callerRef.id : `file:${relFile}`;
+    const targetId = target.id;
+    if (sourceId === targetId) continue;
+    calls.push({
+      source: sourceId,
+      target: targetId,
+      kind: "calls",
+      label: call.member && call.receiver ? `${call.receiver}.${call.callee}()` : `${call.callee}()`,
+    });
+  }
+
+  return {
+    nodes,
+    defines,
+    imports,
+    calls,
+    declaredNames: [...declaredNames],
+    queriedNames: [...queriedNames],
+    hasReceiverCalls,
+    parents: ctx.parentsByFile.get(relFile) ?? [],
+    unresolvedImports,
+  };
+}
+
+function kgShardEnabled(): boolean {
+  return process.env.GRAPHFLOW_GRAPH_INCREMENTAL !== "0";
+}
+
+/** Stage timings, opt-in via `GRAPHFLOW_GRAPH_DEBUG=1`. */
+const kgDebug = process.env.GRAPHFLOW_GRAPH_DEBUG === "1";
+let kgMark = Date.now();
+function kgStage(label: string): void {
+  if (!kgDebug) return;
+  const now = Date.now();
+  process.stderr.write(`[graph] ${label}: ${now - kgMark} ms\n`);
+  kgMark = now;
+}
+
+/** Everything that changes results without changing any file's bytes. */
+function kgShardSignature(): string {
+  return [
+    `v${GRAPH_SHARD_VERSION}`,
+    process.env.GRAPHFLOW_KG_SEMANTIC === "0" ? "sem0" : "sem1",
+    process.env.GRAPHFLOW_TREE_SITTER ? `ts=${process.env.GRAPHFLOW_TREE_SITTER}` : "ts=auto",
+  ].join("|");
+}
+
+/**
+ * `size:mtimeMs` instead of a content hash: detecting staleness must not require reading the
+ * file. mtime has 1s granularity on some filesystems, so a write inside the same second can be
+ * missed — the fingerprint also carries the size, and a miss only costs one extra rebuild.
+ */
+function kgFileFingerprint(rootDir: string, relFile: string): string {
+  try {
+    const st = statSync(join(rootDir, relFile));
+    return `${st.size}:${Math.floor(st.mtimeMs)}`;
+  } catch {
+    return "";
+  }
+}
+
+function readKgShardManifest(rootDir: string): KgShardManifest | undefined {
+  try {
+    const raw = JSON.parse(
+      readFileSync(join(rootDir, ...GRAPH_SHARD_REL.split("/")), "utf8")
+    ) as KgShardManifest;
+    if (raw?.version !== GRAPH_SHARD_VERSION) return undefined;
+    if (typeof raw.files !== "object" || raw.files === null) return undefined;
+    if (raw.signature !== kgShardSignature()) return undefined;
+    return raw;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeKgShardManifest(rootDir: string, manifest: KgShardManifest): void {
+  try {
+    const path = join(rootDir, ...GRAPH_SHARD_REL.split("/"));
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(manifest), "utf8");
+  } catch {
+    // A cache that cannot be written is simply a cache that is never hit.
+  }
+}
+
+function contributionToRecord(c: KgFileContribution, fp: string): KgShardRecord {
+  return {
+    fp,
+    syms: [],
+    declaredNames: c.declaredNames,
+    queriedNames: c.queriedNames,
+    hasReceiverCalls: c.hasReceiverCalls,
+    parents: c.parents,
+    unresolvedImports: c.unresolvedImports,
+    nodes: c.nodes,
+    defines: c.defines,
+    imports: c.imports,
+    calls: c.calls,
+  };
+}
+
+/**
+ * Decides which files must be recomputed.
+ *
+ * The algorithm has three layers, each strictly cheaper than the one below it:
+ *  1. **Fingerprint** (`size:mtime`) — files whose bytes changed are dirty by definition.
+ *  2. **Name delta** — a file's `calls` edges are resolved purely through `symbolsByName`
+ *     lookups, so a file only needs redoing if a name it *queried* appeared or disappeared
+ *     elsewhere. `queriedNames` is recorded per file, which turns "who depends on me" into a
+ *     set intersection instead of a graph traversal over importers.
+ *  3. **Structural delta** — inheritance (`parents`) and the file set itself change what an
+ *     unresolved import or a receiver-typed call can bind to, so those invalidate the files
+ *     that could be affected (`hasReceiverCalls`, `unresolvedImports`).
+ */
+function planKgRebuild(
+  index: ReturnType<typeof getWorkspaceAstIndex>
+): KgRebuildPlan {
+  const rootDir = index.rootDir;
+  const orderedFiles = index.getFiles();
+  const fileSet = new Set(orderedFiles);
+  const manifest = kgShardEnabled() ? readKgShardManifest(rootDir) : undefined;
+
+  const dirty = new Set<string>();
+  const fpByFile = new Map<string, string>();
+  for (const relFile of orderedFiles) {
+    fpByFile.set(relFile, kgFileFingerprint(rootDir, relFile));
+  }
+  if (!manifest) {
+    for (const relFile of orderedFiles) dirty.add(relFile);
+  } else {
+    for (const relFile of orderedFiles) {
+      const rec = manifest.files[relFile];
+      if (!rec || rec.fp !== fpByFile.get(relFile)) dirty.add(relFile);
+    }
+  }
+
+  const fileData = new Map<string, KnowledgeGraphFileData>();
+  const loadFileData = (relFile: string): void => {
+    if (fileData.has(relFile)) return;
+    const data = index.getFileAnalysis(relFile);
+    if (data) fileData.set(relFile, { relFile, ast: data.ast, content: data.content });
+  };
+  for (const relFile of dirty) loadFileData(relFile);
+
+  // ── Layer 2 & 3: what changed in the *name space*, not just in the bytes ──
+  const deltaNames = new Set<string>();
+  let fileSetChanged = false;
+  if (manifest) {
+    for (const [relFile, rec] of Object.entries(manifest.files)) {
+      if (!fileSet.has(relFile)) {
+        fileSetChanged = true;
+        for (const name of rec.declaredNames) deltaNames.add(name);
+        // A deleted file also removes its inheritance declarations, which can change what a
+        // receiver-typed call binds to elsewhere.
+        for (const [child, parent] of rec.parents) {
+          deltaNames.add(child);
+          deltaNames.add(parent);
+        }
+        continue;
+      }
+      if (!dirty.has(relFile)) continue;
+      // Conservative union of the old and new name sets: computing the true symmetric
+      // difference would need the previous AST, and over-invalidating is always safe.
+      for (const name of rec.declaredNames) deltaNames.add(name);
+      const fresh = fileData.get(relFile);
+      if (!fresh) continue;
+      // `parseClassParents` returns a Map, so it must be spread before being compared with
+      // the persisted array — `JSON.stringify` on a Map is always `{}`.
+      const oldParents = JSON.stringify(rec.parents);
+      const freshParents = JSON.stringify([...parseClassParents(relFile, fresh.content, fresh.ast)]);
+      if (oldParents !== freshParents) {
+        // Inheritance changed. Folding the class names into the name delta is far more precise
+        // than "every file with a receiver-typed call": only files that actually resolved a
+        // receiver against one of these classes are invalidated.
+        for (const [child, parent] of rec.parents) {
+          deltaNames.add(child);
+          deltaNames.add(parent);
+        }
+        for (const [child, parent] of parseClassParents(relFile, fresh.content, fresh.ast)) {
+          deltaNames.add(child);
+          deltaNames.add(parent);
+        }
+      }
+    }
+    for (const relFile of orderedFiles) {
+      if (!manifest.files[relFile]) fileSetChanged = true;
+    }
+  } else if (orderedFiles.length > 0) {
+    fileSetChanged = true;
+  }
+  for (const relFile of dirty) {
+    const fresh = fileData.get(relFile);
+    if (!fresh) continue;
+    for (const sym of fresh.ast.symbols) {
+      deltaNames.add(sym.name);
+      if (sym.parentClass) deltaNames.add(sym.parentClass);
+    }
+  }
+
+  // ── Reverse-dependency sweep over the files that are still clean ──
+  if (manifest && deltaNames.size > 0) {
+    for (const relFile of orderedFiles) {
+      if (dirty.has(relFile)) continue;
+      const rec = manifest.files[relFile];
+      if (!rec) continue;
+      if (fileSetChanged && rec.unresolvedImports.length > 0) {
+        dirty.add(relFile);
+        continue;
+      }
+      for (const name of rec.queriedNames) {
+        if (deltaNames.has(name)) {
+          dirty.add(relFile);
+          break;
+        }
+      }
+    }
+    for (const relFile of dirty) loadFileData(relFile);
+  }
+
+  const records = new Map<string, KgShardRecord>();
+  if (manifest) {
+    for (const relFile of orderedFiles) {
+      const rec = manifest.files[relFile];
+      if (rec && !dirty.has(relFile)) records.set(relFile, rec);
+    }
+  }
+
+  kgStage(`plan (dirty=${dirty.size}/${orderedFiles.length}, deltaNames=${deltaNames.size}, fileSet=${fileSetChanged})`);
+  const ctx = buildKgContext(index, orderedFiles, fileData, records);
+  kgStage("context");
+  return { ctx, orderedFiles, dirty, fileData, records, manifest, rootDir, fpByFile };
+}
+
+/** Recomputes the dirty files and replays everything else straight from the manifest. */
+function executeKgRebuild(plan: KgRebuildPlan): Map<string, KgFileContribution> {
+  const out = new Map<string, KgFileContribution>();
+  const { ctx, orderedFiles, dirty, fileData, records } = plan;
+
+  for (const relFile of orderedFiles) {
+    if (!dirty.has(relFile)) {
+      const rec = records.get(relFile);
+      if (rec) {
+        out.set(relFile, {
+          nodes: rec.nodes,
+          defines: rec.defines,
+          imports: rec.imports,
+          calls: rec.calls,
+          declaredNames: rec.declaredNames,
+          queriedNames: rec.queriedNames,
+          hasReceiverCalls: rec.hasReceiverCalls,
+          parents: rec.parents,
+          unresolvedImports: rec.unresolvedImports,
+        });
+      }
+      continue;
+    }
+    const data = fileData.get(relFile);
+    if (!data) continue;
+    out.set(relFile, buildFileCodeContribution(relFile, data.ast, data.content, ctx));
+  }
+
+  // Persist. Records for files that are gone are dropped automatically: the new manifest is
+  // rebuilt from the current file list only.
+  if (kgShardEnabled()) {
+    const files: Record<string, KgShardRecord> = {};
+    for (const relFile of orderedFiles) {
+      const contribution = out.get(relFile);
+      if (!contribution) continue;
+      const fp = plan.fpByFile.get(relFile);
+      if (!fp) continue;
+      const rec = contributionToRecord(contribution, fp);
+      // `syms` is what lets the next rebuild rebuild the symbol tables without an AST.
+      const data = fileData.get(relFile);
+      if (data) {
+        rec.syms = data.ast.symbols.map(
+          (sym) =>
+            [
+              sym.name,
+              sym.line,
+              sym.endLine,
+              ...(sym.parentClass ? [sym.parentClass] : []),
+            ] as [string, number, number, string?]
+        );
+      } else {
+        rec.syms = records.get(relFile)?.syms ?? [];
+      }
+      files[relFile] = rec;
+    }
+    writeKgShardManifest(plan.rootDir, {
+      version: GRAPH_SHARD_VERSION,
+      signature: kgShardSignature(),
+      files,
+    });
+  }
+
+  return out;
+}
+
 export function buildKnowledgeGraphData(
   index: ReturnType<typeof getWorkspaceAstIndex>
 ): KnowledgeGraphData {
@@ -1661,333 +2958,62 @@ export function buildKnowledgeGraphData(
     nodes.push(node);
   };
 
+  // Endpoint existence is checked centrally: contributions can now be replayed from cache,
+  // so a stale edge may point at a node that no longer exists (e.g. an import whose target
+  // file was deleted). Previously each stage did this ad hoc.
   const addEdge = (edge: KnowledgeGraphEdge) => {
     if (edges.length >= MAX_KNOWLEDGE_GRAPH_EDGES) return;
+    if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) return;
     const key = `${edge.kind}\u0000${edge.source}\u0000${edge.target}`;
     if (edgeKeys.has(key)) return;
     edgeKeys.add(key);
     edges.push(edge);
   };
 
-  // ── 1. File nodes, symbol nodes and explicit `defines` edges ──
-  const files = index.getFiles();
-  const fileDataList: KnowledgeGraphFileData[] = [];
-  for (const relFile of files) {
-    const data = index.getFileAnalysis(relFile);
-    if (data) fileDataList.push({ relFile, ast: data.ast, content: data.content });
+  // ── 1-4. Per-file contributions: file/symbol nodes, `defines`, `imports`, `calls` ──
+  // Every node and edge is owned by exactly one file, so the graph is the ordered sum of
+  // per-file contributions. This is what makes incremental rebuilds possible: unchanged
+  // ── 1-4. Per-file contributions: file/symbol nodes, `defines`, `imports`, `calls` ──
+  // Every node and edge is owned by exactly one file, so the graph is the ordered sum of
+  // per-file contributions. `planKgRebuild` decides which files actually need work; the rest
+  // are replayed from the shard manifest without ever loading their AST.
+  kgMark = Date.now();
+  const plan = planKgRebuild(index);
+  const contributions = executeKgRebuild(plan);
+  kgStage(`contributions (dirty=${plan.dirty.size})`);
+  const orderedFiles = plan.orderedFiles;
+
+  // Merge pass 1: nodes. Ids are file-scoped, so dedup is a pure union and the order is
+  // deterministic (index.getFiles() is sorted).
+  for (const relFile of orderedFiles) {
+    for (const node of contributions.get(relFile)?.nodes ?? []) addNode(node);
   }
-
-  for (const { relFile, ast } of fileDataList) {
-    addNode({
-      id: `file:${relFile}`,
-      label: relFile,
-      kind: "file",
-      langOrFormat: extname(relFile).replace(".", "") || "code",
-      detail: `${ast.totalLines} lines, ${ast.symbols.length} symbols`,
-    });
-
-    for (const sym of ast.symbols) {
-      const symId = knowledgeGraphSymbolId(relFile, sym.name, sym.parentClass);
-      addNode({
-        id: symId,
-        label: `${sym.parentClass ? `${sym.parentClass}.` : ""}${sym.name} (${sym.kind})`,
-        kind: "symbol",
-        langOrFormat: extname(relFile).replace(".", "") || "code",
-        detail: `${relFile}:${sym.line}-${sym.endLine} | ${sym.signature}`,
-      });
-      addEdge({
-        source: `file:${relFile}`,
-        target: symId,
-        kind: "defines",
-        label: "defines",
-      });
+  // Merge pass 2: edges, grouped by kind rather than by file. Grouping keeps the emission
+  // order identical to the original single-pass builder, so the MAX edge cap truncates the
+  // same way it always did.
+  for (const kind of ["defines", "imports", "calls"] as const) {
+    for (const relFile of orderedFiles) {
+      for (const edge of contributions.get(relFile)?.[kind] ?? []) addEdge(edge);
     }
   }
 
-  // ── 2. Symbol index (name -> declarations) + per-file stem indexes for package imports ──
-  const symbolsByName = new Map<string, KnowledgeGraphSymbolRef[]>();
-  const symbolsByFileAndName = new Map<string, KnowledgeGraphSymbolRef[]>();
-  const filesByStem = new Map<string, string[]>();
-  const filesByDirName = new Map<string, string[]>();
+  // ── 4b. Symbol lookups used by the doc-edge stage (kept here: they mirror pass 1) ──
+  const symbolsByName = plan.ctx.symbolsByName;
+  const symbolsByFileAndName = plan.ctx.symbolsByFileAndName;
 
-  for (const { relFile, ast } of fileDataList) {
-    for (const sym of ast.symbols) {
-      const ref: KnowledgeGraphSymbolRef = {
-        id: knowledgeGraphSymbolId(relFile, sym.name, sym.parentClass),
-        file: relFile,
-        name: sym.name,
-        line: sym.line,
-        endLine: sym.endLine,
-        ...(sym.parentClass ? { parentClass: sym.parentClass } : {}),
-      };
-      const bucket = symbolsByName.get(sym.name);
-      if (bucket) bucket.push(ref);
-      else symbolsByName.set(sym.name, [ref]);
-      const fileKey = `${relFile}\u0000${sym.name}`;
-      const fileBucket = symbolsByFileAndName.get(fileKey);
-      if (fileBucket) fileBucket.push(ref);
-      else symbolsByFileAndName.set(fileKey, [ref]);
-    }
 
-    const stem = knowledgeGraphFileStem(relFile);
-    const stemBucket = filesByStem.get(stem);
-    if (stemBucket) stemBucket.push(relFile);
-    else filesByStem.set(stem, [relFile]);
-
-    const dirName = basename(dirname(relFile)).toLowerCase();
-    if (dirName && dirName !== ".") {
-      const dirBucket = filesByDirName.get(dirName);
-      if (dirBucket) dirBucket.push(relFile);
-      else filesByDirName.set(dirName, [relFile]);
-    }
-  }
-
-  // ── 3. File -> file `imports` edges (best-effort resolution for all supported languages) ──
-  const fileSet = index.getFileSet();
-  const resolveImportTarget = (fromRelFile: string, moduleSpec: string, importedNames: string[]): string | undefined => {
-    const resolved = resolveRelativeImportPath(index.rootDir, fromRelFile, moduleSpec, fileSet);
-    if (resolved && resolved !== fromRelFile && nodeIds.has(`file:${resolved}`)) return resolved;
-
-    const family = sourceLanguageFamily(fromRelFile);
-
-    // tsconfig.json / jsconfig.json path aliases (TS/JS only), e.g. `@/model` -> ts/model.ts.
-    if (family === "js") {
-      const aliasResolved = resolveAliasImportToFile(index.rootDir, moduleSpec, fileSet);
-      if (
-        aliasResolved &&
-        aliasResolved !== fromRelFile &&
-        nodeIds.has(`file:${aliasResolved}`)
-      ) {
-        return aliasResolved;
-      }
-    }
-
-    // Fallback for package/namespace imports that the path resolver cannot map to a file
-    // (Go package paths and C# `using` namespaces are not file paths).
-    if (family !== "go" && family !== "csharp") return undefined;
-    const moduleTail = moduleSpec.split(/[./:\\]/).filter(Boolean).pop()?.toLowerCase();
-    const names = [
-      moduleTail,
-      ...importedNames.filter((name) => name && name !== "*").map((name) => name.toLowerCase()),
-    ].filter((name): name is string => Boolean(name));
-    const fromDir = dirname(fromRelFile);
-    for (const name of names) {
-      const stemMatches = (filesByStem.get(name) ?? []).filter(
-        (candidate) =>
-          candidate !== fromRelFile && sourceLanguageFamily(candidate) === family
-      );
-      if (stemMatches.length > 0) {
-        return (
-          stemMatches.find((candidate) => dirname(candidate) === fromDir) ?? stemMatches[0]
-        );
-      }
-      const dirMatches = (filesByDirName.get(name) ?? []).filter(
-        (candidate) =>
-          candidate !== fromRelFile && sourceLanguageFamily(candidate) === family
-      );
-      if (dirMatches.length > 0) return [...dirMatches].sort()[0];
-    }
-    return undefined;
-  };
-
-  for (const { relFile, ast } of fileDataList) {
-    for (const imp of ast.imports) {
-      const targetFile = resolveImportTarget(relFile, imp.module, imp.importedNames);
-      if (!targetFile) continue;
-      addEdge({
-        source: `file:${relFile}`,
-        target: `file:${targetFile}`,
-        kind: "imports",
-        label: imp.raw,
-      });
-    }
-  }
-
-  // ── 4. Symbol -> symbol `calls` edges (receiver-type aware: known receiver -> exact class,
-  //       then same-file -> explicit import -> narrow package scope for unknown receivers) ──
-  // Local inheritance map (doc-graph must not import blast-radius/slicer at runtime: that
-  // would create a module cycle; ast-engine's parseClassParents is cycle-free).
-  const classParents = new Map<string, string>();
-  for (const { relFile, ast, content } of fileDataList) {
-    for (const [child, parent] of parseClassParents(relFile, content, ast)) {
-      if (!classParents.has(child)) classParents.set(child, parent);
-    }
-  }
-  const declaresMethodOnType = (typeName: string, methodName: string): boolean =>
-    (symbolsByName.get(methodName) ?? []).some((ref) => ref.parentClass === typeName);
-  /** A receiver typed `resolved` may dispatch to `targetClass.method` when it is the same
-   *  class or a subclass with no override between them. Mirrors blast-radius's hierarchy. */
-  const isCompatibleReceiver = (
-    resolved: string,
-    targetClass: string,
-    methodName: string
-  ): boolean => {
-    if (resolved === targetClass) return true;
-    if (!isSubclassOf(classParents, resolved, targetClass)) return false;
-    let current: string | undefined = resolved;
-    const seen = new Set<string>();
-    while (current && current !== targetClass) {
-      if (seen.has(current)) break;
-      seen.add(current);
-      if (declaresMethodOnType(current, methodName)) return false;
-      current = classParents.get(current);
-    }
-    return current === targetClass;
-  };
-
-  const receiverIndexCache = new Map<string, ReturnType<typeof inferReceiverTypeIndex>>();
-  const getReceiverIndex = (
-    relFile: string,
-    ast: FileAstAnalysis,
-    content: string
-  ): ReturnType<typeof inferReceiverTypeIndex> => {
-    const cached = receiverIndexCache.get(relFile);
-    if (cached) return cached;
-    const inferred = inferReceiverTypeIndex(relFile, content, ast);
-    receiverIndexCache.set(relFile, inferred);
-    return inferred;
-  };
-
-  // Lazy semantic-index preference for ambiguous callees: the same class name can be declared in
-  // two C# namespaces (`Demo.One.Gadget` / `Demo.Two.Gadget`), where a name/import heuristic cannot
-  // tell which file to use. Building the index is deferred to the first ambiguous call and falls
-  // back silently to the local heuristics when the semantic index is unavailable.
-  // `GRAPHFLOW_KG_SEMANTIC=0` disables the lookup (diagnostics/perf fallback).
-  const useSemanticCalls = process.env.GRAPHFLOW_KG_SEMANTIC !== "0";
-  let semanticIndex: ReturnType<typeof getSemanticIndex> | undefined;
-  let semanticIndexUnavailable = false;
-  const trySemanticCallTarget = (
-    relFile: string,
-    call: AstCallSite
-  ): KnowledgeGraphSymbolRef | undefined => {
-    if (semanticIndexUnavailable || !useSemanticCalls) return undefined;
-    try {
-      semanticIndex ??= getSemanticIndex(index.rootDir);
-      const resolved = semanticIndex.resolveCall(relFile, call);
-      if (!resolved.targetFile || !resolved.targetSymbol) return undefined;
-      if (resolved.confidence < SEMANTIC_CONFIDENCE_MIN) return undefined;
-      const refs =
-        symbolsByFileAndName.get(`${resolved.targetFile}\u0000${resolved.targetSymbol}`) ?? [];
-      if (refs.length === 0) return undefined;
-      return (
-        (resolved.parentClass
-          ? refs.find((ref) => ref.parentClass === resolved.parentClass)
-          : undefined) ??
-        refs.find((ref) => ref.parentClass !== undefined) ??
-        refs[0]
-      );
-    } catch {
-      semanticIndexUnavailable = true;
-      return undefined;
-    }
-  };
-
-  for (const { relFile, ast, content } of fileDataList) {
-    const family = sourceLanguageFamily(relFile);
-    const importedNames = new Set<string>();
-    for (const imp of ast.imports) {
-      for (const name of imp.importedNames) {
-        // Wildcard/namespace imports import nothing specific (C/C++ #include, Go package, ...).
-        if (name && name !== "*") importedNames.add(name);
-      }
-    }
-    const receiverIndex = getReceiverIndex(relFile, ast, content);
-
-    for (const call of ast.calls) {
-      // Declaration headers (`bool Engine::cancel(int id);`) are never calls.
-      if (call.isDeclaration) continue;
-      const candidates = symbolsByName.get(call.callee);
-      if (!candidates || candidates.length === 0) continue;
-
-      const sameFileCandidates = candidates.filter((candidate) => candidate.file === relFile);
-      const crossFileCandidates = candidates.filter(
-        (candidate) =>
-          candidate.file !== relFile && sourceLanguageFamily(candidate.file) === family
-      );
-
-      // Caller symbol by line containment (innermost callable wins) -> class-qualified source id.
-      const callerSym = findKnowledgeGraphCaller(ast, call.line);
-      const callerRefs = callerSym
-        ? (symbolsByFileAndName.get(`${relFile}\u0000${callerSym.name}`) ?? [])
-        : [];
-      const callerRef = callerSym
-        ? (callerRefs.find(
-            (ref) => ref.line === callerSym.line && ref.endLine === callerSym.endLine
-          ) ?? callerRefs[0])
-        : undefined;
-
-      // Receiver-type inference (3.3.2): when the receiver's static type is known, ONLY a method
-      // declared on that class may be the target. A foreign receiver is dropped, not guessed.
-      const receiverType = call.receiver
-        ? resolveReceiverType(call, ast, receiverIndex)
-        : undefined;
-
-      let target: KnowledgeGraphSymbolRef | undefined;
-      // Ambiguous callee name: prefer the semantic index's namespace/import/inheritance-aware
-      // resolution (e.g. `using Demo.Two;` must select two/Gadget.cs among two same-stem files).
-      if (candidates.length > 1) {
-        target = trySemanticCallTarget(relFile, call);
-      }
-      if (!target) {
-        if (receiverType) {
-          const typedCandidates = [...sameFileCandidates, ...crossFileCandidates].filter(
-            (candidate) =>
-              candidate.parentClass !== undefined &&
-              isCompatibleReceiver(receiverType, candidate.parentClass, call.callee)
-          );
-          if (typedCandidates.length === 0) continue;
-          target =
-            typedCandidates.find((candidate) => candidate.file === relFile) ??
-            typedCandidates.find(
-              (candidate) => candidate.parentClass && importedNames.has(candidate.parentClass)
-            ) ??
-            typedCandidates[0];
-        } else if (sameFileCandidates.length > 0) {
-          // Unknown receiver: prefer the enclosing class, else deterministic declaration order.
-          const callerParent = callerSym?.parentClass;
-          target =
-            (callerParent
-              ? sameFileCandidates.find((candidate) => candidate.parentClass === callerParent)
-              : undefined) ?? sameFileCandidates[0];
-        } else {
-          const importedMatches = crossFileCandidates.filter(
-            (candidate) =>
-              importedNames.has(candidate.name) ||
-              (candidate.parentClass ? importedNames.has(candidate.parentClass) : false)
-          );
-          if (importedMatches.length > 0) {
-            target =
-              importedMatches.find(
-                (candidate) =>
-                  candidate.parentClass !== undefined &&
-                  importedNames.has(candidate.parentClass)
-              ) ?? importedMatches[0];
-          } else {
-            target = crossFileCandidates.find((candidate) =>
-              inKnowledgeGraphImplicitScope(relFile, candidate.file, family)
-            );
-          }
-        }
-      }
-
-      if (!target) continue;
-      const sourceId =
-        callerRef && nodeIds.has(callerRef.id) ? callerRef.id : `file:${relFile}`;
-      const targetId = target.id;
-      if (!nodeIds.has(targetId) || sourceId === targetId) continue;
-      addEdge({
-        source: sourceId,
-        target: targetId,
-        kind: "calls",
-        label:
-          call.member && call.receiver ? `${call.receiver}.${call.callee}()` : `${call.callee}()`,
-      });
-    }
-  }
+  kgStage("merge 1-4");
 
   // ── 5. Doc nodes & Doc <-> Code edges ──
   const docSections = scanWorkspaceDocuments(index.rootDir);
   const docLinks = buildDocCodeLinks(index, docSections);
+  const docSectionText = new Map<string, string>();
+  for (const sec of docSections) {
+    docSectionText.set(
+      `${sec.docPath}#${sec.title}`,
+      sec.text ?? `${sec.title}\n${sec.summary}`
+    );
+  }
   for (const sec of docSections) {
     addNode({
       id: `doc:${sec.docPath}#${sec.title}`,
@@ -2006,6 +3032,36 @@ export function buildKnowledgeGraphData(
       symbolsByFileAndName.get(`${link.codeFile}\u0000${link.symbolName}`)?.[0];
     const symId = symRef?.id;
     if (symId && nodeIds.has(docId) && nodeIds.has(symId)) {
+      // Explicit mentions are the authoritative doc<->code relation, but identifier-key
+      // normalization is case-insensitive and punctuation-free, so `response` can match the
+      // `Response` class and `options` can bind to an unrelated file's getter. Before emitting
+      // the edge, require the target symbol's bare name to literally appear in THIS section
+      // (case-sensitive, identifier boundary). Concept-only links are semantic by design and
+      // stay confidence-scored instead of literal.
+      if (link.reason.startsWith("explicit ref ")) {
+        const sectionText = docSectionText.get(`${link.docPath}#${link.sectionTitle}`) ?? "";
+        if (!containsLiteralIdentifier(sectionText, link.symbolName)) continue;
+        // Same bare member name declared in several files (`options` on an example class vs
+        // `Options.options`): a bare doc mention is not enough to pick one. Keep it only when the
+        // section also names the qualified member (`options.responseType`) or the exact file.
+        const parentClass = symRef?.parentClass;
+        if (parentClass) {
+          const declaringFiles = new Set(
+            (symbolsByName.get(link.symbolName) ?? []).map((ref) => ref.file)
+          );
+          if (declaringFiles.size > 1) {
+            const baseFile = link.codeFile.split("/").pop() ?? link.codeFile;
+            const fileMentioned =
+              sectionText.includes(link.codeFile) || sectionText.includes(baseFile);
+            if (
+              !fileMentioned &&
+              !containsLiteralIdentifierCi(sectionText, `${parentClass}.${link.symbolName}`)
+            ) {
+              continue;
+            }
+          }
+        }
+      }
       addEdge({
         source: docId,
         target: symId,
@@ -2014,6 +3070,8 @@ export function buildKnowledgeGraphData(
       });
     }
   }
+
+  kgStage("doc-links");
 
   // ── 6. Co-Edit edges & Macro nodes ──
   const store = loadMacroStore(index.rootDir);
@@ -2047,6 +3105,32 @@ export function buildKnowledgeGraphData(
 export function generateKnowledgeGraphHtml(
   index: ReturnType<typeof getWorkspaceAstIndex>
 ): { htmlPath: string; jsonPath: string; nodeCount: number; edgeCount: number } {
+  const outDir = join(index.rootDir, ".graphflow");
+  mkdirSync(outDir, { recursive: true });
+
+  const jsonPath = join(outDir, "knowledge-graph.json");
+  const htmlPath = join(outDir, "knowledge-graph.html");
+  const cachePath = join(index.rootDir, ...KNOWLEDGE_GRAPH_CACHE_REL_PATH.split("/"));
+
+  const cacheEnabled = knowledgeGraphCacheEnabled();
+  const docPaths = cacheEnabled ? listWorkspaceDocumentPaths(index.rootDir) : [];
+  const fingerprint = cacheEnabled
+    ? computeKnowledgeGraphFingerprint(index, docPaths)
+    : "";
+
+  if (cacheEnabled) {
+    const cached = readKnowledgeGraphCache(cachePath, fingerprint);
+    // Only reuse when both artifacts still exist: callers (and tests) rely on the files.
+    if (cached && existsSync(htmlPath) && existsSync(jsonPath)) {
+      return {
+        htmlPath,
+        jsonPath,
+        nodeCount: cached.nodeCount,
+        edgeCount: cached.edgeCount,
+      };
+    }
+  }
+
   const graph = buildKnowledgeGraphData(index);
   const edgeKindCounts = new Map<string, number>();
   for (const edge of graph.edges) {
@@ -2055,12 +3139,23 @@ export function generateKnowledgeGraphHtml(
   const edgeBreakdown = ["defines", "imports", "calls", "doc-links-code", "co-edit"]
     .map((kind) => `${kind}=${edgeKindCounts.get(kind) ?? 0}`)
     .join(" · ");
-  const outDir = join(index.rootDir, ".graphflow");
-  mkdirSync(outDir, { recursive: true });
 
-  const jsonPath = join(outDir, "knowledge-graph.json");
-  const htmlPath = join(outDir, "knowledge-graph.html");
-  writeFileSync(jsonPath, `${JSON.stringify(graph, null, 2)}\n`, "utf8");
+  // Serialize once: the same string feeds the self-contained HTML and the JSON artifact, so the
+  // graph is never stringified twice. No pretty-printing keeps the on-disk JSON compact.
+  const graphJson = JSON.stringify(graph);
+  writeFileSync(jsonPath, graphJson, "utf8");
+  if (cacheEnabled) {
+    writeFileSync(
+      cachePath,
+      JSON.stringify({
+        version: KNOWLEDGE_GRAPH_CACHE_VERSION,
+        fingerprint,
+        nodeCount: graph.nodes.length,
+        edgeCount: graph.edges.length,
+      } satisfies KnowledgeGraphCacheMeta),
+      "utf8"
+    );
+  }
 
   const html = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -2124,7 +3219,7 @@ export function generateKnowledgeGraphHtml(
   </div>
   <div id="canvas-wrap"><canvas id="graph"></canvas></div>
 <script>
-const GRAPH = ${JSON.stringify(graph)};
+const GRAPH = ${graphJson};
 const canvas = document.getElementById("graph");
 const ctx = canvas.getContext("2d");
 const inspector = document.getElementById("inspector");

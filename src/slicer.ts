@@ -4,7 +4,8 @@
  * Supports TypeScript/JavaScript, Python, Go, Rust, C/C++, and C#.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import {
@@ -22,6 +23,7 @@ import {
   generateCrossAgentBrief,
   parseProjectDocument,
 } from "./doc-graph.js";
+import { ensureGraphflowDir } from "./graphflow-dir.js";
 import {
   CHINESE_TYPO_NORMALIZATION,
   CJK_ENGINEERING_GLOSSARY,
@@ -102,19 +104,33 @@ export function resolveSafeWorkspaceRoot(rawRootDir?: string, fallbackRootDir: s
  * Normalizes a caller-supplied file path (relative, Windows backslash, or absolute inside rootDir)
  * into a safe workspace-relative POSIX path. Returns `undefined` if the path escapes `rootDir` (`..`).
  */
+/**
+ * Memoization for `normalizeWorkspaceRelPath`. It is a pure function of
+ * `(rootDir, inputPath)`, but a single `graph` run called it tens of thousands of
+ * times and each call re-ran `resolve()` + `relative()` — profiling measured path
+ * normalization at ~43% of a full graph rebuild (~4.8s on a 274-file workspace).
+ * `null` caches a rejected (escaping) path.
+ */
+const NORMALIZE_REL_PATH_MEMO_MAX = 50_000;
+const normalizeRelPathMemo = new Map<string, string | null>();
+
 export function normalizeWorkspaceRelPath(rootDir: string, inputPath: string): string | undefined {
   const raw = inputPath.trim();
   if (!raw) return undefined;
+  const key = `${rootDir}\u0000${raw}`;
+  const cached = normalizeRelPathMemo.get(key);
+  if (cached !== undefined) return cached === null ? undefined : cached;
+
   const safeRoot = resolve(rootDir);
   const normalizedRaw = raw.replace(/\\/g, "/");
   const absTarget = isAbsolute(normalizedRaw)
     ? resolve(normalizedRaw)
     : resolve(safeRoot, normalizedRaw);
   const rel = relative(safeRoot, absTarget).replace(/\\/g, "/");
-  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
-    return undefined;
-  }
-  return rel;
+  const result = !rel || rel.startsWith("..") || isAbsolute(rel) ? null : rel;
+  if (normalizeRelPathMemo.size >= NORMALIZE_REL_PATH_MEMO_MAX) normalizeRelPathMemo.clear();
+  normalizeRelPathMemo.set(key, result);
+  return result === null ? undefined : result;
 }
 
 /**
@@ -158,6 +174,52 @@ const IGNORED_DIRS = new Set([
 ]);
 
 /**
+ * On-disk AST shard cache.
+ *
+ * The in-memory `astCache` only lives as long as one process, so every new CLI
+ * invocation / MCP server / agent respawn re-parsed the whole workspace. Sharding
+ * one JSON file per source file under `.graphflow/ast-cache/` keeps the cache
+ * lazy (a single-symbol read never loads unrelated shards) and incremental
+ * (a shard is only rewritten when its file actually changed).
+ *
+ * Validity is `contentHash` (not mtime alone: some filesystems and fast
+ * write-then-read loops keep mtime+size identical) plus a backend signature, so
+ * switching `GRAPHFLOW_TREE_SITTER` can never reuse a foreign engine's AST.
+ * `GRAPHFLOW_AST_CACHE=0` disables both reads and writes.
+ */
+const AST_DISK_CACHE_VERSION = 1;
+const AST_DISK_CACHE_DIR_REL = ".graphflow/ast-cache";
+const AST_DISK_CACHE_FLUSH_AT = 48;
+const AST_DISK_CACHE_MAX_PRUNE = 400;
+
+function astDiskCacheEnabled(): boolean {
+  return process.env.GRAPHFLOW_AST_CACHE !== "0";
+}
+
+/** Backend signature: cached ASTs must never be reused across analysis engines. */
+function astBackendSignature(): string {
+  return `v1|tree-sitter=${process.env.GRAPHFLOW_TREE_SITTER === "1" ? "1" : "0"}`;
+}
+
+function astShardName(relPath: string): string {
+  return `${createHash("sha1").update(relPath).digest("hex")}.json`;
+}
+
+function astShardPath(rootDir: string, relPath: string): string {
+  return join(rootDir, AST_DISK_CACHE_DIR_REL, astShardName(relPath));
+}
+
+interface AstShardRecord {
+  version: number;
+  sig: string;
+  relPath: string;
+  mtimeMs: number;
+  size: number;
+  contentHash: string;
+  ast: FileAstAnalysis;
+}
+
+/**
  * In-memory workspace AST index cache with separate raw-text and lazy-AST tiers
  * so lexical pre-filters run in <5ms across hundreds of files.
  */
@@ -167,6 +229,11 @@ class WorkspaceAstIndex {
   private lastScanMs = 0;
   private scannedFiles: string[] = [];
   private scannedFileSet = new Set<string>();
+  /** ASTs analysed in this process that have not been written to `.graphflow/ast-cache` yet. */
+  private pendingAstShards = new Map<string, AstShardRecord>();
+  /** Set to `false` once a write fails (read-only workspace), disabling further writes. */
+  private astDiskWritable: boolean | undefined = undefined;
+  private astPruned = false;
 
   constructor(public readonly rootDir: string) {}
 
@@ -249,20 +316,173 @@ class WorkspaceAstIndex {
     if (cachedAst && cachedAst.mtimeMs === raw.mtimeMs && cachedAst.size === raw.size) {
       return { content: raw.content, ast: cachedAst.ast, size: raw.size };
     }
+
+    // Tier 3: on-disk shard written by an earlier process. Only consulted on a
+    // memory miss, so a single-symbol read never loads unrelated shards.
+    const contentHash = createHash("sha1").update(raw.content).digest("hex");
+    const fromDisk = this.readAstShard(normalized, raw.mtimeMs, raw.size, contentHash);
+    if (fromDisk) {
+      this.astCache.set(normalized, { mtimeMs: raw.mtimeMs, size: raw.size, ast: fromDisk });
+      return { content: raw.content, ast: fromDisk, size: raw.size };
+    }
+
     const ast = analyzeSourceFile(normalized, raw.content);
     this.astCache.set(normalized, { mtimeMs: raw.mtimeMs, size: raw.size, ast });
+    this.queueAstShard(normalized, raw.mtimeMs, raw.size, contentHash, ast);
     return { content: raw.content, ast, size: raw.size };
+  }
+
+  /** Reads a persisted shard, returning `undefined` on miss or any invalidation. */
+  private readAstShard(
+    relPath: string,
+    mtimeMs: number,
+    size: number,
+    contentHash: string
+  ): FileAstAnalysis | undefined {
+    if (!astDiskCacheEnabled() || this.astDiskWritable === false) return undefined;
+    let text: string;
+    try {
+      text = readFileSync(astShardPath(this.rootDir, relPath), "utf8");
+    } catch {
+      return undefined;
+    }
+    try {
+      const rec = JSON.parse(text) as Partial<AstShardRecord>;
+      if (rec.version !== AST_DISK_CACHE_VERSION) return undefined;
+      if (rec.sig !== astBackendSignature()) return undefined;
+      if (rec.relPath !== relPath) return undefined;
+      if (rec.mtimeMs !== mtimeMs || rec.size !== size) return undefined;
+      if (rec.contentHash !== contentHash) return undefined;
+      if (!rec.ast || !Array.isArray(rec.ast.symbols)) return undefined;
+      return rec.ast as FileAstAnalysis;
+    } catch {
+      // A corrupt or truncated shard is simply treated as a miss.
+      return undefined;
+    }
+  }
+
+  private queueAstShard(
+    relPath: string,
+    mtimeMs: number,
+    size: number,
+    contentHash: string,
+    ast: FileAstAnalysis
+  ): void {
+    if (!astDiskCacheEnabled() || this.astDiskWritable === false) return;
+    this.pendingAstShards.set(relPath, {
+      version: AST_DISK_CACHE_VERSION,
+      sig: astBackendSignature(),
+      relPath,
+      mtimeMs,
+      size,
+      contentHash,
+      ast,
+    });
+    if (this.pendingAstShards.size >= AST_DISK_CACHE_FLUSH_AT) {
+      this.flushAstDiskCache();
+    }
+  }
+
+  /** Persists every analysed-but-unwritten AST. Returns how many shards were written. */
+  flushAstDiskCache(): number {
+    if (this.pendingAstShards.size === 0) return 0;
+    const pending = [...this.pendingAstShards.values()];
+    this.pendingAstShards.clear();
+    if (!astDiskCacheEnabled() || this.astDiskWritable === false) return 0;
+
+    const dir = join(this.rootDir, AST_DISK_CACHE_DIR_REL);
+    try {
+      ensureGraphflowDir(this.rootDir);
+      mkdirSync(dir, { recursive: true });
+    } catch {
+      this.astDiskWritable = false;
+      return 0;
+    }
+
+    let written = 0;
+    // Written in place, not via temp-file + rename: a shard is a disposable
+    // cache, and a torn write only shows up as a JSON parse failure (a miss).
+    // On Windows the extra rename roughly doubled the cost of a cold sweep
+    // (274 shards: ~2.6s of pure syscalls).
+    for (const rec of pending) {
+      try {
+        writeFileSync(astShardPath(this.rootDir, rec.relPath), JSON.stringify(rec), "utf8");
+        written += 1;
+      } catch {
+        this.astDiskWritable = false;
+        break;
+      }
+    }
+    this.pruneAstShards(dir);
+    return written;
+  }
+
+  /**
+   * Drops shards whose source file no longer exists. Guarded to one pass per
+   * process and only when the cache clearly outgrew the workspace, so ordinary
+   * runs never pay for a directory scan.
+   */
+  private pruneAstShards(dir: string): void {
+    if (this.astPruned || this.scannedFiles.length === 0) return;
+    this.astPruned = true;
+    let names: string[];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      return;
+    }
+    if (names.length <= this.scannedFiles.length * 2 + 50) return;
+    const valid = new Set(this.scannedFiles.map(astShardName));
+    let removed = 0;
+    for (const name of names) {
+      if (removed >= AST_DISK_CACHE_MAX_PRUNE) break;
+      if (!name.endsWith(".json") || valid.has(name)) continue;
+      try {
+        unlinkSync(join(dir, name));
+        removed += 1;
+      } catch {
+        // Ignore: another process may have removed it first.
+      }
+    }
   }
 
   invalidateFile(relPath: string): void {
     const normalized = normalizeWorkspaceRelPath(this.rootDir, relPath) ?? relPath.replace(/\\/g, "/").replace(/^\.\//, "");
     this.rawCache.delete(normalized);
     this.astCache.delete(normalized);
+    this.pendingAstShards.delete(normalized);
     this.lastScanMs = 0;
   }
 }
 
 const indexByRoot = new Map<string, WorkspaceAstIndex>();
+const liveAstIndices = new Set<WorkspaceAstIndex>();
+let astExitFlushInstalled = false;
+
+/** Flushes every live index's AST cache. Called on process exit and after bulk scans. */
+export function flushWorkspaceAstCaches(): number {
+  let total = 0;
+  for (const idx of liveAstIndices) {
+    try {
+      total += idx.flushAstDiskCache();
+    } catch {
+      // A failed flush must never take down the command that triggered it.
+    }
+  }
+  return total;
+}
+
+function installAstExitFlush(): void {
+  if (astExitFlushInstalled) return;
+  astExitFlushInstalled = true;
+  process.once("exit", () => {
+    try {
+      flushWorkspaceAstCaches();
+    } catch {
+      // Nothing useful to do while exiting.
+    }
+  });
+}
 
 export function getWorkspaceAstIndex(rootDir: string): WorkspaceAstIndex {
   const safeRoot = resolveSafeWorkspaceRoot(rootDir);
@@ -270,6 +490,8 @@ export function getWorkspaceAstIndex(rootDir: string): WorkspaceAstIndex {
   if (!idx) {
     idx = new WorkspaceAstIndex(safeRoot);
     indexByRoot.set(safeRoot, idx);
+    liveAstIndices.add(idx);
+    installAstExitFlush();
   }
   return idx;
 }
@@ -386,13 +608,50 @@ function isTypeDefinitionKind(kind: AstSymbol["kind"]): boolean {
   );
 }
 
+/** `GRAPHFLOW_TYPE_CLOSURE_MAX`: default 12; invalid/empty falls back to the default. */
+function typeClosureMax(): number {
+  const raw = process.env.GRAPHFLOW_TYPE_CLOSURE_MAX;
+  if (raw === undefined || raw.trim() === "") return 12;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 12;
+}
+
+/** class/interface/struct/enum outrank a `type` alias when a closure budget forces a choice. */
+function typeClosureKindPriority(kind: AstSymbol["kind"]): number {
+  return kind === "class" || kind === "interface" || kind === "struct" || kind === "enum" ? 2 : 1;
+}
+
+interface TypeClosureCandidate {
+  name: string;
+  kind: AstSymbol["kind"];
+  relPath: string;
+  sym: AstSymbol;
+  refCount: number;
+  priority: number;
+  order: number;
+}
+
+/** Type-closure bodies are capped, but the marker must state how many source lines were dropped. */
+function formatTypeClosureBlock(relPath: string, sym: AstSymbol, fileLines: string[]): string {
+  const maxBodyLines = 30;
+  const end = Math.min(sym.endLine, sym.line + maxBodyLines - 1);
+  const omitted = Math.max(0, sym.endLine - end);
+  const body = formatNumberedLines(fileLines, sym.line, end);
+  return (
+    `// [Type Closure] ${relPath}:${sym.line}-${sym.endLine} (${sym.kind} ${sym.name})\n` +
+    body +
+    (omitted > 0 ? `\n// ... [${omitted} lines omitted]` : "")
+  );
+}
+
 function resolveTypeClosure(
   index: WorkspaceAstIndex,
   fileAst: FileAstAnalysis,
   fileContent: string,
   targetSymbols: AstSymbol[],
-  maxTypes = 5
+  maxTypes?: number
 ): string[] {
+  const limit = maxTypes ?? typeClosureMax();
   const neededTypes = new Set<string>();
   const targetNames = new Set(targetSymbols.map((s) => s.name));
   for (const sym of targetSymbols) {
@@ -402,51 +661,60 @@ function resolveTypeClosure(
   }
   if (neededTypes.size === 0) return [];
 
-  const blocks: string[] = [];
+  // Ranking signal: how often the target's own body mentions each type. Prefer a real
+  // class/interface/struct over a `type` alias, then the most-referenced type.
   const fileLines = fileContent.split(/\r?\n/);
+  const targetBody = targetSymbols
+    .map((s) => fileLines.slice(Math.max(0, s.line - 1), Math.min(fileLines.length, s.endLine)).join("\n"))
+    .join("\n");
+  const referenceCount = (name: string): number => {
+    const re = new RegExp(`(?<![A-Za-z0-9_$])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9_$])`, "g");
+    return (targetBody.match(re) ?? []).length;
+  };
+
+  const candidates = new Map<string, TypeClosureCandidate>();
+  const remaining = new Set(neededTypes);
+  let order = 0;
+  const addCandidate = (relPath: string, sym: AstSymbol): void => {
+    if (candidates.has(sym.name)) return;
+    remaining.delete(sym.name);
+    candidates.set(sym.name, {
+      name: sym.name,
+      kind: sym.kind,
+      relPath,
+      sym,
+      refCount: referenceCount(sym.name),
+      priority: typeClosureKindPriority(sym.kind),
+      order: order++,
+    });
+  };
 
   // 1. Same-file type definitions
   for (const sym of fileAst.symbols) {
-    if (blocks.length >= maxTypes) break;
-    if (neededTypes.has(sym.name) && isTypeDefinitionKind(sym.kind)) {
-      neededTypes.delete(sym.name);
-      const end = Math.min(sym.endLine, sym.line + 30);
-      blocks.push(
-        `// [Type Closure] ${fileAst.relPath}:${sym.line}-${sym.endLine} (${sym.kind} ${sym.name})\n` +
-          formatNumberedLines(fileLines, sym.line, end)
-      );
+    if (remaining.has(sym.name) && isTypeDefinitionKind(sym.kind)) {
+      addCandidate(fileAst.relPath, sym);
     }
   }
 
   // 2. Explicitly imported modules (TS/JS, Python, Rust, C/C++ #include)
-  if (neededTypes.size > 0 && blocks.length < maxTypes) {
-    for (const imp of fileAst.imports) {
-      if (blocks.length >= maxTypes || neededTypes.size === 0) break;
-      const matchingImportNames = imp.importedNames.includes("*")
-        ? Array.from(neededTypes)
-        : imp.importedNames.filter((n) => neededTypes.has(n));
-      if (matchingImportNames.length === 0) continue;
-      const resolvedRel = resolveRelativeImportPath(index.rootDir, fileAst.relPath, imp.module, index.getFileSet());
-      if (!resolvedRel) continue;
-      const targetFile = index.getFileAnalysis(resolvedRel);
-      if (!targetFile) continue;
-      const targetLines = targetFile.content.split(/\r?\n/);
-      for (const name of matchingImportNames) {
-        const typeSym = targetFile.ast.symbols.find((s) => s.name === name && isTypeDefinitionKind(s.kind));
-        if (typeSym) {
-          neededTypes.delete(name);
-          const end = Math.min(typeSym.endLine, typeSym.line + 30);
-          blocks.push(
-            `// [Type Closure] ${resolvedRel}:${typeSym.line}-${typeSym.endLine} (${typeSym.kind} ${typeSym.name})\n` +
-              formatNumberedLines(targetLines, typeSym.line, end)
-          );
-        }
-      }
+  for (const imp of fileAst.imports) {
+    if (remaining.size === 0) break;
+    const matchingImportNames = imp.importedNames.includes("*")
+      ? Array.from(remaining)
+      : imp.importedNames.filter((n) => remaining.has(n));
+    if (matchingImportNames.length === 0) continue;
+    const resolvedRel = resolveRelativeImportPath(index.rootDir, fileAst.relPath, imp.module, index.getFileSet());
+    if (!resolvedRel) continue;
+    const targetFile = index.getFileAnalysis(resolvedRel);
+    if (!targetFile) continue;
+    for (const name of matchingImportNames) {
+      const typeSym = targetFile.ast.symbols.find((s) => s.name === name && isTypeDefinitionKind(s.kind));
+      if (typeSym) addCandidate(resolvedRel, typeSym);
     }
   }
 
   // 3. Same-package / same-namespace / header fallback (Go package, C# namespace, C/C++ header, Python/Rust module)
-  if (neededTypes.size > 0 && blocks.length < maxTypes) {
+  if (remaining.size > 0) {
     const fromDir = dirname(fileAst.relPath);
     const candidateFiles = [...index.getFiles()].sort((a, b) => {
       const aSameDir = dirname(a) === fromDir ? 0 : 1;
@@ -454,30 +722,34 @@ function resolveTypeClosure(
       return aSameDir - bSameDir || a.localeCompare(b);
     });
     for (const relPath of candidateFiles) {
-      if (blocks.length >= maxTypes || neededTypes.size === 0) break;
+      if (remaining.size === 0) break;
       if (relPath === fileAst.relPath) continue;
       const raw = index.getRawFile(relPath);
       if (!raw) continue;
-      const hasAnyNeeded = Array.from(neededTypes).some((t) => raw.content.includes(t));
+      const hasAnyNeeded = Array.from(remaining).some((t) => raw.content.includes(t));
       if (!hasAnyNeeded) continue;
       const targetFile = index.getFileAnalysis(relPath);
       if (!targetFile) continue;
-      const targetLines = targetFile.content.split(/\r?\n/);
-      for (const name of Array.from(neededTypes)) {
+      for (const name of Array.from(remaining)) {
         const typeSym = targetFile.ast.symbols.find((s) => s.name === name && isTypeDefinitionKind(s.kind));
-        if (typeSym) {
-          neededTypes.delete(name);
-          const end = Math.min(typeSym.endLine, typeSym.line + 30);
-          blocks.push(
-            `// [Type Closure] ${relPath}:${typeSym.line}-${typeSym.endLine} (${typeSym.kind} ${typeSym.name})\n` +
-              formatNumberedLines(targetLines, typeSym.line, end)
-          );
-        }
+        if (typeSym) addCandidate(relPath, typeSym);
       }
     }
   }
 
-  return blocks;
+  return [...candidates.values()]
+    .sort(
+      (a, b) =>
+        b.priority - a.priority ||
+        b.refCount - a.refCount ||
+        a.order - b.order
+    )
+    .slice(0, limit)
+    .map((candidate) => {
+      const targetFile = index.getFileAnalysis(candidate.relPath);
+      const targetLines = targetFile ? targetFile.content.split(/\r?\n/) : fileLines;
+      return formatTypeClosureBlock(candidate.relPath, candidate.sym, targetLines);
+    });
 }
 
 export function tokenizeQuery(query: string): {
@@ -546,12 +818,17 @@ function shrinkTypeClosures(text: string, maxBodyLines: number): string {
     }
     out.push(line);
     i += 1;
+    const headerMatch = line.match(/^\/\/ \[Type Closure\] .+?:(\d+)-(\d+) /);
+    const rangeStart = headerMatch ? Number(headerMatch[1]) : undefined;
+    const rangeEnd = headerMatch ? Number(headerMatch[2]) : undefined;
     let kept = 0;
     let omitted = 0;
+    let lastKeptLine: number | undefined;
     while (i < lines.length) {
       const body = lines[i] ?? "";
       if (
         body.startsWith("// [") ||
+        body.startsWith("// ...") ||
         body.startsWith("### ") ||
         body.startsWith("# ") ||
         body.startsWith("// ---")
@@ -564,18 +841,31 @@ function shrinkTypeClosures(text: string, maxBodyLines: number): string {
       }
       if (kept < maxBodyLines) {
         out.push(body);
+        const lineNo = numberedLineOf(body);
+        if (lineNo !== undefined) lastKeptLine = lineNo;
         kept += 1;
       } else {
         omitted += 1;
       }
       i += 1;
     }
-    if (omitted > 0) out.push(`// ... [${omitted} type-closure lines omitted by read budget]`);
+    if (omitted > 0) {
+      // Replace the closure's own marker rather than stacking two omission notes.
+      if ((lines[i] ?? "").startsWith("// ...")) i += 1;
+      const shownEnd = lastKeptLine ?? (rangeStart !== undefined ? rangeStart - 1 : undefined);
+      const realOmitted =
+        rangeEnd !== undefined && shownEnd !== undefined ? Math.max(0, rangeEnd - shownEnd) : omitted;
+      out.push(`// ... [${realOmitted} lines omitted]`);
+    }
   }
   return out.join("\n");
 }
 
-function truncateSymbolBodies(text: string, maxLines: number): string {
+function truncateSymbolBodies(
+  text: string,
+  maxLines: number,
+  index?: ReturnType<typeof getWorkspaceAstIndex>
+): string {
   const lines = text.split("\n");
   const out: string[] = [];
   let i = 0;
@@ -589,11 +879,18 @@ function truncateSymbolBodies(text: string, maxLines: number): string {
       continue;
     }
     out.push(line);
+    const protectedLines = declarationLinesForBlock(index, line);
     i += 1;
     const body: string[] = [];
     while (i < lines.length) {
       const next = lines[i] ?? "";
-      if (next.startsWith("### ") || next.startsWith("// [") || next.startsWith("// ---") || next.startsWith("# ")) {
+      if (
+        next.startsWith("### ") ||
+        next.startsWith("// [") ||
+        next.startsWith("// ...") ||
+        next.startsWith("// ---") ||
+        next.startsWith("# ")
+      ) {
         break;
       }
       body.push(next);
@@ -612,7 +909,10 @@ function truncateSymbolBodies(text: string, maxLines: number): string {
         out.push(entry);
         continue;
       }
-      if (kept < maxLines || signatureRe.test(entry)) {
+      const lineNo = Number(entry.match(/^\s*(\d+):/)?.[1] ?? "");
+      const protectedLine = protectedLines?.has(lineNo) ?? false;
+      // E5: a declaration line may never be dropped by a budget trim.
+      if (protectedLine || kept < maxLines || signatureRe.test(entry)) {
         out.push(entry);
         kept += 1;
       } else {
@@ -624,13 +924,374 @@ function truncateSymbolBodies(text: string, maxLines: number): string {
   return out.join("\n");
 }
 
+function declarationLinesForBlock(
+  index: ReturnType<typeof getWorkspaceAstIndex> | undefined,
+  headerLine: string
+): ReadonlySet<number> | undefined {
+  if (!index) return undefined;
+  const pathMatch =
+    headerLine.match(/^### (.+?):\d+-\d+ \[/) ??
+    headerLine.match(/^### (.+?) \(AST Skeleton View, /) ??
+    headerLine.match(/^### (.+?):\d+-\d+ \(total /);
+  const relPath = pathMatch?.[1]?.trim();
+  if (!relPath) return undefined;
+  const fileData = index.getFileAnalysis(relPath);
+  if (!fileData) return undefined;
+  return new Set(fileData.ast.symbols.map((sym) => sym.line));
+}
+
+function numberedLineOf(entry: string): number | undefined {
+  const match = entry.match(/^\s*(\d+):/);
+  return match ? Number(match[1]) : undefined;
+}
+
+/**
+ * R1: replace a large `###` symbol body with a structure-preserving digest:
+ * every member signature/first line stays, bodies shrink to `{ ... }` / `...`,
+ * and each omission states how many source lines it replaces.
+ */
+function renderStructuredDigest(
+  header: string,
+  top: AstSymbol,
+  ast: FileAstAnalysis,
+  fileLines: string[],
+  bodyHead: number
+): { lines: string[]; kept: number; omitted: number } {
+  const isPython = ast.backend === "python-ast";
+  const out: string[] = [header];
+  let kept = 0;
+  let omitted = 0;
+  const push = (lineNo: number): void => {
+    if (lineNo < 1 || lineNo > fileLines.length) return;
+    if ((fileLines[lineNo - 1] ?? "").trim() === "") return;
+    out.push(`${String(lineNo).padStart(4)}: ${fileLines[lineNo - 1]}`);
+    kept += 1;
+  };
+  const fold = (count: number): void => {
+    if (count <= 0) return;
+    omitted += count;
+    out.push(isPython ? `// ... [${count} lines omitted]` : `// { ... } [${count} lines omitted]`);
+  };
+  const signatureEndOf = (sym: AstSymbol): number => {
+    if (sym.bodyStartLine && sym.bodyStartLine > sym.line) {
+      return Math.min(sym.endLine, sym.bodyStartLine - 1);
+    }
+    return Math.min(sym.line, sym.endLine);
+  };
+
+  const topSigEnd = signatureEndOf(top);
+  for (let lineNo = top.line; lineNo <= topSigEnd; lineNo++) push(lineNo);
+  // E5: nested declarations (a function inside a method) may never be folded away.
+  const nestedDeclarationLines = new Set(
+    ast.symbols
+      .filter((sym) => sym !== top && sym.line > topSigEnd && sym.line >= top.line && sym.endLine <= top.endLine)
+      .map((sym) => sym.line)
+  );
+
+  const isContainer = isTypeDefinitionKind(top.kind);
+  const units: AstSymbol[] = [];
+  if (isContainer) {
+    const nested = ast.symbols
+      .filter(
+        (sym) =>
+          sym !== top &&
+          sym.line >= top.line &&
+          sym.endLine <= top.endLine &&
+          (isTypeDefinitionKind(sym.kind) || sym.kind === "function" || sym.kind === "method")
+      )
+      .sort((a, b) => a.line - b.line || b.endLine - a.endLine);
+    let lastEnd = topSigEnd;
+    for (const sym of nested) {
+      if (sym.line <= lastEnd) continue;
+      units.push(sym);
+      lastEnd = sym.endLine;
+    }
+  }
+
+  const emitGap = (from: number, to: number): void => {
+    if (to < from) return;
+    let first = -1;
+    for (let lineNo = from; lineNo <= to; lineNo++) {
+      if ((fileLines[lineNo - 1] ?? "").trim() !== "") {
+        first = lineNo;
+        break;
+      }
+    }
+    if (first < 0) return;
+    push(first);
+    fold(to - first);
+  };
+
+  const emitBody = (bodyStart: number, bodyEnd: number): void => {
+    if (bodyEnd < bodyStart) return;
+    const chosen: number[] = [];
+    for (let lineNo = bodyStart; lineNo <= bodyEnd && chosen.length < bodyHead; lineNo++) {
+      if ((fileLines[lineNo - 1] ?? "").trim() === "") continue;
+      chosen.push(lineNo);
+    }
+    const selected = new Set(chosen);
+    for (let lineNo = bodyStart; lineNo <= bodyEnd; lineNo++) {
+      if (nestedDeclarationLines.has(lineNo)) selected.add(lineNo);
+    }
+    const ordered = [...selected].sort((a, b) => a - b);
+    for (const lineNo of ordered) push(lineNo);
+    fold(bodyEnd - bodyStart + 1 - ordered.length);
+  };
+
+  if (units.length > 0) {
+    let cursor = topSigEnd + 1;
+    for (const unit of units) {
+      emitGap(cursor, unit.line - 1);
+      const sigEnd = signatureEndOf(unit);
+      for (let lineNo = unit.line; lineNo <= sigEnd; lineNo++) push(lineNo);
+      emitBody(sigEnd + 1, unit.endLine);
+      cursor = unit.endLine + 1;
+    }
+    emitGap(cursor, top.endLine);
+  } else {
+    emitBody(topSigEnd + 1, top.endLine);
+  }
+
+  out.push(`// [digest: kept ${kept}/${top.endLine - top.line + 1} lines, bodies folded]`);
+  return { lines: out, kept, omitted };
+}
+
+/** Parse `### path:start-end [kind name]` headers and return their body lines. */
+function parseSymbolBlockHeaders(text: string): Array<{
+  header: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  kind: string;
+  name: string;
+  body: string[];
+}> {
+  const lines = text.split("\n");
+  const blocks: Array<{
+    header: string;
+    filePath: string;
+    startLine: number;
+    endLine: number;
+    kind: string;
+    name: string;
+    body: string[];
+  }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const header = lines[i] ?? "";
+    const match = header.match(/^### (.+?):(\d+)-(\d+) \[(?:(?:export )?)([A-Za-z]+) ([^\]]+)\]$/);
+    if (!match) continue;
+    const body: string[] = [];
+    let j = i + 1;
+    while (j < lines.length) {
+      const next = lines[j] ?? "";
+      if (
+        next.startsWith("### ") ||
+        next.startsWith("// [") ||
+        next.startsWith("// ...") ||
+        next.startsWith("// ---") ||
+        next.startsWith("# ")
+      ) {
+        break;
+      }
+      body.push(next);
+      j += 1;
+    }
+    blocks.push({
+      header,
+      filePath: match[1]!,
+      startLine: Number(match[2]),
+      endLine: Number(match[3]),
+      kind: match[4]!,
+      name: match[5]!,
+      body,
+    });
+    i = j - 1;
+  }
+  return blocks;
+}
+
+/** R1: digest oversized symbol blocks, filling up to the block's share of the budget. */
+function digestSymbolBlocks(
+  text: string,
+  budget: number,
+  index: ReturnType<typeof getWorkspaceAstIndex>
+): string {
+  const blocks = parseSymbolBlockHeaders(text);
+  const oversized = blocks.filter((block) => {
+    const numbered = block.body.filter((entry) => numberedLineOf(entry) !== undefined).length;
+    return numbered >= 200;
+  });
+  if (oversized.length === 0) return text;
+
+  const blockChars = new Map<string, number>();
+  let totalBlockChars = 0;
+  for (const block of oversized) {
+    const chars = block.header.length + block.body.reduce((sum, entry) => sum + entry.length + 1, 0);
+    blockChars.set(block.header, chars);
+    totalBlockChars += chars;
+  }
+  const nonBlockChars = Math.max(0, text.length - totalBlockChars);
+  const available = Math.max(400, budget - nonBlockChars);
+
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let cursor = 0;
+  let changed = false;
+  for (const block of blocks) {
+    const headerIndex = lines.indexOf(block.header, cursor);
+    if (headerIndex < 0) continue;
+    out.push(...lines.slice(cursor, headerIndex));
+    cursor = headerIndex;
+
+    const originalChars = block.header.length + block.body.reduce((sum, entry) => sum + entry.length + 1, 0);
+    if (!oversized.includes(block)) {
+      out.push(block.header, ...block.body);
+      cursor = headerIndex + 1 + block.body.length;
+      continue;
+    }
+
+    const fileData = index.getFileAnalysis(block.filePath);
+    const top = fileData?.ast.symbols.find(
+      (sym) =>
+        sym.name === block.name &&
+        sym.line >= block.startLine &&
+        sym.endLine <= block.endLine
+    );
+    if (!fileData || !top) {
+      out.push(block.header, ...block.body);
+      cursor = headerIndex + 1 + block.body.length;
+      continue;
+    }
+    const fileLines = fileData.content.split(/\r?\n/);
+    const share = totalBlockChars > 0 ? (blockChars.get(block.header) ?? originalChars) / totalBlockChars : 1;
+    const target = Math.max(
+      600,
+      Math.min(originalChars, Math.floor(available * 0.92 * share))
+    );
+
+    const base = renderStructuredDigest(block.header, top, fileData.ast, fileLines, 0);
+    const baseLen = base.lines.join("\n").length;
+    // Never expand a block that is already small or whose digest cannot save space.
+    if (baseLen >= originalChars * 0.95) {
+      out.push(block.header, ...block.body);
+      cursor = headerIndex + 1 + block.body.length;
+      continue;
+    }
+
+    let best = base;
+    let bestLen = baseLen;
+    if (baseLen < target) {
+      let low = 0;
+      let high = 600;
+      while (low <= high) {
+        const mid = Math.floor((low + high) / 2);
+        const rendered = renderStructuredDigest(block.header, top, fileData.ast, fileLines, mid);
+        const length = rendered.lines.join("\n").length;
+        if (length <= target) {
+          best = rendered;
+          bestLen = length;
+          low = mid + 1;
+        } else {
+          high = mid - 1;
+        }
+      }
+    }
+
+    if (bestLen < originalChars) {
+      out.push(...best.lines);
+      changed = true;
+    } else {
+      out.push(block.header, ...block.body);
+    }
+    cursor = headerIndex + 1 + block.body.length;
+  }
+  out.push(...lines.slice(cursor));
+  return changed ? out.join("\n") : text;
+}
+
+/**
+ * E5: skeleton/budget trimming must keep every AstSymbol declaration line.
+ * Protected lines are retained even if they exceed the share; body lines fill the rest.
+ */
+function trimSkeletonBlocksPreservingDeclarations(
+  text: string,
+  budget: number,
+  index: ReturnType<typeof getWorkspaceAstIndex>
+): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const header = lines[i] ?? "";
+    if (!header.startsWith("### ") || !header.includes("(AST Skeleton View")) {
+      out.push(header);
+      i += 1;
+      continue;
+    }
+    const body: string[] = [];
+    let j = i + 1;
+    while (j < lines.length) {
+      const next = lines[j] ?? "";
+      if (
+        next.startsWith("### ") ||
+        next.startsWith("// [") ||
+        next.startsWith("// ...") ||
+        next.startsWith("// ---") ||
+        next.startsWith("# ")
+      ) {
+        break;
+      }
+      body.push(next);
+      j += 1;
+    }
+    const originalChars = header.length + body.reduce((sum, entry) => sum + entry.length + 1, 0);
+    const protectedLines = declarationLinesForBlock(index, header);
+    const target = Math.max(
+      400,
+      Math.floor(Math.max(0, budget - (text.length - originalChars)))
+    );
+
+    out.push(header);
+    let used = header.length;
+    let omitted = 0;
+    const flushOmitted = (): void => {
+      if (omitted > 0) {
+        out.push(`// ... [${omitted} lines omitted by read budget]`);
+        omitted = 0;
+      }
+    };
+    for (const entry of body) {
+      const lineNo = numberedLineOf(entry);
+      const protectedLine = lineNo !== undefined && (protectedLines?.has(lineNo) ?? false);
+      if (protectedLine) {
+        flushOmitted();
+        out.push(entry);
+        used += entry.length + 1;
+      } else if (used + entry.length + 1 <= target) {
+        flushOmitted();
+        out.push(entry);
+        used += entry.length + 1;
+      } else {
+        omitted += 1;
+      }
+    }
+    flushOmitted();
+    i = j;
+  }
+  return out.join("\n");
+}
+
 /**
  * When a read/search response is larger than the raw source of the files it touched,
  * compact blast snippets and oversized symbol/closure bodies.
  * Linked-doc lines, blast headers, `// ->` caller lines, the numbered call line,
  * type-closure headers, and skeleton markers stay so small slices remain correct.
  */
-function applyReadBudget(text: string, rawBytes: number): string {
+function applyReadBudget(
+  text: string,
+  rawBytes: number,
+  index?: ReturnType<typeof getWorkspaceAstIndex>
+): string {
   const ratio = readBudgetRatio();
   if (!Number.isFinite(ratio) || rawBytes <= 0) return text;
   const budget = Math.max(1, Math.floor(rawBytes * ratio));
@@ -643,22 +1304,25 @@ function applyReadBudget(text: string, rawBytes: number): string {
     if (next.length < current.length) current = next;
   };
 
-  // Keep linked-doc lines, blast headers, type-closure headers, and skeleton
-  // markers. Those are the lines existing tests and symbol slices require.
-  // Oversized symbol bodies and 3-line blast snippets are what blow past the
-  // source size on search and embedded-type reads.
+  // Shrink the parts that are not the symbol body first: blast snippets, meta doc
+  // links and duplicate closures. A 39-line function must not be folded just
+  // because 24 call-site snippets were printed around it.
   shrink(compactBlastSnippets);
-  shrink((value) => shrinkTypeClosures(value, 12));
-  shrink((value) => truncateSymbolBodies(value, 24));
-  shrink((value) => shrinkTypeClosures(value, 8));
-  shrink((value) => truncateSymbolBodies(value, 12));
-  shrink((value) => shrinkTypeClosures(value, 6));
-  shrink((value) => truncateSymbolBodies(value, 8));
-  shrink(dropDuplicateTypeClosures);
-  shrink(dropClosuresOfShownSymbols);
   shrink(dropNonSuperBlastSources);
   shrink(dropMetaDocLinks);
   shrink(trimBlastArrows);
+  shrink(dropDuplicateTypeClosures);
+  shrink(dropClosuresOfShownSymbols);
+  if (index) {
+    shrink((value) => digestSymbolBlocks(value, budget, index));
+    shrink((value) => trimSkeletonBlocksPreservingDeclarations(value, budget, index));
+  }
+  shrink((value) => shrinkTypeClosures(value, 12));
+  shrink((value) => truncateSymbolBodies(value, 24, index));
+  shrink((value) => shrinkTypeClosures(value, 8));
+  shrink((value) => truncateSymbolBodies(value, 12, index));
+  shrink((value) => shrinkTypeClosures(value, 6));
+  shrink((value) => truncateSymbolBodies(value, 8, index));
   return current.trim();
 }
 
@@ -680,7 +1344,15 @@ function dropClosuresOfShownSymbols(text: string): string {
       i += 1;
       while (i < lines.length) {
         const next = lines[i] ?? "";
-        if (next.startsWith("// [") || next.startsWith("### ") || next.startsWith("# ") || next.startsWith("// ---")) break;
+        if (
+          next.startsWith("// [") ||
+          next.startsWith("// ...") ||
+          next.startsWith("### ") ||
+          next.startsWith("# ") ||
+          next.startsWith("// ---")
+        ) {
+          break;
+        }
         i += 1;
       }
       continue;
@@ -1219,7 +1891,7 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
     }
   }
 
-  const text = applyReadBudget(sections.join("\n\n").trim(), confidenceBudget ?? rawFileBytes);
+  const text = applyReadBudget(sections.join("\n\n").trim(), confidenceBudget ?? rawFileBytes, index);
   const estimatedTokens = Math.max(1, Math.ceil(text.length / 4));
   return {
     text,

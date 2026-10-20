@@ -125,7 +125,7 @@ export const WORKFLOW_CONTRACTS = [
     tokens: [
       "tags:",
       "v*",
-      "npm install",
+      "npm ci",
       "npm run build",
       "npm test",
       "npm publish",

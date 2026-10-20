@@ -804,6 +804,19 @@ function writeMcpTarget(
   return existed ? "updated" : "installed";
 }
 
+/** Removes a container that became empty, so uninstall leaves no `{"mcpServers":{}}` shell. */
+function pruneEmptyObjectKey(parent: Record<string, unknown>, key: string): void {
+  const value = parent[key];
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value as Record<string, unknown>).length === 0
+  ) {
+    delete parent[key];
+  }
+}
+
 function removeMcpTarget(target: AgentMcpTarget, serverName: string): boolean {
   if (!existsSync(target.configPath)) return false;
   const format = target.configFormat ?? "json";
@@ -825,6 +838,7 @@ function removeMcpTarget(target: AgentMcpTarget, serverName: string): boolean {
     const mcp = obj.mcp as Record<string, unknown> | undefined;
     if (!mcp || !(serverName in mcp)) return false;
     delete mcp[serverName];
+    pruneEmptyObjectKey(obj, "mcp");
     writeJsonSafe(target.configPath, obj);
     return true;
   }
@@ -833,6 +847,8 @@ function removeMcpTarget(target: AgentMcpTarget, serverName: string): boolean {
     const servers = mcp?.servers as Record<string, unknown> | undefined;
     if (!servers || !(serverName in servers)) return false;
     delete servers[serverName];
+    if (mcp) pruneEmptyObjectKey(mcp, "servers");
+    pruneEmptyObjectKey(obj, "mcp");
     writeJsonSafe(target.configPath, obj);
     return true;
   }
@@ -840,6 +856,7 @@ function removeMcpTarget(target: AgentMcpTarget, serverName: string): boolean {
   const servers = obj[target.serversKey] as Record<string, unknown> | undefined;
   if (!servers || !(serverName in servers)) return false;
   delete servers[serverName];
+  pruneEmptyObjectKey(obj, target.serversKey);
   writeJsonSafe(target.configPath, obj);
   return true;
 }
@@ -1181,13 +1198,15 @@ export function removeHostHook(hookKind: HookKind, configPath: string): boolean 
     if (!Array.isArray(entries)) continue;
     const filtered = sanitizeHostHookEntries(entries as unknown[]);
     if (JSON.stringify(filtered) !== JSON.stringify(entries)) {
-      hooks[key] = filtered;
+      if (filtered.length === 0) delete hooks[key];
+      else hooks[key] = filtered;
       removed = true;
     }
   }
 
   if (!removed) return false;
-  obj.hooks = hooks;
+  if (Object.keys(hooks).length === 0) delete obj.hooks;
+  else obj.hooks = hooks;
   writeJsonSafe(configPath, obj);
   return true;
 }
@@ -1293,6 +1312,7 @@ function removeMcpKey(target: AgentMcpTarget, key: string): boolean {
     const mcp = obj.mcp as Record<string, unknown> | undefined;
     if (!mcp || !(key in mcp)) return false;
     delete mcp[key];
+    pruneEmptyObjectKey(obj, "mcp");
     writeJsonSafe(target.configPath, obj);
     return true;
   }
@@ -1301,6 +1321,8 @@ function removeMcpKey(target: AgentMcpTarget, key: string): boolean {
     const servers = mcp?.servers as Record<string, unknown> | undefined;
     if (!servers || !(key in servers)) return false;
     delete servers[key];
+    if (mcp) pruneEmptyObjectKey(mcp, "servers");
+    pruneEmptyObjectKey(obj, "mcp");
     writeJsonSafe(target.configPath, obj);
     return true;
   }
@@ -1308,6 +1330,7 @@ function removeMcpKey(target: AgentMcpTarget, key: string): boolean {
   const servers = obj[target.serversKey] as Record<string, unknown> | undefined;
   if (!servers || !(key in servers)) return false;
   delete servers[key];
+  pruneEmptyObjectKey(obj, target.serversKey);
   writeJsonSafe(target.configPath, obj);
   return true;
 }

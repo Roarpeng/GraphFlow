@@ -108,7 +108,7 @@ const PUBLISH_NPM_WORKFLOW = [
   "  publish:",
   "    runs-on: ubuntu-latest",
   "    steps:",
-  "      - run: npm install --no-audit",
+  "      - run: npm ci --no-audit",
   "      - run: npm run build && npm test",
   "      - name: Publish",
   "        env:",

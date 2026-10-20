@@ -13,9 +13,10 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { computeBlastRadius, formatBlastRadiusText } from "./blast-radius.js";
+import { ensureGraphflowDir } from "./graphflow-dir.js";
 import { getRecentFileGitDiff } from "./git-miner.js";
 import { getWorkspaceAstIndex } from "./slicer.js";
 
@@ -85,7 +86,7 @@ export function loadSessionGuardState(rootDir: string, sessionId = "main"): Sess
 }
 
 export function saveSessionGuardState(rootDir: string, state: SessionGuardState): void {
-  mkdirSync(join(rootDir, ".graphflow"), { recursive: true });
+  ensureGraphflowDir(rootDir);
   writeFileSync(sessionStateFilePath(rootDir), JSON.stringify(state, null, 2), "utf8");
 }
 

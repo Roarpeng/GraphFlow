@@ -99,10 +99,15 @@ export interface SurgicalEditResult {
   text: string;
 }
 
-/** Masks `/* ... *\/` so a doc comment that names `OrderService.cancel` is not a live reference. */
-function maskBlockComments(content: string): string {
+/**
+ * Masks comments and string/template literals with spaces (newlines kept), so a
+ * rename can match identifier positions without touching `'./old-name.js'`.
+ * Length is preserved, which lets callers map a match offset back to the source.
+ */
+function maskNonCode(content: string): string {
   let out = "";
   let inBlock = false;
+  let inLine = false;
   let inSingle = false;
   let inDouble = false;
   let inTemplate = false;
@@ -110,6 +115,7 @@ function maskBlockComments(content: string): string {
     const ch = content[i]!;
     const next = content[i + 1] ?? "";
     const prev = i > 0 ? content[i - 1]! : "";
+    const isNewline = ch === "\n" || ch === "\r";
     if (inBlock) {
       if (ch === "*" && next === "/") {
         inBlock = false;
@@ -117,21 +123,89 @@ function maskBlockComments(content: string): string {
         i += 1;
         continue;
       }
-      out += ch === "\n" || ch === "\r" ? ch : " ";
+      out += isNewline ? ch : " ";
       continue;
     }
-    if (!inSingle && !inDouble && !inTemplate && ch === "/" && next === "*") {
+    if (inLine) {
+      if (isNewline) {
+        inLine = false;
+        out += ch;
+      } else {
+        out += " ";
+      }
+      continue;
+    }
+    if (inSingle || inDouble || inTemplate) {
+      if (ch === "\\") {
+        out += "  ";
+        i += 1;
+        continue;
+      }
+      const quote = inSingle ? "'" : inDouble ? '"' : "`";
+      if (ch === quote) {
+        inSingle = false;
+        inDouble = false;
+        inTemplate = false;
+        out += " ";
+        continue;
+      }
+      out += isNewline ? ch : " ";
+      continue;
+    }
+    if (ch === "/" && next === "*") {
       inBlock = true;
       out += "  ";
       i += 1;
       continue;
     }
-    if (!inDouble && !inTemplate && ch === "'" && prev !== "\\") inSingle = !inSingle;
-    else if (!inSingle && !inTemplate && ch === '"' && prev !== "\\") inDouble = !inDouble;
-    else if (!inSingle && !inDouble && ch === "`" && prev !== "\\") inTemplate = !inTemplate;
+    if (ch === "/" && next === "/" && prev !== ":") {
+      inLine = true;
+      out += "  ";
+      i += 1;
+      continue;
+    }
+    if (ch === "'") {
+      inSingle = true;
+      out += " ";
+      continue;
+    }
+    if (ch === '"') {
+      inDouble = true;
+      out += " ";
+      continue;
+    }
+    if (ch === "`") {
+      inTemplate = true;
+      out += " ";
+      continue;
+    }
     out += ch;
   }
   return out;
+}
+
+/**
+ * Replaces whole-identifier matches that occur in code, skipping the same text
+ * inside comments and string literals (imports paths included).
+ */
+function replaceIdentifierInCode(
+  content: string,
+  re: RegExp,
+  newName: string
+): { updated: string; count: number } {
+  const masked = maskNonCode(content);
+  let count = 0;
+  const updated = content.replace(re, (match: string, ...args: unknown[]) => {
+    // The offset is the last numeric argument, before the whole string.
+    const offset = args.find((value): value is number => typeof value === "number") ?? -1;
+    const inCode =
+      offset >= 0 &&
+      masked.slice(offset, offset + match.length) === match;
+    if (!inCode) return match;
+    count += 1;
+    return newName;
+  });
+  return { updated, count };
 }
 
 /**
@@ -147,11 +221,15 @@ function replaceBareIdentifierOnLines(
   if (lines.size === 0) return { updated: content, count: 0 };
   const eol = content.includes("\r\n") ? "\r\n" : "\n";
   const parts = content.split(/\r?\n/);
+  const maskedParts = maskNonCode(content).split(/\r?\n/);
   const re = new RegExp(`(^|[^\\p{ID_Continue}$.])${escapeRegExp(oldName)}(?!${ID_CONTINUE_CLASS})`, "gu");
   let count = 0;
   const next = parts.map((line, index) => {
     if (!lines.has(index + 1)) return line;
-    return line.replace(re, (_match, prefix: string) => {
+    const maskedLine = maskedParts[index] ?? "";
+    return line.replace(re, (_match, prefix: string, ...rest: unknown[]) => {
+      const offset = rest.find((value): value is number => typeof value === "number") ?? -1;
+      if (offset < 0 || maskedLine.slice(offset, offset + _match.length) !== _match) return _match;
       count += 1;
       return `${prefix}${newName}`;
     });
@@ -172,6 +250,7 @@ function replaceMemberAccessOnLines(
   if (lines.size === 0) return { updated: content, count: 0 };
   const eol = content.includes("\r\n") ? "\r\n" : "\n";
   const parts = content.split(/\r?\n/);
+  const maskedParts = maskNonCode(content).split(/\r?\n/);
   const re = new RegExp(
     `(\\(\\s*\\)\\s*\\.|->|::|\\.)(\\s*)${escapeRegExp(oldName)}(?!${ID_CONTINUE_CLASS})`,
     "gu"
@@ -179,7 +258,10 @@ function replaceMemberAccessOnLines(
   let count = 0;
   const next = parts.map((line, index) => {
     if (!lines.has(index + 1)) return line;
-    return line.replace(re, (_match, access: string, space: string) => {
+    const maskedLine = maskedParts[index] ?? "";
+    return line.replace(re, (_match, access: string, space: string, ...rest: unknown[]) => {
+      const offset = rest.find((value): value is number => typeof value === "number") ?? -1;
+      if (offset < 0 || maskedLine.slice(offset, offset + _match.length) !== _match) return _match;
       count += 1;
       return `${access}${space}${newName}`;
     });
@@ -264,7 +346,7 @@ function collectUnresolvedRenameReferences(
     } catch {
       continue;
     }
-    if (!wordRe.test(content)) continue;
+    if (!wordRe.test(maskNonCode(content))) continue;
 
     const ast = analyzeSourceFile(relPath, content);
     const importLines = new Set(ast.imports.map((imp) => imp.line));
@@ -313,7 +395,7 @@ function collectUnresolvedRenameReferences(
     }
 
     if (isMethodRename) {
-      const lines = maskBlockComments(content).split(/\r?\n/);
+      const lines = maskNonCode(content).split(/\r?\n/);
       for (let i = 0; i < lines.length; i++) {
         if (importLines.has(i + 1)) continue;
         const code = stripLineCommentsAndStrings(lines[i] ?? "", commentPrefix);
@@ -485,7 +567,7 @@ function executeCrossRepoRename(
     // Cross-language references are impossible: never stage another family's same-named code.
     if (sourceLanguageFamily(relPath) !== declLangFamily) continue;
     const raw = index.getRawFile(relPath);
-    if (!raw || !typeCheckRe.test(raw.content)) continue;
+    if (!raw || !typeCheckRe.test(maskNonCode(raw.content))) continue;
     const fData = index.getFileAnalysis(relPath);
     if (!fData) continue;
     // Explicit imports only: a wildcard import does not import this specific symbol.
@@ -493,6 +575,66 @@ function executeCrossRepoRename(
       fData.ast.symbols.some((s) => s.referencedTypes.includes(oldName)) ||
       fData.ast.imports.some((imp) => imp.importedNames.includes(oldName))
     ) {
+      candidateFiles.add(relPath);
+    }
+  }
+
+  // Go interface methods are structural: implementations live on unrelated receiver
+  // types and are not connected by an explicit `extends`/`implements` declaration.
+  // Collect same-package declarations/implementations so renaming `I.Method` updates
+  // the interface and every provable implementation in one pass.
+  const goInterfaceDeclLines = new Map<string, Set<number>>();
+  const isGoInterfaceMethod =
+    declLangFamily === "go" &&
+    sym.kind === "method" &&
+    parentClass !== undefined &&
+    declData.ast.symbols.some(
+      (candidate) => candidate.name === parentClass && candidate.kind === "interface"
+    );
+  if (isGoInterfaceMethod && parentClass) {
+    const interfaceMethods = new Set(
+      declData.ast.symbols
+        .filter(
+          (candidate) =>
+            candidate.kind === "method" && candidate.parentClass === parentClass
+        )
+        .map((candidate) => candidate.name)
+    );
+    for (const relPath of index.getFiles(true)) {
+      if (sourceLanguageFamily(relPath) !== "go") continue;
+      if (relPath !== relDecl && !inImplicitPackageScope(relDecl, relPath, "go")) continue;
+      const fData = index.getFileAnalysis(relPath);
+      if (!fData) continue;
+      const receiverTypes = new Set(
+        fData.ast.symbols
+          .filter((candidate) => candidate.name === oldName && candidate.parentClass)
+          .map((candidate) => candidate.parentClass!)
+      );
+      const lines = new Set<number>();
+      // Build-tag variants declare the same interface/method in sibling files.
+      for (const candidate of fData.ast.symbols) {
+        if (candidate.name === oldName && candidate.parentClass === parentClass) {
+          lines.add(candidate.line);
+        }
+      }
+      for (const receiverType of receiverTypes) {
+        const declaresAll = [...interfaceMethods].every((methodName) =>
+          fData.ast.symbols.some(
+            (candidate) =>
+              candidate.kind === "method" &&
+              candidate.parentClass === receiverType &&
+              candidate.name === methodName
+          )
+        );
+        if (!declaresAll) continue;
+        for (const candidate of fData.ast.symbols) {
+          if (candidate.name === oldName && candidate.parentClass === receiverType) {
+            lines.add(candidate.line);
+          }
+        }
+      }
+      if (lines.size === 0) continue;
+      goInterfaceDeclLines.set(relPath, lines);
       candidateFiles.add(relPath);
     }
   }
@@ -510,7 +652,7 @@ function executeCrossRepoRename(
     if (candidateFiles.has(relPath)) continue;
     if (sourceLanguageFamily(relPath) !== declFamily) continue;
     const raw = index.getRawFile(relPath);
-    if (!raw || !typeCheckRe.test(raw.content)) continue;
+    if (!raw || !typeCheckRe.test(maskNonCode(raw.content))) continue;
     if (
       dirname(relPath) !== dirname(relDecl) &&
       !inImplicitPackageScope(relDecl, relPath, declFamily)
@@ -537,6 +679,8 @@ function executeCrossRepoRename(
     let sawOverride = false;
     for (const conflicting of conflicts) {
       // Prototype/definition pairs of the same declaration are updated together, not rejected.
+      // Known Go interface implementations/declarations are the same logical symbol.
+      if (goInterfaceDeclLines.get(relPath)?.has(conflicting.line)) continue;
       if (isSameDeclarationCluster(conflicting)) continue;
       const sub = conflicting.parentClass;
       if (hierarchy && parentClass && sub && hierarchy.isSubclassOf(sub, parentClass)) {
@@ -695,6 +839,7 @@ function executeCrossRepoRename(
           if ((candidate.parentClass ?? "") !== parentClass) continue;
           declLines.add(candidate.line);
         }
+        for (const line of goInterfaceDeclLines.get(relPath) ?? []) declLines.add(line);
       }
       const targetLines = new Set<number>();
       for (const call of ast.calls) {
@@ -736,10 +881,9 @@ function executeCrossRepoRename(
       updated = declared.updated;
       count = members.count + declared.count;
     } else {
-      updated = raw.replace(wordRe, () => {
-        count += 1;
-        return newName;
-      });
+      const replaced = replaceIdentifierInCode(raw, wordRe, newName);
+      updated = replaced.updated;
+      count = replaced.count;
     }
     if (count === 0) continue;
 

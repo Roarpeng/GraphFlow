@@ -402,7 +402,8 @@ check("removeHostHook removes only graphflow hooks and reports no-op when absent
     assert.equal(removeHostHook("cursor", s.cursorHooks), true);
     const hooks = readJson(s.cursorHooks).hooks as Record<string, unknown>;
     assert.deepEqual((hooks.preToolUse as Array<Record<string, unknown>>).map((h) => h.command), ["user-pre"]);
-    assert.deepEqual(hooks.postToolUse, []);
+    // An emptied phase is removed rather than left behind as `"postToolUse": []`.
+    assert.equal(hooks.postToolUse, undefined);
     assert.equal(removeHostHook("cursor", s.cursorHooks), false, "second removal is a no-op");
     assert.equal(removeHostHook("cursor", join(s.root, "missing.json")), false);
   } finally {

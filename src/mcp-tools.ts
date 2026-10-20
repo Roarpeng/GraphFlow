@@ -17,6 +17,7 @@ import {
 import {
   evaluatePostEditHabits,
   executeMacro,
+  findCommandMacro,
   findMatchingMacroHint,
   loadMacroStore,
   mineAndCompileMacros,
@@ -148,6 +149,8 @@ export interface V3ToolCallResponse {
   content: Array<{ type: "text"; text: string }>;
   /** Not part of the tools/list schema. MCP task-run uses this for exitCode. */
   structuredContent?: Record<string, unknown>;
+  /** Set for protocol-level tool failures (unknown tool, unknown action). */
+  isError?: boolean;
 }
 
 function plainTextResponse(text: string): V3ToolCallResponse {
@@ -322,7 +325,8 @@ export function executeV3ToolCall(
         );
         if (affectedTests.length === 0) {
           return plainTextResponse(
-            `PASS [affected-tests] 0 test files affected by changes (${resolvedChanges.length} changed file(s)).`
+            `NONE [affected-tests] 0 test files matched ${resolvedChanges.length} changed file(s). ` +
+              `If you expected hits, check the test directory/naming convention (test/, tests/, __tests__, *.test.*, *_test.*).`
           );
         }
         const suggestedCmd = buildAffectedTestCommand(affectedTests, rootDir);
@@ -332,9 +336,12 @@ export function executeV3ToolCall(
           autoLogExecutedCommand(rootDir, suggestedCmd, {
             ...(instruction ? { instruction } : {}),
           });
-          return plainTextResponse(
-            `# Affected Tests Executed (${affectedTests.join(", ")}):\n${runRes.text}`
-          );
+          return {
+            content: [
+              { type: "text", text: `# Affected Tests Executed (${affectedTests.join(", ")}):\n${runRes.text}` },
+            ],
+            structuredContent: { tool: "gf_exec", ok: runRes.ok, exitCode: runRes.exitCode },
+          };
         }
         return plainTextResponse(
           `# Affected Tests (${affectedTests.length} test file(s) from ${resolvedChanges.length} changed file(s)):\n` +
@@ -384,8 +391,18 @@ export function executeV3ToolCall(
         newlyCompiled.length > 0
           ? `\n// [Auto-Recorded Tool] Pattern compiled into macro '${newlyCompiled[0]!.id}' (${newlyCompiled[0]!.kind}: ${newlyCompiled[0]!.scriptPath})`
           : "";
+      // A command that already has a local script should never be re-derived:
+      // point the agent at the one-call local tool instead.
+      const knownMacro = findCommandMacro(rootDir, cmd);
+      const localToolNote = knownMacro
+        ? `\n// [Local Tool Ready] '${cmd}' is already compiled as '${knownMacro.id}' (${knownMacro.kind}, used ${knownMacro.occurrences}x)` +
+          ` -> gf_macro(action="run", id="${knownMacro.id}") runs it locally, no re-derivation.`
+        : "";
 
-      return plainTextResponse(execRes.text + cbNote + promoNote);
+      return {
+        content: [{ type: "text", text: execRes.text + cbNote + promoNote + localToolNote }],
+        structuredContent: { tool: "gf_exec", ok: execRes.ok, exitCode: execRes.exitCode },
+      };
     }
 
     case "gf_macro": {
@@ -582,12 +599,23 @@ export function executeV3ToolCall(
         return plainTextResponse(res.text);
       }
 
-      return plainTextResponse(
-        `ERR [unknown-action] '${action}'. Use 'list', 'run', 'save', 'mine', 'mine-git', 'task-list', 'task-run', 'task-record', or 'task-harvest'.`
-      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: `ERR [unknown-action] '${action}'. Use 'list', 'run', 'save', 'mine', 'mine-git', 'task-list', 'task-run', 'task-record', or 'task-harvest'.`,
+          },
+        ],
+        structuredContent: { tool: "gf_macro", ok: false },
+        isError: true,
+      };
     }
 
     default:
-      return plainTextResponse(`ERR [unknown-v3-tool] '${name}'`);
+      return {
+        content: [{ type: "text", text: `ERR [unknown-v3-tool] '${name}'` }],
+        structuredContent: { tool: name, ok: false },
+        isError: true,
+      };
   }
 }

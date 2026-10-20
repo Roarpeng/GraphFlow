@@ -1145,7 +1145,10 @@ function main(): void {
     assertEqual(decorated!.line, 3, "py: decorated class span starts at the decorator line");
     const method = ast.symbols.find((s) => s.name === "cancel" && s.parentClass === "Decorated");
     assertTrue(method, "py: decorated method symbol");
-    assertEqual(method!.line, 7, "py: decorated method span starts at its decorator line");
+    // Functions anchor at their `def` line (rename/skeleton address the declaration name);
+    // the decorator still renders immediately above it in the source view. Classes keep
+    // the decorator as their span start.
+    assertEqual(method!.line, 8, "py: decorated method anchors at its def line");
     assertTrue(
       readFileSync(join(adversarialRoot, "adv-py/deco.py"), "utf8").includes("@dataclass"),
       "py: decorator source preserved"

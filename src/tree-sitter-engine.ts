@@ -565,7 +565,12 @@ function parseGoCall(ctx: AnalysisContext, node: TsNode): ParsedCall | undefined
     const operand = fn.childForFieldName("operand");
     const callee = nameOf(ctx, field);
     if (!callee) return undefined;
-    const receiver = receiverLeaf(ctx, operand);
+    let receiver = receiverLeaf(ctx, operand);
+    // `jsonBinding{}.BindBody(...)` — the receiver is a composite literal, whose type is
+    // the static receiver type.
+    if (!receiver && operand?.type === "composite_literal") {
+      receiver = receiverLeaf(ctx, operand.childForFieldName("type"));
+    }
     return { callee, member: true, argsCount: countArguments(args), ...(receiver ? { receiver } : {}) };
   }
   if (fn.type === "parenthesized_expression") {
@@ -852,6 +857,10 @@ function collectPythonSymbols(
           definition.type === "class_definition" || definition.type === "function_definition"
             ? definition
             : findChildOfType(node, "function_definition");
+        // Decorated classes keep the decorator as their start (existing contract). For
+        // functions the `def` line is the addressable/rename-safe anchor: skeleton views
+        // print the source line at `symbol.line`, and pointing at `@setupmethod` hides the
+        // declaration name.
         if (actual) collectPythonSymbols(ctx, actual, classStack, node);
       }
       return;
@@ -886,10 +895,24 @@ function collectPythonSymbols(
         kind: parentClass ? "method" : "function",
         exported: !name.startsWith("_"),
         node,
-        ...(decoratedStart ? { startNode: decoratedStart } : {}),
         bodyNode: node.childForFieldName("body") ?? undefined,
         paramsCount: pythonParams(ctx, node).paramsCount,
         ...(parentClass ? { parentClass } : {}),
+      });
+      return;
+    }
+    case "assignment": {
+      // Module-level assignments are module exports (`template_rendered = ...`).
+      // Class attributes stay fields and function-local assignments stay local.
+      if (classStack.length > 0) return;
+      const left = node.childForFieldName("left");
+      const name = left?.type === "identifier" ? nameOf(ctx, left) : undefined;
+      if (!name) return;
+      pushSymbol(ctx, {
+        name,
+        kind: "variable",
+        exported: !name.startsWith("_"),
+        node,
       });
       return;
     }
@@ -955,6 +978,30 @@ function goStructFields(ctx: AnalysisContext, typeNode: TsNode | null): string[]
   return fields;
 }
 
+function collectGoInterfaceMethods(
+  ctx: AnalysisContext,
+  interfaceType: TsNode,
+  interfaceName: string
+): void {
+  for (const member of interfaceType.namedChildren) {
+    // tree-sitter-go uses `method_elem` for interface method signatures; older grammar
+    // builds exposed `method_spec`. Both describe an addressable method declaration.
+    if (member.type !== "method_elem" && member.type !== "method_spec") continue;
+    const name =
+      nameOf(ctx, member.childForFieldName("name")) ??
+      identifierText(ctx, member.namedChildren.find((child) => child.type === "field_identifier"));
+    if (!name) continue;
+    pushSymbol(ctx, {
+      name,
+      kind: "method",
+      exported: /^[A-Z]/.test(name),
+      node: member,
+      paramsCount: goParamsCount(member),
+      parentClass: interfaceName,
+    });
+  }
+}
+
 function collectGoSymbols(ctx: AnalysisContext, node: TsNode): void {
   switch (node.type) {
     case "import_declaration":
@@ -980,6 +1027,12 @@ function collectGoSymbols(ctx: AnalysisContext, node: TsNode): void {
           bodyNode: kind === "struct" || kind === "interface" ? typeNode : undefined,
           fields: kind === "struct" ? goStructFields(ctx, typeNode) : undefined,
         });
+        // Interface methods are addressable symbols (`read "file.go#Method"`,
+        // interface-aware rename). They are not class methods in the inheritance sense,
+        // but `parentClass` identifies the declaring interface.
+        if (kind === "interface") {
+          collectGoInterfaceMethods(ctx, typeNode, name);
+        }
       }
       return;
     }

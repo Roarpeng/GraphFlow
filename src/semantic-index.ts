@@ -951,6 +951,81 @@ class SemanticIndexImpl implements SemanticIndex {
     return out;
   }
 
+  /**
+   * Go interfaces are structural: a call on a concrete receiver whose type declares the
+   * same method set is an implementation call. Resolve it to the interface method
+   * declaration so blast-radius / rename can see one logical symbol instead of N
+   * unrelated concrete methods. Only activated for Go, and only when the interface
+   * method is unambiguous.
+   */
+  private goInterfaceMethod(
+    receiverType: string,
+    methodName: string,
+    fromFile: string
+  ): SemanticSymbolDecl | undefined {
+    if (sourceLanguageFamily(fromFile) !== "go") return undefined;
+    const candidates = (this.declsByName.get(methodName) ?? []).filter(
+      (decl) =>
+        decl.kind === "method" &&
+        decl.parentClass !== undefined &&
+        sourceLanguageFamily(decl.file) === "go" &&
+        this.isGoInterfaceName(decl.parentClass)
+    );
+    if (candidates.length === 0) return undefined;
+
+    const direct = candidates.filter((candidate) => candidate.parentClass === receiverType);
+    if (direct.length > 0) return this.pickGoInterfaceDecl(direct);
+
+    const implementing = candidates.filter((candidate) => {
+      const interfaceName = candidate.parentClass!;
+      const required = this.goInterfaceMethods(interfaceName)
+        .map((decl) => decl.name);
+      if (required.length === 0 || !required.includes(methodName)) return false;
+      return required.every((requiredName) =>
+        (this.declsByName.get(requiredName) ?? []).some(
+          (impl) =>
+            impl.kind === "method" &&
+            impl.parentClass === receiverType &&
+            sourceLanguageFamily(impl.file) === "go"
+        )
+      );
+    });
+    const interfaceNames = new Set(implementing.map((candidate) => candidate.parentClass));
+    if (interfaceNames.size !== 1) return undefined;
+    return this.pickGoInterfaceDecl(implementing);
+  }
+
+  private isGoInterfaceName(name: string): boolean {
+    return (this.declsByName.get(name) ?? []).some(
+      (decl) => decl.kind === "interface" && sourceLanguageFamily(decl.file) === "go"
+    );
+  }
+
+  /** All method declarations belonging to an interface (methods are indexed by their own name). */
+  private goInterfaceMethods(interfaceName: string): SemanticSymbolDecl[] {
+    const out: SemanticSymbolDecl[] = [];
+    for (const entry of this.entries.values()) {
+      for (const decl of entry.decls) {
+        if (
+          decl.kind === "method" &&
+          decl.parentClass === interfaceName &&
+          sourceLanguageFamily(decl.file) === "go"
+        ) {
+          out.push(decl);
+        }
+      }
+    }
+    return out;
+  }
+
+  private pickGoInterfaceDecl(
+    candidates: readonly SemanticSymbolDecl[]
+  ): SemanticSymbolDecl | undefined {
+    return [...candidates].sort(
+      (a, b) => a.file.length - b.file.length || a.file.localeCompare(b.file) || a.line - b.line
+    )[0];
+  }
+
   resolveCall(callFile: string, call: AstCallSite): SemanticResolvedCall {
     this.queries += 1;
     const entry = this.entry(callFile);
@@ -977,18 +1052,36 @@ class SemanticIndexImpl implements SemanticIndex {
           reason = "factory-return";
         }
       }
+      // Go composite literals (`jsonBinding{}.BindBody(...)`) and package-qualified
+      // receivers carry the type name directly; accept it when that type is declared in
+      // the same Go package.
+      if (
+        !receiverType &&
+        call.receiver &&
+        sourceLanguageFamily(callFile) === "go"
+      ) {
+        const samePackageType = (this.declsByName.get(call.receiver) ?? []).some(
+          (decl) =>
+            isTypeKind(decl.kind) &&
+            sourceLanguageFamily(decl.file) === "go" &&
+            inImplicitPackageScope(callFile, decl.file, "go")
+        );
+        if (samePackageType) receiverType = call.receiver;
+      }
       if (!receiverType) return { ...base, reason: "unresolved-receiver" };
       const resolved = this.resolveMethod(receiverType, call.callee, callFile);
-      if (!resolved) return { ...base, reason: "unresolved-receiver" };
+      const interfaceMethod = this.goInterfaceMethod(receiverType, call.callee, callFile);
+      if (!resolved && !interfaceMethod) return { ...base, reason: "unresolved-receiver" };
+      const target = interfaceMethod ?? resolved!.decl;
       return {
         callFile,
         line: call.line,
         callee: call.callee,
-        targetFile: resolved.decl.file,
-        targetSymbol: resolved.decl.name,
-        ...(resolved.decl.parentClass ? { parentClass: resolved.decl.parentClass } : {}),
-        confidence: resolved.confidence,
-        reason: reason === "factory-return" ? "factory-return" : resolved.reason,
+        targetFile: target.file,
+        targetSymbol: target.name,
+        ...(target.parentClass ? { parentClass: target.parentClass } : {}),
+        confidence: interfaceMethod ? 0.85 : resolved!.confidence,
+        reason: reason === "factory-return" ? "factory-return" : interfaceMethod ? "method-on-receiver" : resolved!.reason,
       };
     }
 

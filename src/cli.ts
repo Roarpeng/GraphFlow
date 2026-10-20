@@ -22,6 +22,7 @@ import {
   findTask,
   formatHarvestReport,
   formatTaskDetails,
+  formatTaskHelp,
   formatTaskSummary,
   harvestInstructionLog,
   listTasks,
@@ -329,8 +330,15 @@ async function main(): Promise<void> {
       ...(agentIds ? { agentIds } : {}),
       ...(rest.includes("--no-prune") ? { pruneLegacy: false } : {}),
     });
-    const mcpCount = report.results.filter((r) => r.category === "mcp" && r.status !== "error").length;
-    const skillCount = report.results.filter((r) => r.category === "skill" && r.status !== "error").length;
+    // An unknown --agents id must not look like a successful install.
+    if (agentIds && report.results.length === 0) {
+      console.error(
+        `ERR [unknown-agent] none of --agents ${agentIds.join(",")} matched a known profile.`
+      );
+      process.exitCode = 1;
+      return;
+    }
+    const mcpCount = report.results.filter((r) => r.category === "mcp" && r.status !== "error").length;    const skillCount = report.results.filter((r) => r.category === "skill" && r.status !== "error").length;
     const ruleCount = report.results.filter((r) => r.category === "rule" && r.status !== "error").length;
     const hookCount = report.results.filter((r) => r.category === "hook" && r.status !== "error").length;
     console.log(
@@ -338,8 +346,12 @@ async function main(): Promise<void> {
         `MCP=${mcpCount}, Skills=${skillCount}, Rules=${ruleCount}, Hooks=${hookCount}`
     );
     for (const item of report.results) {
-      console.log(`  [${item.status.toUpperCase()}] (${item.category}) ${item.agentName} -> ${item.targetPath}`);
+      const suffix = item.message ? ` — ${item.message}` : "";
+      console.log(
+        `  [${item.status.toUpperCase()}] (${item.category}) ${item.agentName} -> ${item.targetPath}${suffix}`
+      );
     }
+    if (report.results.some((r) => r.status === "error")) process.exitCode = 1;
     return;
   }
 
@@ -352,8 +364,12 @@ async function main(): Promise<void> {
     });
     console.log(`GraphFlow v${PACKAGE_VERSION} uninstalled (${removed.length} item(s) removed).`);
     for (const item of removed) {
-      console.log(`  [REMOVED] (${item.category}) ${item.agentName} -> ${item.targetPath}`);
+      const suffix = item.message ? ` — ${item.message}` : "";
+      console.log(
+        `  [${item.status.toUpperCase()}] (${item.category}) ${item.agentName} -> ${item.targetPath}${suffix}`
+      );
     }
+    if (removed.some((r) => r.status === "error")) process.exitCode = 1;
     return;
   }
 
@@ -537,10 +553,17 @@ async function main(): Promise<void> {
       effectiveRoot
     );
     console.log(res.content[0]?.text ?? "");
+    // A failed command must fail the CLI too, or CI reads a red run as green.
+    const execExit = res.structuredContent?.exitCode;
+    if (typeof execExit === "number" && execExit !== 0) process.exitCode = execExit;
     return;
   }
 
   if (cmd === "task" || cmd === "gf-task") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      console.log(formatTaskHelp());
+      return;
+    }
     const parsed = parseTaskArgs(rest);
     const effectiveRoot = parsed.rootDir ?? rootDir;
     const json = parsed.json;

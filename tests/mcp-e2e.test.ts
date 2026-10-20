@@ -356,14 +356,18 @@ async function main(): Promise<void> {
       assert(readText.includes("cancelOrder"), "read type closure should include the called method");
     });
 
-    check("gf_exec affected-tests returns a non-empty receipt", () => {
-      assert(exec.error === undefined, `gf_exec returned error: ${JSON.stringify(exec.error)}`);
-      assert(execText.trim().length > 0, "gf_exec text must be non-empty");
-      assert(
-        execText.startsWith("# Affected Tests") || execText.startsWith("PASS [affected-tests]"),
-        `expected affected-tests receipt, got:\n${execText}`
-      );
-      assert(/affected/i.test(execText), "receipt must mention affected tests");
+  check("gf_exec affected-tests returns an honest receipt (including zero matches)", () => {
+    assert(exec.error === undefined, `gf_exec returned error: ${JSON.stringify(exec.error)}`);
+    assert(execText.trim().length > 0, "gf_exec text must be non-empty");
+    // The fixture has no test files, so zero matches is the correct answer. It must be
+    // reported as NONE, not as a green PASS that hides a broken router.
+    assert(
+      execText.startsWith("NONE [affected-tests]") ||
+        execText.startsWith("# Affected Tests") ||
+        execText.startsWith("PASS [affected-tests]"),
+      `expected affected-tests receipt, got:\n${execText}`
+    );
+    assert(/affected/i.test(execText), "receipt must mention affected tests");
     });
 
     check("unknown tool returns a graceful error without crashing", () => {

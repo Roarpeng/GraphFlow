@@ -45,6 +45,7 @@ import {
   splitQualifiedSymbolName,
   type AstCallSite,
   type AstImport,
+  type FileAstAnalysis,
   type ReceiverTypeIndex,
   type SourceLanguageFamily,
   type WorkspaceTypeHierarchy,
@@ -116,6 +117,160 @@ function isNamespaceImportOfTarget(
     if (tail && tail === basename(dirname(targetFile))) return true;
   }
   return false;
+}
+
+/**
+ * R3: `alias.symbol(...)` where `alias` is an imported module (`import flask`,
+ * `import x as flask`, `from . import helpers as h`) must resolve to the module that
+ * actually defines `symbol`. Unresolvable aliases stay uncounted (no guessing).
+ */
+interface ModuleAliasBinding {
+  alias: string;
+  module: string;
+}
+
+function moduleAliasBindings(imp: AstImport, family: SourceLanguageFamily): ModuleAliasBinding[] {
+  const raw = imp.raw.trim();
+  if (family === "python") {
+    const fromMatch = raw.match(/^from\s+([A-Za-z0-9_.]+)\s+import\s+\(?([^)]+)\)?/);
+    if (fromMatch) {
+      const base = fromMatch[1]!;
+      const bindings: ModuleAliasBinding[] = [];
+      for (const part of fromMatch[2]!.split(",")) {
+        const match = part.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?$/);
+        if (!match) continue;
+        bindings.push({
+          alias: match[2] ?? match[1]!,
+          module: base.endsWith(".") ? `${base}${match[1]}` : `${base}.${match[1]}`,
+        });
+      }
+      return bindings;
+    }
+    const directMatch = raw.match(/^import\s+(.+)$/);
+    if (!directMatch) return [];
+    const bindings: ModuleAliasBinding[] = [];
+    for (const part of directMatch[1]!.split(",")) {
+      const match = part.trim().match(/^([A-Za-z0-9_.]+)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?$/);
+      if (!match) continue;
+      bindings.push({
+        alias: match[2] ?? match[1]!.split(".").pop()!,
+        module: match[1]!,
+      });
+    }
+    return bindings;
+  }
+  if (family === "js") {
+    const namespaceMatch = raw.match(
+      /\bimport\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+["']([^"']+)["']/
+    );
+    if (namespaceMatch) {
+      return [{ alias: namespaceMatch[1]!, module: namespaceMatch[2]! }];
+    }
+  }
+  return [];
+}
+
+/** Python absolute imports are package paths; match their file/`__init__.py` suffix. */
+function pythonModuleCandidates(moduleSpec: string, fileSet: ReadonlySet<string>): string[] {
+  const clean = moduleSpec.replace(/^\.+/, "").replace(/\./g, "/");
+  if (!clean) return [];
+  const moduleFile = `${clean}.py`;
+  const initFile = `${clean}/__init__.py`;
+  return [...fileSet]
+    .filter(
+      (relPath) =>
+        relPath === moduleFile ||
+        relPath.endsWith(`/${moduleFile}`) ||
+        relPath === initFile ||
+        relPath.endsWith(`/${initFile}`)
+    )
+    .sort(
+      (a, b) =>
+        a.split("/").length - b.split("/").length ||
+        a.length - b.length ||
+        a.localeCompare(b)
+    );
+}
+
+/**
+ * True when `moduleFile` (a package `__init__.py` or a module) re-exports `symbolName`
+ * from `targetFile` through an explicit import chain (one or more hops).
+ */
+function moduleReexportsSymbolFromTarget(
+  index: ReturnType<typeof getWorkspaceAstIndex>,
+  moduleFile: string,
+  symbolName: string,
+  targetFile: string,
+  fileSet: ReadonlySet<string>,
+  depth: number,
+  visited: Set<string>
+): boolean {
+  if (moduleFile === targetFile) return true;
+  if (depth <= 0 || visited.has(moduleFile)) return false;
+  visited.add(moduleFile);
+  const fileData = index.getFileAnalysis(moduleFile);
+  if (!fileData) return false;
+  for (const imp of fileData.ast.imports) {
+    if (!imp.importedNames.includes(symbolName) && !imp.importedNames.includes("*")) continue;
+    const resolved = resolveRelativeImportPath(index.rootDir, moduleFile, imp.module, fileSet);
+    if (!resolved) continue;
+    if (resolved === targetFile) return true;
+    if (moduleReexportsSymbolFromTarget(index, resolved, symbolName, targetFile, fileSet, depth - 1, visited)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function aliasModuleResolvesToTarget(
+  index: ReturnType<typeof getWorkspaceAstIndex>,
+  fromFile: string,
+  moduleSpec: string,
+  symbolName: string,
+  targetFile: string,
+  family: SourceLanguageFamily,
+  fileSet: ReadonlySet<string>
+): boolean {
+  const resolved = resolveRelativeImportPath(index.rootDir, fromFile, moduleSpec, fileSet);
+  if (resolved) {
+    if (resolved === targetFile) return true;
+    if (
+      moduleReexportsSymbolFromTarget(index, resolved, symbolName, targetFile, fileSet, 3, new Set<string>())
+    ) {
+      return true;
+    }
+  }
+  if (family === "python") {
+    for (const candidate of pythonModuleCandidates(moduleSpec, fileSet)) {
+      if (candidate === targetFile) return true;
+      if (
+        moduleReexportsSymbolFromTarget(index, candidate, symbolName, targetFile, fileSet, 3, new Set<string>())
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** E6: constructors are not callable symbols, so `this.m()` needs the enclosing class by range. */
+function findEnclosingTypeName(ast: FileAstAnalysis, line: number): string | undefined {
+  let best: { name: string; span: number } | undefined;
+  for (const sym of ast.symbols) {
+    if (
+      sym.kind !== "class" &&
+      sym.kind !== "interface" &&
+      sym.kind !== "struct" &&
+      sym.kind !== "type" &&
+      sym.kind !== "enum"
+    ) {
+      continue;
+    }
+    if (line < sym.line || line > sym.endLine) continue;
+    const span = sym.endLine - sym.line;
+    if (!best || span < best.span) best = { name: sym.name, span };
+  }
+  return best?.name;
 }
 
 export function computeBlastRadius(
@@ -196,13 +351,8 @@ export function computeBlastRadius(
   });
 
   for (const relPath of allFiles) {
-    if (
-      callSites.length >= maxCallSites &&
-      (relPath.startsWith("tests/") || relPath.startsWith("benchmarks/"))
-    ) {
-      continue;
-    }
-
+    // Tests/benchmarks are still scanned so `totalCallSites` is the real count; only
+    // their snippets are withheld once the display quota is full (below).
     // Never match across language families (identifier names collide frequently).
     if (sourceLanguageFamily(relPath) !== targetFamily) continue;
 
@@ -225,6 +375,57 @@ export function computeBlastRadius(
     const namespaceImport = fileData.ast.imports.find((imp) =>
       isNamespaceImportOfTarget(imp, relPath, targetFile, targetFamily, index.rootDir, fileSet)
     );
+
+    // R3: module-alias receivers (`flask.url_for`, `h.foo` after `from . import helpers as h`).
+    // Only aliases whose module actually defines/re-exports the target symbol are accepted.
+    let moduleAliasReceivers: Set<string> | undefined;
+    const getModuleAliasReceivers = (): Set<string> => {
+      if (moduleAliasReceivers) return moduleAliasReceivers;
+      const aliases = new Set<string>();
+      if (!isMethodTarget) {
+        for (const imp of fileData.ast.imports) {
+          for (const binding of moduleAliasBindings(imp, targetFamily)) {
+            if (
+              aliasModuleResolvesToTarget(
+                index,
+                relPath,
+                binding.module,
+                effectiveSymbolName,
+                targetFile,
+                targetFamily,
+                fileSet
+              )
+            ) {
+              aliases.add(binding.alias);
+            }
+          }
+        }
+      }
+      moduleAliasReceivers = aliases;
+      return aliases;
+    };
+
+    // R3 (Python): `current_app.url_for(...)` binds an imported proxy name, not a module
+    // alias. Accept it only when that import lives in the target's own package.
+    let pythonProxyReceivers: Set<string> | undefined;
+    const getPythonProxyReceivers = (): Set<string> => {
+      if (pythonProxyReceivers) return pythonProxyReceivers;
+      const receivers = new Set<string>();
+      if (targetFamily === "python" && !isMethodTarget) {
+        const targetDir = dirname(targetFile);
+        for (const imp of fileData.ast.imports) {
+          const resolved =
+            resolveRelativeImportPath(index.rootDir, relPath, imp.module, fileSet) ??
+            pythonModuleCandidates(imp.module, fileSet)[0];
+          if (!resolved || dirname(resolved) !== targetDir) continue;
+          for (const name of imp.importedNames) {
+            if (name !== "*") receivers.add(name);
+          }
+        }
+      }
+      pythonProxyReceivers = receivers;
+      return receivers;
+    };
 
     // Receiver-type inference is only needed for receiver-aware method matching.
     let receiverIndex: ReceiverTypeIndex | undefined;
@@ -256,10 +457,28 @@ export function computeBlastRadius(
       const semanticVerdict = isResolvedCallToTarget(relPath, call);
       if (semanticVerdict !== undefined) return semanticVerdict;
       if (!isMethodTarget) {
-        return isSameFile || Boolean(matchingImport) || Boolean(namespaceImport) || samePackageScope;
+        if (isSameFile || Boolean(matchingImport) || Boolean(namespaceImport) || samePackageScope) {
+          return true;
+        }
+        if (call.member && call.receiver) {
+          if (getModuleAliasReceivers().has(call.receiver)) return true;
+          if (getPythonProxyReceivers().has(call.receiver)) return true;
+        }
+        return false;
       }
       if (call.member) {
-        const receiverType = resolveReceiverType(call, fileData.ast, getReceiverIndex());
+        let receiverType = resolveReceiverType(call, fileData.ast, getReceiverIndex());
+        // E6: a constructor is not an AstSymbol, so `this.merge()` inside it has no
+        // enclosing callable. Fall back to the enclosing class by line range.
+        if (
+          receiverType === undefined &&
+          (call.receiver === "this" ||
+            call.receiver === "self" ||
+            call.receiver === "cls" ||
+            call.receiver === "Self")
+        ) {
+          receiverType = findEnclosingTypeName(fileData.ast, call.line);
+        }
         if (receiverType !== undefined) {
           // Inheritance-aware: a subclass receiver may dispatch to an inherited base method
           // only when no intermediate class overrides it; `super`/`base` resolve to the parent.

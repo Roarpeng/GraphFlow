@@ -26,13 +26,16 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { dehydrateCommandOutput } from "./dehydrator.js";
 import { isNoiseCommand } from "./macro-engine.js";
-import { stemEnglishWord } from "./tokenizer.js";
 
 /** Uses required before a reflected task is compiled into a local runner. */
 export const TASK_PROMOTION_USES = 2;
-/** Token-Jaccard threshold for near-match lookup (configurable per call). */
+/**
+ * Token similarity threshold for near-match lookup (configurable per call).
+ * 0.86 keeps word-order permutations of the same task matching (normalization
+ * makes a pure reorder 1.0) while a dropped/substituted token (0.857) stays a
+ * miss: replaying the wrong runner is worse than asking the agent to re-record.
+ */
 export const TASK_NEAR_MATCH_THRESHOLD = 0.86;
 export const TASK_STORE_VERSION = 1;
 /** Workspace-relative directory for compiled task runners. */
@@ -151,10 +154,40 @@ function normalizeWhitespace(text: string): string {
 }
 
 /**
+ * Lightweight English word normalizer for instruction identity: lowercase +
+ * singular/verb-form folding (-s/-es/-ing/-ed). It deliberately does NOT use a
+ * full stemmer: truncating to a crude stem produced keys like `tre`, `fil` and
+ * `sourc`, which made identical wording with a different word order score low.
+ */
+export function normalizeEnglishToken(token: string): string {
+  const w = token.toLowerCase();
+  if (w.length <= 3) return w;
+  // plurals: -ies -> -y (queries -> query)
+  if (w.endsWith("ies") && w.length > 4) return `${w.slice(0, -3)}y`;
+  // continuous form: -ing (checking -> check, running -> run)
+  if (w.endsWith("ing") && w.length > 5) {
+    let base = w.slice(0, -3);
+    if (base.length >= 3 && /([b-df-hj-np-tv-z])\1$/.test(base)) base = base.slice(0, -1);
+    return base;
+  }
+  // past form: -ed (checked -> check, counted -> count)
+  if (w.endsWith("ed") && w.length > 4) {
+    let base = w.slice(0, -2);
+    if (base.length >= 3 && /([b-df-hj-np-tv-z])\1$/.test(base)) base = base.slice(0, -1);
+    return base;
+  }
+  // -es only after a sibilant (boxes -> box, classes -> class, wishes -> wish)
+  if (w.endsWith("es") && w.length > 4 && /(?:s|x|z|ch|sh)es$/.test(w)) return w.slice(0, -2);
+  // plain plural -s, but keep -ss/-us/-is words (status, analysis, class)
+  if (w.endsWith("s") && w.length > 3 && !/(?:ss|us|is)$/.test(w)) return w.slice(0, -1);
+  return w;
+}
+
+/**
  * Normalize an instruction into comparable tokens: NFKC (full-width → ASCII),
  * lowercase, punctuation/symbols → spaces, English stopwords removed and
- * stemmed, CJK runs split into individual characters (NFKC also folds
- * full-width/CJK punctuation before tokenization).
+ * lightly folded (plural/verb suffixes), CJK runs split into individual
+ * characters (NFKC also folds full-width/CJK punctuation before tokenization).
  */
 export function tokenizeInstruction(instruction: string): string[] {
   if (typeof instruction !== "string") return [];
@@ -168,7 +201,7 @@ export function tokenizeInstruction(instruction: string): string[] {
     if (!token) continue;
     if (/^[a-z0-9]+$/.test(token)) {
       if (ENGLISH_STOP_WORDS.has(token)) continue;
-      tokens.push(stemEnglishWord(token));
+      tokens.push(normalizeEnglishToken(token));
     } else if (!CJK_STOP_CHARS.has(token)) {
       tokens.push(token);
     }
@@ -179,6 +212,15 @@ export function tokenizeInstruction(instruction: string): string[] {
 /** Stable normalized key stored in `.graphflow/tasks.json`. */
 export function normalizeInstructionKey(instruction: string): string {
   return tokenizeInstruction(instruction).join(" ");
+}
+
+/**
+ * Key used for matching. Stores written by older versions contain full-stem
+ * keys (`sourc`, `fil`); re-deriving from `instructionRaw` keeps them matchable
+ * after the normalizer change instead of forcing a re-record.
+ */
+function effectiveInstructionKey(task: ReflectedTask): string {
+  return task.instructionRaw ? normalizeInstructionKey(task.instructionRaw) : task.instructionKey;
 }
 
 /** Token-set Jaccard similarity in [0, 1]. */
@@ -192,6 +234,35 @@ export function jaccardSimilarity(a: readonly string[], b: readonly string[]): n
   }
   const union = setA.size + setB.size - intersection;
   return union === 0 ? 0 : intersection / union;
+}
+
+/**
+ * Order-insensitive similarity used by near-match lookup.
+ *
+ * Jaccard alone is symmetric but punishes a single substituted word heavily.
+ * When each side has at least one unique token and the token counts differ by
+ * at most one (e.g. `check working tree status ...` vs `... check git
+ * status`), the containment coefficient `|A∩B| / min(|A|,|B|)` reflects the
+ * shared intent far better. Pure supersets/subset queries keep plain Jaccard so
+ * a short query cannot match every longer task at 1.0.
+ */
+export function taskSimilarity(a: readonly string[], b: readonly string[]): number {
+  const jaccard = jaccardSimilarity(a, b);
+  if (jaccard >= 1 || a.length === 0 || b.length === 0) return jaccard;
+  const setA = new Set(a);
+  const setB = new Set(b);
+  let shared = 0;
+  for (const token of setA) {
+    if (setB.has(token)) shared += 1;
+  }
+  const uniqueA = setA.size - shared;
+  const uniqueB = setB.size - shared;
+  const sizeGap = Math.abs(setA.size - setB.size);
+  if (uniqueA > 0 && uniqueB > 0 && sizeGap <= 1) {
+    const containment = shared / Math.min(setA.size, setB.size);
+    if (containment > jaccard) return containment;
+  }
+  return jaccard;
 }
 
 function taskIdForKey(instructionKey: string): string {
@@ -329,6 +400,22 @@ function renderTaskRunner(steps: TaskStep[]): string {
       "  return target === ROOT || target.startsWith(ROOT + sep);",
       "}",
       "",
+      "const MAX_STEP_LINES = 40;",
+      "const STEP_HEAD_LINES = 20;",
+      "const STEP_TAIL_LINES = 10;",
+      "function compactLines(text) {",
+      '  const lines = text.replace(/\\r\\n/g, "\\n").split("\\n");',
+      '  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();',
+      '  while (lines.length > 0 && lines[0] === "") lines.shift();',
+      "  if (lines.length <= MAX_STEP_LINES) return lines;",
+      "  const omitted = lines.length - STEP_HEAD_LINES - STEP_TAIL_LINES;",
+      "  return [",
+      "    ...lines.slice(0, STEP_HEAD_LINES),",
+      "    `... [${omitted} lines omitted]`,",
+      "    ...lines.slice(-STEP_TAIL_LINES),",
+      "  ];",
+      "}",
+      "",
       "let failed = false;",
       "for (let i = 0; i < STEPS.length; i += 1) {",
       "  const step = STEPS[i];",
@@ -339,7 +426,7 @@ function renderTaskRunner(steps: TaskStep[]): string {
       "    failed = true;",
       "    break;",
       "  }",
-      "  console.log(`# step ${i + 1}/${STEPS.length}: ${cmd}`);",
+      "  console.log(`## step ${i + 1}: ${cmd}`);",
       "  const result = spawnSync(cmd, {",
       "    cwd,",
       "    shell: true,",
@@ -349,13 +436,15 @@ function renderTaskRunner(steps: TaskStep[]): string {
       "    windowsHide: true,",
       "  });",
       '  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;',
-      "  if (output.trim().length > 0) console.log(output.trimEnd());",
+      "  for (const line of compactLines(output)) console.log(line);",
+      "  const status = result.status ?? (result.error ? 1 : 0);",
+      "  console.log(`[exit=${status}]`);",
       "  if (result.error) {",
       "    console.log(`ERR [step-error] ${result.error.message}`);",
       "    failed = true;",
       "    break;",
       "  }",
-      "  if (result.status !== 0) {",
+      "  if (status !== 0) {",
       "    failed = true;",
       "    break;",
       "  }",
@@ -419,7 +508,7 @@ export function recordTaskUse(
 
   const tasks = loadTasks(rootDir);
   const nowIso = (opts.now ?? new Date()).toISOString();
-  let record = tasks.find((task) => task.instructionKey === instructionKey);
+  let record = tasks.find((task) => effectiveInstructionKey(task) === instructionKey);
   if (!record) {
     record = {
       id: taskIdForKey(instructionKey),
@@ -447,8 +536,8 @@ export function recordTaskUse(
 }
 
 /**
- * Best token-Jaccard against stored tasks, including scores below the near-match
- * threshold. `0` when the workspace has no comparable tasks.
+ * Best token similarity against stored tasks, including scores below the
+ * near-match threshold. `0` when the workspace has no comparable tasks.
  */
 export function bestTaskSimilarity(rootDir: string, instruction: string): number {
   const instructionKey = normalizeInstructionKey(instruction);
@@ -458,14 +547,15 @@ export function bestTaskSimilarity(rootDir: string, instruction: string): number
   if (queryTokens.length === 0 || tasks.length === 0) return 0;
   let bestScore = 0;
   for (const task of tasks) {
-    if (task.instructionKey === instructionKey) return 1;
-    const score = jaccardSimilarity(queryTokens, task.instructionKey.split(" ").filter(Boolean));
+    const storedKey = effectiveInstructionKey(task);
+    if (storedKey === instructionKey) return 1;
+    const score = taskSimilarity(queryTokens, storedKey.split(" ").filter(Boolean));
     if (score > bestScore) bestScore = score;
   }
   return bestScore;
 }
 
-/** Exact-key or token-Jaccard near-match lookup. */
+/** Exact-key or token-similarity near-match lookup. */
 export function findTask(
   rootDir: string,
   instruction: string,
@@ -479,8 +569,9 @@ export function findTask(
   let best: ReflectedTask | undefined;
   let bestScore = 0;
   for (const task of tasks) {
-    if (task.instructionKey === instructionKey) return { record: task, score: 1 };
-    const score = jaccardSimilarity(queryTokens, task.instructionKey.split(" ").filter(Boolean));
+    const storedKey = effectiveInstructionKey(task);
+    if (storedKey === instructionKey) return { record: task, score: 1 };
+    const score = taskSimilarity(queryTokens, storedKey.split(" ").filter(Boolean));
     if (score > bestScore) {
       best = task;
       bestScore = score;
@@ -541,10 +632,170 @@ function missResult(rootDir: string, instructionOrId: string, startedAt: number)
   };
 }
 
+const ANSI_ESCAPE_RE = /\x1B\[[0-?]*[ -/]*[@-~]/g;
+/** Outputs at or below this size are returned verbatim (nothing to compress). */
+const VERBATIM_OUTPUT_MAX_CHARS = 400;
+/** Share of the original output the compact reflection may keep. */
+const REFLECT_OUTPUT_RATIO = 0.6;
+
+interface RunnerOutputBlock {
+  header: string;
+  output: string[];
+  exitLine: string;
+}
+
+function stripAnsiAndNormalize(text: string): string {
+  return text.replace(ANSI_ESCAPE_RE, "").replace(/\r\n/g, "\n");
+}
+
+function linesLength(lines: readonly string[]): number {
+  return lines.reduce((sum, line) => sum + line.length + 1, 0);
+}
+
+/**
+ * Keep a head/tail slice of `lines` within `budget` characters. This is the
+ * last-resort compaction; per-step output is already capped by the runner.
+ */
+function fitLines(lines: readonly string[], budget: number): string[] {
+  const safeBudget = Math.max(32, budget);
+  if (linesLength(lines) <= safeBudget) return [...lines];
+  const markerReserve = 28;
+  const headBudget = Math.max(8, Math.floor((safeBudget - markerReserve) * 0.65));
+  const tailBudget = Math.max(0, safeBudget - markerReserve - headBudget);
+  const head: string[] = [];
+  let used = 0;
+  for (const line of lines) {
+    if (used + line.length + 1 > headBudget) break;
+    head.push(line);
+    used += line.length + 1;
+  }
+  if (head.length === 0 && lines.length > 0) {
+    const first = lines[0] ?? "";
+    const take = Math.max(1, headBudget - 1);
+    head.push(first.length > take ? `${first.slice(0, take)}…` : first);
+  }
+  const tail: string[] = [];
+  used = 0;
+  for (let i = lines.length - 1; i >= head.length; i -= 1) {
+    const line = lines[i] ?? "";
+    if (used + line.length + 1 > tailBudget) break;
+    tail.unshift(line);
+    used += line.length + 1;
+  }
+  const omitted = Math.max(0, lines.length - head.length - tail.length);
+  return [...head, `... [${omitted} lines omitted]`, ...tail];
+}
+
+/**
+ * Split the runner's deterministic per-step text back into blocks so compaction
+ * keeps every `## step`/`[exit=N]` marker (answers stay attributable).
+ */
+function splitRunnerOutput(
+  text: string
+): { blocks: RunnerOutputBlock[]; extra: string[] } | undefined {
+  const lines = text.split("\n");
+  const firstStep = lines.findIndex((line) => line.startsWith("## step "));
+  if (firstStep < 0) return undefined;
+  const extra = lines.slice(0, firstStep).filter((line) => line.trim().length > 0);
+  const blocks: RunnerOutputBlock[] = [];
+  let current: RunnerOutputBlock | undefined;
+  for (let i = firstStep; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    if (line.startsWith("## step ")) {
+      if (current) blocks.push(current);
+      current = { header: line, output: [], exitLine: "" };
+      continue;
+    }
+    if (!current) {
+      if (line.trim()) extra.push(line);
+      continue;
+    }
+    if (/^\[exit=-?\d+\]$/.test(line)) {
+      current.exitLine = line;
+      continue;
+    }
+    if (current.exitLine) {
+      if (line.trim()) extra.push(line);
+      continue;
+    }
+    current.output.push(line);
+  }
+  if (current) blocks.push(current);
+  for (const block of blocks) {
+    while (block.output.length > 0 && block.output[block.output.length - 1] === "") block.output.pop();
+    while (block.output.length > 0 && block.output[0] === "") block.output.shift();
+  }
+  return { blocks, extra };
+}
+
+/** Archive the raw runner output so >400-char compaction stays recoverable (`gfo:` handle). */
+function archiveTaskRawOutput(rootDir: string, raw: string): string | undefined {
+  try {
+    const sha = createHash("sha256").update(raw, "utf8").digest("hex").slice(0, 12);
+    const dir = join(rootDir, ".graphflow", "observations");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${sha}.log`), raw, "utf8");
+    return `gfo:${sha}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Deterministic, answer-preserving reflection text.
+ *
+ * Small outputs (<= 400 chars) are returned verbatim. Larger outputs are kept
+ * within 60% of their original size, but step headers and `[exit=N]` markers
+ * survive, and the full text is archived under `.graphflow/observations/`.
+ */
+function buildTaskOutputText(
+  rootDir: string,
+  stdout: string,
+  stderr: string,
+  reserveChars = 0
+): { text: string; rawLength: number } {
+  const raw = stripAnsiAndNormalize([stdout.trim(), stderr.trim()].filter(Boolean).join("\n")).trim();
+  if (!raw) return { text: "(no output)", rawLength: 0 };
+  if (raw.length <= VERBATIM_OUTPUT_MAX_CHARS) {
+    return { text: raw, rawLength: raw.length };
+  }
+
+  const handle = archiveTaskRawOutput(rootDir, raw);
+  const note = handle ? `\n[raw ${Buffer.byteLength(raw, "utf8")}B -> ${handle}]` : "";
+  const budget = Math.max(
+    32,
+    Math.floor(raw.length * REFLECT_OUTPUT_RATIO) - note.length - reserveChars
+  );
+  const parsed = splitRunnerOutput(raw);
+
+  let body: string;
+  if (!parsed || parsed.blocks.length === 0) {
+    body = fitLines(raw.split("\n"), budget).join("\n");
+  } else {
+    const fixed =
+      parsed.blocks.reduce(
+        (sum, block) => sum + block.header.length + 1 + (block.exitLine ? block.exitLine.length + 1 : 0),
+        0
+      ) + linesLength(parsed.extra);
+    const share = Math.max(0, Math.floor((budget - fixed) / parsed.blocks.length));
+    const rendered: string[] = [];
+    for (const block of parsed.blocks) {
+      rendered.push(block.header);
+      rendered.push(...fitLines(block.output, share));
+      if (block.exitLine) rendered.push(block.exitLine);
+    }
+    if (parsed.extra.length > 0) rendered.push(...parsed.extra);
+    body = rendered.join("\n");
+    if (body.length > budget) body = fitLines(body.split("\n"), budget).join("\n");
+  }
+
+  return { text: `${body}${note}`, rawLength: raw.length };
+}
+
 /**
  * Run a reflected task by instruction (exact/near match) or id. Compiles lazily,
- * spawns the local runner with `node`, and returns dehydrated output. Never
- * touches an LLM or the network.
+ * spawns the local runner with `node`, and returns compact per-step output
+ * (verbatim for small results). Never touches an LLM or the network.
  */
 export function runTask(
   rootDir: string,
@@ -587,7 +838,7 @@ export function runTask(
       durationMs: Date.now() - startedAt,
     };
   }
-  const scriptAbs = join(rootDir, compiled.scriptPath);
+  const scriptAbs = resolve(rootDir, compiled.scriptPath);
   const spawnResult = spawnSync(process.execPath, [scriptAbs, ...args], {
     cwd: rootDir,
     shell: false,
@@ -614,26 +865,17 @@ export function runTask(
     finalRecord = stored;
   }
 
-  const dehydrated = dehydrateCommandOutput({
-    rootDir,
-    command: `task ${finalRecord.id} ${finalRecord.instructionRaw.slice(0, 80)}`,
-    exitCode,
-    durationMs,
-    stdout,
-    stderr,
-  });
   const matchNote =
     matchedBy === "id"
-      ? "matched by id"
+      ? "by-id"
       : matchedBy === "near"
-        ? `near match score=${(score ?? 0).toFixed(3)}`
-        : "exact normalized match";
-  const header =
-    `# Reflected Task ${finalRecord.id} [uses=${finalRecord.count}, local-runner] ${matchNote}\n` +
-    `Instruction: ${finalRecord.instructionRaw}\n\n`;
+        ? `near ${(score ?? 0).toFixed(3)}`
+        : "exact";
+  const header = `# Reflected Task ${finalRecord.id} [uses=${finalRecord.count}, local-runner] ${matchNote}`;
+  const output = buildTaskOutputText(rootDir, stdout, stderr, header.length + 1);
   const result: RunTaskResult = {
     hit: true,
-    text: `${header}${dehydrated.text}`,
+    text: `${header}\n${output.text}`,
     exitCode,
     durationMs,
     taskId: finalRecord.id,
@@ -876,7 +1118,9 @@ export function harvestTaskInstruction(
   const entry = appendInstructionLogEntry(rootDir, instruction, steps, logOptions);
   const report = harvestInstructionLog(rootDir, opts);
   const instructionKey = normalizeInstructionKey(entry.instruction);
-  const record = loadTasks(resolve(rootDir)).find((task) => task.instructionKey === instructionKey);
+  const record = loadTasks(resolve(rootDir)).find(
+    (task) => effectiveInstructionKey(task) === instructionKey
+  );
   return record ? { report, record } : { report };
 }
 
@@ -895,3 +1139,32 @@ export function formatHarvestReport(report: HarvestReport, record?: ReflectedTas
   }
   return lines.join("\n");
 }
+
+/**
+ * `task` argv parsing lives in `cli.ts`, which prints this text for `task --help`.
+ * Kept as a pure formatter: importing this module must never write to stdout.
+ */
+export function formatTaskHelp(): string {
+  return [
+    "GraphFlow task — reflected local shell tasks (no LLM/network)",
+    "Usage: graphflow task <command> [options]",
+    "",
+    "Commands:",
+    "  list                          list recorded tasks (--json)",
+    "  show <id|instruction>         show one task (--json)",
+    '  record "<text>" --step <cmd>  record a use; the 2nd use compiles a runner',
+    "  run <id|instruction> [args]   run a reflected task (--json)",
+    '  log "<text>" --step <cmd>     append to .graphflow/instruction-log.jsonl',
+    "  harvest                       promote repeated log entries (--json)",
+    "Options:",
+    "  --step <cmd>   shell step, repeatable (--steps alias)",
+    "  --json         machine-readable output",
+    "  --root <dir>   workspace root",
+    "  --log <path>   instruction log path (inside the workspace)",
+  ].join("\n");
+}
+
+/**
+ * `task` argv parsing lives in `cli.ts`; this module stays free of import-time
+ * side effects so tests and the MCP server can load it safely.
+ */

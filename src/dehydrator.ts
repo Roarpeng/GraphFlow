@@ -70,10 +70,49 @@ function isIgnoredStackLine(line: string): boolean {
  * `File "...", line N` traceback frame. Returns undefined when the line carries
  * no resolvable workspace location.
  */
-function parseFailureSourceLocation(line: string): FailureSourceLocation | undefined {
-  const locMatch = line.match(WORKSPACE_FILE_LINE_RE) ?? line.match(PYTHON_TRACEBACK_FILE_LINE_RE);
+const STACK_EXT = "ts|tsx|js|jsx|mjs|cjs|mts|cts|py|go|rs|c|h|cc|cpp|hpp|cxx|cs";
+/** Any absolute path (`C:/…`, `/…`, `file:///…`) ending in `:line[:col]`. */
+const ABSOLUTE_FILE_LINE_RE = new RegExp(
+  `((?:[A-Za-z]:)?/[^\\s:()"']+\\.(?:${STACK_EXT})):(\\d+)(?::(\\d+))?`
+);
+/** Any workspace-relative path with at least one directory separator. */
+const RELATIVE_FILE_LINE_RE = new RegExp(
+  `((?:[\\w.@+-]+/)+[\\w.@+-]+\\.(?:${STACK_EXT})):(\\d+)(?::(\\d+))?`
+);
+
+/**
+ * Normalizes a stack-frame path into a workspace-relative one. Windows traces
+ * arrive as `C:\repo\src\x.ts` or `file:///C:/repo/src/x.ts`, which the
+ * workspace-relative matcher cannot see; without this the failure source window
+ * silently attaches nothing.
+ */
+function toWorkspaceRelative(candidate: string, rootDir: string): string {
+  let file = candidate.replace(/^file:\/\//, "").replace(/\\/g, "/");
+  try {
+    file = decodeURIComponent(file);
+  } catch {
+    // keep the raw form when the path is not percent-encoded
+  }
+  const root = rootDir.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (root && file.toLowerCase().startsWith(`${root.toLowerCase()}/`)) {
+    file = file.slice(root.length + 1);
+  }
+  return file.replace(/^\.\//, "").replace(/^\/+/, "");
+}
+
+function parseFailureSourceLocation(
+  line: string,
+  rootDir?: string
+): FailureSourceLocation | undefined {
+  const normalized = line.replace(/\\/g, "/").replace(/file:\/\//g, "");
+  const locMatch =
+    normalized.match(WORKSPACE_FILE_LINE_RE) ??
+    line.match(PYTHON_TRACEBACK_FILE_LINE_RE) ??
+    normalized.match(ABSOLUTE_FILE_LINE_RE) ??
+    normalized.match(RELATIVE_FILE_LINE_RE);
   if (!locMatch) return undefined;
-  const file = locMatch[1]!.replace(/^\.\//, "");
+  const raw = locMatch[1]!.replace(/^\.\//, "");
+  const file = rootDir ? toWorkspaceRelative(raw, rootDir) : raw;
   const lineNumber = Number.parseInt(locMatch[2]!, 10);
   if (!Number.isFinite(lineNumber) || lineNumber <= 0) return undefined;
   return { file, line: lineNumber };
@@ -142,6 +181,23 @@ export function dehydrateCommandOutput(params: {
   const handle = archiveRawOutput(params.rootDir, combinedRaw);
 
   if (params.exitCode === 0) {
+    // A short passing output is already cheap. Collapsing it to a status line
+    // costs correctness: a runner that prints its own `PASS ...` line makes the
+    // summary regex drop the actual result (the local-task runner did exactly
+    // that). Keep the raw text when there is nothing meaningful to save.
+    if (combinedRaw.length > 0 && combinedRaw.length <= 240) {
+      const shortText = `PASS [exit=0, ${params.durationMs}ms]\n${combinedRaw}`;
+      return {
+        ok: true,
+        exitCode: 0,
+        durationMs: params.durationMs,
+        command: params.command,
+        rawBytes,
+        rawEstimatedTokens,
+        dehydratedTokens: Math.max(1, Math.ceil(shortText.length / 4)),
+        text: shortText,
+      };
+    }
     const lines = combinedRaw.split("\n").filter((l) => l.trim().length > 0);
     const summaryHits = lines.filter((l) =>
       /\b(Tests\s+\d+\s+passed|\d+\s+passing|\d+\s+passed|test result:\s*ok|PASS|built in|Successfully compiled|ok\s+\d+)\b/i.test(l)
@@ -190,7 +246,7 @@ export function dehydrateCommandOutput(params: {
       continue;
     }
 
-    const location = parseFailureSourceLocation(line);
+    const location = parseFailureSourceLocation(line, params.rootDir);
     if (location) {
       recordLocation(location);
       salientLines.push(line);
@@ -206,7 +262,7 @@ export function dehydrateCommandOutput(params: {
       const nextLine = allLines[i + 1];
       if (nextLine !== undefined && nextLine.trim() && !isIgnoredStackLine(nextLine)) {
         salientLines.push(nextLine);
-        const nextLocation = parseFailureSourceLocation(nextLine);
+        const nextLocation = parseFailureSourceLocation(nextLine, params.rootDir);
         if (nextLocation) recordLocation(nextLocation);
         i += 1;
       }
@@ -262,17 +318,29 @@ export function dehydrateCommandOutput(params: {
   };
 }
 
-/** Test-directory conventions honored in addition to filename conventions. */
-const TEST_DIR_RE = /(?:^|\/)(?:tests|__tests__|spec)\//;
+/**
+ * Test-directory conventions honored in addition to filename conventions.
+ * `test/` (singular) is as common as `tests/` — got and express both use it, and
+ * omitting it made the router report "0 test files affected" for real changes.
+ */
+const TEST_DIR_RE = /(?:^|\/)(?:test|tests|__tests__|spec)\//;
 
 function isTestFilePath(relPath: string): boolean {
   const normalized = relPath.replace(/\\/g, "/");
   const base = basename(normalized);
+  const ext = base.slice(base.lastIndexOf(".")).toLowerCase();
+  // Support files inside a test tree are not tests: passing `conftest.py` or
+  // `__init__.py` to pytest is a collection error, not a targeted run.
+  if (base === "conftest.py" || base === "__init__.py") return false;
+  // Python and Go have strict naming conventions; honouring them keeps helpers
+  // (`utils.py`, `compat.py`) out of the affected-test list even under `tests/`.
+  if (ext === ".py") return /^test_.*\.py$/.test(base) || /_test\.py$/.test(base);
+  if (ext === ".go") return /_test\.go$/.test(base);
+  if (ext === ".cs") return /Tests?\.cs$/.test(base);
   return (
     TEST_DIR_RE.test(normalized) ||
     normalized.includes(".test.") ||
     normalized.includes(".spec.") ||
-    /^test_.*\.py$/.test(base) ||
     /_test\.(?:py|go|rs|c|cpp|cc|mts|cts)$/.test(base) ||
     /Tests?\.cs$/.test(base)
   );
@@ -929,16 +997,27 @@ export function resolveAffectedTests(rootDir: string, explicitChangedFiles?: str
   const taintedSourceFiles = new Set<string>(normalizedChanged);
   const taintedStems = new Set<string>(normalizedChanged.flatMap((f) => stemsForPath(f)));
 
-  for (let hop = 0; hop < 2; hop++) {
+  // Follow the import graph to a fixed point instead of exactly two hops: a
+  // test entry can sit three or four modules above the changed file (got:
+  // test → source/index → create → core/index → options). Each hop is a cheap
+  // regex scan over cached specifiers, and the loop stops as soon as nothing
+  // new is tainted.
+  const specCache = new Map<string, string[]>();
+  const MAX_ROUTING_HOPS = 6;
+  for (let hop = 0; hop < MAX_ROUTING_HOPS; hop++) {
+    let grew = false;
     for (const relPath of allFiles) {
       if (affectedTests.has(relPath)) continue;
       const isTest = isTestFilePath(relPath);
-      if (hop === 1 && !isTest) continue;
 
       const raw = index.getRawFile(relPath);
       if (!raw) continue;
 
-      const specs = extractImportSpecs(raw.content);
+      let specs = specCache.get(relPath);
+      if (!specs) {
+        specs = extractImportSpecs(raw.content);
+        specCache.set(relPath, specs);
+      }
       let importsTainted = false;
       for (const spec of specs) {
         const resolved = resolveImportSpecifier(rootDir, relPath, spec, fileSet);
@@ -978,10 +1057,36 @@ export function resolveAffectedTests(rootDir: string, explicitChangedFiles?: str
       if (importsTainted) {
         if (isTest) {
           affectedTests.add(relPath);
+          grew = true;
         } else if (!taintedSourceFiles.has(relPath)) {
           taintedSourceFiles.add(relPath);
           for (const s of stemsForPath(relPath)) taintedStems.add(s);
+          grew = true;
         }
+      }
+    }
+    if (!grew) break;
+  }
+
+  // Go tests live in the same package and import nothing, so the import graph never
+  // reaches them. A `_test.go` file that names an exported symbol declared in a
+  // tainted file is affected all the same.
+  const wordBoundary = (name: string): RegExp =>
+    new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+  for (const relPath of allFiles) {
+    if (affectedTests.has(relPath) || !relPath.endsWith("_test.go")) continue;
+    const raw = index.getRawFile(relPath);
+    if (!raw) continue;
+    for (const tainted of taintedSourceFiles) {
+      if (!tainted.endsWith(".go") || tainted === relPath) continue;
+      const data = index.getFileAnalysis(tainted);
+      if (!data) continue;
+      const hit = data.ast.symbols.some(
+        (sym) => sym.exported && sym.name.length >= 4 && wordBoundary(sym.name).test(raw.content)
+      );
+      if (hit) {
+        affectedTests.add(relPath);
+        break;
       }
     }
   }

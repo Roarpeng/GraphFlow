@@ -27,6 +27,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { execAndDehydrate } from "./dehydrator.js";
+import { ensureGraphflowDir } from "./graphflow-dir.js";
 import { mineGitCoChangeHistory, type GitMineOptions } from "./git-miner.js";
 import { executeSurgicalRead, getWorkspaceAstIndex } from "./slicer.js";
 import { executeSurgicalEdit } from "./surgical-edit.js";
@@ -154,7 +155,7 @@ export function saveMacros(
 ): void {
   const path = macroStoreFilePath(rootDir);
   const current = loadMacroStore(rootDir);
-  mkdirSync(join(rootDir, ".graphflow"), { recursive: true });
+  ensureGraphflowDir(rootDir);
   const payload: MacroStoreFile = {
     version: "3.0",
     macros,
@@ -313,7 +314,7 @@ export function recordTrajectoryAndMine(
     return { recorded: fullEvent, newlyCompiled: [], habits: loadUserHabits(rootDir) };
   }
 
-  mkdirSync(join(rootDir, ".graphflow"), { recursive: true });
+  ensureGraphflowDir(rootDir);
   const path = trajectoryFilePath(rootDir);
   const existing = loadTrajectoryEvents(rootDir);
   const updated = [...existing.slice(-499), fullEvent];
@@ -854,6 +855,34 @@ export function findMatchingMacroHint(rootDir: string, keys: string[]): string |
 
 
 /**
+ * Finds a compiled command macro that already covers `cmd`.
+ *
+ * Command macros (`command-pipeline` / `command-template`) used to be mined but
+ * never surfaced, so an agent re-derived the same build/test command on every
+ * session even though a ready local script existed. Matching is exact first,
+ * then by parameter template (`pytest {{arg1}}`), so a command run with a
+ * different file still resolves to the same local tool.
+ */
+export function findCommandMacro(rootDir: string, cmd: string): CompiledMacro | undefined {
+  const trimmed = cmd.trim();
+  if (!trimmed) return undefined;
+  const { macros } = loadMacroStore(rootDir);
+  const commandMacros = macros.filter(
+    (m) => m.kind === "command-pipeline" || m.kind === "command-template"
+  );
+  if (commandMacros.length === 0) return undefined;
+
+  const exact = commandMacros.find((m) => m.triggers.includes(trimmed));
+  if (exact) return exact;
+
+  const { template, hasParams } = extractCommandTemplate(trimmed);
+  if (!hasParams) return undefined;
+  return commandMacros.find(
+    (m) => m.kind === "command-template" && m.steps.includes(template)
+  );
+}
+
+/**
  * Zero-Cold-Start Git History Miner integration:
  * Scans `git log` for temporal co-change file pairs and merges them into `habits.coEdits`.
  */
@@ -922,7 +951,7 @@ export function recordEditPatternAndMine(
     return undefined;
   }
 
-  mkdirSync(join(rootDir, ".graphflow"), { recursive: true });
+  ensureGraphflowDir(rootDir);
   const pPath = editPatternsFilePath(rootDir);
   let entries: EditPatternEntry[] = [];
   if (existsSync(pPath)) {

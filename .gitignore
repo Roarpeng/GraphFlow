@@ -8,3 +8,14 @@ tmp/
 coverage/
 *.log
 .DS_Store
+
+# Local / generated artifacts
+.workbuddy/
+wasm/
+generated-images/
+graphflow-journey/
+packages/efficiency-agent/
+benchmarks/
+graphflow.config.json
+*.tgz
+*.vsix

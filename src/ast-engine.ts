@@ -1162,7 +1162,11 @@ export function inferReceiverTypeIndex(
     for (const sym of ast.symbols) {
       if (sym.kind !== "function" && sym.kind !== "method") continue;
       if (!sym.signature) continue;
-      const params = extractSignatureParamText(sym.signature);
+      // Go signatures include the receiver list before the method parameters, so the
+      // shared "first parenthesized group" helper would only see `(c *Context)`. Scan the
+      // whole header so both receiver and real parameters contribute receiver types.
+      const params =
+        family === "go" ? sym.signature : extractSignatureParamText(sym.signature);
       if (!params) continue;
       applyPatterns(paramPatterns, params, sym.line, sym.line, "static");
     }
@@ -1541,8 +1545,13 @@ function parseWithBabel(relPath: string, content: string, parser: BabelParserMod
         const endL = stmt.loc?.end?.line ?? startL;
         const names: string[] = [];
         for (const spec of stmt.specifiers ?? []) {
-          const localName = spec.local?.name ?? spec.exported?.name;
-          if (localName) names.push(localName);
+          // `export {default as X} from './m'` re-exports the default binding under `X`.
+          // `spec.local` is the literal `default`, so the exported alias is the only
+          // useful name for the dependency graph / importer set.
+          const localName = spec.local?.name;
+          const resolvedName =
+            localName === "default" ? spec.exported?.name : localName ?? spec.exported?.name;
+          if (resolvedName) names.push(resolvedName);
         }
         imports.push({
           module: stmt.source.value,
@@ -1574,6 +1583,80 @@ function parseWithBabel(relPath: string, content: string, parser: BabelParserMod
     } else {
       handleDeclaration(stmt, stmt, false);
     }
+  }
+
+  // CommonJS / prototype-style API surface: `app.get = function ...`,
+  // `res.send = ...`, `exports.foo = ...`, `module.exports.bar = ...`.
+  // Babel reports these as assignment expressions, not declarations, so they were
+  // previously absent from the symbol table even though they are the public API of
+  // Express-style modules. Only top-level statements are considered: assignments
+  // inside function bodies are implementation details, not exported symbols.
+  const unwrapAssignmentValue = (node: any): any => {
+    let current = node;
+    while (
+      current &&
+      (current.type === "TSAsExpression" ||
+        current.type === "TSTypeAssertion" ||
+        current.type === "TSNonNullExpression" ||
+        current.type === "ParenthesizedExpression" ||
+        current.type === "TypeCastExpression")
+    ) {
+      current = current.expression;
+    }
+    return current;
+  };
+
+  const memberAssignmentInfo = (
+    left: any
+  ): { name?: string; parentClass?: string } => {
+    if (!left || left.type !== "MemberExpression" || left.computed) return {};
+    const property = left.property;
+    const name =
+      property?.type === "Identifier" || property?.type === "PrivateName"
+        ? property.name ?? property.id?.name
+        : typeof property?.value === "string"
+          ? property.value
+          : undefined;
+    if (!name) return {};
+    const object = left.object;
+    let parentClass: string | undefined;
+    if (object?.type === "Identifier") {
+      parentClass = object.name;
+    } else if (
+      object?.type === "MemberExpression" &&
+      !object.computed &&
+      object.object?.type === "Identifier" &&
+      object.property?.type === "Identifier"
+    ) {
+      // `module.exports.foo` -> parentClass `module.exports`.
+      parentClass = `${object.object.name}.${object.property.name}`;
+    }
+    return { name, ...(parentClass ? { parentClass } : {}) };
+  };
+
+  const collectMemberAssignments = (node: any): void => {
+    if (!node || node.type !== "AssignmentExpression") return;
+    const info = memberAssignmentInfo(node.left);
+    const value = unwrapAssignmentValue(node.right);
+    // `module.exports = {...}` is the export object itself, not a member symbol.
+    const isExportContainer = info.parentClass === "module" && info.name === "exports";
+    if (info.name && !isExportContainer) {
+      const isFunction =
+        value?.type === "FunctionExpression" || value?.type === "ArrowFunctionExpression";
+      const paramsCount = isFunction && Array.isArray(value.params) ? value.params.length : undefined;
+      addSymbol(info.name, isFunction ? "function" : "variable", true, node, value ?? node, {
+        ...(paramsCount !== undefined ? { paramsCount } : {}),
+        ...(info.parentClass ? { parentClass: info.parentClass } : {}),
+      });
+    }
+    // Chained assignments (`res.contentType = res.type = function ...`): handle the
+    // nested assignment as well so every assigned property becomes a symbol.
+    if (node.right?.type === "AssignmentExpression") collectMemberAssignments(node.right);
+  };
+
+  for (const stmt of body) {
+    if (stmt.type !== "ExpressionStatement") continue;
+    collectMemberAssignments(stmt.expression);
   }
 
   const walkCalls = (node: any, enclosingCaller?: string) => {
@@ -2861,7 +2944,9 @@ export function resolveRelativeImportPath(
     const sameDir = (fromDir === "." ? moduleSpec : join(fromDir, moduleSpec)).replace(/\\/g, "/");
     relCandidates.push(sameDir, moduleSpec, `include/${moduleSpec}`, `src/${moduleSpec}`);
   } else if (moduleSpec.startsWith(".")) {
-    const baseRel = (fromDir === "." ? moduleSpec : join(fromDir, moduleSpec)).replace(/\\/g, "/");
+    const baseRel = (fromDir === "." ? moduleSpec : join(fromDir, moduleSpec))
+      .replace(/\\/g, "/")
+      .replace(/^\.\//, "");
     if (!baseRel.startsWith("..")) {
       const stripped = baseRel.replace(/\.(js|mjs|cjs)$/i, "");
       relCandidates.push(
