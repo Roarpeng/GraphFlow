@@ -8,7 +8,7 @@
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-roarpeng.graphflow-blue)](https://marketplace.visualstudio.com/items?itemName=roarpeng.graphflow)
 
 > **面向 AI 编程 Agent 的省 Token 外科手术级代码引擎（v3.7.0）**
-> 只暴露 4 个外科手术工具的 MCP 服务器 —— `gf_read`、`gf_edit`、`gf_exec`、`gf_macro` —— 对**全部 6 种语言家族提供真 AST 解析**：TypeScript/JavaScript 用 `@babel/parser`，Python、Go、Rust、C/C++、C# 用可选 tree-sitter 语法包（缺省回退结构化分析器）。**自研语义索引**为爆炸半径/重命名解析调用目标（不新增运行时依赖），**精度调优的文档↔代码链接**（BM25/IDF + PMI + 上限 + 置信度）让知识图谱更可信。**六语言能力平价已纳入回归测试**（51 项矩阵），双语检索在「孤立 30 对 + packed 30 对」语料上达到 **EN 1.000 / ZH 1.000**，**本地任务反射**可通过显式记录或自动收割外部指令日志，在无 LLM/网络下重放已记录的 shell 指令。运行时依赖：`@babel/parser`、`@modelcontextprotocol/sdk` 与 `tree-sitter`；语法包为可选依赖。
+> 只暴露 4 个外科手术工具的 MCP 服务器 —— `gf_read`、`gf_edit`、`gf_exec`、`gf_macro` —— 对**全部 6 种语言家族提供真 AST 解析**：TypeScript/JavaScript 用 `@babel/parser`，Python、Go、Rust、C/C++、C# 用可选 tree-sitter 语法包（缺省回退结构化分析器）。**自研语义索引**为爆炸半径/重命名解析调用目标（不新增运行时依赖），**精度调优的文档↔代码链接**（BM25/IDF + PMI + 上限 + 置信度）让知识图谱更可信。**六语言能力平价已纳入回归测试**（51 项矩阵），双语检索在「孤立 30 对 + packed 30 对」语料上达到 **EN 1.000 / ZH 1.000**，**本地任务反射**可通过显式记录或自动收割外部指令日志，在无 LLM/网络下重放已记录的 shell 指令。知识图谱现在**按文件增量重建**（只重算 dirty 文件，输出与全量重建完全一致），解析后的 AST 索引落盘缓存，因此 274 文件仓库上的热 `gf_read` 从 4.4 s 降到 1.4 s。运行时依赖：`@babel/parser`、`@modelcontextprotocol/sdk` 与 `tree-sitter`；语法包为可选依赖。
 
 ---
 
@@ -47,7 +47,7 @@
 | **3.5.0** | **文档↔代码链接精度（自研 BM25/IDF + PMI + 互惠剪枝 + 上限，`GRAPHFLOW_DOC_LINKS_MAX`；仓库 728 → 约 150 条边，−80%）· `graphflow doctor parsers` + `npm run verify:parsers` + 增量 CI 解析器矩阵 · 自研 L0 语义索引（置信度 ≥0.75）与可选 TypeScript/LSP 提供者 · DSH 配置包 `@roarpeng/graphflow-dsh` · 发布预检（`npm run preflight` / `preflight:release`）· 基准数据刷新** |
 | **3.6.0** | **48 项六语言平价矩阵与修复（语言家族作用域的 `resolveMethod`/重命名、Go 嵌入/分组参数、C typedef 字段、Rust `&dyn`/`impl` 解包、C/C++ 头文件原型↔定义重命名）· 30 对双语召回 1.000 EN / 1.000 ZH（拼音/混合/同义词 1.000；基线 ZH@1 0.967、拼音 0.769）· 本地任务反射（`graphflow task`/`reflect`、`gf_macro` task-list/run/record）· Windows CRLF 测试修复；CI（6 job）+ 解析器矩阵（7 job）全绿 · 458 wire tokens · 24 个测试文件** |
 | **3.6.1** | **六语言平价 51 项：Rust trait 分派闭环（trait 方法带 `parentClass`=trait；`dyn Trait`/`impl Trait` 接收者解析到 trait 方法，具体接收者解析到 impl）、C# `record`/`record struct` kind + 位置参数字段 + namespace 映射闭环（Go 同包 imports 仍为诚实缺口）· packed 文件双语语料：packed EN 1.000 / ZH 1.000 @1/@3/@5（ZH@1 原为 0.900；修复 ±7 行 own-doc 串扰）· 任务自动收割（`.graphflow/instruction-log.jsonl`、`task log`/`task harvest`、`gf_macro` `task-harvest`；需要外部写入者）· 458 wire tokens · 24 个测试文件** |
-| **3.7.0** | **词表外的中文检索英文标识符：L1 注释/提交 PMI 映射、L2 自编口语词表（可选本地 ECDICT）、L3 翻译钩子默认关闭 · `gf_read` 自适应搜索预算 · 80 条留出查询 P@1 0.000 → 0.813 · `ts-zh-search` 3198 → 1077 tokens · wire **459** tokens · 26 个测试文件** |
+| **3.7.0** | **词表外的中文检索英文标识符：L1 注释/提交 PMI 映射、L2 自编口语词表（可选本地 ECDICT）、L3 翻译钩子默认关闭 · `gf_read` 自适应搜索预算 · 真正的按文件增量建图（每文件贡献 + 分片清单）· AST 索引落盘缓存 · 重命名不再改坏 import 路径 · 80 条留出查询 P@1 0.000 → 0.813 · `ts-zh-search` 3198 → 1077 tokens · wire **459** tokens · 39 个测试文件** |
 | **3.6.2** | **评测修复包：类限定名重命名（`OrderService.cancel`）并沿覆写层级更新 `super` · Rust 宏内 `impl Trait` 爆炸半径 · 文档↔代码常量 / 泛词 / 测试符号上限 · `gf_read` 源码体积预算（`GRAPHFLOW_READ_BUDGET_RATIO`）· PostToolUse 钩子与 `gf_exec` `run:true` 自动写指令日志 · MISS Jaccard + task-run 结构化 `exitCode` · wire **459** tokens · 25 个测试文件** |
 
 ## 四个外科手术工具
@@ -66,7 +66,11 @@
 - **词表没覆盖的中文也能找到英文标识符** —— L0 的拼音、同义词和工程词表不动，因此已经饱和的 30+30 平价集仍是 **1.000**。L1 在建索引时把注释和 `git log` 标题里的中文 n-gram 与附近标识符子词配对，按 PMI 保留（英文词若还出现在别的中文窗口里，单次共现会被丢掉），并缓存到 `.graphflow/zh-identifier-map.json`。热查询大约 **0.005 ms**。L2 是随仓库发布的原创编程口语表（Apache-2.0，不是 CC-CEDICT 或 ECDICT 的拷贝），再滤成「这个仓库的标识符里真的出现过的英文词」，缓存远小于 1 MB。本地 ECDICT TSV（MIT；`GRAPHFLOW_ECDICT` 或 `.graphflow/ecdict.csv`）可选，不打进发布包。L3 是 `registerZhEnModel`，只有 `GRAPHFLOW_ZH_EN_MODEL=1` 才调用。不新增模型依赖。`GRAPHFLOW_ZH_RECALL=0` / `GRAPHFLOW_ZH_L1=0` / `GRAPHFLOW_ZH_L2=0` 可逐层关闭。
 - **80 条不在 L0 词表里的留出说法** —— 仅 L0：**P@1 0.000 / MRR 0.000 / R@3 0.000**。**+L1：0.375 / 0.375 / 0.375**（30 条由提交教会的查询从 0 到 **1.000**）。**+L1+L2：0.813 / 0.813 / 0.813**（35 条口语查询从 0 到 **1.000**）。另外 **15** 条仍然是 **0**：注释、提交和词表里都没有。L3 没有当作神经网络模型来打分；注册钩子后，其中一条未命中可以被补上。更短的 L1 n-gram 会抢答（`搞定发货` 会先撞上只教过 `发货` 的提交），直到更长的 L2 短语把它压过去。
 - **自适应搜索预算** —— 不传 `topK` 时，前两名分差至少 **0.45** 就只返回 **1** 条切片；分差更小则保留最多 3 条接近结果（因此 `订单超时` 仍会同时返回处理函数和 `OrderService.timeout`）。这些默认切片不再附类型闭合和爆炸半径。显式传入 `topK` 仍是原来的完整切片。80 条留出查询的 token 合计从 **22157 降到 4849**，自适应 P@1 仍是 **0.813**。CLI 上的 `ts-zh-search`（三次查询，`ceil(字符数/4)`）从 **3198 降到 1077**，三份源文件基线是 1245；要求命中的符号还在。
-- **版本/状态** —— 3.7.0；MCP 面仍是 **4 个工具**。wire schema 未改，仍是 **459 tokens**（1834 字符，`ceil(chars/4)`）。测试套件 **26 个文件**（`tests/zh-recall.test.ts`）。CI（6 job）+ 解析器矩阵（7 job）未改。
+- **真正的按文件增量建图** —— 图谱不再是「一次全量重算」，而是各文件贡献之和。每条边都有唯一归属文件（`defines` / `imports` / `calls` 归声明 / 导入 / 调用方，`doc-links-code` 归代码文件），因此 `buildKnowledgeGraphData` 被拆成 `planKgRebuild` + `executeKgRebuild`，只重算 dirty 文件。失效判定三层，由便宜到贵：**(1) 指纹** `size:mtimeMs`；**(2) 名字级反向依赖** —— 每个文件记录自己查询过的符号名 `queriedNames`，与改动文件的 `deltaNames` 求交集即可定位真正受影响的文件，比「拉整张 import 扇入闭包」精确一个量级；**(3) 结构级** —— 继承关系变化把涉及的类名并入 `deltaNames`，文件增删只影响 `unresolvedImports` 非空的文件。分片清单 `.graphflow/graph-shards.json` 还存了每个文件的符号表，未变的文件连 AST 都不加载。清单缺失或损坏时降级为全量重建。
+- **AST 索引落盘 + 修掉真正的热点** —— 切片器的解析结果持久化到 `.graphflow/ast-cache/<sha1>.json`，键是内容哈希**加后端签名**，因此切换 `GRAPHFLOW_TREE_SITTER` 会正确失效。`GRAPHFLOW_AST_CACHE=0` 可关闭。`--cpu-prof` 同时推翻了原本的直觉：解析不是瓶颈（274 文件约 950 ms），真正的热点是 `tokenizeEnglish`（约 46%）和 `normalizeWorkspaceRelPath`（约 43%）。两者改为有界记忆化，词典模糊匹配按首字母分桶。axios（274 文件）实测：热 `gf_read` **4.4 s → 1.4 s**，冷 `graph` **16.1 s → 5.6 s**。
+- **文档↔代码缓存合并** —— 274 个按文件小分片合并成三个单文件 store（`.graphflow/doc-links/symbols.json`、`concepts.json`、`sections.json`）：Windows 上符号数据加载 **1000 ms → 121 ms**，文档扫描 **920 ms → 49 ms**。候选缓存改用文件内序号（`so`）而非扁平下标作键，因此在文件前部插入符号不会让后面所有缓存条目失效。reciprocal top-K 剪枝仍然每次全局执行，结果与全量重建逐条一致。
+- **修复包（正确性）** —— `gf_edit` 重命名不再改坏 **import 路径**：先对注释与字符串/模板串做等长遮蔽，因此重命名符号不会再把 `./combineURLs.js` 改成 `./joinURLs.js` 而触发 `ERR_MODULE_NOT_FOUND`。读取预算的收缩顺序改为优先 `digestSymbolBlocks`，小函数不再被误折叠。受影响测试路由识别 `tests/` / `__tests__/` / `spec/` 目录，并跳过 `conftest.py` 之类的伪测试。MCP 对未知工具的 `tools/call` 返回 `isError: true`，`gf_exec` 通过 `findCommandMacro()` 暴露已编译的本地工具 id。CLI 退出码正确透传，`install` / `uninstall` 会渲染错误而不是吞掉，卸载只删除 GraphFlow 自己写入的 hook 与 MCP 配置。
+- **版本/状态** —— 3.7.0；MCP 面仍是 **4 个工具**。wire schema 未改，仍是 **459 tokens**（1834 字符，`ceil(chars/4)`）。测试套件 **39 个文件**（新增 10 个 `tests/fix-*.test.ts`）。CI（6 job）+ 解析器矩阵（7 job）未改。
 
 ## 3.6.2 新特性
 
@@ -241,6 +245,29 @@ it("cancels through OrderService", () => {
 
 **本地基准脚本（自测）：** 先 `npm run build`，再 `npm run bench`（`scripts/benchmark.mjs`）会测量 MCP schema 开销、骨架/切片压缩、PASS/失败脱水、知识图谱构建、受影响测试与爆炸半径耗时，并写出 `benchmarks/latest.md` 与 `benchmarks/latest.json`。上表是本仓库 3.6.0 最终基准运行的数字（3.6.1 未变；耗时和计数为约数，随运行略有波动）。重跑可以复现这组自测数字。夹具得分在[独立评测（graphflow-eval）](#独立评测graphflow-eval)。
 
+## 缓存与增量重建
+
+GraphFlow 把派生状态放在 `.graphflow/`（已在 .gitignore 中），因此下一个进程 —— 或另一个 Agent —— 可以复用上一个进程的工作，而不必重付一遍代价。
+
+| 产物 | 内容 | 失效条件 |
+| :--- | :--- | :--- |
+| `.graphflow/graph-shards.json` | 每文件分片清单：指纹（`size:mtimeMs`）、符号表 `syms`、`declaredNames`、`queriedNames`、`parents`、`hasReceiverCalls`、`unresolvedImports` | 指纹或结构变化；不可读/损坏 → 降级为全量重建 |
+| `.graphflow/ast-cache/<sha1>.json` | 单文件的 AST 索引 | 内容哈希**加后端签名**（切换 `GRAPHFLOW_TREE_SITTER` 会正确失效） |
+| `.graphflow/doc-links/{symbols,concepts,sections}.json` | 文档↔代码的符号、候选与 section store | 文件指纹；`.graphflow/doc-link-feedback.json` 参与指纹计算，因此「你拒绝过的链接」不会被陈旧缓存掩盖 |
+| `.graphflow/zh-identifier-map.json` | L1 中文→英文标识符映射 | 索引重建 |
+
+环境变量开关：`GRAPHFLOW_AST_CACHE=0` 关闭 AST 持久化，`GRAPHFLOW_GRAPH_DEBUG=1` 打印建图各阶段耗时（`kgStage`）。
+
+axios（274 文件 → 2819 节点 / 2418 条边）实测，两侧各自在独立副本中预热：
+
+| 场景 | 全量重建 | 增量重建 |
+| :--- | :--- | :--- |
+| 改一个叶子文件（dirty = 1） | 4571 ms | **2666 ms**（贡献计算 **13 ms** vs 2300 ms） |
+| 改一个枢纽文件（dirty = 25，真实扇出 32） | 4455 ms | 4421 ms |
+| 冷启动（无缓存） | — | 6356 ms |
+
+增量结果与全量重建**逐节点、逐边完全一致**。两个诚实的限制：端到端时间里约 **2.6 s** 是固定开销（进程启动、缓存反序列化、HTML 导出），重建算法本身已不是瓶颈；改枢纽文件会真实地弄脏它的全部扇出，此时增量优势消失 —— 依赖方确实必须重算。
+
 ## 支持语言
 
 | 语言 | 提取后端 |
@@ -288,7 +315,7 @@ npx skills add Roarpeng/GraphFlow
 
 ```bash
 git clone https://github.com/Roarpeng/GraphFlow && cd GraphFlow
-npm install && npm test      # tsx tests/run-all.ts（26 个测试文件，含 MCP stdio e2e）
+npm install && npm test      # tsx tests/run-all.ts（39 个测试文件，含 MCP stdio e2e）
 npm run build && npm run bench  # 可选：本地基准脚本 → benchmarks/latest.md
 npm run verify:parsers       # 可选：真 AST 与强制结构化解析器矩阵
 npm run preflight            # 可选：静态发布预检
