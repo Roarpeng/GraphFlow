@@ -47,7 +47,7 @@
 | **3.5.0** | **文档↔代码链接精度（自研 BM25/IDF + PMI + 互惠剪枝 + 上限，`GRAPHFLOW_DOC_LINKS_MAX`；仓库 728 → 约 150 条边，−80%）· `graphflow doctor parsers` + `npm run verify:parsers` + 增量 CI 解析器矩阵 · 自研 L0 语义索引（置信度 ≥0.75）与可选 TypeScript/LSP 提供者 · DSH 配置包 `@roarpeng/graphflow-dsh` · 发布预检（`npm run preflight` / `preflight:release`）· 基准数据刷新** |
 | **3.6.0** | **48 项六语言平价矩阵与修复（语言家族作用域的 `resolveMethod`/重命名、Go 嵌入/分组参数、C typedef 字段、Rust `&dyn`/`impl` 解包、C/C++ 头文件原型↔定义重命名）· 30 对双语召回 1.000 EN / 1.000 ZH（拼音/混合/同义词 1.000；基线 ZH@1 0.967、拼音 0.769）· 本地任务反射（`graphflow task`/`reflect`、`gf_macro` task-list/run/record）· Windows CRLF 测试修复；CI（6 job）+ 解析器矩阵（7 job）全绿 · 458 wire tokens · 24 个测试文件** |
 | **3.6.1** | **六语言平价 51 项：Rust trait 分派闭环（trait 方法带 `parentClass`=trait；`dyn Trait`/`impl Trait` 接收者解析到 trait 方法，具体接收者解析到 impl）、C# `record`/`record struct` kind + 位置参数字段 + namespace 映射闭环（Go 同包 imports 仍为诚实缺口）· packed 文件双语语料：packed EN 1.000 / ZH 1.000 @1/@3/@5（ZH@1 原为 0.900；修复 ±7 行 own-doc 串扰）· 任务自动收割（`.graphflow/instruction-log.jsonl`、`task log`/`task harvest`、`gf_macro` `task-harvest`；需要外部写入者）· 458 wire tokens · 24 个测试文件** |
-| **3.7.0** | **词表外的中文检索英文标识符：L1 注释/提交 PMI 映射、L2 自编口语词表（可选本地 ECDICT）、L3 翻译钩子默认关闭 · `gf_read` 自适应搜索预算 · 真正的按文件增量建图（每文件贡献 + 分片清单）· AST 索引落盘缓存 · 重命名不再改坏 import 路径 · 80 条留出查询 P@1 0.000 → 0.813 · `ts-zh-search` 3198 → 1077 tokens · wire **459** tokens · 39 个测试文件** |
+| **3.7.0** | **词表外的中文检索英文标识符：L1 注释/提交 PMI 映射、L2 自编口语词表（可选本地 ECDICT）、L3 翻译钩子默认关闭 · `gf_read` 自适应搜索预算 · 真正的按文件增量建图（每文件贡献 + 分片清单）· AST 索引落盘缓存 · 重命名不再改坏 import 路径 · 80 条留出查询 P@1 0.000 → 0.813 · `ts-zh-search` 3198 → 1077 tokens · wire **459** tokens · 40 个测试文件** |
 | **3.6.2** | **评测修复包：类限定名重命名（`OrderService.cancel`）并沿覆写层级更新 `super` · Rust 宏内 `impl Trait` 爆炸半径 · 文档↔代码常量 / 泛词 / 测试符号上限 · `gf_read` 源码体积预算（`GRAPHFLOW_READ_BUDGET_RATIO`）· PostToolUse 钩子与 `gf_exec` `run:true` 自动写指令日志 · MISS Jaccard + task-run 结构化 `exitCode` · wire **459** tokens · 25 个测试文件** |
 
 ## 四个外科手术工具
@@ -214,6 +214,24 @@ it("cancels through OrderService", () => {
 
 只由提交标题教会的 30 条，打开 L1 后 P@1 从 0.000 到 1.000。35 条口语在打开 L2 后从 0.000 到 1.000。另外 **15/80** 对不上任何注释、提交标题或收录的口语条目，P@1 保持 **0.000**。L3 没有当作神经网络模型来打分。
 
+**真实代码上的中文 —— 160 条注释**（`tests/zh-real-corpus.test.ts`）。夹具里是从五个 MIT 仓库原样摘录的（注释，声明）对，都是「中文注释紧挨英文标识符」的写法：`akfamily/akshare`（153 条 Python docstring）、`mouday/domain-admin`、`go-admin-team/go-admin`（Go 行注释）、`HalseySpicy/Geeker-Admin` 与 `vbenjs/vue-vben-admin`（TS 块注释）。凡是注释里出现符号名或它任意驼峰片段的，摘录时就丢弃，所以查询不会泄漏答案。测试按原路径重建文件，再把每条注释当查询问回去。
+
+| 设置 | n | P@1 | MRR | R@3 |
+| :--- | ---: | :--- | :--- | :--- |
+| 词表（L0），注释原文 | 160 | 0.825 | 0.849 | 0.875 |
+| + 挖掘层（L1），注释原文 | 160 | 0.819 | 0.845 | 0.875 |
+| 词表（L0），只取第一分句 | 141 | 0.816 | 0.837 | 0.858 |
+| + 挖掘层（L1），只取第一分句 | 141 | 0.801 | 0.827 | 0.851 |
+
+分语言：Go 0.857（n=7），Python 0.817（n=153）。诚实的结论是：**真实注释主要靠 L0 撑住**（维护者用的工程词本来就在词表里），挖掘层在这里从「有害」变成「中性」——在下面这些修复之前，同一批 160 条上它是 **0.775** 对词表的 **0.825**。而在 L0 完全读不出来的合成留出集上，L1 仍是唯一的桥（30 条提交教授的查询 0.000 → 1.000）。
+
+这个夹具有效地暴露了四处问题，都已在 `src/zh-recall.ts` 与 `src/slicer.ts` 修掉：
+
+- **共现窗口原本只向前看 8 行**，一条注释会和隔壁声明的标识符配对。现在改为前后 ±2/+3 行，并遮蔽 URL —— docstring 里常见的 `vip.stock.finance.sina.com.cn` 曾被挖成「finance/vip/sina」。
+- **语料级填充词被当成翻译**。`pass`、包名、以及出现在两成窗口里的 `数据`/`中心`，靠支持度取胜却什么也不说明。语料够大时按文档频率丢弃（英文侧 8%，中文键 12%）。
+- **排序只看声明上方的注释**。所有 Python docstring 风格的函数只能靠正文文字得分。现在 doc 窗口也包含紧跟声明的字符串字面量。
+- **挖掘出的 token 压过了词表**。现在它们只是弱证据（名字命中 8 分对 15 分，签名不计分），且只有当词表完全读不懂查询时才启用。
+
 **自适应 topK**：这 80 条查询的搜索输出按 `ceil(字符数/4)` 求和，显式 `topK` 3 为 **22157** tokens，不传 `topK` 为 **4849**。自适应 P@1 仍是 **0.813**。
 
 **夹具上的 `ts-zh-search` CLI。** 对 graphflow-eval 树做三次 `graphflow read -q`：3.6.2 合计 **3198** tokens，3.7.0 合计 **1077**（`订单超时` 369，`dingdan zhifu` 191，`支付订单` 517）。同三次查询的整文件基线是 1245。要求命中的符号还在。接近分的结果仍会带上 `TIMEOUT_WINDOW_MS` 和 `OrderService` 类切片。
@@ -226,6 +244,7 @@ it("cancels through OrderService", () => {
 - Go 同包 imports 仍是缺口：同一 package 的兄弟文件没有文件级 `imports` 边。
 - 反射命中要求 Jaccard 至少 0.86。丢掉一个词的探针得分 0.857，算未命中。`{{argN}}` 占位符要手写。并发记录是最后写入者胜出，反射跑没有覆盖这个竞争。
 - 本节全部数字来自夹具（graphflow-eval，或那 80 条单元夹具），不是生产轨迹。
+- 真实语料夹具只重建带注释的声明，候选池是 160 个符号而不是五个完整仓库。它衡量的是「注释→标识符」这条桥，不是在上千个兄弟符号里排序。部分「未命中」是标注问题：`东方财富网-上海板块-行业板块` 期望拿到资金流抓取函数，而 `stock_board_industry_cons_em` 同样说得通。
 
 ## 基准数据
 
@@ -315,7 +334,7 @@ npx skills add Roarpeng/GraphFlow
 
 ```bash
 git clone https://github.com/Roarpeng/GraphFlow && cd GraphFlow
-npm install && npm test      # tsx tests/run-all.ts（39 个测试文件，含 MCP stdio e2e）
+npm install && npm test      # tsx tests/run-all.ts（40 个测试文件，含 MCP stdio e2e）
 npm run build && npm run bench  # 可选：本地基准脚本 → benchmarks/latest.md
 npm run verify:parsers       # 可选：真 AST 与强制结构化解析器矩阵
 npm run preflight            # 可选：静态发布预检

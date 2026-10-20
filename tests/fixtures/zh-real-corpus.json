@@ -1,0 +1,2584 @@
+{
+  "note": "Verbatim (comment, declaration) pairs extracted from real MIT-licensed repositories. Comment text is unmodified; only the surrounding code is omitted.",
+  "generatedBy": "scripts/extract-zh-corpus.mjs",
+  "repos": [
+    {
+      "name": "go-admin-team/go-admin",
+      "commit": "e42105e7cd61755f0d21d329e0e69dca7f088a17",
+      "license": "MIT",
+      "url": "https://github.com/go-admin-team/go-admin"
+    },
+    {
+      "name": "HalseySpicy/Geeker-Admin",
+      "commit": "ad08fdd1c08bfd2390a85fbbb359be17e2bdaae9",
+      "license": "MIT",
+      "url": "https://github.com/HalseySpicy/Geeker-Admin"
+    },
+    {
+      "name": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "url": "https://github.com/akfamily/akshare"
+    },
+    {
+      "name": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "url": "https://github.com/mouday/domain-admin"
+    },
+    {
+      "name": "vbenjs/vue-vben-admin",
+      "commit": "61c07936c73b88fbcd1295958f443493cba825fc",
+      "license": "MIT",
+      "url": "https://github.com/vbenjs/vue-vben-admin"
+    }
+  ],
+  "stats": {
+    "candidates": 396,
+    "unique": 237,
+    "sampled": 160
+  },
+  "pairs": [
+    {
+      "repo": "go-admin-team/go-admin",
+      "commit": "e42105e7cd61755f0d21d329e0e69dca7f088a17",
+      "license": "MIT",
+      "lang": "go",
+      "path": "app/other/apis/tools/column_width.go",
+      "symbol": "InferColumnWidth",
+      "comment": "Exported and pure (string in, int out) so QA can pin an exact input/output table against it directly (测试用例.md §2.5's own recommendation), rather than only being able to assert \"the rendered page happens not to overflow\".",
+      "style": "line",
+      "decl": "func InferColumnWidth(columnType string) int {",
+      "variants": [
+        "Exported and pure (string in, int out) so QA can pin an exact input/output table against it directly (测试用例.md §2.5's own recommendation), rather than only being able to assert \"the rendered page happens not to overflow\".",
+        "Exported and pure"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "go-admin-team/go-admin",
+      "commit": "e42105e7cd61755f0d21d329e0e69dca7f088a17",
+      "license": "MIT",
+      "lang": "go",
+      "path": "app/other/router/monitor.go",
+      "symbol": "RegisterMonitorRouter",
+      "comment": "how a probe comes to be asserted against a copy of itself.  无需认证的路由代码",
+      "style": "line",
+      "decl": "func RegisterMonitorRouter(v1 *gin.RouterGroup) {",
+      "variants": [
+        "how a probe comes to be asserted against a copy of itself.  无需认证的路由代码"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "go-admin-team/go-admin",
+      "commit": "e42105e7cd61755f0d21d329e0e69dca7f088a17",
+      "license": "MIT",
+      "lang": "go",
+      "path": "app/other/apis/tools/column_width_test.go",
+      "symbol": "TestInferColumnWidth",
+      "comment": "recommendation (\"QA 才能在阶段 4 补一张精确的输入→输出对照表断言, 而不是只测 结果凑巧没溢出这种弱结论\") - this is that table, kept next to the function it pins rather than only living in a later QA-owned suite.",
+      "style": "line",
+      "decl": "func TestInferColumnWidth(t *testing.T) {",
+      "variants": [
+        "recommendation (\"QA 才能在阶段 4 补一张精确的输入→输出对照表断言, 而不是只测 结果凑巧没溢出这种弱结论\") - this is that table, kept next to the function it pins rather than only living in a later QA-owned suite.",
+        "recommendation"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_us_sina.py",
+      "symbol": "__get_us_page_count",
+      "comment": "新浪财经-美股-总页数 https://finance.sina.com.cn/stock/usstock/sector.shtml",
+      "style": "docstring",
+      "decl": "def __get_us_page_count() -> int:",
+      "variants": [
+        "新浪财经-美股-总页数 https://finance.sina.com.cn/stock/usstock/sector.shtml",
+        "新浪财经-美股-总页数 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/registry.py",
+      "symbol": "_bigrams",
+      "comment": "把查询压成连续字符 2-gram，用于用户未打空格时的降级召回。",
+      "style": "docstring",
+      "decl": "def _bigrams(query: str) -> List[str]:",
+      "variants": [
+        "把查询压成连续字符 2-gram，用于用户未打空格时的降级召回。",
+        "把查询压成连续字符 2-gram"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_fund_em.py",
+      "symbol": "_coerce_numeric_columns",
+      "comment": "将东方财富返回的数值列统一转换为数值类型。",
+      "style": "docstring",
+      "decl": "def _coerce_numeric_columns(",
+      "variants": [
+        "将东方财富返回的数值列统一转换为数值类型。",
+        "将东方财富返回的数值列统一转换为数值类型"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_board_concept_em.py",
+      "symbol": "_fetch_stock_board_concept_name_em",
+      "comment": "获取东方财富概念板块名称列表。",
+      "style": "docstring",
+      "decl": "def _fetch_stock_board_concept_name_em() -> pd.DataFrame:",
+      "variants": [
+        "获取东方财富概念板块名称列表。",
+        "获取东方财富概念板块名称列表"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_cg_lawsuit.py",
+      "symbol": "_get_file_content_ths",
+      "comment": "获取 JS 文件的内容。",
+      "style": "docstring",
+      "decl": "def _get_file_content_ths(file: str = \"cninfo.js\") -> str:",
+      "variants": [
+        "获取 JS 文件的内容。",
+        "获取 JS 文件的内容"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_fund_em.py",
+      "symbol": "_get_stock_concept_fund_flow_summary_code",
+      "comment": "东方财富网-数据中心-资金流向-概念资金流 https://data.eastmoney.com/bkzj/gn.html",
+      "style": "docstring",
+      "decl": "def _get_stock_concept_fund_flow_summary_code() -> dict:",
+      "variants": [
+        "东方财富网-数据中心-资金流向-概念资金流 https://data.eastmoney.com/bkzj/gn.html",
+        "东方财富网-数据中心-资金流向-概念资金流 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_fund_em.py",
+      "symbol": "_get_stock_sector_fund_flow_summary_code",
+      "comment": "东方财富网-数据中心-资金流向-行业板块 https://data.eastmoney.com/bkzj/gn.html",
+      "style": "docstring",
+      "decl": "def _get_stock_sector_fund_flow_summary_code() -> dict:",
+      "variants": [
+        "东方财富网-数据中心-资金流向-行业板块 https://data.eastmoney.com/bkzj/gn.html",
+        "东方财富网-数据中心-资金流向-行业板块 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_xq.py",
+      "symbol": "_get_xq_quote_data",
+      "comment": "获取雪球个股行情接口的原始数据",
+      "style": "docstring",
+      "decl": "def _get_xq_quote_data(",
+      "variants": [
+        "获取雪球个股行情接口的原始数据"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_zh_b_sina.py",
+      "symbol": "_get_zh_b_page_count",
+      "comment": "所有股票的总页数 https://vip.stock.finance.sina.com.cn/mkt/#hs_b",
+      "style": "docstring",
+      "decl": "def _get_zh_b_page_count() -> int:",
+      "variants": [
+        "所有股票的总页数 https://vip.stock.finance.sina.com.cn/mkt/#hs_b",
+        "所有股票的总页数 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/registry.py",
+      "symbol": "_load",
+      "comment": "懒加载 registry 数据。import akshare 时不触发，仅首次检索时读取。",
+      "style": "docstring",
+      "decl": "def _load() -> Dict:",
+      "variants": [
+        "懒加载 registry 数据。import akshare 时不触发，仅首次检索时读取。",
+        "懒加载 registry 数据"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/registry.py",
+      "symbol": "_normalize",
+      "comment": "压缩字符串内的全部空白，用于消除源文档里 latin/数字与中日韩字符之间 人工插入的排版空格（如「A 股」）对子串匹配造成的干扰。",
+      "style": "docstring",
+      "decl": "def _normalize(text: str) -> str:",
+      "variants": [
+        "压缩字符串内的全部空白，用于消除源文档里 latin/数字与中日韩字符之间 人工插入的排版空格（如「A 股」）对子串匹配造成的干扰。",
+        "压缩字符串内的全部空白"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/registry.py",
+      "symbol": "_rank",
+      "comment": "对候选记录打分排序。",
+      "style": "docstring",
+      "decl": "def _rank(query: str, records: List[Dict]) -> List[Dict]:",
+      "variants": [
+        "对候选记录打分排序。",
+        "对候选记录打分排序"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/registry.py",
+      "symbol": "_score",
+      "comment": "对单条记录打分。",
+      "style": "docstring",
+      "decl": "def _score(tokens: List[str], record: Dict) -> float:",
+      "variants": [
+        "对单条记录打分。",
+        "对单条记录打分"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/registry.py",
+      "symbol": "_tokenize",
+      "comment": "按空白与常见标点切分查询词。",
+      "style": "docstring",
+      "decl": "def _tokenize(query: str) -> List[str]:",
+      "variants": [
+        "按空白与常见标点切分查询词。",
+        "按空白与常见标点切分查询词"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/address_api.py",
+      "symbol": "add_address",
+      "comment": "添加主机地址 :return:",
+      "style": "docstring",
+      "decl": "def add_address():",
+      "variants": [
+        "添加主机地址 :return:",
+        "添加主机地址"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/deploy_cert_api.py",
+      "symbol": "add_deploy_cert",
+      "comment": "添加详情 :return:",
+      "style": "docstring",
+      "decl": "def add_deploy_cert():",
+      "variants": [
+        "添加详情 :return:",
+        "添加详情"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/host_api.py",
+      "symbol": "add_host",
+      "comment": "添加主机 :return:",
+      "style": "docstring",
+      "decl": "def add_host():",
+      "variants": [
+        "添加主机 :return:",
+        "添加主机"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/notify_api.py",
+      "symbol": "add_notify",
+      "comment": "添加用户通知配置 :return:",
+      "style": "docstring",
+      "decl": "def add_notify():",
+      "variants": [
+        "添加用户通知配置 :return:",
+        "添加用户通知配置"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/user_api.py",
+      "symbol": "add_user",
+      "comment": "添加用户 :return:",
+      "style": "docstring",
+      "decl": "def add_user():",
+      "variants": [
+        "添加用户 :return:",
+        "添加用户"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/main.py",
+      "symbol": "app_hello",
+      "comment": "测试页 :return:",
+      "style": "docstring",
+      "decl": "def app_hello():",
+      "variants": [
+        "测试页 :return:",
+        "测试页"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/service/domain_service.py",
+      "symbol": "auto_import_from_domain_batch_async",
+      "comment": "自动批量导入子域名证书 :param rows:",
+      "style": "docstring",
+      "decl": "def auto_import_from_domain_batch_async(rows, user_id):",
+      "variants": [
+        "自动批量导入子域名证书 :param rows:",
+        "自动批量导入子域名证书"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/domain_info_api.py",
+      "symbol": "auto_import_subdomain_by_ids",
+      "comment": "批量导入子域证书 @since v1.6.30",
+      "style": "docstring",
+      "decl": "def auto_import_subdomain_by_ids():",
+      "variants": [
+        "批量导入子域证书 @since v1.6.30"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/main.py",
+      "symbol": "before_request",
+      "comment": "跨域请求会出现options，直接返回即可",
+      "style": "docstring",
+      "decl": "def before_request():",
+      "variants": [
+        "跨域请求会出现options，直接返回即可",
+        "跨域请求会出现options"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/service/domain_service.py",
+      "symbol": "check_permission_and_get_row",
+      "comment": "权限检查 :param domain_id:",
+      "style": "docstring",
+      "decl": "def check_permission_and_get_row(domain_id, user_id):",
+      "variants": [
+        "权限检查 :param domain_id:",
+        "权限检查"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/address_api.py",
+      "symbol": "delete_address_by_id",
+      "comment": "删除主机地址 :return:",
+      "style": "docstring",
+      "decl": "def delete_address_by_id():",
+      "variants": [
+        "删除主机地址 :return:",
+        "删除主机地址"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/address_api.py",
+      "symbol": "delete_address_by_ids",
+      "comment": "批量删除主机地址 :return:",
+      "style": "docstring",
+      "decl": "def delete_address_by_ids():",
+      "variants": [
+        "批量删除主机地址 :return:",
+        "批量删除主机地址"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/deploy_cert_api.py",
+      "symbol": "delete_by_deploy_cert_id",
+      "comment": "删除详情 :return:",
+      "style": "docstring",
+      "decl": "def delete_by_deploy_cert_id():",
+      "variants": [
+        "删除详情 :return:",
+        "删除详情"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/deploy_cert_api.py",
+      "symbol": "delete_by_deploy_cert_ids",
+      "comment": "批量删除详情 :return:",
+      "style": "docstring",
+      "decl": "def delete_by_deploy_cert_ids():",
+      "variants": [
+        "批量删除详情 :return:",
+        "批量删除详情"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/domain_info_api.py",
+      "symbol": "delete_domain_info_by_ids",
+      "comment": "批量删除",
+      "style": "docstring",
+      "decl": "def delete_domain_info_by_ids():",
+      "variants": [
+        "批量删除"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/host_api.py",
+      "symbol": "delete_host_by_id",
+      "comment": "移除主机 :return:",
+      "style": "docstring",
+      "decl": "def delete_host_by_id():",
+      "variants": [
+        "移除主机 :return:",
+        "移除主机"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/monitor_api.py",
+      "symbol": "delete_monitor_by_ids",
+      "comment": "批量删除 @since v1.6.12",
+      "style": "docstring",
+      "decl": "def delete_monitor_by_ids():",
+      "variants": [
+        "批量删除 @since v1.6.12"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/notify_api.py",
+      "symbol": "delete_notify_by_id",
+      "comment": "删除用户通知配置 :return:",
+      "style": "docstring",
+      "decl": "def delete_notify_by_id():",
+      "variants": [
+        "删除用户通知配置 :return:",
+        "删除用户通知配置"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/tag_api.py",
+      "symbol": "delete_tag_by_id",
+      "comment": "删除标签 :return:",
+      "style": "docstring",
+      "decl": "def delete_tag_by_id():",
+      "variants": [
+        "删除标签 :return:",
+        "删除标签"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/user_api.py",
+      "symbol": "delete_user",
+      "comment": "删除用户账号 :return:",
+      "style": "docstring",
+      "decl": "def delete_user():",
+      "variants": [
+        "删除用户账号 :return:",
+        "删除用户账号"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/issue_certificate_api.py",
+      "symbol": "deploy_certificate_file",
+      "comment": "ssh方式部署证书文件 :return:",
+      "style": "docstring",
+      "decl": "def deploy_certificate_file():",
+      "variants": [
+        "ssh方式部署证书文件 :return:",
+        "ssh方式部署证书文件"
+      ],
+      "sameNameCount": 2
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/issue_certificate_api.py",
+      "symbol": "deploy_verify_file",
+      "comment": "部署验证文件 :return:",
+      "style": "docstring",
+      "decl": "def deploy_verify_file():",
+      "variants": [
+        "部署验证文件 :return:",
+        "部署验证文件"
+      ],
+      "sameNameCount": 2
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/domain_api.py",
+      "symbol": "domain_relation_group",
+      "comment": "分组关联域名 :return:",
+      "style": "docstring",
+      "decl": "def domain_relation_group():",
+      "variants": [
+        "分组关联域名 :return:",
+        "分组关联域名"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "go-admin-team/go-admin",
+      "commit": "e42105e7cd61755f0d21d329e0e69dca7f088a17",
+      "license": "MIT",
+      "lang": "go",
+      "path": "app/admin/router/router.go",
+      "symbol": "examplesCheckRoleRouter",
+      "comment": "需要认证的路由示例",
+      "style": "line",
+      "decl": "func examplesCheckRoleRouter(r *gin.Engine, authMiddleware *jwtauth.GinJWTMiddleware) {",
+      "variants": [
+        "需要认证的路由示例"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "go-admin-team/go-admin",
+      "commit": "e42105e7cd61755f0d21d329e0e69dca7f088a17",
+      "license": "MIT",
+      "lang": "go",
+      "path": "app/admin/router/router.go",
+      "symbol": "examplesNoCheckRoleRouter",
+      "comment": "无需认证的路由示例",
+      "style": "line",
+      "decl": "func examplesNoCheckRoleRouter(r *gin.Engine) {",
+      "variants": [
+        "无需认证的路由示例"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/migrate/history/migrate_102_to_103.py",
+      "symbol": "execute_migrate",
+      "comment": "版本升级 1.0.2 => 1.0.3 :return:",
+      "style": "docstring",
+      "decl": "def execute_migrate():",
+      "variants": [
+        "版本升级 1.0.2 => 1.0.3 :return:",
+        "版本升级 1.0.2 => 1.0.3"
+      ],
+      "sameNameCount": 31
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/model/domain_model.py",
+      "symbol": "expire_date",
+      "comment": "实时ssl总天数 :return:",
+      "style": "docstring",
+      "decl": "def expire_date(self):",
+      "variants": [
+        "实时ssl总天数 :return:",
+        "实时ssl总天数"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/model/domain_model.py",
+      "symbol": "expire_status",
+      "comment": "过期状态 7 天以上 健康",
+      "style": "docstring",
+      "decl": "def expire_status(self):",
+      "variants": [
+        "过期状态 7 天以上 健康"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/service/domain_info_service.py",
+      "symbol": "export_domain_to_file",
+      "comment": "导出域名到文件 :param ext: 导出格式",
+      "style": "docstring",
+      "decl": "def export_domain_to_file(rows, ext):",
+      "variants": [
+        "导出域名到文件 :param ext: 导出格式",
+        "导出域名到文件"
+      ],
+      "sameNameCount": 2
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/monitor_api.py",
+      "symbol": "export_monitor_file",
+      "comment": "导出监控文件 csv格式",
+      "style": "docstring",
+      "decl": "def export_monitor_file():",
+      "variants": [
+        "导出监控文件 csv格式"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/address_api.py",
+      "symbol": "get_address_by_id",
+      "comment": "获取主机地址 :return:",
+      "style": "docstring",
+      "decl": "def get_address_by_id():",
+      "variants": [
+        "获取主机地址 :return:",
+        "获取主机地址"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/address_api.py",
+      "symbol": "get_address_list_by_domain_id",
+      "comment": "通过域名获取关联的主机地址列表 :return:",
+      "style": "docstring",
+      "decl": "def get_address_list_by_domain_id():",
+      "variants": [
+        "通过域名获取关联的主机地址列表 :return:",
+        "通过域名获取关联的主机地址列表"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/domain_api.py",
+      "symbol": "get_all_domain_list_of_user",
+      "comment": "获取用户的所有域名数据 :return:",
+      "style": "docstring",
+      "decl": "def get_all_domain_list_of_user():",
+      "variants": [
+        "获取用户的所有域名数据 :return:",
+        "获取用户的所有域名数据"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/system_api.py",
+      "symbol": "get_all_system_config",
+      "comment": "获取所有配置项 :return:",
+      "style": "docstring",
+      "decl": "def get_all_system_config():",
+      "variants": [
+        "获取所有配置项 :return:",
+        "获取所有配置项"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/tag_api.py",
+      "symbol": "get_all_tag_list",
+      "comment": "获取所有标签，用于筛选器 :return:",
+      "style": "docstring",
+      "decl": "def get_all_tag_list():",
+      "variants": [
+        "获取所有标签，用于筛选器 :return:",
+        "获取所有标签"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/issue_certificate_api.py",
+      "symbol": "get_allow_commands",
+      "comment": "命令白名单 :return:",
+      "style": "docstring",
+      "decl": "def get_allow_commands():",
+      "variants": [
+        "命令白名单 :return:",
+        "命令白名单"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/cert_api.py",
+      "symbol": "get_cert_information",
+      "comment": "获取域名证书信息 :return:",
+      "style": "docstring",
+      "decl": "def get_cert_information():",
+      "variants": [
+        "获取域名证书信息 :return:",
+        "获取域名证书信息"
+      ],
+      "sameNameCount": 2
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/deploy_cert_api.py",
+      "symbol": "get_deploy_cert_by_id",
+      "comment": "获取详情 :return:",
+      "style": "docstring",
+      "decl": "def get_deploy_cert_by_id():",
+      "variants": [
+        "获取详情 :return:",
+        "获取详情"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/certificate_api.py",
+      "symbol": "get_deploy_webhook",
+      "comment": "获取配置部署托管证书 @since v1.6.52",
+      "style": "docstring",
+      "decl": "def get_deploy_webhook():",
+      "variants": [
+        "获取配置部署托管证书 @since v1.6.52"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/domain_api.py",
+      "symbol": "get_domain_group_filter",
+      "comment": "获取证书分组筛选器 :return:",
+      "style": "docstring",
+      "decl": "def get_domain_group_filter():",
+      "variants": [
+        "获取证书分组筛选器 :return:",
+        "获取证书分组筛选器"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/domain_info_api.py",
+      "symbol": "get_domain_info_group_filter",
+      "comment": "获取域名分组筛选器 :return:",
+      "style": "docstring",
+      "decl": "def get_domain_info_group_filter():",
+      "variants": [
+        "获取域名分组筛选器 :return:",
+        "获取域名分组筛选器"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/service/group_service.py",
+      "symbol": "get_group_map",
+      "comment": "获取分组映射 :param lst: List[str]",
+      "style": "docstring",
+      "decl": "def get_group_map(lst, user_id):",
+      "variants": [
+        "获取分组映射 :param lst: List[str]",
+        "获取分组映射"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/host_api.py",
+      "symbol": "get_host_by_id",
+      "comment": "获取主机 :return:",
+      "style": "docstring",
+      "decl": "def get_host_by_id():",
+      "variants": [
+        "获取主机 :return:",
+        "获取主机"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/host_api.py",
+      "symbol": "get_host_list",
+      "comment": "主机列表 :return:",
+      "style": "docstring",
+      "decl": "def get_host_list():",
+      "variants": [
+        "主机列表 :return:",
+        "主机列表"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/ip_api.py",
+      "symbol": "get_ip_info",
+      "comment": "获取ip地址的信息 :return:",
+      "style": "docstring",
+      "decl": "def get_ip_info():",
+      "variants": [
+        "获取ip地址的信息 :return:",
+        "获取ip地址的信息"
+      ],
+      "sameNameCount": 2
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/issue_certificate_api.py",
+      "symbol": "get_issue_certificate_options",
+      "comment": "获取常量 :return:",
+      "style": "docstring",
+      "decl": "def get_issue_certificate_options():",
+      "variants": [
+        "获取常量 :return:",
+        "获取常量"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/log_scheduler_api.py",
+      "symbol": "get_log_scheduler_list",
+      "comment": "获取调度日志列表 :return:",
+      "style": "docstring",
+      "decl": "def get_log_scheduler_list():",
+      "variants": [
+        "获取调度日志列表 :return:",
+        "获取调度日志列表"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/migrate/migrate_common.py",
+      "symbol": "get_migrator",
+      "comment": "不同的数据库，迁移方法不一样 :param db:",
+      "style": "docstring",
+      "decl": "def get_migrator(db):",
+      "variants": [
+        "不同的数据库，迁移方法不一样 :param db:",
+        "不同的数据库"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/service/group_service.py",
+      "symbol": "get_or_create_group_map",
+      "comment": "获取分组名和分组id映射关系，如果不存在则导入 :param lst: List[str] 分组列表",
+      "style": "docstring",
+      "decl": "def get_or_create_group_map(lst, user_id):",
+      "variants": [
+        "获取分组名和分组id映射关系，如果不存在则导入 :param lst: List[str] 分组列表",
+        "获取分组名和分组id映射关系"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/domain_info_api.py",
+      "symbol": "get_sub_domain_cert",
+      "comment": "获取子域证书列表 :return:",
+      "style": "docstring",
+      "decl": "def get_sub_domain_cert():",
+      "variants": [
+        "获取子域证书列表 :return:",
+        "获取子域证书列表"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/system_api.py",
+      "symbol": "get_system_version",
+      "comment": "获取当前应用版本号 :return:",
+      "style": "docstring",
+      "decl": "def get_system_version():",
+      "variants": [
+        "获取当前应用版本号 :return:",
+        "获取当前应用版本号"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/tag_api.py",
+      "symbol": "get_tag_list",
+      "comment": "获取所有标签，用于列表显示 :return:",
+      "style": "docstring",
+      "decl": "def get_tag_list():",
+      "variants": [
+        "获取所有标签，用于列表显示 :return:",
+        "获取所有标签"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/user_api.py",
+      "symbol": "get_user_info",
+      "comment": "获取当前用户信息 :return:",
+      "style": "docstring",
+      "decl": "def get_user_info():",
+      "variants": [
+        "获取当前用户信息 :return:",
+        "获取当前用户信息"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/user_api.py",
+      "symbol": "get_user_list",
+      "comment": "获取用户列表 :return:",
+      "style": "docstring",
+      "decl": "def get_user_list():",
+      "variants": [
+        "获取用户列表 :return:",
+        "获取用户列表"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/user_api.py",
+      "symbol": "get_user_list_by_name",
+      "comment": "精确搜索，普通用户端可用",
+      "style": "docstring",
+      "decl": "def get_user_list_by_name():",
+      "variants": [
+        "精确搜索，普通用户端可用",
+        "精确搜索"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/whois_api.py",
+      "symbol": "get_whois_raw",
+      "comment": "获取域名信息原始 :return:",
+      "style": "docstring",
+      "decl": "def get_whois_raw():",
+      "variants": [
+        "获取域名信息原始 :return:",
+        "获取域名信息原始"
+      ],
+      "sameNameCount": 2
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/deploy_cert_api.py",
+      "symbol": "handle_deploy_cert",
+      "comment": "部署证书 @since v1.6.20",
+      "style": "docstring",
+      "decl": "def handle_deploy_cert():",
+      "variants": [
+        "部署证书 @since v1.6.20"
+      ],
+      "sameNameCount": 2
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/notify_api.py",
+      "symbol": "handle_notify_by_event_id",
+      "comment": "触发用户的某一类通知操作 :return:",
+      "style": "docstring",
+      "decl": "def handle_notify_by_event_id():",
+      "variants": [
+        "触发用户的某一类通知操作 :return:",
+        "触发用户的某一类通知操作"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/notify_api.py",
+      "symbol": "handle_test_notify_by_id",
+      "comment": "测试通知配置 :return:",
+      "style": "docstring",
+      "decl": "def handle_test_notify_by_id():",
+      "variants": [
+        "测试通知配置 :return:",
+        "测试通知配置"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/service/domain_service.py",
+      "symbol": "has_edit_permission",
+      "comment": "编辑权限",
+      "style": "docstring",
+      "decl": "def has_edit_permission(domain_row, user_id):",
+      "variants": [
+        "编辑权限"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/service/domain_service.py",
+      "symbol": "has_read_permission",
+      "comment": "读取权限",
+      "style": "docstring",
+      "decl": "def has_read_permission(domain_row, user_id):",
+      "variants": [
+        "读取权限"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/domain_api.py",
+      "symbol": "import_domain_from_file",
+      "comment": "从文件导入域名 支持 txt 和 csv格式",
+      "style": "docstring",
+      "decl": "def import_domain_from_file():",
+      "variants": [
+        "从文件导入域名 支持 txt 和 csv格式"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/domain_info_api.py",
+      "symbol": "import_domain_info_from_file",
+      "comment": "从文件导入域名 支持格式: txt、xlsx、csv",
+      "style": "docstring",
+      "decl": "def import_domain_info_from_file():",
+      "variants": [
+        "从文件导入域名 支持格式: txt、xlsx、csv",
+        "从文件导入域名 支持格式"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/monitor_api.py",
+      "symbol": "import_monitor_from_file",
+      "comment": "从文件导入域名 支持 xlsx 和 csv格式",
+      "style": "docstring",
+      "decl": "def import_monitor_from_file():",
+      "variants": [
+        "从文件导入域名 支持 xlsx 和 csv格式"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "go-admin-team/go-admin",
+      "commit": "e42105e7cd61755f0d21d329e0e69dca7f088a17",
+      "license": "MIT",
+      "lang": "go",
+      "path": "cmd/migrate/migration/version/1786700000000_demo_product.go",
+      "symbol": "init",
+      "comment": "注意：已执行过的迁移文件不可再修改——版本号已入表，改动不会重跑。 需要调整时新建一个迁移。",
+      "style": "line",
+      "decl": "func init() {",
+      "variants": [
+        "注意：已执行过的迁移文件不可再修改——版本号已入表，改动不会重跑。 需要调整时新建一个迁移。",
+        "注意"
+      ],
+      "sameNameCount": 5
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/model/database.py",
+      "symbol": "init_database",
+      "comment": "初始化数据表 :return:",
+      "style": "docstring",
+      "decl": "def init_database():",
+      "variants": [
+        "初始化数据表 :return:",
+        "初始化数据表"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/model/system_model.py",
+      "symbol": "init_table_data",
+      "comment": "系统配置初始值 :return:",
+      "style": "docstring",
+      "decl": "def init_table_data():",
+      "variants": [
+        "系统配置初始值 :return:",
+        "系统配置初始值"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/registry.py",
+      "symbol": "interface_info",
+      "comment": "返回单个接口的完整元数据。",
+      "style": "docstring",
+      "decl": "def interface_info(name: str) -> Dict:",
+      "variants": [
+        "返回单个接口的完整元数据。",
+        "返回单个接口的完整元数据"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/model/user_model.py",
+      "symbol": "is_default_password",
+      "comment": "管理员是否使用系统给定的默认密码 :return:",
+      "style": "docstring",
+      "decl": "def is_default_password(self):",
+      "variants": [
+        "管理员是否使用系统给定的默认密码 :return:",
+        "管理员是否使用系统给定的默认密码"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/registry.py",
+      "symbol": "list_categories",
+      "comment": "列出全部类目及其接口数量。",
+      "style": "docstring",
+      "decl": "def list_categories() -> pd.DataFrame:",
+      "variants": [
+        "列出全部类目及其接口数量。",
+        "列出全部类目及其接口数量"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/service/domain_service.py",
+      "symbol": "load_address_count",
+      "comment": "加载主机数量字段 :param lst: List",
+      "style": "docstring",
+      "decl": "def load_address_count(lst):",
+      "variants": [
+        "加载主机数量字段 :param lst: List",
+        "加载主机数量字段"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/auth_api.py",
+      "symbol": "login",
+      "comment": "用户登录",
+      "style": "docstring",
+      "decl": "def login():",
+      "variants": [
+        "用户登录"
+      ],
+      "sameNameCount": 2
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/auth_api.py",
+      "symbol": "login_by_email",
+      "comment": "邮箱登录",
+      "style": "docstring",
+      "decl": "def login_by_email():",
+      "variants": [
+        "邮箱登录"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/main.py",
+      "symbol": "mobile",
+      "comment": "移动端首页 :return:",
+      "style": "docstring",
+      "decl": "def mobile():",
+      "variants": [
+        "移动端首页 :return:",
+        "移动端首页"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/service/auth_service.py",
+      "symbol": "permission",
+      "comment": "权限控制 :param role:",
+      "style": "docstring",
+      "decl": "def permission(role=RoleEnum.ADMIN):",
+      "variants": [
+        "权限控制 :param role:",
+        "权限控制"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/service/auth_service.py",
+      "symbol": "register",
+      "comment": "用户注册 :param username: 用户名",
+      "style": "docstring",
+      "decl": "def register(username, password, password_repeat):",
+      "variants": [
+        "用户注册 :param username: 用户名",
+        "用户注册"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "go-admin-team/go-admin",
+      "commit": "e42105e7cd61755f0d21d329e0e69dca7f088a17",
+      "license": "MIT",
+      "lang": "go",
+      "path": "app/demo/router/demo_product.go",
+      "symbol": "registerDemoProductRouter",
+      "comment": "仅当业务逻辑超出单表 CRUD（如跨表事务、外部调用、复杂校验）时，才需要 自行编写 Handler 与 Service，写法参照 app/admin/apis/sys_post.go。",
+      "style": "line",
+      "decl": "func registerDemoProductRouter(v1 *gin.RouterGroup, authMiddleware *jwt.GinJWTMiddleware) {",
+      "variants": [
+        "仅当业务逻辑超出单表 CRUD（如跨表事务、外部调用、复杂校验）时，才需要 自行编写 Handler 与 Service，写法参照 app/admin/apis/sys_post.go。",
+        "仅当业务逻辑超出单表 CRUD"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/issue_certificate_api.py",
+      "symbol": "renew_issue_certificate_by_id",
+      "comment": "手动续期SSL证书 :return:",
+      "style": "docstring",
+      "decl": "def renew_issue_certificate_by_id():",
+      "variants": [
+        "手动续期SSL证书 :return:",
+        "手动续期SSL证书"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/user_api.py",
+      "symbol": "reset_user_password",
+      "comment": "重置用户密码 :return:",
+      "style": "docstring",
+      "decl": "def reset_user_password():",
+      "variants": [
+        "重置用户密码 :return:",
+        "重置用户密码"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/registry.py",
+      "symbol": "search",
+      "comment": "按自然语言检索 AKShare 接口。",
+      "style": "docstring",
+      "decl": "def search(",
+      "variants": [
+        "按自然语言检索 AKShare 接口。",
+        "按自然语言检索 AKShare 接口"
+      ],
+      "sameNameCount": 3
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/auth_api.py",
+      "symbol": "send_code",
+      "comment": "发送验证码",
+      "style": "docstring",
+      "decl": "def send_code():",
+      "variants": [
+        "发送验证码"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_ask_bid_em.py",
+      "symbol": "stock_bid_ask_em",
+      "comment": "东方财富-行情报价 https://quote.eastmoney.com/sz000001.html",
+      "style": "docstring",
+      "decl": "def stock_bid_ask_em(symbol: str = \"000001\") -> pd.DataFrame:",
+      "variants": [
+        "东方财富-行情报价 https://quote.eastmoney.com/sz000001.html",
+        "东方财富-行情报价 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_board_concept_em.py",
+      "symbol": "stock_board_concept_hist_em",
+      "comment": "东方财富网-沪深板块-概念板块-历史行情 https://quote.eastmoney.com/bk/90.BK0715.html",
+      "style": "docstring",
+      "decl": "def stock_board_concept_hist_em(",
+      "variants": [
+        "东方财富网-沪深板块-概念板块-历史行情 https://quote.eastmoney.com/bk/90.BK0715.html",
+        "东方财富网-沪深板块-概念板块-历史行情 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_board_concept_em.py",
+      "symbol": "stock_board_concept_hist_min_em",
+      "comment": "东方财富网-沪深板块-概念板块-分时历史行情 https://quote.eastmoney.com/bk/90.BK0715.html",
+      "style": "docstring",
+      "decl": "def stock_board_concept_hist_min_em(",
+      "variants": [
+        "东方财富网-沪深板块-概念板块-分时历史行情 https://quote.eastmoney.com/bk/90.BK0715.html",
+        "东方财富网-沪深板块-概念板块-分时历史行情 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_board_concept_em.py",
+      "symbol": "stock_board_concept_spot_em",
+      "comment": "东方财富网-行情中心-沪深京板块-概念板块-实时行情 https://quote.eastmoney.com/bk/90.BK0818.html",
+      "style": "docstring",
+      "decl": "def stock_board_concept_spot_em(symbol: str = \"可燃冰\") -> pd.DataFrame:",
+      "variants": [
+        "东方财富网-行情中心-沪深京板块-概念板块-实时行情 https://quote.eastmoney.com/bk/90.BK0818.html",
+        "东方财富网-行情中心-沪深京板块-概念板块-实时行情 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_board_industry_em.py",
+      "symbol": "stock_board_industry_cons_em",
+      "comment": "东方财富网-沪深板块-行业板块-板块成份 https://data.eastmoney.com/bkzj/BK1027.html",
+      "style": "docstring",
+      "decl": "def stock_board_industry_cons_em(symbol: str = \"小金属\") -> pd.DataFrame:",
+      "variants": [
+        "东方财富网-沪深板块-行业板块-板块成份 https://data.eastmoney.com/bkzj/BK1027.html",
+        "东方财富网-沪深板块-行业板块-板块成份 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_board_industry_em.py",
+      "symbol": "stock_board_industry_hist_em",
+      "comment": "东方财富网-沪深板块-行业板块-历史行情 https://quote.eastmoney.com/bk/90.BK1027.html",
+      "style": "docstring",
+      "decl": "def stock_board_industry_hist_em(",
+      "variants": [
+        "东方财富网-沪深板块-行业板块-历史行情 https://quote.eastmoney.com/bk/90.BK1027.html",
+        "东方财富网-沪深板块-行业板块-历史行情 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_board_industry_em.py",
+      "symbol": "stock_board_industry_hist_min_em",
+      "comment": "东方财富网-沪深板块-行业板块-分时历史行情 https://quote.eastmoney.com/bk/90.BK1027.html",
+      "style": "docstring",
+      "decl": "def stock_board_industry_hist_min_em(",
+      "variants": [
+        "东方财富网-沪深板块-行业板块-分时历史行情 https://quote.eastmoney.com/bk/90.BK1027.html",
+        "东方财富网-沪深板块-行业板块-分时历史行情 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_board_industry_em.py",
+      "symbol": "stock_board_industry_spot_em",
+      "comment": "东方财富网-沪深板块-行业板块-实时行情 https://quote.eastmoney.com/bk/90.BK1027.html",
+      "style": "docstring",
+      "decl": "def stock_board_industry_spot_em(symbol: str = \"小金属\") -> pd.DataFrame:",
+      "variants": [
+        "东方财富网-沪深板块-行业板块-实时行情 https://quote.eastmoney.com/bk/90.BK1027.html",
+        "东方财富网-沪深板块-行业板块-实时行情 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_fund_em.py",
+      "symbol": "stock_concept_fund_flow_hist",
+      "comment": "东方财富网-数据中心-资金流向-概念资金流-概念历史资金流 https://data.eastmoney.com/bkzj/BK0574.html",
+      "style": "docstring",
+      "decl": "def stock_concept_fund_flow_hist(symbol: str = \"数据要素\") -> pd.DataFrame:",
+      "variants": [
+        "东方财富网-数据中心-资金流向-概念资金流-概念历史资金流 https://data.eastmoney.com/bkzj/BK0574.html",
+        "东方财富网-数据中心-资金流向-概念资金流-概念历史资金流 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_profile_em.py",
+      "symbol": "stock_hk_dividend_payout_em",
+      "comment": "东方财富-港股-核心必读-分红派息 https://emweb.securities.eastmoney.com/PC_HKF10/pages/home/index.html?code=03900&type=web&color=w#/CoreReading",
+      "style": "docstring",
+      "decl": "def stock_hk_dividend_payout_em(symbol: str = \"03900\") -> pd.DataFrame:",
+      "variants": [
+        "东方财富-港股-核心必读-分红派息 https://emweb.securities.eastmoney.com/PC_HKF10/pages/home/index.html?code=03900&type=web&color=w#/CoreReading",
+        "东方财富-港股-核心必读-分红派息 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_hk_famous.py",
+      "symbol": "stock_hk_famous_spot_em",
+      "comment": "东方财富网-行情中心-港股市场-知名港股 https://quote.eastmoney.com/center/gridlist.html#hk_wellknown",
+      "style": "docstring",
+      "decl": "def stock_hk_famous_spot_em() -> pd.DataFrame:",
+      "variants": [
+        "东方财富网-行情中心-港股市场-知名港股 https://quote.eastmoney.com/center/gridlist.html#hk_wellknown",
+        "东方财富网-行情中心-港股市场-知名港股 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_profile_em.py",
+      "symbol": "stock_hk_financial_indicator_em",
+      "comment": "东方财富-港股-核心必读-最新指标 https://emweb.securities.eastmoney.com/PC_HKF10/pages/home/index.html?code=03900&type=web&color=w#/CoreReading",
+      "style": "docstring",
+      "decl": "def stock_hk_financial_indicator_em(symbol: str = \"03900\") -> pd.DataFrame:",
+      "variants": [
+        "东方财富-港股-核心必读-最新指标 https://emweb.securities.eastmoney.com/PC_HKF10/pages/home/index.html?code=03900&type=web&color=w#/CoreReading",
+        "东方财富-港股-核心必读-最新指标 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_hold_control_em.py",
+      "symbol": "stock_hold_management_detail_em",
+      "comment": "东方财富网-数据中心-特色数据-高管持股-董监高及相关人员持股变动明细 https://data.eastmoney.com/executive/list.html",
+      "style": "docstring",
+      "decl": "def stock_hold_management_detail_em() -> pd.DataFrame:",
+      "variants": [
+        "东方财富网-数据中心-特色数据-高管持股-董监高及相关人员持股变动明细 https://data.eastmoney.com/executive/list.html",
+        "东方财富网-数据中心-特色数据-高管持股-董监高及相关人员持股变动明细 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_hot_up_em.py",
+      "symbol": "stock_hot_up_em",
+      "comment": "东方财富-个股人气榜-飙升榜 https://guba.eastmoney.com/rank/",
+      "style": "docstring",
+      "decl": "def stock_hot_up_em() -> pd.DataFrame:",
+      "variants": [
+        "东方财富-个股人气榜-飙升榜 https://guba.eastmoney.com/rank/",
+        "东方财富-个股人气榜-飙升榜 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_fund_em.py",
+      "symbol": "stock_individual_fund_flow",
+      "comment": "东方财富网-数据中心-资金流向-个股 https://data.eastmoney.com/zjlx/detail.html",
+      "style": "docstring",
+      "decl": "def stock_individual_fund_flow(",
+      "variants": [
+        "东方财富网-数据中心-资金流向-个股 https://data.eastmoney.com/zjlx/detail.html",
+        "东方财富网-数据中心-资金流向-个股 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_fund_em.py",
+      "symbol": "stock_individual_fund_flow_rank",
+      "comment": "东方财富网-数据中心-资金流向-排名 https://data.eastmoney.com/zjlx/detail.html",
+      "style": "docstring",
+      "decl": "def stock_individual_fund_flow_rank(indicator: str = \"5日\") -> pd.DataFrame:",
+      "variants": [
+        "东方财富网-数据中心-资金流向-排名 https://data.eastmoney.com/zjlx/detail.html",
+        "东方财富网-数据中心-资金流向-排名 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_info_em.py",
+      "symbol": "stock_individual_info_em",
+      "comment": "东方财富-个股-股票信息 https://quote.eastmoney.com/concept/sh603777.html?from=classic",
+      "style": "docstring",
+      "decl": "def stock_individual_info_em(",
+      "variants": [
+        "东方财富-个股-股票信息 https://quote.eastmoney.com/concept/sh603777.html?from=classic",
+        "东方财富-个股-股票信息 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_xq.py",
+      "symbol": "stock_individual_spot_xq",
+      "comment": "雪球-行情中心-个股 https://xueqiu.com/S/SH600000",
+      "style": "docstring",
+      "decl": "def stock_individual_spot_xq(",
+      "variants": [
+        "雪球-行情中心-个股 https://xueqiu.com/S/SH600000",
+        "雪球-行情中心-个股 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_info.py",
+      "symbol": "stock_info_a_code_name",
+      "comment": "沪深京 A 股列表 :return: 沪深京 A 股数据",
+      "style": "docstring",
+      "decl": "def stock_info_a_code_name() -> pd.DataFrame:",
+      "variants": [
+        "沪深京 A 股列表 :return: 沪深京 A 股数据",
+        "沪深京 A 股列表"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_info.py",
+      "symbol": "stock_info_bj_name_code",
+      "comment": "北京证券交易所-股票列表 https://www.bse.cn/nq/listedcompany.html",
+      "style": "docstring",
+      "decl": "def stock_info_bj_name_code() -> pd.DataFrame:",
+      "variants": [
+        "北京证券交易所-股票列表 https://www.bse.cn/nq/listedcompany.html",
+        "北京证券交易所-股票列表 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_intraday_em.py",
+      "symbol": "stock_intraday_em",
+      "comment": "东方财富-分时数据 https://quote.eastmoney.com/f1.html?newcode=0.000001",
+      "style": "docstring",
+      "decl": "def stock_intraday_em(symbol: str = \"000001\") -> pd.DataFrame:",
+      "variants": [
+        "东方财富-分时数据 https://quote.eastmoney.com/f1.html?newcode=0.000001",
+        "东方财富-分时数据 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_weibo_nlp.py",
+      "symbol": "stock_js_weibo_report",
+      "comment": "金十数据中心-实时监控-微博舆情报告 https://datacenter.jin10.com/market",
+      "style": "docstring",
+      "decl": "def stock_js_weibo_report(time_period: str = \"CNHOUR12\") -> pd.DataFrame:",
+      "variants": [
+        "金十数据中心-实时监控-微博舆情报告 https://datacenter.jin10.com/market",
+        "金十数据中心-实时监控-微博舆情报告 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_fund_em.py",
+      "symbol": "stock_main_fund_flow",
+      "comment": "东方财富网-数据中心-资金流向-主力净流入排名 https://data.eastmoney.com/zjlx/list.html",
+      "style": "docstring",
+      "decl": "def stock_main_fund_flow(symbol: str = \"全部股票\") -> pd.DataFrame:",
+      "variants": [
+        "东方财富网-数据中心-资金流向-主力净流入排名 https://data.eastmoney.com/zjlx/list.html",
+        "东方财富网-数据中心-资金流向-主力净流入排名 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_fund_em.py",
+      "symbol": "stock_market_fund_flow",
+      "comment": "东方财富网-数据中心-资金流向-大盘 https://data.eastmoney.com/zjlx/dpzjlx.html",
+      "style": "docstring",
+      "decl": "def stock_market_fund_flow() -> pd.DataFrame:",
+      "variants": [
+        "东方财富网-数据中心-资金流向-大盘 https://data.eastmoney.com/zjlx/dpzjlx.html",
+        "东方财富网-数据中心-资金流向-大盘 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_news_cx.py",
+      "symbol": "stock_news_main_cx",
+      "comment": "财新网-财新数据通 https://cxdata.caixin.com/pc/",
+      "style": "docstring",
+      "decl": "def stock_news_main_cx() -> pd.DataFrame:",
+      "variants": [
+        "财新网-财新数据通 https://cxdata.caixin.com/pc/",
+        "财新网-财新数据通 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_us_js.py",
+      "symbol": "stock_price_js",
+      "comment": "美股目标价 or 港股目标价 https://www.ushknews.com/report.html",
+      "style": "docstring",
+      "decl": "def stock_price_js(symbol: str = \"us\") -> pd.DataFrame:",
+      "variants": [
+        "美股目标价 or 港股目标价 https://www.ushknews.com/report.html",
+        "美股目标价 or 港股目标价 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_fund_hold.py",
+      "symbol": "stock_report_fund_hold",
+      "comment": "东方财富网-数据中心-主力数据-基金持仓 http://data.eastmoney.com/zlsj/2020-12-31-1-2.html",
+      "style": "docstring",
+      "decl": "def stock_report_fund_hold(",
+      "variants": [
+        "东方财富网-数据中心-主力数据-基金持仓 http://data.eastmoney.com/zlsj/2020-12-31-1-2.html",
+        "东方财富网-数据中心-主力数据-基金持仓 http"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_fund_hold.py",
+      "symbol": "stock_report_fund_hold_detail",
+      "comment": "东方财富网-数据中心-主力数据-基金持仓-明细 http://data.eastmoney.com/zlsj/ccjj/2020-12-31-008286.html",
+      "style": "docstring",
+      "decl": "def stock_report_fund_hold_detail(",
+      "variants": [
+        "东方财富网-数据中心-主力数据-基金持仓-明细 http://data.eastmoney.com/zlsj/ccjj/2020-12-31-008286.html",
+        "东方财富网-数据中心-主力数据-基金持仓-明细 http"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_repurchase_em.py",
+      "symbol": "stock_repurchase_em",
+      "comment": "东方财富网-数据中心-股票回购-股票回购数据 https://data.eastmoney.com/gphg/hglist.html",
+      "style": "docstring",
+      "decl": "def stock_repurchase_em() -> pd.DataFrame:",
+      "variants": [
+        "东方财富网-数据中心-股票回购-股票回购数据 https://data.eastmoney.com/gphg/hglist.html",
+        "东方财富网-数据中心-股票回购-股票回购数据 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_fund_em.py",
+      "symbol": "stock_sector_fund_flow_hist",
+      "comment": "东方财富网-数据中心-资金流向-行业资金流-行业历史资金流 https://data.eastmoney.com/bkzj/BK1034.html",
+      "style": "docstring",
+      "decl": "def stock_sector_fund_flow_hist(symbol: str = \"汽车服务\") -> pd.DataFrame:",
+      "variants": [
+        "东方财富网-数据中心-资金流向-行业资金流-行业历史资金流 https://data.eastmoney.com/bkzj/BK1034.html",
+        "东方财富网-数据中心-资金流向-行业资金流-行业历史资金流 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_fund_em.py",
+      "symbol": "stock_sector_fund_flow_rank",
+      "comment": "东方财富网-数据中心-资金流向-板块资金流-排名 https://data.eastmoney.com/bkzj/hy.html",
+      "style": "docstring",
+      "decl": "def stock_sector_fund_flow_rank(",
+      "variants": [
+        "东方财富网-数据中心-资金流向-板块资金流-排名 https://data.eastmoney.com/bkzj/hy.html",
+        "东方财富网-数据中心-资金流向-板块资金流-排名 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_fund_em.py",
+      "symbol": "stock_sector_fund_flow_summary",
+      "comment": "东方财富网-数据中心-资金流向-行业资金流-xx行业个股资金流 https://data.eastmoney.com/bkzj/BK1034.html",
+      "style": "docstring",
+      "decl": "def stock_sector_fund_flow_summary(",
+      "variants": [
+        "东方财富网-数据中心-资金流向-行业资金流-xx行业个股资金流 https://data.eastmoney.com/bkzj/BK1034.html",
+        "东方财富网-数据中心-资金流向-行业资金流-xx行业个股资金流 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_us_famous.py",
+      "symbol": "stock_us_famous_spot_em",
+      "comment": "东方财富网-行情中心-美股市场-知名美股 https://quote.eastmoney.com/center/gridlist.html#us_wellknown",
+      "style": "docstring",
+      "decl": "def stock_us_famous_spot_em(symbol: str = \"科技类\") -> pd.DataFrame:",
+      "variants": [
+        "东方财富网-行情中心-美股市场-知名美股 https://quote.eastmoney.com/center/gridlist.html#us_wellknown",
+        "东方财富网-行情中心-美股市场-知名美股 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_zh_a_special.py",
+      "symbol": "stock_zh_a_st_em",
+      "comment": "东方财富网-行情中心-沪深个股-风险警示板 https://quote.eastmoney.com/center/gridlist.html#st_board",
+      "style": "docstring",
+      "decl": "def stock_zh_a_st_em() -> pd.DataFrame:",
+      "variants": [
+        "东方财富网-行情中心-沪深个股-风险警示板 https://quote.eastmoney.com/center/gridlist.html#st_board",
+        "东方财富网-行情中心-沪深个股-风险警示板 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_zh_a_special.py",
+      "symbol": "stock_zh_a_stop_em",
+      "comment": "东方财富网-行情中心-沪深个股-两网及退市 https://quote.eastmoney.com/center/gridlist.html#staq_net_board",
+      "style": "docstring",
+      "decl": "def stock_zh_a_stop_em() -> pd.DataFrame:",
+      "variants": [
+        "东方财富网-行情中心-沪深个股-两网及退市 https://quote.eastmoney.com/center/gridlist.html#staq_net_board",
+        "东方财富网-行情中心-沪深个股-两网及退市 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_zh_a_tick_tx.py",
+      "symbol": "stock_zh_a_tick_tx_js",
+      "comment": "腾讯财经-历史分笔数据 https://gu.qq.com/sz300494/gp/detail",
+      "style": "docstring",
+      "decl": "def stock_zh_a_tick_tx_js(symbol: str = \"sz000001\") -> pd.DataFrame:",
+      "variants": [
+        "腾讯财经-历史分笔数据 https://gu.qq.com/sz300494/gp/detail",
+        "腾讯财经-历史分笔数据 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_zh_ah_tx.py",
+      "symbol": "stock_zh_ah_daily",
+      "comment": "腾讯财经-港股-AH-股票历史行情 https://gu.qq.com/hk01033/gp",
+      "style": "docstring",
+      "decl": "def stock_zh_ah_daily(",
+      "variants": [
+        "腾讯财经-港股-AH-股票历史行情 https://gu.qq.com/hk01033/gp",
+        "腾讯财经-港股-AH-股票历史行情 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_hsgt_em.py",
+      "symbol": "stock_zh_ah_spot_em",
+      "comment": "东方财富网-行情中心-沪深港通-AH股比价-实时行情 https://quote.eastmoney.com/center/gridlist.html#ah_comparison",
+      "style": "docstring",
+      "decl": "def stock_zh_ah_spot_em() -> pd.DataFrame:",
+      "variants": [
+        "东方财富网-行情中心-沪深港通-AH股比价-实时行情 https://quote.eastmoney.com/center/gridlist.html#ah_comparison",
+        "东方财富网-行情中心-沪深港通-AH股比价-实时行情 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_zh_comparison_em.py",
+      "symbol": "stock_zh_dupont_comparison_em",
+      "comment": "东方财富-行情中心-同行比较-杜邦分析比较 https://emweb.securities.eastmoney.com/pc_hsf10/pages/index.html?type=web&code=000895&color=b#/thbj/dbfxbj",
+      "style": "docstring",
+      "decl": "def stock_zh_dupont_comparison_em(symbol: str = \"SZ000895\") -> pd.DataFrame:",
+      "variants": [
+        "东方财富-行情中心-同行比较-杜邦分析比较 https://emweb.securities.eastmoney.com/pc_hsf10/pages/index.html?type=web&code=000895&color=b#/thbj/dbfxbj",
+        "东方财富-行情中心-同行比较-杜邦分析比较 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_zh_comparison_em.py",
+      "symbol": "stock_zh_growth_comparison_em",
+      "comment": "东方财富-行情中心-同行比较-成长性比较 https://emweb.securities.eastmoney.com/pc_hsf10/pages/index.html?type=web&code=000895&color=b#/thbj/czxbj",
+      "style": "docstring",
+      "decl": "def stock_zh_growth_comparison_em(symbol: str = \"SZ000895\") -> pd.DataFrame:",
+      "variants": [
+        "东方财富-行情中心-同行比较-成长性比较 https://emweb.securities.eastmoney.com/pc_hsf10/pages/index.html?type=web&code=000895&color=b#/thbj/czxbj",
+        "东方财富-行情中心-同行比较-成长性比较 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_zh_comparison_em.py",
+      "symbol": "stock_zh_scale_comparison_em",
+      "comment": "东方财富-行情中心-同行比较-公司规模 https://emweb.securities.eastmoney.com/pc_hsf10/pages/index.html?type=web&code=000895&color=b#/thbj/gsgm",
+      "style": "docstring",
+      "decl": "def stock_zh_scale_comparison_em(symbol: str = \"SZ000895\") -> pd.DataFrame:",
+      "variants": [
+        "东方财富-行情中心-同行比较-公司规模 https://emweb.securities.eastmoney.com/pc_hsf10/pages/index.html?type=web&code=000895&color=b#/thbj/gsgm",
+        "东方财富-行情中心-同行比较-公司规模 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "akfamily/akshare",
+      "commit": "fe10d1decb705e5f43cc8ca3339ca39e580fb8f4",
+      "license": "MIT",
+      "lang": "py",
+      "path": "akshare/stock/stock_zh_comparison_em.py",
+      "symbol": "stock_zh_valuation_comparison_em",
+      "comment": "东方财富-行情中心-同行比较-估值比较 https://emweb.securities.eastmoney.com/pc_hsf10/pages/index.html?type=web&code=000895&color=b#/thbj/gzbj",
+      "style": "docstring",
+      "decl": "def stock_zh_valuation_comparison_em(symbol: str = \"SZ000895\") -> pd.DataFrame:",
+      "variants": [
+        "东方财富-行情中心-同行比较-估值比较 https://emweb.securities.eastmoney.com/pc_hsf10/pages/index.html?type=web&code=000895&color=b#/thbj/gzbj",
+        "东方财富-行情中心-同行比较-估值比较 https"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/service/async_task_service.py",
+      "symbol": "submit_task",
+      "comment": "执行异步任务 see:",
+      "style": "docstring",
+      "decl": "def submit_task(fn, *args, **kwargs):",
+      "variants": [
+        "执行异步任务 see:",
+        "执行异步任务 see"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/main.py",
+      "symbol": "temp",
+      "comment": "临时文件",
+      "style": "docstring",
+      "decl": "def temp(filename):",
+      "variants": [
+        "临时文件"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/domain_api.py",
+      "symbol": "update_all_domain_cert_info",
+      "comment": "更新所有域名证书信息 :return:",
+      "style": "docstring",
+      "decl": "def update_all_domain_cert_info():",
+      "variants": [
+        "更新所有域名证书信息 :return:",
+        "更新所有域名证书信息"
+      ],
+      "sameNameCount": 2
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/domain_api.py",
+      "symbol": "update_all_domain_cert_info_of_user",
+      "comment": "更新当前用户的所有域名信息 :return:",
+      "style": "docstring",
+      "decl": "def update_all_domain_cert_info_of_user():",
+      "variants": [
+        "更新当前用户的所有域名信息 :return:",
+        "更新当前用户的所有域名信息"
+      ],
+      "sameNameCount": 2
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/service/domain_info_service.py",
+      "symbol": "update_all_domain_info",
+      "comment": "更新所有的域名信息 :return:",
+      "style": "docstring",
+      "decl": "def update_all_domain_info():",
+      "variants": [
+        "更新所有的域名信息 :return:",
+        "更新所有的域名信息"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/domain_info_api.py",
+      "symbol": "update_all_domain_info_of_user",
+      "comment": "更新当前用户的域名信息 :return:",
+      "style": "docstring",
+      "decl": "def update_all_domain_info_of_user():",
+      "variants": [
+        "更新当前用户的域名信息 :return:",
+        "更新当前用户的域名信息"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/deploy_cert_api.py",
+      "symbol": "update_deploy_cert_by_id",
+      "comment": "更新详情 :return:",
+      "style": "docstring",
+      "decl": "def update_deploy_cert_by_id():",
+      "variants": [
+        "更新详情 :return:",
+        "更新详情"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/domain_api.py",
+      "symbol": "update_domain_expire_monitor_by_id",
+      "comment": "更新监控状态 :return:",
+      "style": "docstring",
+      "decl": "def update_domain_expire_monitor_by_id():",
+      "variants": [
+        "更新监控状态 :return:",
+        "更新监控状态"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/domain_api.py",
+      "symbol": "update_domain_field_by_ids",
+      "comment": "批量更新单个字段值 :return:",
+      "style": "docstring",
+      "decl": "def update_domain_field_by_ids():",
+      "variants": [
+        "批量更新单个字段值 :return:",
+        "批量更新单个字段值"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/domain_info_api.py",
+      "symbol": "update_domain_info_row_by_id",
+      "comment": "更新当前行的域名信息 :return:",
+      "style": "docstring",
+      "decl": "def update_domain_info_row_by_id():",
+      "variants": [
+        "更新当前行的域名信息 :return:",
+        "更新当前行的域名信息"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/domain_api.py",
+      "symbol": "update_domain_row_info_by_id",
+      "comment": "更新域名关联的证书信息 :return:",
+      "style": "docstring",
+      "decl": "def update_domain_row_info_by_id():",
+      "variants": [
+        "更新域名关联的证书信息 :return:",
+        "更新域名关联的证书信息"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/host_api.py",
+      "symbol": "update_host_by_id",
+      "comment": "更新主机 :return:",
+      "style": "docstring",
+      "decl": "def update_host_by_id():",
+      "variants": [
+        "更新主机 :return:",
+        "更新主机"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/notify_api.py",
+      "symbol": "update_notify_by_id",
+      "comment": "更新用户通知配置 :return:",
+      "style": "docstring",
+      "decl": "def update_notify_by_id():",
+      "variants": [
+        "更新用户通知配置 :return:",
+        "更新用户通知配置"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/notify_api.py",
+      "symbol": "update_notify_status_by_id",
+      "comment": "更新用户通知配置状态 :return:",
+      "style": "docstring",
+      "decl": "def update_notify_status_by_id():",
+      "variants": [
+        "更新用户通知配置状态 :return:",
+        "更新用户通知配置状态"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/issue_certificate_api.py",
+      "symbol": "update_row_auto_renew",
+      "comment": "修改自动更新字段 :return:",
+      "style": "docstring",
+      "decl": "def update_row_auto_renew():",
+      "variants": [
+        "修改自动更新字段 :return:",
+        "修改自动更新字段"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/system_api.py",
+      "symbol": "update_system_config",
+      "comment": "更新单个配置 :return:",
+      "style": "docstring",
+      "decl": "def update_system_config():",
+      "variants": [
+        "更新单个配置 :return:",
+        "更新单个配置"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/user_api.py",
+      "symbol": "update_user_info",
+      "comment": "更新当前用户信息 :return:",
+      "style": "docstring",
+      "decl": "def update_user_info():",
+      "variants": [
+        "更新当前用户信息 :return:",
+        "更新当前用户信息"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/user_api.py",
+      "symbol": "update_user_password",
+      "comment": "更新用户密码 :return:",
+      "style": "docstring",
+      "decl": "def update_user_password():",
+      "variants": [
+        "更新用户密码 :return:",
+        "更新用户密码"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/user_api.py",
+      "symbol": "update_user_status",
+      "comment": "更新账号可用状态 :return:",
+      "style": "docstring",
+      "decl": "def update_user_status():",
+      "variants": [
+        "更新账号可用状态 :return:",
+        "更新账号可用状态"
+      ],
+      "sameNameCount": 1
+    },
+    {
+      "repo": "mouday/domain-admin",
+      "commit": "3a3b49c328ce0dc6de40817252e4307b3ad7198a",
+      "license": "MIT",
+      "lang": "py",
+      "path": "domain_admin/api/issue_certificate_api.py",
+      "symbol": "verify_certificate",
+      "comment": "通知验证 :return:",
+      "style": "docstring",
+      "decl": "def verify_certificate():",
+      "variants": [
+        "通知验证 :return:",
+        "通知验证"
+      ],
+      "sameNameCount": 1
+    }
+  ]
+}

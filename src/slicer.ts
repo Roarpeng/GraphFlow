@@ -515,7 +515,37 @@ function extractOwnDocComment(lines: string[], oneBasedSymbolLine: number): stri
     collected.unshift(trimmed);
     index -= 1;
   }
+  const leading = extractLeadingDocstring(lines, oneBasedSymbolLine);
+  if (leading) collected.push(leading);
   return collected.join("\n");
+}
+
+/**
+ * The docs a Python/Ruby-style declaration carries *inside* its body: a string
+ * literal that opens the block. Comments above the declaration are only one of
+ * the two conventions; reading just that half systematically under-scores every
+ * docstring-annotated function against a verbosely named neighbour.
+ */
+function extractLeadingDocstring(lines: string[], oneBasedSymbolLine: number): string {
+  const limit = Math.min(lines.length, oneBasedSymbolLine + 3);
+  for (let index = oneBasedSymbolLine; index < limit; index += 1) {
+    const trimmed = (lines[index] ?? "").trim();
+    if (!trimmed) continue;
+    const open = /^(?:[rRbBuUfF]{0,2})("""|'''|"|')/.exec(trimmed);
+    if (!open) return "";
+    const quote = open[1] ?? '"""';
+    const collected: string[] = [trimmed];
+    const rest = trimmed.slice(open[0].length);
+    const closes = rest.includes(quote);
+    if (closes) return collected.join("\n");
+    for (let next = index + 1; next < Math.min(lines.length, index + 12); next += 1) {
+      const line = (lines[next] ?? "").trim();
+      collected.push(line);
+      if (line.includes(quote)) break;
+    }
+    return collected.join("\n");
+  }
+  return "";
 }
 
 export function formatNumberedLines(lines: string[], startLine: number, endLine: number): string {
@@ -1637,8 +1667,18 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
     const recallTokens = expandUncoveredChinese(plan, recallBundle);
     const exactLower = new Set(plan.exactIdentifiers.map((s) => s.toLowerCase()));
     const queryWords = [...plan.englishWords, ...recallTokens];
+    // Mined (L1/L2/L3) tokens are guesses from this repo's own comments, so they are
+    // evidence of a weaker grade than a glossary hit. They may break a tie or rescue a
+    // query L0 cannot read, but they must not outvote an exact identifier, a name token
+    // from the glossary, or the symbol's own doc comment.
+    const recallWordSet = new Set(recallTokens);
     const queryStems = new Set(plan.englishStems);
-    for (const token of recallTokens) queryStems.add(stemEnglishWord(token));
+    const recallStems = new Set<string>();
+    for (const token of recallTokens) {
+      const stem = stemEnglishWord(token);
+      queryStems.add(stem);
+      recallStems.add(stem);
+    }
     const cjkWords = plan.chineseWords;
     const cjkPhrases = plan.chinesePhrases;
 
@@ -1716,14 +1756,19 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
         let nameWordHits = 0;
         let signatureWordHits = 0;
         for (const tok of queryWords) {
+          const weak = recallWordSet.has(tok);
+          const wholeWord = weak ? 8 : 15;
+          const substringLong = weak ? 7 : 14;
+          const substringShort = weak ? 3 : 6;
+          const signatureWeight = weak ? 0 : 2;
           if ((symLower === tok || symWordSet.has(tok)) && nameWordHits < 4) {
-            score += 15;
+            score += wholeWord;
             nameWordHits += 1;
           } else if (symLower.includes(tok) && nameWordHits < 4) {
-            score += tok.length >= 5 ? 14 : 6;
+            score += tok.length >= 5 ? substringLong : substringShort;
             nameWordHits += 1;
-          } else if (sigLower.includes(tok) && signatureWordHits < 3) {
-            score += 2;
+          } else if (signatureWeight > 0 && sigLower.includes(tok) && signatureWordHits < 3) {
+            score += signatureWeight;
             signatureWordHits += 1;
           }
         }
@@ -1733,11 +1778,12 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
         let stemHits = 0;
         for (const st of queryStems) {
           if (stemHits >= 3) break;
+          const weak = recallStems.has(st);
           if (symStemSet.has(st)) {
-            score += 10;
+            score += weak ? 5 : 10;
             stemHits += 1;
           } else if (st.length >= 4 && symTokenized.stems.some((ss) => isFuzzyTokenMatch(st, ss))) {
-            score += 8;
+            score += weak ? 4 : 8;
             stemHits += 1;
           }
         }

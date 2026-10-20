@@ -52,6 +52,21 @@ const CACHE_VERSION = 1;
 const TOP_K = 4;
 const MAX_QUERY_TOKENS = 8;
 
+/**
+ * Above this share of windows a token is boilerplate for the whole corpus and
+ * cannot discriminate between symbols. Only applied once the corpus is large
+ * enough for the ratio to mean anything (`DF_MIN_WINDOWS`).
+ */
+const MAX_DF_RATIO = 0.08;
+const DF_MIN_WINDOWS = 20;
+
+/**
+ * A Chinese key spread across a large share of windows ("数据", "中心", "信息")
+ * is a filler word of code comments. PMI still gives it *some* English partner,
+ * but expanding it just injects that neighbour's identifiers into every query.
+ */
+const MAX_ZH_DF_RATIO = 0.12;
+
 const GLUE_TOKENS = new Set([
   "function", "export", "return", "const", "import", "from", "type", "interface", "class",
   "public", "private", "string", "boolean", "number", "void", "null", "true", "false",
@@ -67,6 +82,9 @@ const GLUE_TOKENS = new Set([
   "event", "lock", "scan", "deal", "sale", "fee", "qty", "job", "title", "count", "total",
   "status", "key", "doc", "hop", "sku", "lot", "bin", "row", "col", "len", "idx", "tmp",
   "args", "opts", "config", "context", "params", "fields", "field",
+  // Python/Go/Rust boilerplate that a forward window picks up from every body.
+  "pass", "none", "nil", "err", "mut", "pub", "use", "mod", "impl", "kwargs",
+  "yield", "elif", "else", "try", "except", "raise", "todo", "fixme",
 ]);
 
 let modelTranslator: ZhEnModelTranslator | undefined;
@@ -151,6 +169,7 @@ export function mineZhIdentifierMap(windows: readonly CooccurWindow[]): Map<stri
   }
   const grouped = new Map<string, Array<{ en: string; pmi: number; support: number }>>();
   if (total === 0) return new Map();
+  const dfActive = total >= DF_MIN_WINDOWS;
   for (const [key, support] of pair) {
     const splitAt = key.indexOf("\0");
     const z = key.slice(0, splitAt);
@@ -158,6 +177,10 @@ export function mineZhIdentifierMap(windows: readonly CooccurWindow[]): Map<stri
     const zc = zCount.get(z) ?? 0;
     const ec = eCount.get(e) ?? 0;
     if (zc === 0 || ec === 0) continue;
+    // Corpus-wide boilerplate (`pass`, a package name, a shared prefix) travels
+    // with every window, so it wins on support while telling us nothing.
+    if (dfActive && ec / total > MAX_DF_RATIO) continue;
+    if (dfActive && zc / total > MAX_ZH_DF_RATIO) continue;
     const pmi = Math.log2((support * total) / (zc * ec));
     const perfect = zc === support && ec === support;
     if (!perfect && support === 1 && ec > 1 && pmi < 2) continue;
@@ -174,6 +197,19 @@ export function mineZhIdentifierMap(windows: readonly CooccurWindow[]): Map<stri
   return out;
 }
 
+/**
+ * Identifier window around one Chinese line.
+ *
+ * Two lines back covers the `def`/`func` line that a Python docstring or a
+ * trailing comment annotates; three lines forward covers the declaration plus a
+ * Go signature continuation. Forward-only windows of eight lines used to pull
+ * the whole function body (and the next declaration) into the pair, which is how
+ * a comment ended up "meaning" its neighbour's identifiers.
+ *
+ * URLs are masked first: docstrings routinely cite the data source
+ * (`https://vip.stock.finance.sina.com.cn/...`), and `vip`/`sina`/`finance`
+ * would otherwise be mined as translations of whatever the comment says.
+ */
 function windowsFromContent(content: string): CooccurWindow[] {
   const lines = content.split(/\r?\n/);
   const out: CooccurWindow[] = [];
@@ -182,13 +218,17 @@ function windowsFromContent(content: string): CooccurWindow[] {
     if (!/[\u4e00-\u9fff]/.test(line)) continue;
     const zh = zhKeysFromText(line);
     if (zh.length === 0) continue;
-    const slice = lines.slice(i, Math.min(lines.length, i + 8)).join("\n");
+    const from = Math.max(0, i - 2);
+    const to = Math.min(lines.length, i + 3);
+    const slice = lines.slice(from, to).join("\n").replace(URL_PATTERN, " ");
     const en = identifierTokens(slice);
     if (en.length === 0) continue;
     out.push({ zh, en });
   }
   return out;
 }
+
+const URL_PATTERN = /(?:https?:\/\/|www\.)[^\s"'`）)]+/g;
 
 function gitText(rootDir: string, args: string[]): string {
   if (!existsSync(join(rootDir, ".git"))) return "";
@@ -385,12 +425,19 @@ function queryKeys(plan: BilingualQueryPlan): string[] {
 /**
  * English tokens for Chinese spans L0 does not already cover.
  * Capped so a colloquial query cannot flood the ranker.
+ *
+ * L1 only speaks when the query is *entirely* outside L0. Once the glossary
+ * reads any part of it, the mined neighbours of the remaining span are guesswork
+ * from arbitrary comment/identifier co-occurrence and measurably outvote the
+ * glossary on real repositories (`scripts/zh-recall-bench.ts`). L2 (curated
+ * colloquial) and L3 (explicit translator) stay available per key.
  */
 export function expandUncoveredChinese(plan: BilingualQueryPlan, bundle: ZhRecallBundle): string[] {
   if (process.env.GRAPHFLOW_ZH_RECALL === "0") return [];
-  const l1On = process.env.GRAPHFLOW_ZH_L1 !== "0";
   const l2On = process.env.GRAPHFLOW_ZH_L2 !== "0";
   const modelOn = process.env.GRAPHFLOW_ZH_EN_MODEL === "1" && modelTranslator !== undefined;
+  const keys = queryKeys(plan);
+  const l1On = process.env.GRAPHFLOW_ZH_L1 !== "0" && !keys.some((key) => isGlossaryCovered(key));
   const seen = new Set(plan.englishWords.map((word) => word.toLowerCase()));
   const out: string[] = [];
   const push = (token: string) => {
@@ -400,7 +447,7 @@ export function expandUncoveredChinese(plan: BilingualQueryPlan, bundle: ZhRecal
     out.push(lower);
   };
   const uncovered: string[] = [];
-  for (const key of queryKeys(plan)) {
+  for (const key of keys) {
     if (isGlossaryCovered(key)) continue;
     uncovered.push(key);
     if (l1On) for (const token of bundle.l1.get(key) ?? []) push(token);

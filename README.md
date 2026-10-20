@@ -47,7 +47,7 @@ Version 3.0 **replaced the entire 2.x architecture**. The 10-tool knowledge-grap
 | **3.5.0** | **Doc↔code link precision (self-written BM25/IDF + PMI + reciprocal pruning + caps, `GRAPHFLOW_DOC_LINKS_MAX`; repo 728 → ≈150 edges, −80%) · `graphflow doctor parsers` + `npm run verify:parsers` + additive CI parser matrix · self-written L0 semantic index (confidence ≥0.75) with optional TypeScript/LSP providers · DSH config bundle `@roarpeng/graphflow-dsh` · release preflight (`npm run preflight` / `preflight:release`) · refreshed benchmarks** |
 | **3.6.0** | **48-case six-language parity matrix + fixes (family-scoped `resolveMethod`/rename, Go embedding/grouped params, C typedef fields, Rust `&dyn`/`impl` unwrap, C/C++ header prototype↔definition rename) · bilingual recall 1.000 EN / 1.000 ZH on 30 pairs (pinyin/mixed/synonym 1.000; baseline ZH@1 0.967, pinyin 0.769) · local task reflection (`graphflow task`/`reflect`, `gf_macro` task-list/run/record) · Windows CRLF test fix; CI (6 jobs) + parser matrix (7 jobs) green · 458-token wire · 24 test files** |
 | **3.6.1** | **Six-language parity 51 tests: Rust trait dispatch CLOSED (trait methods with `parentClass`=trait; `dyn Trait`/`impl Trait` receivers resolve to the trait method, concrete receivers to the impl), C# `record`/`record struct` kinds + positional fields + namespace map CLOSED (Go same-package imports stays an honest gap) · packed-file bilingual corpus: packed EN 1.000 / ZH 1.000 @1/@3/@5 (ZH@1 was 0.900; ±7-line own-doc bleed fixed) · task auto-harvest (`.graphflow/instruction-log.jsonl`, `task log`/`task harvest`, `gf_macro` `task-harvest`; external writer needed) · 458-token wire · 24 test files** |
-| **3.7.0** | **Chinese→English recall outside the glossary: L1 PMI map from comments/commits, L2 curated colloquial lexicon (optional local ECDICT), L3 translator hook off by default · adaptive `gf_read` search budget · true incremental knowledge-graph rebuild (per-file contributions + shard manifest) · AST index cached on disk · rename no longer rewrites import paths · held-out 80 queries P@1 0.000 → 0.813 · `ts-zh-search` 3198 → 1077 tokens · wire **459** tokens · 39 test files** |
+| **3.7.0** | **Chinese→English recall outside the glossary: L1 PMI map from comments/commits, L2 curated colloquial lexicon (optional local ECDICT), L3 translator hook off by default · adaptive `gf_read` search budget · true incremental knowledge-graph rebuild (per-file contributions + shard manifest) · AST index cached on disk · rename no longer rewrites import paths · held-out 80 queries P@1 0.000 → 0.813 · `ts-zh-search` 3198 → 1077 tokens · wire **459** tokens · 40 test files** |
 | **3.6.2** | **Eval fix pack: class-qualified rename (`OrderService.cancel`) plus override-hierarchy `super` updates · Rust macro `impl Trait` blast · doc↔code constants / generic-token / test-symbol cap · `gf_read` source-size budget (`GRAPHFLOW_READ_BUDGET_RATIO`) · automatic instruction log from the PostToolUse hook and `gf_exec` `run:true` · MISS Jaccard + structural task-run `exitCode` · wire **459** tokens · 25 test files** |
 
 ## The Four Surgical Tools
@@ -70,7 +70,7 @@ Session read dedup skips unchanged files; 3 consecutive edit-test failures trigg
 - **AST index cached on disk, and the real hot paths fixed** — the slicer's parse results now persist to `.graphflow/ast-cache/<sha1>.json`, keyed by content hash **plus a backend signature**, so flipping `GRAPHFLOW_TREE_SITTER` invalidates correctly. `GRAPHFLOW_AST_CACHE=0` turns it off. `--cpu-prof` also disproved the obvious hypothesis: parsing is not the bottleneck (274 files parse in ~950 ms), `tokenizeEnglish` (~46%) and `normalizeWorkspaceRelPath` (~43%) are. Both now use bounded memoization, and the fuzzy glossary scan is bucketed by first letter. Measured on axios (274 files): warm `gf_read` **4.4 s → 1.4 s**, cold `graph` **16.1 s → 5.6 s**.
 - **Doc↔code stores collapsed** — the 274 per-file doc-link shards became three single-file stores (`.graphflow/doc-links/symbols.json`, `concepts.json`, `sections.json`): on Windows symbol-data load went **1000 ms → 121 ms** and the document scan **920 ms → 49 ms**. Candidate caches are keyed by the in-file ordinal (`so`) instead of a flat index, so inserting symbols earlier in a file no longer invalidates every later entry. The reciprocal top-K prune still runs globally per build, so the result is bit-for-bit what a full rebuild would produce.
 - **Fix pack (correctness)** — `gf_edit` rename no longer rewrites **import paths**: comments and string/template literals are masked with equal-length placeholders first, so renaming a symbol can no longer turn `./combineURLs.js` into `./joinURLs.js` and break the module with `ERR_MODULE_NOT_FOUND`. The read-budget shrink order now prioritizes `digestSymbolBlocks`, so small functions are not folded away. Affected-test routing recognizes `tests/` / `__tests__/` / `spec/` directories and skips pseudo-tests such as `conftest.py`. MCP `tools/call` on an unknown tool returns `isError: true`, and `gf_exec` surfaces the compiled local tool id through `findCommandMacro()`. CLI exit codes propagate, `install` / `uninstall` render their errors instead of swallowing them, and uninstall only removes GraphFlow-owned hooks and MCP rows.
-- **Version/state** — 3.7.0; MCP surface stays **4 tools**. Wire schema is unchanged at **459 tokens** (1834 chars, `ceil(chars/4)`). The suite is **39 test files** (10 new `tests/fix-*.test.ts` files). CI (6 jobs) + parser matrix (7 jobs) are unchanged.
+- **Version/state** — 3.7.0; MCP surface stays **4 tools**. Wire schema is unchanged at **459 tokens** (1834 chars, `ceil(chars/4)`). The suite is **40 test files** (10 new `tests/fix-*.test.ts` files). CI (6 jobs) + parser matrix (7 jobs) are unchanged.
 
 ## What's New in 3.6.2
 
@@ -214,6 +214,24 @@ A word-boundary rename of `cancel` → `cancelOrder` has nothing to change in th
 
 The 30 queries taught only by commit subjects go from P@1 0.000 to 1.000 with L1. The 35 colloquial queries go from 0.000 to 1.000 with L2. The other **15/80** match no comment, commit subject, or curated colloquial entry, so their P@1 stays **0.000**. L3 was not scored as a neural model.
 
+**Chinese on real code — 160 comments** (`tests/zh-real-corpus.test.ts`). The fixture holds verbatim (comment, declaration) pairs lifted from five MIT-licensed repositories that write Chinese comments next to English identifiers: `akfamily/akshare` (153 Python docstrings), `mouday/domain-admin`, `go-admin-team/go-admin` (Go line comments), `HalseySpicy/Geeker-Admin` and `vbenjs/vue-vben-admin` (TS block comments). Comments that name the symbol or any camel token of it are excluded, so the query never leaks the answer. The test rebuilds one file per original path and asks each comment back as a query.
+
+| Setting | n | P@1 | MRR | R@3 |
+| :--- | ---: | :--- | :--- | :--- |
+| Glossary (L0), comment verbatim | 160 | 0.825 | 0.849 | 0.875 |
+| + mined layer (L1), comment verbatim | 160 | 0.819 | 0.845 | 0.875 |
+| Glossary (L0), first clause only | 141 | 0.816 | 0.837 | 0.858 |
+| + mined layer (L1), first clause only | 141 | 0.801 | 0.827 | 0.851 |
+
+Per language: Go 0.857 (n=7), Python 0.817 (n=153). The honest reading is that **L0 carries real comments** — maintainers reuse engineering words the glossary already knows — and the mined layer is now *neutral* there instead of harmful. Before the fixes below it scored **0.775** against the glossary's 0.825 on the same 160 pairs. On the synthetic held-out set, where L0 reads nothing, L1 is still the only bridge (0.000 → 1.000 on the 30 commit-taught queries).
+
+What this fixture caught, all fixed in `src/zh-recall.ts` and `src/slicer.ts`:
+
+- **Co-occurrence windows were forward-only (8 lines).** A comment was paired with its neighbouring declaration's identifiers. Windows are now ±2/+3 lines, and URLs are masked — docstrings cite `vip.stock.finance.sina.com.cn`, which was being mined as "finance/vip/sina".
+- **Corpus-wide filler was mined as a translation.** `pass`, a package name, or a span like `数据`/`中心` that appears in a fifth of all windows wins on support while meaning nothing. Pairs are now dropped by document frequency (8% for the English side, 12% for the Chinese key) once the corpus is large enough to have statistics.
+- **Ranking only read comments *above* a declaration.** Every Python docstring-scored function had to win on body text alone. The doc window now includes a leading string literal.
+- **Mined tokens outvoted the glossary.** They now score as weaker evidence (8 vs 15 for a name token, no signature credit) and are consulted only when the glossary cannot read the query at all.
+
 **Adaptive topK** on those 80 queries, summing `ceil(chars/4)` of the search output: explicit `topK` 3 is **22157** tokens; omitting `topK` is **4849**. Adaptive P@1 stays **0.813**.
 
 **`ts-zh-search` on the fixture CLI.** Three `graphflow read -q` queries against the graphflow-eval tree: 3.6.2 total **3198** tokens, 3.7.0 total **1077** (`订单超时` 369, `dingdan zhifu` 191, `支付订单` 517). The whole-file baseline of the same queries is 1245. The required hits are still present. Near-ties still include `TIMEOUT_WINDOW_MS` and the `OrderService` class slice.
@@ -226,6 +244,7 @@ The 30 queries taught only by commit subjects go from P@1 0.000 to 1.000 with L1
 - Go same-package imports are still a gap: sibling files in one package have no file-level `imports` edge.
 - A reflex hit needs Jaccard of at least 0.86. The dropped-token probe scores 0.857 and is a miss. `{{argN}}` placeholders are written by hand. Concurrent records are last-writer-wins, and the reflex run did not exercise that race.
 - Every number in this section is from a fixture (graphflow-eval, or the 80-query unit fixture). None of it is a production trace.
+- The real-corpus fixture materialises only the annotated declarations, so its candidate pool is 160 symbols rather than five whole repositories. It measures the comment→identifier bridge, not ranking against thousands of siblings. Some "misses" are labelling artifacts: `东方财富网-上海板块-行业板块` expects the fund-flow fetcher while `stock_board_industry_cons_em` is an equally defensible answer.
 
 ## Benchmarks
 
@@ -315,7 +334,7 @@ Run the test suite from source:
 
 ```bash
 git clone https://github.com/Roarpeng/GraphFlow && cd GraphFlow
-npm install && npm test      # tsx tests/run-all.ts (39 test files, incl. MCP stdio e2e)
+npm install && npm test      # tsx tests/run-all.ts (40 test files, incl. MCP stdio e2e)
 npm run build && npm run bench  # optional: local benchmark harness → benchmarks/latest.md
 npm run verify:parsers       # optional: true-AST vs forced-structural parser matrix
 npm run preflight            # optional: static release checks
