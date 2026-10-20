@@ -4,7 +4,7 @@
   "displayName": "GraphFlow Token-First Surgical Engine",
   "description": "Token-First Surgical Code Engine for AI Coding Agents: true AST for TypeScript/JS plus structural analyzers for Python, Go, Rust, C/C++, C#; receiver-type-aware Blast Radius, safe rename, real best-effort knowledge-graph edges, tsconfig-alias-aware affected tests, Output Dehydrator (98.7% fewer test-log tokens on the repo suite), Git Co-Change Miner & Habit Macros.",
   "icon": "media/graphflow.png",
-  "version": "3.7.0",
+  "version": "3.7.1",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

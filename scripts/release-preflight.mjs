@@ -35,6 +35,12 @@ export const REPO_ROOT = resolve(SCRIPT_DIR, "..");
 const IS_WINDOWS = process.platform === "win32";
 const NPM_COMMAND = IS_WINDOWS ? "npm.cmd" : "npm";
 const SUBPROCESS_TIMEOUT_MS = 300_000;
+/**
+ * The full suite is 40 test files and takes ~7 minutes locally (it was ~4 when
+ * the 5-minute leash was set), so `npm test` needs its own, longer timeout —
+ * otherwise release gating fails with ETIMEDOUT on a suite that is passing.
+ */
+const NPM_TEST_TIMEOUT_MS = 900_000;
 
 function quoteShellArg(value) {
   return /[\s"'&|<>^]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
@@ -506,7 +512,7 @@ export function checkNpmTest(rootDir) {
   const result = runSpawn(NPM_COMMAND, ["test"], {
     cwd: rootDir,
     encoding: "utf8",
-    timeout: SUBPROCESS_TIMEOUT_MS,
+    timeout: NPM_TEST_TIMEOUT_MS,
     windowsHide: true,
     env: { ...process.env },
   });

@@ -7,7 +7,7 @@
 [![CI](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/Roarpeng/GraphFlow/actions/workflows/ci.yml)
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-roarpeng.graphflow-blue)](https://marketplace.visualstudio.com/items?itemName=roarpeng.graphflow)
 
-> **面向 AI 编程 Agent 的省 Token 外科手术级代码引擎（v3.7.0）**
+> **面向 AI 编程 Agent 的省 Token 外科手术级代码引擎（v3.7.1）**
 > 只暴露 4 个外科手术工具的 MCP 服务器 —— `gf_read`、`gf_edit`、`gf_exec`、`gf_macro` —— 对**全部 6 种语言家族提供真 AST 解析**：TypeScript/JavaScript 用 `@babel/parser`，Python、Go、Rust、C/C++、C# 用可选 tree-sitter 语法包（缺省回退结构化分析器）。**自研语义索引**为爆炸半径/重命名解析调用目标（不新增运行时依赖），**精度调优的文档↔代码链接**（BM25/IDF + PMI + 上限 + 置信度）让知识图谱更可信。**六语言能力平价已纳入回归测试**（51 项矩阵），双语检索在「孤立 30 对 + packed 30 对」语料上达到 **EN 1.000 / ZH 1.000**，**本地任务反射**可通过显式记录或自动收割外部指令日志，在无 LLM/网络下重放已记录的 shell 指令。知识图谱现在**按文件增量重建**（只重算 dirty 文件，输出与全量重建完全一致），解析后的 AST 索引落盘缓存，因此 274 文件仓库上的热 `gf_read` 从 4.4 s 降到 1.4 s。运行时依赖：`@babel/parser`、`@modelcontextprotocol/sdk` 与 `tree-sitter`；语法包为可选依赖。
 
 ---
@@ -47,6 +47,7 @@
 | **3.5.0** | **文档↔代码链接精度（自研 BM25/IDF + PMI + 互惠剪枝 + 上限，`GRAPHFLOW_DOC_LINKS_MAX`；仓库 728 → 约 150 条边，−80%）· `graphflow doctor parsers` + `npm run verify:parsers` + 增量 CI 解析器矩阵 · 自研 L0 语义索引（置信度 ≥0.75）与可选 TypeScript/LSP 提供者 · DSH 配置包 `@roarpeng/graphflow-dsh` · 发布预检（`npm run preflight` / `preflight:release`）· 基准数据刷新** |
 | **3.6.0** | **48 项六语言平价矩阵与修复（语言家族作用域的 `resolveMethod`/重命名、Go 嵌入/分组参数、C typedef 字段、Rust `&dyn`/`impl` 解包、C/C++ 头文件原型↔定义重命名）· 30 对双语召回 1.000 EN / 1.000 ZH（拼音/混合/同义词 1.000；基线 ZH@1 0.967、拼音 0.769）· 本地任务反射（`graphflow task`/`reflect`、`gf_macro` task-list/run/record）· Windows CRLF 测试修复；CI（6 job）+ 解析器矩阵（7 job）全绿 · 458 wire tokens · 24 个测试文件** |
 | **3.6.1** | **六语言平价 51 项：Rust trait 分派闭环（trait 方法带 `parentClass`=trait；`dyn Trait`/`impl Trait` 接收者解析到 trait 方法，具体接收者解析到 impl）、C# `record`/`record struct` kind + 位置参数字段 + namespace 映射闭环（Go 同包 imports 仍为诚实缺口）· packed 文件双语语料：packed EN 1.000 / ZH 1.000 @1/@3/@5（ZH@1 原为 0.900；修复 ±7 行 own-doc 串扰）· 任务自动收割（`.graphflow/instruction-log.jsonl`、`task log`/`task harvest`、`gf_macro` `task-harvest`；需要外部写入者）· 458 wire tokens · 24 个测试文件** |
+| **3.7.1** | **第 22 个安装目标：WorkBuddy（`~/.workbuddy/mcp.json` + `~/.workbuddy/skills/graphflow/`）· MCP 启动器改为定位真实全局安装（`npm prefix -g` + 平台默认路径），不再静默退化成 `npx -y`，并用绝对路径 `node` 启动 · wire **459** tokens · 40 个测试文件** |
 | **3.7.0** | **词表外的中文检索英文标识符：L1 注释/提交 PMI 映射、L2 自编口语词表（可选本地 ECDICT）、L3 翻译钩子默认关闭 · `gf_read` 自适应搜索预算 · 真正的按文件增量建图（每文件贡献 + 分片清单）· AST 索引落盘缓存 · 重命名不再改坏 import 路径 · 80 条留出查询 P@1 0.000 → 0.813 · `ts-zh-search` 3198 → 1077 tokens · wire **459** tokens · 40 个测试文件** |
 | **3.6.2** | **评测修复包：类限定名重命名（`OrderService.cancel`）并沿覆写层级更新 `super` · Rust 宏内 `impl Trait` 爆炸半径 · 文档↔代码常量 / 泛词 / 测试符号上限 · `gf_read` 源码体积预算（`GRAPHFLOW_READ_BUDGET_RATIO`）· PostToolUse 钩子与 `gf_exec` `run:true` 自动写指令日志 · MISS Jaccard + task-run 结构化 `exitCode` · wire **459** tokens · 25 个测试文件** |
 
@@ -61,6 +62,11 @@
 
 会话级读去重跳过未变更文件；连续 3 次编辑-测试失败触发确定性急救包（爆炸半径契约 + 最近 git diff）。语法守卫在有真 AST 后端时使用它们 —— TS/JS 用 `@babel/parser`，其余 5 种用 tree-sitter 的 ERROR/MISSING 诊断 —— 结构化分析器的启发式检查（花括号/声明级、Python 缺冒号/括号诊断）作为回退，设置 `GRAPHFLOW_TREE_SITTER=0` 时同样适用。
 
+## 3.7.1 新特性
+
+- **新增第 22 个安装目标：WorkBuddy** —— `graphflow install` 会探测 `~/.workbuddy`，把 MCP server 注册进 `~/.workbuddy/mcp.json`，并把技能写到 `~/.workbuddy/skills/graphflow/SKILL.md`。不写 rules 文件：WorkBuddy 没有全局指令文件，放个 `AGENTS.md` 只是死重量。
+- **MCP 启动器不再退化成 `npx`** —— 当 npm 被版本管理器或内置运行时 shim 掉时，`npm root -g` 报的目录并不是 `npm i -g` 真正安装的位置（本机它就指向了一个完全没有 `@roarpeng/graphflow` 的目录），于是**每次注册都静默变成 `npx -y --package=@roarpeng/graphflow graphflow-mcp`**，明明全局装着却每次启动都要联网。现在启动器还会查 `npm prefix -g` 与平台默认路径（Windows `%APPDATA%\npm\node_modules`，POSIX `/usr/local/lib/node_modules`）；一旦找到 `dist/mcp-server.js`，就用绝对路径 `node`（`process.execPath`）启动 —— 宿主 spawn MCP 时的环境里 `node` 未必在 PATH 上。没有全局安装时仍退回 `npx`。
+
 ## 3.7.0 新特性
 
 - **词表没覆盖的中文也能找到英文标识符** —— L0 的拼音、同义词和工程词表不动，因此已经饱和的 30+30 平价集仍是 **1.000**。L1 在建索引时把注释和 `git log` 标题里的中文 n-gram 与附近标识符子词配对，按 PMI 保留（英文词若还出现在别的中文窗口里，单次共现会被丢掉），并缓存到 `.graphflow/zh-identifier-map.json`。热查询大约 **0.005 ms**。L2 是随仓库发布的原创编程口语表（Apache-2.0，不是 CC-CEDICT 或 ECDICT 的拷贝），再滤成「这个仓库的标识符里真的出现过的英文词」，缓存远小于 1 MB。本地 ECDICT TSV（MIT；`GRAPHFLOW_ECDICT` 或 `.graphflow/ecdict.csv`）可选，不打进发布包。L3 是 `registerZhEnModel`，只有 `GRAPHFLOW_ZH_EN_MODEL=1` 才调用。不新增模型依赖。`GRAPHFLOW_ZH_RECALL=0` / `GRAPHFLOW_ZH_L1=0` / `GRAPHFLOW_ZH_L2=0` 可逐层关闭。
@@ -70,7 +76,7 @@
 - **AST 索引落盘 + 修掉真正的热点** —— 切片器的解析结果持久化到 `.graphflow/ast-cache/<sha1>.json`，键是内容哈希**加后端签名**，因此切换 `GRAPHFLOW_TREE_SITTER` 会正确失效。`GRAPHFLOW_AST_CACHE=0` 可关闭。`--cpu-prof` 同时推翻了原本的直觉：解析不是瓶颈（274 文件约 950 ms），真正的热点是 `tokenizeEnglish`（约 46%）和 `normalizeWorkspaceRelPath`（约 43%）。两者改为有界记忆化，词典模糊匹配按首字母分桶。axios（274 文件）实测：热 `gf_read` **4.4 s → 1.4 s**，冷 `graph` **16.1 s → 5.6 s**。
 - **文档↔代码缓存合并** —— 274 个按文件小分片合并成三个单文件 store（`.graphflow/doc-links/symbols.json`、`concepts.json`、`sections.json`）：Windows 上符号数据加载 **1000 ms → 121 ms**，文档扫描 **920 ms → 49 ms**。候选缓存改用文件内序号（`so`）而非扁平下标作键，因此在文件前部插入符号不会让后面所有缓存条目失效。reciprocal top-K 剪枝仍然每次全局执行，结果与全量重建逐条一致。
 - **修复包（正确性）** —— `gf_edit` 重命名不再改坏 **import 路径**：先对注释与字符串/模板串做等长遮蔽，因此重命名符号不会再把 `./combineURLs.js` 改成 `./joinURLs.js` 而触发 `ERR_MODULE_NOT_FOUND`。读取预算的收缩顺序改为优先 `digestSymbolBlocks`，小函数不再被误折叠。受影响测试路由识别 `tests/` / `__tests__/` / `spec/` 目录，并跳过 `conftest.py` 之类的伪测试。MCP 对未知工具的 `tools/call` 返回 `isError: true`，`gf_exec` 通过 `findCommandMacro()` 暴露已编译的本地工具 id。CLI 退出码正确透传，`install` / `uninstall` 会渲染错误而不是吞掉，卸载只删除 GraphFlow 自己写入的 hook 与 MCP 配置。
-- **版本/状态** —— 3.7.0；MCP 面仍是 **4 个工具**。wire schema 未改，仍是 **459 tokens**（1834 字符，`ceil(chars/4)`）。测试套件 **39 个文件**（新增 10 个 `tests/fix-*.test.ts`）。CI（6 job）+ 解析器矩阵（7 job）未改。
+- **版本/状态** —— 3.7.1；MCP 面仍是 **4 个工具**。wire schema 未改，仍是 **459 tokens**（1834 字符，`ceil(chars/4)`）。测试套件 **40 个文件**（新增 10 个 `tests/fix-*.test.ts`）。CI（6 job）+ 解析器矩阵（7 job）未改。
 
 ## 3.6.2 新特性
 
@@ -306,7 +312,7 @@ tree-sitter 语法包是可选依赖：安装后 Python/Go/Rust/C/C++/C# 默认�
 
 ```bash
 # 1) 全局安装（Node 18+）
-npm install -g @roarpeng/graphflow@3.7.0
+npm install -g @roarpeng/graphflow@3.7.1
 
 # 2) 一键注册到检测到的 Agent（MCP + Skill + Rules + Hooks）
 graphflow install            # 等价写法：npx @roarpeng/graphflow install
