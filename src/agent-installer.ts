@@ -637,19 +637,28 @@ export function detectInstalledAgents(
  */
 function candidateGlobalRoots(): string[] {
   const roots: string[] = [];
+  // On Windows `execFileSync("npm", …)` fails outright: npm ships as npm.cmd /
+  // npm.ps1 and there is no npm.exe to exec. Trying the .cmd first is what makes
+  // the two npm-derived candidates actually run there; without it every machine
+  // silently fell through to the platform default.
+  const npmCommands = process.platform === "win32" ? ["npm.cmd", "npm"] : ["npm"];
   const run = (args: string[]) => {
-    try {
-      return execFileSync("npm", args, {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      })
-        .trim()
-        .split(/\r?\n/)
-        .pop()
-        ?.trim();
-    } catch {
-      return undefined;
+    for (const command of npmCommands) {
+      try {
+        const out = execFileSync(command, args, {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        })
+          .trim()
+          .split(/\r?\n/)
+          .pop()
+          ?.trim();
+        if (out) return out;
+      } catch {
+        // try the next npm spelling
+      }
     }
+    return undefined;
   };
   const root = run(["root", "-g"]);
   if (root) roots.push(root);
