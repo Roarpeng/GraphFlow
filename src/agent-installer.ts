@@ -599,6 +599,15 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
       markerPaths: [join(home, ".amazonq")],
       mcpTargets: [{ configPath: join(home, ".amazonq", "mcp.json"), serversKey: "mcpServers" }],
     },
+    {
+      id: "workbuddy",
+      name: "WorkBuddy",
+      markerPaths: [join(home, ".workbuddy")],
+      mcpTargets: [{ configPath: join(home, ".workbuddy", "mcp.json"), serversKey: "mcpServers" }],
+      // WorkBuddy has no global instructions file: the skill is the surface, so
+      // no rulesFiles here (a stray AGENTS.md would simply be ignored).
+      skillsDirs: [join(home, ".workbuddy", "skills")],
+    },
   ];
 }
 
@@ -617,24 +626,52 @@ export function detectInstalledAgents(
   return detected;
 }
 
-function resolveMcpLauncherCommand(): { command: string; args: string[] } {
-  try {
-    const globalRoot = execFileSync("npm", ["root", "-g"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-      .trim()
-      .split(/\r?\n/)
-      .pop()
-      ?.trim();
-    if (globalRoot) {
-      const serverJs = join(globalRoot, "@roarpeng", "graphflow", "dist", "mcp-server.js");
-      if (existsSync(serverJs)) {
-        return { command: "node", args: [serverJs] };
-      }
+/**
+ * Global roots where `@roarpeng/graphflow` may live.
+ *
+ * `npm root -g` alone is not enough: when npm is shimmed by a version manager
+ * (or by a bundled runtime, as in this machine) it reports a root that has
+ * nothing to do with where `npm i -g` actually installed the package — the
+ * launcher then silently degrades to `npx -y`, which needs the network on every
+ * MCP start. `npm prefix -g` and the platform default cover that.
+ */
+function candidateGlobalRoots(): string[] {
+  const roots: string[] = [];
+  const run = (args: string[]) => {
+    try {
+      return execFileSync("npm", args, {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      })
+        .trim()
+        .split(/\r?\n/)
+        .pop()
+        ?.trim();
+    } catch {
+      return undefined;
     }
-  } catch {
-    // fallback to npx
+  };
+  const root = run(["root", "-g"]);
+  if (root) roots.push(root);
+  const prefix = run(["prefix", "-g"]);
+  if (prefix) roots.push(join(prefix, "node_modules"));
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA;
+    if (appData) roots.push(join(appData, "npm", "node_modules"));
+  } else {
+    roots.push("/usr/local/lib/node_modules", join(process.env.HOME ?? "/root", ".npm-global", "lib", "node_modules"));
+  }
+  return [...new Set(roots)];
+}
+
+function resolveMcpLauncherCommand(): { command: string; args: string[] } {
+  for (const globalRoot of candidateGlobalRoots()) {
+    const serverJs = join(globalRoot, "@roarpeng", "graphflow", "dist", "mcp-server.js");
+    if (existsSync(serverJs)) {
+      // Absolute node: hosts start MCP servers with a bare environment where
+      // `node` is not necessarily on PATH.
+      return { command: process.execPath, args: [serverJs] };
+    }
   }
   return {
     command: "npx",

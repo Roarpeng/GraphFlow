@@ -350,7 +350,7 @@ A thin prebuilt launcher (`roarpeng.graphflow`) with three commands: **Install M
 
 Full steps: [VSIX-INSTALL.md](./VSIX-INSTALL.md).
 
-## 21-Agent Auto-Installer
+## 22-Agent Auto-Installer
 
 `graphflow install` auto-detects installed agents and registers MCP + Skill + Rules + Hooks. Host hooks are merged into existing `PreToolUse`/`PostToolUse` configs (user hooks are preserved; reinstall is idempotent), and `graphflow uninstall` cleanly removes MCP, skills, rules and hooks — only GraphFlow-owned entries, leaving user hooks and other phases intact — for **detected agents** by default; scope it with `--agents <id1,id2>` or clean every known profile with `--all`.
 
@@ -359,7 +359,7 @@ Full steps: [VSIX-INSTALL.md](./VSIX-INSTALL.md).
 | IDE / editors | Cursor, VS Code (GitHub Copilot), Windsurf, Trae / Trae CN, Zed |
 | Terminal agents | Claude Code, OpenAI Codex, Gemini CLI, Antigravity, Kimi Code, DeepSeek Harness (DSH), OpenCode, ZCode |
 | Extension-hosted | Cline, Roo Code, Kilo Code, Continue, PearAI, Qoder / Qoder CN |
-| Desktop / cloud | Claude Desktop, Amazon Q |
+| Desktop / cloud | Claude Desktop, Amazon Q, WorkBuddy |
 
 Scope an install with `graphflow install --agents cursor,claude-code --workspace`.
 

@@ -350,7 +350,7 @@ npm run preflight            # 可选：静态发布预检
 
 完整步骤见 [VSIX-INSTALL.md](./VSIX-INSTALL.md)。
 
-## 21-Agent 自动安装器
+## 22-Agent 自动安装器
 
 `graphflow install` 自动探测已安装的 Agent，注册 MCP + Skill + Rules + Hooks。宿主钩子会合并进现有 `PreToolUse`/`PostToolUse` 配置（保留用户钩子；重复安装幂等）；`graphflow uninstall` 干净移除 MCP、Skill、Rules 与 Hooks —— 只删除 GraphFlow 所有的条目，保留用户钩子与其他阶段 —— 缺省仅针对**检测到的 Agent**；可用 `--agents <id1,id2>` 限定子集，或用 `--all` 清理所有已知配置。
 
@@ -359,7 +359,7 @@ npm run preflight            # 可选：静态发布预检
 | IDE / 编辑器 | Cursor、VS Code（GitHub Copilot）、Windsurf、Trae / Trae CN、Zed |
 | 终端 Agent | Claude Code、OpenAI Codex、Gemini CLI、Antigravity、Kimi Code、DeepSeek Harness（DSH）、OpenCode、ZCode |
 | 插件宿主 | Cline、Roo Code、Kilo Code、Continue、PearAI、Qoder / Qoder CN |
-| 桌面 / 云端 | Claude Desktop、Amazon Q |
+| 桌面 / 云端 | Claude Desktop、Amazon Q、WorkBuddy |
 
 限定安装范围：`graphflow install --agents cursor,claude-code --workspace`。
 
