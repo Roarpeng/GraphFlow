@@ -10,6 +10,7 @@
 
 import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -48,6 +49,14 @@ export interface AgentMcpTarget {
   configFormat?: McpConfigFormat;
 }
 
+/**
+ * Tier-2 prompt-reflex assets: hosts without a UserPromptSubmit-style config
+ * hook get the reflex via a plugin/hook FILE the host auto-loads. Install
+ * writes the asset; uninstall deletes it (plus, for dsh, the managed patch
+ * block that references it).
+ */
+export type ReflexAssetType = "opencode-kilo-plugin" | "cline-hook" | "dsh-plugin";
+
 export interface AgentProfile {
   id: string;
   name: string;
@@ -71,6 +80,8 @@ export interface AgentProfile {
    * marker-delimited block in this file and uninstall removes it.
    */
   cordisPatchPath?: string;
+  /** Prompt-reflex plugin/hook files for Tier-2 hosts (see ReflexAssetType). */
+  reflexAssets?: Array<{ type: ReflexAssetType; targetPath: string }>;
 }
 
 export interface AgentInstallItemResult {
@@ -427,6 +438,11 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
           serversKey: "mcpServers",
         },
       ],
+      // Tier-2 prompt reflex: file-based UserPromptSubmit hook (Unix only —
+      // skipped on win32 where Cline itself does not support hook files).
+      reflexAssets: [
+        { type: "cline-hook", targetPath: join(home, "Documents", "Cline", "Hooks", "UserPromptSubmit") },
+      ],
     },
     {
       id: "roo-code",
@@ -498,6 +514,11 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
       ],
       skillsDirs: [join(home, ".kilocode", "skills")],
       rulesFiles: [{ filePath: join(home, ".kilocode", "AGENTS.md"), kind: "managed-md" }],
+      // Tier-2 prompt reflex: shared OpenCode-compatible plugin auto-loads
+      // from ~/.config/kilo/plugin/ ({plugin,plugins}/*.{ts,js} glob).
+      reflexAssets: [
+        { type: "opencode-kilo-plugin", targetPath: join(home, ".config", "kilo", "plugin", "graphflow-prompt-reflex.ts") },
+      ],
     },
     {
       id: "kimi-code",
@@ -523,6 +544,11 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
       skillsDirs: [join(dshHome, "skills")],
       // DSH loads MCP servers from a Cordis patch file, not from mcp.json.
       cordisPatchPath: join(dshHome, "cordis.patch.yml"),
+      // Tier-2 prompt reflex: Cordis plugin + managed patch row (the patch
+      // block is written to cordisPatchPath alongside the MCP block).
+      reflexAssets: [
+        { type: "dsh-plugin", targetPath: join(dshHome, "plugins", "graphflow-prompt-reflex.mjs") },
+      ],
     },
     {
       id: "qoder",
@@ -575,6 +601,11 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
       skillsDirs: [join(home, ".config", "opencode", "skills")],
       rulesFiles: [
         { filePath: join(home, ".config", "opencode", "AGENTS.md"), kind: "managed-md" },
+      ],
+      // Tier-2 prompt reflex: v1 plugin auto-loads from the plugin/ glob dir,
+      // no opencode.json registration needed.
+      reflexAssets: [
+        { type: "opencode-kilo-plugin", targetPath: join(home, ".config", "opencode", "plugin", "graphflow-prompt-reflex.ts") },
       ],
     },
     {
@@ -1080,6 +1111,25 @@ function findCordisMarkerSpans(raw: string): Array<{ begin: number; end: number 
   return spans;
 }
 
+/** Parameterized variant of findCordisMarkerSpans for other managed blocks. */
+function findManagedMarkerSpans(
+  raw: string,
+  beginMarker: string,
+  endMarker: string
+): Array<{ begin: number; end: number }> {
+  const spans: Array<{ begin: number; end: number }> = [];
+  let cursor = 0;
+  for (;;) {
+    const begin = raw.indexOf(beginMarker, cursor);
+    if (begin < 0) break;
+    const endStart = raw.indexOf(endMarker, begin + beginMarker.length);
+    const end = endStart < 0 ? raw.length : endStart + endMarker.length;
+    spans.push({ begin, end });
+    cursor = end;
+  }
+  return spans;
+}
+
 /**
  * Idempotently write the managed Cordis insert:
  * - existing marker block(s): replace the first, drop duplicates, keep the rest
@@ -1149,6 +1199,129 @@ function removeDshCordisPatch(filePath: string): boolean {
     .trim();
   // Keep a valid top-level YAML array even when the managed block was the only
   // entry; an empty file parses as `null` and Cordis expects a patch list.
+  writeFileSync(filePath, cleaned ? `${cleaned}\n` : "[]\n", "utf8");
+  return true;
+}
+
+export const GRAPHFLOW_DSH_HOOK_BEGIN = "# GRAPHFLOW-DSH-HOOK-BEGIN";
+export const GRAPHFLOW_DSH_HOOK_END = "# GRAPHFLOW-DSH-HOOK-END";
+
+/**
+ * Bundled prompt-reflex asset sources (assets/reflex/*). Kept as real files
+ * so they stay lintable and byte-identical to the verified upstream sources
+ * instead of escaping through a template literal.
+ */
+const reflexAssetFiles: Record<ReflexAssetType, string> = {
+  "opencode-kilo-plugin": "graphflow-prompt-reflex.opencode-kilo.ts",
+  "cline-hook": "UserPromptSubmit.cline.js",
+  "dsh-plugin": "graphflow-prompt-reflex.dsh.mjs",
+};
+
+const reflexAssetsDir = join(__dirname, "..", "assets", "reflex");
+
+function reflexAssetContent(type: ReflexAssetType): string {
+  return readFileSync(join(reflexAssetsDir, reflexAssetFiles[type]), "utf8");
+}
+
+/** Write/refresh one prompt-reflex asset file. Returns a status + optional note. */
+function installReflexAsset(
+  type: ReflexAssetType,
+  targetPath: string
+): { status: "installed" | "updated" | "skipped"; message?: string } {
+  if (type === "cline-hook" && process.platform === "win32") {
+    // Cline documents its shebang hook files as Unix-only.
+    return { status: "skipped", message: "Cline hooks are not supported on Windows by Cline itself" };
+  }
+  const existed = existsSync(targetPath);
+  mkdirSync(dirname(targetPath), { recursive: true });
+  writeFileSync(targetPath, reflexAssetContent(type), "utf8");
+  if (type === "cline-hook") {
+    try {
+      chmodSync(targetPath, 0o755);
+    } catch {
+      // ignore — executable bit is irrelevant on some filesystems
+    }
+  }
+  return { status: existed ? "updated" : "installed" };
+}
+
+/** Delete a graphflow-owned reflex asset file. Only removes OUR content. */
+function removeReflexAsset(type: ReflexAssetType, targetPath: string): boolean {
+  if (!existsSync(targetPath)) return false;
+  const marker =
+    type === "cline-hook" ? "GraphFlow Prompt Reflex adapter" : "graphflow-prompt-reflex";
+  try {
+    if (!readFileSync(targetPath, "utf8").includes(marker)) return false;
+  } catch {
+    return false;
+  }
+  rmSync(targetPath, { force: true });
+  return true;
+}
+
+function buildDshHookPatchBlock(): string {
+  return [
+    `${GRAPHFLOW_DSH_HOOK_BEGIN} — GraphFlow prompt reflex (Tier-2). The plugin`,
+    `# file lives beside this patch: relative './' names are anchored to this`,
+    `# file's directory by dsh app-boot.`,
+    `- insert:`,
+    `    - id: graphflow-prompt-reflex`,
+    `      name: './plugins/graphflow-prompt-reflex.mjs'`,
+    `      config:`,
+    `        bin: graphflow`,
+    `        npxArgs: ['-y', '--package=@roarpeng/graphflow', 'graphflow']`,
+    `        timeoutMs: 20000`,
+    `        onMacro: rewrite`,
+    GRAPHFLOW_DSH_HOOK_END,
+  ].join("\n");
+}
+
+/** Managed-block writer for the dsh reflex plugin row (same span rules as MCP). */
+function writeDshHookPatch(filePath: string): "installed" | "updated" {
+  const existed = existsSync(filePath);
+  const current = existed ? readFileSync(filePath, "utf8") : "";
+  const block = buildDshHookPatchBlock();
+  const spans = findManagedMarkerSpans(current, GRAPHFLOW_DSH_HOOK_BEGIN, GRAPHFLOW_DSH_HOOK_END);
+  let next: string;
+  if (spans.length > 0) {
+    let rebuilt = "";
+    let cursor = 0;
+    spans.forEach((span, index) => {
+      rebuilt += current.slice(cursor, span.begin);
+      if (index === 0) rebuilt += block;
+      cursor = span.end;
+    });
+    next = rebuilt + current.slice(cursor);
+  } else if (current.trim() === "") {
+    next = block;
+  } else if (/^\s*\[[ \t]*]/.test(current)) {
+    const remainder = current.replace(/^\s*\[[ \t]*]/, "").replace(/^[ \t]*\r?\n/, "");
+    next = remainder.trim() ? `${block}\n${remainder.replace(/^\s+/, "")}` : block;
+  } else {
+    next = `${current.trimEnd()}\n${block}`;
+  }
+  next = `${next.trimEnd()}\n`;
+  mkdirSync(dirname(filePath), { recursive: true });
+  if (!existed || next !== current) {
+    writeFileSync(filePath, next, "utf8");
+  }
+  return existed ? "updated" : "installed";
+}
+
+/** Remove only the reflex plugin row, leaving the MCP managed block intact. */
+function removeDshHookPatch(filePath: string): boolean {
+  if (!existsSync(filePath)) return false;
+  const current = readFileSync(filePath, "utf8");
+  const spans = findManagedMarkerSpans(current, GRAPHFLOW_DSH_HOOK_BEGIN, GRAPHFLOW_DSH_HOOK_END);
+  if (spans.length === 0) return false;
+  let rebuilt = "";
+  let cursor = 0;
+  for (const span of spans) {
+    rebuilt += current.slice(cursor, span.begin);
+    cursor = span.end;
+  }
+  rebuilt += current.slice(cursor);
+  const cleaned = rebuilt.replace(/[ \t]+\r?\n/g, "\n").replace(/\r?\n{3,}/g, "\n\n").trim();
   writeFileSync(filePath, cleaned ? `${cleaned}\n` : "[]\n", "utf8");
   return true;
 }
@@ -1578,7 +1751,7 @@ function findLegacyMcpKeys(target: AgentMcpTarget, serverName: string): string[]
       const name = match[1] ?? "";
       if (!name || name === serverName) continue;
       const blockRegex = new RegExp(
-        `\\[mcp_servers\\.${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*?(?=\\n\\[|$)`,
+        `\\[mcp_servers\\.${name.replace(/[.*+?^${}()|[\]\\]/g, "\$&")}\\][\\s\\S]*?(?=\\n\\[|$)`,
         "m"
       );
       const block = current.match(blockRegex)?.[0] ?? "";
@@ -1611,7 +1784,7 @@ function removeMcpKey(target: AgentMcpTarget, key: string): boolean {
   if (format === "codex-toml") {
     const current = readFileSync(target.configPath, "utf8");
     const sectionRegex = new RegExp(
-      `\\n?\\[mcp_servers\\.${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*?(?=\\n\\[|$)`,
+      `\\n?\\[mcp_servers\\.${key.replace(/[.*+?^${}()|[\]\\]/g, "\$&")}\\][\\s\\S]*?(?=\\n\\[|$)`,
       "m"
     );
     if (!sectionRegex.test(current)) return false;
@@ -1933,6 +2106,53 @@ export function installAllAgents(opts: InstallAllAgentsOptions = {}): InstallAll
         });
       }
     }
+
+    // 5. Prompt-Reflex plugin assets (Tier-2 hosts: OpenCode/Kilo/Cline/DSH).
+    for (const asset of profile.reflexAssets ?? []) {
+      try {
+        const { status, message } = installReflexAsset(asset.type, asset.targetPath);
+        results.push({
+          agentId: profile.id,
+          agentName: profile.name,
+          category: "hook",
+          targetPath: asset.targetPath,
+          status,
+          ...(message ? { message } : {}),
+        });
+      } catch (err) {
+        results.push({
+          agentId: profile.id,
+          agentName: profile.name,
+          category: "hook",
+          targetPath: asset.targetPath,
+          status: "error",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    // 5b. DSH: the Cordis patch row that loads the reflex plugin.
+    if (profile.cordisPatchPath && (profile.reflexAssets ?? []).some((a) => a.type === "dsh-plugin")) {
+      try {
+        const status = writeDshHookPatch(profile.cordisPatchPath);
+        results.push({
+          agentId: profile.id,
+          agentName: profile.name,
+          category: "hook",
+          targetPath: profile.cordisPatchPath,
+          status,
+        });
+      } catch (err) {
+        results.push({
+          agentId: profile.id,
+          agentName: profile.name,
+          category: "hook",
+          targetPath: profile.cordisPatchPath,
+          status: "error",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   }
 
   return { detectedAgents: detected, results };
@@ -2044,6 +2264,42 @@ export function uninstallAllAgents(opts: UninstallAllAgentsOptions = {}): AgentI
         });
       }
     }
+
+    // 5. Remove prompt-reflex plugin assets (Tier-2 hosts) and, for DSH, the
+    // managed patch row that loads the reflex plugin (MCP block untouched).
+    for (const asset of profile.reflexAssets ?? []) {
+      try {
+        if (removeReflexAsset(asset.type, asset.targetPath)) {
+          results.push({
+            agentId: profile.id,
+            agentName: profile.name,
+            category: "hook",
+            targetPath: asset.targetPath,
+            status: "removed",
+          });
+        }
+      } catch (err) {
+        results.push({
+          agentId: profile.id,
+          agentName: profile.name,
+          category: "hook",
+          targetPath: asset.targetPath,
+          status: "error",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    if (profile.cordisPatchPath && (profile.reflexAssets ?? []).some((a) => a.type === "dsh-plugin")) {
+      if (removeDshHookPatch(profile.cordisPatchPath)) {
+        results.push({
+          agentId: profile.id,
+          agentName: profile.name,
+          category: "hook",
+          targetPath: profile.cordisPatchPath,
+          status: "removed",
+        });
+      }
+    }
   }
 
   return results;
@@ -2058,7 +2314,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\$&");
 }
 
 /** Whether one MCP config target contains the canonical GraphFlow server entry. */

@@ -62,6 +62,16 @@ Version 3.0 **replaced the entire 2.x architecture**. The 10-tool knowledge-grap
 
 Session read dedup skips unchanged files; 3 consecutive edit-test failures trigger a deterministic rescue packet (blast-radius contracts + recent git diffs). Syntax guards use the true-AST backends when available — `@babel/parser` for TS/JS and tree-sitter ERROR/MISSING diagnostics for the other five — with the structural analyzers' heuristic checks (brace/declaration, Python missing-colon/bracket diagnostics) as the fallback, including when `GRAPHFLOW_TREE_SITTER=0` is set.
 
+## Prompt Reflex (0-LLM Local Reaction)
+
+A chat prompt that is a short command (e.g. `启动项目`) can be answered **without a single LLM turn**: when it matches a compiled `command-pipeline` macro's triggers, the macro executes locally and the prompt is **blocked from reaching the model**. The entry point is `graphflow hook user-prompt [--protocol generic|cursor|gemini]`, auto-registered per host by `graphflow install`. A long prompt that merely mentions a trigger gets an injected `gf_macro` hint instead (the model stays in the loop); everything else passes through untouched, and any internal error fails open to a plain pass-through. Only `command-pipeline` macros are prompt-executable — `edit-codemod` macros never auto-run. `GRAPHFLOW_PROMPT_REFLEX=0` is the kill switch.
+
+- **Tier 1 — full 0-LLM block** (auto-registered): ZCode, Claude Code, Codex CLI, Gemini CLI, Cursor, Windsurf, Trae, Qoder, Kimi Code, Continue CLI (CLI only).
+- **Tier 2 — inject/rewrite, in progress / experimental** (macro runs locally; the model gets the result and stays in the loop): OpenCode, Kilo Code, Cline, Antigravity, DeepSeek Harness.
+- **Tier 3 — no prompt-level hooks** (fallback = `gf_macro` MCP tool + rules/skills prompting): VS Code Copilot, Zed, Claude Desktop, PearAI, Roo Code (legacy).
+
+Matching rules (CJK substring / latin word boundary; short-command gate ≤24 chars or ≤12 tokens), the per-host config table, and verification steps: [docs/prompt-reflex.md](./docs/prompt-reflex.md).
+
 ## What's New in 3.7.1
 
 - **WorkBuddy is now an install target** — `graphflow install` detects `~/.workbuddy` and registers the MCP server in `~/.workbuddy/mcp.json` plus the skill at `~/.workbuddy/skills/graphflow/SKILL.md`. No rules file is written: WorkBuddy has no global instructions surface, so an `AGENTS.md` there would be dead weight. That makes **22** supported hosts.
@@ -417,6 +427,7 @@ DSH does **not** read `~/.dsh/mcp.json`. Its MCP servers are Cordis plugin inser
 ## Docs
 
 - [README.zh.md](./README.zh.md) — Chinese documentation
+- [docs/prompt-reflex.md](./docs/prompt-reflex.md) — Prompt Reflex (0-LLM local reaction): host capability matrix, per-host config, security notes
 - [VSIX-INSTALL.md](./VSIX-INSTALL.md) — VS Code extension install guide (EN + 中文)
 - [skills/graphflow/SKILL.md](./skills/graphflow/SKILL.md) — agent-facing skill definition
 - [Releases](https://github.com/Roarpeng/GraphFlow/releases) · [Issues](https://github.com/Roarpeng/GraphFlow/issues) · [License: Apache-2.0](./LICENSE)

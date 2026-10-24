@@ -1132,6 +1132,93 @@ check("tier-1 uninstall removes graphflow prompt hooks; kimi user [[hooks]] surv
   }
 });
 
+// ---------------------------------------------------------------------------
+// Tier-2 prompt-reflex plugin assets: OpenCode / Kilo shared plugin, Cline
+// file hook (Unix-only), DSH Cordis plugin + managed patch block.
+// ---------------------------------------------------------------------------
+
+check("Tier-2 reflex assets: OpenCode/Kilo plugins, Cline file hook, DSH plugin + patch row", () => {
+  const s = createSandbox(true, false, false);
+  // Tier-2 host markers: opencode (~/.config/opencode), kilocode (~/.kilocode),
+  // cline (portable home/.config Code globalStorage marker).
+  mkdirSync(join(s.home, ".config", "opencode"), { recursive: true });
+  mkdirSync(join(s.home, ".kilocode"), { recursive: true });
+  mkdirSync(
+    join(s.home, ".config", "Code", "User", "globalStorage", "saoudrizwan.claude-dev"),
+    { recursive: true }
+  );
+  try {
+    const report = s.install();
+    const hookResults = report.results.filter((r) => r.category === "hook");
+
+    const ocPlugin = join(s.home, ".config", "opencode", "plugin", "graphflow-prompt-reflex.ts");
+    const kiloPlugin = join(s.home, ".config", "kilo", "plugin", "graphflow-prompt-reflex.ts");
+    const clineHook = join(s.home, "Documents", "Cline", "Hooks", "UserPromptSubmit");
+    const dshPlugin = join(s.dshHome, "plugins", "graphflow-prompt-reflex.mjs");
+
+    assert.ok(existsSync(ocPlugin), "OpenCode plugin written");
+    assert.ok(
+      readFileSync(ocPlugin, "utf8").includes('"chat.message"') &&
+        readFileSync(ocPlugin, "utf8").includes("graphflow hook user-prompt"),
+      "OpenCode plugin carries the chat.message reflex wiring"
+    );
+    assert.ok(existsSync(kiloPlugin), "Kilo plugin written");
+    assert.equal(readFileSync(ocPlugin, "utf8"), readFileSync(kiloPlugin, "utf8"), "shared plugin is byte-identical on both hosts");
+
+    const clineResult = hookResults.find((r) => r.targetPath === clineHook);
+    if (process.platform === "win32") {
+      assert.equal(clineResult?.status, "skipped", "Cline hook skipped on win32");
+      assert.ok(!existsSync(clineHook), "no Cline hook file on win32");
+    } else {
+      assert.equal(clineResult?.status, "installed", "Cline hook installed");
+      assert.ok(
+        readFileSync(clineHook, "utf8").startsWith("#!/usr/bin/env node"),
+        "Cline hook has the node shebang"
+      );
+    }
+
+    assert.ok(existsSync(dshPlugin), "DSH reflex plugin written");
+    const patch = readFileSync(s.cordisPath, "utf8");
+    assert.ok(patch.includes("# GRAPHFLOW-DSH-BEGIN"), "MCP managed block still present");
+    assert.ok(patch.includes("# GRAPHFLOW-DSH-HOOK-BEGIN"), "reflex managed block present");
+    assert.ok(
+      patch.indexOf("# GRAPHFLOW-DSH-BEGIN") < patch.indexOf("# GRAPHFLOW-DSH-HOOK-BEGIN"),
+      "MCP block precedes the reflex block"
+    );
+    assert.ok(
+      patch.includes("name: './plugins/graphflow-prompt-reflex.mjs'"),
+      "patch row anchors the plugin beside the patch file"
+    );
+
+    // Idempotency: reinstall leaves every asset byte-identical.
+    const ocBefore = readFileSync(ocPlugin, "utf8");
+    const patchBefore = patch;
+    s.install();
+    assert.equal(readFileSync(ocPlugin, "utf8"), ocBefore, "plugin byte-identical after reinstall");
+    assert.equal(readFileSync(s.cordisPath, "utf8"), patchBefore, "patch byte-identical after reinstall");
+
+    // A user-authored plugin in the same dir must survive uninstall.
+    const userPlugin = join(s.home, ".config", "opencode", "plugin", "my-own.ts");
+    writeFileSync(userPlugin, "export default { id: 'mine', server: async () => ({}) };\n", "utf8");
+
+    s.uninstall();
+    assert.ok(!existsSync(ocPlugin), "graphflow plugin removed");
+    assert.ok(!existsSync(kiloPlugin), "kilo plugin removed");
+    assert.ok(existsSync(userPlugin), "user plugin untouched");
+    if (process.platform !== "win32") {
+      assert.ok(!existsSync(clineHook), "cline hook removed");
+    }
+    assert.ok(!existsSync(dshPlugin), "dsh plugin removed");
+    const patchAfter = readFileSync(s.cordisPath, "utf8");
+    assert.ok(!patchAfter.includes("# GRAPHFLOW-DSH-HOOK-BEGIN"), "reflex block removed from patch");
+    // Full uninstall removes ALL graphflow registrations — the MCP managed
+    // block is graphflow-owned too, so it is gone as well.
+    assert.ok(!patchAfter.includes("# GRAPHFLOW-DSH-BEGIN"), "MCP managed block removed by full uninstall");
+  } finally {
+    s.cleanup();
+  }
+});
+
 if (failures.length > 0) {
   console.error(`\n${failures.length}/${checks} installer-hooks check(s) FAILED:`);
   for (const name of failures) console.error(`  - ${name}`);

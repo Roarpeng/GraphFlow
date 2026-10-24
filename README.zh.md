@@ -62,6 +62,16 @@
 
 会话级读去重跳过未变更文件；连续 3 次编辑-测试失败触发确定性急救包（爆炸半径契约 + 最近 git diff）。语法守卫在有真 AST 后端时使用它们 —— TS/JS 用 `@babel/parser`，其余 5 种用 tree-sitter 的 ERROR/MISSING 诊断 —— 结构化分析器的启发式检查（花括号/声明级、Python 缺冒号/括号诊断）作为回退，设置 `GRAPHFLOW_TREE_SITTER=0` 时同样适用。
 
+## Prompt Reflex（0-LLM 本地反射）
+
+简短命令式的聊天 prompt（例如 `启动项目`）现在**不消耗任何 LLM 轮次**即可响应：命中已编译 `command-pipeline` 宏的触发词时，宏在本地执行，该 prompt **不会到达模型**。入口为 `graphflow hook user-prompt [--protocol generic|cursor|gemini]`，由 `graphflow install` 按宿主自动注册。只是在长 prompt 中提及触发词的，改为注入一条 `gf_macro` 提示（模型仍在环内）；其余 prompt 原样放行，内部任何错误一律失效放行。仅 `command-pipeline` 宏可由 prompt 执行 —— `edit-codemod` 宏绝不自动运行。`GRAPHFLOW_PROMPT_REFLEX=0` 为总开关。
+
+- **第一档 —— 完整 0-LLM 拦截**（自动注册）：ZCode、Claude Code、Codex CLI、Gemini CLI、Cursor、Windsurf、Trae、Qoder、Kimi Code、Continue CLI（仅 CLI）。
+- **第二档 —— 注入/改写，进行中 / 实验性**（宏本地执行；模型拿到结果、仍在环内）：OpenCode、Kilo Code、Cline、Antigravity、DeepSeek Harness。
+- **第三档 —— 无提示词级钩子**（回退 = `gf_macro` MCP 工具 + rules/skills 提示）：VS Code Copilot、Zed、Claude Desktop、PearAI、Roo Code（遗留）。
+
+匹配规则（中文子串 / 拉丁词边界；短命令门 ≤24 字符或 ≤12 tokens）、逐宿主配置表与验证步骤详见 [docs/prompt-reflex.md](./docs/prompt-reflex.md)。
+
 ## 3.7.1 新特性
 
 - **新增第 22 个安装目标：WorkBuddy** —— `graphflow install` 会探测 `~/.workbuddy`，把 MCP server 注册进 `~/.workbuddy/mcp.json`，并把技能写到 `~/.workbuddy/skills/graphflow/SKILL.md`。不写 rules 文件：WorkBuddy 没有全局指令文件，放个 `AGENTS.md` 只是死重量。
@@ -417,6 +427,7 @@ DSH **不读取** `~/.dsh/mcp.json`。它的 MCP 服务器是 `~/.dsh/cordis.pat
 ## 文档
 
 - [README.md](./README.md) —— 英文文档
+- [docs/prompt-reflex.md](./docs/prompt-reflex.md) —— Prompt Reflex（0-LLM 本地反射）：宿主能力矩阵、逐宿主配置与安全说明
 - [VSIX-INSTALL.md](./VSIX-INSTALL.md) —— VS Code 扩展安装指南（EN + 中文）
 - [skills/graphflow/SKILL.md](./skills/graphflow/SKILL.md) —— 面向 Agent 的 Skill 定义
 - [Releases](https://github.com/Roarpeng/GraphFlow/releases) · [Issues](https://github.com/Roarpeng/GraphFlow/issues) · [许可证：Apache-2.0](./LICENSE)
