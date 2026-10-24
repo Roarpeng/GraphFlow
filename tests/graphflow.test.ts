@@ -19,9 +19,11 @@ import {
   getWorkspaceAstIndex,
   interceptPostToolUse,
   interceptPreToolUse,
+  interceptUserPromptSubmit,
   generateCrossAgentBrief,
   loadMacroStore,
   recordTrajectoryAndMine,
+  registerCustomMacro,
   resolveAffectedTests,
   computeTemporalCouplingFromCommits,
   parseGitLogCommitFiles,
@@ -871,6 +873,78 @@ async function runAllTests(): Promise<void> {
       assert.equal(postBash.intercepted, true);
       assert.equal(postBash.action, "dehydrate-bash");
       assert.ok(postBash.dehydratedText!.startsWith("PASS [exit=0"));
+    });
+
+    check("Prompt Reflex: short command-like prompts execute macros locally and block the LLM; long prompts only hint", () => {
+      const proot = mkdtempSync(join(tmpdir(), "gf-prompt-reflex-"));
+      try {
+        const launchMacro = registerCustomMacro(proot, {
+          name: "Launch dev stack",
+          kind: "command-pipeline",
+          description: "启动本地开发环境 (launch the local dev stack)",
+          steps: ["node -e \"process.stdout.write('launched-ok')\""],
+          triggers: ["启动项目", "launch"],
+        });
+
+        // (a) Short command-like CJK prompt -> macro executes locally (0 LLM) and blocks the prompt.
+        const blocked = interceptUserPromptSubmit({ prompt: "启动项目" }, { rootDir: proot });
+        assert.equal(blocked.action, "blocked", "Short trigger prompt must execute the macro and block the LLM");
+        assert.equal(blocked.macroId, launchMacro.id);
+        assert.ok(blocked.summary!.includes("launched-ok"), "Summary must embed the macro output");
+        assert.ok(blocked.summary!.includes(launchMacro.id), "Summary must name the executed macro");
+
+        // Latin trigger with casing + trailing punctuation still matches and executes.
+        const blockedLaunch = interceptUserPromptSubmit({ prompt: "Launch!" }, { rootDir: proot });
+        assert.equal(blockedLaunch.action, "blocked", "'Launch!' must normalize to the 'launch' trigger");
+
+        // (b) Long prompt that merely MENTIONS the trigger -> hint only, never executes.
+        const longRes = interceptUserPromptSubmit(
+          { prompt: "请帮我启动项目然后把 gateway 的日志发给我看看，顺便检查健康状态" },
+          { rootDir: proot }
+        );
+        assert.equal(longRes.action, "hint", "Long mention-only prompt must hint, not execute");
+        assert.ok(longRes.hint!.includes(launchMacro.id), "Hint must name the ready macro");
+        assert.ok(
+          longRes.hint!.includes('gf_macro(action="run"'),
+          "Hint must teach the gf_macro run command"
+        );
+        assert.ok(!longRes.hint!.includes("launched-ok"), "Hint path must not have executed the macro");
+
+        // (c) Unrelated prompt passes straight through.
+        assert.equal(
+          interceptUserPromptSubmit({ prompt: "今天天气怎么样" }, { rootDir: proot }).action,
+          "allow"
+        );
+
+        // (d) GRAPHFLOW_PROMPT_REFLEX=0 disables the reflex entirely (fail-open opt-out).
+        const prevReflexEnv = process.env.GRAPHFLOW_PROMPT_REFLEX;
+        process.env.GRAPHFLOW_PROMPT_REFLEX = "0";
+        try {
+          assert.equal(
+            interceptUserPromptSubmit({ prompt: "启动项目" }, { rootDir: proot }).action,
+            "allow",
+            "GRAPHFLOW_PROMPT_REFLEX=0 must bypass prompt reflex"
+          );
+        } finally {
+          if (prevReflexEnv === undefined) delete process.env.GRAPHFLOW_PROMPT_REFLEX;
+          else process.env.GRAPHFLOW_PROMPT_REFLEX = prevReflexEnv;
+        }
+
+        // (e) An edit-codemod macro with a matching trigger is NEVER auto-executed.
+        registerCustomMacro(proot, {
+          name: "Refactor codemod",
+          kind: "edit-codemod",
+          steps: ["const timeoutMs = 3000;", "const timeoutMs = 10000;"],
+          triggers: ["重构配置"],
+        });
+        assert.equal(
+          interceptUserPromptSubmit({ prompt: "重构配置" }, { rootDir: proot }).action,
+          "allow",
+          "Only command-pipeline macros are prompt-executable; edit-codemod must never run"
+        );
+      } finally {
+        rmSync(proot, { recursive: true, force: true });
+      }
     });
 
     check("V3.1 Pillar A: Zero-Cold-Start Git Temporal Coupling Miner discovers cross-language co-edits", () => {

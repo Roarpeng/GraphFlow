@@ -7,7 +7,13 @@
  *  - uninstall removes only graphflow-owned hooks and keeps user hooks,
  *  - getAgentRegistrationStatus reports mcp/skill/rule/hook before/after
  *    install and uninstall (including DSH Cordis patch detection),
- *  - JSON configs stay valid throughout.
+ *  - JSON configs stay valid throughout,
+ *  - the UserPromptSubmit-level "prompt" phase installs for all five hook
+ *    hosts (cursor/claude/codex/gemini/zcode), including ZCode's
+ *    hooks.enabled + hooks.events.<Event> config-file format,
+ *  - the Tier-1 prompt-only hosts (windsurf/trae/qoder/kimi-code/continue):
+ *    flat Windsurf entries, Claude-like JSON for the other three, and Kimi
+ *    Code's TOML [[hooks]] tables preserved byte-for-byte outside graphflow.
  *
  * Every sandbox (home / AppData / LocalAppData / workspace / DSH_HOME) is a
  * fresh mkdtemp directory passed through installer options; the real HOME and
@@ -20,7 +26,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   getAgentRegistrationStatus,
   installAllAgents,
@@ -71,20 +77,26 @@ interface Sandbox {
   claudeMcp: string;
   codexHooks: string;
   geminiHooks: string;
+  zcodeConfig: string;
+  windsurfHooks: string;
+  traeHooks: string;
+  qoderSettings: string;
+  kimiConfig: string;
+  continueSettings: string;
   baseOptions: () => InstallAllAgentsOptions;
   install: (extra?: Partial<InstallAllAgentsOptions>) => InstallAllAgentsReport;
   uninstall: (extra?: Partial<UninstallAllAgentsOptions>) => AgentInstallItemResult[];
   cleanup: () => void;
 }
 
-function createSandbox(includeDsh = false): Sandbox {
+function createSandbox(includeDsh = false, includeZcode = false, includeNewHosts = false): Sandbox {
   const root = mkdtempSync(join(tmpdir(), "gf-hooks-"));
   const home = join(root, "home");
   const appData = join(root, "appdata");
   const localAppData = join(root, "localappdata");
   const workspace = join(root, "workspace");
   const dshHome = join(root, "dsh-home");
-  // Detected-host markers for the four hook-capable agents.
+  // Detected-host markers for the four tool-hook agents.
   for (const dir of [home, appData, localAppData, workspace]) {
     mkdirSync(dir, { recursive: true });
   }
@@ -92,6 +104,14 @@ function createSandbox(includeDsh = false): Sandbox {
     mkdirSync(join(home, marker), { recursive: true });
   }
   if (includeDsh) mkdirSync(dshHome, { recursive: true });
+  // ZCode marker + the cli dir its hooks/mcp config.json lives in.
+  if (includeZcode) mkdirSync(join(home, ".zcode", "cli"), { recursive: true });
+  // Tier-1 prompt-only hook hosts: windsurf / trae / qoder / kimi-code / continue.
+  if (includeNewHosts) {
+    for (const marker of [join(".codeium", "windsurf"), ".trae", ".qoder", ".kimi-code", ".continue"]) {
+      mkdirSync(join(home, marker), { recursive: true });
+    }
+  }
   const baseOptions = (): InstallAllAgentsOptions => ({
     homeDir: home,
     appDataDir: appData,
@@ -114,6 +134,12 @@ function createSandbox(includeDsh = false): Sandbox {
     claudeMcp: join(home, ".claude.json"),
     codexHooks: join(home, ".codex", "hooks.json"),
     geminiHooks: join(home, ".gemini", "settings.json"),
+    zcodeConfig: join(home, ".zcode", "cli", "config.json"),
+    windsurfHooks: join(home, ".codeium", "windsurf", "hooks.json"),
+    traeHooks: join(home, ".trae", "hooks.json"),
+    qoderSettings: join(home, ".qoder", "settings.json"),
+    kimiConfig: join(home, ".kimi-code", "config.toml"),
+    continueSettings: join(home, ".continue", "settings.json"),
     baseOptions,
     install: (extra = {}) => installAllAgents({ ...baseOptions(), ...extra }),
     uninstall: (extra = {}) => uninstallAllAgents({ ...baseOptions(), ...extra }),
@@ -124,6 +150,89 @@ function createSandbox(includeDsh = false): Sandbox {
 }
 
 const ALL_HOOK_AGENTS = ["cursor", "claude-code", "codex", "gemini"];
+
+/** The five hosts that receive a UserPromptSubmit-level prompt hook (zcode: prompt only). */
+const PROMPT_HOOK_AGENTS = [...ALL_HOOK_AGENTS, "zcode"];
+
+/** The Tier-1 hosts that receive a prompt-ONLY hook (no pre/post tool phases). */
+const NEW_PROMPT_HOST_AGENTS = ["windsurf", "trae", "qoder", "kimi-code", "continue"];
+
+/**
+ * User-owned Kimi config.toml. Ends with exactly one trailing newline so the
+ * install+uninstall round trip below can assert byte-for-byte restoration.
+ */
+const USER_KIMI_TOML = `${[
+  "# user-managed kimi settings",
+  'model = "k2"',
+  "",
+  "[[hooks]]",
+  'event = "PreToolUse"',
+  'matcher = "Bash"',
+  'command = "user-kimi-pre"',
+  "timeout = 5",
+].join("\n")}\n`;
+
+/** The managed Kimi [[hooks]] table GraphFlow must append (timeout in seconds). */
+const GRAPHFLOW_KIMI_BLOCK = [
+  "[[hooks]]",
+  'event = "UserPromptSubmit"',
+  'command = "graphflow hook user-prompt"',
+  "timeout = 60",
+].join("\n");
+
+/**
+ * Isolate KIMI_CODE_HOME inside the sandbox: the kimi-code profile's first MCP
+ * target follows that env var, and without this an ambient real value would
+ * leak writes outside the sandbox.
+ */
+function withSandboxKimiHome<T>(s: Sandbox, fn: () => T): T {
+  const prev = process.env.KIMI_CODE_HOME;
+  process.env.KIMI_CODE_HOME = join(s.root, "kimi-home");
+  try {
+    return fn();
+  } finally {
+    if (prev === undefined) delete process.env.KIMI_CODE_HOME;
+    else process.env.KIMI_CODE_HOME = prev;
+  }
+}
+
+/** Pre-seed user hooks for the five Tier-1 prompt-only hosts. */
+function seedTier1UserHooks(s: Sandbox): void {
+  // Windsurf: flat { command } entries, snake_case event keys.
+  writeJson(s.windsurfHooks, {
+    custom: "keep-windsurf",
+    hooks: {
+      pre_user_prompt: [{ command: "user-windsurf-prompt" }],
+      pre_read_code: [{ command: "user-windsurf-read" }],
+    },
+  });
+  // Trae: Claude-like nested entries in ~/.trae/hooks.json.
+  writeJson(s.traeHooks, {
+    hooks: {
+      UserPromptSubmit: [{ hooks: [{ type: "command", command: "user-trae-prompt" }] }],
+      Stop: [{ hooks: [{ type: "command", command: "user-trae-stop" }] }],
+    },
+  });
+  // Qoder: Claude-like nested entries under the top-level hooks key of settings.json.
+  writeJson(s.qoderSettings, {
+    qoderSetting: true,
+    hooks: {
+      UserPromptSubmit: [{ hooks: [{ type: "command", command: "user-qoder-prompt" }] }],
+    },
+  });
+  // Continue: Claude-like nested entries (CLI-only hook surface).
+  writeJson(s.continueSettings, {
+    theme: "dark",
+    hooks: {
+      UserPromptSubmit: [
+        { matcher: ".*", hooks: [{ type: "command", command: "user-continue-prompt" }] },
+      ],
+    },
+  });
+  // Kimi Code: TOML [[hooks]] tables in ~/.kimi-code/config.toml.
+  mkdirSync(dirname(s.kimiConfig), { recursive: true });
+  writeFileSync(s.kimiConfig, USER_KIMI_TOML, "utf8");
+}
 
 /** Pre-seed user hooks (plus a stale graphflow entry for Cursor / a mixed one for Claude). */
 function seedUserHooks(s: Sandbox): void {
@@ -178,6 +287,55 @@ function seedUserHooks(s: Sandbox): void {
         },
       ],
       AfterTool: [],
+    },
+  });
+}
+
+/**
+ * Prompt-phase user entries for the five prompt-hook hosts (run after
+ * seedUserHooks). ZCode's config.json deliberately has NO hooks.enabled flag —
+ * install must add it — and carries a user MCP server that must survive.
+ */
+function seedPromptUserHooks(s: Sandbox): void {
+  const cursor = readJson(s.cursorHooks);
+  cursor.hooks = {
+    ...(cursor.hooks as Record<string, unknown>),
+    beforeSubmitPrompt: [{ command: "user-cursor-prompt", timeout: 5 }],
+  };
+  writeJson(s.cursorHooks, cursor);
+
+  const claude = readJson(s.claudeHooks);
+  claude.hooks = {
+    ...(claude.hooks as Record<string, unknown>),
+    UserPromptSubmit: [{ hooks: [{ type: "command", command: "user-claude-prompt" }] }],
+  };
+  writeJson(s.claudeHooks, claude);
+
+  const codex = readJson(s.codexHooks);
+  codex.hooks = {
+    ...(codex.hooks as Record<string, unknown>),
+    UserPromptSubmit: [{ hooks: [{ type: "command", command: "user-codex-prompt" }] }],
+  };
+  writeJson(s.codexHooks, codex);
+
+  const gemini = readJson(s.geminiHooks);
+  gemini.hooks = {
+    ...(gemini.hooks as Record<string, unknown>),
+    BeforeAgent: [
+      {
+        matcher: ".*",
+        hooks: [{ name: "user-gemini-prompt", type: "command", command: "user-gemini-prompt" }],
+      },
+    ],
+  };
+  writeJson(s.geminiHooks, gemini);
+
+  writeJson(s.zcodeConfig, {
+    mcp: { servers: { "user-server": { command: "user-mcp", args: [] } } },
+    hooks: {
+      events: {
+        UserPromptSubmit: [{ hooks: [{ type: "command", command: "user-zcode-prompt" }] }],
+      },
     },
   });
 }
@@ -573,6 +731,402 @@ check("graphflow status CLI prints per-agent registration lines", () => {
     const dshLine = registrationLines.find((line) => line.includes("DeepSeek Harness (deepseek-harness)"));
     assert.ok(dshLine && dshLine.includes("[MCP ✓]"), "DSH Cordis registration printed as MCP");
     assert.ok(dshLine.includes("[Rule -]") && dshLine.includes("[Hook -]"), "DSH has no rule/hook surface");
+  } finally {
+    s.cleanup();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 8. Prompt (UserPromptSubmit-level) hooks install for all five kinds.
+// ---------------------------------------------------------------------------
+check("prompt hooks install for all five kinds with the exact per-kind shape", () => {
+  const s = createSandbox(false, true);
+  try {
+    seedUserHooks(s);
+    seedPromptUserHooks(s);
+    const report = s.install();
+    assert.equal(
+      report.results.filter((r) => r.category === "hook").length,
+      PROMPT_HOOK_AGENTS.length,
+      "cursor, claude-code, codex, gemini and zcode each install hooks"
+    );
+
+    // ---- Cursor: flat entry under beforeSubmitPrompt, --protocol cursor.
+    const cursorHooks = readJson(s.cursorHooks).hooks as Record<string, unknown>;
+    assert.deepEqual(cursorHooks.beforeSubmitPrompt, [
+      { command: "user-cursor-prompt", timeout: 5 },
+      { command: "graphflow hook user-prompt --protocol cursor", timeout: 15 },
+    ]);
+
+    // ---- Claude Code: nested entry without matcher, timeout in seconds.
+    const claudeHooks = readJson(s.claudeHooks).hooks as Record<string, unknown>;
+    assert.deepEqual(claudeHooks.UserPromptSubmit, [
+      { hooks: [{ type: "command", command: "user-claude-prompt" }] },
+      { hooks: [{ type: "command", command: "graphflow hook user-prompt", timeout: 60 }] },
+    ]);
+
+    // ---- Codex: Claude-like nested entry, timeout included (harmless).
+    const codexHooks = readJson(s.codexHooks).hooks as Record<string, unknown>;
+    assert.deepEqual(codexHooks.UserPromptSubmit, [
+      { hooks: [{ type: "command", command: "user-codex-prompt" }] },
+      { hooks: [{ type: "command", command: "graphflow hook user-prompt", timeout: 60 }] },
+    ]);
+
+    // ---- Gemini: matcher-wrapped named entry under BeforeAgent, timeout ms.
+    const geminiHooks = readJson(s.geminiHooks).hooks as Record<string, unknown>;
+    assert.deepEqual(geminiHooks.BeforeAgent, [
+      {
+        matcher: ".*",
+        hooks: [{ name: "user-gemini-prompt", type: "command", command: "user-gemini-prompt" }],
+      },
+      {
+        matcher: ".*",
+        hooks: [
+          {
+            name: "graphflow-prompt",
+            type: "command",
+            command: "graphflow hook user-prompt --protocol gemini",
+            timeout: 60000,
+          },
+        ],
+      },
+    ]);
+
+    // ---- ZCode: hooks.enabled flag + entries under hooks.events.UserPromptSubmit.
+    const zcode = readJson(s.zcodeConfig);
+    const zcodeHooks = zcode.hooks as Record<string, unknown>;
+    assert.equal(zcodeHooks.enabled, true, "install turns on the ZCode hooks feature flag");
+    const zcodeEvents = zcodeHooks.events as Record<string, unknown>;
+    assert.deepEqual(Object.keys(zcodeEvents), ["UserPromptSubmit"], "zcode gets ONLY the prompt phase");
+    const zcodePrompt = zcodeEvents.UserPromptSubmit as Array<Record<string, unknown>>;
+    assert.equal(zcodePrompt.length, 2, "user prompt entry + exactly one graphflow entry");
+    assert.ok(hookCommands(zcodePrompt).includes("user-zcode-prompt"));
+    assert.deepEqual(zcodePrompt[1], {
+      hooks: [{ type: "command", command: "graphflow hook user-prompt", timeoutMs: 60000 }],
+    });
+    // The MCP registration in the same config file survives the hook write.
+    const zcodeServers = (zcode.mcp as Record<string, unknown>).servers as Record<string, unknown>;
+    assert.ok(zcodeServers.graphflow, "zcode MCP entry kept alongside the hooks");
+    assert.ok(zcodeServers["user-server"], "user MCP server kept alongside the hooks");
+
+    // Tool phases still install alongside for the four tool-hook hosts.
+    assert.equal(countGraphflowCommands(cursorHooks.preToolUse), 1);
+    assert.equal(countGraphflowCommands(cursorHooks.postToolUse), 1);
+    assert.equal(countGraphflowCommands(claudeHooks.PreToolUse), 1);
+    assert.equal(countGraphflowCommands(claudeHooks.PostToolUse), 1);
+    assert.equal(countGraphflowCommands(codexHooks.PreToolUse), 1);
+    assert.equal(countGraphflowCommands(codexHooks.PostToolUse), 1);
+    assert.equal(countGraphflowCommands(geminiHooks.BeforeTool), 1);
+    assert.equal(countGraphflowCommands(geminiHooks.AfterTool), 1);
+
+    // Registration status sees the zcode hook (hasGraphflowHook, prompt-only kind).
+    const statuses = new Map(
+      getAgentRegistrationStatus({ ...s.baseOptions() }).map((status) => [status.id, status])
+    );
+    assert.equal(statuses.get("zcode")?.hook, true, "zcode hook registration detected");
+    assert.ok(statuses.get("zcode")?.paths.hook?.endsWith(join(".zcode", "cli", "config.json")));
+  } finally {
+    s.cleanup();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 9. Prompt-hook reinstall is idempotent.
+// ---------------------------------------------------------------------------
+check("prompt-hook reinstall is idempotent (no duplicate entries)", () => {
+  const s = createSandbox(false, true);
+  try {
+    seedUserHooks(s);
+    seedPromptUserHooks(s);
+    s.install();
+    const snapshot = {
+      cursor: readFileSync(s.cursorHooks, "utf8"),
+      claude: readFileSync(s.claudeHooks, "utf8"),
+      codex: readFileSync(s.codexHooks, "utf8"),
+      gemini: readFileSync(s.geminiHooks, "utf8"),
+      zcode: readFileSync(s.zcodeConfig, "utf8"),
+    };
+    s.install();
+
+    assert.equal(readFileSync(s.cursorHooks, "utf8"), snapshot.cursor, "cursor byte-identical on reinstall");
+    assert.equal(readFileSync(s.claudeHooks, "utf8"), snapshot.claude, "claude byte-identical on reinstall");
+    assert.equal(readFileSync(s.codexHooks, "utf8"), snapshot.codex, "codex byte-identical on reinstall");
+    assert.equal(readFileSync(s.geminiHooks, "utf8"), snapshot.gemini, "gemini byte-identical on reinstall");
+    assert.equal(readFileSync(s.zcodeConfig, "utf8"), snapshot.zcode, "zcode config byte-identical on reinstall");
+
+    const cursorHooks = readJson(s.cursorHooks).hooks as Record<string, unknown>;
+    assert.equal(countGraphflowCommands(cursorHooks.beforeSubmitPrompt), 1);
+    const claudeHooks = readJson(s.claudeHooks).hooks as Record<string, unknown>;
+    assert.equal(countGraphflowCommands(claudeHooks.UserPromptSubmit), 1);
+    const codexHooks = readJson(s.codexHooks).hooks as Record<string, unknown>;
+    assert.equal(countGraphflowCommands(codexHooks.UserPromptSubmit), 1);
+    const geminiHooks = readJson(s.geminiHooks).hooks as Record<string, unknown>;
+    assert.equal(countGraphflowCommands(geminiHooks.BeforeAgent), 1);
+    const zcodeEvents = (readJson(s.zcodeConfig).hooks as Record<string, unknown>).events as Record<
+      string,
+      unknown
+    >;
+    assert.equal(countGraphflowCommands(zcodeEvents.UserPromptSubmit), 1);
+  } finally {
+    s.cleanup();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 10. Uninstall removes prompt entries but preserves user prompt entries.
+// ---------------------------------------------------------------------------
+check("uninstall removes graphflow prompt hooks but keeps user prompt hooks", () => {
+  const s = createSandbox(false, true);
+  try {
+    seedUserHooks(s);
+    seedPromptUserHooks(s);
+    s.install();
+    const removed = s.uninstall({ agentIds: PROMPT_HOOK_AGENTS });
+    assert.equal(
+      removed.filter((r) => r.category === "hook" && r.status === "removed").length,
+      PROMPT_HOOK_AGENTS.length,
+      "hook removal reported for every prompt-hook host"
+    );
+    for (const hookPath of [s.cursorHooks, s.claudeHooks, s.codexHooks, s.geminiHooks, s.zcodeConfig]) {
+      JSON.parse(readFileSync(hookPath, "utf8")); // still valid JSON
+    }
+
+    const cursorHooks = readJson(s.cursorHooks).hooks as Record<string, unknown>;
+    assert.deepEqual(
+      (cursorHooks.beforeSubmitPrompt as Array<Record<string, unknown>>).map((h) => h.command),
+      ["user-cursor-prompt"]
+    );
+    const claudeHooks = readJson(s.claudeHooks).hooks as Record<string, unknown>;
+    assert.deepEqual(hookCommands(claudeHooks.UserPromptSubmit), ["user-claude-prompt"]);
+    const codexHooks = readJson(s.codexHooks).hooks as Record<string, unknown>;
+    assert.deepEqual(hookCommands(codexHooks.UserPromptSubmit), ["user-codex-prompt"]);
+    const geminiHooks = readJson(s.geminiHooks).hooks as Record<string, unknown>;
+    assert.deepEqual(hookCommands(geminiHooks.BeforeAgent), ["user-gemini-prompt"]);
+
+    const zcode = readJson(s.zcodeConfig);
+    const zcodeHooks = zcode.hooks as Record<string, unknown>;
+    const zcodeEvents = zcodeHooks.events as Record<string, unknown>;
+    assert.deepEqual(hookCommands(zcodeEvents.UserPromptSubmit), ["user-zcode-prompt"]);
+    assert.equal(zcodeHooks.enabled, true, "zcode hooks.enabled is left in place (harmless)");
+    const zcodeServers = (zcode.mcp as Record<string, unknown>).servers as Record<string, unknown>;
+    assert.ok(zcodeServers["user-server"], "user MCP server survives zcode uninstall");
+    assert.ok(!("graphflow" in zcodeServers), "graphflow MCP server removed from zcode config");
+
+    // Second uninstall: nothing graphflow-owned left to remove.
+    const second = s.uninstall({ agentIds: PROMPT_HOOK_AGENTS });
+    assert.equal(second.filter((r) => r.category === "hook").length, 0);
+  } finally {
+    s.cleanup();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 11. ZCode-specific removal edge cases (events-wrapped sanitizer).
+// ---------------------------------------------------------------------------
+check("zcode hook removal drops an emptied events key, keeps the enabled flag and other events", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gf-zcode-hook-"));
+  try {
+    const configPath = join(dir, "config.json");
+    writeJson(configPath, {
+      hooks: {
+        enabled: true,
+        events: {
+          UserPromptSubmit: [
+            { hooks: [{ type: "command", command: "graphflow hook user-prompt" }] },
+          ],
+          SessionStart: [{ hooks: [{ type: "command", command: "user-session" }] }],
+        },
+      },
+    });
+    assert.equal(removeHostHook("zcode", configPath), true);
+    const hooks = readJson(configPath).hooks as Record<string, unknown>;
+    assert.equal(hooks.enabled, true, "enabled flag untouched");
+    const events = hooks.events as Record<string, unknown>;
+    assert.ok(!("UserPromptSubmit" in events), "emptied prompt event key removed");
+    assert.deepEqual(hookCommands(events.SessionStart), ["user-session"], "unrelated zcode event survives");
+    assert.equal(removeHostHook("zcode", configPath), false, "second removal is a no-op");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 12. Tier-1 prompt-only hosts: windsurf / trae / qoder / kimi-code / continue.
+// ---------------------------------------------------------------------------
+check("prompt hooks install for windsurf/trae/qoder/kimi-code/continue with the exact per-host shape", () => {
+  const s = createSandbox(false, false, true);
+  try {
+    seedTier1UserHooks(s);
+    const report = withSandboxKimiHome(s, () => s.install({ agentIds: NEW_PROMPT_HOST_AGENTS }));
+    assert.equal(
+      report.results.filter((r) => r.category === "hook").length,
+      NEW_PROMPT_HOST_AGENTS.length,
+      "windsurf, trae, qoder, kimi-code and continue each install one hook entry"
+    );
+
+    // ---- Windsurf (~/.codeium/windsurf/hooks.json): flat { command } entries
+    //      under pre_user_prompt; the documented schema has no timeout field.
+    const windsurf = readJson(s.windsurfHooks);
+    const windsurfHooks = windsurf.hooks as Record<string, unknown>;
+    assert.deepEqual(windsurfHooks.pre_user_prompt, [
+      { command: "user-windsurf-prompt" },
+      { command: "graphflow hook user-prompt" },
+    ]);
+    assert.deepEqual(
+      windsurfHooks.pre_read_code,
+      [{ command: "user-windsurf-read" }],
+      "unrelated windsurf event preserved"
+    );
+    assert.equal(windsurf.custom, "keep-windsurf", "unrelated windsurf top-level key preserved");
+
+    // ---- Trae (~/.trae/hooks.json): Claude-like nested entry, timeout in seconds.
+    const traeHooks = readJson(s.traeHooks).hooks as Record<string, unknown>;
+    assert.deepEqual(traeHooks.UserPromptSubmit, [
+      { hooks: [{ type: "command", command: "user-trae-prompt" }] },
+      { hooks: [{ type: "command", command: "graphflow hook user-prompt", timeout: 60 }] },
+    ]);
+    assert.deepEqual(hookCommands(traeHooks.Stop), ["user-trae-stop"], "unrelated trae event preserved");
+
+    // ---- Qoder (~/.qoder/settings.json): Claude-like nested entry under hooks.
+    const qoder = readJson(s.qoderSettings);
+    const qoderHooks = qoder.hooks as Record<string, unknown>;
+    assert.deepEqual(qoderHooks.UserPromptSubmit, [
+      { hooks: [{ type: "command", command: "user-qoder-prompt" }] },
+      { hooks: [{ type: "command", command: "graphflow hook user-prompt", timeout: 60 }] },
+    ]);
+    assert.equal(qoder.qoderSetting, true, "unrelated qoder settings key preserved");
+
+    // ---- Continue (~/.continue/settings.json): Claude-like nested entry (CLI-only surface).
+    const cont = readJson(s.continueSettings);
+    const contHooks = cont.hooks as Record<string, unknown>;
+    assert.deepEqual(contHooks.UserPromptSubmit, [
+      { matcher: ".*", hooks: [{ type: "command", command: "user-continue-prompt" }] },
+      { hooks: [{ type: "command", command: "graphflow hook user-prompt", timeout: 60 }] },
+    ]);
+    assert.equal(cont.theme, "dark", "unrelated continue settings key preserved");
+
+    // ---- Kimi Code (~/.kimi-code/config.toml): managed [[hooks]] table
+    //      appended, user TOML preserved verbatim ahead of it.
+    const kimi = readFileSync(s.kimiConfig, "utf8");
+    assert.ok(kimi.startsWith(USER_KIMI_TOML.trimEnd()), "user TOML content preserved verbatim");
+    assert.ok(kimi.endsWith(`${GRAPHFLOW_KIMI_BLOCK}\n`), "managed [[hooks]] table appended at EOF");
+    assert.equal(
+      kimi.split("[[hooks]]").length - 1,
+      2,
+      "exactly the user table + the graphflow table"
+    );
+
+    // Registration status detects the prompt hooks for every new kind.
+    const statuses = withSandboxKimiHome(s, () =>
+      new Map(getAgentRegistrationStatus({ ...s.baseOptions() }).map((st) => [st.id, st]))
+    );
+    for (const id of NEW_PROMPT_HOST_AGENTS) {
+      assert.equal(statuses.get(id)?.hook, true, `${id} hook registration detected`);
+    }
+    assert.ok(
+      statuses.get("windsurf")?.paths.hook?.endsWith(join(".codeium", "windsurf", "hooks.json"))
+    );
+    assert.ok(statuses.get("qoder")?.paths.hook?.endsWith(join(".qoder", "settings.json")));
+    assert.ok(statuses.get("kimi-code")?.paths.hook?.endsWith(join(".kimi-code", "config.toml")));
+  } finally {
+    s.cleanup();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 13. Tier-1 prompt-hook reinstall is idempotent (incl. the Kimi TOML file).
+// ---------------------------------------------------------------------------
+check("tier-1 prompt-hook reinstall is idempotent (no duplicate entries, TOML untouched)", () => {
+  const s = createSandbox(false, false, true);
+  try {
+    seedTier1UserHooks(s);
+    withSandboxKimiHome(s, () => s.install({ agentIds: NEW_PROMPT_HOST_AGENTS }));
+    const snapshot = {
+      windsurf: readFileSync(s.windsurfHooks, "utf8"),
+      trae: readFileSync(s.traeHooks, "utf8"),
+      qoder: readFileSync(s.qoderSettings, "utf8"),
+      kimi: readFileSync(s.kimiConfig, "utf8"),
+      continue: readFileSync(s.continueSettings, "utf8"),
+    };
+    withSandboxKimiHome(s, () => s.install({ agentIds: NEW_PROMPT_HOST_AGENTS }));
+
+    assert.equal(readFileSync(s.windsurfHooks, "utf8"), snapshot.windsurf, "windsurf byte-identical on reinstall");
+    assert.equal(readFileSync(s.traeHooks, "utf8"), snapshot.trae, "trae byte-identical on reinstall");
+    assert.equal(readFileSync(s.qoderSettings, "utf8"), snapshot.qoder, "qoder byte-identical on reinstall");
+    assert.equal(readFileSync(s.kimiConfig, "utf8"), snapshot.kimi, "kimi config.toml byte-identical on reinstall");
+    assert.equal(readFileSync(s.continueSettings, "utf8"), snapshot.continue, "continue byte-identical on reinstall");
+
+    const windsurfHooks = readJson(s.windsurfHooks).hooks as Record<string, unknown>;
+    assert.equal(countGraphflowCommands(windsurfHooks.pre_user_prompt), 1);
+    const traeHooks = readJson(s.traeHooks).hooks as Record<string, unknown>;
+    assert.equal(countGraphflowCommands(traeHooks.UserPromptSubmit), 1);
+    const qoderHooks = readJson(s.qoderSettings).hooks as Record<string, unknown>;
+    assert.equal(countGraphflowCommands(qoderHooks.UserPromptSubmit), 1);
+    const contHooks = readJson(s.continueSettings).hooks as Record<string, unknown>;
+    assert.equal(countGraphflowCommands(contHooks.UserPromptSubmit), 1);
+    assert.equal(
+      (readFileSync(s.kimiConfig, "utf8").match(/graphflow hook user-prompt/g) ?? []).length,
+      1,
+      "exactly one graphflow [[hooks]] table in kimi config.toml"
+    );
+  } finally {
+    s.cleanup();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 14. Tier-1 uninstall: graphflow entries removed, user entries kept; the
+//     pre-existing non-graphflow Kimi [[hooks]] block survives byte-for-byte.
+// ---------------------------------------------------------------------------
+check("tier-1 uninstall removes graphflow prompt hooks; kimi user [[hooks]] survives byte-for-byte", () => {
+  const s = createSandbox(false, false, true);
+  try {
+    seedTier1UserHooks(s);
+    withSandboxKimiHome(s, () => s.install({ agentIds: NEW_PROMPT_HOST_AGENTS }));
+    const removed = withSandboxKimiHome(s, () => s.uninstall({ agentIds: NEW_PROMPT_HOST_AGENTS }));
+    assert.equal(
+      removed.filter((r) => r.category === "hook" && r.status === "removed").length,
+      NEW_PROMPT_HOST_AGENTS.length,
+      "hook removal reported for every tier-1 host"
+    );
+    for (const hookPath of [s.windsurfHooks, s.traeHooks, s.qoderSettings, s.continueSettings]) {
+      JSON.parse(readFileSync(hookPath, "utf8")); // still valid JSON
+    }
+
+    const windsurfHooks = readJson(s.windsurfHooks).hooks as Record<string, unknown>;
+    assert.deepEqual(windsurfHooks.pre_user_prompt, [{ command: "user-windsurf-prompt" }]);
+    assert.deepEqual(windsurfHooks.pre_read_code, [{ command: "user-windsurf-read" }]);
+
+    const traeHooks = readJson(s.traeHooks).hooks as Record<string, unknown>;
+    assert.deepEqual(hookCommands(traeHooks.UserPromptSubmit), ["user-trae-prompt"]);
+    assert.deepEqual(hookCommands(traeHooks.Stop), ["user-trae-stop"]);
+
+    const qoder = readJson(s.qoderSettings);
+    assert.deepEqual(hookCommands((qoder.hooks as Record<string, unknown>).UserPromptSubmit), [
+      "user-qoder-prompt",
+    ]);
+    assert.equal(qoder.qoderSetting, true);
+
+    const contHooks = readJson(s.continueSettings).hooks as Record<string, unknown>;
+    assert.deepEqual(hookCommands(contHooks.UserPromptSubmit), ["user-continue-prompt"]);
+
+    // Kimi: install+uninstall restores the user config.toml byte-for-byte,
+    // including the pre-existing non-graphflow [[hooks]] block.
+    assert.equal(
+      readFileSync(s.kimiConfig, "utf8"),
+      USER_KIMI_TOML,
+      "kimi config.toml restored byte-for-byte (user [[hooks]] block intact)"
+    );
+
+    const statuses = withSandboxKimiHome(s, () =>
+      new Map(getAgentRegistrationStatus({ ...s.baseOptions() }).map((st) => [st.id, st]))
+    );
+    for (const id of NEW_PROMPT_HOST_AGENTS) {
+      assert.equal(statuses.get(id)?.hook, false, `${id} hook unregistered`);
+    }
+
+    const second = withSandboxKimiHome(s, () => s.uninstall({ agentIds: NEW_PROMPT_HOST_AGENTS }));
+    assert.equal(second.filter((r) => r.category === "hook").length, 0, "second uninstall is a no-op");
   } finally {
     s.cleanup();
   }

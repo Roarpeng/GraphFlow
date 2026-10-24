@@ -157,10 +157,13 @@ export {
 export {
   interceptPostToolUse,
   interceptPreToolUse,
+  interceptUserPromptSubmit,
+  type HostPromptPayload,
   type HostToolUsePayload,
   type PostToolInterceptResult,
   type PreToolInterceptOptions,
   type PreToolInterceptResult,
+  type PromptReflexResult,
 } from "./host-interceptor.js";
 
 export {

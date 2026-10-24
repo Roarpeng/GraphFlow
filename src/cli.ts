@@ -13,7 +13,11 @@ import {
   uninstallAllAgents,
   type AgentRegistrationStatus,
 } from "./agent-installer.js";
-import { interceptPostToolUse, interceptPreToolUse } from "./host-interceptor.js";
+import {
+  interceptPostToolUse,
+  interceptPreToolUse,
+  interceptUserPromptSubmit,
+} from "./host-interceptor.js";
 import { PACKAGE_VERSION } from "./mcp-server.js";
 import { executeV3ToolCall } from "./mcp-tools.js";
 import {
@@ -285,7 +289,7 @@ function printUsage(): void {
       "  graphflow macro <list|run|mine|mine-git|save> [id] [args...]",
       "  graphflow task <list|show|record|run|log|harvest> [--step <cmd>] [--log <path>] [--json] [--root <dir>]",
       '  graphflow reflect "<instruction>" [args...] [--json] [--root <dir>]',
-      "  graphflow hook <pre-tool|post-tool>",
+      "  graphflow hook <pre-tool|post-tool|user-prompt> [--protocol generic|cursor|gemini]",
       "  graphflow version | help",
       "",
       "Notes:",
@@ -498,6 +502,69 @@ async function main(): Promise<void> {
         { rootDir: hookRoot }
       );
       process.stdout.write(`${JSON.stringify(res.hookProtocolOutput)}\n`);
+      return;
+    }
+    if (sub === "user-prompt" || sub === "UserPromptSubmit" || sub === "prompt" || sub === "BeforeAgent") {
+      // Prompt Reflex: hosts spell the prompt field differently (prompt /
+      // user_prompt / input); --protocol picks the host's stdout dialect.
+      const protocolRaw = readFlag(rest, "--protocol");
+      const protocol = protocolRaw === "cursor" || protocolRaw === "gemini" ? protocolRaw : "generic";
+      const rawPrompt = payload.prompt ?? payload.user_prompt ?? payload.input;
+      const sessionId = typeof payload.session_id === "string" ? payload.session_id : undefined;
+      const res = interceptUserPromptSubmit(
+        {
+          hook_event_name: "UserPromptSubmit",
+          ...(typeof rawPrompt === "string" ? { prompt: rawPrompt } : {}),
+          ...(typeof payload.cwd === "string" ? { cwd: payload.cwd } : {}),
+          ...(sessionId !== undefined ? { session_id: sessionId } : {}),
+        },
+        { rootDir: hookRoot, ...(sessionId !== undefined ? { sessionId } : {}) }
+      );
+      if (res.action === "blocked") {
+        if (protocol === "cursor") {
+          process.stdout.write(
+            `${JSON.stringify({ continue: false, user_message: res.summary ?? "" })}\n`
+          );
+        } else if (protocol === "gemini") {
+          process.stdout.write(
+            `${JSON.stringify({ decision: "deny", reason: res.summary ?? "" })}\n`
+          );
+        } else {
+          // Generic dialect: stderr carries the summary, stdout stays empty, and
+          // a non-zero exit code tells the host the prompt was consumed.
+          process.stderr.write(`${res.summary ?? ""}\n`);
+          process.exitCode = 2;
+        }
+        return;
+      }
+      if (res.action === "hint") {
+        if (protocol === "cursor") {
+          process.stdout.write("{}\n");
+        } else if (protocol === "gemini") {
+          process.stdout.write(
+            `${JSON.stringify({
+              hookSpecificOutput: {
+                hookEventName: "BeforeAgent",
+                additionalContext: res.hint ?? "",
+              },
+            })}\n`
+          );
+        } else {
+          process.stdout.write(
+            `${JSON.stringify({
+              hookSpecificOutput: {
+                hookEventName: "UserPromptSubmit",
+                additionalContext: res.hint ?? "",
+              },
+            })}\n`
+          );
+        }
+        return;
+      }
+      // allow: print nothing in the generic dialect; JSON-speaking hosts get {}.
+      if (protocol === "cursor" || protocol === "gemini") {
+        process.stdout.write("{}\n");
+      }
       return;
     }
     process.stdout.write("{}\n");

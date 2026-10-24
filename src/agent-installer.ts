@@ -25,8 +25,22 @@ import { stripJsonComments } from "./semantic-index.js";
 export type McpServersKey = "mcpServers" | "servers" | "context_servers" | "mcp";
 export type McpConfigFormat = "json" | "codex-toml" | "opencode" | "zcode";
 
-/** Hosts with a PreToolUse/PostToolUse hook file GraphFlow can manage. */
-export type HookKind = "claude" | "cursor" | "gemini" | "codex";
+/**
+ * Hosts with a host hook file GraphFlow can manage (tool and/or prompt phases).
+ *
+ * Prompt-only Tier-1 hosts: zcode, windsurf, trae, qoder, kimi-code, continue.
+ */
+export type HookKind =
+  | "claude"
+  | "cursor"
+  | "gemini"
+  | "codex"
+  | "zcode"
+  | "windsurf"
+  | "trae"
+  | "qoder"
+  | "kimi-code"
+  | "continue";
 
 export interface AgentMcpTarget {
   configPath: string;
@@ -294,6 +308,8 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
           kind: "managed-md",
         },
       ],
+      hookKind: "windsurf",
+      hookConfigPath: join(home, ".codeium", "windsurf", "hooks.json"),
     },
     {
       id: "trae",
@@ -332,6 +348,9 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
         isWin ? join(appData, "Trae CN", "User", "skills") : join(home, ".config", "Trae CN", "User", "skills"),
         isWin ? join(appData, "TRAE SOLO CN", "User", "skills") : join(home, ".config", "TRAE SOLO CN", "User", "skills"),
       ],
+      // Standard (international) build only; the CN build (.trae-cn) is left alone.
+      hookKind: "trae",
+      hookConfigPath: join(home, ".trae", "hooks.json"),
     },
     {
       id: "codex",
@@ -493,6 +512,8 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
       ],
       skillsDirs: [join(kimiHome, "skills"), join(home, ".kimi-code", "skills")],
       rulesFiles: [{ filePath: join(kimiHome, "AGENTS.md"), kind: "managed-md" }],
+      hookKind: "kimi-code",
+      hookConfigPath: join(home, ".kimi-code", "config.toml"),
     },
     {
       id: "deepseek-harness",
@@ -530,6 +551,8 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
       ],
       workspaceMcpTargets: [{ relativePath: join(".qoder", "mcp.json"), serversKey: "mcpServers" }],
       skillsDirs: [join(home, ".qoder", "skills"), join(home, ".qoder-cn", "skills")],
+      hookKind: "qoder",
+      hookConfigPath: join(home, ".qoder", "settings.json"),
     },
     {
       id: "opencode",
@@ -567,6 +590,8 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
       ],
       skillsDirs: [join(home, ".zcode", "skills")],
       rulesFiles: [{ filePath: join(home, ".zcode", "AGENTS.md"), kind: "managed-md" }],
+      hookKind: "zcode",
+      hookConfigPath: join(home, ".zcode", "cli", "config.json"),
     },
     {
       id: "zed",
@@ -586,6 +611,10 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
       name: "Continue",
       markerPaths: [join(home, ".continue")],
       mcpTargets: [{ configPath: join(home, ".continue", "config.json"), serversKey: "mcpServers" }],
+      // Hooks currently run in the Continue CLI only (the IDE extension ignores
+      // them); still registered so CLI sessions get the prompt hook.
+      hookKind: "continue",
+      hookConfigPath: join(home, ".continue", "settings.json"),
     },
     {
       id: "pearai",
@@ -1126,10 +1155,67 @@ function removeDshCordisPatch(filePath: string): boolean {
 
 const GRAPHFLOW_HOOK_COMMAND = "graphflow hook";
 
-function hookPhaseKeys(hookKind: HookKind): { pre: string; post: string } {
-  if (hookKind === "cursor") return { pre: "preToolUse", post: "postToolUse" };
-  if (hookKind === "gemini") return { pre: "BeforeTool", post: "AfterTool" };
-  return { pre: "PreToolUse", post: "PostToolUse" };
+/** Hook phases GraphFlow registers in host configs (tool calls + prompt submit). */
+type HookPhase = "pre" | "post" | "prompt";
+
+/**
+ * Per-kind event keys for every phase GraphFlow registers. A key is omitted
+ * when the host has no surface for that phase — ZCode plus the Tier-1 hosts
+ * (windsurf, trae, qoder, kimi-code, continue) only get the prompt phase:
+ * ZCode/Windsurf have no tool-call hook surface and Trae/Qoder/Kimi/Continue
+ * only the UserPromptSubmit-equivalent one is registered.
+ */
+function hookPhaseKeys(hookKind: HookKind): { pre?: string; post?: string; prompt?: string } {
+  if (hookKind === "cursor") {
+    return { pre: "preToolUse", post: "postToolUse", prompt: "beforeSubmitPrompt" };
+  }
+  if (hookKind === "gemini") {
+    return { pre: "BeforeTool", post: "AfterTool", prompt: "BeforeAgent" };
+  }
+  if (hookKind === "zcode") {
+    return { prompt: "UserPromptSubmit" };
+  }
+  // Windsurf (~/.codeium/windsurf/hooks.json): pre_user_prompt, flat entries.
+  if (hookKind === "windsurf") {
+    return { prompt: "pre_user_prompt" };
+  }
+  // Trae (~/.trae/hooks.json), Qoder (~/.qoder/settings.json), Kimi Code
+  // (~/.kimi-code/config.toml) and Continue (~/.continue/settings.json) all
+  // name the prompt event UserPromptSubmit (Claude-compatible).
+  if (
+    hookKind === "trae" ||
+    hookKind === "qoder" ||
+    hookKind === "kimi-code" ||
+    hookKind === "continue"
+  ) {
+    return { prompt: "UserPromptSubmit" };
+  }
+  return { pre: "PreToolUse", post: "PostToolUse", prompt: "UserPromptSubmit" };
+}
+
+/** `[event key, phase]` pairs this kind actually registers, in write order. */
+function hookPhaseEntries(hookKind: HookKind): Array<[string, HookPhase]> {
+  const { pre, post, prompt } = hookPhaseKeys(hookKind);
+  const entries: Array<[string, HookPhase]> = [];
+  if (pre) entries.push([pre, "pre"]);
+  if (post) entries.push([post, "post"]);
+  if (prompt) entries.push([prompt, "prompt"]);
+  return entries;
+}
+
+/**
+ * Where one kind keeps its per-event hook arrays. Every kind but ZCode uses the
+ * `hooks` object directly; ZCode nests them under `hooks.events.<Event>` and
+ * requires the top-level `hooks.enabled` feature flag to be true.
+ */
+function zcodeHookEventsContainer(hooks: Record<string, unknown>): Record<string, unknown> {
+  const rawEvents = hooks.events;
+  const events =
+    rawEvents && typeof rawEvents === "object" && !Array.isArray(rawEvents)
+      ? (rawEvents as Record<string, unknown>)
+      : {};
+  hooks.events = events;
+  return events;
 }
 
 function isGraphflowHookCommand(value: unknown): boolean {
@@ -1142,7 +1228,10 @@ function isGraphflowHookObject(value: unknown): boolean {
   const record = value as Record<string, unknown>;
   if (isGraphflowHookCommand(record.command)) return true;
   const name = record.name;
-  return typeof name === "string" && (name === "graphflow-pre" || name === "graphflow-post");
+  return (
+    typeof name === "string" &&
+    (name === "graphflow-pre" || name === "graphflow-post" || name === "graphflow-prompt")
+  );
 }
 
 /**
@@ -1178,11 +1267,45 @@ function sanitizeHostHookEntries(entries: unknown[]): unknown[] {
   return kept;
 }
 
+/**
+ * Hook command per kind and phase. The prompt phase speaks three input
+ * protocols: generic stdin JSON (claude/codex/zcode plus the Tier-1 hosts
+ * windsurf/trae/qoder/kimi-code/continue), Gemini's BeforeAgent payload, and
+ * Cursor's beforeSubmitPrompt payload.
+ */
+function buildGraphflowHookCommand(hookKind: HookKind, phase: HookPhase): string {
+  if (phase === "prompt") {
+    if (hookKind === "gemini") return `${GRAPHFLOW_HOOK_COMMAND} user-prompt --protocol gemini`;
+    if (hookKind === "cursor") return `${GRAPHFLOW_HOOK_COMMAND} user-prompt --protocol cursor`;
+    return `${GRAPHFLOW_HOOK_COMMAND} user-prompt`;
+  }
+  return `${GRAPHFLOW_HOOK_COMMAND} ${phase}-tool`;
+}
+
 function buildGraphflowHookEntry(
   hookKind: HookKind,
-  phase: "pre" | "post"
+  phase: HookPhase
 ): Record<string, unknown> {
-  const command = `graphflow hook ${phase}-tool`;
+  const command = buildGraphflowHookCommand(hookKind, phase);
+  if (phase === "prompt") {
+    // UserPromptSubmit-level events match no tool, so no matcher field.
+    if (hookKind === "cursor") return { command, timeout: 15 };
+    if (hookKind === "gemini") {
+      return {
+        matcher: ".*",
+        hooks: [{ name: "graphflow-prompt", type: "command", command, timeout: 60000 }],
+      };
+    }
+    if (hookKind === "zcode") {
+      return { hooks: [{ type: "command", command, timeoutMs: 60000 }] };
+    }
+    // Windsurf hooks.json entries are flat { command } objects: the documented
+    // schema has no matcher / nested hooks / type / timeout fields at all.
+    if (hookKind === "windsurf") return { command };
+    // claude / codex / trae / qoder / continue: Claude-like nested entries;
+    // timeout is in seconds on every one of these hosts.
+    return { hooks: [{ type: "command", command, timeout: 60 }] };
+  }
   if (hookKind === "cursor") return { command, timeout: 15 };
   if (hookKind === "gemini") {
     return {
@@ -1196,12 +1319,136 @@ function buildGraphflowHookEntry(
   };
 }
 
+/* -------- Kimi Code TOML hooks (`~/.kimi-code/config.toml` [[hooks]]) -------- */
+
 /**
- * Merge the GraphFlow PreToolUse/PostToolUse hooks into a host hook config
- * instead of replacing the user's hook arrays. Existing graphflow-owned entries
- * are refreshed in place (idempotent reinstall); every user hook is preserved.
+ * Kimi Code reads hooks from `~/.kimi-code/config.toml` as `[[hooks]]` array
+ * tables whose ONLY legal fields are event/matcher/command/timeout (timeout in
+ * seconds, 1-600; any extra field breaks config loading). This package has no
+ * TOML parser, so — exactly like the Codex `config.toml` MCP path — the managed
+ * table is maintained with a span-based read-modify-write that preserves every
+ * user byte outside graphflow-owned tables.
+ */
+interface KimiHookSpan {
+  begin: number;
+  end: number;
+  text: string;
+  event: string;
+  command: string;
+}
+
+/** One `[[hooks]]` table per span: header line through just before the next `[` table header (or EOF). */
+function findKimiHookSpans(raw: string): KimiHookSpan[] {
+  const spans: KimiHookSpan[] = [];
+  const headerRe = /^[ \t]*\[\[hooks\]\][ \t]*\r?$/gm;
+  const headers: number[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = headerRe.exec(raw)) !== null) headers.push(match.index);
+  for (const begin of headers) {
+    const tableRe = /^[ \t]*\[/gm;
+    let end = raw.length;
+    let next: RegExpExecArray | null;
+    while ((next = tableRe.exec(raw)) !== null) {
+      if (next.index > begin) {
+        end = next.index;
+        break;
+      }
+    }
+    const text = raw.slice(begin, end);
+    const event = text.match(/^[ \t]*event[ \t]*=[ \t]*"((?:[^"\\]|\\.)*)"/m)?.[1] ?? "";
+    const command = text.match(/^[ \t]*command[ \t]*=[ \t]*"((?:[^"\\]|\\.)*)"/m)?.[1] ?? "";
+    spans.push({ begin, end, text, event, command });
+  }
+  return spans;
+}
+
+/** Splice the given spans out of `raw`, keeping everything between them byte-for-byte. */
+function dropTomlSpans(raw: string, spans: Array<{ begin: number; end: number }>): string {
+  let out = "";
+  let cursor = 0;
+  for (const span of spans) {
+    if (span.begin < cursor) continue; // overlapping spans: the first one wins
+    out += raw.slice(cursor, span.begin);
+    cursor = span.end;
+  }
+  return out + raw.slice(cursor);
+}
+
+/** Canonical managed Kimi [[hooks]] table (JSON-string escaping is TOML basic-string compatible). */
+function buildKimiHookBlock(event: string, command: string): string {
+  return [
+    "[[hooks]]",
+    `event = ${JSON.stringify(event)}`,
+    `command = ${JSON.stringify(command)}`,
+    "timeout = 60",
+  ].join("\n");
+}
+
+function installKimiHostHook(configPath: string): "installed" | "updated" {
+  const existed = existsSync(configPath);
+  const original = existed ? readFileSync(configPath, "utf8") : "";
+  let next = original;
+  for (const [event, phase] of hookPhaseEntries("kimi-code")) {
+    const block = buildKimiHookBlock(event, buildGraphflowHookCommand("kimi-code", phase));
+    const owned = findKimiHookSpans(next).filter((span) =>
+      isGraphflowHookCommand(span.command)
+    );
+    // Idempotent: the exact managed table is already the only graphflow-owned
+    // [[hooks]] entry — leave the file byte-for-byte as-is.
+    if (owned.length === 1 && owned[0]!.text.trim() === block) continue;
+    // Otherwise refresh in place: strip every graphflow-owned table, append the
+    // canonical one (separated by one blank line).
+    const stripped =
+      owned.length > 0 ? dropTomlSpans(next, owned).replace(/\r?\n{3,}/g, "\n\n") : next;
+    next = stripped.trim() ? `${stripped.trimEnd()}\n\n${block}\n` : `${block}\n`;
+  }
+  if (!existed || next !== original) {
+    mkdirSync(dirname(configPath), { recursive: true });
+    writeFileSync(configPath, next, "utf8");
+  }
+  return existed ? "updated" : "installed";
+}
+
+function removeKimiHostHook(configPath: string): boolean {
+  if (!existsSync(configPath)) return false;
+  const current = readFileSync(configPath, "utf8");
+  const owned = findKimiHookSpans(current).filter((span) =>
+    isGraphflowHookCommand(span.command)
+  );
+  if (owned.length === 0) return false;
+  const cleaned = dropTomlSpans(current, owned)
+    .replace(/[ \t]+\r?\n/g, "\n")
+    .replace(/\r?\n{3,}/g, "\n\n")
+    .trim();
+  writeFileSync(configPath, cleaned ? `${cleaned}\n` : "", "utf8");
+  return true;
+}
+
+function hasKimiGraphflowHook(configPath: string): boolean {
+  if (!existsSync(configPath)) return false;
+  try {
+    return findKimiHookSpans(readFileSync(configPath, "utf8")).some((span) =>
+      isGraphflowHookCommand(span.command)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Merge the GraphFlow PreToolUse/PostToolUse/UserPromptSubmit hooks into a host
+ * hook config instead of replacing the user's hook arrays. Existing graphflow-owned
+ * entries are refreshed in place (idempotent reinstall); every user hook is preserved.
+ *
+ * ZCode is the odd one out: its config-file hooks live under
+ * `hooks.events.<Event>` (never top-level `hooks.<Event>`) and require the
+ * top-level `hooks.enabled` flag, which install turns on.
+ *
+ * Kimi Code is the other odd one out: its hooks live in TOML `[[hooks]]`
+ * tables (see installKimiHostHook), not in JSON.
  */
 export function installHostHook(hookKind: HookKind, configPath: string): "installed" | "updated" {
+  if (hookKind === "kimi-code") return installKimiHostHook(configPath);
   const existed = existsSync(configPath);
   const obj = readJsonForUpdate(configPath);
   const rawHooks = obj.hooks;
@@ -1209,14 +1456,16 @@ export function installHostHook(hookKind: HookKind, configPath: string): "instal
     rawHooks && typeof rawHooks === "object" && !Array.isArray(rawHooks)
       ? { ...(rawHooks as Record<string, unknown>) }
       : {};
-  const { pre, post } = hookPhaseKeys(hookKind);
 
-  for (const [key, phase] of [
-    [pre, "pre"],
-    [post, "post"],
-  ] as const) {
-    const existing = Array.isArray(hooks[key]) ? (hooks[key] as unknown[]) : [];
-    hooks[key] = [...sanitizeHostHookEntries(existing), buildGraphflowHookEntry(hookKind, phase)];
+  let container: Record<string, unknown> = hooks;
+  if (hookKind === "zcode") {
+    hooks.enabled = true;
+    container = zcodeHookEventsContainer(hooks);
+  }
+
+  for (const [key, phase] of hookPhaseEntries(hookKind)) {
+    const existing = Array.isArray(container[key]) ? (container[key] as unknown[]) : [];
+    container[key] = [...sanitizeHostHookEntries(existing), buildGraphflowHookEntry(hookKind, phase)];
   }
 
   if (hookKind === "cursor") obj.version = obj.version ?? 1;
@@ -1226,47 +1475,65 @@ export function installHostHook(hookKind: HookKind, configPath: string): "instal
 }
 
 /**
- * Remove only graphflow-owned hooks from a host hook config. User hooks (and any
- * unrelated phases/keys) are preserved, the file is kept and stays valid JSON.
- * Returns true when at least one graphflow hook entry was removed.
+ * Remove only graphflow-owned hooks (tool and prompt phases) from a host hook
+ * config. User hooks (and any unrelated phases/keys) are preserved, the file is
+ * kept and stays valid JSON. For ZCode an emptied `hooks.events` table is
+ * deleted but the user-visible `hooks.enabled` flag is left in place — it is
+ * harmless without entries. Returns true when at least one graphflow hook
+ * entry was removed.
  */
 export function removeHostHook(hookKind: HookKind, configPath: string): boolean {
+  if (hookKind === "kimi-code") return removeKimiHostHook(configPath);
   if (!existsSync(configPath)) return false;
   const obj = readJsonForUpdate(configPath);
   const rawHooks = obj.hooks;
   if (!rawHooks || typeof rawHooks !== "object" || Array.isArray(rawHooks)) return false;
   const hooks = { ...(rawHooks as Record<string, unknown>) };
-  const { pre, post } = hookPhaseKeys(hookKind);
+  const rawContainer: unknown = hookKind === "zcode" ? hooks.events : hooks;
+  if (!rawContainer || typeof rawContainer !== "object" || Array.isArray(rawContainer)) {
+    return false;
+  }
+  const container = rawContainer as Record<string, unknown>;
   let removed = false;
 
-  for (const key of [pre, post]) {
-    const entries = hooks[key];
+  for (const [key] of hookPhaseEntries(hookKind)) {
+    const entries = container[key];
     if (!Array.isArray(entries)) continue;
     const filtered = sanitizeHostHookEntries(entries as unknown[]);
     if (JSON.stringify(filtered) !== JSON.stringify(entries)) {
-      if (filtered.length === 0) delete hooks[key];
-      else hooks[key] = filtered;
+      if (filtered.length === 0) delete container[key];
+      else container[key] = filtered;
       removed = true;
     }
   }
 
   if (!removed) return false;
-  if (Object.keys(hooks).length === 0) delete obj.hooks;
-  else obj.hooks = hooks;
+  if (hookKind === "zcode") {
+    if (Object.keys(container).length === 0) delete hooks.events;
+    obj.hooks = hooks;
+  } else {
+    if (Object.keys(hooks).length === 0) delete obj.hooks;
+    else obj.hooks = hooks;
+  }
   writeJsonSafe(configPath, obj);
   return true;
 }
 
 /** True when at least one graphflow-owned hook is registered for this host. */
 function hasGraphflowHook(hookKind: HookKind, configPath: string): boolean {
+  if (hookKind === "kimi-code") return hasKimiGraphflowHook(configPath);
   if (!existsSync(configPath)) return false;
   const obj = readJsonSafe(configPath);
   const rawHooks = obj.hooks;
   if (!rawHooks || typeof rawHooks !== "object" || Array.isArray(rawHooks)) return false;
   const hooks = rawHooks as Record<string, unknown>;
-  const { pre, post } = hookPhaseKeys(hookKind);
-  for (const key of [pre, post]) {
-    const entries = hooks[key];
+  const rawContainer: unknown = hookKind === "zcode" ? hooks.events : hooks;
+  if (!rawContainer || typeof rawContainer !== "object" || Array.isArray(rawContainer)) {
+    return false;
+  }
+  const container = rawContainer as Record<string, unknown>;
+  for (const [key] of hookPhaseEntries(hookKind)) {
+    const entries = container[key];
     if (!Array.isArray(entries)) continue;
     for (const entry of entries as unknown[]) {
       if (isGraphflowHookObject(entry)) return true;
@@ -1644,7 +1911,7 @@ export function installAllAgents(opts: InstallAllAgentsOptions = {}): InstallAll
       }
     }
 
-    // 4. Register Host Hooks (PreToolUse / PostToolUse)
+    // 4. Register Host Hooks (PreToolUse / PostToolUse / UserPromptSubmit)
     if (profile.hookKind && profile.hookConfigPath) {
       try {
         const status = installHostHook(profile.hookKind, profile.hookConfigPath);

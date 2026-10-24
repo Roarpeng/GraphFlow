@@ -6,7 +6,7 @@
  *
  *   1. `interceptPreToolUse`:
  *      - Intercepts unscoped native `Read` / `View` calls on large source files (>250 lines
- *        without a bounded `offset`/`limit`) and transparently returns the AST Skeleton
+ *        without a bounded `offset`/ `limit`) and transparently returns the AST Skeleton
  *        Folded view (saving ~75-93% tokens) with exact 1-based line numbers.
  *      - Intercepts blind full-repo test runs (`npm test`, `vitest run`, `pytest`, `go test ./...`)
  *        when `git diff` shows a small set of affected tests, surfacing the fast Diff-to-Test route.
@@ -17,6 +17,13 @@
  *        the command into `.graphflow/trajectories.jsonl` for automatic macro/template compilation.
  *      - Intercepts native `Edit` / `Write` calls to run the zero-LLM AST static syntax guard,
  *        record co-edit habits, and run learned directory auto-verify hooks.
+ *
+ *   3. `interceptUserPromptSubmit` (Prompt Reflex):
+ *      - Intercepts the chat prompt itself at the UserPromptSubmit/BeforeAgent hook level:
+ *        a SHORT command-like prompt that matches a compiled `command-pipeline` macro's
+ *        triggers executes the macro locally with 0 LLM turns and BLOCKS the prompt from
+ *        reaching the LLM; a long prompt that merely MENTIONS a trigger only gets a hint
+ *        (context injection) so the agent can call `gf_macro` explicitly.
  */
 
 import { extname, isAbsolute, relative } from "node:path";
@@ -29,9 +36,12 @@ import {
 import { dehydrateCommandOutput, resolveAffectedTests } from "./dehydrator.js";
 import {
   evaluatePostEditHabits,
+  executeMacro,
   findMatchingMacroHint,
   isNoiseCommand,
+  loadMacroStore,
   recordTrajectoryAndMine,
+  type CompiledMacro,
 } from "./macro-engine.js";
 import { executeSurgicalRead, getWorkspaceAstIndex } from "./slicer.js";
 import { autoLogExecutedCommand } from "./task-reflector.js";
@@ -52,6 +62,29 @@ export interface HostToolUsePayload {
   };
   cwd?: string;
   session_id?: string;
+}
+
+/** stdin payload of a host UserPromptSubmit / BeforeAgent hook. */
+export interface HostPromptPayload {
+  hook_event_name?: string;
+  prompt?: string;
+  cwd?: string;
+  session_id?: string;
+}
+
+/**
+ * Prompt Reflex verdict:
+ *   - `allow`:   pass the prompt through to the LLM untouched.
+ *   - `blocked`: macro executed locally (0 LLM turns); the prompt never reaches the LLM.
+ *   - `hint`:    prompt reaches the LLM, but with injected context naming a ready macro.
+ */
+export interface PromptReflexResult {
+  action: "allow" | "blocked" | "hint";
+  macroId?: string;
+  /** For `blocked`: what ran + PASS/FAIL outcome (truncated to ~500 chars). */
+  summary?: string;
+  /** For `hint`: suggestion text naming the macro and its `gf_macro` run command. */
+  hint?: string;
 }
 
 export interface PreToolInterceptOptions {
@@ -425,4 +458,140 @@ export function interceptPostToolUse(
   }
 
   return { intercepted: false, action: "noop", hookProtocolOutput: {} };
+}
+
+// ─────────────────────────── UserPromptSubmit Prompt Reflex ───────────────────────────
+
+/** Trailing sentence punctuation (full-width + ASCII) stripped before trigger matching. */
+const PROMPT_REFLEX_TRAILING_PUNCT_RE = /[。．.!！?？;；]+$/;
+/** CJK ideographs / kana / hangul — `\b` has no notion of these as word characters. */
+const PROMPT_REFLEX_CJK_RE = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\u3040-\u30FF\uAC00-\uD7AF]/g;
+
+function hasCjkChar(text: string): boolean {
+  PROMPT_REFLEX_CJK_RE.lastIndex = 0;
+  return PROMPT_REFLEX_CJK_RE.test(text);
+}
+
+function escapeRegExpLiteral(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function truncateForHook(text: string, maxChars: number): string {
+  return text.length <= maxChars ? text : `${text.slice(0, maxChars)}…`;
+}
+
+/**
+ * Count "words" in a prompt: whitespace-separated tokens, except CJK runs count
+ * per character (1 CJK char ≈ 1 word). Plain whitespace splitting would call a
+ * 30-char Chinese sentence "3 tokens", making every long CJK prompt look like a
+ * short command; counting CJK chars as words keeps the short-command gate honest
+ * for both scripts.
+ */
+function countPromptTokens(prompt: string): number {
+  let tokens = 0;
+  for (const chunk of prompt.split(/\s+/)) {
+    if (!chunk) continue;
+    PROMPT_REFLEX_CJK_RE.lastIndex = 0;
+    const cjkCount = (chunk.match(PROMPT_REFLEX_CJK_RE) ?? []).length;
+    tokens += cjkCount + (chunk.length - cjkCount > 0 ? 1 : 0);
+  }
+  return tokens;
+}
+
+function triggerMatchesPrompt(normalizedPrompt: string, normalizedTrigger: string): boolean {
+  if (!normalizedTrigger) return false;
+  if (normalizedPrompt === normalizedTrigger) return true;
+  if (!normalizedPrompt.includes(normalizedTrigger)) return false;
+  // Substring hit: CJK triggers match inline directly (no \b for CJK), latin
+  // triggers must sit on word boundaries ("launch" must not fire on "relaunch").
+  return (
+    hasCjkChar(normalizedTrigger) ||
+    new RegExp(`\\b${escapeRegExpLiteral(normalizedTrigger)}\\b`).test(normalizedPrompt)
+  );
+}
+
+/** Best macro = the matched one the user has actually used the most. */
+function pickMostUsedMacro(matched: CompiledMacro[]): CompiledMacro {
+  return matched.reduce((best, m) => (m.occurrences > best.occurrences ? m : best));
+}
+
+/**
+ * UserPromptSubmit / BeforeAgent Prompt Reflex:
+ * a short command-like prompt that matches a compiled `command-pipeline` macro's
+ * triggers runs the macro locally (0 LLM turns) and BLOCKS the prompt; a long
+ * prompt that merely mentions a trigger gets a `gf_macro` hint injected instead.
+ * Non-`command-pipeline` macros are never auto-executed from a chat prompt.
+ */
+export function interceptUserPromptSubmit(
+  payload: HostPromptPayload,
+  options: { rootDir: string; sessionId?: string }
+): PromptReflexResult {
+  // 1. Hard opt-out switch.
+  if (process.env.GRAPHFLOW_PROMPT_REFLEX === "0") return { action: "allow" };
+
+  // 2. Empty prompts reach the LLM untouched.
+  const rawPrompt = (payload.prompt ?? "").trim();
+  if (rawPrompt.length === 0) return { action: "allow" };
+
+  // Everything below is wrapped defensively: the reflex must never break the
+  // host chat flow, so any internal error fails open to a plain allow.
+  try {
+    // 3. Only compiled `command-pipeline` macros are prompt-executable.
+    const pipelines = loadMacroStore(options.rootDir).macros.filter(
+      (m) => m.kind === "command-pipeline"
+    );
+
+    // 4. Normalize both sides: lowercase; strip trailing punctuation + whitespace
+    // from the prompt ("launch!" / "启动项目。" still match).
+    const normalizedPrompt = rawPrompt
+      .toLowerCase()
+      .replace(PROMPT_REFLEX_TRAILING_PUNCT_RE, "")
+      .trim();
+    const matched = pipelines.filter((m) =>
+      (m.triggers ?? []).some((t) =>
+        triggerMatchesPrompt(normalizedPrompt, t.trim().toLowerCase())
+      )
+    );
+
+    // 5. No command-pipeline trigger matched -> nothing to reflex.
+    if (matched.length === 0) return { action: "allow" };
+
+    // 6. Short-command gate: only a genuinely short command-like prompt may be
+    //    executed and blocked. A longer prompt that merely MENTIONS a trigger
+    //    gets a hint so the agent can call the macro explicitly.
+    const isShortCommand = rawPrompt.length <= 24 || countPromptTokens(rawPrompt) <= 12;
+    const best = pickMostUsedMacro(matched);
+    if (!isShortCommand) {
+      return {
+        action: "hint",
+        macroId: best.id,
+        hint:
+          `[GraphFlow Prompt Reflex] 本工作区有本地宏 '${best.id}' 可直接完成该意图:` +
+          `调用 gf_macro(action="run", id="${best.id}") 执行,无需重新推导命令。` +
+          ` (${best.description})`,
+      };
+    }
+
+    // 7. Execute locally with 0 LLM turns. Failure fails soft: hand the failure
+    //    text to the agent as a hint so it can see and help.
+    const res = executeMacro(options.rootDir, best.id);
+    if (res.ok) {
+      return {
+        action: "blocked",
+        macroId: best.id,
+        summary:
+          `✅ [GraphFlow Prompt Reflex] 已本地执行宏 '${best.id}'(0 LLM):\n` +
+          truncateForHook(res.text, 500),
+      };
+    }
+    return {
+      action: "hint",
+      macroId: best.id,
+      hint:
+        `⚠️ [GraphFlow Prompt Reflex] 宏 '${best.id}' 执行失败,已回退给 LLM 处理,请协助排查:\n` +
+        truncateForHook(res.text, 300),
+    };
+  } catch {
+    return { action: "allow" };
+  }
 }
