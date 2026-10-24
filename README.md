@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-roarpeng.graphflow-blue)](https://marketplace.visualstudio.com/items?itemName=roarpeng.graphflow)
 
-**Token-first surgical code engine for coding agents (v3.7.1).** Four deterministic MCP tools plus a **0-LLM prompt reflex** — all local, no LLM in the engine loop.
+**Token-first surgical code engine for coding agents (v3.8.0).** Four deterministic MCP tools plus a **0-LLM prompt reflex** — all local, no LLM in the engine loop.
 
 ## The Four Surgical Tools
 
