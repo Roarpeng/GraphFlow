@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-roarpeng.graphflow-blue)](https://marketplace.visualstudio.com/items?itemName=roarpeng.graphflow)
 
-**面向编码 agent 的省 Token 外科手术引擎。** 四个确定性 MCP 工具加 **0-LLM 提示词反射**——全本地执行，引擎环内无 LLM。
+**面向编码 agent 的省 Token 外科手术引擎（v3.7.1）。** 四个确定性 MCP 工具加 **0-LLM 提示词反射**——全本地执行，引擎环内无 LLM。
 
 ## 四个外科手术工具
 
