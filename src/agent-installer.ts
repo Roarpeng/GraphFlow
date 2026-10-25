@@ -400,6 +400,14 @@ export function buildAgentProfiles(opts: InstallAllAgentsOptions = {}): AgentPro
           configPath: join(home, ".gemini", "antigravity", "mcp_config.json"),
           serversKey: "mcpServers",
         },
+        {
+          // Read by current Antigravity builds (verified live: a 2.x-era
+          // registration here kept spawning a vendored 2.2.0 server even
+          // after the modern paths above were updated). Must stay in the
+          // install/prune map or stale 2.x entries survive undetected.
+          configPath: join(home, ".gemini", "config", "mcp_config.json"),
+          serversKey: "mcpServers",
+        },
       ],
       workspaceMcpTargets: [
         { relativePath: join(".agents", "mcp_config.json"), serversKey: "mcpServers" },
