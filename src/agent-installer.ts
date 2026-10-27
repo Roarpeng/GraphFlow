@@ -848,11 +848,41 @@ function writeJsonSafe(filePath: string, data: Record<string, unknown>): void {
   }
 }
 
+/**
+ * Canonical JSON for "same content?" checks: object keys are sorted so an entry
+ * whose keys were reordered by a host or editor still compares equal.
+ */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/**
+ * Regex for one `[mcp_servers.<name>]` TOML section including its body.
+ *
+ * Deliberately no `m` flag: with it, `$` matches at every line end, so the lazy
+ * body matched zero characters after the header and the "section" was just the
+ * header line — replaces left stale `command`/`args` lines behind (one extra
+ * pair per upgrade), deletes dropped the body onto the previous table, and
+ * legacy-alias detection only saw alias names. Without `m`, `$` is end-of-input
+ * and the lazy body runs to the next section header or EOF.
+ */
+function codexMcpSectionRegex(serverName: string): RegExp {
+  return new RegExp(`\\[mcp_servers\\.${escapeRegExp(serverName)}\\][\\s\\S]*?(?=\\n\\[|$)`);
+}
+
 function writeMcpTarget(
   target: AgentMcpTarget,
   serverName: string,
   launcher: { command: string; args: string[] }
-): "installed" | "updated" {
+): "installed" | "updated" | "skipped" {
   const existed = existsSync(target.configPath);
   const format = target.configFormat ?? "json";
 
@@ -861,16 +891,20 @@ function writeMcpTarget(
     const current = existed ? readFileSync(target.configPath, "utf8") : "";
     const sectionHeader = `[mcp_servers.${serverName}]`;
     const argsJson = JSON.stringify(launcher.args);
-    const newBlock = `${sectionHeader}\ncommand = ${JSON.stringify(launcher.command)}\nargs = ${argsJson}\n`;
-    const sectionRegex = new RegExp(
-      `\\[mcp_servers\\.${serverName}\\][\\s\\S]*?(?=\\n\\[|$)`,
-      "m"
-    );
-    const updated = sectionRegex.test(current)
-      ? current.replace(sectionRegex, newBlock.trimEnd())
-      : `${current.trimEnd()}${current.trim() ? "\n\n" : ""}${newBlock}`;
+    const newBlock = `${sectionHeader}\ncommand = ${JSON.stringify(launcher.command)}\nargs = ${argsJson}`;
+    const existing = current.match(codexMcpSectionRegex(serverName))?.[0];
+    if (existing !== undefined) {
+      if (existing.replace(/\r/g, "").trim() === newBlock) return "skipped";
+      // Replacing the whole section also collapses any command/args pairs an
+      // older buggy installer stacked inside it. Function replacement so `$`
+      // sequences in paths are never read as replacement patterns.
+      const updated = current.replace(codexMcpSectionRegex(serverName), () => newBlock);
+      writeFileSync(target.configPath, `${updated.trimEnd()}\n`, "utf8");
+      return "updated";
+    }
+    const updated = `${current.trimEnd()}${current.trim() ? "\n\n" : ""}${newBlock}\n`;
     writeFileSync(target.configPath, `${updated.trimEnd()}\n`, "utf8");
-    return existed ? "updated" : "installed";
+    return "installed";
   }
 
   const obj = readJsonForUpdate(target.configPath);
@@ -878,14 +912,19 @@ function writeMcpTarget(
   if (format === "opencode") {
     const mcp =
       obj.mcp && typeof obj.mcp === "object" ? (obj.mcp as Record<string, unknown>) : {};
-    mcp[serverName] = {
-      type: "local",
+    const desired = {
+      type: "local" as const,
       command: [launcher.command, ...launcher.args],
       enabled: true,
     };
+    const entryExisted = serverName in mcp;
+    if (entryExisted && canonicalJson(mcp[serverName]) === canonicalJson(desired)) {
+      return "skipped";
+    }
+    mcp[serverName] = desired;
     obj.mcp = mcp;
     writeJsonSafe(target.configPath, obj);
-    return existed ? "updated" : "installed";
+    return entryExisted ? "updated" : "installed";
   }
 
   if (format === "zcode") {
@@ -895,27 +934,31 @@ function writeMcpTarget(
       mcp.servers && typeof mcp.servers === "object"
         ? (mcp.servers as Record<string, unknown>)
         : {};
-    servers[serverName] = {
-      command: launcher.command,
-      args: launcher.args,
-    };
+    const desired = { command: launcher.command, args: launcher.args };
+    const entryExisted = serverName in servers;
+    if (entryExisted && canonicalJson(servers[serverName]) === canonicalJson(desired)) {
+      return "skipped";
+    }
+    servers[serverName] = desired;
     mcp.servers = servers;
     obj.mcp = mcp;
     writeJsonSafe(target.configPath, obj);
-    return existed ? "updated" : "installed";
+    return entryExisted ? "updated" : "installed";
   }
 
   const servers =
     obj[target.serversKey] && typeof obj[target.serversKey] === "object"
       ? (obj[target.serversKey] as Record<string, unknown>)
       : {};
-  servers[serverName] = {
-    command: launcher.command,
-    args: launcher.args,
-  };
+  const desired = { command: launcher.command, args: launcher.args };
+  const entryExisted = serverName in servers;
+  if (entryExisted && canonicalJson(servers[serverName]) === canonicalJson(desired)) {
+    return "skipped";
+  }
+  servers[serverName] = desired;
   obj[target.serversKey] = servers;
   writeJsonSafe(target.configPath, obj);
-  return existed ? "updated" : "installed";
+  return entryExisted ? "updated" : "installed";
 }
 
 /** Removes a container that became empty, so uninstall leaves no `{"mcpServers":{}}` shell. */
@@ -937,9 +980,11 @@ function removeMcpTarget(target: AgentMcpTarget, serverName: string): boolean {
 
   if (format === "codex-toml") {
     const current = readFileSync(target.configPath, "utf8");
+    // No `m` flag: with it only the header line was deleted and the section
+    // body leaked into the preceding TOML table. `\n?` also swallows the line
+    // break in front of the header so no orphan blank line is left behind.
     const sectionRegex = new RegExp(
-      `\\n?\\[mcp_servers\\.${serverName}\\][\\s\\S]*?(?=\\n\\[|$)`,
-      "m"
+      `\\n?\\[mcp_servers\\.${escapeRegExp(serverName)}\\][\\s\\S]*?(?=\\n\\[|$)`
     );
     if (!sectionRegex.test(current)) return false;
     const next = current.replace(sectionRegex, "").trim();
@@ -975,6 +1020,57 @@ function removeMcpTarget(target: AgentMcpTarget, serverName: string): boolean {
   return true;
 }
 
+/**
+ * Line-level prefixes for locating GraphFlow's own managed instruction block.
+ * BEGIN lines may carry an informational suffix: an older release decorated
+ * them as `<!-- GRAPHFLOW:BEGIN managed block — ... -->`, which the exact
+ * `GRAPHFLOW_BLOCK_BEGIN` substring never matches. Matching by line prefix
+ * (instead of exact substring) is only used to recognize and clean up
+ * GraphFlow's own markers; any other line is preserved verbatim.
+ */
+const MANAGED_BEGIN_LINE_PREFIX = "<!-- GRAPHFLOW:BEGIN";
+const MANAGED_END_LINE_PREFIX = "<!-- GRAPHFLOW:END";
+
+/**
+ * Locate every GraphFlow-managed instruction block span in `raw`, expressed as
+ * character offsets into the original text.
+ *
+ * A line whose trimmed content starts with `<!-- GRAPHFLOW:BEGIN` opens a span
+ * and a line starting with `<!-- GRAPHFLOW:END` closes it (the whole closing
+ * line is consumed, decorations included). Corrupted shapes self-heal:
+ *  - a dangling BEGIN (no END before the next BEGIN / EOF) clamps to the next
+ *    BEGIN line or EOF, so its leftover fragment is removed too;
+ *  - a stray END without an open BEGIN becomes a one-line span so uninstall
+ *    leaves no marker residue.
+ * Non-marker user content is never touched.
+ */
+function findManagedInstructionSpans(raw: string): Array<{ begin: number; end: number }> {
+  const spans: Array<{ begin: number; end: number }> = [];
+  const lines = raw.split("\n");
+  let offset = 0;
+  let openBegin: number | null = null;
+  for (const line of lines) {
+    const lineStart = offset;
+    const lineEnd = lineStart + line.length; // excludes the line break (and any trailing \r)
+    const trimmed = line.trim();
+    if (trimmed.startsWith(MANAGED_BEGIN_LINE_PREFIX)) {
+      // A dangling BEGIN (no END seen) clamps to where the next block starts.
+      if (openBegin !== null) spans.push({ begin: openBegin, end: lineStart });
+      openBegin = lineStart;
+    } else if (trimmed.startsWith(MANAGED_END_LINE_PREFIX)) {
+      if (openBegin !== null) {
+        spans.push({ begin: openBegin, end: lineEnd });
+        openBegin = null;
+      } else {
+        spans.push({ begin: lineStart, end: lineEnd }); // stray END line
+      }
+    }
+    offset = lineEnd + 1;
+  }
+  if (openBegin !== null) spans.push({ begin: openBegin, end: raw.length }); // clamped to EOF
+  return spans;
+}
+
 function writeManagedFile(
   filePath: string,
   kind: "cursor-mdc" | "managed-md" | "dedicated-md"
@@ -1005,20 +1101,41 @@ function writeManagedFile(
   }
 
   const current = readFileSync(filePath, "utf8");
-  const beginIdx = current.indexOf(GRAPHFLOW_BLOCK_BEGIN);
-  const endIdx = current.indexOf(GRAPHFLOW_BLOCK_END);
-  if (beginIdx >= 0 && endIdx > beginIdx) {
-    const next =
-      current.slice(0, beginIdx) +
-      MANAGED_INSTRUCTION_BLOCK +
-      current.slice(endIdx + GRAPHFLOW_BLOCK_END.length);
-    if (next === current) return "skipped";
-    writeFileSync(filePath, next, "utf8");
+  if (!current.trim()) {
+    writeFileSync(filePath, `${MANAGED_INSTRUCTION_BLOCK}\n`, "utf8");
     return "updated";
   }
 
-  const appended = `${current.trimEnd()}\n\n${MANAGED_INSTRUCTION_BLOCK}\n`;
-  writeFileSync(filePath, appended, "utf8");
+  const spans = findManagedInstructionSpans(current);
+  if (spans.length === 0) {
+    const appended = `${current.trimEnd()}\n\n${MANAGED_INSTRUCTION_BLOCK}\n`;
+    if (appended === current) return "skipped";
+    writeFileSync(filePath, appended, "utf8");
+    return "updated";
+  }
+
+  // Replace the first marker span in place with the current block version and
+  // drop every additional span (duplicate blocks / dangling heads) older
+  // installs may have left behind, so the file ends up with exactly one
+  // canonical block while user content around it is preserved verbatim.
+  let next = "";
+  let cursor = 0;
+  for (const [i, span] of spans.entries()) {
+    next += current.slice(cursor, span.begin);
+    if (i === 0) {
+      next += MANAGED_INSTRUCTION_BLOCK;
+      // Keep the block separated from user content that used to be glued to it.
+      const after = current.slice(span.end);
+      if (after.length > 0 && !/^\r?\n/.test(after)) next += "\n";
+    }
+    cursor = span.end;
+    // Swallow one line break per removed duplicate so emptied lines vanish.
+    if (i > 0 && current[cursor] === "\n") cursor += 1;
+  }
+  next += current.slice(cursor);
+  if (!next.endsWith("\n")) next += "\n";
+  if (next === current) return "skipped";
+  writeFileSync(filePath, next, "utf8");
   return "updated";
 }
 
@@ -1032,18 +1149,24 @@ function removeManagedFile(
     return true;
   }
   const current = readFileSync(filePath, "utf8");
-  const beginIdx = current.indexOf(GRAPHFLOW_BLOCK_BEGIN);
-  const endIdx = current.indexOf(GRAPHFLOW_BLOCK_END);
-  if (beginIdx < 0 || endIdx <= beginIdx) return false;
-  const stripped = (
-    current.slice(0, beginIdx).trimEnd() +
-    "\n" +
-    current.slice(endIdx + GRAPHFLOW_BLOCK_END.length).trimStart()
-  ).trim();
-  if (!stripped) {
+  // Line-level span detection so decorated/duplicate/dangling markers left by
+  // older installs are all cleaned up, not just one exact BEGIN..END pair.
+  const spans = findManagedInstructionSpans(current);
+  if (spans.length === 0) return false;
+  let stripped = "";
+  let cursor = 0;
+  for (const span of spans) {
+    stripped += current.slice(cursor, span.begin);
+    cursor = span.end;
+    // Drop the emptied line so removed blocks leave no blank residue.
+    if (current[cursor] === "\n") cursor += 1;
+  }
+  stripped += current.slice(cursor);
+  const trimmed = stripped.trim();
+  if (!trimmed) {
     rmSync(filePath, { force: true });
   } else {
-    writeFileSync(filePath, `${stripped}\n`, "utf8");
+    writeFileSync(filePath, `${trimmed}\n`, "utf8");
   }
   return true;
 }
@@ -1758,11 +1881,10 @@ function findLegacyMcpKeys(target: AgentMcpTarget, serverName: string): string[]
     while ((match = sectionRegex.exec(current)) !== null) {
       const name = match[1] ?? "";
       if (!name || name === serverName) continue;
-      const blockRegex = new RegExp(
-        `\\[mcp_servers\\.${name.replace(/[.*+?^${}()|[\]\\]/g, "\$&")}\\][\\s\\S]*?(?=\\n\\[|$)`,
-        "m"
-      );
-      const block = current.match(blockRegex)?.[0] ?? "";
+      // Whole-section block (no `m` flag) so detection is based on the section
+      // body: a legacy alias whose name hides "graphflow" still points its
+      // command/args at a GraphFlow launcher and must be pruned.
+      const block = current.match(codexMcpSectionRegex(name))?.[0] ?? "";
       if (block.toLowerCase().includes("graphflow")) out.push(name);
     }
     return out;
@@ -1791,9 +1913,11 @@ function removeMcpKey(target: AgentMcpTarget, key: string): boolean {
 
   if (format === "codex-toml") {
     const current = readFileSync(target.configPath, "utf8");
+    // No `m` flag: with it only the header line was deleted and the section
+    // body leaked into the preceding TOML table. `\n?` also swallows the line
+    // break in front of the header so no orphan blank line is left behind.
     const sectionRegex = new RegExp(
-      `\\n?\\[mcp_servers\\.${key.replace(/[.*+?^${}()|[\]\\]/g, "\$&")}\\][\\s\\S]*?(?=\\n\\[|$)`,
-      "m"
+      `\\n?\\[mcp_servers\\.${escapeRegExp(key)}\\][\\s\\S]*?(?=\\n\\[|$)`
     );
     if (!sectionRegex.test(current)) return false;
     const next = current.replace(sectionRegex, "").trim();
@@ -2362,7 +2486,9 @@ function managedRuleRegistered(
   if (!existsSync(rule.filePath)) return false;
   if (rule.kind === "managed-md") {
     try {
-      return readFileSync(rule.filePath, "utf8").includes(GRAPHFLOW_BLOCK_BEGIN);
+      // Line-level detection (matching writeManagedFile) so a decorated or
+      // partially corrupted block still reports as registered.
+      return findManagedInstructionSpans(readFileSync(rule.filePath, "utf8")).length > 0;
     } catch {
       return false;
     }
