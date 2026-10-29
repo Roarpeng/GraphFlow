@@ -203,14 +203,11 @@ export const CURSOR_RULE_MDC_CONTENT = [
 
 export const MANAGED_INSTRUCTION_BLOCK = [
   GRAPHFLOW_BLOCK_BEGIN,
-  "# GraphFlow 3.1 (Token-First Surgical Mode / 外科手术省 Token 模式)",
+  "# GraphFlow",
   "",
-  "Use GraphFlow's 4 surgical MCP tools (`gf_read`, `gf_edit`, `gf_exec`, `gf_macro`) to minimize token usage and prevent context rot:",
-  "",
-  "1. `gf_read`: Slice specific symbols (`targets: [\"file#symbol\"]`) or search by English/Chinese keywords (`q: \"keyword / 中文词\"`) with automatic cross-file type closure and `[Blast Radius]` call sites.",
-  "2. `gf_edit`: Perform in-place symbol/line edits, bottom-up batch `edits`, or cross-repo `renameTo` with instant AST syntax, caller-arity, and struct-field contract guards.",
-  "3. `gf_exec`: Run `cmd: \"affected-tests\"` or shell commands with dehydrated output (1-line `PASS` receipt; 5-line source window on failure; 3-strike loop circuit breaker).",
-  "4. `gf_macro`: Run `action: \"mine-git\"` for zero-cold-start git co-change hints, or `action: \"run\"` to execute auto-compiled `.graphflow/macros/*.mjs` scripts.",
+  "探索/修改/调试本项目代码前，先调 `graphflow_context`，以其 summary/anchors 为主上下文；多步任务先 `graphflow_plan`，改完用 `graphflow_index` 刷新。`rootDir` 传本项目绝对路径（勿用主目录/AppData/未展开 `${workspaceFolder}`）。改动默认由 hooks 自动回填，`GRAPHFLOW_AUTO_CAPTURE=0` 可关。",
+  "工具：graphflow_context/plan/run/report_outcome/insight/index/artifact/skill_insights/skill_guide/diagnose，详细用法看 graphflow skill（`graphflow_skill_guide`）。",
+  "外科工具优先：`gf_read` 按符号或中英关键词切片读；`gf_edit` AST 守卫编辑；`gf_exec` 跑命令与 affected-tests（脱水输出）；`gf_macro` 用 action:\"mine-git\" 取 git 共变提示、action:\"run\" 执行 .graphflow/macros 宏。",
   GRAPHFLOW_BLOCK_END,
 ].join("\n");
 

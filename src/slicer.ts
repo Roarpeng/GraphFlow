@@ -628,6 +628,199 @@ export function foldFileSkeleton(
   return out.join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// Data-file structure-aware folding (whole-file `gf_read` of json/csv/tsv/log/txt)
+//
+// A whole-file read (no symbol target, no line range) of a data file above its
+// threshold returns a compact structure skeleton instead of the raw dump. Token
+// accounting reuses the same ceil(len/4) convention as the read budget and
+// `SliceResult.estimatedTokens`. Every parser below is hand-written and
+// defensive: any failure returns `undefined` and the caller falls back to the
+// raw whole-file view, so behaviour for source files is untouched.
+// ---------------------------------------------------------------------------
+
+const DATA_FOLD_JSON_MAX_BYTES = 2 * 1024 * 1024;
+const DATA_FOLD_JSON_MAX_DEPTH = 4;
+const DATA_FOLD_JSON_MAX_SIBLING_KEYS = 30;
+const DATA_FOLD_JSON_MAX_LINES = 400;
+const DATA_FOLD_CSV_MIN_ROWS = 40;
+const DATA_FOLD_CSV_SAMPLE_ROWS = 3;
+const DATA_FOLD_LOG_MIN_LINES = 250;
+const DATA_FOLD_LOG_EDGE_LINES = 20;
+const DATA_FOLD_CELL_MAX_CHARS = 40;
+const DATA_FOLD_EXTS = new Set([".json", ".csv", ".tsv", ".log", ".txt"]);
+
+/** Token estimate on the same convention as the read budget / SliceResult (`ceil(len/4)`). */
+function estimateFoldTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
+/** Collapses whitespace and caps a scalar/cell at `maxChars` glyphs, marking cuts with an ellipsis. */
+function truncateDataText(text: string, maxChars: number = DATA_FOLD_CELL_MAX_CHARS): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > maxChars ? `${flat.slice(0, maxChars)}…` : flat;
+}
+
+/**
+ * JSON key-path skeleton: nested objects become a path tree, arrays collapse to
+ * `[N items]` (the first element is sampled for shape), scalar leaves truncate
+ * to 40 chars, expansion stops at depth 4, and an object level with more than
+ * 30 sibling keys folds to `…(+K more keys)`. Returns `undefined` when the
+ * payload is not valid JSON (caller falls back to the raw view).
+ */
+function foldJsonToSkeleton(content: string): string[] | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return undefined;
+  }
+  const lines: string[] = [];
+  let capped = false;
+  const emit = (line: string): boolean => {
+    if (lines.length >= DATA_FOLD_JSON_MAX_LINES) {
+      capped = true;
+      return false;
+    }
+    lines.push(line);
+    return true;
+  };
+  const indentOf = (depth: number): string => "  ".repeat(Math.min(depth, DATA_FOLD_JSON_MAX_DEPTH));
+
+  const walk = (value: unknown, label: string, depth: number): void => {
+    if (capped) return;
+    const indent = indentOf(depth);
+    if (Array.isArray(value)) {
+      if (!emit(`${indent}${label}: [${value.length} items]`)) return;
+      if (depth >= DATA_FOLD_JSON_MAX_DEPTH || value.length === 0) return;
+      walk(value[0], `${label}[0]`, depth + 1);
+      return;
+    }
+    if (value !== null && typeof value === "object") {
+      const entries = Object.entries(value as Record<string, unknown>);
+      if (entries.length === 0) {
+        emit(`${indent}${label}: {}`);
+        return;
+      }
+      if (depth >= DATA_FOLD_JSON_MAX_DEPTH) {
+        emit(`${indent}${label}: {…} [${entries.length} keys, depth cap ${DATA_FOLD_JSON_MAX_DEPTH}]`);
+        return;
+      }
+      const shown = entries.slice(0, DATA_FOLD_JSON_MAX_SIBLING_KEYS);
+      for (const [key, child] of shown) {
+        if (capped) break;
+        walk(child, label ? `${label}.${key}` : key, depth + 1);
+      }
+      const more = entries.length - shown.length;
+      if (more > 0) emit(`${indentOf(depth + 1)}…(+${more} more keys)`);
+      return;
+    }
+    const scalar = typeof value === "string" ? JSON.stringify(truncateDataText(value)) : String(value);
+    emit(`${indent}${label || "(root)"}: ${scalar}`);
+  };
+
+  walk(parsed, "", 0);
+  if (capped) lines.push(`…(+output capped at ${DATA_FOLD_JSON_MAX_LINES} lines)`);
+  return lines;
+}
+
+/**
+ * CSV/TSV skeleton: header + first 3 data rows + `(+N more rows)`, every cell
+ * truncated to 40 chars. Rows keep their real 1-based line numbers. Returns
+ * `undefined` when the row count is at or below `DATA_FOLD_CSV_MIN_ROWS`.
+ */
+function foldDelimitedToSkeleton(content: string, delimiter: string): string[] | undefined {
+  const rawLines = content.split(/\r?\n/);
+  const rows: Array<{ lineNo: number; text: string }> = [];
+  for (let i = 0; i < rawLines.length; i++) {
+    const text = rawLines[i] ?? "";
+    if (text.trim() === "") continue;
+    rows.push({ lineNo: i + 1, text });
+  }
+  if (rows.length <= DATA_FOLD_CSV_MIN_ROWS) return undefined;
+  const out: string[] = [];
+  const kept = 1 + DATA_FOLD_CSV_SAMPLE_ROWS;
+  for (const row of rows.slice(0, kept)) {
+    const cells = row.text.split(delimiter).map((cell) => truncateDataText(cell));
+    out.push(`${String(row.lineNo).padStart(4)}: ${cells.join(delimiter)}`);
+  }
+  const more = rows.length - kept;
+  if (more > 0) out.push(`(+${more} more rows)`);
+  return out;
+}
+
+/**
+ * Log/txt head+tail skeleton for long flat files: first 20 + last 20 lines
+ * with their real 1-based line numbers, and a one-line marker for the omitted
+ * middle. Returns `undefined` when the file has at most `DATA_FOLD_LOG_MIN_LINES` lines.
+ */
+function foldTextTailToSkeleton(content: string): string[] | undefined {
+  const split = content.split(/\r?\n/);
+  // A single trailing entry produced by the final newline is not a real line.
+  const lines =
+    split.length > 1 && (split[split.length - 1] ?? "").trim() === "" ? split.slice(0, -1) : split;
+  if (lines.length <= DATA_FOLD_LOG_MIN_LINES) return undefined;
+  const out: string[] = [];
+  for (let i = 0; i < DATA_FOLD_LOG_EDGE_LINES; i++) {
+    out.push(`${String(i + 1).padStart(4)}: ${lines[i] ?? ""}`);
+  }
+  const omitted = lines.length - DATA_FOLD_LOG_EDGE_LINES * 2;
+  out.push(`… (+${omitted} lines omitted)`);
+  for (let i = lines.length - DATA_FOLD_LOG_EDGE_LINES; i < lines.length; i++) {
+    out.push(`${String(i + 1).padStart(4)}: ${lines[i] ?? ""}`);
+  }
+  return out;
+}
+
+interface DataFoldSection {
+  relPath: string;
+  sizeBytes: number;
+  text: string;
+}
+
+/**
+ * Whole-file data-folding dispatcher. Returns `undefined` — so the caller falls
+ * back to the raw whole-file view — when the extension is not a data file, the
+ * file is unreadable, its threshold is not met (json folds at any size, csv/tsv
+ * need > 40 rows, log/txt need > 250 lines), or anything throws.
+ */
+function tryFoldDataFileSection(
+  index: ReturnType<typeof getWorkspaceAstIndex>,
+  target: string
+): DataFoldSection | undefined {
+  try {
+    const ext = extname(target.split("#")[0]!.split(":")[0]!).toLowerCase();
+    if (!DATA_FOLD_EXTS.has(ext)) return undefined;
+    const relPath = normalizeWorkspaceRelPath(index.rootDir, target);
+    if (!relPath) return undefined;
+    const raw = index.getRawFile(relPath);
+    if (!raw) return undefined;
+    if (ext === ".json" && raw.size > DATA_FOLD_JSON_MAX_BYTES) return undefined;
+    const body =
+      ext === ".json"
+        ? foldJsonToSkeleton(raw.content)
+        : ext === ".csv"
+          ? foldDelimitedToSkeleton(raw.content, ",")
+          : ext === ".tsv"
+            ? foldDelimitedToSkeleton(raw.content, "\t")
+            : foldTextTailToSkeleton(raw.content);
+    if (!body || body.length === 0) return undefined;
+    const rawTokens = estimateFoldTokens(raw.content);
+    const foldedTokens = estimateFoldTokens(body.join("\n"));
+    const reduction = Math.max(0, Math.round((1 - foldedTokens / rawTokens) * 100));
+    return {
+      relPath,
+      sizeBytes: raw.size,
+      text:
+        `### ${relPath} (Data Skeleton, ${ext.slice(1).toUpperCase()})\n` +
+        `// [Data Skeleton] raw ~${rawTokens} tok → folded ~${foldedTokens} tok (−${reduction}%)\n` +
+        body.join("\n"),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function isTypeDefinitionKind(kind: AstSymbol["kind"]): boolean {
   return (
     kind === "interface" ||
@@ -1630,6 +1823,18 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
           `### ${fileData.ast.relPath}:${startLine}-${Math.min(lines.length, endLine)} (total ${lines.length}L)\n` +
             formatNumberedLines(lines, startLine, endLine)
         );
+        continue;
+      }
+
+      // Data-file folding: only a whole-file read (no symbol target, no line
+      // range) of .json/.csv/.tsv/.log/.txt above its threshold folds to a
+      // data skeleton. Everything else — including every source file — keeps
+      // the existing behaviour; any fold failure falls back to the raw view.
+      const dataFold = tryFoldDataFileSection(index, target);
+      if (dataFold) {
+        accountRawFile(dataFold.relPath, dataFold.sizeBytes);
+        resolvedKeys.push(dataFold.relPath);
+        sections.push(dataFold.text);
         continue;
       }
 

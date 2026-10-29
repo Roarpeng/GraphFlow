@@ -18,6 +18,7 @@ import {
   interceptPreToolUse,
   interceptUserPromptSubmit,
 } from "./host-interceptor.js";
+import { DEFAULT_FLYWHEEL_TTL_DAYS, inspectFlywheel, pruneFlywheel } from "./flywheel.js";
 import { PACKAGE_VERSION } from "./mcp-server.js";
 import { executeV3ToolCall } from "./mcp-tools.js";
 import {
@@ -246,6 +247,37 @@ export interface ParsedReflectArgs {
   rootDir?: string;
 }
 
+export interface ParsedFlywheelArgs {
+  prune: boolean;
+  /** TTL in days; `NaN` signals an invalid `--ttl-days` value (main rejects it). */
+  ttlDays: number;
+  rootDir?: string;
+}
+
+/**
+ * Parse `graphflow flywheel [--prune] [--ttl-days N] [--root <dir>]`.
+ * `ttlDays` defaults to 30 and is `NaN` when `--ttl-days` is not a positive
+ * finite number, so the caller can fail with a usage error instead of
+ * silently pruning everything (or nothing).
+ */
+export function parseFlywheelArgs(args: string[]): ParsedFlywheelArgs {
+  const parsed = parseFlagArgs(args, ["--root", "--ttl-days"]);
+  const rootDir = parsed.values.get("--root");
+  const ttlRaw = parsed.values.get("--ttl-days");
+  const ttlParsed = ttlRaw === undefined ? undefined : Number(ttlRaw);
+  const ttlDays =
+    ttlParsed === undefined
+      ? DEFAULT_FLYWHEEL_TTL_DAYS
+      : Number.isFinite(ttlParsed) && ttlParsed > 0
+        ? ttlParsed
+        : Number.NaN;
+  return {
+    prune: parsed.flags.has("--prune"),
+    ttlDays,
+    ...(rootDir !== undefined ? { rootDir } : {}),
+  };
+}
+
 /** Parse `graphflow reflect "<instruction>" [args...] [--root <dir>] [--json]`. */
 export function parseReflectArgs(args: string[]): ParsedReflectArgs {
   const parsed = parseFlagArgs(args, ["--root"]);
@@ -289,6 +321,7 @@ function printUsage(): void {
       "  graphflow macro <list|run|mine|mine-git|save> [id] [args...]",
       "  graphflow task <list|show|record|run|log|harvest> [--step <cmd>] [--log <path>] [--json] [--root <dir>]",
       '  graphflow reflect "<instruction>" [args...] [--json] [--root <dir>]',
+      "  graphflow flywheel [--prune] [--ttl-days N] [--root <dir>]",
       "  graphflow hook <pre-tool|post-tool|user-prompt> [--protocol generic|cursor|gemini]",
       "  graphflow version | help",
       "",
@@ -299,6 +332,8 @@ function printUsage(): void {
       "  the 3rd use runs it with no LLM/network. Use `--step` once per shell step to record.",
       "  task log/harvest: append to .graphflow/instruction-log.jsonl (e.g. from a shell wrapper or",
       "  DSH skill) then harvest to promote repeated instructions; `task harvest` is incremental.",
+      "  flywheel: session-journal health check; --prune removes pending-episode entries older",
+      "  than --ttl-days (default 30). Other kinds and unparsable lines are always kept.",
     ].join("\n")
   );
 }
@@ -777,6 +812,54 @@ async function main(): Promise<void> {
     const result = runTask(effectiveRoot, parsed.instruction, parsed.args);
     console.log(parsed.json ? JSON.stringify(result, null, 2) : result.text);
     if (!result.hit || result.exitCode !== 0) process.exitCode = result.exitCode || 1;
+    return;
+  }
+
+  if (cmd === "flywheel") {
+    const parsed = parseFlywheelArgs(rest);
+    const effectiveRoot = parsed.rootDir ?? rootDir;
+    if (!Number.isFinite(parsed.ttlDays) || parsed.ttlDays <= 0) {
+      console.error(
+        `ERR [flywheel] --ttl-days must be a positive number of days (got ${JSON.stringify(
+          readFlag(rest, "--ttl-days") ?? "?"
+        )}).`
+      );
+      process.exitCode = 1;
+      return;
+    }
+    const report = inspectFlywheel(effectiveRoot, parsed.ttlDays);
+    console.log(`GraphFlow v${PACKAGE_VERSION} — flywheel journal ${report.journalPath}`);
+    if (!report.exists) {
+      console.log("  journal: missing (nothing to inspect or prune)");
+      return;
+    }
+    const statusDist = Object.keys(report.statusCounts)
+      .sort()
+      .map((status) => `${status}=${report.statusCounts[status]}`)
+      .join(", ");
+    console.log(
+      `  pending episodes: ${report.pendingTotal}${statusDist ? ` (${statusDist})` : ""}`
+    );
+    console.log(
+      `  oldest pending age: ${
+        report.oldestPendingAgeDays === null
+          ? "-"
+          : `${report.oldestPendingAgeDays.toFixed(1)} days`
+      }`
+    );
+    console.log(`  over TTL (${report.ttlDays} days): ${report.overTtl}`);
+    if (report.parseErrors > 0) console.log(`  parse errors (kept as-is): ${report.parseErrors}`);
+    if (!parsed.prune) {
+      console.log(
+        `  (dry run — pass --prune to remove pending episodes older than ${report.ttlDays} days)`
+      );
+      return;
+    }
+    const result = pruneFlywheel(effectiveRoot, parsed.ttlDays);
+    console.log(
+      `OK [flywheel-pruned] pruned=${result.pruned} kept=${result.kept} ` +
+        `parseErrors=${result.parseErrors} ttlDays=${result.ttlDays}`
+    );
     return;
   }
 

@@ -12,6 +12,9 @@
  *  - empty / marker-free file -> exactly one canonical block after install,
  *    and a second install is a byte-identical no-op;
  *  - an outdated block body is replaced in place, user context preserved;
+ *  - a real 3.8.0 install (legacy decorated Context-First block + old surgical
+ *    block) migrates to exactly one current block: replacement matches only
+ *    the BEGIN/END marker lines, never the body, so any legacy body self-heals;
  *  - a corrupted file (decorated BEGIN + 3 complete blocks + dangling BEGIN +
  *    stray END) self-heals to exactly one current block with no marker
  *    residue and user content intact;
@@ -92,6 +95,57 @@ function createSandbox(): Sandbox {
 
 /** Decorated BEGIN line as written by an older GraphFlow release. */
 const DECORATED_BEGIN = "<!-- GRAPHFLOW:BEGIN managed block — edit outside these markers only -->";
+
+/**
+ * The full resident block a GraphFlow 3.8.0 install left in hosts' AGENTS.md /
+ * CLAUDE.md (decorated marker). Kept verbatim as the legacy fixture: the
+ * installer must replace it by marker match alone, with no content fingerprint.
+ */
+const LEGACY_CONTEXT_FIRST_BLOCK = [
+  DECORATED_BEGIN,
+  "## GraphFlow Context-First Rule",
+  "",
+  "GraphFlow is a local code knowledge-graph + context compression MCP server (10 tools).",
+  "Before broad code exploration, implementation, debugging, review, or architecture",
+  "questions in this project:",
+  "",
+  "1. Call `graphflow_context` with the task/query first.",
+  "2. Use the returned `summary`, `anchors`, and `tokenBudget` as the primary context.",
+  "3. Read full files only when anchors point there or compressed context is insufficient.",
+  "4. For multi-step or ambiguous work, call `graphflow_plan` before implementing.",
+  "5. After project changes, call `graphflow_index` to keep the graph fresh.",
+  "6. The flywheel auto-closes: pending episodes are backfilled by Claude Code",
+  "   hooks (or `graphflow_report_outcome`) by default; set GRAPHFLOW_AUTO_CAPTURE=0 to opt out.",
+  "",
+  "Pass `rootDir` = this project's absolute path. Never pass your home directory, AppData,",
+  "or an unexpanded `${workspaceFolder}` placeholder — GraphFlow refuses unsafe workspace",
+  "roots. If a call answers `unsafe workspace root`, retry it without `rootDir`.",
+  "",
+  "When using Cursor `CallMcpTool`, always pass `server` + `toolName` + `arguments`",
+  "(e.g. server `\"graphflow\"` / `\"user-graphflow\"`, toolName `\"graphflow_context\"`).",
+  "",
+  "Tools: graphflow_context, graphflow_plan, graphflow_run, graphflow_report_outcome,",
+  "graphflow_insight, graphflow_index, graphflow_artifact, graphflow_skill_insights,",
+  "graphflow_skill_guide, graphflow_diagnose.",
+  "",
+  "Do not scan the whole repository or read many large files before trying GraphFlow",
+  "context. Treat GraphFlow output as structured, token-saving context.",
+  GRAPHFLOW_BLOCK_END,
+].join("\n");
+
+/** Resident block body as written before the slim-down (3.8.0 release text). */
+const LEGACY_SURGICAL_BLOCK = [
+  GRAPHFLOW_BLOCK_BEGIN,
+  "# GraphFlow 3.1 (Token-First Surgical Mode / 外科手术省 Token 模式)",
+  "",
+  "Use GraphFlow's 4 surgical MCP tools (`gf_read`, `gf_edit`, `gf_exec`, `gf_macro`) to minimize token usage and prevent context rot:",
+  "",
+  "1. `gf_read`: Slice specific symbols (`targets: [\"file#symbol\"]`) or search by English/Chinese keywords (`q: \"keyword / 中文词\"`) with automatic cross-file type closure and `[Blast Radius]` call sites.",
+  "2. `gf_edit`: Perform in-place symbol/line edits, bottom-up batch `edits`, or cross-repo `renameTo` with instant AST syntax, caller-arity, and struct-field contract guards.",
+  "3. `gf_exec`: Run `cmd: \"affected-tests\"` or shell commands with dehydrated output (1-line `PASS` receipt; 5-line source window on failure; 3-strike loop circuit breaker).",
+  "4. `gf_macro`: Run `action: \"mine-git\"` for zero-cold-start git co-change hints, or `action: \"run\"` to execute auto-compiled `.graphflow/macros/*.mjs` scripts.",
+  GRAPHFLOW_BLOCK_END,
+].join("\n");
 
 function beginMarkerLines(content: string): number {
   return content.split("\n").filter((line) => line.trim().startsWith("<!-- GRAPHFLOW:BEGIN")).length;
@@ -223,6 +277,52 @@ check("outdated block body is replaced in place with the current block", () => {
       `# My header\n\n${MANAGED_INSTRUCTION_BLOCK}\n\nSome user footer text.\n`,
       "block replaced in place, surrounding user content untouched"
     );
+  } finally {
+    s.cleanup();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 3b. Real 3.8.0 install (decorated Context-First block + old surgical block):
+//     marker-only matching migrates both legacy blocks to the one current block.
+// ---------------------------------------------------------------------------
+check("installed 3.8.0 block pair self-heals to the single current slim block", () => {
+  const s = createSandbox();
+  try {
+    mkdirSync(join(s.home, ".zcode"), { recursive: true });
+    // Byte shape of a real 3.8.0-era AGENTS.md: user header, legacy decorated
+    // Context-First block, then the old surgical block appended after it.
+    writeFileSync(
+      s.agentsMd,
+      ["# Agent OS", "", LEGACY_CONTEXT_FIRST_BLOCK, "", LEGACY_SURGICAL_BLOCK, ""].join("\n"),
+      "utf8"
+    );
+
+    const report = s.install();
+    assert.equal(
+      report.results.find((r) => r.category === "rule")?.status,
+      "updated",
+      "migrating the legacy pair reports updated"
+    );
+    const healed = readFileSync(s.agentsMd, "utf8");
+    assert.equal(beginMarkerLines(healed), 1, "exactly one BEGIN marker line remains");
+    assert.equal(endMarkerLines(healed), 1, "exactly one END marker line remains");
+    assert.equal(occurrences(healed, MANAGED_INSTRUCTION_BLOCK), 1, "new block in place");
+    assert.ok(
+      healed.trimEnd() === `# Agent OS\n\n${MANAGED_INSTRUCTION_BLOCK}`,
+      "user header kept, legacy blocks replaced in place"
+    );
+    assert.ok(!healed.includes(DECORATED_BEGIN), "decorated BEGIN line gone");
+    assert.ok(!healed.includes("Context-First Rule"), "legacy context-first body gone");
+    assert.ok(!healed.includes("CallMcpTool"), "legacy CallMcpTool paragraph gone");
+    assert.ok(!healed.includes("Token-First Surgical Mode"), "old surgical body gone");
+    assert.ok(
+      Buffer.byteLength(MANAGED_INSTRUCTION_BLOCK, "utf8") <= 900,
+      "resident block stays within the 900-byte (~220-token) budget"
+    );
+
+    s.install();
+    assert.equal(readFileSync(s.agentsMd, "utf8"), healed, "migrated file is idempotent");
   } finally {
     s.cleanup();
   }

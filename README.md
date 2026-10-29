@@ -75,6 +75,7 @@ Marketplace / Open VSX: search "GraphFlow" (`roarpeng.graphflow`) — prebuilt l
 | `graphflow macro <list\|run\|save\|mine\|mine-git> [id] [args...]` | Macros and git co-change mining |
 | `graphflow task <list\|show\|record\|run\|log\|harvest>` | Local task reflection: record, promote repeated instructions, replay offline |
 | `graphflow reflect "<instruction>" [args...]` | Run the recorded/near-match task for an instruction locally (MISS when unknown) |
+| `graphflow flywheel [--prune] [--ttl-days N]` | Session-journal health check: pending-episode backlog, status split, oldest age, over-TTL count; `--prune` removes pending episodes older than TTL days (default 30), other kinds kept |
 | `graphflow hook <pre-tool\|post-tool\|user-prompt> [--protocol generic\|cursor\|gemini]` | Host hook interceptor entry (internal) |
 | `graphflow graph` / `graphflow brief` | Knowledge-graph HTML export / cross-agent handoff brief |
 | `graphflow doctor parsers [--strict]` / `graphflow parsers` | Tree-sitter engine diagnostics (`--strict` exits non-zero without true AST) |

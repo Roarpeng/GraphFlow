@@ -43,19 +43,24 @@ function which(cmd) {
   return undefined;
 }
 
-/** Candidate command paths for `cmd` across platforms. */
+/**
+ * Absolute-path guard for resolved executables: only `which()`-resolved
+ * absolute paths are ever spawned — never a bare PATH-relative name.
+ * Matches Windows drive roots, UNC paths, and posix roots.
+ */
+function isAbsoluteExecutablePath(file) {
+  return typeof file === "string" && /^(?:[a-zA-Z]:[\\/]|\\\\|\/)/.test(file);
+}
+
+/** Candidate command paths for `cmd`: `which()`-resolved absolute paths only. */
 function commandCandidates(cmd) {
   const out = [];
   const push = (v) => {
-    if (v && !out.includes(v)) out.push(v);
+    if (isAbsoluteExecutablePath(v) && !out.includes(v)) out.push(v);
   };
   push(which(cmd));
-  push(cmd);
   if (process.platform === "win32") {
-    for (const ext of [".cmd", ".exe", ".bat"]) {
-      push(which(cmd + ext));
-      push(cmd + ext);
-    }
+    for (const ext of [".cmd", ".exe", ".bat"]) push(which(cmd + ext));
   }
   return out;
 }
@@ -69,7 +74,11 @@ function commandCandidates(cmd) {
  */
 function runGraphFlowHook(stdinPayload) {
   const isWin = process.platform === "win32";
-  const comspec = isWin ? process.env.ComSpec || "cmd.exe" : "";
+  const comspec = isWin
+    ? isAbsoluteExecutablePath(process.env.ComSpec)
+      ? process.env.ComSpec
+      : "C:\\Windows\\System32\\cmd.exe"
+    : "";
   const SPAWN_OPTS = {
     timeout: HOOK_TIMEOUT_MS,
     killSignal: "SIGKILL",

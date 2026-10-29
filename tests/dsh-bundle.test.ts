@@ -486,11 +486,27 @@ async function run(): Promise<void> {
     const markerIndex = cwdLine!.indexOf("!!js");
     assert.ok(markerIndex >= 0, "cwd uses a !!js Loader expression");
     const expression = cwdLine!.slice(markerIndex + "!!js".length).trim();
-    // Same evaluation shape as @deepseek-ai/cordis-plugin-loader config/utils.ts.
-    const evaluate = new Function("ctx", "expr", "with (ctx) { return eval(expr) }") as (
-      ctx: object,
+    // The Loader (@deepseek-ai/cordis-plugin-loader config/utils.ts) evaluates
+    // this expression as `with (ctx) { return eval(expr) }`. Pin the exact
+    // shipped text and verify its semantics with a local equivalent instead
+    // of running eval on file content inside this test.
+    const shippedExpression =
+      /^process\.env\.GRAPHFLOW_WORKSPACE_ROOT \|\| ctx\.get\('workingDirectory'\)\?\.defaultDirectory \|\| process\.cwd\(\)$/;
+    assert.ok(
+      shippedExpression.test(expression),
+      "cwd !!js expression is exactly the documented env-pin || DSH workingDirectory || process.cwd() form"
+    );
+    const evaluate = (
+      ctx: { get: (key?: string) => { defaultDirectory?: string } | undefined },
       expr: string
-    ) => unknown;
+    ): unknown => {
+      assert.ok(shippedExpression.test(expr), "refusing to evaluate an unexpected expression");
+      return (
+        process.env.GRAPHFLOW_WORKSPACE_ROOT ||
+        ctx.get("workingDirectory")?.defaultDirectory ||
+        process.cwd()
+      );
+    };
     const savedWorkspaceRoot = process.env.GRAPHFLOW_WORKSPACE_ROOT;
     try {
       delete process.env.GRAPHFLOW_WORKSPACE_ROOT;
