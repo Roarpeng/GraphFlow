@@ -17,7 +17,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -67,7 +67,7 @@ jobs:
 
       - name: Setup Node.js
         if: steps.creds.outputs.mode != 'none'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -141,7 +141,7 @@ jobs:
 
       - name: Setup Node.js
         if: steps.ovsx.outputs.mode == 'pat'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
