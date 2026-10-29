@@ -14,8 +14,9 @@
  *
  * Kill switch: GRAPHFLOW_PROMPT_REFLEX=0 disables everything (no child spawn).
  *
- * Runtime: Bun (both hosts). Only `node:child_process` is imported at runtime —
- * no npm dependencies, so the file works as a bare local plugin on both hosts.
+ * Runtime: Bun (both hosts). Only node builtins (`node:child_process`,
+ * `node:fs`, `node:path`) are imported at runtime — no npm dependencies, so
+ * the file works as a bare local plugin on both hosts.
  *
  * Export shape — one file, both hosts:
  *   - OpenCode v1 (1.x, incl. >= 1.18.29 object entrypoint) and Kilo Code pick
@@ -25,22 +26,43 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { existsSync, realpathSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 const HOOK_TIMEOUT_MS = 60_000;
 const GRAPHFLOW_PACKAGE = "@roarpeng/graphflow";
 
-/** Resolve an executable on PATH (Bun.which honors Windows PATHEXT). */
-function which(cmd) {
-  const bun = globalThis.Bun;
-  if (bun && typeof bun.which === "function") {
-    try {
-      const found = bun.which(cmd);
-      if (found) return found;
-    } catch {
-      /* ignore and fall through */
+/** Default PATHEXT probe order when the env var is missing on Windows. */
+const PATH_EXT_DEFAULT = [".com", ".exe", ".bat", ".cmd"];
+
+/**
+ * Resolve every absolute `name` (plus Windows PATHEXT variants) on PATH, in
+ * PATH order. Deterministic and shell-free — replaces `which`, so resolution
+ * behaves identically on any runtime and finds installs beyond the FIRST
+ * PATH hit (e.g. a stale project-local `.bin` shadowing a global install).
+ */
+function resolveAllOnPath(name) {
+  const out = [];
+  const pathEnv = process.env.PATH ?? "";
+  const sep = pathEnv.includes(";") ? ";" : ":";
+  const exts =
+    process.platform === "win32"
+      ? [
+          ...new Set([
+            ...(process.env.PATHEXT ?? "").split(";").filter(Boolean),
+            ...PATH_EXT_DEFAULT,
+            "",
+          ]),
+        ]
+      : [""];
+  for (const dir of pathEnv.split(sep)) {
+    if (!isAbsoluteExecutablePath(dir)) continue;
+    for (const ext of exts) {
+      const candidate = join(dir, name + ext);
+      if (existsSync(candidate) && !out.includes(candidate)) out.push(candidate);
     }
   }
-  return undefined;
+  return out;
 }
 
 /**
@@ -52,33 +74,99 @@ function isAbsoluteExecutablePath(file) {
   return typeof file === "string" && /^(?:[a-zA-Z]:[\\/]|\\\\|\/)/.test(file);
 }
 
-/** Candidate command paths for `cmd`: `which()`-resolved absolute paths only. */
+/** Candidate command paths for `cmd`: every absolute PATH hit, in order. */
 function commandCandidates(cmd) {
+  return resolveAllOnPath(cmd);
+}
+
+/**
+ * Resolve a package file that npm-family installs place under
+ * `<dir>/node_modules/<pkgPath...>`. No shell is involved — this sidesteps
+ * the Windows `.cmd` shim problem entirely.
+ */
+function jsEntryInDir(dir, ...pkgPath) {
+  if (!isAbsoluteExecutablePath(dir)) return undefined;
+  const entry = join(dir, "node_modules", ...pkgPath);
+  return existsSync(entry) ? entry : undefined;
+}
+
+/** Direct file probe: `dir` must be absolute; segments are joined as-is. */
+function jsFileAt(dir, ...segments) {
+  if (!isAbsoluteExecutablePath(dir)) return undefined;
+  const entry = join(dir, ...segments);
+  return existsSync(entry) ? entry : undefined;
+}
+
+function graphflowCliCandidates() {
   const out = [];
   const push = (v) => {
-    if (isAbsoluteExecutablePath(v) && !out.includes(v)) out.push(v);
+    if (v && !out.includes(v)) out.push(v);
   };
-  push(which(cmd));
-  if (process.platform === "win32") {
-    for (const ext of [".cmd", ".exe", ".bat"]) push(which(cmd + ext));
+  for (const shim of commandCandidates("graphflow")) {
+    const binDir = dirname(shim);
+    // npm unix global installs symlink the bin straight at dist/cli.js —
+    // the realpath IS the entry. Also covers pnpm-style link farms.
+    try {
+      const real = realpathSync(shim);
+      if (/dist[\\/]cli\.js$/.test(real)) push(real);
+    } catch {
+      /* not a resolvable link */
+    }
+    // npm global on Windows / project root: <binDir>/node_modules/...
+    push(jsEntryInDir(binDir, "@roarpeng", "graphflow", "dist", "cli.js"));
+    // npm global on unix: <prefix>/bin + <prefix>/lib/node_modules/...
+    push(jsEntryInDir(join(binDir, "..", "lib"), "@roarpeng", "graphflow", "dist", "cli.js"));
+    // yarn classic global: <prefix>/bin + <prefix>/global/node_modules/...
+    push(jsEntryInDir(join(binDir, "..", "global"), "@roarpeng", "graphflow", "dist", "cli.js"));
+    // npm project-local / hoisted layout: shims in node_modules/.bin, the
+    // package tree one level up.
+    if (basename(binDir) === ".bin") {
+      push(jsFileAt(dirname(binDir), "@roarpeng", "graphflow", "dist", "cli.js"));
+    }
+  }
+  return out;
+}
+
+function npxCliCandidates() {
+  const out = [];
+  const push = (v) => {
+    if (v && !out.includes(v)) out.push(v);
+  };
+  for (const shim of commandCandidates("npx")) {
+    const binDir = dirname(shim);
+    push(jsEntryInDir(binDir, "npm", "bin", "npx-cli.js"));
+    push(jsEntryInDir(join(binDir, "..", "lib"), "npm", "bin", "npx-cli.js"));
+    if (basename(binDir) === ".bin") {
+      push(jsFileAt(dirname(binDir), "npm", "bin", "npx-cli.js"));
+    }
   }
   return out;
 }
 
 /**
- * Run `graphflow hook user-prompt` synchronously with the JSON payload on stdin.
- * On Windows, npm installs `graphflow` as a `.cmd` shim, and both Node and Bun
- * refuse to spawn `.cmd`/`.bat` directly (EINVAL) — so every candidate gets a
- * second attempt wrapped in `cmd.exe /d /s /c`. Falls back to npx when
- * `graphflow` is not on PATH. Returns undefined when nothing could run.
+ * Absolute JS runtime candidates: every `node` on PATH (PATHEXT order puts
+ * node.exe first on Windows), then the host runtime itself
+ * (`process.execPath` — Bun runs plain node scripts fine).
+ */
+function jsRuntimeCandidates() {
+  const out = [...resolveAllOnPath("node")];
+  if (isAbsoluteExecutablePath(process.execPath) && !out.includes(process.execPath)) {
+    out.push(process.execPath);
+  }
+  return out;
+}
+
+/**
+ * Run `graphflow hook user-prompt` synchronously with the JSON payload on
+ * stdin. Never touches a shell: the installed CLI's JS entry is resolved as
+ * a sibling of the bin shim and spawned directly with an absolute JS
+ * runtime. Falls back to npx's own `npx-cli.js` the same way when
+ * `graphflow` is not resolvable. Returns undefined when nothing could run
+ * (the hook then stays silent, never breaking the host). Install layouts no
+ * rule covers (e.g. pnpm global on Windows) disable the reflex rather than
+ * falling back to a shell.
  */
 function runGraphFlowHook(stdinPayload) {
-  const isWin = process.platform === "win32";
-  const comspec = isWin
-    ? isAbsoluteExecutablePath(process.env.ComSpec)
-      ? process.env.ComSpec
-      : "C:\\Windows\\System32\\cmd.exe"
-    : "";
   const SPAWN_OPTS = {
     timeout: HOOK_TIMEOUT_MS,
     killSignal: "SIGKILL",
@@ -88,26 +176,10 @@ function runGraphFlowHook(stdinPayload) {
     windowsHide: true,
   };
 
-  const exec = (file, args) => {
-    try {
-      const res = spawnSync(file, args, { ...SPAWN_OPTS, input: stdinPayload });
-      if (!res.error && res.status !== null) {
-        return {
-          status: res.status,
-          stdout: typeof res.stdout === "string" ? res.stdout : "",
-          stderr: typeof res.stderr === "string" ? res.stderr : "",
-        };
-      }
-    } catch {
-      /* fall through */
-    }
-    if (isWin) {
+  const exec = (args) => {
+    for (const runtime of jsRuntimeCandidates()) {
       try {
-        const quoted = /[ "]/.test(file) ? `"${file}"` : file;
-        const res = spawnSync(comspec, ["/d", "/s", "/c", `${quoted} ${args.join(" ")}`], {
-          ...SPAWN_OPTS,
-          input: stdinPayload,
-        });
+        const res = spawnSync(runtime, args, { ...SPAWN_OPTS, input: stdinPayload });
         if (!res.error && res.status !== null) {
           return {
             status: res.status,
@@ -116,21 +188,19 @@ function runGraphFlowHook(stdinPayload) {
           };
         }
       } catch {
-        /* fall through */
+        /* try the next runtime */
       }
     }
     return undefined;
   };
 
-  const graphflowArgs = ["hook", "user-prompt"];
-  const npxArgs = ["-y", `--package=${GRAPHFLOW_PACKAGE}`, "graphflow", ...graphflowArgs];
-
-  for (const file of commandCandidates("graphflow")) {
-    const result = exec(file, graphflowArgs);
+  for (const cli of graphflowCliCandidates()) {
+    const result = exec([cli, "hook", "user-prompt"]);
     if (result) return result;
   }
-  for (const file of commandCandidates("npx")) {
-    const result = exec(file, npxArgs);
+  const npxArgs = ["-y", `--package=${GRAPHFLOW_PACKAGE}`, "graphflow", "hook", "user-prompt"];
+  for (const npxCli of npxCliCandidates()) {
+    const result = exec([npxCli, ...npxArgs]);
     if (result) return result;
   }
   return undefined;
