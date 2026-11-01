@@ -5,8 +5,6 @@
  * Exposes the 4 Token-First Surgical Tools (`gf_read`, `gf_edit`, `gf_exec`, `gf_macro`).
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -18,27 +16,10 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { V3_TOOL_DEFINITIONS, executeV3ToolCall } from "./mcp-tools.js";
 
-export function resolvePackageVersion(): string {
-  const candidates = [
-    join(__dirname, "..", "package.json"),
-    join(__dirname, "..", "..", "package.json"),
-  ];
-
-  for (const packageJsonPath of candidates) {
-    try {
-      const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { version?: string };
-      if (packageJson.version) {
-        return packageJson.version;
-      }
-    } catch {
-      // try next candidate
-    }
-  }
-
-  return "3.7.0";
-}
-
-export const PACKAGE_VERSION = resolvePackageVersion();
+import { PACKAGE_VERSION } from "./version.js";
+// Version lives in its own module so the CLI never has to import this file (and with it
+// the whole MCP SDK) just to print a version string.
+export { PACKAGE_VERSION, resolvePackageVersion } from "./version.js";
 
 export interface ToolAnnotations {
   title: string;

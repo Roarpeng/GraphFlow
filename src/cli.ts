@@ -19,7 +19,7 @@ import {
   interceptUserPromptSubmit,
 } from "./host-interceptor.js";
 import { DEFAULT_FLYWHEEL_TTL_DAYS, inspectFlywheel, pruneFlywheel } from "./flywheel.js";
-import { PACKAGE_VERSION } from "./mcp-server.js";
+import { PACKAGE_VERSION } from "./version.js";
 import { executeV3ToolCall } from "./mcp-tools.js";
 import {
   TASK_PROMOTION_USES,
