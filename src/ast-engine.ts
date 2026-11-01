@@ -944,13 +944,26 @@ export interface WorkspaceTypeHierarchy {
 }
 
 export function createWorkspaceTypeHierarchy(
-  index: WorkspaceTypeHierarchySource
+  index: WorkspaceTypeHierarchySource,
+  /**
+   * Optional prebuilt child -> parent map. When the caller already has class parents
+   * (the semantic index persists them per file), passing them here avoids reading every
+   * source file just to rebuild the same map — measured at ~9 s on a 9 900-file workspace.
+   * The fallback below stays for callers that have no index to draw from.
+   */
+  knownParents?: ReadonlyMap<string, string>
 ): WorkspaceTypeHierarchy {
   const parents = new Map<string, string>();
   let parentsLoaded = false;
   const loadParents = (): void => {
     if (parentsLoaded) return;
     parentsLoaded = true;
+    if (knownParents) {
+      for (const [child, parent] of knownParents) {
+        if (!parents.has(child)) parents.set(child, parent);
+      }
+      return;
+    }
     for (const relPath of index.getFiles()) {
       const raw = index.getRawFile(relPath);
       if (!raw) continue;

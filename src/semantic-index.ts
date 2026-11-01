@@ -23,7 +23,7 @@
  */
 
 import { createRequire } from "node:module";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";import {
   createWorkspaceTypeHierarchy,
   inImplicitPackageScope,
@@ -34,6 +34,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
   unwrapTypeExpression,
   type AstCallSite,
   type FileAstAnalysis,
+  type ReceiverTypeAssignment,
   type ReceiverTypeIndex,
   type SourceLanguageFamily,
   type SymbolKind,
@@ -48,6 +49,12 @@ export interface SemanticWorkspaceSource extends WorkspaceTypeHierarchySource {
   getFiles(forceRescan?: boolean): string[];
   getFileSet(): ReadonlySet<string>;
   getRawFile(relPath: string): { content: string; size: number; mtimeMs: number } | undefined;
+  /**
+   * Optional stat-only staleness probe. When the source provides it, `ensureFresh`
+   * fingerprints files without reading their bodies; sources that don't are still
+   * supported through `getRawFile`.
+   */
+  getFileState?(relPath: string): { mtimeMs: number; size: number } | undefined;
   getFileAnalysis(relPath: string): { content: string; ast: FileAstAnalysis; size: number } | undefined;
 }
 
@@ -192,11 +199,88 @@ interface SemanticFileEntry {
   namespaces: string[];
 }
 
+// ── Persisted representation of an entry ────────────────────────────────────
+//
+// Rebuilding this index costs one AST-shard read per file, so a cold CLI process over a
+// 3 000-file workspace paid ~6 000 file reads before answering anything. The store below
+// lets a process start from the previous process's entries and re-stat only what moved.
+// Maps are flattened to pairs because JSON has no Map; every other field is already plain.
+
+const SEMANTIC_STORE_REL = join(".graphflow", "semantic-index.json");
+/**
+ * Append-only overlay beside the base store. Editing one file used to rewrite the whole
+ * 24 MB base even though a single entry changed; now only the touched entries are written
+ * here, and the base is rewritten (compacted) once the overlay grows past 15% of it.
+ */
+const SEMANTIC_DELTA_REL = join(".graphflow", "semantic-index-delta.json");
+const SEMANTIC_STORE_VERSION = 3;
+
+interface SerializedReceiverIndex {
+  byScope: Array<[string, string]>;
+  byClass: Array<[string, string]>;
+  byName: Array<[string, string]>;
+  parents: Array<[string, string]>;
+  assignments: Array<[string, ReceiverTypeAssignment[]]>;
+}
+
+interface SerializedEntry {
+  file: string;
+  state: string;
+  contentHash: string;
+  /**
+   * Only the two AST slices anything downstream reads after a load:
+   * `symbols` (receiver/enclosing-callable lookup) and `imports` (module-node rebuild).
+   * The full `FileAstAnalysis` — dominated by `calls` — is not persisted; the store would
+   * otherwise be ~50% larger and every run paid to serialize it.
+   */
+  symbols: FileAstAnalysis["symbols"];
+  imports: FileAstAnalysis["imports"];
+  totalLines: number;
+  backend: FileAstAnalysis["backend"];
+  engine: FileAstAnalysis["engine"];
+  module: SemanticModuleNode;
+  receiverIndex: SerializedReceiverIndex;
+  decls: SemanticSymbolDecl[];
+  namespaces: string[];
+}
+
+interface SemanticStoreFile {
+  version: number;
+  sig: string;
+  files: SerializedEntry[];
+}
+
+/** Entries changed since the base was written, plus tombstones for deleted files. */
+interface SemanticDeltaFile {
+  version: number;
+  sig: string;
+  removed: string[];
+  files: SerializedEntry[];
+}
+
+/**
+ * Rebuilds the AST slices a loaded entry can still be asked for: call sites are not
+ * stored, so `calls` comes back empty. Nothing reads `entry.ast.calls` — resolution
+ * consumes the *queried* call site, not the file's own list.
+ */
+function rebuildAst(rec: SerializedEntry): FileAstAnalysis {
+  return {
+    relPath: rec.file,
+    totalLines: rec.totalLines ?? 0,
+    backend: rec.backend,
+    symbols: rec.symbols ?? [],
+    imports: rec.imports ?? [],
+    calls: [],
+    syntaxErrors: [],
+    engine: rec.engine,
+  } as FileAstAnalysis;
+}
+
+
 interface AliasPattern {
   pattern: string;
   targets: string[];
 }
-
 interface AliasConfig {
   patterns: AliasPattern[];
   baseDir: string;
@@ -366,6 +450,19 @@ function returnTypeFromSignature(
 
 // ── Index implementation ────────────────────────────────────────────────────
 
+/**
+ * Throttle window for the semantic freshness pass (`GRAPHFLOW_SEMANTIC_FRESH_MS`, default
+ * 50 ms). Queries inside one tool call reuse one pass; a later call re-validates.
+ */
+function semanticFreshWindowMs(): number {
+  const raw = process.env.GRAPHFLOW_SEMANTIC_FRESH_MS;
+  if (raw !== undefined && raw.trim() !== "") {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  return 50;
+}
+
 class SemanticIndexImpl implements SemanticIndex {
   readonly rootDir: string;
   private readonly workspace: SemanticWorkspaceSource;
@@ -376,56 +473,353 @@ class SemanticIndexImpl implements SemanticIndex {
   private namespaceToFiles = new Map<string, string[]>();
   private hierarchyCache: WorkspaceTypeHierarchy | null = null;
   private aliasConfigCache: AliasConfig | null | undefined;
+  private sortedFiles: { source: readonly string[]; sorted: string[] } | null = null;
+  /** Last full staleness pass; see `ensureFresh` for the throttle. */
+  private lastFreshAt = 0;
+  /** Entries rebuilt since the last save (written to the delta overlay). */
+  private dirtyEntries = new Set<string>();
+  /** Files dropped since the last save (tombstoned in the delta overlay). */
+  private removedEntries = new Set<string>();
+  /** Set when the whole index was cleared: the next save must rewrite the base. */
+  private baseStale = false;
   private buildTimeMs = 0;
   private queries = 0;
 
   constructor(rootDir: string) {
     this.rootDir = rootDir;
     this.workspace = loadWorkspaceIndex(rootDir);
-    this.ensureFresh();
+    // Seed from the previous process's entries, then let `ensureFresh` re-stat every
+    // file: unchanged files cost one stat, changed files are rebuilt as usual.
+    this.loadStore();
+    this.ensureFresh(true);
   }
 
-  private ensureFresh(): void {
-    const files = this.workspace.getFiles().slice().sort();
+  /**
+   * Sorted workspace file list, reused while the workspace scan is unchanged.
+   * `ensureFresh` runs on every query, and a fresh `slice().sort()` of a 3 000-entry
+   * array on each of them was measurable on its own.
+   */
+  private orderedFiles(): string[] {
+    const source = this.workspace.getFiles();
+    if (this.sortedFiles?.source === source) return this.sortedFiles.sorted;
+    const sorted = source.slice().sort();
+    this.sortedFiles = { source, sorted };
+    return sorted;
+  }
+
+  private storePath(): string {
+    return join(this.rootDir, SEMANTIC_STORE_REL);
+  }
+
+  /**
+   * Everything that changes results without changing a file's bytes. Same idea as the
+   * knowledge-graph shard signature, so a parser-mode switch invalidates both caches.
+   */
+  private storeSignature(): string {
+    return [
+      `v${SEMANTIC_STORE_VERSION}`,
+      process.env.GRAPHFLOW_TREE_SITTER === "1" ? "ts=1" : "ts=auto",
+    ].join("|");
+  }
+
+  private semanticCacheEnabled(): boolean {
+    return process.env.GRAPHFLOW_SEMANTIC_CACHE !== "0";
+  }
+
+  private deltaPath(): string {
+    return join(this.rootDir, SEMANTIC_DELTA_REL);
+  }
+
+  /** Best-effort: a missing, unreadable or stale store is simply an empty index. */
+  private loadStore(): void {
+    if (!this.semanticCacheEnabled()) return;
+    let text: string;
+    try {
+      text = readFileSync(this.storePath(), "utf8");
+    } catch {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(text) as Partial<SemanticStoreFile>;
+      if (parsed.version !== SEMANTIC_STORE_VERSION) return;
+      if (parsed.sig !== this.storeSignature()) return;
+      if (!Array.isArray(parsed.files)) return;
+      for (const rec of parsed.files) {
+        if (!rec || typeof rec.file !== "string" || !rec.module) continue;
+        this.hydrateEntry(rec);
+      }
+    } catch {
+      // A truncated store is a cache miss, never an error.
+      this.entries.clear();
+      this.declsByName.clear();
+      this.moduleGraph.clear();
+      this.fileStates.clear();
+      this.namespaceToFiles.clear();
+      return;
+    }
+    // Overlay is applied on top of the base: removals drop entries, additions replace them.
+    try {
+      const delta = JSON.parse(readFileSync(this.deltaPath(), "utf8")) as Partial<SemanticDeltaFile>;
+      if (delta.version !== SEMANTIC_STORE_VERSION) return;
+      if (delta.sig !== this.storeSignature()) return;
+      for (const relFile of delta.removed ?? []) this.removeEntry(relFile);
+      for (const rec of delta.files ?? []) {
+        if (!rec || typeof rec.file !== "string" || !rec.module) continue;
+        this.hydrateEntry(rec);
+      }
+    } catch {
+      // No overlay (or an unreadable one) simply means the base is the whole story.
+    }
+  }
+
+  private hydrateEntry(rec: SerializedEntry): void {
+    const r: SerializedReceiverIndex = rec.receiverIndex ?? {
+      byScope: [],
+      byClass: [],
+      byName: [],
+      parents: [],
+      assignments: [],
+    };
+    const receiverIndex: ReceiverTypeIndex = {
+      byScope: new Map<string, string>(r.byScope),
+      byClass: new Map<string, string>(r.byClass),
+      byName: new Map<string, string>(r.byName),
+      parents: new Map<string, string>(r.parents),
+      assignments: new Map<string, ReceiverTypeAssignment[]>(r.assignments),
+    };
+    const decls = rec.decls ?? [];
+    const namespaces = rec.namespaces ?? [];
+    const entry: SemanticFileEntry = {
+      file: rec.file,
+      state: rec.state,
+      contentHash: rec.contentHash ?? "",
+      ast: rebuildAst(rec),
+      // Source text is only read while building an entry; nothing queries it afterwards.
+      content: "",
+      module: rec.module,
+      receiverIndex,
+      decls,
+      namespaces,
+    };
+    this.entries.set(rec.file, entry);
+    this.moduleGraph.set(rec.file, rec.module);
+    this.fileStates.set(rec.file, rec.state);
+    this.registerNamespaces(rec.file, namespaces);
+    for (const decl of decls) {
+      const list = this.declsByName.get(decl.name) ?? [];
+      list.push(decl);
+      this.declsByName.set(decl.name, list);
+    }
+  }
+
+  /** Serializes one live entry into its stored form. */
+  private serializeEntry(entry: SemanticFileEntry): SerializedEntry {
+    return {
+      file: entry.file,
+      state: entry.state,
+      contentHash: entry.contentHash,
+      symbols: entry.ast.symbols,
+      imports: entry.ast.imports,
+      totalLines: entry.ast.totalLines,
+      backend: entry.ast.backend,
+      engine: entry.ast.engine,
+      module: entry.module,
+      receiverIndex: {
+        byScope: Array.from(entry.receiverIndex.byScope),
+        byClass: Array.from(entry.receiverIndex.byClass),
+        byName: Array.from(entry.receiverIndex.byName),
+        parents: Array.from(entry.receiverIndex.parents ?? new Map<string, string>()),
+        assignments: Array.from(
+          entry.receiverIndex.assignments ?? new Map<string, ReceiverTypeAssignment[]>()
+        ),
+      },
+      decls: entry.decls,
+      namespaces: entry.namespaces,
+    };
+  }
+
+  private writeJsonAtomic(path: string, value: unknown): void {
+    const tmp = `${path}.${process.pid}.tmp`;
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(tmp, JSON.stringify(value), "utf8");
+    renameSync(tmp, path);
+  }
+
+  /**
+   * Persists the index. A small change set goes to the delta overlay (kilobytes); a large
+   * one, or any change while a compaction is due, rewrites the base and drops the overlay.
+   * Measured at 9 900 files: whole-base rewrite ~24 MB per run versus ~60 KB for a
+   * one-file edit.
+   */
+  private saveStore(): void {
+    if (!this.semanticCacheEnabled()) return;
+    if (!this.baseStale && this.dirtyEntries.size === 0 && this.removedEntries.size === 0) return;
+    try {
+      const baseExists = existsSync(this.storePath());
+      const compactionLimit = Math.max(256, Math.floor(this.entries.size * 0.15));
+      // The overlay itself counts toward the budget, otherwise repeated small edits would
+      // grow it without ever triggering a compaction.
+      let existingDeltaCount = 0;
+      try {
+        const peek = JSON.parse(readFileSync(this.deltaPath(), "utf8")) as Partial<SemanticDeltaFile>;
+        existingDeltaCount = (peek.files?.length ?? 0) + (peek.removed?.length ?? 0);
+      } catch {
+        existingDeltaCount = 0;
+      }
+      const smallChange =
+        existingDeltaCount + this.dirtyEntries.size + this.removedEntries.size <= compactionLimit;
+      if (!baseExists || this.baseStale || !smallChange) {
+        const files: SerializedEntry[] = [];
+        for (const entry of this.entries.values()) files.push(this.serializeEntry(entry));
+        for (const path of [this.storePath(), this.deltaPath()]) {
+          const tmp = `${path}.${process.pid}.tmp`;
+          // Write base first, then remove any stale overlay: never a window where the
+          // overlay describes an older base than the one on disk.
+          if (path === this.storePath()) {
+            this.writeJsonAtomic(path, {
+              version: SEMANTIC_STORE_VERSION,
+              sig: this.storeSignature(),
+              files,
+            } satisfies SemanticStoreFile);
+          } else {
+            rmSync(tmp, { force: true });
+            rmSync(path, { force: true });
+          }
+        }
+      } else {
+        let removed: string[] = [];
+        let files: SerializedEntry[] = [];
+        try {
+          const existing = JSON.parse(
+            readFileSync(this.deltaPath(), "utf8")
+          ) as Partial<SemanticDeltaFile>;
+          if (existing.version === SEMANTIC_STORE_VERSION && existing.sig === this.storeSignature()) {
+            removed = existing.removed ?? [];
+            files = existing.files ?? [];
+          }
+        } catch {
+          // Start a fresh overlay.
+        }
+        const removedSet = new Set(removed);
+        const byFile = new Map<string, SerializedEntry>();
+        for (const rec of files) byFile.set(rec.file, rec);
+        for (const relFile of this.removedEntries) {
+          byFile.delete(relFile);
+          removedSet.add(relFile);
+        }
+        for (const relFile of this.dirtyEntries) {
+          const entry = this.entries.get(relFile);
+          if (!entry) continue;
+          byFile.set(relFile, this.serializeEntry(entry));
+          removedSet.delete(relFile);
+        }
+        this.writeJsonAtomic(this.deltaPath(), {
+          version: SEMANTIC_STORE_VERSION,
+          sig: this.storeSignature(),
+          removed: [...removedSet],
+          files: [...byFile.values()],
+        } satisfies SemanticDeltaFile);
+      }
+      this.dirtyEntries.clear();
+      this.removedEntries.clear();
+      this.baseStale = false;
+    } catch {
+      // A read-only workspace or a full disk must not break the query path.
+    }
+  }
+
+  /**
+   * Staleness re-check, throttled.
+   *
+   * Every resolution path calls this, and each pass walks the whole workspace. During a
+   * cold build over 3 000 files that is thousands of passes, which measured as ~36% of the
+   * run even when every per-file probe was a cache hit. The window below collapses those
+   * passes into one; our own mutation paths call `ensureFresh(true)` to bypass it.
+   * Tune with `GRAPHFLOW_SEMANTIC_FRESH_MS` (0 restores a check on every call).
+   */
+  private ensureFresh(force = false): void {
+    const now = Date.now();
+    if (!force && now - this.lastFreshAt < semanticFreshWindowMs()) return;
+    this.lastFreshAt = now;
+    const files = this.orderedFiles();
     const present = new Set(files);
-    let changed = false;
+    let fileSetChanged = false;
     for (const existing of Array.from(this.entries.keys())) {
       if (!present.has(existing)) {
         this.removeEntry(existing);
-        changed = true;
+        fileSetChanged = true;
       }
     }
     const startedAt = Date.now();
-    const pending: Array<{ file: string; state: string; contentHash: string }> = [];
+    const pending: Array<{ file: string; state: string }> = [];
     for (const file of files) {
+      // Fingerprint first, body second. `getFileState` is stat-only, so a workspace
+      // where nothing changed costs one stat per file instead of a full read.
+      const probe = this.workspace.getFileState?.(file);
+      if (probe) {
+        const state = `${probe.mtimeMs}:${probe.size}`;
+        if (this.entries.get(file)?.state === state) continue;
+        pending.push({ file, state });
+        continue;
+      }
       const raw = this.workspace.getRawFile(file);
       if (!raw) continue;
-      const state = `${raw.mtimeMs}:${raw.size}`;
-      if (this.entries.get(file)?.state === state) continue;
-      // Content hash is captured on (re)build; it only needs to run when the cheap
-      // mtime+size fingerprint changes, keeping warm queries cheap.
-      pending.push({ file, state, contentHash: fnv1a(raw.content) });
+      const nextState = `${raw.mtimeMs}:${raw.size}`;
+      if (this.entries.get(file)?.state === nextState) continue;
+      pending.push({ file, state: nextState });
     }
+    const namespacesBefore = this.namespaceSignature();
     for (const change of pending) {
-      this.buildFile(change.file, change.state, change.contentHash);
-      changed = true;
+      this.buildFile(change.file, change.state);
     }
+    const changed = pending.length > 0 || fileSetChanged;
     if (changed) {
-      // Namespace/import resolution needs the full namespace map, so (re)build module nodes
-      // in a second pass once every pending file has registered its namespaces.
-      for (const [file, entry] of Array.from(this.entries.entries())) {
-        const moduleNode = this.buildModuleNode(
-          file,
-          entry.module.language,
-          entry.ast,
-          entry.namespaces
-        );
-        entry.module = moduleNode;
-        this.moduleGraph.set(file, moduleNode);
+      // Namespace/import resolution needs the full namespace map. Rebuilding every
+      // module node is only necessary when that map, or the file set itself, moved —
+      // a single edited file keeps its own resolution inputs and nothing else's.
+      const fullRebuild =
+        fileSetChanged || this.namespaceSignature() !== namespacesBefore;
+      if (fullRebuild) {
+        for (const [file, entry] of Array.from(this.entries.entries())) {
+          const moduleNode = this.buildModuleNode(
+            file,
+            entry.module.language,
+            entry.ast,
+            entry.namespaces
+          );
+          entry.module = moduleNode;
+          this.moduleGraph.set(file, moduleNode);
+        }
+      } else {
+        for (const change of pending) {
+          const entry = this.entries.get(change.file);
+          if (!entry) continue;
+          const moduleNode = this.buildModuleNode(
+            change.file,
+            entry.module.language,
+            entry.ast,
+            entry.namespaces
+          );
+          entry.module = moduleNode;
+          this.moduleGraph.set(change.file, moduleNode);
+        }
       }
       this.buildTimeMs += Date.now() - startedAt;
       this.hierarchyCache = null;
+      this.saveStore();
     }
+  }
+
+  /**
+   * Cheap signature of the namespace→files map. Any membership change can re-target a
+   * C# `using` elsewhere, which is the one cross-file input `buildModuleNode` reads.
+   */
+  private namespaceSignature(): string {
+    if (this.namespaceToFiles.size === 0) return "";
+    return Array.from(this.namespaceToFiles.entries())
+      .map(([namespace, files]) => `${namespace}=${files.length}`)
+      .sort()
+      .join(",");
   }
 
   private removeEntry(file: string): void {
@@ -442,6 +836,8 @@ class SemanticIndexImpl implements SemanticIndex {
     this.entries.delete(file);
     this.moduleGraph.delete(file);
     this.fileStates.delete(file);
+    this.dirtyEntries.delete(file);
+    this.removedEntries.add(file);
     this.hierarchyCache = null;
   }
 
@@ -462,10 +858,13 @@ class SemanticIndexImpl implements SemanticIndex {
     }
   }
 
-  private buildFile(file: string, state: string, contentHash: string): void {
+  private buildFile(file: string, state: string): void {
     this.removeEntry(file);
     const data = this.workspace.getFileAnalysis(file);
     if (!data) return;
+    // Only files that actually changed reach this point, so hashing here costs nothing
+    // on a warm run — and the persisted entry keeps the hash for the next process.
+    const contentHash = fnv1a(data.content);
     const { ast, content } = data;
     const language = sourceLanguageFamily(file);
     const namespaces = extractNamespaces(file, content);
@@ -497,6 +896,8 @@ class SemanticIndexImpl implements SemanticIndex {
     this.entries.set(file, entry);
     this.moduleGraph.set(file, moduleNode);
     this.fileStates.set(file, state);
+    this.dirtyEntries.add(file);
+    this.removedEntries.delete(file);
     for (const decl of decls) {
       const list = this.declsByName.get(decl.name) ?? [];
       list.push(decl);
@@ -738,10 +1139,28 @@ class SemanticIndexImpl implements SemanticIndex {
     return new Map(this.entry(file)?.receiverIndex.byName ?? []);
   }
 
+  /**
+   * Class parents already derived per file (same `parseClassParents` call the hierarchy
+   * fallback makes), merged in file order so ambiguous `first wins` stays deterministic.
+   * This is what lets the hierarchy skip reading every source file.
+   */
+  private collectClassParents(): Map<string, string> {
+    const merged = new Map<string, string>();
+    for (const relFile of this.orderedFiles()) {
+      const entry = this.entries.get(relFile);
+      const perFile = entry?.receiverIndex.parents;
+      if (!perFile) continue;
+      for (const [child, parent] of perFile) {
+        if (!merged.has(child)) merged.set(child, parent);
+      }
+    }
+    return merged;
+  }
+
   getHierarchy(): WorkspaceTypeHierarchy {
     this.ensureFresh();
     if (!this.hierarchyCache) {
-      this.hierarchyCache = createWorkspaceTypeHierarchy(this.workspace);
+      this.hierarchyCache = createWorkspaceTypeHierarchy(this.workspace, this.collectClassParents());
     }
     return this.hierarchyCache;
   }
@@ -1142,6 +1561,9 @@ class SemanticIndexImpl implements SemanticIndex {
   invalidate(file?: string): void {
     if (file) {
       this.removeEntry(file.replace(/\\/g, "/"));
+      // Drop the throttle: the entry is gone on purpose, so the very next query has to
+      // rebuild it instead of trusting a pass that ran moments ago.
+      this.lastFreshAt = 0;
       return;
     }
     this.entries.clear();
@@ -1149,9 +1571,12 @@ class SemanticIndexImpl implements SemanticIndex {
     this.moduleGraph.clear();
     this.fileStates.clear();
     this.namespaceToFiles.clear();
+    this.dirtyEntries.clear();
+    this.removedEntries.clear();
+    this.baseStale = true;
     this.hierarchyCache = null;
     this.aliasConfigCache = undefined;
-    this.ensureFresh();
+    this.ensureFresh(true);
   }
 
   rebuild(): void {
@@ -1162,8 +1587,11 @@ class SemanticIndexImpl implements SemanticIndex {
     this.namespaceToFiles.clear();
     this.hierarchyCache = null;
     this.aliasConfigCache = undefined;
+    this.dirtyEntries.clear();
+    this.removedEntries.clear();
+    this.baseStale = true;
     this.buildTimeMs = 0;
-    this.ensureFresh();
+    this.ensureFresh(true);
   }
 
   stats(): SemanticIndexStats {

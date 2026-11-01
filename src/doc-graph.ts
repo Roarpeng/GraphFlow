@@ -1057,6 +1057,12 @@ interface SymbolDataShardEntry {
 
 interface SymbolDataStoreRecord {
   hash: string;
+  /**
+   * `mtimeMs:size` of the source at build time. Validating on this lets a warm run
+   * replay the record without reading or parsing the file at all; `hash` stays as the
+   * stronger check for a record that carries no state (older stores).
+   */
+  state?: string;
   entries: SymbolDataShardEntry[];
 }
 
@@ -1121,21 +1127,26 @@ export function buildDocCodeLinks(
   // One file instead of one shard per source file: 274 small reads cost ~1s on Windows,
   // which dominated the whole doc-link stage. The store is rewritten only when something
   // actually changed, and is rebuilt from the current file list so deleted files drop out.
-  const store = symbolDataCacheOn ? readSymbolDataStore(index.rootDir) : undefined;
+  // A missing store must still bootstrap: with `undefined` here the loop below never
+  // records anything (`if (store)`), so the cache stayed empty forever and every run
+  // re-read the whole workspace.
+  const store = symbolDataCacheOn
+    ? readSymbolDataStore(index.rootDir) ?? { version: SYMBOL_DATA_CACHE_VERSION, files: {} }
+    : undefined;
   const storeFiles: Record<string, SymbolDataStoreRecord> = {};
   let storeChanged = false;
   /** Where each file's symbols live inside the flat `symbolData` array. */
   const fileRanges: Array<{ relFile: string; start: number; count: number; hash: string }> = [];
   for (const relFile of index.getFiles()) {
-    const fileData = index.getFileAnalysis(relFile);
-    if (!fileData) continue;
-    const contentHash = store
-      ? createHash("sha1").update(fileData.content).digest("hex")
-      : "";
-    const fileStart = symbolData.length;
+    // Fingerprint without reading: an unchanged file is replayed from the store, so a
+    // one-file edit no longer re-reads and re-parses the whole workspace here.
+    const stat = index.getFileState(relFile);
+    if (!stat) continue;
+    const state = `${stat.mtimeMs}:${stat.size}`;
     const cached = store?.files[relFile];
-    if (cached && cached.hash === contentHash) {
-      for (const entry of cached.entries) {
+    const fileStart = symbolData.length;
+    const replay = (record: SymbolDataStoreRecord): void => {
+      for (const entry of record.entries) {
         symbolData.push({
           relFile,
           symbol: entry.symbol as SymbolRetrievalData["symbol"],
@@ -1147,13 +1158,27 @@ export function buildDocCodeLinks(
           normalizedName: entry.normalizedName,
         });
       }
-      storeFiles[relFile] = cached;
+      storeFiles[relFile] = record.state === state ? record : { ...record, state };
       fileRanges.push({
         relFile,
         start: fileStart,
-        count: cached.entries.length,
-        hash: contentHash,
+        count: record.entries.length,
+        hash: record.hash,
       });
+    };
+    if (cached && cached.state === state) {
+      replay(cached);
+      continue;
+    }
+    const fileData = index.getFileAnalysis(relFile);
+    if (!fileData) continue;
+    const contentHash = store
+      ? createHash("sha1").update(fileData.content).digest("hex")
+      : "";
+    if (cached && cached.hash === contentHash) {
+      // Upgrading a state-less record: the bytes are identical, keep the entries.
+      replay(cached);
+      storeChanged = true;
       continue;
     }
     const built: SymbolRetrievalData[] = [];
@@ -1165,6 +1190,7 @@ export function buildDocCodeLinks(
     if (store) {
       storeFiles[relFile] = {
         hash: contentHash,
+        state,
         entries: built.map((sd) => ({
           symbol: sd.symbol,
           weights: [...sd.weights],

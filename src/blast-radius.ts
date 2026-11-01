@@ -50,6 +50,7 @@ import {
   type SourceLanguageFamily,
   type WorkspaceTypeHierarchy,
 } from "./ast-engine.js";
+import { getWorkspaceNameIndex } from "./name-index.js";
 import { formatNumberedLines, type getWorkspaceAstIndex } from "./slicer.js";
 import {
   getSemanticIndex,
@@ -308,7 +309,20 @@ export function computeBlastRadius(
   const parentClass = targetSymbol?.parentClass ?? parentClassHint;
   const isMethodTarget = Boolean(parentClass);
   // Inheritance-aware matching for method receivers (`B extends A` -> inherited A methods).
-  const hierarchy = isMethodTarget ? createWorkspaceTypeHierarchy(index) : undefined;
+  // Built lazily and, when the semantic index is available, from the class parents it
+  // already holds — otherwise the hierarchy reads every source file in the workspace.
+  let hierarchyRef: ReturnType<typeof createWorkspaceTypeHierarchy> | null | undefined;
+  const getHierarchy = (): ReturnType<typeof createWorkspaceTypeHierarchy> | undefined => {
+    if (!isMethodTarget) return undefined;
+    if (hierarchyRef !== undefined) return hierarchyRef ?? undefined;
+    const semantic = getSemantic();
+    try {
+      hierarchyRef = semantic ? semantic.getHierarchy() : createWorkspaceTypeHierarchy(index);
+    } catch {
+      hierarchyRef = null;
+    }
+    return hierarchyRef ?? undefined;
+  };
 
   // Prefer semantic call-target resolution when it can prove an answer; unresolved calls fall
   // back to the per-file heuristics below (guards/scoping remain unchanged either way).
@@ -350,14 +364,25 @@ export function computeBlastRadius(
     return aProd - bProd || a.localeCompare(b);
   });
 
+  // Candidate filter without reading sources: the persisted name index knows which
+  // identifiers each file mentions. A certain "no" skips the file; anything unknown falls
+  // back to the byte scan below.
+  const nameIndex = getWorkspaceNameIndex(index.rootDir, index);
+
   for (const relPath of allFiles) {
     // Tests/benchmarks are still scanned so `totalCallSites` is the real count; only
     // their snippets are withheld once the display quota is full (below).
     // Never match across language families (identifier names collide frequently).
     if (sourceLanguageFamily(relPath) !== targetFamily) continue;
 
-    const raw = index.getRawFile(relPath);
-    if (!raw || !wordRe.test(raw.content)) continue;
+    if (relPath !== targetFile) {
+      const mentions = nameIndex.mentions(relPath, effectiveSymbolName);
+      if (mentions === false) continue;
+      if (mentions === undefined) {
+        const raw = index.getRawFile(relPath);
+        if (!raw || !wordRe.test(raw.content)) continue;
+      }
+    }
 
     const fileData = index.getFileAnalysis(relPath);
     if (!fileData) continue;
@@ -482,6 +507,7 @@ export function computeBlastRadius(
         if (receiverType !== undefined) {
           // Inheritance-aware: a subclass receiver may dispatch to an inherited base method
           // only when no intermediate class overrides it; `super`/`base` resolve to the parent.
+          const hierarchy = getHierarchy();
           return hierarchy
             ? hierarchy.isCompatibleReceiver(receiverType, parentClass!, effectiveSymbolName)
             : receiverType === parentClass;

@@ -16,6 +16,7 @@ import {
   type FileAstAnalysis,
 } from "./ast-engine.js";
 import { computeBlastRadius, formatBlastRadiusText } from "./blast-radius.js";
+import { getWorkspaceNameIndex } from "./name-index.js";
 import {
   SUPPORTED_DOC_EXTS,
   buildDocCodeLinks,
@@ -72,7 +73,25 @@ export interface SliceResult {
 }
 
 
-const MAX_SCAN_FILES = 5000;
+/**
+ * Upper bound on files indexed from one workspace.
+ *
+ * The old hard 5 000 silently truncated larger workspaces: a 9 900-file tree was indexed
+ * as 5 000 files, with the remaining files (and every edit to them) invisible. The limit
+ * is now configurable and defaults well above ROS/monorepo scale; the cost of raising it
+ * is memory, roughly 110 KB per file at index time.
+ */
+const DEFAULT_MAX_SCAN_FILES = 20000;
+
+function maxScanFiles(): number {
+  const raw = process.env.GRAPHFLOW_MAX_FILES;
+  if (raw !== undefined && raw.trim() !== "") {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_MAX_SCAN_FILES;
+}
+
 const MAX_SCAN_DEPTH = 12;
 
 /**
@@ -225,6 +244,8 @@ interface AstShardRecord {
  */
 class WorkspaceAstIndex {
   private rawCache = new Map<string, { mtimeMs: number; size: number; content: string; checkedAt: number }>();
+  /** Stat-only fingerprints, so staleness probes never need a syscall twice in 5 s. */
+  private stateCache = new Map<string, { mtimeMs: number; size: number; checkedAt: number }>();
   private astCache = new Map<string, { mtimeMs: number; size: number; ast: FileAstAnalysis }>();
   private lastScanMs = 0;
   private scannedFiles: string[] = [];
@@ -243,12 +264,13 @@ class WorkspaceAstIndex {
       return this.scannedFiles;
     }
     const out: string[] = [];
+    const cap = maxScanFiles();
     const isBareHome = resolve(this.rootDir) === resolve(homedir());
     if (isBareHome) {
       return out;
     }
     const walk = (dir: string, depth: number) => {
-      if (depth > MAX_SCAN_DEPTH || out.length >= MAX_SCAN_FILES) return;
+      if (depth > MAX_SCAN_DEPTH || out.length >= cap) return;
       let entries;
       try {
         entries = readdirSync(dir, { withFileTypes: true });
@@ -256,7 +278,7 @@ class WorkspaceAstIndex {
         return;
       }
       for (const entry of entries) {
-        if (out.length >= MAX_SCAN_FILES) break;
+        if (out.length >= cap) break;
         if (entry.name.startsWith(".") && entry.name !== ".trae") continue;
         if (IGNORED_DIRS.has(entry.name)) continue;
         const full = join(dir, entry.name);
@@ -303,6 +325,49 @@ class WorkspaceAstIndex {
     } catch {
       this.rawCache.delete(normalized);
       this.astCache.delete(normalized);
+      return undefined;
+    }
+  }
+
+  /**
+   * Staleness probe that never reads the file body.
+   *
+   * Callers that only need "did this file change?" (the semantic index is the main
+   * one) would otherwise pull every file's bytes through `getRawFile` just to compare
+   * `mtimeMs:size` — that turns every warm query into O(total bytes) instead of
+   * O(files). A warm `rawCache` entry answers without touching the disk at all.
+   */
+  getFileState(relPath: string): { mtimeMs: number; size: number } | undefined {
+    const now = Date.now();
+    // Hot loop is `for (file of getFiles())`: those keys are already workspace-relative
+    // and normalized, so the cache can answer before any path normalization runs. Doing
+    // `normalizeWorkspaceRelPath` per file per probe showed up as ~14% of a cold KG build.
+    const direct = this.stateCache.get(relPath);
+    if (direct && now - direct.checkedAt < 5_000) {
+      return { mtimeMs: direct.mtimeMs, size: direct.size };
+    }
+    const normalized = normalizeWorkspaceRelPath(this.rootDir, relPath);
+    if (!normalized) return undefined;
+    const raw = this.rawCache.get(normalized);
+    if (raw && now - raw.checkedAt < 5_000) {
+      return { mtimeMs: raw.mtimeMs, size: raw.size };
+    }
+    // Stat results get their own short-lived cache. Without it, a caller that probes
+    // the whole workspace on every query (the semantic index does, once per resolution)
+    // turns into one stat syscall per file per query.
+    const cached = this.stateCache.get(normalized);
+    if (cached && now - cached.checkedAt < 5_000) {
+      return { mtimeMs: cached.mtimeMs, size: cached.size };
+    }
+    try {
+      const st = statSync(join(this.rootDir, normalized));
+      if (!st.isFile() || st.size > 2_000_000) return undefined;
+      const entry = { mtimeMs: st.mtimeMs, size: st.size, checkedAt: now };
+      this.stateCache.set(normalized, entry);
+      if (normalized !== relPath) this.stateCache.set(relPath, entry);
+      return { mtimeMs: st.mtimeMs, size: st.size };
+    } catch {
+      this.stateCache.delete(normalized);
       return undefined;
     }
   }
@@ -450,6 +515,9 @@ class WorkspaceAstIndex {
     const normalized = normalizeWorkspaceRelPath(this.rootDir, relPath) ?? relPath.replace(/\\/g, "/").replace(/^\.\//, "");
     this.rawCache.delete(normalized);
     this.astCache.delete(normalized);
+    // The stat cache is a fingerprint source too: leaving it behind would report the
+    // pre-edit size/mtime and let downstream stores replay stale entries.
+    this.stateCache.delete(normalized);
     this.pendingAstShards.delete(normalized);
     this.lastScanMs = 0;
   }
@@ -944,13 +1012,20 @@ function resolveTypeClosure(
       const bSameDir = dirname(b) === fromDir ? 0 : 1;
       return aSameDir - bSameDir || a.localeCompare(b);
     });
+    // The fallback scan must not read every source file: the persisted name index answers
+    // "does this file mention any of the missing types" from AST-derived names.
+    const nameIndex = getWorkspaceNameIndex(index.rootDir, index);
     for (const relPath of candidateFiles) {
       if (remaining.size === 0) break;
       if (relPath === fileAst.relPath) continue;
-      const raw = index.getRawFile(relPath);
-      if (!raw) continue;
-      const hasAnyNeeded = Array.from(remaining).some((t) => raw.content.includes(t));
-      if (!hasAnyNeeded) continue;
+      const needed = Array.from(remaining);
+      const mentions = nameIndex.mentionsAny(relPath, needed);
+      if (mentions === false) continue;
+      if (mentions === undefined) {
+        const raw = index.getRawFile(relPath);
+        if (!raw) continue;
+        if (!needed.some((t) => raw.content.includes(t))) continue;
+      }
       const targetFile = index.getFileAnalysis(relPath);
       if (!targetFile) continue;
       for (const name of Array.from(remaining)) {
