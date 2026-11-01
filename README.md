@@ -81,6 +81,20 @@ Marketplace / Open VSX: search "GraphFlow" (`roarpeng.graphflow`) — prebuilt l
 | `graphflow doctor parsers [--strict]` / `graphflow parsers` | Tree-sitter engine diagnostics (`--strict` exits non-zero without true AST) |
 | `graphflow version \| help` | Version / usage |
 
+## Environment & Tuning
+
+| Variable | Default | Effect |
+| :--- | :--- | :--- |
+| `GRAPHFLOW_EXEC_TIMEOUT_MS` | `600000` | Wall-clock budget for one `gf_exec` command. A run stopped by it returns `TIMEOUT` (exit 124) with the last output lines and a handle — never a plain `FAIL`. |
+| `GRAPHFLOW_MAX_FILES` | `20000` | Workspace scan cap. Earlier builds hard-coded 5 000 and silently truncated larger trees. |
+| `GRAPHFLOW_SEMANTIC_CACHE` | on | Persist the L0 semantic index (`semantic-index.json` plus a `semantic-index-delta.json` overlay). `=0` disables. |
+| `GRAPHFLOW_SEMANTIC_FRESH_MS` | `50` | Staleness re-check window for the semantic index; `0` re-checks on every query. |
+| `GRAPHFLOW_NAME_INDEX` | on | Persisted per-file identifier set used to pre-filter blast-radius candidates without reading sources. `=0` falls back to byte scans. |
+| `GRAPHFLOW_AST_CACHE` | on | AST shard persistence under `.graphflow/ast-cache/`. |
+| `GRAPHFLOW_GRAPH_DEBUG` | off | Print per-stage timings for the knowledge-graph build. |
+
+Measured on a synthetic 9 902-file workspace: single-symbol read with blast radius **0.62–0.69 s**, knowledge graph rebuild with no changes **0.17–0.28 s**, with one file changed **~1.7 s**, full cold build **~30 s**.
+
 ## Development
 
 ```bash

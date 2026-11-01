@@ -80,6 +80,20 @@ Marketplace / Open VSX 搜索 "GraphFlow"（`roarpeng.graphflow`）——预构�
 | `graphflow doctor parsers [--strict]` / `graphflow parsers` | tree-sitter 引擎诊断（`--strict` 无真 AST 时非零退出） |
 | `graphflow version \| help` | 版本 / 用法 |
 
+## 环境变量与调优
+
+| 变量 | 默认 | 作用 |
+| :--- | :--- | :--- |
+| `GRAPHFLOW_EXEC_TIMEOUT_MS` | `600000` | 单条 `gf_exec` 命令的墙钟预算。被预算截断时返回 `TIMEOUT`（exit 124）并附最后输出与 handle，不会伪装成普通 `FAIL`。 |
+| `GRAPHFLOW_MAX_FILES` | `20000` | 工作区扫描上限。旧版硬编码 5000，会静默截断更大的仓库。 |
+| `GRAPHFLOW_SEMANTIC_CACHE` | 开 | 持久化 L0 语义索引（`semantic-index.json` 及其 `semantic-index-delta.json` 覆盖层）。`=0` 关闭。 |
+| `GRAPHFLOW_SEMANTIC_FRESH_MS` | `50` | 语义索引的新鲜度复检窗口；`0` 表示每次查询都复检。 |
+| `GRAPHFLOW_NAME_INDEX` | 开 | 逐文件标识符集合，用于在不读源码的情况下预过滤爆炸半径候选。`=0` 回退为原文扫描。 |
+| `GRAPHFLOW_AST_CACHE` | 开 | `.graphflow/ast-cache/` 下的 AST 分片持久化。 |
+| `GRAPHFLOW_GRAPH_DEBUG` | 关 | 打印知识图谱构建的分阶段耗时。 |
+
+在 9 902 文件的合成工作区实测：单符号读取（含爆炸半径）**0.62–0.69 s**，知识图谱无改动重建 **0.17–0.28 s**、改 1 个文件 **约 1.7 s**、全冷建 **约 30 s**。
+
 ## 开发
 
 ```bash
