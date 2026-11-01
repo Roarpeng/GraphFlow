@@ -331,7 +331,11 @@ export function executeV3ToolCall(
         }
         const suggestedCmd = buildAffectedTestCommand(affectedTests, rootDir);
         if (args.run === true || cmd === "run-affected-tests") {
-          const runRes = execAndDehydrate({ rootDir, command: suggestedCmd });
+          const runRes = execAndDehydrate({
+            rootDir,
+            command: suggestedCmd,
+            ...(typeof args.timeoutMs === "number" ? { timeoutMs: args.timeoutMs } : {}),
+          });
           const instruction = typeof args.instruction === "string" ? args.instruction : undefined;
           autoLogExecutedCommand(rootDir, suggestedCmd, {
             ...(instruction ? { instruction } : {}),
@@ -356,7 +360,11 @@ export function executeV3ToolCall(
         );
       }
 
-      const execRes = execAndDehydrate({ rootDir, command: cmd });
+      const execRes = execAndDehydrate({
+        rootDir,
+        command: cmd,
+        ...(typeof args.timeoutMs === "number" ? { timeoutMs: args.timeoutMs } : {}),
+      });
       const runInstruction = typeof args.instruction === "string" ? args.instruction : undefined;
       autoLogExecutedCommand(rootDir, cmd, {
         ...(runInstruction ? { instruction: runInstruction } : {}),

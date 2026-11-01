@@ -1097,32 +1097,125 @@ export function resolveAffectedTests(rootDir: string, explicitChangedFiles?: str
   };
 }
 
+/**
+ * Default wall-clock budget for a dehydrated command.
+ *
+ * The old hard 60 s killed real suites: a `npm test` over a mid-size project, or any
+ * `affected-tests` run that pulls in a slow integration suite, routinely needs minutes.
+ * When the budget expired the call reported a plain failure, which reads as "the command
+ * failed" rather than "we stopped it", so the tool looked broken.
+ *
+ * 10 minutes by default, overridable per call (`timeoutMs`) and per workspace
+ * (`GRAPHFLOW_EXEC_TIMEOUT_MS`).
+ */
+const DEFAULT_EXEC_TIMEOUT_MS = 600_000;
+
+/** Output ceiling before spawnSync gives up; long suites can print a lot. */
+const EXEC_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+
+export function resolveExecTimeoutMs(override?: number): number {
+  if (typeof override === "number" && Number.isFinite(override) && override > 0) return override;
+  const raw = process.env.GRAPHFLOW_EXEC_TIMEOUT_MS;
+  if (raw !== undefined && raw.trim() !== "") {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_EXEC_TIMEOUT_MS;
+}
+
 export function execAndDehydrate(params: {
   rootDir: string;
   command: string;
   timeoutMs?: number;
 }): DehydratedExecResult {
   const start = Date.now();
+  const timeoutMs = resolveExecTimeoutMs(params.timeoutMs);
   const proc = spawnSync(params.command, {
     cwd: params.rootDir,
     shell: true,
     encoding: "utf8",
-    timeout: params.timeoutMs ?? 60_000,
-    maxBuffer: 16 * 1024 * 1024,
+    timeout: timeoutMs,
+    maxBuffer: EXEC_MAX_BUFFER_BYTES,
   });
   const durationMs = Date.now() - start;
-  const exitCode = proc.status ?? (proc.error ? 1 : 0);
   const stdout = proc.stdout ?? "";
-  const stderr = (proc.stderr ?? "") + (proc.error ? `\n${proc.error.message}` : "");
+  const stderr = proc.stderr ?? "";
+  const errorCode = (proc.error as NodeJS.ErrnoException | undefined)?.code;
 
+  // A killed run is not a failed run. Say which one it was, and how to raise the budget.
+  if (errorCode === "ETIMEDOUT" || proc.signal === "SIGTERM") {
+    return describeInterruptedRun({
+      rootDir: params.rootDir,
+      command: params.command,
+      durationMs,
+      stdout,
+      stderr,
+      kind: "TIMEOUT",
+      detail:
+        `killed after ${Math.round(durationMs / 1000)} s (limit ${Math.round(timeoutMs / 1000)} s). ` +
+        `Re-run with a larger budget: gf_exec { timeoutMs: ${timeoutMs * 2} } ` +
+        `or set GRAPHFLOW_EXEC_TIMEOUT_MS.`,
+    });
+  }
+  if (errorCode === "ENOBUFS") {
+    return describeInterruptedRun({
+      rootDir: params.rootDir,
+      command: params.command,
+      durationMs,
+      stdout,
+      stderr,
+      kind: "OUTPUT-LIMIT",
+      detail:
+        `output exceeded ${Math.round(EXEC_MAX_BUFFER_BYTES / (1024 * 1024))} MB and was cut. ` +
+        `Narrow the command (single test file) or raise GRAPHFLOW_EXEC_MAX_BUFFER.`,
+    });
+  }
+
+  const exitCode = proc.status ?? (proc.error ? 1 : 0);
   return dehydrateCommandOutput({
     rootDir: params.rootDir,
     command: params.command,
     exitCode,
     durationMs,
     stdout,
-    stderr,
+    stderr: stderr + (proc.error ? `\n${proc.error.message}` : ""),
   });
+}
+
+/** Receipt for a run we stopped ourselves: what happened, how far it got, where the rest is. */
+function describeInterruptedRun(params: {
+  rootDir: string;
+  command: string;
+  durationMs: number;
+  stdout: string;
+  stderr: string;
+  kind: "TIMEOUT" | "OUTPUT-LIMIT";
+  detail: string;
+}): DehydratedExecResult {
+  const combined = stripAnsi(
+    [params.stdout.trim(), params.stderr.trim()].filter(Boolean).join("\n")
+  );
+  const handle = combined ? archiveRawOutput(params.rootDir, combined) : undefined;
+  const tailLines = combined ? combined.split("\n").slice(-8).join("\n") : "";
+  const text = [
+    `${params.kind} [${params.command}] ${Math.round(params.durationMs / 1000)}s`,
+    params.detail,
+    tailLines ? `# last output\n${tailLines}` : "# no output captured",
+    handle ? `Full output: gf_exec { handle: "${handle}" }` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return {
+    ok: false,
+    exitCode: 124,
+    durationMs: params.durationMs,
+    command: params.command,
+    rawBytes: Buffer.byteLength(combined, "utf8"),
+    rawEstimatedTokens: Math.max(1, Math.ceil(combined.length / 4)),
+    dehydratedTokens: Math.max(1, Math.ceil(text.length / 4)),
+    ...(handle ? { handle } : {}),
+    text,
+  };
 }
 
 
