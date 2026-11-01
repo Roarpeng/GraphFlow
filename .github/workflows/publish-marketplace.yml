@@ -34,11 +34,41 @@ jobs:
           VERSION=$(node -p "require('./vscode-extension/package.json').version")
           TAG="v${VERSION}"
           VSIX="vscode-extension/graphflow-${VERSION}.vsix"
-          # Idempotent: if the release exists, upload may 422 on duplicate asset — tolerate.
-          gh release create "${TAG}" "${VSIX}" \
-            --title "GraphFlow v${VERSION}" \
-            --notes "Token-First surgical engine + 21-agent installer. VSIX: graphflow-${VERSION}.vsix" \
-            || echo "release ${TAG} already exists (idempotent)."
+          # `gh release create` fails WHOLESALE when the release already exists — it does
+          # not fall back to uploading the asset. That happens whenever the release was
+          # created before this job ran (e.g. the tag came from a manual
+          # `gh release create`, or this workflow is re-run), and the old
+          # `|| echo "already exists"` swallowed it: the VSIX was silently dropped while
+          # the job still reported success. Upload to the existing release instead, and
+          # only create the release when it is genuinely missing.
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "release ${TAG} already exists — uploading ${VSIX} to it."
+            gh release upload "${TAG}" "${VSIX}" --clobber
+          else
+            gh release create "${TAG}" "${VSIX}" \
+              --title "GraphFlow v${VERSION}" \
+              --notes "Token-First surgical engine + 21-agent installer. VSIX: graphflow-${VERSION}.vsix"
+          fi
+
+      - name: Verify the VSIX is attached to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./vscode-extension/package.json').version")
+          TAG="v${VERSION}"
+          ASSET="graphflow-${VERSION}.vsix"
+          # Make a missing asset a hard failure. The previous silent-skip is exactly how
+          # v3.9.0 shipped with no VSIX while every check stayed green.
+          for i in $(seq 1 10); do
+            if gh release view "${TAG}" --json assets --jq '.assets[].name' | grep -Fxq "${ASSET}"; then
+              echo "PASS: ${ASSET} is attached to ${TAG}"
+              exit 0
+            fi
+            echo "attempt ${i}: ${ASSET} not visible yet, retrying in 10s"
+            sleep 10
+          done
+          echo "::error::${ASSET} is not attached to ${TAG}"
+          exit 1
 
   publish-marketplace:
     name: Publish to VS Code Marketplace
