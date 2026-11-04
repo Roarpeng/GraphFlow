@@ -1,6 +1,39 @@
 "use strict";
 const vscode = require("vscode");
 const { execFile } = require("node:child_process");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+
+function syncActiveWorkspaceLease() {
+  try {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0) return;
+    const root = path.resolve(folders[0].uri.fsPath);
+    if (!fs.existsSync(root)) return;
+    const leasePath = path.join(os.homedir(), ".graphflow", "active-workspace.json");
+    let recent = [];
+    if (fs.existsSync(leasePath)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(leasePath, "utf8"));
+        if (parsed && Array.isArray(parsed.recentRoots)) {
+          recent = parsed.recentRoots.filter((r) => typeof r === "string");
+        }
+      } catch {
+        recent = [];
+      }
+    }
+    const recentRoots = [root, ...recent.filter((r) => path.resolve(r) !== root)].slice(0, 8);
+    fs.mkdirSync(path.dirname(leasePath), { recursive: true });
+    fs.writeFileSync(
+      leasePath,
+      JSON.stringify({ rootDir: root, updatedAt: Date.now(), recentRoots }, null, 2) + "\n",
+      "utf8"
+    );
+  } catch {
+    /* ignore */
+  }
+}
 
 function runGraphflowCli(args, cwd) {
   return new Promise((resolve) => {
@@ -62,6 +95,20 @@ async function autoInstallOnce(context, outputChannel) {
 
 function activate(context) {
   const outputChannel = vscode.window.createOutputChannel("GraphFlow");
+
+  syncActiveWorkspaceLease();
+  if (vscode.window && typeof vscode.window.onDidChangeWindowState === "function") {
+    context.subscriptions.push(
+      vscode.window.onDidChangeWindowState((state) => {
+        if (state && state.focused) syncActiveWorkspaceLease();
+      })
+    );
+  }
+  if (vscode.workspace && typeof vscode.workspace.onDidChangeWorkspaceFolders === "function") {
+    context.subscriptions.push(
+      vscode.workspace.onDidChangeWorkspaceFolders(() => syncActiveWorkspaceLease())
+    );
+  }
 
   // Auto-register once per extension version (fail-open): a fresh
   // install/update registers MCP, Skills, Rules & Hooks to every detected

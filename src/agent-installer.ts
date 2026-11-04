@@ -194,9 +194,10 @@ export const CURSOR_RULE_MDC_CONTENT = [
   "",
   "# GraphFlow 3.1 Surgical Mode (外科手术省 Token 模式)",
   "",
+  "- Pass `rootDir` as this project's absolute path on `gf_*` calls (never `~`, AppData, or unexpanded `${workspaceFolder}`) so global MCP (`user-graphflow`) binds to this repo; when omitted, GraphFlow resolves via active-workspace hooks and target file probing.",
   "- Prefer `gf_read` (`targets: [\"path/file#symbol\"]` or `q: \"keyword / 中文关键词\"`) over reading entire large files (>250 lines).",
   "- Prefer `gf_edit` for symbol/line edits, multi-site batch `edits`, and cross-repo `renameTo`; update `[Blast Radius]` callers in the same turn.",
-  "- Prefer `gf_exec({ cmd: \"affected-tests\", run: true })` to run affected tests with dehydrated output.",
+  "- Prefer `gf_exec({ cmd: \"affected-tests\", run: true })` to run affected tests with dehydrated output, or `gf_exec({ cmd: \"status\" })` (or CLI `graphflow status`) to inspect workspace binding and index status.",
   "- Prefer `gf_macro({ action: \"mine-git\" })` on new repos to load git co-change coupling hints, and `gf_macro({ action: \"run\", id })` for repeated workflows.",
   "",
 ].join("\n");
@@ -205,9 +206,8 @@ export const MANAGED_INSTRUCTION_BLOCK = [
   GRAPHFLOW_BLOCK_BEGIN,
   "# GraphFlow",
   "",
-  "探索/修改/调试本项目代码前，先调 `graphflow_context`，以其 summary/anchors 为主上下文；多步任务先 `graphflow_plan`，改完用 `graphflow_index` 刷新。`rootDir` 传本项目绝对路径（勿用主目录/AppData/未展开 `${workspaceFolder}`）。改动默认由 hooks 自动回填，`GRAPHFLOW_AUTO_CAPTURE=0` 可关。",
-  "工具：graphflow_context/plan/run/report_outcome/insight/index/artifact/skill_insights/skill_guide/diagnose，详细用法看 graphflow skill（`graphflow_skill_guide`）。",
-  "外科工具优先：`gf_read` 按符号或中英关键词切片读；`gf_edit` AST 守卫编辑；`gf_exec` 跑命令与 affected-tests（脱水输出）；`gf_macro` 用 action:\"mine-git\" 取 git 共变提示、action:\"run\" 执行 .graphflow/macros 宏。",
+  "探索/修改/调试本项目代码前，优先使用 4 个外科 MCP 工具（`gf_read`、`gf_edit`、`gf_exec`、`gf_macro`）代替整文件读取与全量测试。`rootDir` 传本项目绝对路径（勿用主目录/AppData/未展开 `${workspaceFolder}`；省略时由活跃工作区租约与目标路径自动推导）。",
+  "外科工具：`gf_read` 按符号（`file#sym`）或中英关键词（`q`）精准切片并附带爆炸半径；`gf_edit` AST 守卫原地编辑与跨仓重命名；`gf_exec` 跑命令、`affected-tests`（脱水输出，`run:true` 执行）及 `cmd:\"status\"` 状态诊断；`gf_macro` 用 `action:\"mine-git\"` 取 git 共变提示、`action:\"run\"` 零 Token 执行 `.graphflow/macros` 宏。详情见 graphflow skill。",
   GRAPHFLOW_BLOCK_END,
 ].join("\n");
 
@@ -878,7 +878,8 @@ function codexMcpSectionRegex(serverName: string): RegExp {
 function writeMcpTarget(
   target: AgentMcpTarget,
   serverName: string,
-  launcher: { command: string; args: string[] }
+  launcher: { command: string; args: string[] },
+  extraEnv?: Record<string, string>
 ): "installed" | "updated" | "skipped" {
   const existed = existsSync(target.configPath);
   const format = target.configFormat ?? "json";
@@ -947,7 +948,10 @@ function writeMcpTarget(
     obj[target.serversKey] && typeof obj[target.serversKey] === "object"
       ? (obj[target.serversKey] as Record<string, unknown>)
       : {};
-  const desired = { command: launcher.command, args: launcher.args };
+  const desired =
+    extraEnv && Object.keys(extraEnv).length > 0
+      ? { command: launcher.command, args: launcher.args, env: extraEnv }
+      : { command: launcher.command, args: launcher.args };
   const entryExisted = serverName in servers;
   if (entryExisted && canonicalJson(servers[serverName]) === canonicalJson(desired)) {
     return "skipped";
@@ -1520,7 +1524,19 @@ function zcodeHookEventsContainer(hooks: Record<string, unknown>): Record<string
 }
 
 function isGraphflowHookCommand(value: unknown): boolean {
-  return typeof value === "string" && value.toLowerCase().includes(GRAPHFLOW_HOOK_COMMAND);
+  if (typeof value !== "string") return false;
+  const lower = value.toLowerCase();
+  return lower.includes(GRAPHFLOW_HOOK_COMMAND) || lower.includes("graphflow-hooks");
+}
+
+function cleanupLegacyHookAssets(configPath: string): void {
+  const legacyDir = join(dirname(configPath), "graphflow-hooks");
+  if (!existsSync(legacyDir)) return;
+  try {
+    rmSync(legacyDir, { recursive: true, force: true });
+  } catch {
+    // Best-effort cleanup of obsolete v2 session.sh hook directory.
+  }
 }
 
 /** A hook object is graphflow-owned when its command (or Gemini name) says so. */
@@ -1764,6 +1780,16 @@ export function installHostHook(hookKind: HookKind, configPath: string): "instal
     container = zcodeHookEventsContainer(hooks);
   }
 
+  for (const key of Object.keys(container)) {
+    const entries = container[key];
+    if (!Array.isArray(entries)) continue;
+    const filtered = sanitizeHostHookEntries(entries as unknown[]);
+    if (filtered.length === 0) delete container[key];
+    else if (filtered.length !== entries.length || JSON.stringify(filtered) !== JSON.stringify(entries)) {
+      container[key] = filtered;
+    }
+  }
+
   for (const [key, phase] of hookPhaseEntries(hookKind)) {
     const existing = Array.isArray(container[key]) ? (container[key] as unknown[]) : [];
     container[key] = [...sanitizeHostHookEntries(existing), buildGraphflowHookEntry(hookKind, phase)];
@@ -1772,6 +1798,7 @@ export function installHostHook(hookKind: HookKind, configPath: string): "instal
   if (hookKind === "cursor") obj.version = obj.version ?? 1;
   obj.hooks = hooks;
   writeJsonSafe(configPath, obj);
+  cleanupLegacyHookAssets(configPath);
   return existed ? "updated" : "installed";
 }
 
@@ -1797,7 +1824,7 @@ export function removeHostHook(hookKind: HookKind, configPath: string): boolean 
   const container = rawContainer as Record<string, unknown>;
   let removed = false;
 
-  for (const [key] of hookPhaseEntries(hookKind)) {
+  for (const key of Object.keys(container)) {
     const entries = container[key];
     if (!Array.isArray(entries)) continue;
     const filtered = sanitizeHostHookEntries(entries as unknown[]);
@@ -1808,6 +1835,7 @@ export function removeHostHook(hookKind: HookKind, configPath: string): boolean 
     }
   }
 
+  cleanupLegacyHookAssets(configPath);
   if (!removed) return false;
   if (hookKind === "zcode") {
     if (Object.keys(container).length === 0) delete hooks.events;
@@ -2114,7 +2142,8 @@ export function installAllAgents(opts: InstallAllAgentsOptions = {}): InstallAll
               ...(wsTarget.configFormat ? { configFormat: wsTarget.configFormat } : {}),
             },
             serverName,
-            launcher
+            launcher,
+            { GRAPHFLOW_WORKSPACE_ROOT: opts.workspaceRoot }
           );
           results.push({
             agentId: profile.id,

@@ -27,12 +27,22 @@ import {
   syncGitCoChangeHabits,
   type MacroKind,
 } from "./macro-engine.js";
+import { getAgentRegistrationStatus } from "./agent-installer.js";
 import {
   generateCrossAgentBrief,
   generateKnowledgeGraphHtml,
   recordCrossAgentActivity,
 } from "./doc-graph.js";
-import { executeSurgicalRead, getWorkspaceAstIndex, resolveSafeWorkspaceRoot } from "./slicer.js";
+import {
+  discoverCandidateWorkspaces,
+  executeSurgicalRead,
+  getWorkspaceAstIndex,
+  isExplicitRootDirValid,
+  recordActiveWorkspace,
+  resolveSmartWorkspaceRoot,
+  setSessionStickyWorkspaceRoot,
+  type SmartWorkspaceResolveOptions,
+} from "./slicer.js";
 import { executeSurgicalEdit, type SingleEditSpec } from "./surgical-edit.js";
 import {
   autoLogExecutedCommand,
@@ -45,6 +55,7 @@ import {
   runTask,
   type TaskStep,
 } from "./task-reflector.js";
+import { PACKAGE_VERSION } from "./version.js";
 
 export interface V3ToolDefinition {
   name: "gf_read" | "gf_edit" | "gf_exec" | "gf_macro";
@@ -60,7 +71,7 @@ export interface V3ToolDefinition {
 export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
   {
     name: "gf_read",
-    description: "Read: `targets` (file#sym, file:L1-L2), `q`, `topicId`.",
+    description: "Read `targets` (file#sym), `q`, `topicId`.",
     inputSchema: {
       type: "object",
       properties: {
@@ -77,7 +88,7 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
   },
   {
     name: "gf_edit",
-    description: "Edit by `symbol`, lines, `oldCode`, `edits`, `renameTo`.",
+    description: "Edit `symbol`, lines, `oldCode`, `edits`, `renameTo`.",
     inputSchema: {
       type: "object",
       properties: {
@@ -96,7 +107,7 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
   },
   {
     name: "gf_exec",
-    description: "Run `cmd`/affected-tests dehydrated; preview unless run:true.",
+    description: "Run `cmd`/affected-tests/status (run:true).",
     inputSchema: {
       type: "object",
       properties: {
@@ -105,6 +116,7 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
         changedFiles: { type: "array", items: { type: "string" } },
         handle: { type: "string" },
         range: { type: "array", items: { type: "number" } },
+        timeoutMs: { type: "number" },
         rootDir: { type: "string" },
       },
       additionalProperties: false,
@@ -112,7 +124,7 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
   },
   {
     name: "gf_macro",
-    description: "Macros/habits/tasks: list,run,save,mine,mine-git,task-*.",
+    description: "Macros/tasks: list,run,save,mine-git,task-*.",
     inputSchema: {
       type: "object",
       properties: {
@@ -162,12 +174,11 @@ function plainTextResponse(text: string): V3ToolCallResponse {
 export function executeV3ToolCall(
   name: string,
   args: Record<string, unknown> = {},
-  defaultRootDir: string = process.cwd()
+  defaultRootDir: string = process.cwd(),
+  resolveOpts?: SmartWorkspaceResolveOptions
 ): V3ToolCallResponse {
-  const rootDir = resolveSafeWorkspaceRoot(
-    typeof args.rootDir === "string" ? args.rootDir : undefined,
-    defaultRootDir
-  );
+  const resolvedRoot = resolveSmartWorkspaceRoot(args, defaultRootDir, resolveOpts);
+  let rootDir = resolvedRoot.rootDir;
   const sessionId =
     typeof args.sessionId === "string" && args.sessionId.trim() ? args.sessionId.trim() : "main";
 
@@ -202,7 +213,7 @@ export function executeV3ToolCall(
         }
       }
 
-      const slice = executeSurgicalRead({
+      let slice = executeSurgicalRead({
         rootDir,
         ...(targets && targets.length > 0 ? { targets } : {}),
         ...(query ? { query } : {}),
@@ -211,6 +222,31 @@ export function executeV3ToolCall(
         includeSkeleton,
         macroHintLookup: (keys) => findMatchingMacroHint(rootDir, keys),
       });
+
+      if (
+        query &&
+        (!targets || targets.length === 0) &&
+        !isExplicitRootDirValid(typeof args.rootDir === "string" ? args.rootDir : undefined) &&
+        slice.matchedSymbols.length === 0
+      ) {
+        for (const candidate of discoverCandidateWorkspaces(defaultRootDir)) {
+          const candidateSlice = executeSurgicalRead({
+            rootDir: candidate,
+            query,
+            ...(topK !== undefined ? { topK } : {}),
+            includeCallers: true,
+            includeSkeleton,
+            macroHintLookup: (keys) => findMatchingMacroHint(candidate, keys),
+          });
+          if (candidateSlice.matchedSymbols.length > 0) {
+            rootDir = candidate;
+            slice = candidateSlice;
+            setSessionStickyWorkspaceRoot(defaultRootDir, candidate);
+            recordActiveWorkspace(candidate);
+            break;
+          }
+        }
+      }
 
       if (args.dedup === true && slice.resolvedKeys.length > 0) {
         const key = slice.resolvedKeys.join("|");
@@ -317,6 +353,40 @@ export function executeV3ToolCall(
       const changedFiles = Array.isArray(args.changedFiles)
         ? args.changedFiles.filter((f): f is string => typeof f === "string")
         : undefined;
+
+      if (/^(?:graphflow\s+)?(?:status|doctor)(?:\s+--[\w-]+(?:\s+\S+)?)*$/i.test(cmd)) {
+        const index = getWorkspaceAstIndex(rootDir);
+        const files = index.getFiles();
+        let symbolCount = 0;
+        for (const relPath of files) {
+          const analysis = index.getFileAnalysis(relPath);
+          if (analysis) symbolCount += analysis.ast.symbols.length;
+        }
+        const { macros, habits } = loadMacroStore(rootDir);
+        const hasGraphflowDir = existsSync(join(rootDir, ".graphflow"));
+        const statuses = getAgentRegistrationStatus({ workspaceRoot: rootDir });
+        const mark = (ok: boolean | undefined) => (ok ? "✓" : "-");
+        const agentLines = statuses.map(
+          (s) =>
+            `  [MCP ${mark(s.mcp)}] [Skill ${mark(s.skill)}] [Rule ${mark(s.rule)}] [Hook ${mark(s.hook)}] ${s.name} (${s.id})`
+        );
+        const statusText = [
+          `PASS [graphflow-status] v${PACKAGE_VERSION} | rootDir: ${rootDir} (source: ${resolvedRoot.source})`,
+          `Index: ${files.length} source file(s), ${symbolCount} symbol(s) | .graphflow: ${hasGraphflowDir ? "present" : "missing"} | macros: ${macros.length}, coEdits: ${habits.coEdits.length}`,
+          `Detected agents (${statuses.length}):`,
+          ...(agentLines.length > 0 ? agentLines : ["  (no known coding agent directories detected)"]),
+        ].join("\n");
+        return {
+          content: [{ type: "text", text: statusText }],
+          structuredContent: {
+            tool: "gf_exec",
+            ok: true,
+            exitCode: 0,
+            rootDir,
+            rootDirSource: resolvedRoot.source,
+          },
+        };
+      }
 
       if (cmd === "affected-tests" || cmd === "run-affected-tests") {
         const { changedFiles: resolvedChanges, affectedTests } = resolveAffectedTests(
@@ -611,7 +681,7 @@ export function executeV3ToolCall(
         content: [
           {
             type: "text",
-            text: `ERR [unknown-action] '${action}'. Use 'list', 'run', 'save', 'mine', 'mine-git', 'task-list', 'task-run', 'task-record', or 'task-harvest'.`,
+            text: `ERR [unknown-action] '${action}'. Use 'list', 'run', 'save', 'mine', 'mine-git', 'visualize', 'brief', 'task-list', 'task-run', 'task-record', or 'task-harvest'.`,
           },
         ],
         structuredContent: { tool: "gf_macro", ok: false },

@@ -6,7 +6,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   SUPPORTED_SOURCE_EXTS,
@@ -117,6 +117,413 @@ export function resolveSafeWorkspaceRoot(rawRootDir?: string, fallbackRootDir: s
     // ignore
   }
   return resolved;
+}
+
+export type WorkspaceRootResolutionSource =
+  | "explicit"
+  | "target-abs"
+  | "target-probe"
+  | "session-sticky"
+  | "active-lease"
+  | "recent-sibling"
+  | "env"
+  | "cwd";
+
+export interface ResolvedWorkspaceRoot {
+  rootDir: string;
+  source: WorkspaceRootResolutionSource;
+}
+
+export interface SmartWorkspaceResolveOptions {
+  /** When true (MCP server mode without GRAPHFLOW_WORKSPACE_ROOT), consult active lease & recent sibling .graphflow stores. */
+  preferActiveLease?: boolean;
+}
+
+export function isExplicitRootDirValid(rawRootDir?: string): boolean {
+  const candidate = (rawRootDir ?? "").trim();
+  return Boolean(
+    candidate &&
+      !candidate.includes("${") &&
+      candidate !== "~" &&
+      candidate !== "."
+  );
+}
+
+function isExistingDir(dirPath: string): boolean {
+  try {
+    return existsSync(dirPath) && statSync(dirPath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function isPathInside(childPath: string, parentPath: string): boolean {
+  const rel = relative(resolve(parentPath), resolve(childPath)).replace(/\\/g, "/");
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function resolveActiveWorkspaceLeasePath(): string {
+  const custom = process.env.GRAPHFLOW_ACTIVE_WORKSPACE_FILE?.trim();
+  if (custom) return resolve(custom);
+  return join(homedir(), ".graphflow", "active-workspace.json");
+}
+
+let sessionStickyRoot: { fromDefaultRoot: string; resolvedRoot: string; updatedAt: number } | undefined;
+
+export function setSessionStickyWorkspaceRoot(fromDefaultRoot: string, resolvedRoot: string): void {
+  sessionStickyRoot = {
+    fromDefaultRoot: resolve(fromDefaultRoot),
+    resolvedRoot: resolve(resolvedRoot),
+    updatedAt: Date.now(),
+  };
+}
+
+export function resetSessionStickyWorkspaceRoot(): void {
+  sessionStickyRoot = undefined;
+}
+
+/**
+ * Records the most recently active workspace root so a long-lived global MCP
+ * server (`user-graphflow`) can follow the host IDE's active project without
+ * requiring `rootDir` on every call.
+ */
+export function recordActiveWorkspace(rawRootDir: string): void {
+  try {
+    const resolved = resolveSafeWorkspaceRoot(rawRootDir);
+    if (!isExistingDir(resolved)) return;
+    const customLeaseFile = process.env.GRAPHFLOW_ACTIVE_WORKSPACE_FILE?.trim();
+    if (!customLeaseFile) {
+      const home = resolve(homedir());
+      const tmp = resolve(tmpdir());
+      if (resolved === home || isPathInside(resolved, tmp)) {
+        return;
+      }
+    }
+    const leasePath = resolveActiveWorkspaceLeasePath();
+    let existingRecent: string[] = [];
+    if (existsSync(leasePath)) {
+      try {
+        const parsed = JSON.parse(readFileSync(leasePath, "utf8")) as Record<string, unknown>;
+        if (Array.isArray(parsed.recentRoots)) {
+          existingRecent = parsed.recentRoots.filter((r): r is string => typeof r === "string");
+        }
+      } catch {
+        existingRecent = [];
+      }
+    }
+    const recentRoots = [
+      resolved,
+      ...existingRecent.map((r) => resolve(r)).filter((r) => r !== resolved && isExistingDir(r)),
+    ].slice(0, 8);
+    mkdirSync(dirname(leasePath), { recursive: true });
+    writeFileSync(
+      leasePath,
+      `${JSON.stringify({ rootDir: resolved, updatedAt: Date.now(), recentRoots }, null, 2)}\n`,
+      "utf8"
+    );
+  } catch {
+    // Non-fatal: workspace lease is best-effort.
+  }
+}
+
+export function readActiveWorkspaceLease(): {
+  rootDir?: string;
+  updatedAt?: number;
+  recentRoots: string[];
+} {
+  const leasePath = resolveActiveWorkspaceLeasePath();
+  if (!existsSync(leasePath)) return { recentRoots: [] };
+  try {
+    const parsed = JSON.parse(readFileSync(leasePath, "utf8")) as Record<string, unknown>;
+    const rootDir =
+      typeof parsed.rootDir === "string" && isExistingDir(parsed.rootDir)
+        ? resolve(parsed.rootDir)
+        : undefined;
+    const updatedAt = typeof parsed.updatedAt === "number" ? parsed.updatedAt : undefined;
+    const recentRoots = Array.isArray(parsed.recentRoots)
+      ? parsed.recentRoots
+          .filter((r): r is string => typeof r === "string" && isExistingDir(r))
+          .map((r) => resolve(r))
+      : [];
+    if (rootDir && !recentRoots.includes(rootDir)) {
+      recentRoots.unshift(rootDir);
+    }
+    return {
+      ...(rootDir !== undefined ? { rootDir } : {}),
+      ...(updatedAt !== undefined ? { updatedAt } : {}),
+      recentRoots,
+    };
+  } catch {
+    return { recentRoots: [] };
+  }
+}
+
+/**
+ * Walks up from a file or directory path to find the enclosing project root
+ * (`.graphflow`, `.git`, or common language manifest).
+ */
+export function findNearestProjectRoot(targetPath: string): string {
+  const resolved = resolve(targetPath);
+  let startDir = resolved;
+  try {
+    if (existsSync(resolved) && statSync(resolved).isFile()) {
+      startDir = dirname(resolved);
+    }
+  } catch {
+    startDir = dirname(resolved);
+  }
+  const home = resolve(homedir());
+  let dir = startDir;
+  for (let i = 0; i < 10; i++) {
+    if (dir === home) break;
+    if (existsSync(join(dir, ".graphflow")) || existsSync(join(dir, ".git"))) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  const manifests = [
+    "package.json",
+    "pyproject.toml",
+    "requirements.txt",
+    "go.mod",
+    "Cargo.toml",
+    "pom.xml",
+    "CMakeLists.txt",
+  ];
+  dir = startDir;
+  for (let i = 0; i < 10; i++) {
+    if (dir === home) break;
+    if (manifests.some((m) => existsSync(join(dir, m)))) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return startDir;
+}
+
+function extractTargetFileHints(args: Record<string, unknown>): string[] {
+  const rawList: string[] = [];
+  if (Array.isArray(args.targets)) {
+    for (const item of args.targets) {
+      if (typeof item === "string") rawList.push(item);
+    }
+  }
+  if (typeof args.file === "string") {
+    rawList.push(args.file);
+  }
+  if (Array.isArray(args.edits)) {
+    for (const edit of args.edits) {
+      if (edit && typeof edit === "object" && typeof (edit as Record<string, unknown>).file === "string") {
+        rawList.push((edit as Record<string, unknown>).file as string);
+      }
+    }
+  }
+  if (Array.isArray(args.changedFiles)) {
+    for (const f of args.changedFiles) {
+      if (typeof f === "string") rawList.push(f);
+    }
+  }
+  const hints: string[] = [];
+  for (const raw of rawList) {
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.startsWith("@")) continue;
+    const withoutSymbol = trimmed.replace(/#.*$/, "");
+    const withoutRange = withoutSymbol.replace(/:\d+(?:-\d+)?$/, "").trim();
+    if (withoutRange) hints.push(withoutRange);
+  }
+  return hints;
+}
+
+function candidateHasRelativeFile(candidateRoot: string, rawRelPath: string): boolean {
+  const cleaned = rawRelPath.replace(/\\/g, "/").trim();
+  if (!cleaned || cleaned.startsWith("..") || isAbsolute(cleaned)) return false;
+  const full = resolve(candidateRoot, cleaned);
+  if (!isPathInside(full, candidateRoot)) return false;
+  try {
+    return existsSync(full) && statSync(full).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function graphflowStoreMtimeMs(workspaceDir: string): number {
+  const gfDir = join(workspaceDir, ".graphflow");
+  if (!existsSync(gfDir)) return 0;
+  let best = 0;
+  for (const probe of [
+    join(gfDir, "session-journal.jsonl"),
+    join(gfDir, "graph-shards.json"),
+    join(gfDir, "semantic-index-delta.json"),
+    join(gfDir, "semantic-index.json"),
+    gfDir,
+  ]) {
+    try {
+      if (existsSync(probe)) {
+        const m = statSync(probe).mtimeMs;
+        if (m > best) best = m;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return best;
+}
+
+export function discoverCandidateWorkspaces(fallbackRootDir: string): string[] {
+  const base = resolve(fallbackRootDir);
+  const seen = new Set<string>();
+  const add = (dir: string | undefined) => {
+    if (!dir) return;
+    const resolved = resolve(dir);
+    if (resolved !== base && !seen.has(resolved) && isExistingDir(resolved)) {
+      seen.add(resolved);
+    }
+  };
+
+  if (sessionStickyRoot && sessionStickyRoot.fromDefaultRoot === base) {
+    add(sessionStickyRoot.resolvedRoot);
+  }
+
+  const lease = readActiveWorkspaceLease();
+  add(lease.rootDir);
+  for (const r of lease.recentRoots) add(r);
+
+  // Sibling directories of fallbackRootDir that already contain a `.graphflow` store
+  // (e.g. when MCP started in `/code/Rice` and the user is working in `/code/NetWork`).
+  const parentDir = dirname(base);
+  if (parentDir && parentDir !== base && isExistingDir(parentDir)) {
+    try {
+      const siblings: Array<{ path: string; mtime: number }> = [];
+      for (const entry of readdirSync(parentDir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const sibPath = resolve(parentDir, entry.name);
+        if (sibPath === base) continue;
+        const mtime = graphflowStoreMtimeMs(sibPath);
+        if (mtime > 0) {
+          siblings.push({ path: sibPath, mtime });
+        }
+      }
+      siblings.sort((a, b) => b.mtime - a.mtime);
+      for (const s of siblings) add(s.path);
+    } catch {
+      // ignore
+    }
+  }
+
+  return [...seen];
+}
+
+/**
+ * Resolves the workspace root for a tool call, combining explicit `rootDir` with
+ * target-path inference, relative file probing across active/sibling `.graphflow`
+ * workspaces, session stickiness, and the active-workspace lease.
+ */
+export function resolveSmartWorkspaceRoot(
+  args: Record<string, unknown> = {},
+  fallbackRootDir: string = process.cwd(),
+  opts: SmartWorkspaceResolveOptions = {}
+): ResolvedWorkspaceRoot {
+  const safeFallback = resolve(fallbackRootDir);
+  const rawRootDir = typeof args.rootDir === "string" ? args.rootDir : undefined;
+
+  // 1. Explicit valid rootDir always wins and updates session stickiness + lease.
+  if (isExplicitRootDirValid(rawRootDir)) {
+    const explicitRoot = resolveSafeWorkspaceRoot(rawRootDir, safeFallback);
+    setSessionStickyWorkspaceRoot(safeFallback, explicitRoot);
+    recordActiveWorkspace(explicitRoot);
+    return { rootDir: explicitRoot, source: "explicit" };
+  }
+
+  const fileHints = extractTargetFileHints(args);
+
+  // 2. Absolute file path in targets/file/edits/changedFiles outside fallbackRootDir.
+  for (const hint of fileHints) {
+    const normalized = hint.replace(/\\/g, "/");
+    if (isAbsolute(normalized)) {
+      const absPath = resolve(normalized);
+      if (isPathInside(absPath, safeFallback)) {
+        return { rootDir: safeFallback, source: "cwd" };
+      }
+      if (existsSync(absPath)) {
+        const inferred = findNearestProjectRoot(absPath);
+        setSessionStickyWorkspaceRoot(safeFallback, inferred);
+        recordActiveWorkspace(inferred);
+        return { rootDir: inferred, source: "target-abs" };
+      }
+    }
+  }
+
+  // 3. Relative file path probe: if none of the relative targets exist in safeFallback,
+  //    probe sticky root, active-workspace lease, and sibling `.graphflow` repositories.
+  const relHints = fileHints.filter((h) => {
+    const norm = h.replace(/\\/g, "/");
+    return !isAbsolute(norm) && !norm.startsWith("..");
+  });
+
+  if (relHints.length > 0) {
+    // Check session-sticky root first if one is active for this fallbackRootDir.
+    if (
+      sessionStickyRoot &&
+      sessionStickyRoot.fromDefaultRoot === safeFallback &&
+      isExistingDir(sessionStickyRoot.resolvedRoot) &&
+      relHints.some((h) => candidateHasRelativeFile(sessionStickyRoot!.resolvedRoot, h))
+    ) {
+      return { rootDir: sessionStickyRoot.resolvedRoot, source: "session-sticky" };
+    }
+
+    // If the file exists in safeFallback itself, keep safeFallback.
+    if (relHints.some((h) => candidateHasRelativeFile(safeFallback, h))) {
+      return {
+        rootDir: safeFallback,
+        source: process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim() ? "env" : "cwd",
+      };
+    }
+
+    // Otherwise probe candidate workspaces for a matching file.
+    for (const candidate of discoverCandidateWorkspaces(safeFallback)) {
+      if (relHints.some((h) => candidateHasRelativeFile(candidate, h))) {
+        setSessionStickyWorkspaceRoot(safeFallback, candidate);
+        recordActiveWorkspace(candidate);
+        return { rootDir: candidate, source: "target-probe" };
+      }
+    }
+  }
+
+  const allowLease =
+    Boolean(process.env.GRAPHFLOW_ACTIVE_WORKSPACE_FILE?.trim()) ||
+    !isPathInside(safeFallback, resolve(tmpdir()));
+
+  // 4. Active workspace lease (if newer than session sticky root) & session-sticky root.
+  if (opts.preferActiveLease && allowLease) {
+    const lease = readActiveWorkspaceLease();
+    if (
+      lease.rootDir &&
+      isExistingDir(lease.rootDir) &&
+      (!sessionStickyRoot ||
+        sessionStickyRoot.fromDefaultRoot !== safeFallback ||
+        (lease.updatedAt ?? 0) > sessionStickyRoot.updatedAt)
+    ) {
+      setSessionStickyWorkspaceRoot(safeFallback, lease.rootDir);
+      return { rootDir: lease.rootDir, source: "active-lease" };
+    }
+  }
+
+  if (
+    sessionStickyRoot &&
+    sessionStickyRoot.fromDefaultRoot === safeFallback &&
+    isExistingDir(sessionStickyRoot.resolvedRoot)
+  ) {
+    return { rootDir: sessionStickyRoot.resolvedRoot, source: "session-sticky" };
+  }
+
+  return {
+    rootDir: safeFallback,
+    source: process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim() ? "env" : "cwd",
+  };
 }
 
 /**

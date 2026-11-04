@@ -173,12 +173,12 @@ export async function executeToolCall(
   call: ToolCall
 ): Promise<ToolCallResponse & { structuredContent: Record<string, unknown> }> {
   const args = call.arguments ?? {};
-  const rootDir =
-    (typeof args.rootDir === "string" && args.rootDir.trim()) ||
-    process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim() ||
-    process.cwd();
+  const envRoot = process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim();
+  const fallbackRoot = envRoot || process.cwd();
 
-  const v3Res = executeV3ToolCall(call.name, args, rootDir);
+  const v3Res = executeV3ToolCall(call.name, args, fallbackRoot, {
+    preferActiveLease: !envRoot,
+  });
   const text = v3Res.content[0]?.text ?? "";
   const ok = !text.startsWith("ERR ") && !text.startsWith("FAIL ") && !text.startsWith("REJECTED ");
   return {

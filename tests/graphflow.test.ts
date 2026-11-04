@@ -34,8 +34,12 @@ import {
   segmentChinese,
   tokenizeEnglish,
   tokenizeBilingualQuery,
+  recordActiveWorkspace,
+  resetSessionStickyWorkspaceRoot,
+  resolveSmartWorkspaceRoot,
 } from "../src/index.js";
 import { getToolDefinitions, getV3ToolDefinitions } from "../src/mcp-server.js";
+import { installHostHook, removeHostHook } from "../src/agent-installer.js";
 
 function createSampleWorkspace(): string {
   const root = mkdtempSync(join(tmpdir(), "gf-v3-test-"));
@@ -1598,6 +1602,156 @@ async function runAllTests(): Promise<void> {
         );
       } finally {
         rmSync(d3Root, { recursive: true, force: true });
+      }
+    });
+
+    check("Smart Workspace Binding & Built-in gf_exec status: Sibling Probing, Session Stickiness, Active Lease & Status Receipt", () => {
+      const parentSandbox = mkdtempSync(join(tmpdir(), "gf-multi-ws-"));
+      const riceDir = join(parentSandbox, "Rice");
+      const networkDir = join(parentSandbox, "NetWork");
+      const leaseFile = join(parentSandbox, "active-workspace.json");
+      const prevLeaseEnv = process.env.GRAPHFLOW_ACTIVE_WORKSPACE_FILE;
+      process.env.GRAPHFLOW_ACTIVE_WORKSPACE_FILE = leaseFile;
+      resetSessionStickyWorkspaceRoot();
+
+      try {
+        mkdirSync(join(riceDir, ".graphflow"), { recursive: true });
+        writeFileSync(
+          join(riceDir, "rice_main.py"),
+          "def run_rice_pipeline():\n    return 'rice'\n",
+          "utf8"
+        );
+        registerCustomMacro(riceDir, {
+          id: "rice_only_macro",
+          kind: "context-bundle",
+          description: "Rice-specific bundle",
+          steps: ["rice_main.py#run_rice_pipeline"],
+        });
+
+        mkdirSync(join(networkDir, ".graphflow"), { recursive: true });
+        writeFileSync(
+          join(networkDir, "backend_app.py"),
+          [
+            "class FastAPI:",
+            "    def __init__(self):",
+            "        self.routes = []",
+            "",
+            "def create_network_app() -> FastAPI:",
+            "    return FastAPI()",
+          ].join("\n"),
+          "utf8"
+        );
+
+        // 1. Calling gf_read({ targets: ["backend_app.py"], skeleton: true }) WITHOUT rootDir when defaultRoot is Rice
+        //    automatically probes sibling .graphflow repo NetWork and locks session stickiness.
+        const skeletonRes = executeV3ToolCall(
+          "gf_read",
+          { targets: ["backend_app.py"], skeleton: true },
+          riceDir
+        );
+        assert.ok(
+          skeletonRes.content[0]!.text.includes("create_network_app"),
+          "gf_read without rootDir must probe sibling .graphflow workspace NetWork when file is absent in Rice"
+        );
+
+        // 2. Subsequent query call WITHOUT rootDir uses sticky session root (NetWork)
+        const queryRes = executeV3ToolCall("gf_read", { q: "FastAPI" }, riceDir);
+        assert.ok(
+          queryRes.content[0]!.text.includes("FastAPI"),
+          "Subsequent gf_read query without rootDir must stay bound to NetWork via session stickiness"
+        );
+
+        // 3. Subsequent macro list WITHOUT rootDir reads NetWork macros, not Rice macros
+        const macroRes = executeV3ToolCall("gf_macro", { action: "list" }, riceDir);
+        assert.ok(
+          !macroRes.content[0]!.text.includes("rice_only_macro"),
+          "gf_macro without rootDir must not leak Rice macros after binding to NetWork"
+        );
+
+        // 4. Query-only fallback even before session stickiness is set
+        resetSessionStickyWorkspaceRoot();
+        rmSync(leaseFile, { force: true });
+        const coldQueryRes = executeV3ToolCall("gf_read", { q: "create_network_app" }, riceDir);
+        assert.ok(
+          coldQueryRes.content[0]!.text.includes("create_network_app"),
+          "Cold gf_read query without rootDir must probe sibling .graphflow workspace when defaultRoot has 0 matches"
+        );
+
+        // 5. Absolute target path outside defaultRoot without rootDir infers enclosing project root
+        resetSessionStickyWorkspaceRoot();
+        const absTargetRes = executeV3ToolCall(
+          "gf_read",
+          { targets: [`${join(networkDir, "backend_app.py")}#create_network_app`] },
+          riceDir
+        );
+        assert.ok(
+          absTargetRes.content[0]!.text.includes("def create_network_app"),
+          "Absolute target path outside defaultRoot without rootDir must infer enclosing workspace root"
+        );
+
+        // 6. Active workspace lease resolution in MCP auto-root mode
+        resetSessionStickyWorkspaceRoot();
+        recordActiveWorkspace(networkDir);
+        const leaseResolved = resolveSmartWorkspaceRoot({}, riceDir, { preferActiveLease: true });
+        assert.equal(leaseResolved.rootDir, networkDir);
+        assert.equal(leaseResolved.source, "active-lease");
+
+        // 7. Built-in gf_exec({ cmd: "status" }) returns GraphFlow status receipt without shell execution
+        const statusRes = executeV3ToolCall("gf_exec", { cmd: "status" }, networkDir);
+        const statusText = statusRes.content[0]!.text;
+        assert.ok(
+          statusText.startsWith("PASS [graphflow-status]"),
+          `gf_exec({cmd:"status"}) must return PASS [graphflow-status], got:\n${statusText}`
+        );
+        assert.ok(statusText.includes(networkDir), "status output must report active rootDir");
+        assert.equal(statusRes.structuredContent?.ok, true);
+        assert.equal(statusRes.structuredContent?.exitCode, 0);
+
+        // 8. gf_exec inputSchema declares timeoutMs, and wire budget stays <460 tokens
+        const gfExecSchema = V3_TOOL_DEFINITIONS.find((t) => t.name === "gf_exec")!;
+        assert.ok("timeoutMs" in gfExecSchema.inputSchema.properties, "gf_exec schema must declare timeoutMs");
+        assert.ok(Math.ceil(Buffer.byteLength(JSON.stringify(V3_TOOL_DEFINITIONS), "utf8") / 4) < 460, "tools/list wire tax must stay <460 tokens");
+
+        // 9. installHostHook cleans up legacy v2 sessionStart/sessionEnd/stop graphflow-hooks entries & directory
+        const hookDir = join(parentSandbox, ".cursor");
+        const legacyScriptsDir = join(hookDir, "graphflow-hooks");
+        mkdirSync(legacyScriptsDir, { recursive: true });
+        writeFileSync(join(legacyScriptsDir, "session.sh"), "#!/bin/sh\ngraphflow outcome report\n", "utf8");
+        const hooksJsonPath = join(hookDir, "hooks.json");
+        writeFileSync(
+          hooksJsonPath,
+          JSON.stringify(
+            {
+              version: 1,
+              hooks: {
+                sessionStart: [{ command: "bash 'C:\\Users\\test\\.cursor\\graphflow-hooks\\session.sh' start", timeout: 30 }],
+                sessionEnd: [
+                  { command: "bash 'C:\\Users\\test\\.cursor\\graphflow-hooks\\session.sh' end", timeout: 30 },
+                  { command: "echo user-keep", timeout: 10 },
+                ],
+                stop: [{ command: "bash 'C:\\Users\\test\\.cursor\\graphflow-hooks\\session.sh' end", timeout: 30 }],
+              },
+            },
+            null,
+            2
+          ),
+          "utf8"
+        );
+        installHostHook("cursor", hooksJsonPath);
+        const updatedHooks = JSON.parse(readFileSync(hooksJsonPath, "utf8")) as { hooks: Record<string, unknown[]> };
+        assert.equal(updatedHooks.hooks.sessionStart, undefined, "legacy sessionStart hook must be removed");
+        assert.equal(updatedHooks.hooks.stop, undefined, "legacy stop hook must be removed");
+        assert.equal(updatedHooks.hooks.sessionEnd?.length, 1, "user hook in sessionEnd must be preserved");
+        assert.equal(existsSync(legacyScriptsDir), false, "legacy graphflow-hooks directory must be removed");
+        removeHostHook("cursor", hooksJsonPath);
+      } finally {
+        resetSessionStickyWorkspaceRoot();
+        if (prevLeaseEnv === undefined) {
+          delete process.env.GRAPHFLOW_ACTIVE_WORKSPACE_FILE;
+        } else {
+          process.env.GRAPHFLOW_ACTIVE_WORKSPACE_FILE = prevLeaseEnv;
+        }
+        rmSync(parentSandbox, { recursive: true, force: true });
       }
     });
 

@@ -21,6 +21,7 @@ import {
 import { DEFAULT_FLYWHEEL_TTL_DAYS, inspectFlywheel, pruneFlywheel } from "./flywheel.js";
 import { PACKAGE_VERSION } from "./version.js";
 import { executeV3ToolCall } from "./mcp-tools.js";
+import { recordActiveWorkspace } from "./slicer.js";
 import {
   TASK_PROMOTION_USES,
   appendInstructionLogEntry,
@@ -355,6 +356,7 @@ async function main(): Promise<void> {
   }
 
   if (cmd === "install" || cmd === "init") {
+    recordActiveWorkspace(rootDir);
     const includeWorkspace = rest.includes("--workspace") || rest.includes("--all");
     const agentsCsv = readFlag(rest, "--agents");
     const agentIds = agentsCsv
@@ -458,6 +460,7 @@ async function main(): Promise<void> {
   }
 
   if (cmd === "status" || cmd === "doctor") {
+    recordActiveWorkspace(rootDir);
     const agentsCsv = readFlag(rest, "--agents");
     const agentIds = agentsCsv
       ? agentsCsv
@@ -520,9 +523,16 @@ async function main(): Promise<void> {
       }
       return startDir;
     };
-    const hookRoot = resolveHookRoot(
-      typeof payload.cwd === "string" && payload.cwd ? payload.cwd : rootDir
-    );
+    const payloadWorkspaceRoot =
+      Array.isArray(payload.workspace_roots) &&
+      typeof payload.workspace_roots[0] === "string" &&
+      payload.workspace_roots[0].trim()
+        ? payload.workspace_roots[0].trim()
+        : typeof payload.cwd === "string" && payload.cwd.trim()
+          ? payload.cwd.trim()
+          : rootDir;
+    const hookRoot = resolveHookRoot(payloadWorkspaceRoot);
+    recordActiveWorkspace(hookRoot);
     if (sub === "pre-tool" || sub === "PreToolUse" || sub === "preToolUse") {
       const res = interceptPreToolUse(
         payload as unknown as Parameters<typeof interceptPreToolUse>[0],
