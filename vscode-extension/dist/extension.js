@@ -35,12 +35,101 @@ function syncActiveWorkspaceLease() {
   }
 }
 
+function resolveLocalGraphflowCli(cwd) {
+  const candidates = [];
+  const push = (p) => {
+    if (p && !candidates.includes(p) && fs.existsSync(p)) candidates.push(p);
+  };
+  if (cwd) {
+    push(path.join(cwd, "dist", "cli.js"));
+    push(path.join(cwd, "node_modules", "@roarpeng", "graphflow", "dist", "cli.js"));
+  }
+  if (process.platform === "win32" && process.env.APPDATA) {
+    push(path.join(process.env.APPDATA, "npm", "node_modules", "@roarpeng", "graphflow", "dist", "cli.js"));
+  } else {
+    push("/usr/local/lib/node_modules/@roarpeng/graphflow/dist/cli.js");
+    push(path.join(os.homedir(), ".npm-global", "lib", "node_modules", "@roarpeng", "graphflow", "dist", "cli.js"));
+  }
+  const pathEnv = process.env.PATH || "";
+  const sep = process.platform === "win32" ? ";" : ":";
+  for (const dir of pathEnv.split(sep)) {
+    if (!dir) continue;
+    push(path.join(dir, "node_modules", "@roarpeng", "graphflow", "dist", "cli.js"));
+    push(path.join(dir, "..", "lib", "node_modules", "@roarpeng", "graphflow", "dist", "cli.js"));
+  }
+  return candidates[0];
+}
+
+function resolveNodeExecutable() {
+  const sep = process.platform === "win32" ? ";" : ":";
+  const exe = process.platform === "win32" ? "node.exe" : "node";
+  for (const dir of (process.env.PATH || "").split(sep)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, exe);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return exe;
+}
+
+function resolveNpxCliJs() {
+  const candidates = [];
+  const push = (p) => {
+    if (p && !candidates.includes(p) && fs.existsSync(p)) candidates.push(p);
+  };
+  const sep = process.platform === "win32" ? ";" : ":";
+  for (const dir of (process.env.PATH || "").split(sep)) {
+    if (!dir) continue;
+    push(path.join(dir, "node_modules", "npm", "bin", "npx-cli.js"));
+    push(path.join(dir, "..", "lib", "node_modules", "npm", "bin", "npx-cli.js"));
+  }
+  return candidates[0];
+}
+
 function runGraphflowCli(args, cwd) {
+  const workDir = cwd || process.cwd();
+  const nodeBin = resolveNodeExecutable();
+  const localCli = resolveLocalGraphflowCli(workDir);
+  if (localCli) {
+    return new Promise((resolve) => {
+      execFile(
+        nodeBin,
+        [localCli, ...args],
+        { cwd: workDir, timeout: 30000, windowsHide: true },
+        (err, stdout, stderr) => {
+          resolve({
+            ok: !err,
+            output: (stdout || stderr || (err ? err.message : "")).trim(),
+          });
+        }
+      );
+    });
+  }
+  const npxCliJs = resolveNpxCliJs();
+  if (npxCliJs) {
+    return new Promise((resolve) => {
+      execFile(
+        nodeBin,
+        [npxCliJs, "-y", "--package=@roarpeng/graphflow", "graphflow", ...args],
+        { cwd: workDir, timeout: 60000, windowsHide: true },
+        (err, stdout, stderr) => {
+          resolve({
+            ok: !err,
+            output: (stdout || stderr || (err ? err.message : "")).trim(),
+          });
+        }
+      );
+    });
+  }
   return new Promise((resolve) => {
     execFile(
       process.platform === "win32" ? "npx.cmd" : "npx",
       ["-y", "--package=@roarpeng/graphflow", "graphflow", ...args],
-      { cwd: cwd || process.cwd(), timeout: 30000 },
+      {
+        cwd: workDir,
+        timeout: 60000,
+        shell: process.platform === "win32",
+        windowsHide: true,
+      },
       (err, stdout, stderr) => {
         resolve({
           ok: !err,

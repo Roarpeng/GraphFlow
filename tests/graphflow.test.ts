@@ -1744,6 +1744,12 @@ async function runAllTests(): Promise<void> {
         assert.equal(updatedHooks.hooks.sessionEnd?.length, 1, "user hook in sessionEnd must be preserved");
         assert.equal(existsSync(legacyScriptsDir), false, "legacy graphflow-hooks directory must be removed");
         removeHostHook("cursor", hooksJsonPath);
+
+        // 10. VS Code extension runGraphflowCli avoids Windows CVE-2024-27980 `spawn EINVAL` on .cmd shims
+        const extSource = readFileSync(join(process.cwd(), "vscode-extension", "dist", "extension.js"), "utf8");
+        assert.ok(extSource.includes("resolveLocalGraphflowCli"), "extension must resolve local/global cli.js directly");
+        assert.ok(extSource.includes("resolveNpxCliJs"), "extension must resolve npx-cli.js directly before .cmd fallback");
+        assert.ok(extSource.includes("shell: process.platform === \"win32\""), "extension .cmd fallback must enable shell on win32");
       } finally {
         resetSessionStickyWorkspaceRoot();
         if (prevLeaseEnv === undefined) {

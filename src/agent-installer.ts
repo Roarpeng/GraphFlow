@@ -702,17 +702,38 @@ export function detectInstalledAgents(
  */
 function candidateGlobalRoots(): string[] {
   const roots: string[] = [];
-  // On Windows `execFileSync("npm", …)` fails outright: npm ships as npm.cmd /
-  // npm.ps1 and there is no npm.exe to exec. Trying the .cmd first is what makes
-  // the two npm-derived candidates actually run there; without it every machine
-  // silently fell through to the platform default.
-  const npmCommands = process.platform === "win32" ? ["npm.cmd", "npm"] : ["npm"];
+  // Probe npm-cli.js via node directly (shell-free; avoids CVE-2024-27980
+  // `spawn EINVAL` when spawning `npm.cmd` without a shell on Windows Node 18.20+/20.12+/22+).
+  const npmCliCandidates = [
+    join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"),
+    join(dirname(process.execPath), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+  ];
   const run = (args: string[]) => {
+    for (const npmCli of npmCliCandidates) {
+      if (!existsSync(npmCli)) continue;
+      try {
+        const out = execFileSync(process.execPath, [npmCli, ...args], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+          windowsHide: true,
+        })
+          .trim()
+          .split(/\r?\n/)
+          .pop()
+          ?.trim();
+        if (out) return out;
+      } catch {
+        // try fallback
+      }
+    }
+    const npmCommands = process.platform === "win32" ? ["npm.cmd", "npm"] : ["npm"];
     for (const command of npmCommands) {
       try {
         const out = execFileSync(command, args, {
           encoding: "utf8",
           stdio: ["ignore", "pipe", "ignore"],
+          shell: process.platform === "win32",
+          windowsHide: true,
         })
           .trim()
           .split(/\r?\n/)
