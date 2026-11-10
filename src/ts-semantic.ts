@@ -237,6 +237,8 @@ function discoverSourceFiles(rootDir: string): string[] {
     } catch {
       return;
     }
+    // Nested worktree / submodule / vendored repo: another branch or project, never ours.
+    if (depth > 0 && entries.some((entry) => String(entry.name) === ".git")) return;
     const names = entries
       .map((entry) => ({ name: String(entry.name), directory: entry.isDirectory(), file: entry.isFile() }))
       .sort((a, b) => a.name.localeCompare(b.name));

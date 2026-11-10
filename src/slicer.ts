@@ -25,6 +25,7 @@ import {
   parseProjectDocument,
 } from "./doc-graph.js";
 import { ensureGraphflowDir } from "./graphflow-dir.js";
+import { branchScopeKey, isSameRepositoryWorktree } from "./branch-scope.js";
 import {
   CHINESE_TYPO_NORMALIZATION,
   CJK_ENGINEERING_GLOSSARY,
@@ -402,6 +403,9 @@ export function discoverCandidateWorkspaces(fallbackRootDir: string): string[] {
         if (!entry.isDirectory()) continue;
         const sibPath = resolve(parentDir, entry.name);
         if (sibPath === base) continue;
+        // Another worktree of the *same* repository is this project on another branch, not
+        // a different project: answering from it would mix branches.
+        if (isSameRepositoryWorktree(base, sibPath)) continue;
         const mtime = graphflowStoreMtimeMs(sibPath);
         if (mtime > 0) {
           siblings.push({ path: sibPath, mtime });
@@ -662,10 +666,22 @@ class WorkspaceAstIndex {
   /** Set to `false` once a write fails (read-only workspace), disabling further writes. */
   private astDiskWritable: boolean | undefined = undefined;
   private astPruned = false;
+  private lastBranchKey: string | undefined = undefined;
 
-  constructor(public readonly rootDir: string) {}
+  constructor(public readonly rootDir: string) {
+    this.lastBranchKey = branchScopeKey(this.rootDir);
+  }
+
+  private checkBranchSwitch(): void {
+    const current = branchScopeKey(this.rootDir);
+    if (this.lastBranchKey !== undefined && this.lastBranchKey !== current) {
+      this.resetForBranchSwitch();
+    }
+    this.lastBranchKey = current;
+  }
 
   getFiles(forceRescan = false): string[] {
+    this.checkBranchSwitch();
     const now = Date.now();
     if (!forceRescan && this.scannedFiles.length > 0 && now - this.lastScanMs < 5_000) {
       return this.scannedFiles;
@@ -684,6 +700,10 @@ class WorkspaceAstIndex {
       } catch {
         return;
       }
+      // A nested `.git` (file or dir) marks another worktree, a submodule or a vendored
+      // repository — e.g. `worktrees/feature-x` created inside this checkout. Its files
+      // belong to a different branch/project and must never leak into this graph.
+      if (depth > 0 && entries.some((e) => e.name === ".git")) return;
       for (const entry of entries) {
         if (out.length >= cap) break;
         if (entry.name.startsWith(".") && entry.name !== ".trae") continue;
@@ -710,6 +730,7 @@ class WorkspaceAstIndex {
   }
 
   getRawFile(relPath: string): { content: string; size: number; mtimeMs: number } | undefined {
+    this.checkBranchSwitch();
     const normalized = normalizeWorkspaceRelPath(this.rootDir, relPath);
     if (!normalized) return undefined;
     const now = Date.now();
@@ -745,6 +766,7 @@ class WorkspaceAstIndex {
    * O(files). A warm `rawCache` entry answers without touching the disk at all.
    */
   getFileState(relPath: string): { mtimeMs: number; size: number } | undefined {
+    this.checkBranchSwitch();
     const now = Date.now();
     // Hot loop is `for (file of getFiles())`: those keys are already workspace-relative
     // and normalized, so the cache can answer before any path normalization runs. Doing
@@ -780,6 +802,7 @@ class WorkspaceAstIndex {
   }
 
   getFileAnalysis(relPath: string): { content: string; ast: FileAstAnalysis; size: number } | undefined {
+    this.checkBranchSwitch();
     const normalized = normalizeWorkspaceRelPath(this.rootDir, relPath);
     if (!normalized) return undefined;
     const raw = this.getRawFile(normalized);
@@ -807,7 +830,7 @@ class WorkspaceAstIndex {
   /** Reads a persisted shard, returning `undefined` on miss or any invalidation. */
   private readAstShard(
     relPath: string,
-    mtimeMs: number,
+    _mtimeMs: number,
     size: number,
     contentHash: string
   ): FileAstAnalysis | undefined {
@@ -823,7 +846,10 @@ class WorkspaceAstIndex {
       if (rec.version !== AST_DISK_CACHE_VERSION) return undefined;
       if (rec.sig !== astBackendSignature()) return undefined;
       if (rec.relPath !== relPath) return undefined;
-      if (rec.mtimeMs !== mtimeMs || rec.size !== size) return undefined;
+      // mtime is deliberately not compared: `git checkout` rewrites a file's mtime even when
+      // switching back restores identical bytes. size + content hash decide validity, so
+      // this shared (not branch-scoped) cache stays warm across branch switches.
+      if (rec.size !== size) return undefined;
       if (rec.contentHash !== contentHash) return undefined;
       if (!rec.ast || !Array.isArray(rec.ast.symbols)) return undefined;
       return rec.ast as FileAstAnalysis;
@@ -918,6 +944,18 @@ class WorkspaceAstIndex {
     }
   }
 
+  /**
+   * `git checkout` rewrote an arbitrary set of files in one go. Drop every throttled view of
+   * the file system (file list, raw text, stat fingerprints) so the next query re-reads the
+   * new branch immediately instead of serving the old one for up to 5 s. Parsed ASTs stay:
+   * they are re-validated against the fresh fingerprints, and identical files keep theirs.
+   */
+  resetForBranchSwitch(): void {
+    this.rawCache.clear();
+    this.stateCache.clear();
+    this.lastScanMs = 0;
+  }
+
   invalidateFile(relPath: string): void {
     const normalized = normalizeWorkspaceRelPath(this.rootDir, relPath) ?? relPath.replace(/\\/g, "/").replace(/^\.\//, "");
     this.rawCache.delete(normalized);
@@ -931,6 +969,8 @@ class WorkspaceAstIndex {
 }
 
 const indexByRoot = new Map<string, WorkspaceAstIndex>();
+/** Last git branch scope observed per index, to detect `git checkout` between calls. */
+const branchKeyByIndex = new WeakMap<WorkspaceAstIndex, string>();
 const liveAstIndices = new Set<WorkspaceAstIndex>();
 let astExitFlushInstalled = false;
 
@@ -968,6 +1008,10 @@ export function getWorkspaceAstIndex(rootDir: string): WorkspaceAstIndex {
     liveAstIndices.add(idx);
     installAstExitFlush();
   }
+  const branchKey = branchScopeKey(safeRoot);
+  const previous = branchKeyByIndex.get(idx);
+  if (previous !== undefined && previous !== branchKey) idx.resetForBranchSwitch();
+  branchKeyByIndex.set(idx, branchKey);
   return idx;
 }
 

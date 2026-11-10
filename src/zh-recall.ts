@@ -16,6 +16,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { graphCachePath } from "./branch-scope.js";
 import { CURATED_ZH_EN } from "./zh-lexicon.js";
 import {
   CJK_ENGINEERING_GLOSSARY,
@@ -385,7 +386,7 @@ export function getZhRecallBundle(rootDir: string, files: readonly ZhRecallSourc
   const fingerprint = fingerprintOf(files, head, subjects);
   const cached = memoryCache.get(rootDir);
   if (cached && cached.fingerprint === fingerprint) return cached.bundle;
-  const cachePath = join(rootDir, ".graphflow", "zh-identifier-map.json");
+  const cachePath = graphCachePath(rootDir, "zh-identifier-map.json");
   const fromDisk = readCache(cachePath, fingerprint);
   if (fromDisk) {
     memoryCache.set(rootDir, { fingerprint, bundle: fromDisk });

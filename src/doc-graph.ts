@@ -36,6 +36,7 @@ import {
 } from "./ast-engine.js";
 import { loadMacroStore } from "./macro-engine.js";
 import { ensureGraphflowDir } from "./graphflow-dir.js";
+import { graphCachePath } from "./branch-scope.js";
 import { getSemanticIndex, SEMANTIC_CONFIDENCE_MIN } from "./semantic-index.js";
 import type { getWorkspaceAstIndex } from "./slicer.js";
 import { segmentChinese, toPinyin, tokenizeEnglish } from "./tokenizer.js";
@@ -418,6 +419,8 @@ function listWorkspaceDocumentPaths(rootDir: string, maxDocs = 200): string[] {
     } catch {
       return;
     }
+    // Nested worktree / submodule / vendored repo: another branch or project, never ours.
+    if (depth > 0 && entries.some((e) => e.name === ".git")) return;
     for (const entry of entries) {
       if (paths.length >= maxDocs) break;
       if (entry.name.startsWith(".")) continue;
@@ -453,7 +456,7 @@ function listWorkspaceDocumentPaths(rootDir: string, maxDocs = 200): string[] {
  * invalidated by a fingerprint over every document's path/size/mtime.
  */
 const DOC_SECTION_CACHE_VERSION = 1;
-const DOC_SECTION_CACHE_REL = ".graphflow/doc-links/sections.json";
+const DOC_SECTION_CACHE_REL = "doc-links/sections.json";
 
 interface DocSectionCacheFile {
   version: number;
@@ -473,7 +476,7 @@ function computeDocSectionFingerprint(rootDir: string, maxDocs: number): string 
 function readDocSectionCache(rootDir: string, fingerprint: string): DocSection[] | undefined {
   try {
     const parsed = JSON.parse(
-      readFileSync(join(rootDir, ...DOC_SECTION_CACHE_REL.split("/")), "utf8")
+      readFileSync(graphCachePath(rootDir, ...DOC_SECTION_CACHE_REL.split("/")), "utf8")
     ) as DocSectionCacheFile;
     if (parsed?.version !== DOC_SECTION_CACHE_VERSION) return undefined;
     if (parsed.fingerprint !== fingerprint) return undefined;
@@ -491,7 +494,7 @@ function writeDocSectionCache(
 ): void {
   try {
     ensureGraphflowDir(rootDir);
-    const path = join(rootDir, ...DOC_SECTION_CACHE_REL.split("/"));
+    const path = graphCachePath(rootDir, ...DOC_SECTION_CACHE_REL.split("/"));
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(
       path,
@@ -678,12 +681,12 @@ interface ConceptStore {
 }
 
 const CONCEPT_STORE_VERSION = 1;
-const CONCEPT_STORE_REL = ".graphflow/doc-links/concepts.json";
+const CONCEPT_STORE_REL = "doc-links/concepts.json";
 
 function readConceptStore(rootDir: string): ConceptStore | undefined {
   try {
     const parsed = JSON.parse(
-      readFileSync(join(rootDir, ...CONCEPT_STORE_REL.split("/")), "utf8")
+      readFileSync(graphCachePath(rootDir, ...CONCEPT_STORE_REL.split("/")), "utf8")
     ) as ConceptStore;
     if (parsed?.version !== CONCEPT_STORE_VERSION) return undefined;
     if (typeof parsed.files !== "object" || parsed.files === null) return undefined;
@@ -696,7 +699,7 @@ function readConceptStore(rootDir: string): ConceptStore | undefined {
 function writeConceptStore(rootDir: string, store: ConceptStore): void {
   try {
     ensureGraphflowDir(rootDir);
-    const path = join(rootDir, ...CONCEPT_STORE_REL.split("/"));
+    const path = graphCachePath(rootDir, ...CONCEPT_STORE_REL.split("/"));
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify(store), "utf8");
   } catch {
@@ -980,7 +983,7 @@ export function recordDocLinkFeedback(rootDir: string, patch: DocLinkFeedback): 
  * invalidates it without any bookkeeping. `GRAPHFLOW_DOC_LINK_CACHE=0` disables it.
  */
 const DOC_LINK_CACHE_VERSION = 1;
-const DOC_LINK_CACHE_DIR_REL = ".graphflow/doc-links";
+const DOC_LINK_CACHE_DIR_REL = "doc-links";
 /** Version of the per-file symbol retrieval shard; bump when `buildSymbolRetrievalData` changes. */
 const SYMBOL_DATA_CACHE_VERSION = 1;
 
@@ -989,7 +992,7 @@ function docLinkCacheEnabled(): boolean {
 }
 
 function docLinkCachePath(rootDir: string, key: string): string {
-  return join(rootDir, DOC_LINK_CACHE_DIR_REL, `${createHash("sha1").update(key).digest("hex")}.json`);
+  return graphCachePath(rootDir, DOC_LINK_CACHE_DIR_REL, `${createHash("sha1").update(key).digest("hex")}.json`);
 }
 
 function computeDocLinkFingerprint(
@@ -1034,7 +1037,7 @@ function readDocLinkCache(rootDir: string, key: string): DocCodeLink[] | undefin
 function writeDocLinkCache(rootDir: string, key: string, links: readonly DocCodeLink[]): void {
   try {
     ensureGraphflowDir(rootDir);
-    const dir = join(rootDir, DOC_LINK_CACHE_DIR_REL);
+    const dir = graphCachePath(rootDir, DOC_LINK_CACHE_DIR_REL);
     mkdirSync(dir, { recursive: true });
     const target = docLinkCachePath(rootDir, key);
     const tmp = join(dir, `.tmp-${process.pid}-${Date.now().toString(36)}.json`);
@@ -1071,12 +1074,12 @@ interface SymbolDataStore {
   files: Record<string, SymbolDataStoreRecord>;
 }
 
-const SYMBOL_DATA_STORE_REL = ".graphflow/doc-links/symbols.json";
+const SYMBOL_DATA_STORE_REL = "doc-links/symbols.json";
 
 function readSymbolDataStore(rootDir: string): SymbolDataStore | undefined {
   try {
     const parsed = JSON.parse(
-      readFileSync(join(rootDir, ...SYMBOL_DATA_STORE_REL.split("/")), "utf8")
+      readFileSync(graphCachePath(rootDir, ...SYMBOL_DATA_STORE_REL.split("/")), "utf8")
     ) as SymbolDataStore;
     if (parsed?.version !== SYMBOL_DATA_CACHE_VERSION) return undefined;
     if (typeof parsed.files !== "object" || parsed.files === null) return undefined;
@@ -1089,7 +1092,7 @@ function readSymbolDataStore(rootDir: string): SymbolDataStore | undefined {
 function writeSymbolDataStore(rootDir: string, store: SymbolDataStore): void {
   try {
     ensureGraphflowDir(rootDir);
-    const path = join(rootDir, ...SYMBOL_DATA_STORE_REL.split("/"));
+    const path = graphCachePath(rootDir, ...SYMBOL_DATA_STORE_REL.split("/"));
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify(store), "utf8");
   } catch {
@@ -2282,7 +2285,7 @@ function resolveAliasImportToFile(
 // ============================================================================
 
 const GRAPH_SHARD_VERSION = 1;
-const GRAPH_SHARD_REL = ".graphflow/graph-shards.json";
+const GRAPH_SHARD_REL = "graph-shards.json";
 
 /**
  * Everything one file contributes, plus the metadata the next rebuild needs to decide whether
@@ -2736,7 +2739,7 @@ function kgFileFingerprint(rootDir: string, relFile: string): string {
 function readKgShardManifest(rootDir: string): KgShardManifest | undefined {
   try {
     const raw = JSON.parse(
-      readFileSync(join(rootDir, ...GRAPH_SHARD_REL.split("/")), "utf8")
+      readFileSync(graphCachePath(rootDir, ...GRAPH_SHARD_REL.split("/")), "utf8")
     ) as KgShardManifest;
     if (raw?.version !== GRAPH_SHARD_VERSION) return undefined;
     if (typeof raw.files !== "object" || raw.files === null) return undefined;
@@ -2749,7 +2752,7 @@ function readKgShardManifest(rootDir: string): KgShardManifest | undefined {
 
 function writeKgShardManifest(rootDir: string, manifest: KgShardManifest): void {
   try {
-    const path = join(rootDir, ...GRAPH_SHARD_REL.split("/"));
+    const path = graphCachePath(rootDir, ...GRAPH_SHARD_REL.split("/"));
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify(manifest), "utf8");
   } catch {

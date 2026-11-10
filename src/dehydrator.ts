@@ -893,6 +893,8 @@ function collectExtraRoutingFiles(rootDir: string): string[] {
     } catch {
       return;
     }
+    // Nested worktree / submodule / vendored repo: another branch or project, never ours.
+    if (depth > 0 && entries.some((e) => e.name === ".git")) return;
     for (const entry of entries) {
       if (out.length >= ROUTING_EXTRA_MAX_FILES) break;
       if (entry.name.startsWith(".") && entry.name !== ".trae") continue;

@@ -24,7 +24,9 @@
 
 import { createRequire } from "node:module";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";import {
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { branchScopeKey, graphCachePath } from "./branch-scope.js";
+import {
   createWorkspaceTypeHierarchy,
   inImplicitPackageScope,
   inferReceiverTypeIndex,
@@ -206,13 +208,15 @@ interface SemanticFileEntry {
 // lets a process start from the previous process's entries and re-stat only what moved.
 // Maps are flattened to pairs because JSON has no Map; every other field is already plain.
 
-const SEMANTIC_STORE_REL = join(".graphflow", "semantic-index.json");
+// Both stores live in the branch-scoped cache dir (`.graphflow/branches/<key>/` inside a git
+// repository, `.graphflow/` otherwise), see `branch-scope.ts`.
+const SEMANTIC_STORE_REL = "semantic-index.json";
 /**
  * Append-only overlay beside the base store. Editing one file used to rewrite the whole
  * 24 MB base even though a single entry changed; now only the touched entries are written
  * here, and the base is rewritten (compacted) once the overlay grows past 15% of it.
  */
-const SEMANTIC_DELTA_REL = join(".graphflow", "semantic-index-delta.json");
+const SEMANTIC_DELTA_REL = "semantic-index-delta.json";
 const SEMANTIC_STORE_VERSION = 3;
 
 interface SerializedReceiverIndex {
@@ -465,6 +469,8 @@ function semanticFreshWindowMs(): number {
 
 class SemanticIndexImpl implements SemanticIndex {
   readonly rootDir: string;
+  private readonly storeFile: string;
+  private readonly deltaFile: string;
   private readonly workspace: SemanticWorkspaceSource;
   private entries = new Map<string, SemanticFileEntry>();
   private declsByName = new Map<string, SemanticSymbolDecl[]>();
@@ -487,6 +493,11 @@ class SemanticIndexImpl implements SemanticIndex {
 
   constructor(rootDir: string) {
     this.rootDir = rootDir;
+    // Pinned for this instance's lifetime: the base and its delta overlay must always be
+    // read and written as a pair from the same branch, even if HEAD moves meanwhile
+    // (`getSemanticIndex` hands out a separate instance per branch).
+    this.storeFile = graphCachePath(rootDir, SEMANTIC_STORE_REL);
+    this.deltaFile = graphCachePath(rootDir, SEMANTIC_DELTA_REL);
     this.workspace = loadWorkspaceIndex(rootDir);
     // Seed from the previous process's entries, then let `ensureFresh` re-stat every
     // file: unchanged files cost one stat, changed files are rebuilt as usual.
@@ -508,7 +519,7 @@ class SemanticIndexImpl implements SemanticIndex {
   }
 
   private storePath(): string {
-    return join(this.rootDir, SEMANTIC_STORE_REL);
+    return this.storeFile;
   }
 
   /**
@@ -527,7 +538,7 @@ class SemanticIndexImpl implements SemanticIndex {
   }
 
   private deltaPath(): string {
-    return join(this.rootDir, SEMANTIC_DELTA_REL);
+    return this.deltaFile;
   }
 
   /** Best-effort: a missing, unreadable or stale store is simply an empty index. */
@@ -1610,12 +1621,17 @@ class SemanticIndexImpl implements SemanticIndex {
 
 const indexByRoot = new Map<string, SemanticIndexImpl>();
 
-/** Returns the cached semantic index for a workspace root (builds it on first use). */
+/**
+ * Returns the cached semantic index for a workspace root (builds it on first use).
+ * Keyed by root *and* git branch: after `git checkout` the other branch's instance is
+ * kept warm in memory and reused when switching back.
+ */
 export function getSemanticIndex(rootDir: string): SemanticIndex {
-  const key = resolve(rootDir);
+  const root = resolve(rootDir);
+  const key = `${root}\u0000${branchScopeKey(root)}`;
   let index = indexByRoot.get(key);
   if (!index) {
-    index = new SemanticIndexImpl(key);
+    index = new SemanticIndexImpl(root);
     indexByRoot.set(key, index);
   }
   return index;
@@ -1627,7 +1643,10 @@ export function clearSemanticIndexCache(rootDir?: string): void {
     indexByRoot.clear();
     return;
   }
-  indexByRoot.delete(resolve(rootDir));
+  const prefix = `${resolve(rootDir)}\u0000`;
+  for (const key of [...indexByRoot.keys()]) {
+    if (key.startsWith(prefix)) indexByRoot.delete(key);
+  }
 }
 
 /** Exposed for diagnostics/tests: resolve a type expression to a base receiver type. */

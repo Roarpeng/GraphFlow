@@ -28,6 +28,7 @@ import {
   type MacroKind,
 } from "./macro-engine.js";
 import { getAgentRegistrationStatus } from "./agent-installer.js";
+import { describeBranchScope } from "./branch-scope.js";
 import {
   generateCrossAgentBrief,
   generateKnowledgeGraphHtml,
@@ -373,6 +374,7 @@ export function executeV3ToolCall(
         const statusText = [
           `PASS [graphflow-status] v${PACKAGE_VERSION} | rootDir: ${rootDir} (source: ${resolvedRoot.source})`,
           `Index: ${files.length} source file(s), ${symbolCount} symbol(s) | .graphflow: ${hasGraphflowDir ? "present" : "missing"} | macros: ${macros.length}, coEdits: ${habits.coEdits.length}`,
+          `Graph scope: ${describeBranchScope(rootDir)}`,
           `Detected agents (${statuses.length}):`,
           ...(agentLines.length > 0 ? agentLines : ["  (no known coding agent directories detected)"]),
         ].join("\n");

@@ -15,10 +15,12 @@
  */
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
+import { branchScopeKey, graphCachePath } from "./branch-scope.js";
 import type { getWorkspaceAstIndex } from "./slicer.js";
 
-const NAME_INDEX_REL = join(".graphflow", "name-index.json");
+/** Lives in the branch-scoped cache dir (see `branch-scope.ts`). */
+const NAME_INDEX_REL = "name-index.json";
 const NAME_INDEX_VERSION = 2;
 
 type Index = ReturnType<typeof getWorkspaceAstIndex>;
@@ -39,12 +41,12 @@ export interface WorkspaceNameIndex {
 const cacheByRoot = new Map<string, WorkspaceNameIndex>();
 
 function indexPath(rootDir: string): string {
-  return join(rootDir, NAME_INDEX_REL);
+  return graphCachePath(rootDir, NAME_INDEX_REL);
 }
 
-function readStore(rootDir: string): NameIndexFile | undefined {
+function readStore(path: string): NameIndexFile | undefined {
   try {
-    const parsed = JSON.parse(readFileSync(indexPath(rootDir), "utf8")) as NameIndexFile;
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as NameIndexFile;
     if (parsed?.version !== NAME_INDEX_VERSION) return undefined;
     if (typeof parsed.files !== "object" || parsed.files === null) return undefined;
     return parsed;
@@ -53,8 +55,7 @@ function readStore(rootDir: string): NameIndexFile | undefined {
   }
 }
 
-function writeStore(rootDir: string, store: NameIndexFile): void {
-  const path = indexPath(rootDir);
+function writeStore(path: string, store: NameIndexFile): void {
   try {
     mkdirSync(dirname(path), { recursive: true });
     const tmp = `${path}.${process.pid}.tmp`;
@@ -93,10 +94,13 @@ export function getWorkspaceNameIndex(rootDir: string, index: Index): WorkspaceN
   if (process.env.GRAPHFLOW_NAME_INDEX === "0") {
     return { mentions: () => undefined, mentionsAny: () => undefined };
   }
-  const cached = cacheByRoot.get(rootDir);
+  // Per root *and* branch: each branch keeps its own identifier sets (and store file).
+  const cacheKey = `${rootDir}\u0000${branchScopeKey(rootDir)}`;
+  const cached = cacheByRoot.get(cacheKey);
   if (cached) return cached;
 
-  const store: NameIndexFile = readStore(rootDir) ?? { version: NAME_INDEX_VERSION, files: {} };
+  const storePath = indexPath(rootDir);
+  const store: NameIndexFile = readStore(storePath) ?? { version: NAME_INDEX_VERSION, files: {} };
   const files = index.getFiles();
   const known = new Map<string, Set<string> | null>();
   let changed = false;
@@ -131,7 +135,7 @@ export function getWorkspaceNameIndex(rootDir: string, index: Index): WorkspaceN
       changed = true;
     }
   }
-  if (changed) writeStore(rootDir, store);
+  if (changed) writeStore(storePath, store);
 
   /**
    * Re-reads one file's identifier set when its fingerprint moved. Editing a file makes the
@@ -176,12 +180,18 @@ export function getWorkspaceNameIndex(rootDir: string, index: Index): WorkspaceN
       return names.some((name) => set.has(name));
     },
   };
-  cacheByRoot.set(rootDir, result);
+  cacheByRoot.set(cacheKey, result);
   return result;
 }
 
 /** Drops the cached index (tests, or after a bulk workspace change). */
 export function clearWorkspaceNameIndex(rootDir?: string): void {
-  if (rootDir === undefined) cacheByRoot.clear();
-  else cacheByRoot.delete(rootDir);
+  if (rootDir === undefined) {
+    cacheByRoot.clear();
+    return;
+  }
+  const prefix = `${rootDir}\u0000`;
+  for (const key of [...cacheByRoot.keys()]) {
+    if (key.startsWith(prefix)) cacheByRoot.delete(key);
+  }
 }

@@ -19,3 +19,5 @@ benchmarks/
 graphflow.config.json
 *.tgz
 *.vsix
+*.zip
+.mimosa/
