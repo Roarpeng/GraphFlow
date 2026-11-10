@@ -19,12 +19,10 @@ examples_zh:
   - "精准切片并计算函数的调用爆炸半径"
   - "零 LLM 跨文件安全重命名方法并检查歧义"
   - "运行变更代码受影响的单元测试并脱水显示关键结果"
-  - "查看项目知识图谱与当前工作区状态"
 examples_en:
   - "Slice symbol AST and calculate blast radius"
   - "Safely rename method across repository with AST guard"
   - "Run affected tests with dehydrated output"
-  - "Check project knowledge graph and workspace status"
 ---
 
 # GraphFlow — Token-First Surgical Engine (外科手术级省 Token 引擎)
