@@ -29,6 +29,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -43,7 +44,6 @@ export const BRANCH_SCOPED_ENTRIES: readonly string[] = [
   "name-index.json",
   "graph-shards.json",
   "doc-links",
-  "zh-identifier-map.json",
 ];
 
 const GRAPHFLOW_DIR = ".graphflow";
@@ -91,16 +91,36 @@ export function resolveGitLocation(rootDir: string): GitLocation | undefined {
   } catch {
     return undefined;
   }
-  if (st.isDirectory()) return { gitDir: dotGit, commonDir: dotGit };
+  if (st.isDirectory()) {
+    let commonDir = dotGit;
+    try {
+      commonDir = realpathSync(dotGit);
+    } catch {
+      commonDir = resolve(dotGit);
+    }
+    return { gitDir: commonDir, commonDir };
+  }
   if (!st.isFile()) return undefined;
   try {
     const match = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dotGit, "utf8"));
     if (!match) return undefined;
-    const gitDir = resolve(rootDir, match[1]!);
+    let gitDir = resolve(rootDir, match[1]!);
+    try {
+      gitDir = realpathSync(gitDir);
+    } catch {
+      // ignore
+    }
     let commonDir = gitDir;
     try {
       const common = readFileSync(join(gitDir, "commondir"), "utf8").trim();
-      if (common) commonDir = resolve(gitDir, common);
+      if (common) {
+        commonDir = resolve(gitDir, common);
+        try {
+          commonDir = realpathSync(commonDir);
+        } catch {
+          // ignore
+        }
+      }
     } catch {
       // Submodules have no `commondir`: the git dir is the repository.
     }
@@ -124,7 +144,12 @@ function findGitLocationUpwards(startDir: string): GitLocation | undefined {
 }
 
 function normalizeFsPath(p: string): string {
-  const resolved = resolve(p);
+  let resolved: string;
+  try {
+    resolved = realpathSync(p);
+  } catch {
+    resolved = resolve(p);
+  }
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 

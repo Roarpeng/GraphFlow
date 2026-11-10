@@ -191,7 +191,8 @@ check("5. isSameRepositoryWorktree detects separate worktrees of same git reposi
     const locWt = resolveGitLocation(wtDir);
     assert.ok(locMain);
     assert.ok(locWt);
-    assert.equal(locMain.commonDir.toLowerCase(), locWt.commonDir.toLowerCase());
+    const norm = (p: string) => process.platform === "win32" ? p.toLowerCase() : p;
+    assert.equal(norm(locMain.commonDir), norm(locWt.commonDir));
   } finally {
     try {
       execFileSync("git", ["worktree", "remove", "--force", wtDir], { cwd: root, stdio: "ignore" });

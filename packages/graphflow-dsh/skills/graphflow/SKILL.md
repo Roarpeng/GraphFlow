@@ -1,6 +1,30 @@
 ---
 name: graphflow
-description: Token-First Surgical Code Engine (gf_read, gf_edit, gf_exec, gf_macro) for TS/JS, Python, Go, Rust, C/C++, C# — true AST for all six language families (TS/JS via `@babel/parser`; Python/Go/Rust/C/C++/C# via optional tree-sitter grammars, structural fallback), self-written L0 semantic index, inheritance-aware blast-radius guards, ambiguous-safe rename, type-aware knowledge-graph calls with alias-resolved imports, precision-capped BM25 doc↔code links, `extends`-aware affected-test routing, six-language parity (51 tests) with packed EN/ZH recall 1.000, offline task reflection/auto-harvest, dehydrated test logs (1-line PASS), bilingual 中文/pinyin code search, git co-change habit macros. 外科手术级省 Token 代码引擎：6 种语言真 AST（TS/JS 用 `@babel/parser`；其余用可选 tree-sitter，缺省回退结构化分析）、自研 L0 语义索引、含继承/super 的爆炸半径守卫、歧义安全重命名、类型感知知识图谱 calls 与别名解析 imports、BM25 上限控制的文档↔代码链接、extends 感知的受影响测试路由、六语言平价（51 项）与 packed EN/ZH 召回 1.000、离线任务反射/自动收割、测试日志脱水、双语检索、习惯宏。
+version: 3.9.2
+display_name: GraphFlow 外科手术级省 Token 代码引擎
+display_name_en: GraphFlow Token-First Surgical Code Engine
+author: roarpeng
+description: |
+  Token-First Surgical Code Engine (gf_read, gf_edit, gf_exec, gf_macro) for TS/JS, Python, Go, Rust, C/C++, C# — true AST for all six language families (TS/JS via `@babel/parser`; Python/Go/Rust/C/C++/C# via optional tree-sitter grammars, structural fallback), self-written L0 semantic index, inheritance-aware blast-radius guards, ambiguous-safe rename, type-aware knowledge-graph calls with alias-resolved imports, precision-capped BM25 doc↔code links, `extends`-aware affected-test routing, six-language parity (51 tests) with packed EN/ZH recall 1.000, offline task reflection/auto-harvest, dehydrated test logs (1-line PASS), bilingual 中文/pinyin code search, git co-change habit macros.
+description_zh: |
+  外科手术级省 Token 代码引擎：6 种语言真 AST（TS/JS 用 @babel/parser；其余用可选 tree-sitter，缺省回退结构化分析）、自研 L0 语义索引、含继承/super 的爆炸半径守卫、歧义安全重命名、类型感知知识图谱 calls 与别名解析 imports、BM25 上限控制的文档↔代码链接、extends 感知的受影响测试路由、六语言平价（51 项）与 packed EN/ZH 召回 1.000、离线任务反射/自动收割、测试日志脱水、双语检索、习惯宏。
+description_en: |
+  Token-First Surgical Code Engine (gf_read, gf_edit, gf_exec, gf_macro) for TS/JS, Python, Go, Rust, C/C++, C#. Slices exact AST symbols, type closures, caller blast radius, ambiguous-safe renames, affected-test routing, and dehydrated logs to save >90% tokens.
+allowed-tools:
+  - "gf_read"
+  - "gf_edit"
+  - "gf_exec"
+  - "gf_macro"
+examples_zh:
+  - "精准切片并计算函数的调用爆炸半径"
+  - "零 LLM 跨文件安全重命名方法并检查歧义"
+  - "运行变更代码受影响的单元测试并脱水显示关键结果"
+  - "查看项目知识图谱与当前工作区状态"
+examples_en:
+  - "Slice symbol AST and calculate blast radius"
+  - "Safely rename method across repository with AST guard"
+  - "Run affected tests with dehydrated output"
+  - "Check project knowledge graph and workspace status"
 ---
 
 # GraphFlow — Token-First Surgical Engine (外科手术级省 Token 引擎)
