@@ -94,9 +94,16 @@ export function resolveGitLocation(rootDir: string): GitLocation | undefined {
   if (st.isDirectory()) {
     let commonDir = dotGit;
     try {
-      commonDir = realpathSync(dotGit);
+      commonDir = realpathSync.native(dotGit);
     } catch {
-      commonDir = resolve(dotGit);
+      try {
+        commonDir = realpathSync(dotGit);
+      } catch {
+        commonDir = resolve(dotGit);
+      }
+    }
+    if (process.platform === "win32") {
+      commonDir = commonDir.replace(/^\\\\\?\\/, "");
     }
     return { gitDir: commonDir, commonDir };
   }
@@ -106,9 +113,16 @@ export function resolveGitLocation(rootDir: string): GitLocation | undefined {
     if (!match) return undefined;
     let gitDir = resolve(rootDir, match[1]!);
     try {
-      gitDir = realpathSync(gitDir);
+      gitDir = realpathSync.native(gitDir);
     } catch {
-      // ignore
+      try {
+        gitDir = realpathSync(gitDir);
+      } catch {
+        // ignore
+      }
+    }
+    if (process.platform === "win32") {
+      gitDir = gitDir.replace(/^\\\\\?\\/, "");
     }
     let commonDir = gitDir;
     try {
@@ -116,9 +130,16 @@ export function resolveGitLocation(rootDir: string): GitLocation | undefined {
       if (common) {
         commonDir = resolve(gitDir, common);
         try {
-          commonDir = realpathSync(commonDir);
+          commonDir = realpathSync.native(commonDir);
         } catch {
-          // ignore
+          try {
+            commonDir = realpathSync(commonDir);
+          } catch {
+            // ignore
+          }
+        }
+        if (process.platform === "win32") {
+          commonDir = commonDir.replace(/^\\\\\?\\/, "");
         }
       }
     } catch {
@@ -146,11 +167,19 @@ function findGitLocationUpwards(startDir: string): GitLocation | undefined {
 function normalizeFsPath(p: string): string {
   let resolved: string;
   try {
-    resolved = realpathSync(p);
+    resolved = realpathSync.native(p);
   } catch {
-    resolved = resolve(p);
+    try {
+      resolved = realpathSync(p);
+    } catch {
+      resolved = resolve(p);
+    }
   }
-  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  if (process.platform === "win32") {
+    resolved = resolved.replace(/^\\\\\?\\/, "");
+    return resolved.toLowerCase();
+  }
+  return resolved;
 }
 
 /**

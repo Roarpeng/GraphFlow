@@ -3,7 +3,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -191,7 +191,22 @@ check("5. isSameRepositoryWorktree detects separate worktrees of same git reposi
     const locWt = resolveGitLocation(wtDir);
     assert.ok(locMain);
     assert.ok(locWt);
-    const norm = (p: string) => process.platform === "win32" ? p.toLowerCase() : p;
+    const norm = (p: string) => {
+      let r = p;
+      try {
+        r = realpathSync.native(p);
+      } catch {
+        try {
+          r = realpathSync(p);
+        } catch {
+          r = resolve(p);
+        }
+      }
+      if (process.platform === "win32") {
+        return r.replace(/^\\\\\?\\/, "").toLowerCase();
+      }
+      return r;
+    };
     assert.equal(norm(locMain.commonDir), norm(locWt.commonDir));
   } finally {
     try {
