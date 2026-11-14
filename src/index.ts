@@ -106,6 +106,19 @@ export {
 } from "./surgical-edit.js";
 
 export {
+  commitEditTransaction,
+  prepareEditTransaction,
+  recoverEditTransactions,
+  type ProposedWrite,
+  type TransactionOutcome,
+} from "./edit-transaction.js";
+
+export { appendToolEvidence, type ToolEvidence } from "./evidence-ledger.js";
+export { createReadReceipt, continueReadReceipt } from "./read-receipt.js";
+export { changedContentHash, failureFingerprint } from "./test-evidence.js";
+export { escalateReadReferences } from "./lsp-escalation.js";
+
+export {
   buildAffectedTestCommand,
   dehydrateCommandOutput,
   execAndDehydrate,
@@ -129,6 +142,9 @@ export {
   recordTrajectoryAndMine,
   registerCustomMacro,
   saveMacros,
+  setMacroTrust,
+  verifyMacroRecipe,
+  runVerifiedRecipe,
   syncGitCoChangeHabits,
   type CoEditHabit,
   type CompiledMacro,

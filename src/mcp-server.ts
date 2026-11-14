@@ -14,7 +14,7 @@ import {
   ListToolsRequestSchema,
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
-import { V3_TOOL_DEFINITIONS, executeV3ToolCall } from "./mcp-tools.js";
+import { V3_TOOL_DEFINITIONS, executeToolCallWithEscalation } from "./mcp-tools.js";
 
 import { PACKAGE_VERSION } from "./version.js";
 // Version lives in its own module so the CLI never has to import this file (and with it
@@ -176,7 +176,7 @@ export async function executeToolCall(
   const envRoot = process.env.GRAPHFLOW_WORKSPACE_ROOT?.trim();
   const fallbackRoot = envRoot || process.cwd();
 
-  const v3Res = executeV3ToolCall(call.name, args, fallbackRoot, {
+  const v3Res = await executeToolCallWithEscalation(call.name, args, fallbackRoot, {
     preferActiveLease: !envRoot,
   });
   const text = v3Res.content[0]?.text ?? "";

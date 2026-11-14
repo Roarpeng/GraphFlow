@@ -1,4 +1,6 @@
-# Prompt Reflex (0-LLM Local Reaction)
+# Prompt Reflex (v3 historical behavior)
+
+> **v4 development update:** The v3 behavior described below is historical. Command and file-writing macros are no longer auto-executed from prompt hooks. Unapproved command triggers produce hints. An effectful macro must pass `propose → approve → activate` and run through `gf_macro`; generated `.mjs` files refuse direct execution. See [v4 upgrade notes](./v4-upgrade.md).
 
 **English** | [中文](#中文)
 

@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setMacroTrust } from "../src/macro-engine.js";
 import {
   buildAffectedTestCommand,
   dehydrateCommandOutput,
@@ -478,6 +479,7 @@ async function runAllTests(): Promise<void> {
           "def compute_py_budget(cfg: PyBudgetConfig) -> int:",
           "    return cfg.max_tokens",
         ].join("\n"),
+        policy: "warn",
       });
       assert.equal(pyEdit.ok, true, "Python symbol edit succeeds");
       assert.ok(
@@ -551,6 +553,7 @@ async function runAllTests(): Promise<void> {
           "  return policy.strict ? Math.min(1000, policy.maxTokens) : policy.maxTokens;",
           "}",
         ].join("\n"),
+        policy: "warn",
       });
       assert.equal(arityEdit.ok, true);
       assert.ok(
@@ -662,6 +665,9 @@ async function runAllTests(): Promise<void> {
       assert.ok(tplMacro, "Must learn parameterized command-template macro from varying file args");
       assert.ok(tplMacro.steps[0]!.includes("{{arg1}}"));
 
+      setMacroTrust(root, tplMacro.id, "propose");
+      setMacroTrust(root, tplMacro.id, "approve");
+      setMacroTrust(root, tplMacro.id, "activate");
       const tplRun = executeMacro(root, tplMacro.id, ["src/resolver.ts"]);
       assert.equal(tplRun.ok, true);
 
@@ -767,8 +773,8 @@ async function runAllTests(): Promise<void> {
         );
         const pipeScript = readFileSync(join(mroot, pipeMacro.scriptPath!), "utf8");
         assert.ok(
-          pipeScript.includes("cwd: ROOT"),
-          "Generated pipeline script must pin its working directory via cwd: ROOT"
+          pipeScript.includes("macro-runner"),
+          "Generated pipeline script must refuse direct execution outside the approval gate"
         );
 
         // A single FIXED command repeated twice is itself a habit (1-step pipeline).
@@ -808,7 +814,7 @@ async function runAllTests(): Promise<void> {
         }
         const habitVerdict = evaluatePostEditHabits(mroot, ["src/a.ts"]);
         assert.ok(
-          habitVerdict.autoVerifySummary?.includes("auto-run skipped"),
+          /auto-run skipped|approval required/.test(habitVerdict.autoVerifySummary ?? ""),
           `Long-running verify commands must be hinted, not auto-run (got: ${habitVerdict.autoVerifySummary})`
         );
       } finally {
@@ -892,14 +898,13 @@ async function runAllTests(): Promise<void> {
 
         // (a) Short command-like CJK prompt -> macro executes locally (0 LLM) and blocks the prompt.
         const blocked = interceptUserPromptSubmit({ prompt: "启动项目" }, { rootDir: proot });
-        assert.equal(blocked.action, "blocked", "Short trigger prompt must execute the macro and block the LLM");
+        assert.equal(blocked.action, "hint", "Unapproved command macros must only produce a hint");
         assert.equal(blocked.macroId, launchMacro.id);
-        assert.ok(blocked.summary!.includes("launched-ok"), "Summary must embed the macro output");
-        assert.ok(blocked.summary!.includes(launchMacro.id), "Summary must name the executed macro");
+        assert.ok(blocked.hint!.includes(launchMacro.id), "Hint must name the macro");
 
         // Latin trigger with casing + trailing punctuation still matches and executes.
         const blockedLaunch = interceptUserPromptSubmit({ prompt: "Launch!" }, { rootDir: proot });
-        assert.equal(blockedLaunch.action, "blocked", "'Launch!' must normalize to the 'launch' trigger");
+        assert.equal(blockedLaunch.action, "hint", "'Launch!' must normalize to the 'launch' trigger");
 
         // (b) Long prompt that merely MENTIONS the trigger -> hint only, never executes.
         const longRes = interceptUserPromptSubmit(
@@ -1023,6 +1028,7 @@ async function runAllTests(): Promise<void> {
         file: "src/types.ts",
         symbol: "BudgetPolicy",
         newCode: "export interface BudgetPolicy {\n  maxTokens: number;\n}",
+        policy: "warn",
       });
       assert.equal(fieldGuardRes.ok, true);
       // Restore `strict` field and test when `resolver.ts` accesses `policy.maxTokens`
@@ -1031,6 +1037,7 @@ async function runAllTests(): Promise<void> {
         file: "src/types.ts",
         symbol: "BudgetPolicy",
         newCode: "export interface BudgetPolicy {\n  strict: boolean;\n}",
+        policy: "warn",
       });
       assert.equal(removeMaxTokensRes.ok, true);
       assert.ok(
@@ -1061,6 +1068,9 @@ async function runAllTests(): Promise<void> {
       );
       const codemodIdMatch = secondIsoEdit.content[0]!.text.match(/promoted to '(codemod_[a-f0-9]+)'/);
       assert.ok(codemodIdMatch, "Must extract codemod macro id");
+      setMacroTrust(root, codemodIdMatch[1]!, "propose");
+      setMacroTrust(root, codemodIdMatch[1]!, "approve");
+      setMacroTrust(root, codemodIdMatch[1]!, "activate");
 
       const applyCodemod = executeV3ToolCall(
         "gf_macro",

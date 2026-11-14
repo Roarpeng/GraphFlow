@@ -19,7 +19,7 @@
  *      removed exports still imported elsewhere, and caller parameter arity drift.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   analyzeSourceFile,
@@ -46,6 +46,7 @@ import {
   type SemanticResolvedCall,
 } from "./semantic-index.js";
 import { markSessionFilesEdited } from "./circuit-breaker.js";
+import { commitDirectEditTransaction, commitEditTransaction, contentSha256, prepareEditTransaction, recoverEditTransactions } from "./edit-transaction.js";
 import {
   findMatchingSymbolsInAst,
   formatNumberedLines,
@@ -67,6 +68,10 @@ export interface SingleEditSpec {
 
 export interface SurgicalEditInput extends SingleEditSpec {
   rootDir: string;
+  mode?: "prepare" | "commit";
+  proposalId?: string;
+  expectedSha256?: string | Record<string, string>;
+  policy?: "strict" | "warn";
   /** Optional batch of edits applied atomically (bottom-up line-drift-free per file). */
   edits?: SingleEditSpec[];
   /** Roll back all edits if AST syntax errors are introduced (default true). */
@@ -97,6 +102,11 @@ export interface SurgicalEditResult {
   newSpan: [number, number];
   diagnostics: StaticGuardDiagnostic[];
   text: string;
+  status?: "PREPARED" | "COMMITTED" | "STALE_BASELINE" | "RECOVERABLE_FAILURE" | "REJECTED";
+  proposalId?: string;
+  recoveryId?: string;
+  baseHashes?: Record<string, string>;
+  diff?: string;
 }
 
 /**
@@ -449,7 +459,8 @@ function executeCrossRepoRename(
   rootDir: string,
   declFile: string,
   oldName: string,
-  newName: string
+  newName: string,
+  input?: SurgicalEditInput
 ): SurgicalEditResult {
   const safeRoot = resolveSafeWorkspaceRoot(rootDir);
   const relDecl = normalizeWorkspaceRelPath(safeRoot, declFile);
@@ -799,7 +810,7 @@ function executeCrossRepoRename(
   }
 
   const wordRe = identifierBoundaryRe(oldName, "g");
-  const stagedWrites = new Map<string, { absPath: string; content: string; replacements: number }>();
+  const stagedWrites = new Map<string, { absPath: string; before: string; content: string; replacements: number }>();
   const diagnostics: StaticGuardDiagnostic[] = [];
 
   for (const relPath of candidateFiles) {
@@ -896,7 +907,7 @@ function executeCrossRepoRename(
         message: synErr.message,
       });
     }
-    stagedWrites.set(relPath, { absPath, content: updated, replacements: count });
+    stagedWrites.set(relPath, { absPath, before: raw, content: updated, replacements: count });
   }
 
   if (diagnostics.some((d) => d.severity === "error")) {
@@ -946,32 +957,56 @@ function executeCrossRepoRename(
     };
   }
 
-  let totalOccurrences = 0;
-  const touchedFiles: string[] = [];
-  for (const [relPath, item] of stagedWrites) {
-    writeFileSync(item.absPath, item.content, "utf8");
-    index.invalidateFile(relPath);
-    touchedFiles.push(relPath);
-    totalOccurrences += item.replacements;
+  const writes = [...stagedWrites].map(([file, item]) => ({ file, before: item.before, after: item.content }));
+  const mismatch = writes.find((w) => {
+    const expected = typeof input?.expectedSha256 === "string" ? input.expectedSha256 : input?.expectedSha256?.[w.file];
+    return expected && expected.replace(/^sha256:/, "") !== contentSha256(w.before);
+  });
+  if (mismatch) return { ok: false, file: relDecl, touchedFiles: [], mode: "rename", replacedSpan: [sym.line, sym.endLine], newSpan: [sym.line, sym.endLine], diagnostics,
+    status: "STALE_BASELINE", text: `STALE_BASELINE [${mismatch.file}] expectedSha256 differs from current file.` };
+  const tx = input?.mode === "prepare" ? prepareEditTransaction(safeRoot, writes) : commitDirectEditTransaction(safeRoot, writes);
+  if (tx.status === "COMMITTED") {
+    for (const w of writes) index.invalidateFile(w.file);
+    markSessionFilesEdited(safeRoot, "main", tx.changedFiles);
   }
-  markSessionFilesEdited(safeRoot, "main", touchedFiles);
+  const totalOccurrences = [...stagedWrites.values()].reduce((sum, item) => sum + item.replacements, 0);
+  const touchedFiles = tx.changedFiles;
 
   return {
-    ok: true,
+    ok: tx.status === "COMMITTED" || tx.status === "PREPARED",
     file: relDecl,
     touchedFiles,
     mode: "rename",
     replacedSpan: [sym.line, sym.endLine],
     newSpan: [sym.line, sym.endLine],
     diagnostics,
-    text: `OK [renamed '${oldName}' -> '${newName}'] ${totalOccurrences} occurrence(s) across ${touchedFiles.length} file(s): ${touchedFiles.join(", ")}`,
+    status: tx.status,
+    ...(tx.proposalId ? { proposalId: tx.proposalId } : {}),
+    ...(tx.recoveryId ? { recoveryId: tx.recoveryId } : {}),
+    ...(tx.baseHashes ? { baseHashes: tx.baseHashes } : {}),
+    ...(tx.diff ? { diff: tx.diff } : {}),
+    text: `${tx.message} Rename '${oldName}' -> '${newName}': ${totalOccurrences} occurrence(s) across ${writes.length} file(s).`,
   };
 }
 
 export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResult {
+  const safeRootForCommit = resolveSafeWorkspaceRoot(input.rootDir);
+  if (input.mode === "commit") {
+    const tx = input.proposalId ? commitEditTransaction(safeRootForCommit, input.proposalId) : { status: "REJECTED" as const, changedFiles: [], message: "REJECTED [missing-proposalId]" };
+    if (tx.status === "COMMITTED") {
+      const index = getWorkspaceAstIndex(safeRootForCommit);
+      for (const file of tx.changedFiles) index.invalidateFile(file);
+      markSessionFilesEdited(safeRootForCommit, "main", tx.changedFiles);
+    }
+    return { ok: tx.status === "COMMITTED", file: tx.changedFiles[0] ?? input.file, touchedFiles: tx.changedFiles,
+      mode: "batch", replacedSpan: [0, 0], newSpan: [0, 0], diagnostics: [], status: tx.status,
+      ...(tx.recoveryId ? { recoveryId: tx.recoveryId } : {}), text: tx.message };
+  }
+  const unresolvedRecovery = recoverEditTransactions(safeRootForCommit);
+  if (unresolvedRecovery.length > 0) return { ok: false, file: input.file, touchedFiles: [], mode: "batch", replacedSpan: [0, 0], newSpan: [0, 0], diagnostics: [], status: "RECOVERABLE_FAILURE", recoveryId: unresolvedRecovery[0]!, text: `RECOVERABLE_FAILURE [${unresolvedRecovery.join(", ")}] manual recovery needed.` };
   // Handle Deterministic Cross-Repo Symbol Rename (Pillar 3 + Pillar 2)
   if (input.symbol && input.renameTo && !input.newCode) {
-    return executeCrossRepoRename(input.rootDir, input.file, input.symbol, input.renameTo);
+    return executeCrossRepoRename(input.rootDir, input.file, input.symbol, input.renameTo, input);
   }
 
   const specs: SingleEditSpec[] =
@@ -1027,6 +1062,7 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
       absPath: string;
       beforeAst: ReturnType<typeof analyzeSourceFile>;
       afterAst: ReturnType<typeof analyzeSourceFile>;
+      originalContent: string;
       updatedContent: string;
       firstReplacedSpan: [number, number];
       firstNewSpan: [number, number];
@@ -1201,6 +1237,7 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
       absPath,
       beforeAst,
       afterAst,
+      originalContent,
       updatedContent,
       firstReplacedSpan: [firstPatch.startLine, firstPatch.endLine],
       firstNewSpan: [
@@ -1248,25 +1285,21 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
     };
   }
 
-  // Commit all staged files to disk and run cross-repo static guard checks
-  const touchedFiles: string[] = [];
+  // Analyze the candidate workspace before any managed file is written.
   for (const [relPath, staged] of stagedFiles) {
-    writeFileSync(staged.absPath, staged.updatedContent, "utf8");
-    index.invalidateFile(relPath);
-    touchedFiles.push(relPath);
-
     // Check broken relative imports
+    const originalImports = new Set(staged.beforeAst.imports.map((imp) => imp.module));
     for (const imp of staged.afterAst.imports) {
-      if (imp.module.startsWith(".")) {
+      if (imp.module.startsWith(".") && !originalImports.has(imp.module)) {
         const resolved = resolveRelativeImportPath(
           input.rootDir,
           relPath,
           imp.module,
           index.getFileSet()
         );
-        if (!resolved && !existsSync(join(input.rootDir, relPath, "..", imp.module))) {
+        if (!resolved && !existsSync(join(safeRoot, dirname(relPath), imp.module))) {
           diagnostics.push({
-            severity: "warn",
+            severity: "error",
             kind: "broken-import",
             location: `${relPath}:${imp.line}`,
             message: `Relative import '${imp.module}' does not resolve to a file on disk`,
@@ -1281,13 +1314,16 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
       const newSym = afterSymbolsByName.get(oldSym.name);
       if (oldSym.exported && (!newSym || !newSym.exported)) {
         const blast = computeBlastRadius(index, relPath, oldSym.name, 4);
-        if (blast.importers.length > 0 || blast.totalCallSites > 0) {
+        const stillNames = new RegExp(identifierBoundary(oldSym.name), "u");
+        const externalSites = blast.callSites.filter((c) => !stagedFiles.has(c.file) || stillNames.test(stagedFiles.get(c.file)!.updatedContent));
+        const externalImporters = blast.importers.filter((i) => !stagedFiles.has(i.file) || stillNames.test(stagedFiles.get(i.file)!.updatedContent));
+        if (externalImporters.length > 0 || externalSites.length > 0) {
           const sites = [
-            ...blast.callSites.map((c) => `${c.file}:${c.line}`),
-            ...blast.importers.map((i) => `${i.file}:${i.line}`),
+            ...externalSites.map((c) => `${c.file}:${c.line}`),
+            ...externalImporters.map((i) => `${i.file}:${i.line}`),
           ].slice(0, 4);
           diagnostics.push({
-            severity: "warn",
+            severity: "error",
             kind: "removed-export-still-imported",
             location: `${relPath}:${staged.firstReplacedSpan[0]}`,
             message: `Export '${oldSym.name}' was removed/unexported but is still referenced at: ${sites.join(", ")}`,
@@ -1301,11 +1337,12 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
       ) {
         const blast = computeBlastRadius(index, relPath, oldSym.name, 5);
         for (const site of blast.callSites) {
-          // Skip warning if the caller file itself was also updated in this atomic batch!
-          if (stagedFiles.has(site.file)) continue;
-          if (site.argsCount > newSym.paramsCount) {
+          const candidateCalls = stagedFiles.get(site.file)?.afterAst.calls.filter((call) => call.callee === oldSym.name && !call.isDeclaration);
+          const calls = candidateCalls ?? [site];
+          if (calls.some((call) => call.argsCount > newSym.paramsCount! ||
+              (newSym.paramsCount! > oldSym.paramsCount! && call.argsCount < newSym.paramsCount!))) {
             diagnostics.push({
-              severity: "warn",
+              severity: "error",
               kind: "caller-arity-mismatch",
               location: `${site.file}:${site.line}`,
               message: `Caller passes ${site.argsCount} arg(s) to '${newSym.name}', which now declares ${newSym.paramsCount} param(s)`,
@@ -1322,10 +1359,9 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
           const fldAccessRe = new RegExp(`(?:\\.|->)${identifierBoundary(fld)}`, "u");
           const fldRefs: string[] = [];
           for (const candidateRel of index.getFiles()) {
-            if (stagedFiles.has(candidateRel)) continue;
-            const raw = index.getRawFile(candidateRel);
-            if (!raw || !fldAccessRe.test(raw.content)) continue;
-            const cLines = raw.content.split(/\r?\n/);
+            const content = stagedFiles.get(candidateRel)?.updatedContent ?? index.getRawFile(candidateRel)?.content;
+            if (!content || !fldAccessRe.test(content)) continue;
+            const cLines = content.split(/\r?\n/);
             for (let ln = 0; ln < cLines.length; ln++) {
               if (fldAccessRe.test(cLines[ln] ?? "")) {
                 fldRefs.push(`${candidateRel}:${ln + 1}`);
@@ -1336,7 +1372,7 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
           }
           if (fldRefs.length > 0) {
             diagnostics.push({
-              severity: "warn",
+              severity: "error",
               kind: "removed-struct-field-still-referenced",
               location: `${relPath}:${newSym.line}`,
               message: `Field '${oldSym.name}.${fld}' was removed/renamed but is still accessed at: ${fldRefs.join(", ")}`,
@@ -1347,11 +1383,30 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
     }
   }
 
-  markSessionFilesEdited(input.rootDir, "main", touchedFiles);
+  if (diagnostics.some((d) => d.severity === "error") && input.policy !== "warn") {
+    return { ok: false, file: primaryFile, touchedFiles: [], mode: specs.length > 1 ? "batch" : (primaryStaged?.mode ?? "symbol"),
+      replacedSpan: primaryStaged?.firstReplacedSpan ?? [0, 0], newSpan: primaryStaged?.firstNewSpan ?? [0, 0],
+      diagnostics, status: "REJECTED", text: `REJECTED [contract-guard] No files written:\n${diagnostics.map((d) => `  - [${d.kind}] ${d.location}: ${d.message}`).join("\n")}` };
+  }
+
+  const writes = [...stagedFiles].map(([file, staged]) => ({ file, before: staged.originalContent, after: staged.updatedContent }));
+  const mismatch = writes.find((w) => {
+    const expected = typeof input.expectedSha256 === "string" ? input.expectedSha256 : input.expectedSha256?.[w.file];
+    return expected && expected.replace(/^sha256:/, "") !== contentSha256(w.before);
+  });
+  if (mismatch) return { ok: false, file: primaryFile, touchedFiles: [], mode: "batch", replacedSpan: [0, 0], newSpan: [0, 0], diagnostics,
+    status: "STALE_BASELINE", text: `STALE_BASELINE [${mismatch.file}] expectedSha256 differs from current file.` };
+  const tx = input.mode === "prepare" ? prepareEditTransaction(safeRoot, writes) : commitDirectEditTransaction(safeRoot, writes);
+  const touchedFiles = tx.status === "COMMITTED" ? tx.changedFiles : [];
+  if (tx.status === "COMMITTED") {
+    for (const file of touchedFiles) index.invalidateFile(file);
+  }
+
+  if (touchedFiles.length > 0) markSessionFilesEdited(input.rootDir, "main", touchedFiles);
 
   // Check learned user habits (Co-Edit Partner Warnings + Auto-Verify Hook)
   let autoVerifyLine: string | undefined;
-  if (input.habitHook) {
+  if (input.habitHook && tx.status === "COMMITTED") {
     const habitOut = input.habitHook(touchedFiles);
     for (const hint of habitOut.coEditHints) {
       diagnostics.push({
@@ -1377,13 +1432,18 @@ export function executeSurgicalEdit(input: SurgicalEditInput): SurgicalEditResul
       : `OK [edited ${primaryFile}] L${primaryStaged!.firstReplacedSpan[0]}-${primaryStaged!.firstReplacedSpan[1]} -> L${primaryStaged!.firstNewSpan[0]}-${primaryStaged!.firstNewSpan[1]} (${diagnostics.length === 0 ? "AST syntax & callers clean" : `${diagnostics.length} warning(s)`})`;
 
   return {
-    ok: true,
+    ok: tx.status === "COMMITTED" || tx.status === "PREPARED",
     file: primaryFile,
     touchedFiles,
     mode: specs.length > 1 ? "batch" : primaryStaged!.mode,
     replacedSpan: primaryStaged!.firstReplacedSpan,
     newSpan: primaryStaged!.firstNewSpan,
     diagnostics,
-    text: [summaryHeader, ...(autoVerifyLine ? [autoVerifyLine] : []), ...diagLines].join("\n"),
+    status: tx.status,
+    ...(tx.proposalId ? { proposalId: tx.proposalId } : {}),
+    ...(tx.recoveryId ? { recoveryId: tx.recoveryId } : {}),
+    ...(tx.baseHashes ? { baseHashes: tx.baseHashes } : {}),
+    ...(tx.diff ? { diff: tx.diff } : {}),
+    text: [tx.message, ...(tx.status === "COMMITTED" ? [summaryHeader] : []), ...(autoVerifyLine ? [autoVerifyLine] : []), ...diagLines].join("\n"),
   };
 }

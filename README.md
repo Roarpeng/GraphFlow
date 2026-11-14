@@ -7,22 +7,22 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-roarpeng.graphflow-blue)](https://marketplace.visualstudio.com/items?itemName=roarpeng.graphflow)
 
-**Token-first surgical code engine for coding agents (v3.9.2).** Four deterministic MCP tools plus a **0-LLM prompt reflex** — all local, no LLM in the engine loop.
+**Token-first surgical code engine for coding agents.** The package is currently v3.9.2; this checkout includes the v4 local safety and evidence upgrade. The engine exposes four deterministic MCP tools and runs locally.
 
 ## The Four Surgical Tools
 
 | Tool | Capability |
 | :--- | :--- |
 | `gf_read` | Slice exact symbols (`file.ts#fn`) with cross-file type closure + blast-radius call sites; bilingual keyword search (`q: "启动 / launch"`); AST skeleton fold (−93% tokens). |
-| `gf_edit` | In-place symbol/line edits, bottom-up atomic batches, cross-repo rename — with AST syntax rollback, caller-arity and struct-field guards. |
-| `gf_exec` | `affected-tests` routing (2-hop reverse imports) or any command with dehydrated output: 1-line `PASS` receipt, 5-line failure source window, 3-strike circuit breaker. `run:true` executes; otherwise preview. |
-| `gf_macro` | Habit-mined deterministic macros: repeated reads → context bundles, repeated commands → 1-step pipelines / parameterized templates, isomorphic edits → codemods. Zero LLM turns to replay. |
+| `gf_edit` | Symbol/line edits and cross-repo rename with write-before checks, optional prepare/commit proposals, SHA conflict checks and recoverable multi-file commits. |
+| `gf_exec` | `affected-tests` routing (up to 6 reverse-import hops) or any command with dehydrated output: 1-line `PASS` receipt, 5-line failure source window, 3-strike circuit breaker. `run:true` executes; otherwise preview. |
+| `gf_macro` | Local habit macros and verified recipes. Effectful macros require propose → approve → activate; command templates use argv execution and codemods use the edit transaction. |
 
-## Prompt Reflex (0-LLM Local Reaction)
+## Prompt Reflex
 
-A short command-like prompt (e.g. `启动项目`) that matches a macro trigger **executes the macro locally and blocks the prompt from reaching the model**; longer prompts get an injected hint; anything else passes through. Kill switch: `GRAPHFLOW_PROMPT_REFLEX=0`.
+A prompt matching a command macro receives a hint until that macro is explicitly authorized. Command and file-writing macros do not auto-run from the prompt hook. Kill switch: `GRAPHFLOW_PROMPT_REFLEX=0`.
 
-- **Tier 1 — full block** (auto-registered): ZCode, Claude Code, Codex CLI, Gemini CLI, Cursor, Windsurf, Trae, Qoder, Kimi Code, Continue CLI.
+- **Tier 1 — prompt hook** (auto-registered): ZCode, Claude Code, Codex CLI, Gemini CLI, Cursor, Windsurf, Trae, Qoder, Kimi Code, Continue CLI.
 - **Tier 2 — inject/rewrite**: OpenCode, Kilo Code, Cline (Unix), DeepSeek Harness.
 - **Tier 3 — fallback** (`gf_macro` MCP): VS Code Copilot, Zed, Claude Desktop, PearAI, Antigravity, Roo Code (archived).
 
@@ -69,10 +69,10 @@ Marketplace / Open VSX: search "GraphFlow" (`roarpeng.graphflow`) — prebuilt l
 | `graphflow install [--workspace] [--agents <id1,id2>]` | Register MCP + Skill + Rules + Hooks in detected agents (merges host hooks; user hooks preserved) |
 | `graphflow uninstall [--agents <id1,id2>] [--all]` | Remove GraphFlow registrations (owned entries only); default detected agents, `--all` cleans every profile |
 | `graphflow status [--agents <id1,id2>] [--all]` | Per-agent registration state (`[MCP ✓] [Skill ✓] [Rule -] [Hook ✓]`) |
-| `graphflow read [targets...] [-q <query>] [--skeleton] [--dedup]` | Surgical read from the terminal |
-| `graphflow edit <file> [--symbol <sym>] [--new <code>] [--rename <name>]` | Surgical edit / rename |
-| `graphflow exec [cmd] [--run] [--root <dir>]` | Affected-tests routing or any command with dehydration (`--run` executes, otherwise preview) |
-| `graphflow macro <list\|run\|save\|mine\|mine-git> [id] [args...]` | Macros and git co-change mining |
+| `graphflow read [targets...] [-q <query>] [--detail locate\|summary\|code\|closure] [--max-output-tokens N]` | Surgical read, receipt and cursor pagination |
+| `graphflow edit <file> [--symbol <sym>] [--new <code>] [--prepare]` / `graphflow edit --proposal-id <id>` | Prepare or commit a guarded edit; add `--policy warn` only for a deliberate compatibility override |
+| `graphflow exec [cmd] [--run] [--plan-only] [--verify-level fast\|safe\|full]` | Affected-test plan or command with structured test evidence |
+| `graphflow macro <list\|propose\|approve\|activate\|revoke\|run\|verify\|recipe-run> [id]` | Macro trust and verified recipes |
 | `graphflow task <list\|show\|record\|run\|log\|harvest>` | Local task reflection: record, promote repeated instructions, replay offline |
 | `graphflow reflect "<instruction>" [args...]` | Run the recorded/near-match task for an instruction locally (MISS when unknown) |
 | `graphflow flywheel [--prune] [--ttl-days N]` | Session-journal health check: pending-episode backlog, status split, oldest age, over-TTL count; `--prune` removes pending episodes older than TTL days (default 30), other kinds kept |
@@ -98,14 +98,16 @@ Measured on a synthetic 9 902-file workspace: single-symbol read with blast radi
 ## Development
 
 ```bash
-npm install && npm test        # 40 test files (incl. MCP stdio e2e)
+npm install && npm test        # full test suite (incl. MCP stdio e2e)
 npm run build                  # tsc → dist/
 npm run bench                  # local benchmark → benchmarks/latest.md
 npm run verify:parsers         # true-AST vs structural matrix
 npm run preflight              # static release checks
+node scripts/v4-ab-report.mjs --check-corpus  # validate the 30-task v4 A/B corpus
 ```
 
 ## Docs
 
+- [v4 development upgrade and A/B protocol](./docs/v4-upgrade.md)
 - [Prompt Reflex — host matrix & config](./docs/prompt-reflex.md)
 - [VSIX install](./VSIX-INSTALL.md)

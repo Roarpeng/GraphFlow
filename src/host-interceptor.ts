@@ -16,14 +16,12 @@
  *        (stripping ANSI, `node_modules` frames, and passing-test log spam), while recording
  *        the command into `.graphflow/trajectories.jsonl` for automatic macro/template compilation.
  *      - Intercepts native `Edit` / `Write` calls to run the zero-LLM AST static syntax guard,
- *        record co-edit habits, and run learned directory auto-verify hooks.
+ *        record co-edit habits, and suggest learned directory verification.
  *
  *   3. `interceptUserPromptSubmit` (Prompt Reflex):
  *      - Intercepts the chat prompt itself at the UserPromptSubmit/BeforeAgent hook level:
- *        a SHORT command-like prompt that matches a compiled `command-pipeline` macro's
- *        triggers executes the macro locally with 0 LLM turns and BLOCKS the prompt from
- *        reaching the LLM; a long prompt that merely MENTIONS a trigger only gets a hint
- *        (context injection) so the agent can call `gf_macro` explicitly.
+ *        a prompt matching a command macro receives a hint to call `gf_macro`
+ *        explicitly. The hook does not execute commands or file edits.
  */
 
 import { extname, isAbsolute, relative } from "node:path";
@@ -36,7 +34,6 @@ import {
 import { dehydrateCommandOutput, resolveAffectedTests } from "./dehydrator.js";
 import {
   evaluatePostEditHabits,
-  executeMacro,
   findMatchingMacroHint,
   isNoiseCommand,
   loadMacroStore,
@@ -476,28 +473,6 @@ function escapeRegExpLiteral(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function truncateForHook(text: string, maxChars: number): string {
-  return text.length <= maxChars ? text : `${text.slice(0, maxChars)}…`;
-}
-
-/**
- * Count "words" in a prompt: whitespace-separated tokens, except CJK runs count
- * per character (1 CJK char ≈ 1 word). Plain whitespace splitting would call a
- * 30-char Chinese sentence "3 tokens", making every long CJK prompt look like a
- * short command; counting CJK chars as words keeps the short-command gate honest
- * for both scripts.
- */
-function countPromptTokens(prompt: string): number {
-  let tokens = 0;
-  for (const chunk of prompt.split(/\s+/)) {
-    if (!chunk) continue;
-    PROMPT_REFLEX_CJK_RE.lastIndex = 0;
-    const cjkCount = (chunk.match(PROMPT_REFLEX_CJK_RE) ?? []).length;
-    tokens += cjkCount + (chunk.length - cjkCount > 0 ? 1 : 0);
-  }
-  return tokens;
-}
-
 function triggerMatchesPrompt(normalizedPrompt: string, normalizedTrigger: string): boolean {
   if (!normalizedTrigger) return false;
   if (normalizedPrompt === normalizedTrigger) return true;
@@ -517,10 +492,8 @@ function pickMostUsedMacro(matched: CompiledMacro[]): CompiledMacro {
 
 /**
  * UserPromptSubmit / BeforeAgent Prompt Reflex:
- * a short command-like prompt that matches a compiled `command-pipeline` macro's
- * triggers runs the macro locally (0 LLM turns) and BLOCKS the prompt; a long
- * prompt that merely mentions a trigger gets a `gf_macro` hint injected instead.
- * Non-`command-pipeline` macros are never auto-executed from a chat prompt.
+ * matching command macros receive an explicit-run hint. Prompt hooks never
+ * start processes or write files on their own.
  */
 export function interceptUserPromptSubmit(
   payload: HostPromptPayload,
@@ -536,7 +509,7 @@ export function interceptUserPromptSubmit(
   // Everything below is wrapped defensively: the reflex must never break the
   // host chat flow, so any internal error fails open to a plain allow.
   try {
-    // 3. Only compiled `command-pipeline` macros are prompt-executable.
+    // 3. Only command-pipeline triggers are suggested.
     const pipelines = loadMacroStore(options.rootDir).macros.filter(
       (m) => m.kind === "command-pipeline"
     );
@@ -556,40 +529,11 @@ export function interceptUserPromptSubmit(
     // 5. No command-pipeline trigger matched -> nothing to reflex.
     if (matched.length === 0) return { action: "allow" };
 
-    // 6. Short-command gate: only a genuinely short command-like prompt may be
-    //    executed and blocked. A longer prompt that merely MENTIONS a trigger
-    //    gets a hint so the agent can call the macro explicitly.
-    const isShortCommand = rawPrompt.length <= 24 || countPromptTokens(rawPrompt) <= 12;
     const best = pickMostUsedMacro(matched);
-    if (!isShortCommand) {
-      return {
-        action: "hint",
-        macroId: best.id,
-        hint:
-          `[GraphFlow Prompt Reflex] 本工作区有本地宏 '${best.id}' 可直接完成该意图:` +
-          `调用 gf_macro(action="run", id="${best.id}") 执行,无需重新推导命令。` +
-          ` (${best.description})`,
-      };
-    }
-
-    // 7. Execute locally with 0 LLM turns. Failure fails soft: hand the failure
-    //    text to the agent as a hint so it can see and help.
-    const res = executeMacro(options.rootDir, best.id);
-    if (res.ok) {
-      return {
-        action: "blocked",
-        macroId: best.id,
-        summary:
-          `✅ [GraphFlow Prompt Reflex] 已本地执行宏 '${best.id}'(0 LLM):\n` +
-          truncateForHook(res.text, 500),
-      };
-    }
     return {
       action: "hint",
       macroId: best.id,
-      hint:
-        `⚠️ [GraphFlow Prompt Reflex] 宏 '${best.id}' 执行失败,已回退给 LLM 处理,请协助排查:\n` +
-        truncateForHook(res.text, 300),
+      hint: `[GraphFlow Prompt Reflex] Macro '${best.id}' (${best.state ?? "discovered"}) requires explicit execution via gf_macro(action="run", id="${best.id}").`,
     };
   } catch {
     return { action: "allow" };

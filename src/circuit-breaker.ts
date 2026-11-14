@@ -13,7 +13,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { computeBlastRadius, formatBlastRadiusText } from "./blast-radius.js";
 import { ensureGraphflowDir } from "./graphflow-dir.js";
@@ -33,6 +33,8 @@ export interface SessionGuardState {
   reads: Record<string, SessionReadRecord>;
   consecutiveFailures: number;
   lastFailedCommand?: string;
+  lastFailureFingerprint?: string;
+  lastFailurePatchHash?: string;
   recentEditedFiles: string[];
   totalDuplicateTokensSaved: number;
   circuitTrippedCount: number;
@@ -71,6 +73,12 @@ export function loadSessionGuardState(rootDir: string, sessionId = "main"): Sess
         typeof parsed.consecutiveFailures === "number" ? parsed.consecutiveFailures : 0,
       ...(typeof parsed.lastFailedCommand === "string"
         ? { lastFailedCommand: parsed.lastFailedCommand }
+        : {}),
+      ...(typeof parsed.lastFailureFingerprint === "string"
+        ? { lastFailureFingerprint: parsed.lastFailureFingerprint }
+        : {}),
+      ...(typeof parsed.lastFailurePatchHash === "string"
+        ? { lastFailurePatchHash: parsed.lastFailurePatchHash }
         : {}),
       recentEditedFiles: Array.isArray(parsed.recentEditedFiles) ? parsed.recentEditedFiles : [],
       totalDuplicateTokensSaved:
@@ -172,7 +180,9 @@ export function recordTestAndCheckCircuitBreaker(
   sessionId: string,
   command: string,
   ok: boolean,
-  failureThreshold = 3
+  failureThreshold = 3,
+  fingerprint?: string,
+  patchHash?: string
 ): {
   tripped: boolean;
   consecutiveFailures: number;
@@ -182,12 +192,17 @@ export function recordTestAndCheckCircuitBreaker(
   if (ok) {
     state.consecutiveFailures = 0;
     delete state.lastFailedCommand;
+    delete state.lastFailureFingerprint;
+    delete state.lastFailurePatchHash;
     saveSessionGuardState(rootDir, state);
     return { tripped: false, consecutiveFailures: 0 };
   }
 
-  state.consecutiveFailures += 1;
+  state.consecutiveFailures = fingerprint && state.lastFailureFingerprint !== fingerprint
+    ? 1 : state.consecutiveFailures + 1;
   state.lastFailedCommand = command;
+  if (fingerprint) state.lastFailureFingerprint = fingerprint;
+  if (patchHash) state.lastFailurePatchHash = patchHash;
 
   if (state.consecutiveFailures < failureThreshold) {
     saveSessionGuardState(rootDir, state);
@@ -228,4 +243,18 @@ export function recordTestAndCheckCircuitBreaker(
     consecutiveFailures: state.consecutiveFailures,
     rescuePacket: rescueSections.join("\n"),
   };
+}
+
+export function shouldStopRepeatedFailure(rootDir: string, sessionId: string, command: string, patchHash: string): boolean {
+  const state = loadSessionGuardState(rootDir, sessionId);
+  return state.consecutiveFailures >= 3 && state.lastFailedCommand === command &&
+    state.lastFailurePatchHash === patchHash && Boolean(state.lastFailureFingerprint);
+}
+
+export function recordFailureOverride(rootDir: string, command: string, reason: string): void {
+  ensureGraphflowDir(rootDir);
+  appendFileSync(join(rootDir, ".graphflow", "failure-overrides.jsonl"), JSON.stringify({
+    at: new Date().toISOString(), commandHash: createHash("sha256").update(command).digest("hex"),
+    reasonHash: createHash("sha256").update(reason).digest("hex"),
+  }) + "\n", "utf8");
 }

@@ -7,6 +7,8 @@ import { join } from "node:path";
 import {
   checkAndRecordSessionRead,
   recordTestAndCheckCircuitBreaker,
+  shouldStopRepeatedFailure,
+  recordFailureOverride,
 } from "./circuit-breaker.js";
 import {
   buildAffectedTestCommand,
@@ -24,6 +26,9 @@ import {
   recordEditPatternAndMine,
   recordTrajectoryAndMine,
   registerCustomMacro,
+  setMacroTrust,
+  verifyMacroRecipe,
+  runVerifiedRecipe,
   syncGitCoChangeHabits,
   type MacroKind,
 } from "./macro-engine.js";
@@ -57,6 +62,11 @@ import {
   type TaskStep,
 } from "./task-reflector.js";
 import { PACKAGE_VERSION } from "./version.js";
+import { appendToolEvidence, type ToolEvidence } from "./evidence-ledger.js";
+import { continueReadReceipt, createReadReceipt } from "./read-receipt.js";
+import { contentSha256 } from "./edit-transaction.js";
+import { changedContentHash, failureFingerprint } from "./test-evidence.js";
+import { escalateReadReferences } from "./lsp-escalation.js";
 
 export interface V3ToolDefinition {
   name: "gf_read" | "gf_edit" | "gf_exec" | "gf_macro";
@@ -72,43 +82,49 @@ export interface V3ToolDefinition {
 export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
   {
     name: "gf_read",
-    description: "Read `targets` (file#sym), `q`, `topicId`.",
+    description: "Read.",
     inputSchema: {
       type: "object",
       properties: {
         targets: { type: "array", items: { type: "string" } },
         q: { type: "string" },
-        topK: { type: "number" },
-        skeleton: { type: "boolean" },
-        dedup: { type: "boolean" },
-        topicId: { type: "string" },
+        topK: {},
+        skeleton: {},
+        dedup: {},
+        detail: {},
+        maxOutputTokens: {},
+        sinceReceipt: {},
+        cursor: {},
+        topicId: {},
         rootDir: { type: "string" },
       },
-      additionalProperties: false,
     },
   },
   {
     name: "gf_edit",
-    description: "Edit `symbol`, lines, `oldCode`, `edits`, `renameTo`.",
+    description: "Edit.",
     inputSchema: {
       type: "object",
       properties: {
         file: { type: "string" },
         symbol: { type: "string" },
-        startLine: { type: "number" },
-        endLine: { type: "number" },
-        oldCode: { type: "string" },
+        startLine: {},
+        endLine: {},
+        oldCode: {},
         newCode: { type: "string" },
-        renameTo: { type: "string" },
+        renameTo: {},
         edits: { type: "array", items: { type: "object" } },
+        mode: { type: "string", enum: ["prepare", "commit"] },
+        proposalId: { type: "string" },
+        expectedSha256: { type: "string" },
+        policy: { type: "string", enum: ["strict", "warn"] },
         rootDir: { type: "string" },
       },
-      additionalProperties: false,
     },
   },
   {
     name: "gf_exec",
-    description: "Run `cmd`/affected-tests/status (run:true).",
+    description: "Exec.",
     inputSchema: {
       type: "object",
       properties: {
@@ -118,42 +134,31 @@ export const V3_TOOL_DEFINITIONS: readonly V3ToolDefinition[] = [
         handle: { type: "string" },
         range: { type: "array", items: { type: "number" } },
         timeoutMs: { type: "number" },
+        planOnly: { type: "boolean" },
+        verifyLevel: { type: "string" },
+        overrideFailureStop: { type: "boolean" },
+        overrideReason: { type: "string" },
         rootDir: { type: "string" },
       },
-      additionalProperties: false,
     },
   },
   {
     name: "gf_macro",
-    description: "Macros/tasks: list,run,save,mine-git,task-*.",
+    description: "Macro.",
     inputSchema: {
       type: "object",
       properties: {
-        action: {
-          type: "string",
-          enum: [
-            "list",
-            "run",
-            "save",
-            "mine",
-            "mine-git",
-            "visualize",
-            "brief",
-            "task-list",
-            "task-run",
-            "task-record",
-            "task-harvest",
-          ],
-        },
+        action: { type: "string", enum: ["list", "run", "propose", "approve", "activate", "revoke", "verify", "recipe-run", "save", "mine", "mine-git", "visualize", "brief", "task-list", "task-run", "task-record", "task-harvest"] },
         id: { type: "string" },
-        kind: { type: "string", enum: ["context-bundle", "command-pipeline", "command-template", "edit-codemod"] },
+        dryRun: { type: "boolean" },
+        autoRun: { type: "boolean" },
+        kind: { type: "string" },
         steps: { type: "array", items: { type: "string" } },
         args: { type: "array", items: { type: "string" } },
         instruction: { type: "string" },
         rootDir: { type: "string" },
       },
       required: ["action"],
-      additionalProperties: false,
     },
   },
 ];
@@ -172,7 +177,7 @@ function plainTextResponse(text: string): V3ToolCallResponse {
   };
 }
 
-export function executeV3ToolCall(
+function executeV3ToolCallCore(
   name: string,
   args: Record<string, unknown> = {},
   defaultRootDir: string = process.cwd(),
@@ -185,6 +190,13 @@ export function executeV3ToolCall(
 
   switch (name) {
     case "gf_read": {
+      const maxOutputTokens = typeof args.maxOutputTokens === "number" && Number.isFinite(args.maxOutputTokens)
+        ? Math.max(0, Math.floor(args.maxOutputTokens)) : undefined;
+      if (typeof args.cursor === "string") {
+        const continued = continueReadReceipt(rootDir, args.cursor, maxOutputTokens);
+        return { content: [{ type: "text", text: continued.text }], structuredContent: { tool: "gf_read", ok: Boolean(continued.receiptId), ...continued } };
+      }
+      const detail = args.detail === "locate" || args.detail === "summary" || args.detail === "code" || args.detail === "closure" ? args.detail : "closure";
       const targets = Array.isArray(args.targets)
         ? args.targets.filter((t): t is string => typeof t === "string" && t.trim().length > 0)
         : undefined;
@@ -219,7 +231,8 @@ export function executeV3ToolCall(
         ...(targets && targets.length > 0 ? { targets } : {}),
         ...(query ? { query } : {}),
         ...(topK !== undefined ? { topK } : {}),
-        includeCallers: true,
+        includeCallers: detail === "closure",
+        includeTypeClosure: detail === "closure",
         includeSkeleton,
         macroHintLookup: (keys) => findMatchingMacroHint(rootDir, keys),
       });
@@ -235,7 +248,8 @@ export function executeV3ToolCall(
             rootDir: candidate,
             query,
             ...(topK !== undefined ? { topK } : {}),
-            includeCallers: true,
+            includeCallers: detail === "closure",
+            includeTypeClosure: detail === "closure",
             includeSkeleton,
             macroHintLookup: (keys) => findMatchingMacroHint(candidate, keys),
           });
@@ -249,7 +263,17 @@ export function executeV3ToolCall(
         }
       }
 
-      if (args.dedup === true && slice.resolvedKeys.length > 0) {
+      if (detail === "locate" || detail === "summary") {
+        const index = getWorkspaceAstIndex(rootDir);
+        slice.text = slice.matchedSymbols.length > 0
+          ? slice.matchedSymbols.map((s) => {
+              if (detail === "locate") return `${s.file}:${s.line}-${s.endLine} ${s.kind} ${s.name}`;
+              const signature = index.getFileAnalysis(s.file)?.ast.symbols.find((item) => item.name === s.name && item.line === s.line)?.signature ?? s.name;
+              return `${s.file}:${s.line}-${s.endLine} ${signature}`;
+            }).join("\n") : slice.text;
+      }
+
+      if (args.dedup === true && maxOutputTokens === undefined && args.sinceReceipt === undefined && args.detail === undefined && slice.resolvedKeys.length > 0) {
         const key = slice.resolvedKeys.join("|");
         const dedupRes = checkAndRecordSessionRead(
           rootDir,
@@ -286,7 +310,15 @@ export function executeV3ToolCall(
         }
       }
 
-      return plainTextResponse((topicPrefix + slice.text + promoNote).trim());
+      const finalText = (topicPrefix + slice.text + promoNote).trim();
+      if (maxOutputTokens !== undefined || typeof args.sinceReceipt === "string" || args.detail !== undefined) {
+        const receipt = createReadReceipt(rootDir, slice.resolvedKeys, finalText, maxOutputTokens,
+          typeof args.sinceReceipt === "string" ? args.sinceReceipt : undefined);
+        return { content: [{ type: "text", text: receipt.text }],
+          structuredContent: { tool: "gf_read", ok: true, receiptId: receipt.receiptId, contentHash: receipt.contentHash,
+            omitted: receipt.omitted, truncated: receipt.truncated, ...(receipt.nextCursor ? { nextCursor: receipt.nextCursor } : {}) } };
+      }
+      return plainTextResponse(finalText);
     }
 
     case "gf_edit": {
@@ -298,6 +330,11 @@ export function executeV3ToolCall(
       const oldCode = typeof args.oldCode === "string" ? args.oldCode : undefined;
       const renameTo = typeof args.renameTo === "string" && args.renameTo.trim() ? args.renameTo.trim() : undefined;
       const edits = Array.isArray(args.edits) ? (args.edits as SingleEditSpec[]) : undefined;
+      const mode = args.mode === "prepare" || args.mode === "commit" ? args.mode : undefined;
+      const proposalId = typeof args.proposalId === "string" ? args.proposalId : undefined;
+      const expectedSha256 = typeof args.expectedSha256 === "string" || (typeof args.expectedSha256 === "object" && args.expectedSha256 !== null)
+        ? args.expectedSha256 as string | Record<string, string> : undefined;
+      const policy = args.policy === "warn" ? "warn" : "strict";
 
       const editRes = executeSurgicalEdit({
         rootDir,
@@ -309,17 +346,21 @@ export function executeV3ToolCall(
         ...(newCode !== undefined ? { newCode } : {}),
         ...(renameTo ? { renameTo } : {}),
         ...(edits ? { edits } : {}),
+        ...(mode ? { mode } : {}),
+        ...(proposalId ? { proposalId } : {}),
+        ...(expectedSha256 ? { expectedSha256 } : {}),
+        policy,
         habitHook: (touchedFiles) => evaluatePostEditHabits(rootDir, touchedFiles, true),
       });
 
-      recordCrossAgentActivity(rootDir, {
+      if (editRes.status !== "PREPARED") recordCrossAgentActivity(rootDir, {
         agentHint: sessionId,
         action: "edit",
         summary: `${editRes.mode} on ${(editRes.touchedFiles.length > 0 ? editRes.touchedFiles : [editRes.file]).join(", ")}${symbol ? "#" + symbol : ""}`,
         files: editRes.touchedFiles.length > 0 ? editRes.touchedFiles : [editRes.file],
         ok: editRes.ok,
       });
-      for (const tf of editRes.touchedFiles.length > 0 ? editRes.touchedFiles : [editRes.file]) {
+      if (editRes.status === "COMMITTED") for (const tf of editRes.touchedFiles) {
         const targetKey = symbol && tf === editRes.file ? `${tf}#${symbol}` : tf;
         recordTrajectoryAndMine(rootDir, {
           sessionId,
@@ -331,14 +372,24 @@ export function executeV3ToolCall(
       }
 
       let codemodNote = "";
-      if (editRes.ok && oldCode && newCode) {
+      if (editRes.status === "COMMITTED" && oldCode && newCode) {
         const cm = recordEditPatternAndMine(rootDir, file, oldCode, newCode);
         if (cm) {
           codemodNote = `\n// [Auto-Compiled Codemod] Isomorphic edit promoted to '${cm.id}': call gf_macro(action="run", id="${cm.id}", args=["file1", "file2"]) to batch-apply with 0 LLM tokens!`;
         }
       }
 
-      return plainTextResponse(editRes.text + codemodNote);
+      const proposedFiles = Object.keys(editRes.baseHashes ?? {});
+      const proposedTests = editRes.status === "PREPARED" ? resolveAffectedTests(rootDir, proposedFiles).affectedTests : [];
+      const risk = editRes.mode === "rename" || editRes.diagnostics.some((d) => d.severity === "error") ? "high"
+        : proposedFiles.length > 1 || editRes.diagnostics.length > 0 ? "medium" : "low";
+      return { content: [{ type: "text", text: editRes.text + (editRes.diff ? `\n${editRes.diff}` : "") + codemodNote }],
+        structuredContent: { tool: "gf_edit", ok: editRes.ok, status: editRes.status ?? (editRes.ok ? "COMMITTED" : "REJECTED"),
+          touchedFiles: editRes.touchedFiles, ...(editRes.proposalId ? { proposalId: editRes.proposalId } : {}),
+          ...(editRes.baseHashes ? { baseHashes: editRes.baseHashes } : {}),
+          ...(editRes.diff ? { diff: editRes.diff } : {}),
+          risk, blocking: editRes.diagnostics.filter((d) => d.severity === "error"), proposedTests,
+          ...(editRes.recoveryId ? { recoveryId: editRes.recoveryId } : {}) } };
     }
 
     case "gf_exec": {
@@ -395,14 +446,33 @@ export function executeV3ToolCall(
           rootDir,
           changedFiles
         );
+        const verifyLevel = args.verifyLevel === "full" || args.verifyLevel === "safe" ? args.verifyLevel : "fast";
+        const packagePath = join(rootDir, "package.json");
+        let hasFullSuite = false;
+        try { hasFullSuite = typeof JSON.parse(readFileSync(packagePath, "utf8")).scripts?.test === "string"; } catch { /* no package script */ }
+        const useFull = verifyLevel === "full" || (verifyLevel === "safe" && affectedTests.length === 0 && hasFullSuite);
+        const selectedTests = useFull && hasFullSuite ? ["<npm test full suite>"] : affectedTests;
+        const suggestedCmd = useFull && hasFullSuite ? "npm test" : buildAffectedTestCommand(affectedTests, rootDir);
+        const coverageStatus = affectedTests.length > 0 ? "TARGETED" : "UNKNOWN";
+        const plan = { selectedTests, selectionReasons: selectedTests.map((test) => `${test}: ${useFull ? "full-suite verification" : "reverse import or test-name match (up to 6 hops)"}`),
+          coverageStatus, uncoveredRisk: affectedTests.length === 0 ? "No matching test files found" : "Heuristic routing may miss dynamic dependencies",
+          planHash: `sha256:${contentSha256(JSON.stringify([resolvedChanges, selectedTests, suggestedCmd]))}` };
+        if (args.planOnly === true) return { content: [{ type: "text", text: JSON.stringify(plan) }],
+          structuredContent: { tool: "gf_exec", ok: true, status: "UNKNOWN", ...plan } };
         if (affectedTests.length === 0) {
-          return plainTextResponse(
+          if (!useFull || !hasFullSuite) return { content: [{ type: "text", text:
             `NONE [affected-tests] 0 test files matched ${resolvedChanges.length} changed file(s). ` +
               `If you expected hits, check the test directory/naming convention (test/, tests/, __tests__, *.test.*, *_test.*).`
-          );
+          }], structuredContent: { tool: "gf_exec", ok: false, status: "NO_TESTS", ...plan } };
         }
-        const suggestedCmd = buildAffectedTestCommand(affectedTests, rootDir);
         if (args.run === true || cmd === "run-affected-tests") {
+          const patchHash = changedContentHash(rootDir, resolvedChanges);
+          if (args.overrideFailureStop === true && (typeof args.overrideReason !== "string" || !args.overrideReason.trim()))
+            return plainTextResponse("REJECTED [missing-override-reason] Provide overrideReason.");
+          if (args.overrideFailureStop !== true && shouldStopRepeatedFailure(rootDir, sessionId, suggestedCmd, patchHash))
+            return { content: [{ type: "text", text: "REJECTED [repeated-failure] Same command, patch and failure occurred 3 times; inspect the diagnostic packet or pass overrideFailureStop with a reason." }],
+              structuredContent: { tool: "gf_exec", ok: false, status: "UNKNOWN", ...plan } };
+          if (args.overrideFailureStop === true) recordFailureOverride(rootDir, suggestedCmd, args.overrideReason as string);
           const runRes = execAndDehydrate({
             rootDir,
             command: suggestedCmd,
@@ -412,11 +482,17 @@ export function executeV3ToolCall(
           autoLogExecutedCommand(rootDir, suggestedCmd, {
             ...(instruction ? { instruction } : {}),
           });
+          const status = runRes.exitCode === 124 ? "TIMEOUT" : runRes.ok ? "PASS" : "FAIL";
+          const fingerprint = runRes.ok ? undefined : failureFingerprint(rootDir, suggestedCmd, runRes.text, resolvedChanges);
+          const cb = recordTestAndCheckCircuitBreaker(rootDir, sessionId, suggestedCmd, runRes.ok, 3, fingerprint, patchHash);
           return {
             content: [
               { type: "text", text: `# Affected Tests Executed (${affectedTests.join(", ")}):\n${runRes.text}` },
             ],
-            structuredContent: { tool: "gf_exec", ok: runRes.ok, exitCode: runRes.exitCode },
+            structuredContent: { tool: "gf_exec", ok: runRes.ok, exitCode: runRes.exitCode, status,
+              ...(fingerprint ? { failureFingerprint: fingerprint } : {}),
+              ...(runRes.handle ? { rawLogHandle: runRes.handle } : {}),
+              ...(cb.tripped ? { repeatedFailure: true } : {}), ...plan },
           };
         }
         return plainTextResponse(
@@ -431,6 +507,16 @@ export function executeV3ToolCall(
           `# Preview (not executed)\nCmd: ${cmd}\nPass run: true to execute.`
         );
       }
+
+      const currentChanges = changedFiles ?? resolveAffectedTests(rootDir).changedFiles;
+      const patchHash = changedContentHash(rootDir, currentChanges);
+      if (args.overrideFailureStop === true && (typeof args.overrideReason !== "string" || !args.overrideReason.trim()))
+        return plainTextResponse("REJECTED [missing-override-reason] Provide overrideReason.");
+      if (args.overrideFailureStop !== true && shouldStopRepeatedFailure(rootDir, sessionId, cmd, patchHash)) {
+        return { content: [{ type: "text", text: "REJECTED [repeated-failure] Same command, patch and failure occurred 3 times. Review diagnostics or pass overrideFailureStop with a reason." }],
+          structuredContent: { tool: "gf_exec", ok: false, status: "UNKNOWN" } };
+      }
+      if (args.overrideFailureStop === true) recordFailureOverride(rootDir, cmd, args.overrideReason as string);
 
       const execRes = execAndDehydrate({
         rootDir,
@@ -465,7 +551,8 @@ export function executeV3ToolCall(
             }
           : {}),
       });
-      const cb = recordTestAndCheckCircuitBreaker(rootDir, sessionId, cmd, execRes.ok);
+      const fingerprint = execRes.ok ? undefined : failureFingerprint(rootDir, cmd, execRes.text, currentChanges);
+      const cb = recordTestAndCheckCircuitBreaker(rootDir, sessionId, cmd, execRes.ok, 3, fingerprint, patchHash);
       const cbNote = cb.tripped && cb.rescuePacket ? `\n\n${cb.rescuePacket}` : "";
       const promoNote =
         newlyCompiled.length > 0
@@ -481,7 +568,10 @@ export function executeV3ToolCall(
 
       return {
         content: [{ type: "text", text: execRes.text + cbNote + promoNote + localToolNote }],
-        structuredContent: { tool: "gf_exec", ok: execRes.ok, exitCode: execRes.exitCode },
+        structuredContent: { tool: "gf_exec", ok: execRes.ok, exitCode: execRes.exitCode,
+          status: execRes.exitCode === 124 ? "TIMEOUT" : execRes.ok ? "PASS" : "FAIL",
+          ...(fingerprint ? { failureFingerprint: fingerprint } : {}),
+          ...(execRes.handle ? { rawLogHandle: execRes.handle } : {}) },
       };
     }
 
@@ -497,7 +587,7 @@ export function executeV3ToolCall(
           lines.push(`# Compiled Deterministic Macros (${macros.length}):`);
           for (const m of macros) {
             lines.push(
-              `- ${m.id} [${m.kind}, uses=${m.occurrences}]: ${m.description}` +
+              `- ${m.id} [${m.kind}, state=${m.state ?? "discovered"}, uses=${m.occurrences}${m.verifiedRecipe ? ", verified" : ""}]: ${m.description}` +
                 (m.scriptPath ? ` (script: ${m.scriptPath})` : "")
             );
           }
@@ -675,8 +765,27 @@ export function executeV3ToolCall(
         const templateArgs = Array.isArray(args.args)
           ? args.args.filter((a): a is string => typeof a === "string")
           : [];
-        const res = executeMacro(rootDir, id, templateArgs);
+        const res = executeMacro(rootDir, id, templateArgs, args.dryRun === true);
         return plainTextResponse(res.text);
+      }
+
+      if (action === "verify") {
+        const id = typeof args.id === "string" ? args.id.trim() : "";
+        const command = Array.isArray(args.steps) && typeof args.steps[0] === "string" ? args.steps[0] : "";
+        const result = verifyMacroRecipe(rootDir, id, command);
+        return plainTextResponse(result.text);
+      }
+      if (action === "recipe-run") {
+        const id = typeof args.id === "string" ? args.id.trim() : "";
+        const templateArgs = Array.isArray(args.args) ? args.args.filter((a): a is string => typeof a === "string") : [];
+        return plainTextResponse(runVerifiedRecipe(rootDir, id, templateArgs).text);
+      }
+
+      if (action === "propose" || action === "approve" || action === "activate" || action === "revoke") {
+        const id = typeof args.id === "string" ? args.id.trim() : "";
+        const macro = id ? setMacroTrust(rootDir, id, action, args.autoRun === true) : undefined;
+        return plainTextResponse(macro ? `OK [macro-${action}] id=${id} state=${macro.state} permissions=${macro.permissions?.join(",") ?? "read-only"}`
+          : `REJECTED [macro-${action}] id=${id || "missing"}; check current state and workspace version.`);
       }
 
       return {
@@ -698,4 +807,57 @@ export function executeV3ToolCall(
         isError: true,
       };
   }
+}
+
+export function executeV3ToolCall(
+  name: string,
+  args: Record<string, unknown> = {},
+  defaultRootDir: string = process.cwd(),
+  resolveOpts?: SmartWorkspaceResolveOptions
+): V3ToolCallResponse {
+  const started = Date.now();
+  const result = executeV3ToolCallCore(name, args, defaultRootDir, resolveOpts);
+  try {
+    const rootDir = resolveSmartWorkspaceRoot(args, defaultRootDir, resolveOpts).rootDir;
+    const output = result.content.map((item) => item.text).join("\n");
+    let testStatus: ToolEvidence["testStatus"] = "UNKNOWN";
+    if (name === "gf_exec" && args.run === true) {
+      if (/^TIMEOUT\b/m.test(output)) testStatus = "TIMEOUT";
+      else if (/^NONE \[affected-tests\]/m.test(output)) testStatus = "NO_TESTS";
+      else if (/^PASS\b/m.test(output) || /\nPASS\b/m.test(output)) testStatus = "PASS";
+      else if (/^FAIL\b/m.test(output) || /\nFAIL\b/m.test(output)) testStatus = "FAIL";
+    }
+    const usage = args.observedModelUsage && typeof args.observedModelUsage === "object"
+      ? args.observedModelUsage as Record<string, unknown> : undefined;
+    const observedModelUsage = usage ? {
+      ...(typeof usage.inputTokens === "number" && Number.isFinite(usage.inputTokens) ? { inputTokens: usage.inputTokens } : {}),
+      ...(typeof usage.outputTokens === "number" && Number.isFinite(usage.outputTokens) ? { outputTokens: usage.outputTokens } : {}),
+    } : undefined;
+    const receipt = appendToolEvidence(rootDir, { tool: name, output, durationMs: Date.now() - started, testStatus,
+      ...(typeof args.taskId === "string" ? { taskId: args.taskId } : {}),
+      ...(args.verifiedOutcome === "VERIFIED" || args.verifiedOutcome === "FAILED" ? { verifiedOutcome: args.verifiedOutcome } : {}),
+      ...(observedModelUsage && Object.keys(observedModelUsage).length > 0 ? { observedModelUsage } : {}) });
+    result.structuredContent = { ...result.structuredContent, evidenceId: receipt.artifactHash };
+  } catch { /* Telemetry is best effort and never changes tool behavior. */ }
+  return result;
+}
+
+export async function executeToolCallWithEscalation(
+  name: string, args: Record<string, unknown> = {}, defaultRootDir: string = process.cwd(),
+  resolveOpts?: SmartWorkspaceResolveOptions
+): Promise<V3ToolCallResponse> {
+  const result = executeV3ToolCall(name, args, defaultRootDir, resolveOpts);
+  if (name !== "gf_read" || args.lsp === false || (args.detail !== undefined && args.detail !== "closure") ||
+      args.maxOutputTokens !== undefined || !Array.isArray(args.targets) || args.targets.length !== 1 ||
+      typeof args.targets[0] !== "string" || result.content[0]?.text.includes("[Blast Radius")) return result;
+  try {
+    const rootDir = resolveSmartWorkspaceRoot(args, defaultRootDir, resolveOpts).rootDir;
+    const lsp = await escalateReadReferences(rootDir, args.targets[0]);
+    if (!lsp) return result;
+    const output = `${result.content[0]?.text ?? ""}\n${lsp.text}`;
+    result.content = [{ type: "text", text: output }];
+    const evidence = appendToolEvidence(rootDir, { tool: name, output, durationMs: 0 });
+    result.structuredContent = { ...result.structuredContent, lspConfidence: "verified", evidenceId: evidence.artifactHash };
+  } catch { /* An unavailable server must leave the fast AST result intact. */ }
+  return result;
 }

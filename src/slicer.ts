@@ -61,6 +61,7 @@ export interface ReadOptions {
   query?: string;
   topK?: number;
   includeCallers?: boolean;
+  includeTypeClosure?: boolean;
   includeSkeleton?: boolean;
   macroHintLookup?: (keys: string[]) => string | undefined;
 }
@@ -2297,8 +2298,10 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
             formatNumberedLines(lines, sym.line, sym.endLine),
           ];
 
-          const typeClosure = resolveTypeClosure(index, fileData.ast, fileData.content, [sym]);
-          if (typeClosure.length > 0) blockLines.push(...typeClosure);
+          if (options.includeTypeClosure !== false) {
+            const typeClosure = resolveTypeClosure(index, fileData.ast, fileData.content, [sym]);
+            if (typeClosure.length > 0) blockLines.push(...typeClosure);
+          }
 
           if (includeCallers) {
             const blast = computeBlastRadius(
@@ -2417,6 +2420,8 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
       relPath: string;
       sym: AstSymbol;
       score: number;
+      baseScore: number;
+      directTextMatch: boolean;
       fileContent: string;
       fileAst: FileAstAnalysis;
       fileSize: number;
@@ -2451,7 +2456,7 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
         if (pathLower.includes(id)) pathScore += 12;
       }
       for (const tok of queryWords) {
-        if (pathLower.includes(tok)) pathScore += 3;
+        if (pathLower.includes(tok)) pathScore += recallWordSet.has(tok) ? 0 : 3;
       }
       for (const cjk of cjkWords) {
         if (relPath.includes(cjk)) pathScore += 8;
@@ -2459,6 +2464,8 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
 
       for (const sym of fileData.ast.symbols) {
         let score = pathScore;
+        let recallScore = 0;
+        let directTextMatch = false;
         const symLower = sym.name.toLowerCase();
         const sigLower = sym.signature.toLowerCase();
         // Tokenize & stem the symbol identifier itself for morphological stem matching
@@ -2494,9 +2501,12 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
           const signatureWeight = weak ? 0 : 2;
           if ((symLower === tok || symWordSet.has(tok)) && nameWordHits < 4) {
             score += wholeWord;
+            if (weak) recallScore += wholeWord;
             nameWordHits += 1;
           } else if (symLower.includes(tok) && nameWordHits < 4) {
-            score += tok.length >= 5 ? substringLong : substringShort;
+            const weight = tok.length >= 5 ? substringLong : substringShort;
+            score += weight;
+            if (weak) recallScore += weight;
             nameWordHits += 1;
           } else if (signatureWeight > 0 && sigLower.includes(tok) && signatureWordHits < 3) {
             score += signatureWeight;
@@ -2511,10 +2521,14 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
           if (stemHits >= 3) break;
           const weak = recallStems.has(st);
           if (symStemSet.has(st)) {
-            score += weak ? 5 : 10;
+            const weight = weak ? 5 : 10;
+            score += weight;
+            if (weak) recallScore += weight;
             stemHits += 1;
           } else if (st.length >= 4 && symTokenized.stems.some((ss) => isFuzzyTokenMatch(st, ss))) {
-            score += weak ? 4 : 8;
+            const weight = weak ? 4 : 8;
+            score += weight;
+            if (weak) recallScore += weight;
             stemHits += 1;
           }
         }
@@ -2526,6 +2540,7 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
           const bodyWindow = fileLines
             .slice(Math.max(0, sym.line - 1), Math.min(fileLines.length, sym.endLine))
             .join("\n");
+          directTextMatch = docWindow.includes(options.query) || bodyWindow.includes(options.query);
           // Longer doc blocks are slightly discounted so documentation volume alone cannot
           // dominate a precise name/doc match.
           const docLengthNorm = 1 + Math.min(0.5, docWindow.length / 2400);
@@ -2563,6 +2578,8 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
             relPath,
             sym,
             score,
+            baseScore: score - recallScore,
+            directTextMatch,
             fileContent: fileData.content,
             fileAst: fileData.ast,
             fileSize: fileData.size,
@@ -2571,6 +2588,12 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
       }
     }
 
+    // A symbol's own exact Chinese text is stronger evidence than mined identifiers.
+    // Keep the unexpanded order when that direct evidence exists; L1/L2 still rescue
+    // English-only symbols where the query has no direct text match.
+    if (candidates.some((candidate) => candidate.directTextMatch)) {
+      for (const candidate of candidates) candidate.score = candidate.baseScore;
+    }
     candidates.sort((a, b) => b.score - a.score || a.relPath.localeCompare(b.relPath) || a.sym.line - b.sym.line);
 
     const topScore = candidates[0]?.score ?? 0;
@@ -2643,8 +2666,10 @@ export function executeSurgicalRead(options: ReadOptions): SliceResult {
 
         // Default search keeps a short slice. Explicit topK still attaches closure and callers.
         if (!adaptive) {
-          const typeClosure = resolveTypeClosure(index, c.fileAst, c.fileContent, [c.sym], 3);
-          if (typeClosure.length > 0) block.push(...typeClosure);
+          if (options.includeTypeClosure !== false) {
+            const typeClosure = resolveTypeClosure(index, c.fileAst, c.fileContent, [c.sym], 3);
+            if (typeClosure.length > 0) block.push(...typeClosure);
+          }
 
           if (includeCallers) {
             const blast = computeBlastRadius(index, c.relPath, c.sym.name, 4, c.sym.parentClass);

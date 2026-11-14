@@ -4,7 +4,7 @@
   "display_name": "GraphFlow 外科手术级省 Token 代码引擎",
   "display_name_en": "GraphFlow Token-First Surgical Code Engine",
   "author": "roarpeng",
-  "description_zh": "外科手术级省 Token 代码引擎：6 种语言真 AST、自研 L0 语义索引、含继承的爆炸半径守卫、歧义安全重命名、受影响测试路由与日志脱水，节省 90% 以上 Token 消耗。",
-  "description_en": "Token-First Surgical Code Engine (gf_read, gf_edit, gf_exec, gf_macro) for TS/JS, Python, Go, Rust, C/C++, C#. Slices exact AST symbols, type closures, caller blast radius, ambiguous-safe renames, and dehydrated logs to save >90% tokens.",
+  "description_zh": "GraphFlow 代码引擎：符号检索、可恢复编辑事务、测试证据与可信本地宏。",
+  "description_en": "GraphFlow code engine: symbol search, recoverable edit transactions, test evidence and trusted local macros.",
   "iconLocalPath": "_icon.png"
 }

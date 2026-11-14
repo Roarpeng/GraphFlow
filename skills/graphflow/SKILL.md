@@ -1,115 +1,34 @@
 ---
 name: graphflow
 version: 3.9.2
-display_name: GraphFlow 外科手术级省 Token 代码引擎
-display_name_en: GraphFlow Token-First Surgical Code Engine
+display_name: GraphFlow 外科手术级代码引擎
+display_name_en: GraphFlow Surgical Code Engine
 author: roarpeng
-description: |
-  Token-First Surgical Code Engine (gf_read, gf_edit, gf_exec, gf_macro) for TS/JS, Python, Go, Rust, C/C++, C# — true AST for all six language families (TS/JS via `@babel/parser`; Python/Go/Rust/C/C++/C# via optional tree-sitter grammars, structural fallback), self-written L0 semantic index, inheritance-aware blast-radius guards, ambiguous-safe rename, type-aware knowledge-graph calls with alias-resolved imports, precision-capped BM25 doc↔code links, `extends`-aware affected-test routing, six-language parity (51 tests) with packed EN/ZH recall 1.000, offline task reflection/auto-harvest, dehydrated test logs (1-line PASS), bilingual 中文/pinyin code search, git co-change habit macros.
-description_zh: |
-  外科手术级省 Token 代码引擎：6 种语言真 AST（TS/JS 用 @babel/parser；其余用可选 tree-sitter，缺省回退结构化分析）、自研 L0 语义索引、含继承/super 的爆炸半径守卫、歧义安全重命名、类型感知知识图谱 calls 与别名解析 imports、BM25 上限控制的文档↔代码链接、extends 感知的受影响测试路由、六语言平价（51 项）与 packed EN/ZH 召回 1.000、离线任务反射/自动收割、测试日志脱水、双语检索、习惯宏。
-description_en: |
-  Token-First Surgical Code Engine (gf_read, gf_edit, gf_exec, gf_macro) for TS/JS, Python, Go, Rust, C/C++, C#. Slices exact AST symbols, type closures, caller blast radius, ambiguous-safe renames, affected-test routing, and dehydrated logs to save >90% tokens.
+description: Use GraphFlow's four MCP tools to inspect, edit, test, and automate code in an indexed workspace.
+description_zh: 使用 GraphFlow 四个 MCP 工具定位、修改、测试代码并管理本地宏。
+description_en: Use GraphFlow's four MCP tools to inspect, edit, test, and automate code in an indexed workspace.
 allowed-tools:
   - "gf_read"
   - "gf_edit"
   - "gf_exec"
   - "gf_macro"
 examples_zh:
-  - "精准切片并计算函数的调用爆炸半径"
-  - "零 LLM 跨文件安全重命名方法并检查歧义"
-  - "运行变更代码受影响的单元测试并脱水显示关键结果"
+  - "定位函数和调用方"
+  - "预览并安全提交跨文件修改"
+  - "运行受影响的测试"
 examples_en:
-  - "Slice symbol AST and calculate blast radius"
-  - "Safely rename method across repository with AST guard"
-  - "Run affected tests with dehydrated output"
+  - "Locate a function and its callers"
+  - "Prepare and commit a guarded edit"
+  - "Run affected tests"
 ---
 
-# GraphFlow — Token-First Surgical Engine (外科手术级省 Token 引擎)
+# GraphFlow
 
-Always prefer the 4 surgical `gf_*` MCP tools over raw full-file reads or verbose test runs (请优先使用以下 4 个 `gf_*` 工具代替整文件读取与全量测试):
+Use the four GraphFlow MCP tools for supported code exploration, edits and targeted tests. Pass the absolute workspace path as `rootDir` when workspace resolution is uncertain.
 
-1. **`gf_read`** (`targets`, `q`, `topK`, `skeleton`, `dedup`, `rootDir`):
-   - Read exact symbols (`"src/file.ts#symbol"`, `"src/file.ts:L1-L2"`) with automatic **Cross-File Type Closure** and receiver-type-aware `[Blast Radius]` caller snippets — blast-radius target resolution consults the self-written L0 semantic index first (confidence ≥0.75) and only then the receiver/inheritance heuristics: declarations, annotations, `new Type()`, parameters, class fields, `this`/`self`/`cls`/`Self`, `Class.`/`Class::` and the Go/Rust/C++/C# declaration forms; `super`/`base` resolve to the parent class, subclass receivers dispatch to inherited base methods unless an intermediate class overrides, last assignment wins per scope, and generic/array/nullable annotations are unwrapped, so `A.cancel` vs `B.cancel` in one file disambiguate and only matching receivers count (精准读取目标函数/类，自动附带跨文件类型定义与调用点爆炸半径；调用目标先查自研 L0 语义索引（置信度 ≥0.75），再回退接收者/继承启发式；方法调用按推断出的接收者类型消歧，`super`/`base` 指向父类，子类可命中未覆写的基类方法，最后赋值优先，泛型/数组/可空标注会解包).
-   - Bilingual keyword search (`q: "keyword / 中文关键词 / pinyin"`) across symbol names, docstrings and comments — validated at **1.000 EN / 1.000 ZH recall@1/@3/@5** on the isolated + packed (6 symbols/file) corpus. Phrases outside that glossary use a repo PMI map (`.graphflow/zh-identifier-map.json`) plus a small curated colloquial lexicon; `registerZhEnModel` stays off unless `GRAPHFLOW_ZH_EN_MODEL=1`. Omitting `topK` returns one slice when the top score margin is confident, otherwise the near-tie cluster, without type closure (双语检索在孤立 + packed 语料上 EN/ZH @1/@3/@5 仍为 1.000；词表外说法走仓库 PMI 映射和小型口语词表；默认不传 `topK` 时高置信只切 1 条，接近的分数保留一小簇，且不附类型闭合).
-   - Fold large files into symbol skeletons (`"src/file.ts"`, `skeleton: true`) and pass `dedup: true` to skip unchanged files.
-2. **`gf_edit`** (`file`, `symbol`, `newCode`, `edits`, `renameTo`, `rootDir`):
-   - Edit symbols or line ranges in-place, apply multi-file atomic batch `edits` bottom-up with zero line drift, or run zero-LLM cross-repo symbol rename (`renameTo`) — rename asks the semantic index for a resolved target first (confidence ≥0.75) and then reuses the receiver/inheritance resolution: foreign-receiver-only files are skipped, mixed target/foreign files are rejected as `REJECTED [ambiguous-symbol]`, same-name sibling declarations are rejected before writing, and unresolved callers roll the rename back with the file list. **Import paths are never rewritten**: comments and string/template literals are masked with equal-length placeholders before replacing, so renaming `combineURLs` cannot turn `./combineURLs.js` into `./joinURLs.js` (import 路径不会被重命名改动：替换前先对注释与字符串/模板串做等长遮蔽，因此重命名 `combineURLs` 不会把 `./combineURLs.js` 改成 `./joinURLs.js`). (重命名先查语义索引（置信度 ≥0.75），再复用接收者/继承解析：跳过仅外部接收者命中的文件；目标与外部接收者混用的文件以 `REJECTED [ambiguous-symbol]` 拒绝；同名兄弟声明写入前拒绝；仍有未解析调用方则回滚并返回文件清单).
-   - Syntax guards use the true-AST backends when installed — `@babel/parser` for TS/JS, tree-sitter ERROR/MISSING diagnostics for Python/Go/Rust/C/C++/C#; the structural analyzers' heuristic checks (brace/declaration, Python missing-colon/bracket diagnostics) are the fallback and apply when `GRAPHFLOW_TREE_SITTER=0`. Caller-arity checks and struct/interface field-deletion guards also apply (语法守卫使用已安装的真 AST 后端：TS/JS 用 `@babel/parser`，其余 5 种用 tree-sitter 的 ERROR/MISSING 诊断；结构化分析器的启发式检查为回退，`GRAPHFLOW_TREE_SITTER=0` 时生效；另有调用方参数个数校验与结构体字段删除引用守卫).
-3. **`gf_exec`** (`cmd`, `changedFiles`, `handle`, `run`, `timeoutMs`, `rootDir`):
-   - Run `cmd: "affected-tests"` (2-hop reverse import router + `tsconfig.json`/`jsconfig.json` JSONC `baseUrl`/`paths` aliases with `extends` chains, nearest nested configs and root project `references` + dynamic `import()`/`require()`; honors `package.json` `scripts.test`) or any command with output dehydration. It recognizes `tests/`, `__tests__/`, `spec/`, `.test.*`/`.spec.*`, `.test.mts`/`.cts`, `*_test.go`, `test_*.py`, `*Tests.cs`; routing stays heuristic — no nested project-to-project reference traversal, no Node `exports` map, `node_modules` `extends` stops at the workspace root (2-hop 反向 import 路由 + tsconfig/jsconfig 别名（含 extends 链、最近嵌套配置、根 references）+ 动态 import；识别常见测试约定；不做嵌套项目间 reference 遍历、不支持 Node exports map，node_modules 的 extends 止于工作区根).
-   - Built-in status diagnostic: `cmd: "status"` (or `cmd: "doctor"`) returns the in-process GraphFlow runtime & workspace binding receipt (`PASS [graphflow-status]`, active `rootDir` & resolution source, indexed file/symbol/macro counts, and detected agent registration matrix) directly via MCP without requiring `run: true` or spawning a shell (内置状态诊断：`cmd: "status"` 或 `"doctor"` 直接返回当前生效 `rootDir` 及来源、索引与宏统计、Agent 注册矩阵，无需传 `run: true`，也不会作为外部 shell 命令执行；命令行仍可用 `graphflow status`).
-   - **`run: true` is required to execute shell commands — without it the call is a preview only** (执行 shell 命令或受影响测试必须传 `run: true`，否则仅返回预览；测试通过仅回 1 行 `PASS`；失败时内联最多 5 行源码上下文，包括 `Error:` 行紧跟栈帧与 Python traceback 的情况；连续 3 次失败触发死循环熔断急救包).
-   - Budget: **600 s per command by default**, not 60 s. A run stopped by the budget returns `TIMEOUT …` (exit 124) with the last output lines and a `handle` — never a plain `FAIL`, so a killed run is never confused with a failing test. Raise it per call with `timeoutMs` or per workspace with `GRAPHFLOW_EXEC_TIMEOUT_MS`; output above 64 MB returns `OUTPUT-LIMIT …` instead of a truncated buffer (默认 600 s 而非 60 s；被预算截断返回 `TIMEOUT`（exit 124）并附最后输出与 handle，不会伪装成普通失败；单次用 `timeoutMs`、工作区用 `GRAPHFLOW_EXEC_TIMEOUT_MS`；输出超 64 MB 返回 `OUTPUT-LIMIT`).
-   - Recall full archived output any time via the returned `handle` + `range`.
-4. **`gf_macro`** (`action: "list" | "run" | "save" | "mine" | "mine-git" | "visualize" | "brief" | "task-list" | "task-run" | "task-record" | "task-harvest"`, `rootDir`):
-   - Mine git history co-change coupling (`mine-git`), run auto-compiled `.graphflow/macros/*.mjs` scripts with zero LLM turns, export the interactive knowledge-graph HTML, or manage local reflected tasks (`task-list` / `task-run` / `task-record` / `task-harvest` with `instruction` + `steps`) — see Task reflection below. Graph: a real best-effort graph with type-aware `calls` (receiver-matched targets; foreign receivers dropped), `imports` (relative paths + root tsconfig/jsconfig aliases), `defines` (file → symbol), `doc-links-code` and `co-edit` edges; method ids are class-qualified (`sym:file#Class.method`). `doc-links-code` edges are self-written BM25/IDF + PMI scored with per-section/per-symbol caps (≤3) and a global `GRAPHFLOW_DOC_LINKS_MAX` (default 400), confidence-labelled; `.graphflow/doc-link-feedback.json` is read-only accept/reject feedback. Edges are best-effort heuristics, not type-checked, capped at 5000; Go/C# import edges use a stem/dir fallback (知识图谱 HTML 为真实依赖图：类型感知 calls（按接收者匹配目标、外部接收者丢弃）、imports（相对路径 + 根 tsconfig/jsconfig 别名）、defines/doc-links-code/co-edit 五种边，方法节点 id 带类名；文档↔代码边为自研 BM25/IDF + PMI 打分，受每小节/每符号上限（≤3）与全局 `GRAPHFLOW_DOC_LINKS_MAX`（默认 400）约束并带置信度；`.graphflow/doc-link-feedback.json` 为只读的接受/拒绝反馈；边为启发式、非类型检查、上限 5000；另可管理本地任务反射：task-list / task-run / task-record / task-harvest).
+- `gf_read`: use `targets` for `file#symbol` or `q` for keywords. Optional `detail`, `maxOutputTokens`, `sinceReceipt` and `cursor` control output and continuation. A receipt is tied to the branch and source hashes.
+- `gf_edit`: use `mode: "prepare"` to review the diff and diagnostics, then `mode: "commit"` with `proposalId`. Stale snapshots are rejected. Contract errors block by default; `policy: "warn"` is an explicit compatibility override. Multi-file rollback uses a recovery journal.
+- `gf_exec`: use `cmd: "affected-tests"` to select relevant tests; `planOnly` previews selection and `run: true` executes. Treat `NO_TESTS`, `UNKNOWN` and `TIMEOUT` separately from `PASS`. Repeated identical failures stop execution until a reasoned override or new evidence.
+- `gf_macro`: inspect and explicitly approve and activate effectful macros before running them. Command parameters are passed as argv; verified recipes recheck their verification command.
 
-## Setup & Workspace Binding — register the MCP server (安装与工作区绑定)
-
-This skill is the usage layer; the `gf_*` tools live in the GraphFlow MCP server. If they are not registered yet, run this **from the project you want to work on**:
-
-```bash
-npx @roarpeng/graphflow@latest install               # global registration + active workspace lease
-npx @roarpeng/graphflow@latest install --workspace   # also writes workspace-pinned .cursor/mcp.json, .vscode/mcp.json, .mcp.json
-```
-
-That auto-detects your agents and registers MCP + Skill + Rules + Hooks, merging GraphFlow hooks into existing host hook configs and preserving user hooks (从工作区根目录执行；安装器会探测已安装 Agent 并注册 MCP + Skill + Rules + Hooks，钩子为合并写入并保留用户钩子). Check what is registered with `graphflow status` (CLI) or `gf_exec({ cmd: "status" })` (MCP) — it prints one line per agent, e.g. `[MCP ✓] [Skill ✓] [Rule ✓] [Hook ✓] Cursor (cursor)` (每个 Agent 一行显示 MCP/Skill/Rule/Hook 注册状态). `graphflow uninstall` removes only GraphFlow-owned registrations, including only GraphFlow's own hook entries (卸载只删除 GraphFlow 自己的注册项与钩子条目).
-
-**Workspace Root Binding (`rootDir`) in Multi-Project / Global MCP Hosts (`user-graphflow`):**
-- Global MCP servers (e.g. `~/.cursor/mcp.json` mounted as `user-graphflow`) run as a long-lived background process whose initial `process.cwd()` may point at an earlier project.
-- **Best practice**: Pass `rootDir: "<project-absolute-path>"` (never `~`, AppData, or unexpanded `${workspaceFolder}`) on `gf_*` calls, or run `graphflow install --workspace` to pin `GRAPHFLOW_WORKSPACE_ROOT` in the project's local MCP config (建议显式传当前项目的绝对路径 `rootDir`（勿传 `~`、AppData 或未展开的 `${workspaceFolder}`），或用 `graphflow install --workspace` 生成带 `GRAPHFLOW_WORKSPACE_ROOT` 的工作区级配置).
-- **Automatic workspace resolution when `rootDir` is omitted**: GraphFlow resolves the target repository in order: (1) explicit `rootDir` (which also locks session stickiness for subsequent calls); (2) absolute paths in `targets` / `file` / `edits` / `changedFiles` (walks up to the nearest `.graphflow` or `.git` root); (3) relative file or keyword probing across the active workspace lease (`~/.graphflow/active-workspace.json`, refreshed automatically by host hooks, VS Code/Cursor window focus, and CLI `--root`) and sibling `.graphflow` repositories; (4) `GRAPHFLOW_WORKSPACE_ROOT` -> `process.cwd()` (省略 `rootDir` 时按优先级自动定位：显式 `rootDir` 并锁定会话粘性 -> 目标绝对路径向上寻根 -> 相对目标文件与关键词在活跃工作区租约 `~/.graphflow/active-workspace.json` 及同级 `.graphflow` 仓库中探测 -> `GRAPHFLOW_WORKSPACE_ROOT` -> `process.cwd()`).
-
-Check parser backends with `graphflow doctor parsers` (add `--strict` to fail when true AST is unavailable; alias `graphflow parsers`). From a source checkout, `npm run verify:parsers` runs the true-AST vs forced-structural matrix (`GRAPHFLOW_TREE_SITTER=0`) and `npm run preflight` runs the static release gate (解析器后端用 `graphflow doctor parsers` 查看，`--strict` 在真 AST 不可用时失败，别名为 `graphflow parsers`；源码检出下 `npm run verify:parsers` 跑真 AST/强制结构化矩阵，`npm run preflight` 跑静态发布预检).
-
-### DeepSeek Harness (DSH)
-
-DSH does **not** read `~/.dsh/mcp.json` — its MCP servers are Cordis plugin inserts in `~/.dsh/cordis.patch.yml`. `graphflow install` writes a managed block there inserting `@deepseek-ai/dsh-mcp-client` (`serverName: graphflow`, `transport: stdio`, `command: npx`, `args: ["-y","--package=@roarpeng/graphflow","graphflow-mcp"]`), with `cwd` set to your workspace and `GRAPHFLOW_WORKSPACE_ROOT` in its env, and installs this skill to `~/.dsh/skills/graphflow/SKILL.md` (DSH 不读 `~/.dsh/mcp.json`；安装器改为写入 `~/.dsh/cordis.patch.yml` 的托管块，`cwd` 指向工作区并设置 `GRAPHFLOW_WORKSPACE_ROOT`，Skill 装到 `~/.dsh/skills/graphflow/SKILL.md`).
-
-`cwd` matters: without it the MCP child process starts in the DSH profile directory, so every `gf_*` target must pass an explicit `rootDir`. After a workspace install, relative targets such as `src/app.ts#main` resolve normally; if you registered manually or get wrong-root errors, pass `rootDir` explicitly (没有 `cwd` 时子进程在 DSH 配置目录启动，需显式传 `rootDir`；在工作区安装后相对目标即可正常解析).
-
-**Bundle alternative (配置包替代方案).** `@roarpeng/graphflow-dsh` is a configuration-only DSH Cordis bundle (version mirrors the CLI): its patch inserts the same `mcp-graphflow` stdio row (cwd from `GRAPHFLOW_WORKSPACE_ROOT`, else DSH's default working directory) and ships this skill. Install it via `plugin_manager install_bundle` (or `node scripts/install-dsh-bundle.mjs --print|--stage|--check`). Honest DSH matrix: **MCP ✅ · Skill ✅ · Rules ❌ · Hooks ❌**. Use the bundle **or** `graphflow install --agents deepseek-harness`, not both (same row id/serverName) (配置包...：纯配置 DSH Cordis bundle，插入同一条 mcp-graphflow 行并携带 Skill；通过 plugin_manager install_bundle 或安装脚本使用；DSH 能力矩阵 MCP ✅ · Skill ✅ · Rules ❌ · Hooks ❌；与 CLI 安装器二选一).
-
-Other agents that read an `mcpServers` JSON block can register manually:
-
-```json
-{ "mcpServers": { "graphflow": { "command": "npx", "args": ["-y", "@roarpeng/graphflow@latest", "graphflow-mcp"] } } }
-```
-
-### Task reflection — offline command replay (本地任务反射)
-
-Repeat a shell workflow and GraphFlow can replay it locally with no LLM/network call (重复的 shell 流程可记录并在本地重放，无需 LLM/网络). Two paths — explicit record, or an externally written instruction log:
-
-```bash
-# explicit: record twice to promote
-graphflow task record "run parser matrix" --step "npm run build" --step "node scripts/verify-parsers.mjs"
-graphflow task record "run parser matrix" --step "npm run build" --step "node scripts/verify-parsers.mjs"
-graphflow reflect "run parser matrix"                 # compiled .graphflow/tasks/<id>.mjs; near-match (Jaccard 0.86) replays offline
-
-# auto-harvest: an external writer appends to the JSONL log, then harvest promotes repeats
-graphflow task log "run parser matrix" --step "npm run build" --step "node scripts/verify-parsers.mjs"
-graphflow task harvest [--log .graphflow/instruction-log.jsonl]   # incremental via .graphflow/task-harvest.json
-```
-
-Or from MCP: `gf_macro({ action: "task-record", instruction, steps })` / `gf_macro({ action: "task-harvest", instruction, steps })` (bare `task-harvest` harvests the log), then `task-list` / `task-run`. `graphflow reflect` returns `MISS` when nothing matches. Recording is explicit unless a log writer exists: **auto-harvest still needs an external writer** (shell wrapper / DSH skill — no host hook or daemon), shell steps run locally with the recorder's privileges, `{{argN}}` is manual, and concurrent cross-process records are last-writer-wins (`npm run task` / `npm run reflect` equivalents; 记录写入 `.graphflow/tasks.json` 并编译为 `.graphflow/tasks/<id>.mjs`；自动收割读取 `.graphflow/instruction-log.jsonl`，按字节偏移增量处理并写入 `.graphflow/task-harvest.json`；未知指令返回 MISS；自动收割需要外部写入者，无宿主钩子/守护进程；步骤以记录者权限本地执行、`{{argN}}` 需手工参数化、并发记录最后写入者胜出).
-
-### Limits (边界)
-
-- Exactly 4 tools: no knowledge-graph, planning, or artifact surface (只有 4 个工具).
-- True AST is the default for all six languages: TS/JS via `@babel/parser`; Python/Go/Rust/C/C++/C# via optional tree-sitter grammars, with the built-in structural analyzers as the fallback when a grammar is missing. tree-sitter is syntax-only — no semantic type resolution — so cross-file inference stays heuristic (documented limits: Python import aliases/nested functions, Go grouped params/embedded fields, Rust macros/trait-macro edge cases, C/C++ macros/namespaces, C# properties-as-fields/non-record constructors). Set `GRAPHFLOW_TREE_SITTER=0` to force structural (6 种语言默认真 AST：TS/JS 用 `@babel/parser`，其余用可选 tree-sitter，缺语法包时回退结构化分析；tree-sitter 仅语法、无语义类型解析；`GRAPHFLOW_TREE_SITTER=0` 强制结构化).
-- Runtime deps: `@babel/parser`, `@modelcontextprotocol/sdk`, `tree-sitter` (required); the six grammar packages are optionalDependencies — peer-range install warnings are expected, and a missing grammar falls back to structural for that language (必需依赖：`@babel/parser`、`@modelcontextprotocol/sdk`、`tree-sitter`；6 个语法包为可选依赖，peer 范围警告属正常，缺包即回退结构化分析).
-- Blast radius and rename are receiver-type-aware heuristics, not a type checker: known-mismatched receivers are excluded, same-file same-name methods disambiguate, `super`/`base` and subclass→base dispatch are inheritance-aware (when no intermediate class overrides), last assignment wins per scope (conflicting branch assignments are unknown), and generic/array/nullable wrappers are unwrapped. Residual: ambiguous unions/factory returns and dynamic receivers stay unknown; multi-level override chains need the intermediate class parseable; Rust trait dispatch resolves to the trait method but trait+impl atomic rename stays conservative, and Go embedding is intentionally not inherited (接收者类型推断是启发式，不是类型检查器；含继承/super 与最后赋值，泛型/数组/可空解包；歧义联合/工厂返回/动态接收者未知；多级覆写需中间类可解析；Rust trait 分派解析到 trait 方法，但 trait+impl 原子重命名保持保守；Go 嵌入不做继承).
-- Blast radius and rename consult a self-written L0 semantic index first (`src/semantic-index.ts`, confidence ≥0.75): module graph with root tsconfig/jsconfig aliases + barrel/re-exports, workspace symbol table, per-file type env, and resolved call targets. Residual: root config only (no `extends`/project references), default/namespace import limits, no flow narrowing or generic substitution (爆炸半径/重命名先查自研 L0 语义索引（置信度 ≥0.75）：模块图（根 tsconfig/jsconfig 别名 + barrel/re-export）、工作区符号表、逐文件类型环境、调用目标解析；残余：仅根配置（不支持 extends/project references）、default/namespace import 限制、无流敏感收窄/泛型替换).
-- Optional semantic acceleration: `src/ts-semantic.ts` uses the installed TypeScript compiler package when present (lazily; `resolveCallTarget`/`getReferences`/`getTypeAt`), and `src/lsp-bridge.ts` drives user-installed stdio language servers (pyright/pylsp, gopls, rust-analyzer, clangd, OmniSharp/csharp-ls, typescript-language-server). Neither is a required dependency and no servers are bundled — availability depends on your environment (可选语义加速：...；均非必需依赖、不捆绑语言服务器，可用性取决于用户环境).
-- Knowledge-graph `calls` edges are best-effort (receiver-type-aware when resolvable, not type-checked) and capped at 5000; `imports` use relative resolution plus root tsconfig/jsconfig aliases; Go/C# `imports` edges use a stem/dir fallback (知识图谱边为启发式，非类型检查).
-- Affected-test routing is heuristic: `tsconfig`/`jsconfig` `extends` chains (relative + node_modules, arrays, cycle-safe), nearest nested configs, `jsconfig` inheritance and root `references` are supported; no nested project-to-project reference traversal, no Node `exports` map, `node_modules` `extends` stops at the workspace root, configs are cached for the process lifetime (受影响测试路由支持 extends 链/最近嵌套配置/根 references；不做嵌套项目间 reference 遍历、不支持 Node exports map).
-- Doc↔code linking is a self-written BM25/IDF + PMI pipeline with reciprocal top-K, per-section/per-symbol caps (≤3), `GRAPHFLOW_DOC_LINKS_MAX` (default 400) and confidence labels; concept links require margin/confidence. `.graphflow/doc-link-feedback.json` is read-only accept/reject input; `@brief` remains heuristic (文档↔代码链接为自研 BM25/IDF + PMI 流水线，双向 Top-K、每小节/每符号上限 ≤3、全局 `GRAPHFLOW_DOC_LINKS_MAX`（默认 400）与置信度）；反馈文件只读；`@brief` 仍为启发式).
-- Six-language parity residuals (51-test matrix): **Go same-package imports is the honest remaining gap** — same-package sibling files have no file-level `imports` edge (no invented edges; package-scope calls/edges resolve). Rust trait dispatch and C# `record`/`record struct` + namespace-map resolution are closed; remaining residuals are trait+impl atomic rename rejected safely, `impl Trait for Type` not modelled as subclassing, ambiguous doc-graph KG `calls` now resolved via the semantic index's namespace map (confidence ≥0.75; fixture `using Demo.Two; g.Cancel()` → `two/Gadget.cs#Gadget.Cancel`; residual only the one-time cold semantic-index build ~+120 ms, then cached, and the `GRAPHFLOW_KG_SEMANTIC=0` escape hatch), C function-level, Go models only the first embedded type, conservative rename, and best-effort C++ prototype targeting; the structural fallback is not covered by the parity matrix (六语言平价残余（51 项矩阵）：Go 同包 imports 为仅存的诚实缺口（同包兄弟文件无文件级 imports 边，不虚构；包作用域 calls/边可解析）；Rust trait 分派与 C# record/record struct + namespace 映射已闭环；剩余：trait+impl 原子重命名安全拒绝、impl Trait for Type 不视为继承、doc-graph KG 的歧义 calls 现经语义索引 namespace 映射解析（置信度 ≥0.75；fixture：`using Demo.Two; g.Cancel()` → `two/Gadget.cs#Gadget.Cancel`；残余仅为首次歧义工作区的一次性冷启动构建约 +120 ms 后缓存，以及 `GRAPHFLOW_KG_SEMANTIC=0` 逃生开关）、C 为函数级、Go 只建模第一个嵌入类型、重命名保守、C++ 原型定位尽力而为；结构化回退不在平价矩阵内).
-- Task reflection: explicit `task record` plus optional external-log auto-harvest (`task log` → `.graphflow/instruction-log.jsonl`, incremental `task harvest` via `.graphflow/task-harvest.json`). Auto-harvest still needs an external writer (shell wrapper / DSH skill — no host hook or daemon); recorded shell steps run locally with the recorder's privileges; `{{argN}}` parameters are manual; concurrent cross-process records are last-writer-wins (任务反射：显式 `task record`，并可选用外部日志自动收割（`task log` → `.graphflow/instruction-log.jsonl`，`task harvest` 按字节偏移增量处理）；自动收割仍需外部写入者（shell wrapper / DSH skill，无宿主钩子或守护进程）；步骤以记录者权限本地执行；`{{argN}}` 需手工参数化；并发记录最后写入者胜出).
-- Derived state is cached under `.graphflow/` (git-ignored) and reused across processes and agents: the shard manifest `graph-shards.json`, the AST cache `ast-cache/<sha1>.json` (content hash + backend signature), the semantic index `semantic-index.json` (+ its `semantic-index-delta.json` overlay) and the name index `name-index.json`, plus the doc↔code stores `doc-links/{symbols,concepts,sections}.json`. The knowledge graph and the semantic index rebuild **incrementally per file** — fingerprint (`size:mtimeMs`), name-level reverse dependency (`queriedNames` ∩ `deltaNames`) and structural change decide what is dirty; output is identical to a full rebuild, and a one-file edit appends a ~kB delta instead of rewriting the 24 MB base. `GRAPHFLOW_AST_CACHE=0` / `GRAPHFLOW_SEMANTIC_CACHE=0` / `GRAPHFLOW_NAME_INDEX=0` disable the respective stores, `GRAPHFLOW_GRAPH_DEBUG=1` prints per-stage timings. Residual: on a 9 900-file workspace a 1-file graph rebuild is ~1.7 s, dominated by *reading* the three big JSON stores (46 MB) rather than writing them (派生状态缓存在 `.graphflow/` 并跨进程/跨 Agent 复用：分片清单、AST 缓存、语义索引（含 delta 覆盖层）、名称索引、文档↔代码 store；图谱与语义索引按文件增量重建，输出与全量一致，改 1 个文件只追加 kB 级 delta 而非重写 24 MB base；三个开关可各自关闭；残余：9902 文件工作区 1 文件重建约 1.7 s，成本主要在读 46 MB 而非写).
-- Release/CI: `npm run preflight` / `preflight:release` gate the repo; CI (6 jobs) and the parser matrix (7 jobs) are green across ubuntu/windows/macos × Node 20/22, and the suite has 44 test files (发布/CI：CI 6 job + 解析器矩阵 7 job 在三大 OS × Node 20/22 全绿；共 44 个测试文件).
-- `gf_exec` executes no shell commands unless `run: true` (built-in `cmd: "status"` / `"doctor"` is read-only and returns immediately) (`gf_exec` 除内置只读 `cmd: "status"` / `"doctor"` 外，其余命令只有传 `run: true` 才会执行).
-- The workspace scan is capped at **20 000 files** (`GRAPHFLOW_MAX_FILES`); the old hard 5 000 was silently truncating larger trees, so a 9 900-file workspace only ever saw 5 000 of them (工作区扫描上限 20000 文件，旧版硬编码 5000 会静默截断大型仓库).
-
-Verify with `graphflow status` (CLI) or `gf_exec({ cmd: "status", rootDir: "<project-abs-path>" })` (MCP), then call `gf_read({ targets: ["src/some-file.ts"], skeleton: true, rootDir: "<project-abs-path>" })` for a ~300-token project orientation (`@brief` target returns the cross-agent handoff brief).
+MCP requires a running GraphFlow server. Install a matching GraphFlow runtime and register `graphflow-mcp` in WorkBuddy's MCP configuration; a skill package alone does not install the server. The v4 development behavior requires the accompanying runtime build. Token counts are estimates unless the host supplies usage.

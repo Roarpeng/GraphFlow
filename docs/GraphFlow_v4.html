@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GraphFlow 插件深化路线图 · v4.0 提案</title>
+<style>
+:root{--bg:#f5f7fa;--paper:#fff;--ink:#152433;--muted:#68788a;--line:#dfe6ed;--blue:#1f5dc9;--dark:#10253c;--cyan:#0a7187;--green:#11795d;--amber:#a45a06;--light:#edf3fc;--radius:13px}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.72 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}code,pre{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}code{color:#164b85;background:#eef3f8;border-radius:4px;padding:1px 4px}pre{background:#102237;color:#def1ff;border-radius:10px;padding:18px;overflow:auto;font-size:12.5px;line-height:1.65}pre code{background:transparent;color:inherit;padding:0}
+header{background:linear-gradient(135deg,#0f2339,#1d4267);color:#fff;padding:52px max(24px,calc((100vw - 1130px)/2)) 46px}header h1{font-size:clamp(29px,4vw,43px);letter-spacing:-.5px;line-height:1.24;margin:12px 0 14px}header p{max-width:875px;color:#d6e2ed;line-height:1.75;margin:6px 0}.eyebrow{font-size:12px;letter-spacing:1.7px;text-transform:uppercase;color:#91cfff;font-weight:750}header .tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}.tag{display:inline-block;font-size:12px;border:1px solid #507491;color:#dceffc;padding:3px 10px;border-radius:99px}header .stripe{width:70px;height:4px;background:#64c6d9;margin-top:20px}
+.layout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:26px;max-width:1240px;margin:0 auto;padding:28px 24px 65px}.nav{position:sticky;top:24px;align-self:start;background:var(--paper);border:1px solid var(--line);padding:18px;border-radius:12px}.nav h3{font-size:12px;text-transform:uppercase;color:var(--muted);letter-spacing:.12em;margin:0 0 10px}.nav a{display:block;padding:8px 10px;border-radius:7px;color:#40536a;font-size:13px}.nav a:hover{background:#eef3f8;text-decoration:none;color:var(--blue)}.nav .small{font-size:11px;color:var(--muted);margin-top:15px;border-top:1px solid var(--line);padding-top:12px}.content{min-width:0}.section{background:var(--paper);border:1px solid var(--line);border-radius:14px;margin-bottom:22px;padding:29px 31px;box-shadow:0 5px 19px #21395708}.section h2{font-size:24px;margin:0 0 18px;letter-spacing:-.35px}.section h3{font-size:17px;margin:22px 0 9px}.section p{margin:8px 0 13px}.lead{font-size:17px;font-weight:600;color:#27415e}.muted{color:var(--muted)}.label{display:inline-block;border-radius:4px;padding:1px 7px;background:#e9f1fb;color:#235b9c;font-size:11px;letter-spacing:.03em;font-weight:700}.label.p0{background:#e5f7ec;color:#116740}.label.p1{background:#e9f1fb;color:#205b9e}.label.p2{background:#fff2dd;color:#925e12}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}.tile{border:1px solid var(--line);border-radius:11px;padding:17px 18px;min-width:0}.tile h3{margin:0 0 7px;font-size:17px}.tile p{font-size:13px;color:#5b6f84;margin:7px 0}.numb{font-family:ui-monospace,Consolas,monospace;color:var(--blue);font-size:11px;font-weight:800;letter-spacing:1px}.wide{grid-column:1/-1}.callout{padding:14px 17px;border-left:4px solid var(--blue);background:#f2f6fc;border-radius:0 9px 9px 0;margin:16px 0}.callout.warn{border-left-color:#c28327;background:#fffbef}.callout.ok{border-left-color:var(--green);background:#f0f8f4}table{width:100%;border-collapse:collapse;font-size:13px;margin:15px 0}thead{background:#f1f5f9}th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--line)}th{font-weight:700;color:#314a61}td strong{color:#1e3853}tr:last-child td{border-bottom:none}.scroll{overflow-x:auto}ul{padding-left:22px;margin:8px 0 12px}li{margin:4px 0}ol{padding-left:22px}.step{display:flex;gap:15px;padding:14px 0;border-bottom:1px solid var(--line)}.step:last-child{border-bottom:0}.step .disc{flex:0 0 30px;height:30px;border-radius:50%;background:#e8f1ff;color:var(--blue);display:grid;place-items:center;font-size:13px;font-weight:800}.step .body{flex:1;min-width:0}.step strong{display:block}.step p{margin:3px 0;color:#566c82;font-size:13px}.flow{display:grid;gap:9px;text-align:center;margin:18px 0}.flow .bar{padding:12px 15px;background:#eef5fc;border:1px solid #cbddef;border-radius:8px;font-weight:680}.flow .bar.main{background:#1b476e;color:#fff;border:0}.flow .arrow{font-size:23px;color:#97a9bc;line-height:1}.flowcols{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.flowcols .bar{padding:13px 4px;font-size:13px}.flow small{color:#5a6d80;font-weight:400}.codehead{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-top:18px}.source{font-size:12px;color:var(--muted);background:#f8fafc;border-radius:9px;padding:13px;margin-top:17px}.source a{word-break:break-all}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}.btn{cursor:pointer;user-select:none;border:1px solid #cbd7e4;padding:7px 13px;border-radius:8px;background:#fff;color:#25496c;font:inherit;font-size:12px}.btn.primary{background:var(--blue);color:#fff;border-color:var(--blue)}.checklist{list-style:none;margin:0;padding:0}.checklist li{padding:11px 0;border-bottom:1px solid var(--line);display:flex;gap:11px;align-items:flex-start;font-size:13px}.checklist li:last-child{border-bottom:0}.checklist label{cursor:pointer;flex:1}.checklist input{width:16px;height:16px;accent-color:var(--green);margin-top:4px}.checklist input:checked + label{text-decoration:line-through;color:#7e93a4}.statusline{color:var(--muted);font-size:12px;margin-bottom:15px}.milestone{font-weight:700;color:var(--blue)}footer{margin-top:12px;color:#728194;font-size:12px;text-align:center;padding:18px}
+@media(max-width:900px){.layout{display:block;padding:18px 13px 40px}.nav{position:static;margin-bottom:16px}.nav a{display:inline-block}.section{padding:22px 18px}.grid{grid-template-columns:1fr}.flowcols{grid-template-columns:repeat(2,1fr)}}
+@media print{body{background:white;font-size:12px}.layout{display:block;padding:0}.nav,.actions{display:none}.section{border:0;border-bottom:1px solid #ddd;border-radius:0;box-shadow:none;break-inside:avoid;padding:15px 0;margin:0}header{padding:24px;background:#152b43!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}h2{break-after:avoid}.tile{break-inside:avoid}}
+</style></head>
+<body><header><div class="eyebrow">GraphFlow · Product / Engineering Roadmap</div><h1>插件深化路线图<br>以更少 Token 完成更多正确任务</h1><div class="stripe"></div><p>面向 v3.9.2 的增量设计方案。产品边界固定：四个 MCP 工具、纯本地确定性引擎、不托管大模型、不提供多 Agent 编排、不成为模型网关。</p><div class="tags"><span class="tag">基线：main · 5536fb3</span><span class="tag">输出：代码级任务 + 接口 + 测试</span><span class="tag">所有节省数字均待 A/B 实测</span></div></header>
+<div class="layout"><aside class="nav"><h3>开发导航</h3><a href="#summary">01 方向与边界</a><a href="#facts">02 已有能力与漏洞</a><a href="#core">03 四工具深度增强</a><a href="#new">04 六项跨工具能力</a><a href="#architecture">05 插件内部架构</a><a href="#contracts">06 接口契约</a><a href="#roadmap">07 实施顺序</a><a href="#metrics">08 验收与成本评估</a><a href="#checklist">09 Agent 开发清单</a><a href="#sources">10 源码依据</a><div class="small">交互：点击开发清单可勾选，状态只保存在当前浏览器中。</div></aside>
+<main class="content">
+<section id="summary" class="section"><span class="label">01 / PRODUCT</span><h2>重新定义 GraphFlow 的核心目标</h2><p class="lead">不是单纯压缩源码，而是降低「一次正确完成任务」所需的模型工作量。</p><div class="callout">工程指标：<strong>成功任务平均费用 = 全部任务实际模型费用 ÷ 验收通过的任务数</strong>。不能只看输出 token 压缩率；必须同时核对正确率、返工轮数、延迟、误拦截率。</div><div class="grid"><div class="tile"><div class="numb">KEEP</div><h3>坚持不做</h3><p>模型路由与收费 API 代理、通用任务规划 Agent、云端对话记忆、模型训练平台、替代 Cursor/ZCode 的聊天 UI。</p></div><div class="tile"><div class="numb">BUILD</div><h3>继续深耕</h3><p>精确上下文、可信代码编辑、最小充分验证、可授权的本地经验复用、任务级工具收益证据。</p></div></div></section>
+<section id="facts" class="section"><span class="label">02 / AUDIT</span><h2>先承认仓库已经有什么</h2><div class="scroll"><table><thead><tr><th>现有能力</th><th>代码事实</th><th>仍需解决的缺口</th></tr></thead><tbody>
+<tr><td><strong>gf_read</strong></td><td>AST 切片、类型闭包、Blast Radius、中英检索、搜索结果自适应截断、重复读取去重、AST/语义索引缓存、Git 分支范围隔离</td><td>缺公开的输出预算参数、统一片段证据 ID、严格的按文件版本增量返回、跨调用准确率测试</td></tr>
+<tr><td><strong>gf_edit</strong></td><td>语法错误先拦截、批量内存预编辑、跨仓重命名、导出/签名/字段变更警告</td><td>部分跨文件检查发生在写盘后；警告不等于拒绝；多文件写盘中断缺事务日志恢复</td></tr>
+<tr><td><strong>gf_exec</strong></td><td>基于反向导入的受影响测试选择（代码最大 6 跳）、输出压缩、原始日志归档、超时、3 次失败提醒</td><td>缺可解释的选择依据、无关联测试的独立状态、失败指纹及强制继续条件、按风险升级验证</td></tr>
+<tr><td><strong>gf_macro</strong></td><td>重复读取/命令/编辑习惯挖掘、确定性脚本复用、Prompt Reflex、任务反射与 Git 同改文件习惯</td><td>宏信任级别和审批不足；命令模板插值接 shell；独立生成 codemod 脚本绕开工具编辑门禁</td></tr>
+</tbody></table></div><div class="callout warn"><strong>风险优先级：</strong>先修复可导致错误写入/意外命令执行的路径，再提升检索效率。一次不安全修改引发的返工，可能抵消大量 token 压缩收益。</div></section>
+<section id="core" class="section"><span class="label">03 / FOUR TOOLS</span><h2>四个工具逐项深化</h2>
+<div class="grid">
+<div class="tile"><span class="label p1">gf_read / P1</span><h3>渐进式证据读取</h3><p><strong>现状：</strong>已具备搜索截断及估算 token。<strong>新增：</strong>按预算分层输出「位置 → 摘要 → 代码 → 调用方/类型闭包」，支持上次证据版本的 Delta Read。</p><ul><li><code>maxOutputTokens</code>、<code>detail=locate|summary|code|closure</code></li><li><code>sinceReceipt</code>、<code>cursor</code>，保证可恢复而非静默截断</li><li>返回精确 <code>file:line-range</code>、<code>content_sha256</code>、未读部分清单</li></ul><p><strong>验收：</strong>给定相同定位测试，命中率不能下降；重复调用若源码未变，只给简短引用；源码改变时不误用旧证据。</p></div>
+<div class="tile"><span class="label p0">gf_edit / P0</span><h3>带证据的变更事务</h3><p><strong>现状：</strong>先语法预检，后写盘并产生部分静态警告。<strong>新增：</strong>候选工作区内完成全部阻断检查，并提供预览与显式提交。</p><ul><li><code>mode=prepare|commit</code>、<code>expectedSha256</code></li><li>提交前检测：导出引用、签名、类型字段、导入解析、基线漂移</li><li>跨文件使用事务快照及恢复日志；高风险变更需显式批准</li></ul><p><strong>验收：</strong>严重风险在写盘前拒绝；失败后文件哈希一致；提交冲突返回 <code>STALE_BASELINE</code>，不覆盖别人的改动。</p></div>
+<div class="tile"><span class="label p1">gf_exec / P1</span><h3>最小充分测试与失败诊断</h3><p><strong>现状：</strong>反向导入最大六跳和日志压缩。<strong>新增：</strong>记录选测原因、置信度及未覆盖范围，按实际改动风险选择测试层。</p><ul><li><code>planOnly</code>、<code>verifyLevel=fast|safe|full</code></li><li>结构化状态：<code>PASS</code>、<code>FAIL</code>、<code>NO_TESTS</code>、<code>UNKNOWN</code>、<code>TIMEOUT</code></li><li>错误指纹：文件、行、诊断码、stack root、关联 patch</li></ul><p><strong>验收：</strong>对照完整测试集测漏测率；错误摘要能定位到真正失败断言；无测试不可报 PASS。</p></div>
+<div class="tile"><span class="label p0">gf_macro / P0</span><h3>可信、可审计的零 LLM 复用</h3><p><strong>现状：</strong>两次相似操作可挖掘宏，Prompt Reflex 可直接触发。<strong>新增：</strong>宏信任状态机与动作权限。</p><ul><li><code>discovered → proposed → approved → active → revoked</code></li><li>参数化命令改用安全 argv/受控模板；无外部确认不执行有副作用的宏</li><li>所有 codemod 一律走 <code>gf_edit</code> 的准备/提交事务</li></ul><p><strong>验收：</strong>未授权宏不执行；外部参数不能注入 shell；过期项目条件的宏只能重新审批。</p></div>
+</div></section>
+<section id="new" class="section"><span class="label">04 / SHARED CAPABILITIES</span><h2>真正值得新增的六项底层能力</h2>
+<div class="grid">
+<div class="tile"><div class="numb">01 / P0</div><h3>Change Transaction</h3><p>一次修改对应一份不可变的 <code>prepare</code> 提案、引用的源码哈希、风险清单和提交记录。统一所有写入入口，包括宏与 CLI。</p></div>
+<div class="tile"><div class="numb">02 / P0</div><h3>Tool Benefit Ledger</h3><p>只统计插件实际可观察的信息：返回字节、粗略 token 估算、命中率、重试/测试轮数、验证结果。实际 API usage 仅在宿主主动提供时记录，严禁伪称账单级精度。</p></div>
+<div class="tile"><div class="numb">03 / P1</div><h3>Context Delta & Receipt</h3><p>第一次读文件给可验证证据，第二次仅给变更片段；跨 Agent 交换证据 ID 而非重复搬运整段源码。遇到 hash 漂移则强制重新读。</p></div>
+<div class="tile"><div class="numb">04 / P1</div><h3>Failure Fingerprint</h3><p>将相同错误合并为一个指纹，识别「无新文件变更、无新错误信息、同一验证命令」的无效循环；自动提供最小诊断包，而非继续刷日志。</p></div>
+<div class="tile"><div class="numb">05 / P1</div><h3>Verified Recipe Library</h3><p>升级现有习惯挖掘：只有通过验证的操作才能晋升为可信配方；保存前置条件、文件适配范围、校验命令与失效边界。默认项目本地，不自动上传。</p></div>
+<div class="tile"><div class="numb">06 / P2</div><h3>Semantic Confidence & Optional LSP</h3><p>继续使用现有 AST/语义索引作为快速路径；对于跨语言/动态解析低置信度目标，可选调用已有 <code>lsp-bridge.ts</code>。无法确认时不把猜测当作精确引用。</p></div>
+</div><div class="callout">重点：这是六个<strong>内部模块</strong>。从用户视角仍然只调用 <code>gf_read</code>、<code>gf_edit</code>、<code>gf_exec</code>、<code>gf_macro</code>，降低宿主工具菜单与提示词成本。</div></section>
+<section id="architecture" class="section"><span class="label">05 / ARCHITECTURE</span><h2>不改变四工具入口的内部架构</h2>
+<div class="flow"><div class="bar main">Cursor / ZCode / Claude Code / Cline / MCP Host</div><div class="arrow">↓</div><div class="flowcols"><div class="bar">gf_read</div><div class="bar">gf_edit</div><div class="bar">gf_exec</div><div class="bar">gf_macro</div></div><div class="arrow">↓</div><div class="bar">Shared Policy + Evidence Kernel<br><small>ContextReceipt · EditTransaction · ExecEvidence · MacroTrust · OutcomeLedger</small></div><div class="arrow">↓</div><div class="flowcols"><div class="bar">AST/语义缓存</div><div class="bar">Git/分支作用域</div><div class="bar">测试影响图</div><div class="bar">本地配方仓库</div></div></div><p class="muted">职责边界：插件提供准确工具结果和本地安全执行；宿主 Agent 负责用户目标解释、计划与模型调用。插件不主动选择模型、不接管长任务生命周期。</p></section>
+<section id="contracts" class="section"><span class="label">06 / CONTRACT</span><h2>兼容性优先的接口设计</h2><p>下列为拟新增字段，保持现有参数全部可用。先引入可选字段，再逐步启用阻断策略。</p>
+<div class="codehead">gf_read：严格预算与证据指针</div><pre><code>{
+  "targets": ["src/mcp-tools.ts#executeV3ToolCall"],
+  "detail": "summary",              // locate | summary | code | closure
+  "maxOutputTokens": 900,          // 硬上限；含提示与证据元信息
+  "sinceReceipt": "read:sha256:...", // 可选，返回增量
+  "cursor": null,
+  "dedup": true
+}
+→ { "receiptId": "read:...", "contentHash": "sha256:...",
+    "text": "...", "omitted": [...], "nextCursor": "...", "truncated": true }</code></pre>
+<div class="codehead">gf_edit：写前准备 + hash 比对提交</div><pre><code>{
+  "mode": "prepare",
+  "edits": [{"file":"src/a.ts","symbol":"processJob","newCode":"..."}],
+  "policy": "strict", "verify": "affected"
+}
+→ { "proposalId": "edit:...", "baseHashes": {...},
+    "risk": "medium", "blocking": [], "diff": "...", "proposedTests": [...] }
+
+{"mode":"commit", "proposalId":"edit:...", "approved":true}
+→ { "status":"COMMITTED|REJECTED|STALE_BASELINE|RECOVERABLE_FAILURE",
+    "changedFiles":[...], "recoveryId":"..." }</code></pre>
+<div class="codehead">gf_exec：验证计划与证据回执</div><pre><code>{"cmd":"affected-tests", "verifyLevel":"safe", "planOnly":true}
+→ {"selectedTests":[...], "selectionReasons":[...],
+   "coverageStatus":"TARGETED|UNKNOWN", "planHash":"sha256:..."}
+
+{"cmd":"affected-tests", "verifyLevel":"safe", "run":true}
+→ {"status":"PASS|FAIL|NO_TESTS|UNKNOWN|TIMEOUT",
+   "failureFingerprint":"...", "rawLogHandle":"...", "evidenceId":"..."}</code></pre>
+<div class="codehead">gf_macro：无授权不执行有副作用的操作</div><pre><code>{"action":"list", "includeProposals":true}
+{"action":"approve", "id":"build_and_test", "scope":"workspace", "policy":"read-only"}
+{"action":"run", "id":"build_and_test", "dryRun":true}
+→ {"status":"WOULD_RUN", "steps":[...], "permissions":[...], "sourceHash":"..."}</code></pre>
+<div class="callout warn">上面的字段属于<strong>计划中的 API 草案</strong>，并非 v3.9.2 当前已支持参数。CLI/MCP 两层都需要同步修改及回归测试。</div></section>
+<section id="roadmap" class="section"><span class="label">07 / DELIVERY</span><h2>建议按 5 个批次开发，而非同时开工</h2>
+<div class="step"><div class="disc">0</div><div class="body"><strong><span class="milestone">Baseline</span> · 可重复实验基线</strong><p>冻结主分支基线、完成现有测试，建立 30–50 个真实仓库任务集：定位、改名、跨文件修改、测试修复、重复操作。记录有/无 GraphFlow 的耗时、token、成功率。</p><div class="muted">产出：benchmarks/task-suite.json / eval runner / baseline 报告。建议先在独立分支开展。</div></div></div>
+<div class="step"><div class="disc">1</div><div class="body"><strong><span class="milestone">P0-A</span> · 编辑事务与宏权限统一</strong><p>先完成写前 guard，再加入完整的 prepare/commit、基线哈希与失败恢复。所有宏编辑路径都走事务。Prompt Reflex 只自动执行明确授权的低风险动作。</p><div class="muted">修改：surgical-edit.ts、macro-engine.ts、host-interceptor.ts、mcp-tools.ts；增加编辑事务与权限测试。</div></div></div>
+<div class="step"><div class="disc">2</div><div class="body"><strong><span class="milestone">P0-B</span> · 可观察的 Task Benefit Ledger</strong><p>新增结构化工具回执与本地任务计数器。区分估算节省 token / 宿主提供的实测 usage / 成功任务三种信息，不混算。</p><div class="muted">修改：mcp-tools.ts、circuit-breaker.ts、flywheel.ts；新增 evidence-ledger.ts。</div></div></div>
+<div class="step"><div class="disc">3</div><div class="body"><strong><span class="milestone">P1-A</span> · 增量上下文 + 精准选测 + 失败指纹</strong><p>输出预算与 receipt/增量读取；测试选择记录原因及置信度；相同失败提供救援包与下一动作建议。先在 dry-run 验证，再允许适配宿主 hook。</p><div class="muted">修改：slicer.ts、dehydrator.ts、circuit-breaker.ts、semantic-index.ts；新增 context-receipt.ts。</div></div></div>
+<div class="step"><div class="disc">4</div><div class="body"><strong><span class="milestone">P1-B / P2</span> · 已验证配方 + 可选 LSP 精度升级</strong><p>让宏只能从通过验证的记录升级，补齐撤销/失效。低置信度符号引用可选用 LSP 补证，无 LSP 时保留原有本地降级能力。</p><div class="muted">修改：task-reflector.ts、macro-engine.ts、lsp-bridge.ts、blast-radius.ts；建立多语言精度评测。</div></div></div>
+</section>
+<section id="metrics" class="section"><span class="label">08 / ACCEPTANCE</span><h2>验收不能只用「Token 少了多少」</h2><div class="scroll"><table><thead><tr><th>指标</th><th>测量方法</th><th>建议门槛（目标，不是实测）</th></tr></thead><tbody>
+<tr><td><strong>成功任务平均实付费用</strong></td><td>同一组任务、相同模型/价格/种子上下文，宿主提供真实 usage 时计算</td><td>降低 ≥ 20%；没有 usage 时只报告估算输出量，不报告实付费用</td></tr>
+<tr><td><strong>任务验收成功率</strong></td><td>固定单测、人工审查和变更要求双门禁</td><td>不得低于基线</td></tr>
+<tr><td><strong>修改前置安全</strong></td><td>故意导入破坏、签名漂移、并行冲突、磁盘中断测试</td><td>所有已知高风险样例写前拦截；失败状态可恢复</td></tr>
+<tr><td><strong>检索质量</strong></td><td>每个真实任务标注目标符号与关键依赖</td><td>Recall@k 不下降；P95 输出 token 降低 ≥ 20%</td></tr>
+<tr><td><strong>测试选择质量</strong></td><td>全量测试与候选测试集的失败发现对照</td><td>已知相关失败不得漏报；不确定则升级或显式 UNKNOWN</td></tr>
+<tr><td><strong>宏安全</strong></td><td>Shell 注入、路径逃逸、未授权启动/删除、哈希漂移用例</td><td>测试中未授权动作 0 次</td></tr>
+<tr><td><strong>性能</strong></td><td>热缓存读取 P50/P95、编辑准备时间、工程索引 RAM</td><td>相比基线不得显著恶化；制定各语言/仓库规模单独阈值</td></tr>
+</tbody></table></div><div class="callout ok">建议做一个真实的对照实验：GraphFlow v3.9.2、GraphFlow 新版，均在同一宿主 Agent 下跑相同任务。除了平均值，还要看成本 P90/P95 与最差失败案例。</div></section>
+<section id="checklist" class="section"><span class="label">09 / EXECUTION</span><h2>可交给编码 Agent 的执行任务</h2><div class="actions"><button class="btn primary" onclick="setAll(true)">全部勾选</button><button class="btn" onclick="setAll(false)">清空勾选</button><button class="btn" onclick="window.print()">打印 / PDF</button></div><div class="statusline" id="progressText">待办清单加载中</div>
+<ul class="checklist" id="task-list">
+<li><input type="checkbox" data-id="t01" id="t01"><label for="t01">T01 建立 30–50 个可复现任务与脚本，覆盖 TS/JS/Python/C#/Go/Rust/C/C++</label></li>
+<li><input type="checkbox" data-id="t02" id="t02"><label for="t02">T02 固化原有构建/测试/benchmark 结果，并标出未运行的真实模型费用项</label></li>
+<li><input type="checkbox" data-id="t03" id="t03"><label for="t03">T03 拆出 candidate workspace guard；导出、签名、字段和相对导入校验改成提交前阻断或显式提示</label></li>
+<li><input type="checkbox" data-id="t04" id="t04"><label for="t04">T04 实现 prepare/commit、proposal TTL、expectedSha256、并发冲突处理、完整恢复日志</label></li>
+<li><input type="checkbox" data-id="t05" id="t05"><label for="t05">T05 CLI、MCP、macro、codemod 修改全部归一到 gf_edit 事务入口</label></li>
+<li><input type="checkbox" data-id="t06" id="t06"><label for="t06">T06 宏信任状态机；区分 read-only、writes-files、process-start、external-network；默认不给副作用许可</label></li>
+<li><input type="checkbox" data-id="t07" id="t07"><label for="t07">T07 参数替换防注入、命令白名单、路径根范围检查、工程版本失效与撤销</label></li>
+<li><input type="checkbox" data-id="t08" id="t08"><label for="t08">T08 结构化读取收据，增加输出预算、resume cursor 和同 hash Delta Read</label></li>
+<li><input type="checkbox" data-id="t09" id="t09"><label for="t09">T09 选测理由、覆盖不确定标志、必要时 full suite 升级，禁止 NO_TESTS 标为 PASS</label></li>
+<li><input type="checkbox" data-id="t10" id="t10"><label for="t10">T10 错误指纹与重复失败判定，阻断策略必须支持用户显式覆盖并记录原因</label></li>
+<li><input type="checkbox" data-id="t11" id="t11"><label for="t11">T11 构建 verified recipe，绑定来源、验证记录、适配作用域与失效条件</label></li>
+<li><input type="checkbox" data-id="t12" id="t12"><label for="t12">T12 低置信度符号解析使用可选 LSP，未安装时保持旧行为</label></li>
+<li><input type="checkbox" data-id="t13" id="t13"><label for="t13">T13 本地 evidence ledger 区分估算量、真实宿主 usage、验收结果；默认不收集源码和机密信息</label></li>
+<li><input type="checkbox" data-id="t14" id="t14"><label for="t14">T14 新旧版本运行同一任务集，输出成功率、返工次数、平均 token、P95、总费用（如可观测）</label></li>
+<li><input type="checkbox" data-id="t15" id="t15"><label for="t15">T15 现有 22 宿主安装兼容回归；功能不支持时明确降级，不隐式越权</label></li>
+<li><input type="checkbox" data-id="t16" id="t16"><label for="t16">T16 完成 README 文档漂移修订（受影响测试最大 6 跳，非旧的 2 跳）；保留现有 4 个工具名称</label></li>
+</ul></section>
+<section id="sources" class="section"><span class="label">10 / SOURCE MAP</span><h2>核心源码与核对边界</h2><p>以下链接均指向仓库 <code>main</code>。审查基线提交为 <a href="https://github.com/Roarpeng/GraphFlow/commit/5536fb3b5f1aa887ac38307852cd72cadd681f30">5536fb3</a>。</p><div class="scroll"><table><thead><tr><th>源码</th><th>当前审查重点</th></tr></thead><tbody>
+<tr><td><a href="https://github.com/Roarpeng/GraphFlow/blob/main/src/mcp-tools.ts">src/mcp-tools.ts</a></td><td>仅 4 个 MCP tools；请求参数、工具回执、工具注册</td></tr>
+<tr><td><a href="https://github.com/Roarpeng/GraphFlow/blob/main/src/slicer.ts">src/slicer.ts</a></td><td>搜索自适应截断、AST 切片、原始内容预算和语义证据</td></tr>
+<tr><td><a href="https://github.com/Roarpeng/GraphFlow/blob/main/src/surgical-edit.ts">src/surgical-edit.ts</a></td><td>写前语法检查、写后跨文件警告、无多文件磁盘事务</td></tr>
+<tr><td><a href="https://github.com/Roarpeng/GraphFlow/blob/main/src/dehydrator.ts">src/dehydrator.ts</a></td><td>六跳测试影响路由、日志脱水与超时</td></tr>
+<tr><td><a href="https://github.com/Roarpeng/GraphFlow/blob/main/src/macro-engine.ts">src/macro-engine.ts</a></td><td>习惯挖掘、模板 shell 命令、独立 codemod 脚本</td></tr>
+<tr><td><a href="https://github.com/Roarpeng/GraphFlow/blob/main/src/host-interceptor.ts">src/host-interceptor.ts</a></td><td>原生工具预/后置钩子，短指令 Prompt Reflex</td></tr>
+<tr><td><a href="https://github.com/Roarpeng/GraphFlow/blob/main/src/circuit-breaker.ts">src/circuit-breaker.ts</a></td><td>重复读取哈希与失败次数提示</td></tr>
+<tr><td><a href="https://github.com/Roarpeng/GraphFlow/blob/main/src/semantic-index.ts">src/semantic-index.ts</a></td><td>分支索引、文件 hash/置信度、符号关联</td></tr>
+<tr><td><a href="https://github.com/Roarpeng/GraphFlow/blob/main/src/task-reflector.ts">src/task-reflector.ts</a></td><td>指令近似匹配与本地任务编译</td></tr>
+<tr><td><a href="https://github.com/Roarpeng/GraphFlow/blob/main/src/lsp-bridge.ts">src/lsp-bridge.ts</a></td><td>已存在可选 LSP 客户端；需评估与读取/编辑流程的实用集成程度</td></tr>
+</tbody></table></div><p class="muted">核对范围为 GitHub 源码静态审查。未在本地复现新的构建、测试或真实模型账单。计划中的性能与费用门槛均为待验证目标。</p></section>
+<footer>GraphFlow · Four Tools, Better Outcomes · 2026-11-14</footer>
+</main></div>
+<script>
+(function(){const checks=[...document.querySelectorAll('#checklist input[type=checkbox]')];const key='graphflow-v4-roadmap-progress';let store={};try{store=JSON.parse(localStorage.getItem(key)||'{}')}catch{}for(const c of checks){c.checked=Boolean(store[c.dataset.id]);c.addEventListener('change',save)}function update(){const n=checks.filter(x=>x.checked).length;document.getElementById('progressText').textContent=`已完成 ${n} / ${checks.length} 项 · ${Math.round(100*n/checks.length)}%（浏览器本地记录）`}function save(){const data={};for(const c of checks)data[c.dataset.id]=c.checked;try{localStorage.setItem(key,JSON.stringify(data))}catch{}update()}window.setAll=function(v){for(const c of checks)c.checked=v;save()};update()})();
+</script></body></html>

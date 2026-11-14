@@ -20,7 +20,7 @@ import {
 } from "./host-interceptor.js";
 import { DEFAULT_FLYWHEEL_TTL_DAYS, inspectFlywheel, pruneFlywheel } from "./flywheel.js";
 import { PACKAGE_VERSION } from "./version.js";
-import { executeV3ToolCall } from "./mcp-tools.js";
+import { executeToolCallWithEscalation, executeV3ToolCall } from "./mcp-tools.js";
 import { recordActiveWorkspace } from "./slicer.js";
 import {
   TASK_PROMOTION_USES,
@@ -114,6 +114,10 @@ export interface ParsedExecArgs {
   cmd: string;
   run: boolean;
   rootDir?: string;
+  planOnly?: boolean;
+  verifyLevel?: string;
+  overrideFailureStop?: boolean;
+  overrideReason?: string;
 }
 
 /**
@@ -122,11 +126,15 @@ export interface ParsedExecArgs {
  * command is supplied. Use `--` to forward flags to the wrapped command.
  */
 export function parseExecArgs(args: string[], defaultCmd = "affected-tests"): ParsedExecArgs {
-  const parsed = parseFlagArgs(args, ["--root"]);
+  const parsed = parseFlagArgs(args, ["--root", "--verify-level", "--override-reason"]);
   const rootDir = parsed.values.get("--root");
   return {
     cmd: parsed.positionals.length > 0 ? parsed.positionals.join(" ") : defaultCmd,
     run: parsed.flags.has("--run"),
+    ...(parsed.flags.has("--plan-only") ? { planOnly: true } : {}),
+    ...(parsed.values.get("--verify-level") ? { verifyLevel: parsed.values.get("--verify-level")! } : {}),
+    ...(parsed.flags.has("--override-failure-stop") ? { overrideFailureStop: true } : {}),
+    ...(parsed.values.get("--override-reason") ? { overrideReason: parsed.values.get("--override-reason")! } : {}),
     ...(rootDir !== undefined ? { rootDir } : {}),
   };
 }
@@ -166,11 +174,15 @@ export interface ParsedReadArgs {
   skeleton: boolean;
   dedup: boolean;
   rootDir?: string;
+  detail?: string;
+  maxOutputTokens?: number;
+  sinceReceipt?: string;
+  cursor?: string;
 }
 
 /** Parse `graphflow read [targets...] [-q <query>] [--skeleton] [--dedup]`. */
 export function parseReadArgs(args: string[]): ParsedReadArgs {
-  const parsed = parseFlagArgs(args, ["-q", "--query", "--root"]);
+  const parsed = parseFlagArgs(args, ["-q", "--query", "--root", "--detail", "--max-output-tokens", "--since-receipt", "--cursor"]);
   const q = parsed.values.get("-q") ?? parsed.values.get("--query");
   const rootDir = parsed.values.get("--root");
   return {
@@ -178,6 +190,10 @@ export function parseReadArgs(args: string[]): ParsedReadArgs {
     ...(q !== undefined ? { q } : {}),
     skeleton: parsed.flags.has("--skeleton"),
     dedup: parsed.flags.has("--dedup"),
+    ...(parsed.values.get("--detail") ? { detail: parsed.values.get("--detail")! } : {}),
+    ...(parsed.values.get("--max-output-tokens") ? { maxOutputTokens: Number(parsed.values.get("--max-output-tokens")) } : {}),
+    ...(parsed.values.get("--since-receipt") ? { sinceReceipt: parsed.values.get("--since-receipt")! } : {}),
+    ...(parsed.values.get("--cursor") ? { cursor: parsed.values.get("--cursor")! } : {}),
     ...(rootDir !== undefined ? { rootDir } : {}),
   };
 }
@@ -619,13 +635,17 @@ async function main(): Promise<void> {
   if (cmd === "read" || cmd === "gf-read") {
     const parsed = parseReadArgs(rest);
     const effectiveRoot = parsed.rootDir ?? rootDir;
-    const res = executeV3ToolCall(
+    const res = await executeToolCallWithEscalation(
       "gf_read",
       {
         ...(parsed.targets.length > 0 ? { targets: parsed.targets } : {}),
         ...(parsed.q ? { q: parsed.q } : {}),
         skeleton: parsed.skeleton,
         dedup: parsed.dedup,
+        ...(parsed.detail ? { detail: parsed.detail } : {}),
+        ...(parsed.maxOutputTokens !== undefined ? { maxOutputTokens: parsed.maxOutputTokens } : {}),
+        ...(parsed.sinceReceipt ? { sinceReceipt: parsed.sinceReceipt } : {}),
+        ...(parsed.cursor ? { cursor: parsed.cursor } : {}),
         rootDir: effectiveRoot,
       },
       effectiveRoot
@@ -640,6 +660,10 @@ async function main(): Promise<void> {
     const newCode = readFlag(rest, "--new");
     const oldCode = readFlag(rest, "--old");
     const renameTo = readFlag(rest, "--rename");
+    const mode = rest.includes("--prepare") ? "prepare" : readFlag(rest, "--proposal-id") ? "commit" : undefined;
+    const proposalId = readFlag(rest, "--proposal-id");
+    const expectedSha256 = readFlag(rest, "--expected-sha256");
+    const policy = readFlag(rest, "--policy");
     const res = executeV3ToolCall(
       "gf_edit",
       {
@@ -648,6 +672,10 @@ async function main(): Promise<void> {
         ...(newCode !== undefined ? { newCode } : {}),
         ...(oldCode !== undefined ? { oldCode } : {}),
         ...(renameTo ? { renameTo } : {}),
+        ...(mode ? { mode } : {}),
+        ...(proposalId ? { proposalId } : {}),
+        ...(expectedSha256 ? { expectedSha256 } : {}),
+        ...(policy ? { policy } : {}),
         rootDir,
       },
       rootDir
@@ -661,7 +689,11 @@ async function main(): Promise<void> {
     const effectiveRoot = parsed.rootDir ?? rootDir;
     const res = executeV3ToolCall(
       "gf_exec",
-      { cmd: parsed.cmd, run: parsed.run, rootDir: effectiveRoot },
+      { cmd: parsed.cmd, run: parsed.run, rootDir: effectiveRoot,
+        ...(parsed.planOnly ? { planOnly: true } : {}),
+        ...(parsed.verifyLevel ? { verifyLevel: parsed.verifyLevel } : {}),
+        ...(parsed.overrideFailureStop ? { overrideFailureStop: true } : {}),
+        ...(parsed.overrideReason ? { overrideReason: parsed.overrideReason } : {}) },
       effectiveRoot
     );
     console.log(res.content[0]?.text ?? "");

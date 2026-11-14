@@ -3,7 +3,7 @@
  *
  * Principle 4: "根据用户习惯来记忆生成工具，以后直接干"
  * (Learn from the user's coding/testing/editing habits and compile recurring
- * patterns into parameterized, deterministic tools that execute with 0 LLM turns).
+ * patterns into parameterized, deterministic local tools with explicit trust states).
  *
  * Four genuine Habit-to-Tool mechanisms:
  *   1. Exact & Co-Access Context Bundles (`context-bundle`): Repeatedly read symbol/file
@@ -20,13 +20,14 @@
  *        whenever A is edited alone!
  *      - Tracks **Directory Verify Habits**: If editing files in `src/surfaces/*` is
  *        repeatedly followed by running `node scripts/sync-surfaces.cjs --check`,
- *        binds that verification command to `src/surfaces` and can auto-execute it!
+ *        binds that verification command to `src/surfaces` and suggests it after edits.
  */
 
 import { createHash } from "node:crypto";
+import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { execAndDehydrate } from "./dehydrator.js";
+import { dehydrateCommandOutput } from "./dehydrator.js";
 import { ensureGraphflowDir } from "./graphflow-dir.js";
 import { mineGitCoChangeHistory, type GitMineOptions } from "./git-miner.js";
 import { executeSurgicalRead, getWorkspaceAstIndex } from "./slicer.js";
@@ -63,6 +64,126 @@ export interface CompiledMacro {
   createdAt: string;
   lastUsedAt?: string;
   scriptPath?: string;
+  state?: "discovered" | "proposed" | "approved" | "active" | "revoked";
+  permissions?: Array<"read-only" | "writes-files" | "process-start" | "external-network">;
+  sourceHash?: string;
+  autoRun?: boolean;
+  verifiedRecipe?: {
+    sourceHash: string;
+    verifiedAt: string;
+    verificationCommand: string;
+    permissions: NonNullable<CompiledMacro["permissions"]>;
+    version: string;
+  };
+}
+
+function macroSourceHash(rootDir: string, macro: CompiledMacro): string {
+  const packagePath = join(rootDir, "package.json");
+  const packageHash = existsSync(packagePath) ? shortHash(readFileSync(packagePath, "utf8")) : "none";
+  let revision = "no-git";
+  try { revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: rootDir, encoding: "utf8", timeout: 1000, stdio: ["ignore", "pipe", "ignore"] }).trim(); }
+  catch { /* workspace without git */ }
+  return shortHash(JSON.stringify([macro.kind, macro.steps, packageHash, revision]));
+}
+
+function macroPermissions(macro: CompiledMacro): NonNullable<CompiledMacro["permissions"]> {
+  if (macro.kind === "context-bundle") return ["read-only"];
+  if (macro.kind === "edit-codemod") return ["writes-files"];
+  const commands = macro.steps.join(" ");
+  return /\b(?:curl|wget|ssh|scp|ftp|http|fetch)\b/i.test(commands)
+    ? ["process-start", "external-network"] : ["process-start"];
+}
+
+export function setMacroTrust(rootDir: string, id: string, action: "propose" | "approve" | "activate" | "revoke", autoRun = false): CompiledMacro | undefined {
+  const { macros, habits } = loadMacroStore(rootDir);
+  const macro = macros.find((m) => m.id === id);
+  if (!macro) return undefined;
+  if (action === "revoke") { macro.state = "revoked"; macro.autoRun = false; }
+  else if (action === "propose") {
+    if (macro.state && macro.state !== "discovered") return undefined;
+    macro.state = "proposed";
+  }
+  else if (action === "approve") {
+    if (macro.state !== "proposed") return undefined;
+    macro.state = "approved";
+    macro.permissions = macroPermissions(macro);
+    macro.sourceHash = macroSourceHash(rootDir, macro);
+    macro.autoRun = autoRun && macro.permissions.length === 1 && macro.permissions[0] === "read-only";
+  } else if (macro.state === "approved" && macro.sourceHash === macroSourceHash(rootDir, macro)) {
+    macro.state = "active";
+  } else return undefined;
+  saveMacros(rootDir, macros, habits);
+  return macro;
+}
+
+function projectVersion(rootDir: string): string {
+  try { return String(JSON.parse(readFileSync(join(rootDir, "package.json"), "utf8")).version ?? "unknown"); }
+  catch { return "unknown"; }
+}
+
+const VERIFY_COMMAND_RE = /^(?:npm\s+(?:test|run\s+(?:test|build|check|lint))|npx\s+(?:tsc|vitest|jest)|node\s+--test|pytest|go\s+test|cargo\s+test|dotnet\s+test|ctest)\b/i;
+
+export function verifyMacroRecipe(rootDir: string, id: string, verificationCommand: string): { ok: boolean; text: string } {
+  const { macros, habits } = loadMacroStore(rootDir);
+  const macro = macros.find((m) => m.id === id);
+  if (!macro || macro.state !== "active" || macro.sourceHash !== macroSourceHash(rootDir, macro))
+    return { ok: false, text: `REJECTED [recipe-inactive] ${id}` };
+  if (!VERIFY_COMMAND_RE.test(verificationCommand) || !safeArgv(verificationCommand))
+    return { ok: false, text: "REJECTED [recipe-verifier] use a test/build/check command without shell operators." };
+  const outcome = runSafeCommand(rootDir, verificationCommand);
+  if (!outcome.ok) {
+    delete macro.verifiedRecipe;
+    saveMacros(rootDir, macros, habits);
+    return { ok: false, text: `FAIL [recipe-verification] ${outcome.text}` };
+  }
+  macro.verifiedRecipe = { sourceHash: macro.sourceHash, verifiedAt: new Date().toISOString(),
+    verificationCommand, permissions: macro.permissions ?? macroPermissions(macro), version: projectVersion(rootDir) };
+  saveMacros(rootDir, macros, habits);
+  return { ok: true, text: `PASS [verified-recipe ${id}] source=${macro.sourceHash} version=${macro.verifiedRecipe.version} verifier=${verificationCommand}` };
+}
+
+export function runVerifiedRecipe(rootDir: string, id: string, args: string[] = []): { ok: boolean; text: string } {
+  const { macros } = loadMacroStore(rootDir);
+  const macro = macros.find((m) => m.id === id);
+  const recipe = macro?.verifiedRecipe;
+  if (!macro || !recipe || macro.state !== "active" || recipe.sourceHash !== macroSourceHash(rootDir, macro) ||
+      recipe.version !== projectVersion(rootDir))
+    return { ok: false, text: `REJECTED [stale-recipe] ${id}; verify current workspace version first.` };
+  const run = executeMacro(rootDir, id, args);
+  if (!run.ok) return run;
+  const verify = runSafeCommand(rootDir, recipe.verificationCommand);
+  if (!verify.ok) {
+    const refreshed = loadMacroStore(rootDir);
+    const current = refreshed.macros.find((m) => m.id === id);
+    if (current) { delete current.verifiedRecipe; current.state = "approved"; saveMacros(rootDir, refreshed.macros, refreshed.habits); }
+    return { ok: false, text: `FAIL [recipe-invalidated ${id}] ${verify.text}` };
+  }
+  return { ok: true, text: `${run.text}\nPASS [recipe-reverified ${id}] ${verify.text}` };
+}
+
+/** Parse a recorded command into argv. Shell operators and substituted snippets are refused. */
+function safeArgv(command: string): string[] | undefined {
+  if (/[;&|<>`$\r\n]/.test(command)) return undefined;
+  const tokens = command.match(/(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s"']+)+/g) ?? [];
+  if (tokens.length === 0) return undefined;
+  return tokens.map((token) => token.replace(/^(["'])(.*)\1$/, "$2"));
+}
+
+function runSafeCommand(rootDir: string, command: string) {
+  const argv = safeArgv(command);
+  if (!argv) return { ok: false, durationMs: 0, rawEstimatedTokens: 0, text: "REJECTED [unsafe-command] shell metacharacters are not allowed in macros." };
+  const started = Date.now();
+  let executable = argv[0]!;
+  let args = argv.slice(1);
+  if (process.platform === "win32" && (executable === "npm" || executable === "npx")) {
+    const cli = join(dirname(process.execPath), "node_modules", "npm", "bin", `${executable}-cli.js`);
+    if (!existsSync(cli)) return { ok: false, durationMs: 0, rawEstimatedTokens: 0, text: `REJECTED [missing-executable] ${cli}` };
+    args = [cli, ...args];
+    executable = process.execPath;
+  }
+  const proc = spawnSync(executable, args, { cwd: rootDir, shell: false, encoding: "utf8", timeout: 600_000 });
+  return dehydrateCommandOutput({ rootDir, command, exitCode: proc.status ?? 1, durationMs: Date.now() - started,
+    stdout: proc.stdout ?? "", stderr: (proc.stderr ?? "") + (proc.error ? `\n${proc.error.message}` : "") });
 }
 
 export interface CoEditHabit {
@@ -170,74 +291,15 @@ function writeStandaloneMacroScript(rootDir: string, macro: CompiledMacro): stri
   const safeFile = `${macro.id.replace(/[^a-zA-Z0-9_-]/g, "_")}.mjs`;
   const relScriptPath = `.graphflow/macros/${safeFile}`;
   const absScriptPath = join(rootDir, relScriptPath);
-
-  let scriptContent: string;
-  if (macro.kind === "command-pipeline") {
-    scriptContent = [
-      `#!/usr/bin/env node`,
-      `// Auto-compiled by GraphFlow 3.0 Macro Engine (${macro.id}: ${macro.description})`,
-      `import { spawnSync } from "node:child_process";`,
-      `const ROOT = ${JSON.stringify(rootDir)}; // pin cwd so relative-path steps resolve`,
-      `const steps = ${JSON.stringify(macro.steps, null, 2)};`,
-      `const start = Date.now();`,
-      `for (let i = 0; i < steps.length; i++) {`,
-      `  const cmd = steps[i];`,
-      `  const res = spawnSync(cmd, { shell: true, encoding: "utf8", cwd: ROOT });`,
-      `  if (res.status !== 0) {`,
-      `    console.error(\`FAIL [step \${i + 1}/\${steps.length}] \${cmd}\\n\${(res.stderr || res.stdout || "").slice(0, 1200)}\`);`,
-      `    process.exit(res.status ?? 1);`,
-      `  }`,
-      `}`,
-      `console.log(\`PASS [macro ${macro.id}: \${steps.length}/\${steps.length} steps in \${Date.now() - start}ms]\`);`,
-    ].join("\n");
-  } else if (macro.kind === "command-template") {
-    scriptContent = [
-      `#!/usr/bin/env node`,
-      `// Auto-compiled Parameterized Habit Tool (${macro.id}: ${macro.description})`,
-      `import { spawnSync } from "node:child_process";`,
-      `const ROOT = ${JSON.stringify(rootDir)}; // pin cwd so relative-path steps resolve`,
-      `const template = ${JSON.stringify(macro.steps[0] ?? "")};`,
-      `const args = process.argv.slice(2);`,
-      `const cmd = template.replace(/\\{\\{arg(\\d+)\\}\\}/g, (_, idx) => args[Number(idx) - 1] ?? "");`,
-      `const res = spawnSync(cmd, { shell: true, encoding: "utf8", cwd: ROOT });`,
-      `if (res.status !== 0) {`,
-      `  console.error(res.stderr || res.stdout);`,
-      `  process.exit(res.status ?? 1);`,
-      `}`,
-      `console.log(\`PASS [template ${macro.id}] \${cmd}\`);`,
-    ].join("\n");
-  } else if (macro.kind === "edit-codemod") {
-    scriptContent = [
-      `#!/usr/bin/env node`,
-      `// Auto-compiled AST Codemod (${macro.id}: ${macro.description})`,
-      `import { readFileSync, writeFileSync } from "node:fs";`,
-      `const oldCode = ${JSON.stringify(macro.steps[0] ?? "")};`,
-      `const newCode = ${JSON.stringify(macro.steps[1] ?? "")};`,
-      `const files = process.argv.slice(2);`,
-      `let count = 0;`,
-      `for (const f of files) {`,
-      `  const raw = readFileSync(f, "utf8");`,
-      `  if (raw.includes(oldCode)) {`,
-      `    writeFileSync(f, raw.replaceAll(oldCode, newCode), "utf8");`,
-      `    count += 1;`,
-      `  }`,
-      `}`,
-      `console.log(\`PASS [codemod ${macro.id}] updated \${count}/\${files.length} file(s)\`);`,
-    ].join("\n");
-  } else {
-    scriptContent = [
-      `#!/usr/bin/env node`,
-      `// Auto-compiled Context Bundle (${macro.id}: ${macro.description})`,
-      `console.log(${JSON.stringify(`Context bundle macro ${macro.id}: ${macro.steps.join(", ")}`)});`,
-    ].join("\n");
-  }
-
-  writeFileSync(absScriptPath, scriptContent + "\n", "utf8");
-  try {
-    chmodSync(absScriptPath, 0o755);
-  } catch {
-    // ignore
-  }
+  // Generated runners are informational. Execution must pass the live trust and
+  // edit transaction gates in executeMacro, including after a macro is revoked.
+  const message = macro.kind === "context-bundle"
+    ? `Context bundle macro ${macro.id}: ${macro.steps.join(", ")}`
+    : `REJECTED [macro-runner] Use gf_macro(action="run", id="${macro.id}") so approval and transaction guards apply.`;
+  const exitCode = macro.kind === "context-bundle" ? 0 : 1;
+  writeFileSync(absScriptPath,
+    `#!/usr/bin/env node\n${exitCode ? "console.error" : "console.log"}(${JSON.stringify(message)});\nprocess.exitCode = ${exitCode};\n`, "utf8");
+  try { chmodSync(absScriptPath, 0o755); } catch { /* optional */ }
   return relScriptPath;
 }
 
@@ -610,6 +672,7 @@ export function registerCustomMacro(
     triggers: input.triggers ?? input.steps,
     occurrences: existingIdx >= 0 ? macros[existingIdx]!.occurrences + 1 : 1,
     createdAt: existingIdx >= 0 ? macros[existingIdx]!.createdAt : new Date().toISOString(),
+    state: "proposed",
   };
   macro.scriptPath = writeStandaloneMacroScript(rootDir, macro);
 
@@ -629,7 +692,8 @@ export function registerCustomMacro(
 export function executeMacro(
   rootDir: string,
   macroId: string,
-  templateArgs: string[] = []
+  templateArgs: string[] = [],
+  dryRun = false
 ): {
   ok: boolean;
   macroId: string;
@@ -644,6 +708,12 @@ export function executeMacro(
       macroId,
       text: `ERR [macro-not-found] '${macroId}'. Available macros: ${available || "none"}`,
     };
+  }
+
+  const permissions = macroPermissions(macro);
+  if (dryRun) return { ok: true, macroId: macro.id, text: `WOULD_RUN [${macro.id}] state=${macro.state ?? "discovered"} permissions=${permissions?.join(",")} steps=${JSON.stringify(macro.steps)}` };
+  if (macro.kind !== "context-bundle" && (macro.state !== "active" || macro.sourceHash !== macroSourceHash(rootDir, macro))) {
+    return { ok: false, macroId: macro.id, text: `REJECTED [macro-not-active] ${macro.id}; approve and activate the current workspace version first.` };
   }
 
   macro.lastUsedAt = new Date().toISOString();
@@ -694,7 +764,7 @@ export function executeMacro(
     return {
       ok: editRes.ok,
       macroId: macro.id,
-      text: `PASS [codemod ${macro.id}: applied across ${editRes.touchedFiles.length} file(s) with 0 LLM tokens] -> ${editRes.text}`,
+      text: `${editRes.ok ? "PASS" : "REJECTED"} [codemod ${macro.id}: ${editRes.touchedFiles.length} file(s)] -> ${editRes.text}`,
     };
   }
 
@@ -703,7 +773,7 @@ export function executeMacro(
     const resolvedCmd = rawTemplate
       .replace(/\{\{arg(\d+)\}\}/g, (_, idx) => templateArgs[Number(idx) - 1] ?? "")
       .trim();
-    const res = execAndDehydrate({ rootDir, command: resolvedCmd });
+    const res = runSafeCommand(rootDir, resolvedCmd);
     return {
       ok: res.ok,
       macroId: macro.id,
@@ -716,7 +786,7 @@ export function executeMacro(
   let totalRawTokens = 0;
   for (let i = 0; i < macro.steps.length; i++) {
     const cmd = macro.steps[i]!;
-    const res = execAndDehydrate({ rootDir, command: cmd });
+    const res = runSafeCommand(rootDir, cmd);
     totalMs += res.durationMs;
     totalRawTokens += res.rawEstimatedTokens;
     if (!res.ok) {
@@ -812,8 +882,7 @@ export function evaluatePostEditHabits(
             `auto-run skipped (long-running/server-like command); invoke it explicitly via gf_macro.`;
           break;
         }
-        const res = execAndDehydrate({ rootDir, command: matchedHabit.command, timeoutMs: 15_000 });
-        autoVerifySummary = `Auto-Verify Habit [${matchedHabit.dirPrefix} -> ${matchedHabit.command}]: ${res.text}`;
+        autoVerifySummary = `Auto-Verify Habit [${matchedHabit.dirPrefix} -> ${matchedHabit.command}]: approval required; run via gf_exec.`;
         break;
       }
     }

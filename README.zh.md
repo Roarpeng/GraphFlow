@@ -7,22 +7,22 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code-roarpeng.graphflow-blue)](https://marketplace.visualstudio.com/items?itemName=roarpeng.graphflow)
 
-**面向编码 agent 的省 Token 外科手术引擎（v3.9.2）。** 四个确定性 MCP 工具加 **0-LLM 提示词反射**——全本地执行，引擎环内无 LLM。
+**面向编码 agent 的省 Token 外科手术引擎。** 当前 package 版本为 v3.9.2；此工作区包含 v4 本地安全与证据升级。仍只提供四个确定性 MCP 工具。
 
 ## 四个外科手术工具
 
 | 工具 | 能力 |
 | :--- | :--- |
 | `gf_read` | 精确切片符号（`file.ts#fn`），自动跨文件类型闭合 + 爆炸半径调用点；中英双语关键词检索（`q: "启动 / launch"`）；AST 骨架折叠（−93% token）。 |
-| `gf_edit` | 符号/行级就地编辑、自底向上原子批改、跨仓重命名——带 AST 语法回滚、调用方参数个数与结构体字段守卫。 |
-| `gf_exec` | `affected-tests` 路由（两跳反向导入）或任意命令的脱水执行：1 行 `PASS` 回执、5 行失败源码窗口、三连败熔断。`run:true` 执行，否则预览。 |
-| `gf_macro` | 习惯挖掘的确定性宏：重复读取 → 上下文捆绑；重复命令 → 单步 pipeline / 参数化模板；同构编辑 → codemod。回放零 LLM。 |
+| `gf_edit` | 符号/行级编辑与跨仓重命名；写前契约检查、可选 prepare/commit、SHA 冲突检测及多文件恢复日志。 |
+| `gf_exec` | `affected-tests` 最多六跳反向导入路由；结构化验证状态、失败指纹与重复失败停止。`run:true` 执行，否则预览。 |
+| `gf_macro` | 本地习惯宏与可验证配方。有副作用的宏需 propose → approve → activate；命令参数以 argv 执行，codemod 走编辑事务。 |
 
-## Prompt Reflex（0-LLM 本地反射）
+## Prompt Reflex
 
-短命令式输入（如 `启动项目`）命中宏触发词 → **本地执行宏并阻断 prompt 进入模型**；长句降级为注入提示；其余静默放行。总闸：`GRAPHFLOW_PROMPT_REFLEX=0`。
+输入命中命令宏时，未获授权的宏只会给出提示。命令和写文件宏不会被 prompt hook 默认自动执行。总闸：`GRAPHFLOW_PROMPT_REFLEX=0`。
 
-- **第一档 —— 完整阻断**（自动注册）：ZCode、Claude Code、Codex CLI、Gemini CLI、Cursor、Windsurf、Trae、Qoder、Kimi Code、Continue CLI。
+- **第一档 —— 提示词钩子**（自动注册）：ZCode、Claude Code、Codex CLI、Gemini CLI、Cursor、Windsurf、Trae、Qoder、Kimi Code、Continue CLI。
 - **第二档 —— 注入/改写**：OpenCode、Kilo Code、Cline（Unix）、DeepSeek Harness。
 - **第三档 —— 回退**（`gf_macro` MCP）：VS Code Copilot、Zed、Claude Desktop、PearAI、Antigravity、Roo Code（已归档）。
 
